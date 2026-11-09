@@ -14,7 +14,10 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
@@ -73,6 +76,13 @@ const REWRITTEN: [&str; 11] = [
     "delivered_at",
     "held_until",
 ];
+
+/// What closing a window writes on the rows of the ledger besides the columns a restart rewrites
+/// by design ([`REWRITTEN`]), as (table, column): the live update case closes the two windows it
+/// opened before it installs, between the look at the ledger and the end of it, which the cases of
+/// an app replaced by hand don't (the app is quit before the ledger is read). Named one by one: a
+/// column that is not here is held to its value.
+pub const WINDOWS_CLOSED: [(&str, &str); 1] = [("conversation", "program_gone")];
 
 /// What a column of a row holds.
 #[derive(Debug, Clone, PartialEq)]
@@ -158,8 +168,84 @@ fn sqlite(file: &Path) -> impl Fn(rusqlite::Error) -> Error + '_ {
 
 /// Every table of the ledger with its rows, the schema's version and what SQLite says of the file.
 pub fn read_ledger(file: &Path) -> Result<Ledger> {
+    let db = Connection::open_with_flags(file, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(sqlite(file))?;
+    read_from(&db, file)
+}
+
+/// The ledger of a home whose daemon runs, as it is at this moment: the daemon holds the file in
+/// SQLite's exclusive locking mode, so no other connection can open it, and its commits sit in
+/// the write-ahead log. The file and its log are copied into `scratch` (a clone is what the
+/// board's own backup takes, `backup-live-ledger.sh`), checked to have held still while they
+/// were, and the copy is opened, which recovers the log. Written to nothing but `scratch`. The
+/// smoke asks it where the daemon is idle: the page has had its answers.
+pub fn read_live_ledger(file: &Path, scratch: &Path) -> Result<Ledger> {
+    let clone = copy_when_still(file, scratch, |_| {})?;
+    // Read and write, for the copy's log is recovered into a shared-memory file of its own, which
+    // only a connection that may write can make.
+    let db = Connection::open_with_flags(&clone, OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .map_err(sqlite(file))?;
+    read_from(&db, file)
+}
+
+/// How many times the copy of a live ledger is made before it is said to have never held still.
+const COPIES: usize = 5;
+
+/// The write-ahead log of the ledger `file`.
+fn log_of(file: &Path) -> PathBuf {
+    let mut name = file.as_os_str().to_owned();
+    name.push("-wal");
+    PathBuf::from(name)
+}
+
+/// What a ledger file looks like from outside: its size and when it was written; none where it
+/// is not there.
+fn stamp(file: &Path) -> Option<(u64, Option<std::time::SystemTime>)> {
+    let seen = fs::metadata(file).ok()?;
+    Some((seen.len(), seen.modified().ok()))
+}
+
+/// Copies the ledger `file` and its log into `scratch` as one whose stamps are the same before and
+/// after the copy, and answers where the copy is; `between` is told the number of each try once
+/// its copy is made (a test writes to the ledger there). A ledger written to all the while is
+/// said so.
+fn copy_when_still(file: &Path, scratch: &Path, mut between: impl FnMut(usize)) -> Result<PathBuf> {
+    let log = log_of(file);
+    let clone = scratch.join("live.db");
+    let clone_log = log_of(&clone);
+    for attempt in 1..=COPIES {
+        let before = (stamp(file), stamp(&log));
+        let _ = fs::remove_file(&clone);
+        let _ = fs::remove_file(&clone_log);
+        fs::copy(file, &clone).map_err(files("copy", file))?;
+        if before.1.is_some() {
+            // A log that is gone by now was checkpointed into the file: the stamps say so.
+            match fs::copy(&log, &clone_log) {
+                Ok(_) => {}
+                Err(cause) if cause.kind() == io::ErrorKind::NotFound => {}
+                Err(cause) => {
+                    return Err(Error::new(format!(
+                        "could not copy {}: {cause}",
+                        log.display()
+                    )))
+                }
+            }
+        }
+        between(attempt);
+        if (stamp(file), stamp(&log)) == before {
+            return Ok(clone);
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+    Err(Error::new(format!(
+        "the ledger {} never held still for a copy ({COPIES} tries)",
+        file.display()
+    )))
+}
+
+/// Every table of the open ledger `db`, which is the file `file`.
+fn read_from(db: &Connection, file: &Path) -> Result<Ledger> {
     let told = sqlite(file);
-    let db = Connection::open_with_flags(file, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(&told)?;
     let names: Vec<String> = db
         .prepare(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
@@ -281,7 +367,12 @@ pub fn assert_projects(ledger: &Ledger, directories: &[PathBuf]) -> Result {
 /// has its rows by what they hold. A column is not looked for where a migration that
 /// ran between the two versions takes it out (`dropped`); one renamed has its values
 /// under the new name. Whatever else is gone is lost.
-pub fn assert_kept(before: &Ledger, after: &Ledger, dropped: &[Dropped]) -> Result {
+pub fn assert_kept(
+    before: &Ledger,
+    after: &Ledger,
+    dropped: &[Dropped],
+    rewritten: &[(&str, &str)],
+) -> Result {
     assert_sound(after, before.version)?;
     // What the migrations that ran between the two ledgers took out.
     let taken_out = |table: &str, column: Option<&str>| {
@@ -312,7 +403,9 @@ pub fn assert_kept(before: &Ledger, after: &Ledger, dropped: &[Dropped]) -> Resu
                 )));
             };
             for (column, value) in &row.0 {
-                if REWRITTEN.contains(&column.as_str()) {
+                if REWRITTEN.contains(&column.as_str())
+                    || rewritten.contains(&(table.as_str(), column.as_str()))
+                {
                     continue;
                 }
                 let held = match (kept.get(column), taken_out(table, Some(column))) {

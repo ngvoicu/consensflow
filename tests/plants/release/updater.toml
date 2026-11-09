@@ -202,8 +202,8 @@ runs = ["smoke-evidence"]
 
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/ledger.rs"
-find = "if REWRITTEN.contains(&column.as_str()) {"
-replace = "if true {"
+find = "if REWRITTEN.contains(&column.as_str())"
+replace = "if true || REWRITTEN.contains(&column.as_str())"
 
 [[plant]]
 name = "updater evidence: a row that is gone is let through"
@@ -967,13 +967,11 @@ runs = ["smoke-descriptors"]
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/descriptors.rs"
 find = """
-            .is_some_and(|(_, node)| *node == left.node)
-        {
-            faults.push("""
+            .is_some_and(|(_, node)| *node == left.node);
+        if left_file {"""
 replace = """
-            .is_some_and(|(_, node)| *node == left.node && false)
-        {
-            faults.push("""
+            .is_some_and(|(_, node)| *node == left.node && false);
+        if left_file {"""
 
 [[plant]]
 name = "updater evidence: the smoke's test run alone is not told it is alone, and passes having run nothing"
@@ -1350,36 +1348,6 @@ replace = '''
                     .is_some()'''
 
 [[plant]]
-name = "updater evidence: an installed app that closed the two at its start is taken for one not left them"
-meant = "an_installed_app_that_closed_the_two_at_its_start_makes_the_check_prove_what_the_new_app_holds"
-runs = ["smoke-descriptors"]
-
-[[plant.edit]]
-file = "tools/xtask/src/updater_smoke/descriptors.rs"
-find = "    } else if installed_closed.contains(&left.pipe) {"
-replace = "    } else if false {"
-
-[[plant]]
-name = "updater evidence: an installed app that closed some other descriptor is taken for one that closed the two"
-meant = "an_installed_app_that_closed_the_two_at_its_start_makes_the_check_prove_what_the_new_app_holds"
-runs = ["smoke-descriptors"]
-
-[[plant.edit]]
-file = "tools/xtask/src/updater_smoke/descriptors.rs"
-find = "    } else if installed_closed.contains(&left.file_fd) {"
-replace = "    } else if !installed_closed.is_empty() {"
-
-[[plant]]
-name = "updater evidence: the line of another program is taken for what the app closed at its start"
-meant = "reads_the_descriptors_the_apps_log_says_it_closed_as_it_started"
-runs = ["smoke-descriptors"]
-
-[[plant.edit]]
-file = "tools/xtask/src/updater_smoke/descriptors.rs"
-find = '        .filter(|line| line.starts_with("consensflow: closed "))'
-replace = '        .filter(|line| line.contains(" closed "))'
-
-[[plant]]
 name = "updater evidence: the list of what the migrations drop names a column no migration drops"
 meant = "the_list_of_what_the_migrations_drop_is_what_they_drop"
 runs = ["smoke-dropped"]
@@ -1425,3 +1393,194 @@ runs = ["smoke-dropped"]
 file = "crates/cf-ledger/migrations/dropped.json"
 find = '"renamed_to": "compaction",'
 replace = '"renamed_to": "compactions",'
+
+# T-1338, round 2: the bridge release's update is let hold what the bridge is known to hand on and
+# nothing beyond it (the app closes none of what it is left, for it can't tell what it owns), and the
+# live update case compares the ledger it kept with the one after.
+[[plant]]
+name = "updater evidence: what the bridge is let hand on is let to every release"
+meant = "the_bridges_tolerance_is_named_with_its_why_and_is_no_other_releases"
+runs = ["smoke-descriptors"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/descriptors.rs"
+find = "[&BRIDGE].into_iter().find(|each| each.release == release)"
+replace = "[&BRIDGE].into_iter().find(|each| each.release == release || release == Release::Flip)"
+
+[[plant]]
+name = "updater evidence: a file the bridge is not known to hand on is let through"
+meant = "an_update_from_the_bridge_is_at_fault_for_a_file_it_is_not_known_to_hand_on"
+runs = ["smoke-descriptors"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/descriptors.rs"
+find = "                    Some(known) if known.names(&held.name) => notes.push(format!("
+replace = "                    Some(known) if true => notes.push(format!("
+
+[[plant]]
+name = "updater evidence: the bridge's files are named by a part of their name"
+meant = "the_bridges_tolerance_is_named_with_its_why_and_is_no_other_releases"
+runs = ["smoke-descriptors"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/descriptors.rs"
+find = "        self.files.contains(&name)"
+replace = "        self.files.iter().any(|file| name.contains(file))"
+
+[[plant]]
+name = "updater evidence: the file the case left the bridge is a fault in its update"
+meant = "an_update_from_the_bridge_is_let_hold_what_the_bridge_is_known_to_hand_on_and_says_so"
+runs = ["smoke-descriptors"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/descriptors.rs"
+find = '''
+        if left_file {
+            match hands_on {'''
+replace = '''
+        if left_file {
+            match hands_on.filter(|_| false) {'''
+
+[[plant]]
+name = "updater evidence: what the bridge handed on is not in the report"
+meant = "an_update_from_the_bridge_is_let_hold_what_the_bridge_is_known_to_hand_on_and_says_so"
+runs = ["smoke-descriptors"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/descriptors.rs"
+find = '''
+                        "handed on by the {} release, as it always did: {}",
+                        known.release.name(),
+                        held.said()'''
+replace = '''
+                        "handed on by the {} release, as it always did: {}",
+                        known.release.name(),
+                        ""'''
+
+[[plant]]
+name = "updater evidence: the file the case left is a fault whatever release it was left"
+meant = "an_update_from_a_later_release_is_let_hold_nothing_of_the_installed_apps"
+runs = ["smoke-descriptors"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/descriptors.rs"
+find = '''
+                None => faults.push(format!(
+                    "the new app holds the file the installed app was left ({})",'''
+replace = '''
+                None => notes.push(format!(
+                    "the new app holds the file the installed app was left ({})",'''
+
+[[plant]]
+name = "updater evidence: the live ledger is read from the file without its log"
+meant = "reads_the_ledger_a_running_daemon_holds_as_it_is_with_what_only_its_log_holds"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = "        if before.1.is_some() {"
+replace = "        if false {"
+
+[[plant]]
+name = "updater evidence: the live ledger is taken as it is though it moved while it was copied"
+meant = "a_ledger_that_moves_while_it_is_copied_is_copied_again_and_one_that_never_stops_is_said_so"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = "        if (stamp(file), stamp(&log)) == before {"
+replace = "        if true {"
+
+[[plant]]
+name = "updater evidence: the live ledger is read though it never held still"
+meant = "a_ledger_that_moves_while_it_is_copied_is_copied_again_and_one_that_never_stops_is_said_so"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = '''
+    Err(Error::new(format!(
+        "the ledger {} never held still for a copy ({COPIES} tries)",
+        file.display()
+    )))'''
+replace = '''
+    Ok(clone)'''
+
+# T-1338, round 2: the count of the starts of the app takes the fork of an app, before it execs,
+# for the app it is a fork of; and a live update is let change the columns closing a window writes.
+[[plant]]
+name = "updater evidence: the fork of an app before it execs is counted as a start of it"
+meant = "the_fork_of_a_watched_program_before_it_execs_is_no_start_of_it"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/processes.rs"
+find = "            if watched.contains(&row.ppid) {"
+replace = "            if false {"
+
+[[plant]]
+name = "updater evidence: a child of the app that lasts is never counted as a start"
+meant = "a_child_of_a_watched_program_is_a_start_once_it_lasts"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/processes.rs"
+find = "                if *looks >= CONFIRMED_IN {"
+replace = "                if *looks >= 1000 {"
+
+[[plant]]
+name = "updater evidence: a child of the app is a start at its first look"
+meant = "the_fork_of_a_watched_program_before_it_execs_is_no_start_of_it"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/processes.rs"
+find = "const CONFIRMED_IN: u32 = 3;"
+replace = "const CONFIRMED_IN: u32 = 1;"
+
+[[plant]]
+name = "updater evidence: an app another program started is a start only once it lasts"
+meant = "a_program_started_by_another_is_a_start_at_the_first_look"
+runs = ["smoke-kit"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/processes.rs"
+find = '''
+            } else {
+                self.counted.insert(row.pid);
+            }'''
+replace = '''
+            }'''
+
+[[plant]]
+name = "updater evidence: every column is let change in a live update"
+meant = "only_the_columns_closing_a_window_writes_are_let_change_in_a_live_update"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = "                    || rewritten.contains(&(table.as_str(), column.as_str()))"
+replace = "                    || !rewritten.is_empty()"
+
+[[plant]]
+name = "updater evidence: the columns closing a window writes are held to their value in a live update"
+meant = "only_the_columns_closing_a_window_writes_are_let_change_in_a_live_update"
+runs = ["smoke-evidence"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/ledger.rs"
+find = "                    || rewritten.contains(&(table.as_str(), column.as_str()))"
+replace = ""
+
+# The stand-in Claude of a machine answers the daemon's read of the models (`claude -p
+# --input-format stream-json`) with the model the page opens its projects on, and is no window:
+# without it a project cannot be opened by an installed app that reads the list (T-1338).
+[[plant]]
+name = "updater evidence: the stand-in claude does not answer the daemon's read of the models"
+meant = "the_stand_in_claude_answers_the_daemons_read_of_the_models_and_is_no_window"
+runs = ["smoke-sandbox"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/sandbox.rs"
+find = '''if [ \"@NAME@\" = claude ] && [ \"${1:-}\" = \"-p\" ]; then'''
+replace = '''if [ \"@NAME@\" = nobody ] && [ \"${1:-}\" = \"-p\" ]; then'''

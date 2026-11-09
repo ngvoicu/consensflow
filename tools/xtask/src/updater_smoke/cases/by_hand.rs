@@ -4,8 +4,6 @@
 use super::{ledger_of, projects_of, quit, BRIDGE_SCHEMA};
 use crate::updater_smoke::bundle::{cf_of, copy_over, digest_manifest, remove_all, verify_seal};
 use crate::updater_smoke::case::{boot_evidence, held_evidence, Case};
-#[cfg(unix)]
-use crate::updater_smoke::descriptors::closed_at_start;
 use crate::updater_smoke::evidence::{
     app_log, assert_daemon_is, assert_started_daemon_since, mark, Kind,
 };
@@ -105,16 +103,6 @@ pub(super) fn by_hand(kase: &mut Case, how: How) -> Result {
     );
     assert_started_daemon_since(&app_log(&kase.sandbox), log_mark, &cf)?;
     assert_daemon_is(&second.daemon, &cf, inputs.daemon_version.as_deref())?;
-    // Both apps were started with their streams and nothing else: whatever an app closes as it
-    // starts is what it was left, and so is none of what it opened itself.
-    #[cfg(unix)]
-    {
-        let closed = closed_at_start(&app_log(&kase.sandbox));
-        ensure!(
-            closed.is_empty(),
-            "an app closed descriptors at its start that no program left it: {closed:?}"
-        );
-    }
     let version = second.daemon.runtime.split(' ').nth(1).unwrap_or_default();
     assert_repaired(&Repaired {
         sandbox: &kase.sandbox,
@@ -130,7 +118,7 @@ pub(super) fn by_hand(kase: &mut Case, how: How) -> Result {
     ));
     quit(kase, &[second.daemon.pid])?;
     let after = ledger_of(kase)?;
-    assert_kept(&before, &after, &dropped_in(&inputs.checkout)?)?;
+    assert_kept(&before, &after, &dropped_in(&inputs.checkout)?, &[])?;
     kase.note(format!(
         "the ledger: schema {} then {}, every row it had is there",
         before.version, after.version

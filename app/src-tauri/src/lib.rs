@@ -541,39 +541,9 @@ pub(crate) fn with_page<R: Runtime, B: PageBuilder<R>>(builder: B) -> B {
         .invoke_handler(page_commands())
 }
 
-/// What the app's log says of the descriptors the app closed as it started, which the program
-/// that started it had left it (an app that is not a release of this one's, such as the bridge,
-/// leaves its successor every descriptor it holds that is not close-on-exec): nothing where there
-/// were none. The updater smoke reads these words (`descriptors.rs` there).
-fn left_at_start(closed: &std::io::Result<Vec<u64>>) -> Option<String> {
-    match closed {
-        Ok(left) if left.is_empty() => None,
-        Ok(left) => Some(format!(
-            "closed {} {} it was left at its start: {}",
-            left.len(),
-            if left.len() == 1 {
-                "descriptor"
-            } else {
-                "descriptors"
-            },
-            left.iter()
-                .map(u64::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
-        Err(failed) => Some(format!(
-            "could not close the descriptors it was left at its start: {failed}"
-        )),
-    }
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 #[allow(clippy::disallowed_methods)] // The app's start settles its home from the environment, before any thread.
 pub fn run() {
-    // The app's first code: what it was left by the program that started it is none of its own,
-    // and it holds nothing of another's for as long as it runs (T-1338). Said in its log below,
-    // once that is where the app writes.
-    let left = cf_process::close_inherited();
     std::hint::black_box(BUILT_IDENTITY);
     // The process's one TLS provider, before the plugins, any client or any thread exists: reqwest
     // panics at the build of a client where the process has none (tls.rs, T-1247).
@@ -605,9 +575,6 @@ pub fn run() {
     panics::appkit::guard_event_dispatch();
     if let Some(log) = error_log() {
         redirect_stderr(&log);
-    }
-    if let Some(said) = left_at_start(&left) {
-        eprintln!("consensflow: {said}");
     }
     let app = with_page(
         tauri::Builder::default()
@@ -721,49 +688,6 @@ mod tests {
             "{}",
             config["build"]
         );
-    }
-
-    /// The updater smoke reads these words in the app's log: a descriptor left to the app is
-    /// closed and said, and none left is no word (T-1338).
-    #[test]
-    fn the_app_says_the_descriptors_it_closed_at_its_start_and_nothing_where_there_were_none() {
-        assert_eq!(left_at_start(&Ok(vec![])), None);
-        assert_eq!(
-            left_at_start(&Ok(vec![9])).as_deref(),
-            Some("closed 1 descriptor it was left at its start: 9")
-        );
-        assert_eq!(
-            left_at_start(&Ok(vec![6, 7])).as_deref(),
-            Some("closed 2 descriptors it was left at its start: 6, 7")
-        );
-        let failed = std::io::Error::from_raw_os_error(1);
-        assert!(left_at_start(&Err(failed))
-            .unwrap()
-            .starts_with("could not close the descriptors it was left at its start: "));
-    }
-
-    /// The first code of the app closes what it was left: before the home is settled, the log is
-    /// redirected, a thread exists or the TLS provider is installed, since anything the app opens
-    /// first would be closed with them if it were not close-on-exec.
-    #[test]
-    fn the_app_closes_what_it_was_left_before_anything_else() {
-        let source = include_str!("lib.rs");
-        let body = &source[source.find("pub fn run() {").expect("the app's start")..];
-        let first = body
-            .find("cf_process::close_inherited()")
-            .expect("the app's start closes what it was left");
-        for later in [
-            "tls::install_ring_as_default()",
-            "tauri::generate_context!()",
-            "isolated_home(",
-            "redirect_stderr(&log)",
-        ] {
-            let at = body.find(later).unwrap_or_else(|| panic!("{later}"));
-            assert!(
-                first < at,
-                "{later} comes before the app closes what it was left"
-            );
-        }
     }
 
     #[test]

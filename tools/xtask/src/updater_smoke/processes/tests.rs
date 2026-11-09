@@ -246,3 +246,78 @@ fn a_program_is_known_under_the_path_the_system_resolves_it_to() {
         [folder.path().join("nothing").display().to_string()]
     );
 }
+
+fn app_row(pid: u32, ppid: u32, command: &str) -> Row {
+    Row {
+        pid,
+        ppid,
+        state: "S".into(),
+        command: command.into(),
+    }
+}
+
+const APP: &str = "/var/x/Applications/ConsensFlow.app/Contents/MacOS/app";
+const CF: &str =
+    "/var/x/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf ui --json --no-open";
+
+/// T-1338: an app that starts a program forks first, and until the child execs the process table
+/// shows it with the app's own command. The daemon of the update was counted as a second start of
+/// the app, at the one look of 50 ms that happened to see it.
+#[test]
+fn the_fork_of_a_watched_program_before_it_execs_is_no_start_of_it() {
+    let programs = vec![APP.to_string()];
+    let mut starts = Starts::default();
+    // The app, and its daemon in the milliseconds before it is the daemon.
+    starts.look(
+        &[app_row(30879, 1, APP), app_row(30886, 30879, APP)],
+        &programs,
+    );
+    // The next look: the child has exec'd.
+    starts.look(
+        &[app_row(30879, 1, APP), app_row(30886, 30879, CF)],
+        &programs,
+    );
+    starts.look(
+        &[app_row(30879, 1, APP), app_row(30886, 30879, CF)],
+        &programs,
+    );
+    assert_eq!(starts.pids().into_iter().collect::<Vec<_>>(), [30879]);
+}
+
+/// The fork is seen for as long as the system takes to exec it, which a loaded machine makes
+/// long; one that is seen twice is still a fork, and one that lasts is a start.
+#[test]
+fn a_child_of_a_watched_program_is_a_start_once_it_lasts() {
+    let programs = vec![APP.to_string()];
+    let mut starts = Starts::default();
+    for looked in 1..=3 {
+        starts.look(&[app_row(10, 1, APP), app_row(11, 10, APP)], &programs);
+        let counted = starts.pids().contains(&11);
+        assert_eq!(counted, looked >= CONFIRMED_IN, "after {looked} looks");
+    }
+}
+
+/// An app that a launcher starts (launchd, for the app Tauri restarts) is a start at the first
+/// look: it may quit at once, and is not seen twice.
+#[test]
+fn a_program_started_by_another_is_a_start_at_the_first_look() {
+    let programs = vec![APP.to_string()];
+    let mut starts = Starts::default();
+    starts.look(&[app_row(10, 1, APP)], &programs);
+    starts.look(&[app_row(20, 1, APP)], &programs);
+    starts.look(&[], &programs);
+    assert_eq!(starts.pids().into_iter().collect::<Vec<_>>(), [10, 20]);
+}
+
+/// The app that the old app starts is its child until the old app has gone (the old one exits
+/// once it has started it), and is a start all the same.
+#[test]
+fn the_app_the_installed_app_started_is_a_start_though_the_installed_app_is_its_parent() {
+    let programs = vec![APP.to_string()];
+    let mut starts = Starts::default();
+    for _ in 0..3 {
+        starts.look(&[app_row(10, 1, APP), app_row(11, 10, APP)], &programs);
+    }
+    starts.look(&[app_row(11, 1, APP)], &programs);
+    assert_eq!(starts.pids().into_iter().collect::<Vec<_>>(), [10, 11]);
+}

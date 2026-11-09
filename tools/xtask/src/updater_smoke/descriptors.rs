@@ -16,12 +16,14 @@
 //! a peer such as a system service is many processes' alike, and a socket whose peer closed shows
 //! none).
 //!
-//! An app that was left descriptors does not go on holding them: it closes what it was left as its
-//! first code (`cf_process::close_inherited`), and says so in its log. The bridge release never
-//! made its descriptors close-on-exec, so it hands the new app every one it holds, and the new
-//! app's own close is what the update from it proves (T-1338). An installed app that is this
-//! checkout's closes the two at its own start: it is not left them to hold, its log says it
-//! closed them, and the check is only what the new app is left of it.
+//! The bridge release (`v3.0.0-alpha.81`) is the one exception, and a narrow one ([`BRIDGE`]): it
+//! never made a descriptor close-on-exec, and a shipped release can't be changed. The new app can't
+//! close what it was left either (it can't tell what it was left from what it owns: a library may
+//! have opened a file before `main`, a launcher may hand a job handle that a close would end the
+//! app with), so an update from the bridge is let hold what the bridge is known to hand on, which
+//! is named in one place with why, and listed in the report. Anything else the new app holds that
+//! the bridge held at the same number is a fault, and an update from any later release is let hold
+//! nothing.
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -35,6 +37,7 @@ use std::thread;
 use cf_base::env::Env;
 use nix::fcntl::{fcntl, FcntlArg, FdFlag};
 
+use super::build::Release;
 use super::processes::Waits;
 use super::{files, Error, Result};
 use crate::process::{self, Invocation};
@@ -44,21 +47,49 @@ const LSOF: &str = "/usr/sbin/lsof";
 /// What the app's log says when a descriptor could not be made close-on-exec as it ended.
 pub const NOT_MARKED: &str = "could not mark close-on-exec";
 
-/// What the app's log says after the descriptors it closed as it started, the numbers following
-/// (`consensflow: closed 2 descriptors it was left at its start: 6, 7`, lib.rs of the app).
-const LEFT_AT_START: &str = " it was left at its start: ";
+/// What a release is known to hand on to the app it starts, though no release is meant to: the
+/// descriptors the smoke tolerates in an update from it, and nothing beyond them.
+#[derive(Debug, PartialEq, Eq)]
+pub struct HandsOn {
+    pub release: Release,
+    /// Why they are tolerated, for the report.
+    pub why: &'static str,
+    /// The files, by the last part of their path as `lsof` names them, that the release holds
+    /// not close-on-exec besides the two the smoke leaves it. (Those two it hands on whatever
+    /// they are: that is what the smoke finds out, and it can't be otherwise.)
+    pub files: &'static [&'static str],
+}
 
-/// The numbers of the descriptors the app's log says it closed as it started.
-pub fn closed_at_start(log: &str) -> Vec<u32> {
-    log.lines()
-        .filter(|line| line.starts_with("consensflow: closed "))
-        .filter_map(|line| line.split_once(LEFT_AT_START))
-        .flat_map(|(_, numbers)| {
-            numbers
-                .split(", ")
-                .filter_map(|number| number.trim().parse().ok())
-        })
-        .collect()
+/// What the bridge hands on. Measured on this Mac on 2026-11-08 and 09 (T-1338): in an update
+/// from the bridge, and in no other leg of the smoke (the flip's, the own update's), the new app
+/// holds `default.metallib` and `PixelConverter.metallib` of
+/// `/System/Library/Extensions/AppleMetalOpenGLRenderer.bundle` at the numbers the bridge held
+/// them at (8 and 9, behind the smoke's pipe at 6 and file at 7), the same file at the same
+/// number. With the app closing what it was left as its first statement, an experiment that was
+/// taken out again, it closed exactly those four at its start in the bridge's update and none in
+/// any clean start of an app (the cases of an app replaced by hand): so they are the bridge's,
+/// and the system's own files that its Metal renderer opened.
+pub const BRIDGE: HandsOn = HandsOn {
+    release: Release::Bridge,
+    why: "v3.0.0-alpha.81 never made a descriptor close-on-exec, so Tauri's restart hands the app \
+          it starts every descriptor the bridge holds: what the smoke left it, and the two library \
+          files of the system's Metal renderer. A shipped release can't be changed, and the new app \
+          can't tell what it was left from what it owns, so it closes none",
+    files: &["default.metallib", "PixelConverter.metallib"],
+};
+
+/// What the update from `release` is let hold of the installed app's: none for a release that
+/// marks its descriptors close-on-exec as it ends.
+pub fn hands_on(release: Release) -> Option<&'static HandsOn> {
+    [&BRIDGE].into_iter().find(|each| each.release == release)
+}
+
+impl HandsOn {
+    /// Whether the file `lsof` names `path` is one it is known to hand on.
+    fn names(&self, path: &str) -> bool {
+        let name = path.rsplit('/').next().unwrap_or(path);
+        self.files.contains(&name)
+    }
 }
 
 /// One descriptor above the standard streams a process holds, as `lsof -F ftdDin` says it.
@@ -249,39 +280,23 @@ pub fn compare(
     old: &[Held],
     new: &[Held],
     left: &Left,
-    installed_closed: &[u32],
+    hands_on: Option<&HandsOn>,
 ) -> (Vec<String>, Vec<String>) {
     let mut faults = Vec::new();
     let mut notes = Vec::new();
-    // The installed app was left the two: it holds them (the bridge's and the older flips'), or
-    // its log says it closed them as it started (an app of this checkout's).
     let pipe = old.iter().find(|held| held.fd == left.pipe);
-    let held_pipe = pipe.is_some_and(|held| held.kind == "PIPE");
-    if held_pipe {
-    } else if installed_closed.contains(&left.pipe) {
-        notes.push(format!(
-            "the installed app closed the pipe it was left at fd {} as it started",
-            left.pipe
-        ));
-    } else {
+    if !pipe.is_some_and(|held| held.kind == "PIPE") {
         faults.push(format!(
             "the installed app does not hold the pipe it was left at fd {}: the check proves nothing",
             left.pipe
         ));
     }
     let file = old.iter().find(|held| held.fd == left.file_fd);
-    let held_file = file.is_some_and(|held| {
+    if !file.is_some_and(|held| {
         held.file
             .as_ref()
             .is_some_and(|(_, node)| *node == left.node)
-    });
-    if held_file {
-    } else if installed_closed.contains(&left.file_fd) {
-        notes.push(format!(
-            "the installed app closed the file it was left at fd {} as it started",
-            left.file_fd
-        ));
-    } else {
+    }) {
         faults.push(format!(
             "the installed app does not hold the file it was left at fd {}: the check proves nothing",
             left.file_fd
@@ -298,24 +313,47 @@ pub fn compare(
                 held.name
             ));
         }
-        if held
+        let left_file = held
             .file
             .as_ref()
-            .is_some_and(|(_, node)| *node == left.node)
-        {
-            faults.push(format!(
-                "the new app holds the file the installed app was left ({})",
-                held.said()
-            ));
+            .is_some_and(|(_, node)| *node == left.node);
+        if left_file {
+            match hands_on {
+                // The bridge never marks a descriptor, so it hands on whatever it holds, and
+                // what the case left it is that.
+                Some(known) => notes.push(format!(
+                    "handed on by the {} release, as it does with every descriptor it holds: the file the case left it ({})",
+                    known.release.name(),
+                    held.said()
+                )),
+                None => faults.push(format!(
+                    "the new app holds the file the installed app was left ({})",
+                    held.said()
+                )),
+            }
         } else if let Some(file) = &held.file {
             if old
                 .iter()
                 .any(|was| was.fd == held.fd && was.file.as_ref() == Some(file))
             {
-                notes.push(format!(
-                    "the same file at the same number in both apps, opened again or left: {}",
-                    held.said()
-                ));
+                match hands_on {
+                    None => notes.push(format!(
+                        "the same file at the same number in both apps, opened again or left: {}",
+                        held.said()
+                    )),
+                    Some(known) if known.names(&held.name) => notes.push(format!(
+                        "handed on by the {} release, as it always did: {}",
+                        known.release.name(),
+                        held.said()
+                    )),
+                    Some(known) => faults.push(format!(
+                        "the new app holds {}, which the installed {} app held at the same number and is not among what it is known to hand on ({}): {}",
+                        held.said(),
+                        known.release.name(),
+                        known.files.join(", "),
+                        known.why
+                    )),
+                }
             }
         }
     }

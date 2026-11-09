@@ -131,7 +131,7 @@ fn is_whole_sound_its_projects_there_and_nothing_it_held_lost_or_changed() {
             "PRAGMA user_version = 11",
         ],
     );
-    assert_kept(&before, &after, &[]).unwrap();
+    assert_kept(&before, &after, &[], &[]).unwrap();
 }
 
 #[test]
@@ -172,9 +172,134 @@ fn is_no_longer_whole_when_a_row_is_gone_a_stable_column_changed_a_table_lost_or
         let folder = tempfile::tempdir().unwrap();
         let file = ledger_file(folder.path(), 10, &ROWS);
         let before = read_ledger(&file).unwrap();
-        let said = refusal(assert_kept(&before, &changed(&file, statements), &[]));
+        let said = refusal(assert_kept(&before, &changed(&file, statements), &[], &[]));
         assert!(said.contains(words), "{what}: {said}");
     }
+}
+
+/// A ledger as a running daemon holds it: exclusive locking mode, a write-ahead log nothing has
+/// checkpointed into the file, the connection kept open (the daemon's), with the rows of
+/// [`ROWS`] in the log alone.
+fn held_by_a_daemon(folder: &Path) -> (PathBuf, Connection) {
+    let file = folder.join("consensflow.db");
+    let db = Connection::open(&file).unwrap();
+    db.execute_batch("PRAGMA locking_mode = EXCLUSIVE").unwrap();
+    db.execute_batch("BEGIN EXCLUSIVE; COMMIT").unwrap();
+    db.execute_batch("PRAGMA journal_mode = WAL").unwrap();
+    db.execute_batch("PRAGMA wal_autocheckpoint = 0").unwrap();
+    db.execute_batch(SCHEMA).unwrap();
+    db.execute_batch("PRAGMA user_version = 10").unwrap();
+    for sql in ROWS {
+        db.execute_batch(sql).unwrap();
+    }
+    (file, db)
+}
+
+/// T-1338: the live update case looked at the ledger once the update was over, and never at what
+/// it had been before, so a project that lost its name passed. The ledger before is read while the
+/// installed daemon holds it, from a copy of its file and its log.
+#[test]
+fn reads_the_ledger_a_running_daemon_holds_as_it_is_with_what_only_its_log_holds() {
+    let folder = tempfile::tempdir().unwrap();
+    let (file, _daemon) = held_by_a_daemon(folder.path());
+    let scratch = tempfile::tempdir().unwrap();
+    // The file alone has none of the rows: they are in the log. And the exclusive lock refuses
+    // any reader of the file itself.
+    let plain = Connection::open_with_flags(&file, OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    plain.busy_timeout(std::time::Duration::ZERO).unwrap();
+    assert!(plain
+        .query_row("SELECT count(*) FROM project", [], |row| row
+            .get::<_, i64>(0))
+        .is_err());
+    drop(plain);
+    let live = read_live_ledger(&file, scratch.path()).unwrap();
+    assert_eq!(live.version, 10);
+    assert_eq!(live.integrity, ["ok"]);
+    assert_eq!(live.tables["project"].len(), 2);
+    assert_eq!(live.tables["event"].len(), 2);
+    assert_eq!(
+        live.tables["project"][0].get("name"),
+        Some(&Cell::Text("a".to_string()))
+    );
+    // The daemon's own files are as they were: nothing was written there.
+    let again = read_live_ledger(&file, scratch.path()).unwrap();
+    assert_eq!(again, live);
+}
+
+/// What the live read is for: a project that lost its name or its timestamp in the update is a
+/// loss, seen by the comparison the by-hand case makes.
+#[test]
+fn a_live_ledger_compared_with_the_one_after_the_update_finds_a_value_lost() {
+    let folder = tempfile::tempdir().unwrap();
+    let (file, daemon) = held_by_a_daemon(folder.path());
+    let scratch = tempfile::tempdir().unwrap();
+    let before = read_live_ledger(&file, scratch.path()).unwrap();
+    drop(daemon);
+    let after = changed(
+        &file,
+        &[
+            "UPDATE project SET name = '' WHERE id = 1",
+            "PRAGMA user_version = 11",
+        ],
+    );
+    let said = refusal(assert_kept(&before, &after, &[], &[]));
+    assert!(
+        said.contains("project 1: name was \"a\" and is \"\""),
+        "{said}"
+    );
+}
+
+/// A ledger written to between the copy of its file and the look at its stamps is copied again,
+/// and what the second copy holds is read; one written to all the while is said so.
+#[test]
+fn a_ledger_that_moves_while_it_is_copied_is_copied_again_and_one_that_never_stops_is_said_so() {
+    let folder = tempfile::tempdir().unwrap();
+    let (file, daemon) = held_by_a_daemon(folder.path());
+    let scratch = tempfile::tempdir().unwrap();
+    let mut tries = 0;
+    let copy = copy_when_still(&file, scratch.path(), |attempt| {
+        tries = attempt;
+        if attempt == 1 {
+            daemon
+                .execute_batch("INSERT INTO project VALUES (3, '/w/c', 'c', 'open', 't3')")
+                .unwrap();
+        }
+    })
+    .unwrap();
+    assert_eq!(tries, 2);
+    let db = Connection::open_with_flags(&copy, OpenFlags::SQLITE_OPEN_READ_WRITE).unwrap();
+    let projects: i64 = db
+        .query_row("SELECT count(*) FROM project", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(
+        projects, 3,
+        "the copy that held still has the row written meanwhile"
+    );
+    drop(db);
+
+    let mut id = 10;
+    let said = copy_when_still(&file, scratch.path(), |_| {
+        id += 1;
+        daemon
+            .execute_batch(&format!(
+                "INSERT INTO project VALUES ({id}, '/w/{id}', 'n', 'open', 't')"
+            ))
+            .unwrap();
+    })
+    .unwrap_err()
+    .to_string();
+    assert!(said.contains("never held still"), "{said}");
+}
+
+#[test]
+fn a_ledger_that_is_not_there_is_said_so_with_its_path() {
+    let folder = tempfile::tempdir().unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let nowhere = folder.path().join("nowhere.db");
+    let said = read_live_ledger(&nowhere, scratch.path())
+        .unwrap_err()
+        .to_string();
+    assert!(said.contains("nowhere.db"), "{said}");
 }
 
 /// A ledger of the smoke's tables at schema 10, as the bridge's daemon leaves it, with
@@ -202,7 +327,7 @@ fn a_column_a_migration_between_the_two_versions_took_out_is_no_loss() {
             "PRAGMA user_version = 13",
         ],
     );
-    assert_kept(&before, &after, &dropped(RESUME_ON_START)).unwrap();
+    assert_kept(&before, &after, &dropped(RESUME_ON_START), &[]).unwrap();
 }
 
 /// The entry of the list that migration 0013 is.
@@ -268,7 +393,7 @@ fn only_the_columns_the_migrations_between_the_two_versions_took_out_are_no_loss
                 &format!("PRAGMA user_version = {version_after}"),
             ],
         );
-        let said = refusal(assert_kept(&before, &after, &dropped(entries)));
+        let said = refusal(assert_kept(&before, &after, &dropped(entries), &[]));
         assert!(said.contains(words), "{what}: {said}");
     }
 }
@@ -287,7 +412,7 @@ fn a_row_or_a_value_lost_beside_a_dropped_column_is_still_a_loss() {
             "PRAGMA user_version = 13",
         ],
     );
-    let said = refusal(assert_kept(&before, &after, &list));
+    let said = refusal(assert_kept(&before, &after, &list, &[]));
     assert!(
         said.contains("project 1: directory was \"/w/a\" and is \"/w/other\""),
         "{said}"
@@ -304,7 +429,7 @@ fn a_row_or_a_value_lost_beside_a_dropped_column_is_still_a_loss() {
             "PRAGMA user_version = 13",
         ],
     );
-    assert!(refusal(assert_kept(&before, &after, &list)).contains("2 is gone"));
+    assert!(refusal(assert_kept(&before, &after, &list, &[])).contains("2 is gone"));
 }
 
 /// A column renamed keeps its values under the new name, which is looked at; a table a
@@ -323,9 +448,9 @@ fn a_renamed_column_keeps_its_values_and_a_table_taken_out_whole_is_no_loss() {
             "PRAGMA user_version = 11",
         ],
     );
-    assert_kept(&before, &kept, &renamed).unwrap();
+    assert_kept(&before, &kept, &renamed, &[]).unwrap();
     let changed_value = changed(&file, &["UPDATE project SET title = 'z' WHERE id = 1"]);
-    let said = refusal(assert_kept(&before, &changed_value, &renamed));
+    let said = refusal(assert_kept(&before, &changed_value, &renamed, &[]));
     assert!(
         said.contains("project 1: name was \"a\" and is \"z\""),
         "{said}"
@@ -335,8 +460,54 @@ fn a_renamed_column_keeps_its_values_and_a_table_taken_out_whole_is_no_loss() {
     let (file, before) = bridges_ledger(folder.path());
     let table = dropped(r#"{"migration": 12, "table": "event", "why": "x"}"#);
     let after = changed(&file, &["DROP TABLE event", "PRAGMA user_version = 12"]);
-    assert_kept(&before, &after, &table).unwrap();
-    assert!(refusal(assert_kept(&before, &after, &[])).contains("lost its event table"));
+    assert_kept(&before, &after, &table, &[]).unwrap();
+    assert!(refusal(assert_kept(&before, &after, &[], &[])).contains("lost its event table"));
+}
+
+/// A live update closes the two windows of the case before it installs, and closing a window writes
+/// `conversation.program_gone`: that column, of that table, may change between the look at the
+/// ledger and the end of it. No other column of it, and the same column of another table, may.
+#[test]
+fn only_the_columns_closing_a_window_writes_are_let_change_in_a_live_update() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = ledger_file(folder.path(), 10, &ROWS);
+    let before = changed(
+        &file,
+        &[
+            "CREATE TABLE conversation (id INTEGER PRIMARY KEY, program_gone INTEGER NOT NULL, title TEXT)",
+            "INSERT INTO conversation VALUES (1, 0, 'chief')",
+            "CREATE TABLE elsewhere (id INTEGER PRIMARY KEY, program_gone INTEGER NOT NULL)",
+            "INSERT INTO elsewhere VALUES (1, 0)",
+        ],
+    );
+    let closed = [("conversation", "program_gone")];
+    let after = changed(&file, &["UPDATE conversation SET program_gone = 1"]);
+    assert_kept(&before, &after, &[], &closed).unwrap();
+    // Held to its value where the list does not name it.
+    let said = refusal(assert_kept(&before, &after, &[], &[]));
+    assert!(
+        said.contains("conversation 1: program_gone was 0 and is 1"),
+        "{said}"
+    );
+    let renamed = changed(&file, &["UPDATE conversation SET title = 'x'"]);
+    let said = refusal(assert_kept(&before, &renamed, &[], &closed));
+    assert!(
+        said.contains("conversation 1: title was \"chief\" and is \"x\""),
+        "{said}"
+    );
+    let elsewhere = changed(
+        &file,
+        &[
+            "UPDATE conversation SET title = 'chief'",
+            "UPDATE elsewhere SET program_gone = 1",
+        ],
+    );
+    let said = refusal(assert_kept(&before, &elsewhere, &[], &closed));
+    assert!(
+        said.contains("elsewhere 1: program_gone was 0 and is 1"),
+        "{said}"
+    );
+    assert_eq!(WINDOWS_CLOSED, closed);
 }
 
 /// The list the product keeps with its migrations is read as it is written, and every entry says
@@ -392,7 +563,7 @@ fn says_the_row_that_is_gone_whole() {
         ],
     );
     // The tables are read in order of their names: the event goes first.
-    let said = refusal(assert_kept(&before, &after, &[]));
+    let said = refusal(assert_kept(&before, &after, &[], &[]));
     assert_eq!(
         said,
         "event 2 is gone: {\"id\":2,\"project_id\":2,\"at\":\"t2\",\"kind\":\"project.created\",\"data\":\"{\\\"name\\\":\\\"b\\\"}\"}"
@@ -412,9 +583,9 @@ fn takes_a_row_of_a_table_with_no_id_by_what_it_holds() {
     .unwrap();
     drop(db);
     let before = read_ledger(&file).unwrap();
-    assert_kept(&before, &before, &[]).unwrap();
+    assert_kept(&before, &before, &[], &[]).unwrap();
     let after = changed(&file, &["DELETE FROM task_need WHERE task_id = 3"]);
-    assert!(refusal(assert_kept(&before, &after, &[])).contains("task_need undefined is gone"));
+    assert!(refusal(assert_kept(&before, &after, &[], &[])).contains("task_need undefined is gone"));
 }
 
 #[test]
