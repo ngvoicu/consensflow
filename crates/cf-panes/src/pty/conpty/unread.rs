@@ -1,9 +1,20 @@
-//! How many bytes written to a pipe its reader has not read yet (T-1336).
+//! Whether a pipe holds bytes written to it that its reader has not read yet (T-1336).
 //!
 //! The console host reads a window's input 4,096 bytes at a time and takes an Escape that ends a read
 //! for the Escape key, whatever follows, so an Escape-led key that straddles two reads reaches
-//! the window as an Escape and what came after it (`pty/keys.rs`, `conpty`). A key written into a pipe
-//! that holds nothing unread is read together, and this is how the pane host knows that.
+//! the window as an Escape and what came after it (`pty/keys.rs`, `conpty`). A key written into a
+//! pipe that holds no unread bytes is read together, and this is how the pane host knows that.
+//!
+//! **What the system says of a pipe's write end** (`FilePipeLocalInformation`, measured on zeewin2,
+//! 2026-11-09): its quota (`OutboundQuota`, 4,096 for a pipe of the system's size) and what is left of
+//! it (`WriteQuotaAvailable`). On a pipe nobody reads, the quota less what is left is the bytes unread,
+//! exactly (empty 4,096 left, 1,000 written 3,096, full 0). On the console's input a read of the
+//! console host's own, of its 4,096-byte buffer, is pending while it waits for input, and a pending read
+//! uses up the quota: **an empty pipe says 0 left** (a first guard that took 0 for 4,096 unread bytes
+//! waited for ever). So the pipe holds unread bytes a key could be read in two with only when
+//! some of its quota is used and some is not: when 4,096 are left it is empty with no read pending, when
+//! none are, it is empty with the read pending or holds exactly 4,096 bytes, which the host's next
+//! read takes whole, and a key written after them begins the one after.
 
 use std::fs::File;
 use std::io::{self, Write as _};
@@ -44,24 +55,30 @@ pub(super) fn information(pipe: &File) -> io::Result<FILE_PIPE_LOCAL_INFORMATION
     Ok(information)
 }
 
-/// How many bytes written to this end of a pipe its reader has not read: what the pipe's buffer
-/// holds of the writer's, its quota less what is left of it.
-pub(super) fn unread(pipe: &File) -> io::Result<usize> {
-    let information = information(pipe)?;
-    Ok(information
-        .OutboundQuota
-        .saturating_sub(information.WriteQuotaAvailable) as usize)
+/// The room of the console host's read, a pipe of the system's size: the quota of the pipes made
+/// here, and the size of the buffer the console host reads its input into.
+const HOST_READ: u32 = 4096;
+
+/// Whether `pipe`, the write end of the console's input, holds unread bytes that a key written now
+/// could be read in two with (see the head of this file). A pipe that cannot be asked, or whose size is
+/// not the console host's read's, is said to hold none: the write that follows goes as it always did.
+pub(super) fn holds_unread(pipe: &File) -> bool {
+    information(pipe).is_ok_and(|each| {
+        each.OutboundQuota == HOST_READ
+            && each.WriteQuotaAvailable > 0
+            && each.WriteQuotaAvailable < HOST_READ
+    })
 }
 
 /// How long the wait of a key that begins with Escape is slept between looks at the pipe.
 const LOOK: Duration = Duration::from_millis(1);
 
-/// Waits until the reader of `pipe` has read everything written to it, and says how long that took. A
-/// pipe that cannot be asked, or that is broken, is waited for no longer: the write that
-/// follows says what is wrong with it.
+/// Waits until the reader of `pipe` has read the bytes written to it that a key could be read in
+/// two with, and says how long that took. A pipe that cannot be asked, or that is broken, is waited
+/// for no longer: the write that follows says what is wrong with it.
 pub(super) fn wait_until_read(pipe: &File) -> Duration {
     let started = Instant::now();
-    while matches!(unread(pipe), Ok(held) if held > 0) {
+    while holds_unread(pipe) {
         thread::sleep(LOOK);
     }
     started.elapsed()
@@ -113,43 +130,60 @@ mod tests {
 
     /// The spike (T-1336): what the system reports of the write end of a pipe of the kind the
     /// console's input is (`pipe()`: the system's size, 4,096), empty, part full, full, and as the
-    /// reader reads: the bytes the reader has not read, truly.
+    /// reader reads, and what `holds_unread` makes of each. On a pipe nobody has a read pending on the
+    /// quota left is exact (4,096 less the bytes unread); a key waits while some of the quota is used
+    /// and some is not, and goes when the pipe is empty or full.
     #[test]
-    fn the_write_end_of_a_pipe_says_how_many_bytes_the_reader_has_not_read() {
+    fn the_write_end_of_a_pipe_says_how_much_the_reader_has_not_read_and_a_key_waits_for_it() {
         let (mut read, mut write) = pipe().expect("a pipe");
+        let left = |pipe: &File| information(pipe).expect("the pipe").WriteQuotaAvailable;
         println!("empty: {}", shown(&write));
+        assert_eq!(information(&write).expect("size").OutboundQuota, HOST_READ);
         assert_eq!(
-            unread(&write).expect("empty"),
-            0,
-            "empty: {}",
-            shown(&write)
-        );
-        let size = information(&write).expect("size").OutboundQuota as usize;
-        assert!(size >= 512, "the pipe's size {size}: {}", shown(&write));
-
-        write.write_all(&vec![b'x'; 1000]).expect("part full");
-        println!("1000 written: {}", shown(&write));
-        assert_eq!(unread(&write).expect("part"), 1000, "{}", shown(&write));
-
-        write.write_all(&vec![b'x'; size - 1000]).expect("full");
-        println!("full: {}", shown(&write));
-        assert_eq!(unread(&write).expect("full"), size, "{}", shown(&write));
-
-        let mut buffer = vec![0_u8; 1500];
-        read.read_exact(&mut buffer).expect("the reader reads 1500");
-        println!("1500 read: {}", shown(&write));
-        assert_eq!(
-            unread(&write).expect("read"),
-            size - 1500,
+            (left(&write), holds_unread(&write)),
+            (4096, false),
             "{}",
             shown(&write)
         );
 
-        let mut rest = vec![0_u8; size - 1500];
+        write.write_all(&[b'x'; 1000]).expect("part full");
+        println!("1000 written: {}", shown(&write));
+        assert_eq!(
+            (left(&write), holds_unread(&write)),
+            (3096, true),
+            "{}",
+            shown(&write)
+        );
+
+        write.write_all(&[b'x'; 3096]).expect("full");
+        println!("full: {}", shown(&write));
+        assert_eq!(
+            (left(&write), holds_unread(&write)),
+            (0, false),
+            "full: the host's next read takes all 4,096, and a key written after them begins the one after: {}",
+            shown(&write)
+        );
+
+        let mut buffer = [0_u8; 1500];
+        read.read_exact(&mut buffer).expect("the reader reads 1500");
+        println!("1500 read: {}", shown(&write));
+        assert_eq!(
+            (left(&write), holds_unread(&write)),
+            (1500, true),
+            "{}",
+            shown(&write)
+        );
+
+        let mut rest = [0_u8; 2596];
         read.read_exact(&mut rest)
             .expect("the reader reads the rest");
         println!("all read: {}", shown(&write));
-        assert_eq!(unread(&write).expect("drained"), 0, "{}", shown(&write));
+        assert_eq!(
+            (left(&write), holds_unread(&write)),
+            (4096, false),
+            "{}",
+            shown(&write)
+        );
     }
 
     /// An Escape-led key written while nothing reads the pipe waits behind what is unread, as it
@@ -168,8 +202,10 @@ mod tests {
             .expect("text into the pipe");
         assert!(started.elapsed() < Duration::from_secs(1));
         assert_eq!(
-            unread(&input.lock().expect("the writer")).expect("unread"),
-            100
+            information(&input.lock().expect("the writer"))
+                .expect("quota")
+                .WriteQuotaAvailable,
+            4096 - 100
         );
 
         // The key waits, holding the pane's writer as a write does; what is written after it is
@@ -250,6 +286,6 @@ mod tests {
         let (read, write) = pipe().expect("a pipe");
         drop(read);
         println!("reader gone: {}", shown(&write));
-        let _ = unread(&write);
+        let _ = holds_unread(&write);
     }
 }
