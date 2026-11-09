@@ -618,8 +618,7 @@ fn a_relative_codex_home_is_offered_no_update() {
     while common < a.len() && common < b.len() && a[common] == b[common] {
         common += 1;
     }
-    let relative: std::path::PathBuf = std::iter::repeat("..")
-        .take(a.len() - common)
+    let relative: std::path::PathBuf = std::iter::repeat_n("..", a.len() - common)
         .map(std::path::PathBuf::from)
         .chain(
             b[common..]
