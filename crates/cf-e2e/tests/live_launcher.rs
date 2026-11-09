@@ -292,22 +292,28 @@ fn refusal(stage: &str, proved: Option<&str>, now: &str) -> Option<String> {
     }
 }
 
-#[test]
-fn the_owners_stage_runs_only_after_the_pretend_owners_showed_this_version_honours_the_switches() {
-    // Asked alone, it never runs: nothing in this run has shown the switches honoured.
-    let alone = refusal("real", None, "2.1.321").expect("refused");
-    assert!(
-        alone.contains("--stage both") && alone.contains("2.1.321"),
-        "{alone}"
-    );
-    // After a pretend owner that did not show it, it does not run.
-    assert!(refusal("both", None, "2.1.321").is_some());
-    // Shown on another version than the machine's now (an update in between), it does not run.
-    let other = refusal("both", Some("2.1.319"), "2.1.321").expect("refused");
-    assert!(
-        other.contains("2.1.319") && other.contains("2.1.321"),
-        "{other}"
-    );
-    // Shown on this version, in this run: it runs.
-    assert_eq!(refusal("both", Some("2.1.321"), "2.1.321"), None);
+#[cfg(test)]
+mod tests {
+    use super::refusal;
+
+    #[test]
+    fn the_owners_stage_runs_only_after_the_pretend_owners_showed_this_version_honours_the_switches(
+    ) {
+        // Asked alone, it never runs: nothing in this run has shown the switches honoured.
+        let alone = refusal("real", None, "2.1.321").expect("refused");
+        assert!(
+            alone.contains("--stage both") && alone.contains("2.1.321"),
+            "{alone}"
+        );
+        // After a pretend owner that did not show it, it does not run.
+        assert!(refusal("both", None, "2.1.321").is_some());
+        // Shown on another version than the machine's now (an update in between), it does not run.
+        let other = refusal("both", Some("2.1.319"), "2.1.321").expect("refused");
+        assert!(
+            other.contains("2.1.319") && other.contains("2.1.321"),
+            "{other}"
+        );
+        // Shown on this version, in this run: it runs.
+        assert_eq!(refusal("both", Some("2.1.321"), "2.1.321"), None);
+    }
 }
