@@ -281,6 +281,7 @@ fn the_item_that_may_still_be_written_is_the_newest_of_the_conversation_now_and_
                 model: "maia".into(),
                 effort: None,
                 cut: false,
+                model_name: None,
             },
         )
         .expect("switched");

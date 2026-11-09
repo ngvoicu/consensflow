@@ -80,6 +80,7 @@ fn the_old_window_of_a_switch_chief_is_looked_at_for_the_methods_await_and_the_c
             harness: "codex".to_owned(),
             model: "gpt-6-astra".to_owned(),
             effort: None,
+            model_name: None,
         };
         let switching = context.begin_switch_chief(project.id, to, SwitchWhen::Now, false);
         tick_after(&context, project.id, turns);

@@ -42,6 +42,7 @@ fn world() -> World {
                 harness: "claude-code".into(),
                 model: None,
                 effort: None,
+                model_name: None,
             },
             staff,
             gate: false,

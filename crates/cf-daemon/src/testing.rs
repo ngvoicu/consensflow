@@ -224,6 +224,7 @@ pub fn scene() -> Scene {
                 harness: "claude-code".to_owned(),
                 model: Some("mybuilder".to_owned()),
                 effort: None,
+                model_name: None,
             },
             staff: Vec::new(),
             gate: false,

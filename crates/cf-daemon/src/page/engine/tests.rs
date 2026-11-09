@@ -16,6 +16,7 @@ fn request() -> NewProject {
             harness: "claude-code".to_owned(),
             model: Some("apollo".to_owned()),
             effort: None,
+            model_name: None,
         },
         staff: vec![NewMember {
             model: None,
@@ -104,6 +105,7 @@ fn a_pane_and_a_waiting_switch_are_written_as_the_dispatcher_writes_them() {
         harness: "codex".to_owned(),
         model: "diana".to_owned(),
         effort: None,
+        model_name: None,
     };
     assert_eq!(
         switch_value(&to).to_string(),

@@ -23,6 +23,7 @@ fn ledger_with_two_queued_tasks(dir: &tempfile::TempDir) -> Ledger {
                 harness: "claude-code".into(),
                 model: Some("apollo".into()),
                 effort: None,
+                model_name: None,
             },
             staff: vec![NewMember {
                 model: None,

@@ -62,7 +62,12 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     request.insert("name".to_owned(), name);
     request.insert(
         "chief".to_owned(),
-        json!({ "harness": chief.harness, "model": chief.model, "effort": chief.effort }),
+        json!({
+            "harness": chief.harness,
+            "model": chief.model,
+            "effort": chief.effort,
+            "modelName": chief.model_name,
+        }),
     );
     for key in ["gate", "wakeUp", "specs", "rules", "compaction"] {
         if let Some(said) = body.get(key) {
@@ -368,6 +373,7 @@ mod tests {
             harness: "claude-code".to_owned(),
             model: model.map(str::to_owned),
             effort: Some("high".to_owned()),
+            model_name: None,
         }
     }
 

@@ -110,6 +110,10 @@ pub struct NewChief {
     pub model: Option<String>,
     /// The effort it runs its model at; none for its harness's own.
     pub effort: Option<String>,
+    /// What its harness's list calls the model, its id (Devin's `swe-2` for the `swe-2-high` its
+    /// launch is given), which its card says; none where the list was never read. Held with
+    /// the model only: a chief on its harness's default has none.
+    pub model_name: Option<String>,
 }
 
 /// A member a new project starts with.
@@ -167,6 +171,8 @@ impl NewProject {
             given => Some(model::parse_model_id(given)?),
         };
         let chief_effort = model::parse_effort(chief.and_then(|chief| chief.get("effort")))?;
+        let chief_model_name =
+            model::parse_model_name(chief.and_then(|chief| chief.get("modelName")))?;
         let gate = match value.get("gate") {
             None => false,
             gate => model::parse_gate(gate)?,
@@ -191,6 +197,7 @@ impl NewProject {
                 harness: harness.to_string(),
                 model: chief_model,
                 effort: chief_effort,
+                model_name: chief_model_name,
             },
             staff,
             gate,
@@ -310,6 +317,14 @@ pub(crate) fn create_project(
     if let Some(chief_model) = &request.chief.model {
         model::require_model_id(chief_model)?;
     }
+    model::parse_model_name(
+        request
+            .chief
+            .model_name
+            .as_ref()
+            .map(|name| json!(name))
+            .as_ref(),
+    )?;
     let members = request
         .staff
         .iter()
@@ -341,8 +356,18 @@ pub(crate) fn create_project(
             NewParticipant::coordinator("chief", Some(chief_harness)),
         )?;
         store.db.execute(
-            "UPDATE participant SET model = ?, effort = ? WHERE id = ?",
-            params![request.chief.model, request.chief.effort, chief.id],
+            "UPDATE participant SET model = ?, effort = ?, model_name = ? WHERE id = ?",
+            params![
+                request.chief.model,
+                request.chief.effort,
+                // A name goes with a model: none for the harness's own default.
+                request
+                    .chief
+                    .model
+                    .as_ref()
+                    .and(request.chief.model_name.as_ref()),
+                chief.id
+            ],
         )?;
         for (member, roles) in &members {
             let handle = member.handle(store, id)?;
