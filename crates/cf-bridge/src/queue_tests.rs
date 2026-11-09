@@ -6,6 +6,7 @@
 //! the cases are the same on the Mac and on Windows.
 
 use std::io::{Read, Write};
+use std::sync::atomic::Ordering;
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -164,6 +165,43 @@ impl Rig {
             .any(|error| error.to_string().contains(words))
     }
 
+    /// Waits until `what` holds (or its time is out, which is a failure of the case).
+    fn wait_until(&self, what: &str, holds: impl Fn(&Bridge) -> bool) {
+        let until = Instant::now() + Duration::from_secs(10);
+        while !holds(&self.bridge) {
+            assert!(
+                Instant::now() < until,
+                "never came about: {what} (queued {}, waiting {})",
+                self.bridge.inner.queued.load(Ordering::Acquire),
+                self.bridge.waiting_responses()
+            );
+            thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// Leaves the queue full and [`WRITER_QUEUE_CAPACITY`] responses waiting for room behind
+    /// it, with the writer held, and returns once that is so. The count of responses
+    /// ([`Bridge::waiting_responses`]) has a response in it from before its look at the
+    /// queue, so it is read only where it cannot be of one about to be queued: with the
+    /// queue full, nothing is, and the count of what waits only goes up until the
+    /// transport ends.
+    fn leave_responses_waiting_for_room(&self) {
+        self.wait_until_the_writer_is_held();
+        for index in 0..WRITER_QUEUE_CAPACITY {
+            self.ask_the_unknown(format!("n-queued-{index}"));
+        }
+        self.wait_until("the queue filled with responses", |bridge| {
+            bridge.inner.queued.load(Ordering::Acquire) == WRITER_QUEUE_CAPACITY
+                && bridge.waiting_responses() == 0
+        });
+        for index in 0..WRITER_QUEUE_CAPACITY {
+            self.ask_the_unknown(format!("n-waiting-{index}"));
+        }
+        self.wait_until("every response that cannot be queued waits", |bridge| {
+            bridge.waiting_responses() == WRITER_QUEUE_CAPACITY
+        });
+    }
+
     fn open_for(&self, long: Duration) -> bool {
         let until = Instant::now() + long;
         while Instant::now() < until {
@@ -309,15 +347,7 @@ fn a_burst_far_over_the_old_cap_loses_no_response() {
 fn closing_the_bridge_ends_every_response_that_waits_for_room() {
     let rig = Rig::new(BridgeBuilder::new(Role::Host, 1024));
     assert_eq!(rig.bridge.event("occupy", json!(null)), Ok(true));
-    rig.wait_until_the_writer_is_held();
-    for index in 0..(2 * WRITER_QUEUE_CAPACITY) {
-        rig.ask_the_unknown(format!("n-{index}"));
-    }
-    let until = Instant::now() + Duration::from_secs(5);
-    while rig.bridge.waiting_responses() == 0 && Instant::now() < until {
-        thread::sleep(Duration::from_millis(5));
-    }
-    assert!(rig.bridge.waiting_responses() > 0, "nothing waited");
+    rig.leave_responses_waiting_for_room();
 
     rig.bridge.close_input();
     let until = Instant::now() + Duration::from_secs(5);
@@ -336,15 +366,7 @@ fn closing_the_bridge_ends_every_response_that_waits_for_room() {
 fn a_bridge_whose_input_ends_ends_every_response_that_waits_for_room() {
     let rig = Rig::new(BridgeBuilder::new(Role::Host, 1024));
     assert_eq!(rig.bridge.event("occupy", json!(null)), Ok(true));
-    rig.wait_until_the_writer_is_held();
-    for index in 0..(2 * WRITER_QUEUE_CAPACITY) {
-        rig.ask_the_unknown(format!("n-{index}"));
-    }
-    let until = Instant::now() + Duration::from_secs(5);
-    while rig.bridge.waiting_responses() == 0 && Instant::now() < until {
-        thread::sleep(Duration::from_millis(5));
-    }
-    assert!(rig.bridge.waiting_responses() > 0, "nothing waited");
+    rig.leave_responses_waiting_for_room();
 
     // The peer is gone: its input ends, which closes the transport.
     let Rig {
