@@ -20,17 +20,18 @@ const SHIM: &str = "@echo off\r\nset /p V=<\"%~dp0VERSION\"\r\necho codex-cli %V
 /// npm: like npm's own shim it hands `%*` on to what runs (here a label, by `call`), which is where
 /// the second layer of cmd.exe escaping the admin puts on every argument is read; that writes the
 /// arguments it was given, the prefix (the fourth) read as `%~4` reads one with a space in it, and
-/// the new version beside the shim.
+/// the new version beside the shim. (A batch file is handed each argument quoted, as cmd.exe
+/// quotes them: `%~1` reads one without.)
 const NPM: &str = "@echo off\r\n\
 call :record %*\r\n\
 echo added 1 package\r\n\
 exit /b 0\r\n\
 :record\r\n\
-echo %1> \"%~4\\npm-args.txt\"\r\n\
-echo %2>> \"%~4\\npm-args.txt\"\r\n\
-echo %3>> \"%~4\\npm-args.txt\"\r\n\
+echo %~1> \"%~4\\npm-args.txt\"\r\n\
+echo %~2>> \"%~4\\npm-args.txt\"\r\n\
+echo %~3>> \"%~4\\npm-args.txt\"\r\n\
 echo %~4>> \"%~4\\npm-args.txt\"\r\n\
-echo %5>> \"%~4\\npm-args.txt\"\r\n\
+echo %~5>> \"%~4\\npm-args.txt\"\r\n\
 echo 0.167.1> \"%~4\\VERSION\"\r\n\
 exit /b 0\r\n";
 
