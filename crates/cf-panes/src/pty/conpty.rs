@@ -68,6 +68,7 @@ use crate::job_object::JobObject;
 use environment::environment_block;
 
 mod environment;
+mod unread;
 
 /// The two flags portable-pty gives a console besides the cursor it has it inherit, which
 /// Windows' headers do not name: a resize that does not redraw what scrolled away, and
