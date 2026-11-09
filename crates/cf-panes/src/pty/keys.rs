@@ -420,6 +420,38 @@ mod conpty {
         (hex, seen)
     }
 
+    /// What a terminal answers a program's questions with (xterm.js: an OSC colour ended by ST or
+    /// by BEL, a DCS name ended by ST) goes through the pane host's input like a key and reaches a
+    /// Node program whole, with the words typed after it: the console host gives the program the
+    /// report as it was written (measured on zeewin2, 2026-11-09: also a DCS report written in two
+    /// parts up to 1.5 s apart: it holds the part until its ST comes and gives the string whole).
+    /// The pane host writes a report as one key: `field-recap-not-typed` on CI's Windows runner
+    /// found a `\`, the end of an ST, typed into the next words after reports that the guard had
+    /// cut before their ST.
+    #[test]
+    fn a_terminals_reports_reach_a_node_program_whole_with_the_words_after_them() {
+        for (what, report) in [
+            (
+                "an OSC colour ended by ST",
+                &b"\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\"[..],
+            ),
+            (
+                "an OSC colour ended by BEL",
+                &b"\x1b]10;rgb:cccc/cccc/cccc\x07"[..],
+            ),
+            (
+                "a DCS name ended by ST",
+                &b"\x1bP>|xterm.js(6.0.0)\x1b\\"[..],
+            ),
+        ] {
+            let mut bytes = report.to_vec();
+            bytes.extend_from_slice(b"abc");
+            let wanted: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+            let (hex, seen) = node_reads(&bytes);
+            assert_eq!(hex, wanted, "{what}; its screen: {seen:?}");
+        }
+    }
+
     /// How many bytes the console host reads from a pane's input at once: the size of the
     /// buffer of its input thread (`VtInputThread`, 4,096), so that a write which reaches past
     /// it is read in two.

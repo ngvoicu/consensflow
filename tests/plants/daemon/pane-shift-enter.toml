@@ -404,8 +404,8 @@ runs = ["pse-escapes"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/escapes.rs"
-find = "        if bytes[at] == 0x1b && bytes[at - 1] != 0x1b {"
-replace = "        if bytes[at] == 0x1b {"
+find = "            if at > 0 && bytes[at - 1] != 0x1b {"
+replace = "            if at > 0 {"
 
 [[plant]]
 name = "pane shift enter windows-guard: nothing is cut off from the text before an Escape-led key"
@@ -414,5 +414,35 @@ runs = ["pse-escapes"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/escapes.rs"
-find = "        if bytes[at] == 0x1b && bytes[at - 1] != 0x1b {"
-replace = "        if false && bytes[at] == 0x1b && bytes[at - 1] != 0x1b {"
+find = "            if at > 0 && bytes[at - 1] != 0x1b {"
+replace = "            if false && at > 0 && bytes[at - 1] != 0x1b {"
+
+[[plant]]
+name = "pane shift enter windows-guard: a terminal string is cut before its ST"
+meant = "a_terminal_string_is_one_key_with_its_terminator"
+runs = ["pse-escapes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/escapes.rs"
+find = "            if byte == 0x1b && bytes.get(at + 1) == Some(&b'\\\\') {"
+replace = "            if false && byte == 0x1b && bytes.get(at + 1) == Some(&b'\\\\') {"
+
+[[plant]]
+name = "pane shift enter windows-guard: a terminal string is not known by its start"
+meant = "a_terminal_string_is_one_key_with_its_terminator"
+runs = ["pse-escapes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/escapes.rs"
+find = "            if let Some(kind) = bytes.get(at + 1).filter(|kind| b\"]P_^X\".contains(kind)) {"
+replace = "            if let Some(kind) = bytes.get(at + 1).filter(|_| false) {"
+
+[[plant]]
+name = "pane shift enter windows-guard: a BEL does not end a string"
+meant = "a_terminal_string_is_one_key_with_its_terminator"
+runs = ["pse-escapes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/escapes.rs"
+find = "            if byte == 0x07 && string == Some(b']') {"
+replace = "            if byte == 0xff && string == Some(b']') {"
