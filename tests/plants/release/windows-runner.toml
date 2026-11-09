@@ -831,8 +831,8 @@ replace = "} catch {}\n"
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "cmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n\"##;\n\n/// The C#"
-replace = "$job = [CfJob]::Enter()\ncmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n\"##;\n\n/// The C#"
+find = "cmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n"
+replace = "$job = [CfJob]::Enter()\ncmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n"
 
 [[plant]]
 name = "windows runner: the job is never released where the run ends by itself"
@@ -1055,8 +1055,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }\n"
-replace = ""
+find = "  $folder = Get-Item -LiteralPath $reports\n  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }\n"
+replace = "  $folder = Get-Item -LiteralPath $reports\n"
 
 [[plant]]
 name = "windows runner: what is newer than the limit is pruned"
@@ -1130,8 +1130,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }\n"
-replace = "  $null = Clear-Old $folder\n"
+find = "  $folder = Get-Item -LiteralPath $reports\n  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }\n"
+replace = "  $folder = Get-Item -LiteralPath $reports\n  $null = Clear-Old $folder\n"
 
 # What a run leaves in `evals/reports` there is brought back here (T-141, P3-3), the files this checkout
 # lacks and nothing it has, by names of a report's alone, whole; the runner and the matrix both do it.
@@ -1775,8 +1775,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "«limits»foreach ($step in @(«steps»)) {"
-replace = "foreach ($step in @(«steps»)) {"
+find = "«limits»$steps = @(«steps»)\n"
+replace = "$steps = @(«steps»)\n"
 
 [[plant]]
 name = "windows runner: a run goes ahead of the runs that came before it"

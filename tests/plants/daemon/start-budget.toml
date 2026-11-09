@@ -138,8 +138,8 @@ replace = '"sleep {lives} {} & sleep 45; printf'
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/stop/tests/tree.rs"
-find = "Set-Content -Path '{}'"
-replace = "Start-Sleep 45; Set-Content -Path '{}'"
+find = "Set-Content -ErrorAction Stop -Path '{}'"
+replace = "Start-Sleep 45; Set-Content -ErrorAction Stop -Path '{}'"
 
 # The grandchild lets go of the capture's streams, as one an installer leaves may, so that the
 # capture ends with the parent: what the force left is for the test's look to find.
