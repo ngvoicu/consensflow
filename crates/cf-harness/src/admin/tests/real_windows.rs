@@ -9,7 +9,7 @@ use cf_base::env::Env;
 use cf_proto::agents::Harness;
 use serde_json::Value;
 
-use crate::admin::tests::npm_windows::{lay_npm, lay_npm_cmd};
+use crate::admin::tests::npm_windows::{canonical, lay_npm, lay_npm_cmd};
 use crate::admin::{Capture, HarnessAdmin, Latest, Outcome};
 use crate::seams::{SystemProcesses, SystemTime, Time};
 use crate::testing::ScriptedLatest;
@@ -46,7 +46,9 @@ fn runtime() -> tokio::runtime::Runtime {
 fn an_npm_install_on_windows_is_updated_for_real_through_the_npm_found_told_its_prefix_and_read_again(
 ) {
     let temp = tempfile::tempdir().unwrap();
-    let root = temp.path().to_path_buf();
+    // Where it leads, as the admin spells a real path: a runner's temp folder has a short name
+    // (`RUNNER~1`) the admin does not give.
+    let root = canonical(temp.path());
     let prefix = root
         .join("Users")
         .join("A B")
