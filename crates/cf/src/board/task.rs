@@ -1140,6 +1140,29 @@ and 2 idle sessions (`cf task list --all`)";
         assert_eq!(posted, Some(json!({ "tier": "light", "body": "Write it" })));
     }
 
+    /// A role is one row of the roles' table: a sixth, put in it for this test alone, has its
+    /// switch, which asks for it with no tier where its row has none, and the receipt names
+    /// it as its row does.
+    #[test]
+    fn a_role_in_the_table_alone_is_asked_for_by_its_switch_and_named_by_its_row() {
+        cf_ledger::roles::seam::with_a_scout(|| {
+            let answer = json!({
+                "task": { "number": 3, "state": "open", "assignee": null, "requester": "chief",
+                    "title": "Look around", "blockedBy": [], "pool": "scout", "tier": null },
+                "message": null, "gated": false,
+            });
+            let (posted, said) = added(&["--scout", "Look around"], &answer);
+            assert_eq!(posted, Some(json!({ "scout": true, "body": "Look around" })));
+            assert_eq!(
+                said,
+                "T-3 is on the board for a field scout; it starts in a new window of one, and its result arrives in your inbox.\nT-3: sent 11 characters, ending \"Look around\"."
+            );
+            // A tier said beside it is not sent, as with --design.
+            let (posted, _) = added(&["--scout", "--tier", "light", "Look"], &answer);
+            assert_eq!(posted, Some(json!({ "scout": true, "body": "Look" })));
+        });
+    }
+
     /// A chief that read of a free member after every task it added took a member
     /// for a person who can be busy, and chained its work through one window (T-1129, T-1134):
     /// whatever the task waits for, the receipt says a member of its role and tier takes it in a

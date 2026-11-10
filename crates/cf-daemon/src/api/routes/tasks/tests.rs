@@ -272,6 +272,37 @@ async fn the_kind_of_staff_asked_for_is_the_first_flag_that_is_true_design_advic
     );
 }
 
+/// A role is one row of the roles' table: a sixth, put in it for this test alone, is asked
+/// for by its own field, before any role with tiers where its row has none, and with no tier;
+/// a staff with nobody in it refuses it by the role's name.
+#[tokio::test]
+async fn a_role_in_the_table_alone_is_asked_for_by_its_field_and_refused_by_its_name() {
+    let _scout = cf_ledger::roles::seam::put(&cf_ledger::roles::seam::WITH_A_SCOUT);
+    let scene = scene();
+    for body in [
+        r#"{"scout":true,"body":"x"}"#,
+        r#"{"test":true,"scout":true,"advice":true,"body":"x","tier":"standard"}"#,
+    ] {
+        let answered = post(&scene, &scene.chief, body).await;
+        assert_eq!(
+            refused(&answered),
+            (
+                409,
+                "no-member-of-tier",
+                "no field scout is on the staff: ask the human for one, in your terminal"
+            ),
+            "{body}"
+        );
+    }
+    // Between two roles with no tier, the table's order: the scout stands before the image
+    // designer.
+    let answered = post(&scene, &scene.chief, r#"{"design":true,"scout":true,"body":"x"}"#).await;
+    assert_eq!(
+        refused(&answered).2,
+        "no field scout is on the staff: ask the human for one, in your terminal"
+    );
+}
+
 #[tokio::test]
 async fn a_test_opens_on_the_board_for_the_testers_of_its_tier_and_wakes_the_dispatcher_once() {
     let scene = scene();

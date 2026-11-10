@@ -1,0 +1,167 @@
+//! A role is one row of the roles' table (`cf_ledger::roles`): a sixth role put in it for
+//! a test, and nowhere else, is a role the ledger's model holds, a pool a task is for,
+//! said by its name in the refusals and in its place in their lists, and a role with no
+//! tier where its row says so. The SQLite CHECKs of `participant.role` and `task.pool`
+//! still name the five roles of today (migration 0012), and a migration is what changes
+//! them: a test that writes a row of the sixth role turns them off on its own connection
+//! (`PRAGMA ignore_check_constraints`), and one that is refused before it writes needs not.
+
+#![allow(clippy::expect_used)]
+
+use cf_ledger::model::{self, parse_roles, require_fitting_roles, require_roles};
+use cf_ledger::roles::seam::with_a_scout;
+use cf_ledger::{
+    open_ledger, Ledger, LedgerError, NewChief, NewMember, NewProject, NewTask, Options,
+    ProjectView, TaskEdit,
+};
+use serde_json::json;
+
+fn said(error: LedgerError) -> (String, String) {
+    match error {
+        LedgerError::Refused(refusal) => (refusal.code.to_string(), refusal.message.clone()),
+        other => panic!("not a refusal: {other}"),
+    }
+}
+
+fn member(agent: &str, roles: &[&str], tier: &str) -> NewMember {
+    NewMember {
+        model: None,
+        effort: None,
+        model_name: Some(agent.into()),
+        harness: "claude-code".into(),
+        designer: false,
+        roles: roles.iter().map(|role| (*role).to_owned()).collect(),
+        tier: tier.into(),
+    }
+}
+
+fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> Result<ProjectView, LedgerError> {
+    ledger.create_project(&NewProject {
+        directory: "/work/app".into(),
+        name: "app".into(),
+        chief: NewChief {
+            harness: "claude-code".into(),
+            model: Some("apollo".into()),
+            effort: None,
+            model_name: None,
+        },
+        staff,
+        gate: false,
+        wake_up: None,
+        specs: None,
+        staff_rules: None,
+        compaction: None,
+        advisor_tool: false,
+    })
+}
+
+fn for_scouts(body: &str) -> NewTask {
+    NewTask::from_json(&json!({ "from": "chief", "pool": "scout", "body": body }))
+        .expect("a scout's task takes no tier")
+}
+
+#[test]
+fn a_role_in_the_table_alone_is_one_a_member_holds_and_the_refusals_list_it_in_its_place() {
+    with_a_scout(|| {
+        assert_eq!(
+            require_roles(&["scout", "worker"], String::new).expect("roles"),
+            ["scout", "worker"]
+        );
+        assert_eq!(parse_roles(Some(&json!(["scout"]))).expect("roles"), ["scout"]);
+        assert_eq!(
+            said(require_roles(&["captain"], || "captain".to_owned()).unwrap_err()).1,
+            "a member is one or more of worker, advisor, reviewer, scout, tester, designer, not captain"
+        );
+        assert_eq!(
+            said(
+                NewTask::from_json(&json!({ "from": "chief", "pool": "captain", "body": "A" }))
+                    .unwrap_err()
+            )
+            .1,
+            "a pool is worker, advisor, reviewer, scout, tester, designer, not captain"
+        );
+        // Any agent may scout but an image agent, which is nothing but an image designer.
+        assert!(require_fitting_roles("hera", false, &["scout"]).is_ok());
+        assert_eq!(
+            said(require_fitting_roles("pygmalion", true, &["scout"]).unwrap_err()).1,
+            "pygmalion is an image agent, which can only be an image designer"
+        );
+        assert!(model::fits_role(false, "scout"));
+    });
+    // Without its row it is no role at all.
+    assert_eq!(
+        said(require_roles(&["scout"], || "scout".to_owned()).unwrap_err()).1,
+        "a member is one or more of worker, advisor, reviewer, tester, designer, not scout"
+    );
+}
+
+#[test]
+fn a_task_for_a_role_nobody_holds_is_refused_by_the_roles_name() {
+    with_a_scout(|| {
+        let dir = tempfile::tempdir().expect("a home");
+        let mut ledger =
+            open_ledger(&dir.path().join("consensflow.db"), Options::default()).expect("a ledger");
+        let project =
+            project(&mut ledger, vec![member("zeus", &["worker"], "standard")]).expect("a project");
+        let refused = ledger
+            .create_task(project.id, &for_scouts("Look around"))
+            .unwrap_err();
+        assert_eq!(
+            said(refused),
+            (
+                "no-member-of-tier".to_owned(),
+                "no field scout is on the staff: ask the human for one, in your terminal"
+                    .to_owned()
+            )
+        );
+    });
+}
+
+#[test]
+fn a_role_with_no_tier_takes_a_task_with_none_and_its_tier_is_not_changed() {
+    with_a_scout(|| {
+        let dir = tempfile::tempdir().expect("a home");
+        let mut ledger =
+            open_ledger(&dir.path().join("consensflow.db"), Options::default()).expect("a ledger");
+        ledger
+            .sqlite()
+            .execute_batch("PRAGMA ignore_check_constraints = ON")
+            .expect("the CHECKs off");
+        let project = project(
+            &mut ledger,
+            vec![
+                member("zeus", &["worker"], "standard"),
+                member("argus", &["scout"], "light"),
+            ],
+        )
+        .expect("a project with a scout");
+        let scout = project
+            .participants
+            .iter()
+            .find(|participant| participant.role == "scout")
+            .expect("the scout");
+        assert_eq!(scout.roles, ["scout"]);
+        let given = ledger
+            .create_task(project.id, &for_scouts("Look around"))
+            .expect("a scout's task");
+        assert_eq!(
+            (given.task.pool.as_deref(), given.task.tier.as_deref()),
+            (Some("scout"), None)
+        );
+        let refused = ledger
+            .edit_task_with(
+                project.id,
+                given.task.number,
+                "chief",
+                &TaskEdit {
+                    tier: Some("complex".into()),
+                    ..TaskEdit::default()
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            said(refused).1,
+            "cannot change the tier of T-1: the field scout has no tier"
+        );
+    });
+}

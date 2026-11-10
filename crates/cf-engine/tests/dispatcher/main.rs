@@ -129,6 +129,7 @@ mod session_windows;
 mod sessions;
 mod several_roles;
 mod shared;
+mod sixth_role;
 mod slow_records;
 mod specs;
 mod stale_box;
