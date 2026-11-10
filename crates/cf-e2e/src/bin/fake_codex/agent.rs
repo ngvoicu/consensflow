@@ -24,9 +24,21 @@
 //! server is configured with (`-c developer_instructions=…`), as Codex 0.164.0 does;
 //! the first turn of the thread writes them into the rollout as the developer's
 //! message. A thread it resumes goes on in the rollout it has, which already holds
-//! that message, and is given no other: what the server is configured with now is
-//! read and unused, as the live Codex 0.162.1 did with a chief resumed after its
-//! role changed (2026-10-13).
+//! that message, and is given no other: what its resume names (`developerInstructions`)
+//! or the server is configured with now is read and unused by its turns, as the live
+//! Codex 0.162.1 did with a chief resumed after its role changed (2026-10-13).
+//!
+//! A compaction is where those instructions are read again. Codex rebuilds a compacted
+//! history from the session that compacts it: the developer message of its replacement
+//! history is the instructions that session was given (its start's or its resume's
+//! `developerInstructions`, else its configuration), not the one the thread began with
+//! (`build_compaction_replacement_history`, codex-rs 0.167.0; T-1388's rollouts, Codex
+//! 0.167.0: a window resumed with no instructions compacted to a history with no role,
+//! one resumed with the role compacted to a history with it once). So the stand-in's
+//! `compacted` record holds the developer message of the instructions its session has,
+//! and after it that is what the thread holds. A message with the line `Say your role`
+//! is answered from what the thread holds now: the sentence that names its ConsensFlow
+//! role and the command it asks the chief with, or that it has none.
 //!
 //! What a turn does is what the stand-in agent's does: the `SLEEP <seconds>` line of
 //! its message is how long it works, `Reply with exactly: X` is its answer, and
@@ -111,8 +123,14 @@ pub struct Agent {
     /// The developer instructions the server is configured with, which a thread it
     /// starts begins with where its start names none.
     configured: Option<String>,
-    /// The developer instructions the thread it started begins with.
+    /// The developer instructions of this server's session of the thread: those its
+    /// start or its resume names, or else those the server is configured with. A
+    /// thread's first turn writes them, and a compaction rebuilds the thread's developer
+    /// message from them; no turn of a resumed thread writes them.
     developer: Mutex<Option<String>>,
+    /// The developer message the thread's history holds now, which is what its model
+    /// reads: the one its first turn wrote, or the one its latest compaction rebuilt.
+    holds: Mutex<Option<String>>,
     /// Whether the thread has its developer message in the rollout already: a thread
     /// writes it once, with its first turn, and a resumed one has it from before.
     instructed: AtomicBool,
@@ -189,6 +207,7 @@ impl Agent {
             home,
             rollout: Mutex::new(None),
             developer: Mutex::new(configured.clone()),
+            holds: Mutex::new(None),
             configured,
             instructed: AtomicBool::new(false),
             plugins,
@@ -217,10 +236,7 @@ impl Agent {
     /// The server starts its thread, as `params` (those of `thread/start`) ask: with
     /// the developer instructions they name, or those the server is configured with.
     pub fn started(&self, params: &Value) {
-        *held(&self.developer) = params["developerInstructions"]
-            .as_str()
-            .map(str::to_owned)
-            .or_else(|| self.configured.clone());
+        *held(&self.developer) = self.instructions_of(params);
         *held(&self.window_env) = params["config"]
             .as_object()
             .into_iter()
@@ -255,9 +271,26 @@ impl Agent {
         );
         self.instructed
             .store(has_developer_message(&text), Ordering::Relaxed);
+        *held(&self.holds) = developer_held(&text);
         thread.clone_into(&mut held(&self.thread));
         *held(&self.rollout) = Some(found);
         true
+    }
+
+    /// The developer instructions a start's or a resume's `params` give the session: those
+    /// they name, or those the server is configured with.
+    fn instructions_of(&self, params: &Value) -> Option<String> {
+        params["developerInstructions"]
+            .as_str()
+            .map(str::to_owned)
+            .or_else(|| self.configured.clone())
+    }
+
+    /// The session of the thread a resume went on with has the developer instructions its
+    /// `params` (those of `thread/resume`) give it: no turn writes them, and the thread's
+    /// next compaction rebuilds its developer message from them.
+    pub fn resumed_with(&self, params: &Value) {
+        *held(&self.developer) = self.instructions_of(params);
     }
 
     /// The server takes `text` as a turn, which goes on beside it.
@@ -431,24 +464,27 @@ impl Agent {
         );
         if let Some(compacting) = compacts_for(text) {
             thread::sleep(compacting);
+            // The history is rebuilt from the session's own instructions, which a
+            // compaction installs as the thread's context: no first turn writes them after.
+            let instructions = held(&self.developer).clone();
+            let replacement: Vec<Value> = instructions
+                .iter()
+                .map(|instructions| developer_message(instructions))
+                .chain([json!({ "type": "compaction", "encrypted_content": "stand-in" })])
+                .collect();
             self.write(
                 "compacted",
-                json!({ "message": "", "replacement_history": [] }),
+                json!({ "message": "", "replacement_history": replacement }),
             );
+            self.instructed.store(true, Ordering::Relaxed);
+            *held(&self.holds) = instructions;
         }
         // The first turn of a thread writes what the thread begins with: the
         // developer's instructions, which no later turn, and no resume, writes again.
         if !self.instructed.swap(true, Ordering::Relaxed) {
             if let Some(instructions) = held(&self.developer).clone() {
-                self.write(
-                    "response_item",
-                    json!({
-                        "type": "message",
-                        "id": item_id(),
-                        "role": "developer",
-                        "content": [{ "type": "input_text", "text": instructions }],
-                    }),
-                );
+                self.write("response_item", developer_message(&instructions));
+                *held(&self.holds) = Some(instructions);
             }
         }
         self.write(
@@ -482,6 +518,11 @@ impl Agent {
             self.plugins.call_a_tool();
         }
         let (work, said) = what_it_says(text);
+        let said = if text.contains(SAY_YOUR_ROLE) {
+            role_said(held(&self.holds).as_deref())
+        } else {
+            said
+        };
         self.interrupted.store(false, Ordering::Relaxed);
         while began.elapsed() < work && !self.interrupted.load(Ordering::Relaxed) {
             thread::sleep(work.saturating_sub(began.elapsed()).min(INTERRUPT_LOOK));
@@ -659,14 +700,76 @@ fn find_rollout(sessions: &Path, thread: &str) -> Option<PathBuf> {
     files::find(sessions, &|name| name.ends_with(&ends))
 }
 
-/// Whether the rollout `text` has a developer's message: what a thread begins with.
+/// The line of a message that asks the agent what its role is, which it answers from the
+/// developer message its thread holds ([`role_said`]).
+const SAY_YOUR_ROLE: &str = "Say your role";
+
+/// A developer's message of `text`, as a rollout and a replacement history hold one.
+fn developer_message(text: &str) -> Value {
+    json!({
+        "type": "message",
+        "id": item_id(),
+        "role": "developer",
+        "content": [{ "type": "input_text", "text": text }],
+    })
+}
+
+/// What an agent whose thread holds the developer message `holds` says when asked its role:
+/// the sentence that names its ConsensFlow role and the command it asks the chief with, each
+/// as its instructions say them, or that they say none, as Codex's model answered with no
+/// role in its history (T-1388: "No command is specified for asking the chief a question.").
+fn role_said(holds: Option<&str>) -> String {
+    static ROLE: OnceLock<Regex> = OnceLock::new();
+    static ASK: OnceLock<Regex> = OnceLock::new();
+    let holds = holds.unwrap_or_default();
+    let role = pattern::once(&ROLE, r"Your ConsensFlow role is [\w-]+")
+        .find(holds)
+        .map_or("No ConsensFlow role is given", |found| found.as_str());
+    let ask = pattern::once(&ASK, r#"(\S*cf(?:\.exe)?) ask ""#)
+        .captures(holds)
+        .map_or_else(
+            || "No command is specified for asking the chief a question.".to_owned(),
+            |found| format!("Ask the chief with: {} ask", &found[1]),
+        );
+    format!("{role}. {ask}")
+}
+
+/// The developer message the rollout `text` has its thread hold now: the one its latest
+/// compaction rebuilt (none where it rebuilt none), or else the last one written.
+fn developer_held(text: &str) -> Option<String> {
+    let said = |message: &Value| message["content"][0]["text"].as_str().map(str::to_owned);
+    let mut holds = None;
+    for record in text
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+    {
+        if record["type"] == "compacted" {
+            holds = record["payload"]["replacement_history"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter(|item| item["role"] == "developer")
+                .find_map(said);
+        } else if record["type"] == "response_item"
+            && record["payload"]["type"] == "message"
+            && record["payload"]["role"] == "developer"
+        {
+            holds = said(&record["payload"]);
+        }
+    }
+    holds
+}
+
+/// Whether the rollout `text` has given its thread its context: a developer's message, what
+/// a thread begins with, or a compaction, which installs the context in its place.
 fn has_developer_message(text: &str) -> bool {
     text.lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         .any(|record| {
-            record["type"] == "response_item"
-                && record["payload"]["type"] == "message"
-                && record["payload"]["role"] == "developer"
+            record["type"] == "compacted"
+                || record["type"] == "response_item"
+                    && record["payload"]["type"] == "message"
+                    && record["payload"]["role"] == "developer"
         })
 }
 
@@ -935,6 +1038,122 @@ mod tests {
         assert!(
             find_rollout(&home.path().join("sessions"), "thread-2").is_none(),
             "no rollout of the id the server began with"
+        );
+    }
+
+    /// A role as a window's broker gives it: Codex's own, then ConsensFlow's, with the
+    /// command that asks the chief.
+    const ROLE: &str = "Codex's own instructions.\n\n  Your ConsensFlow role is worker. \
+        Follow it.\n\n    /app/bin/cf ask \"…\"   a question to the chief; then end your turn";
+
+    /// What the agent said last in `records`.
+    fn answer(records: &[Value]) -> &str {
+        records
+            .iter()
+            .rev()
+            .find(|record| record["payload"]["role"] == "assistant")
+            .and_then(|record| record["payload"]["content"][0]["text"].as_str())
+            .unwrap_or_default()
+    }
+
+    /// The developer's messages of the replacement history of the `compacted` records.
+    fn rebuilt(records: &[Value]) -> Vec<Vec<&str>> {
+        records
+            .iter()
+            .filter(|record| record["type"] == "compacted")
+            .map(|record| {
+                record["payload"]["replacement_history"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|item| item["role"] == "developer")
+                    .filter_map(|item| item["content"][0]["text"].as_str())
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_compaction_rebuilds_the_developer_message_from_the_instructions_of_the_session_that_compacts(
+    ) {
+        // A first window: its thread began with the role, and a compaction keeps it once.
+        let home = tempfile::tempdir().unwrap();
+        let first = server(home.path(), "thread-1", "the configured");
+        first.started(&json!({ "developerInstructions": ROLE }));
+        first.turn("Reply with exactly: ONE");
+        first.turn("COMPACT 0 Say your role");
+        let written = records(home.path(), "thread-1");
+        assert_eq!(
+            developers(&written),
+            [ROLE],
+            "written once, by the first turn"
+        );
+        assert_eq!(rebuilt(&written), [vec![ROLE]]);
+        assert_eq!(
+            answer(&written),
+            "Your ConsensFlow role is worker. Ask the chief with: /app/bin/cf ask"
+        );
+
+        // Resumed by a window that gives no instructions, as the broker did before T-1394:
+        // the thread keeps its role until the compaction, which rebuilds none (T-1388's
+        // run-codex-1794337068, Codex 0.167.0).
+        let lost = Agent::on(
+            "thread-9".to_owned(),
+            Some(home.path().to_path_buf()),
+            None,
+            Plugins::open(0, 0).unwrap(),
+        );
+        assert!(lost.resume("thread-1"));
+        lost.resumed_with(&json!({ "threadId": "thread-1", "developerInstructions": null }));
+        lost.turn("Say your role");
+        let written = records(home.path(), "thread-1");
+        assert!(answer(&written).starts_with("Your ConsensFlow role is worker."));
+        lost.turn("COMPACT 0 Say your role");
+        let written = records(home.path(), "thread-1");
+        assert_eq!(rebuilt(&written).last(), Some(&Vec::<&str>::new()));
+        assert_eq!(
+            answer(&written),
+            "No ConsensFlow role is given. No command is specified for asking the chief a question."
+        );
+
+        // Resumed by a window that gives the role: no turn writes it, and the compaction
+        // rebuilds it once (T-1388's run-codex-1794335426).
+        let kept = server(home.path(), "thread-8", "the configured");
+        assert!(kept.resume("thread-1"));
+        kept.resumed_with(&json!({ "threadId": "thread-1", "developerInstructions": ROLE }));
+        kept.turn("Say your role");
+        let written = records(home.path(), "thread-1");
+        assert_eq!(
+            developers(&written),
+            [ROLE],
+            "no turn of a resumed thread writes it"
+        );
+        assert!(
+            answer(&written).starts_with("No ConsensFlow role"),
+            "it holds none yet"
+        );
+        kept.turn("COMPACT 0 Say your role");
+        let written = records(home.path(), "thread-1");
+        assert_eq!(rebuilt(&written).last(), Some(&vec![ROLE]));
+        assert_eq!(developers(&written), [ROLE]);
+        assert_eq!(
+            answer(&written),
+            "Your ConsensFlow role is worker. Ask the chief with: /app/bin/cf ask"
+        );
+
+        // And a resume that names none has the session's configured instructions.
+        let configured = server(home.path(), "thread-7", "the configured");
+        assert!(configured.resume("thread-1"));
+        assert_eq!(
+            held(&configured.holds).as_deref(),
+            Some(ROLE),
+            "read from the rollout"
+        );
+        configured.resumed_with(&json!({ "threadId": "thread-1" }));
+        configured.turn("COMPACT 0 Reply with exactly: TWO");
+        assert_eq!(
+            rebuilt(&records(home.path(), "thread-1")).last(),
+            Some(&vec!["the configured"])
         );
     }
 

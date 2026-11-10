@@ -6,7 +6,8 @@
 //! its terminal). Given `resume <thread>` the TUI resumes that thread instead, as
 //! the real one asks (`thread/resume`, in the shape Codex 0.159.2 sent it): the
 //! server goes on in the thread's rollout, which keeps the developer instructions
-//! the thread began with (those its start named, the role the broker gave it), and the window ends with 1 where the server has no
+//! the thread began with (those its start named, the role the broker gave it) until
+//! a compaction rebuilds its history from those the resume named (`agent`), and the window ends with 1 where the server has no
 //! rollout of it, as Codex's does: a thread has one only once it has had a turn.
 //! Each run writes what it was given, and what it saw, to `CF_TEST_CODEX_LOG`, and with
 //! `CF_TEST_CODEX_ENV_LOG` set the names of its environment's variables, never a value, to
@@ -491,6 +492,7 @@ fn resumed(id: &Value, params: &Value, agent: &Arc<Agent>) -> Value {
         thread::sleep(Duration::from_millis(slow));
     }
     if agent.resume(thread) {
+        agent.resumed_with(params);
         // A thread another server still holds is this one's to read, not to work in.
         let read_only = !agent.hold();
         if read_only {
