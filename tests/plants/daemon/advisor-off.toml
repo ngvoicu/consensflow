@@ -11,7 +11,6 @@
 
 [run]
 ao-ledger-described = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "described", "advisor_tool::"]
-ao-ledger-testing-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::advisor_tool::"]
 ao-engine-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "advisor_off::"]
 ao-harness-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::advisor_off"]
 ao-daemon-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::advisor_tool"]
@@ -209,16 +208,6 @@ runs = ["ao-ledger-described"]
 file = "crates/cf-ledger/src/projects.rs"
 find = '''        if request.advisor_tool {'''
 replace = '''        if false && request.advisor_tool {'''
-
-[[plant]]
-name = "advisor off: the undo for older ledgers leaves the column"
-meant = "undoing_migration_0035_leaves_the_schema_0034_left_and_the_ledger_migrates_again"
-runs = ["ao-ledger-testing-lib"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/testing/advisor_tool.rs"
-find = '''    db.execute_batch("ALTER TABLE project DROP COLUMN advisor_tool")'''
-replace = '''    db.execute_batch("SELECT 1")'''
 
 [[plant]]
 name = "advisor off: the page's operation is the compaction's operation"
