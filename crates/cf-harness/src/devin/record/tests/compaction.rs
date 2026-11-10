@@ -540,3 +540,101 @@ fn a_chain_compacted_at_rest_is_a_conversation_at_rest_and_the_turn_after_it_rea
         "the turn after the compaction is read as one after any chain, the summary in no way its own"
     );
 }
+
+#[test]
+fn a_summary_with_a_turn_open_on_the_wire_is_no_conversation_at_rest_until_the_turn_ends() {
+    // A compaction in the middle of a turn that kept no step: the chain is Devin's own words
+    // and the summary, no message of the user's and no step, as it is at rest. Only the wire
+    // tells which. Devin says `blocked` before the turn's end, and where it waits for its
+    // user, and works again after: a turn is over only where its end is said (T-1395, the
+    // review of its first head: a Stop owed was paid as if the window rested, and was never
+    // owed again).
+    let status = |state: &str| {
+        json!({
+            "sessionId": SESSION,
+            "update": {
+                "sessionUpdate": "session_info_update",
+                "_meta": {
+                    "cognition.ai/timestamp": 1_792_976_967_738_i64,
+                    "cognition.ai/eventType": "status_update",
+                    "cognition.ai/statusEnum": state,
+                },
+            },
+        })
+    };
+    let thought = json!({
+        "sessionId": SESSION,
+        "update": {
+            "sessionUpdate": "agent_thought_chunk",
+            "content": { "type": "text", "text": "Reading the next file." },
+            "_meta": {
+                "cognition.ai/timestamp": "2026-11-10T20:35:15.000000+00:00",
+                "cognition.ai/streamingMessageId": "stream-1",
+            },
+        },
+    });
+    let staged = Staged::new();
+    let system =
+        |id: &str| json!({ "message_id": id, "role": "system", "content": "Devin's own." });
+    staged.chain(&[system("p-1"), system("p-2"), summary("s-1")]);
+    let mut reader = staged.reader();
+    // What a look that read each step before and a fresh one, which read the same, say.
+    let both = |staged: &Staged, reader: &mut Box<dyn Look + Send>, what: &str| {
+        let incremental = look(reader);
+        assert_eq!(
+            show(&incremental),
+            read_once(staged),
+            "{what}: a fresh look reads the same"
+        );
+        match &*incremental {
+            Reading::Known(record) => (record.settlement, record.in_flight),
+            other => panic!("{other:?}"),
+        }
+    };
+
+    let mut wire = vec![status("working"), thought.clone()];
+    staged.wire("launch-1", &wire);
+    assert_eq!(
+        both(&staged, &mut reader, "at work"),
+        (Settlement::InFlight, true),
+        "Devin says it works"
+    );
+
+    // It waits, or is about to end its turn: not at work by its word, and no end said.
+    wire.push(status("blocked"));
+    staged.wire("launch-1", &wire);
+    assert_eq!(
+        both(&staged, &mut reader, "blocked"),
+        (Settlement::Unknown, false),
+        "a turn that began and did not end is no conversation at rest, whatever Devin says of its work"
+    );
+
+    // The turn's end is said: nothing is open on the chain, as at rest.
+    wire.extend([
+        json!({ "sessionId": SESSION, "turnClientMessageId": "request-1" }),
+        json!({ "sessionId": SESSION, "cause": "complete", "stats": {} }),
+    ]);
+    staged.wire("launch-1", &wire);
+    assert_eq!(
+        both(&staged, &mut reader, "ended"),
+        (Settlement::Settled, false)
+    );
+
+    // And a turn begun after it, by the same word, is open again.
+    wire.extend([status("working"), status("blocked")]);
+    staged.wire("launch-1", &wire);
+    assert_eq!(
+        both(&staged, &mut reader, "begun again"),
+        (Settlement::Unknown, false)
+    );
+
+    // A turn whose work was said with no word of Devin's that it works is open as well.
+    let bare = Staged::new();
+    bare.chain(&[system("p-1"), system("p-2"), summary("s-1")]);
+    let mut reader = bare.reader();
+    bare.wire("launch-1", &[thought, status("blocked")]);
+    assert_eq!(
+        both(&bare, &mut reader, "work alone"),
+        (Settlement::Unknown, false)
+    );
+}

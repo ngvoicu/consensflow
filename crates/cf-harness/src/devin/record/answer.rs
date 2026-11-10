@@ -14,7 +14,8 @@
 //! launch whose wire was written last (a resume opens a new one). A user's
 //! message that is what ConsensFlow gave a launch behind `/bypass` is read as
 //! the prompt it ran, however Devin stores the command. A chain of Devin's own words and the
-//! summary of a compaction, with no message of the user's (compacted at rest), has no turn open.
+//! summary of a compaction, with no message of the user's (compacted at rest), has no turn open,
+//! where the wire does not say a turn began and has not ended.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -103,12 +104,17 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
     // conversation compacted at rest (T-1388, `/compact` on a finished session; a window at rest
     // that `/compact` is typed into): the summary stands for the turns it summed up, no message of
     // the user's is on the chain and no turn is open on it. Without a summary the same words are
-    // a chain no turn was begun on, and say nothing.
+    // a chain no turn was begun on, and say nothing. The same chain is one compacted in the
+    // middle of a turn that kept no step, where the wire says a turn began and not that it
+    // ended: that turn is open, whatever Devin says of its work (`blocked` is no end), and
+    // nothing is said of it until its own end (T-1395: a Stop owed to it was paid as to a window
+    // at rest, with no key, and never owed again).
     let compacted_at_rest = last.is_none()
         && chain
             .entries
             .iter()
-            .any(|entry| entry.item.kind() == Kind::Compaction);
+            .any(|entry| entry.item.kind() == Kind::Compaction)
+        && !wires.turn_open();
     record.in_flight = working || (last_open && !cancelled && !failed);
     record.settlement = if working {
         Settlement::InFlight
