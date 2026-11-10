@@ -7305,6 +7305,7 @@ test('New project has the advisor tool off, and sends it only when the human tic
         model: 'claude-sonnet-5',
         gate: false,
         staff: [],
+        compaction: 300000,
       },
     ])
   await expect(made.dialog).toBeHidden()
@@ -7328,6 +7329,7 @@ test('New project with the advisor tool ticked starts the project with it, in th
         model: 'claude-sonnet-5',
         gate: false,
         staff: [],
+        compaction: 300000,
         advisorTool: true,
       },
     ])
