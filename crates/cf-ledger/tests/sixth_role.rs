@@ -208,6 +208,16 @@ fn the_ledgers_checks_hold_the_tables_roles_and_a_new_row_needs_a_migration() {
     let ours = sorted(roles.iter().map(|role| (*role).to_owned()).collect());
     assert_eq!(sorted(members.clone()), ours);
     assert_eq!(sorted(checked(&ledger, "task", "task_pool_check")), ours);
-    // The scout is a row and no word of the CHECKs: this test is what fails.
-    with_a_scout(|| assert!(cf_ledger::roles::ids().len() > members.len()));
+    // A table with the scout, a row that is no word of the CHECKs, is told apart by the same
+    // comparison: this test is what fails when a row comes without its migration.
+    with_a_scout(|| {
+        let with_scout = sorted(
+            cf_ledger::roles::ids()
+                .iter()
+                .map(|role| (*role).to_owned())
+                .collect(),
+        );
+        assert_ne!(sorted(members.clone()), with_scout);
+        assert!(with_scout.contains(&"scout".to_owned()), "{with_scout:?}");
+    });
 }

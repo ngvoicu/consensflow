@@ -360,6 +360,8 @@ async function open(page, given = model()) {
     // Why the daemon is down, while a test has it down: the app answers every
     // core request with this, as Rust does with no bridge to the daemon.
     window.__down = null
+    // How many of the first reads of the harnesses the daemon refuses: a test's `missingRefused`.
+    window.__missingRefused = data.missingRefused ?? 0
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
     // A project's wake-up calls as the daemon says them: the interval in the
     // largest unit that holds it whole, the default words where none were written.
@@ -392,7 +394,13 @@ async function open(page, given = model()) {
       })
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
-      'harnesses.missing': () => answer({ missing: data.missing ?? [], roles: data.roles }),
+      'harnesses.missing': () => {
+        if (window.__missingRefused > 0) {
+          window.__missingRefused -= 1
+          return { ok: false, error: 'not-available-yet', detail: 'the daemon is starting' }
+        }
+        return answer({ missing: data.missing ?? [], roles: data.roles })
+      },
       // What a harness lists of its models, by its program's name (CHF-07): the fixture's,
       // or a refusal a test names for it (`modelsRefusal`).
       'models.get': ({ harness }) => {
@@ -10521,6 +10529,19 @@ test('resizes no terminal when the projects fold away and come back: the board t
   // Past the time a size settles in: still the first size alone.
   await page.waitForTimeout(600)
   expect(await resizes()).toBe(1)
+})
+
+test('names the role a task waits for when the first read of the roles was refused', async ({
+  page,
+}) => {
+  const data = model()
+  data.missingRefused = 1
+  data.boards[1].open.push(
+    task(7, 'Draw the logo', 'open', 'chief', null, 1, { pool: 'designer', tier: null }),
+  )
+  await open(page, data)
+  // The page reads the roles again with the board, and says the role by its name.
+  await expect(page.locator('button.card[data-task="7"]')).toContainText('for an image designer')
 })
 
 test('folds the panels for this page when the browser keeps no storage', async ({ page }) => {

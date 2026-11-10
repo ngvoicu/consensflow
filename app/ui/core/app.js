@@ -7,7 +7,7 @@ import { listenForFileDrops } from './file-drop.js'
 import { HistoryViewer } from './history-viewer.js'
 import { Layout } from './layout.js'
 import { ProjectMenu } from './project-menu.js'
-import { poolName, readRoles } from './roles.js'
+import { poolName, readRoles, roleIds } from './roles.js'
 import { SpecsSettings } from './specs-settings.js'
 import { SpecsViewer } from './specs-viewer.js'
 import { TerminalsView } from './terminals.js'
@@ -467,6 +467,9 @@ async function refresh() {
   }
   refreshing = (async () => {
     try {
+      // A page whose first read of the roles was refused reads them with the board: a card
+      // says the role a task waits for by its name, which only the daemon's table holds.
+      if (roleIds().length === 0) await readMissing().catch(() => {})
       const { projects } = await daemon('projects.list')
       state.projects = projects
       if (!projects.some((project) => project.id === state.selected)) {
