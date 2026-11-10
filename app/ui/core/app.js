@@ -7,6 +7,7 @@ import { listenForFileDrops } from './file-drop.js'
 import { HistoryViewer } from './history-viewer.js'
 import { Layout } from './layout.js'
 import { ProjectMenu } from './project-menu.js'
+import { poolName, readRoles } from './roles.js'
 import { SpecsSettings } from './specs-settings.js'
 import { SpecsViewer } from './specs-viewer.js'
 import { TerminalsView } from './terminals.js'
@@ -96,10 +97,14 @@ async function daemon(operation, body = {}) {
   return result
 }
 
-/** The harnesses not installed here, read again: Add member and the chief's pickers offer none of them. */
+/**
+ * The harnesses not installed here, read again: Add member and the chief's pickers offer none of
+ * them; and the staff's roles, which the pickers offer and the board names.
+ */
 async function readMissing() {
-  const { missing = [] } = await daemon('harnesses.missing')
+  const { missing = [], roles } = await daemon('harnesses.missing')
   state.missing = missing
+  readRoles(roles)
 }
 
 /**
@@ -258,9 +263,7 @@ const drawer = new TaskDrawer($('#task-drawer'), {
   onReassign: (task) =>
     act(async () => {
       await daemon('task.reassign', { project: task.projectId, task: task.number })
-      note(
-        `T-${task.number} is back on the board for another ${task.pool === 'designer' ? 'image designer' : `${task.tier} ${task.pool}`}.`,
-      )
+      note(`T-${task.number} is back on the board for another ${poolName(task)}.`)
     }),
   onFinish: (task) =>
     act(async () => {

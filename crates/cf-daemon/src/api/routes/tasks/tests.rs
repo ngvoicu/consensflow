@@ -296,7 +296,12 @@ async fn a_role_in_the_table_alone_is_asked_for_by_its_field_and_refused_by_its_
     }
     // Between two roles with no tier, the table's order: the scout stands before the image
     // designer.
-    let answered = post(&scene, &scene.chief, r#"{"design":true,"scout":true,"body":"x"}"#).await;
+    let answered = post(
+        &scene,
+        &scene.chief,
+        r#"{"design":true,"scout":true,"body":"x"}"#,
+    )
+    .await;
     assert_eq!(
         refused(&answered).2,
         "no field scout is on the staff: ask the human for one, in your terminal"

@@ -2,6 +2,7 @@ import { button, element, redraw } from '../dom.js'
 import { HARNESS_NAMES, harnessLabel, isMember, modelShown, nameApart } from './board.js'
 import { harnessesOf } from './computer-use.js'
 import { holdEnter, ProjectSections } from './project-sections.js'
+import { isImageAgentRole, readRoles, roleIds, roleLabel } from './roles.js'
 
 /**
  * The dialogs that say who works on a project and how: New project (its
@@ -15,14 +16,6 @@ import { holdEnter, ProjectSections } from './project-sections.js'
  * throwing, as the daemon's refusals do.
  */
 
-const ROLES = ['worker', 'advisor', 'reviewer', 'tester', 'designer']
-const ROLE_LABEL = {
-  worker: 'Worker',
-  advisor: 'Advisor',
-  reviewer: 'Reviewer',
-  tester: 'Tester',
-  designer: 'Image designer',
-}
 /** The work tiers, most critical first. */
 const TIER_LABEL = {
   critical: 'Critical work',
@@ -34,7 +27,7 @@ const TIERS = Object.keys(TIER_LABEL)
 const rank = (list, value) => (list.includes(value) ? list.indexOf(value) : list.length)
 /** A staff reads by role, in the order the picker offers them, then by tier, the most critical first, then by name. */
 const byRoleAndTier = (a, b) =>
-  rank(ROLES, a.role) - rank(ROLES, b.role) ||
+  rank(roleIds(), a.role) - rank(roleIds(), b.role) ||
   rank(TIERS, a.tier) - rank(TIERS, b.tier) ||
   a.name.localeCompare(b.name)
 /**
@@ -59,13 +52,13 @@ const runsLabel = (member, named = true) => {
 }
 
 /** Whether a staff row, or a pick of New project, is an image designer. */
-const isDesigner = (member) => member.designer === true || member.role === 'designer'
+const isDesigner = (member) => member.designer === true || isImageAgentRole(member.role)
 
 /** One row of a staff table: the member, one of its roles, a Remove for that role, and an Edit of the member where it has one. */
 function staffRow(who, role, remove, edit = null) {
   const row = element('tr')
   row.dataset.role = role
-  row.append(who, element('td', null, ROLE_LABEL[role]))
+  row.append(who, element('td', null, roleLabel(role)))
   const tools = element('td')
   if (edit !== null) tools.append(edit)
   tools.append(remove)
@@ -643,7 +636,7 @@ class MemberPicker {
 
   /** Whether the form adds an image designer: it draws on Codex's own model and has no tier. */
   get #designer() {
-    return this.#role.value === 'designer' && this.editing === null
+    return isImageAgentRole(this.#role.value) && this.editing === null
   }
 
   constructor(form, lists, refreshed) {
@@ -667,13 +660,6 @@ class MemberPicker {
     this.#refreshed = refreshed
     this.#lists = lists
     this.#adds = this.#submit.textContent
-    if (this.#role.options.length === 0) {
-      for (const role of ROLES) {
-        const option = element('option', null, ROLE_LABEL[role])
-        option.value = role
-        this.#role.append(option)
-      }
-    }
     if (this.#tier.options.length === 0) {
       const ask = new Option('Pick a tier', '')
       ask.disabled = true
@@ -690,8 +676,22 @@ class MemberPicker {
     this.#refresh.addEventListener('click', () => void this.refresh())
   }
 
+  /**
+   * The roles the form offers, as the daemon said them as the dialog opened: drawn once they are
+   * read, and not before (the form is made as the page loads, before the daemon answered).
+   */
+  #fillRoles() {
+    if (this.#role.options.length !== 0) return
+    for (const role of roleIds()) {
+      const option = element('option', null, roleLabel(role))
+      option.value = role
+      this.#role.append(option)
+    }
+  }
+
   /** The form as it adds a member: the harnesses installed here, nothing picked. */
   reset(missing) {
+    this.#fillRoles()
     this.#missing = missing
     this.editing = null
     this.#legend.textContent = 'Add a member'
@@ -710,6 +710,7 @@ class MemberPicker {
    * model, effort and tier picked where its harness still lists them.
    */
   async edit(member) {
+    this.#fillRoles()
     this.editing = member.handle
     this.#current = member.model ? { model: member.model, effort: member.effort ?? null } : null
     this.#origin = null
@@ -718,7 +719,7 @@ class MemberPicker {
     this.#submit.textContent = 'Save member'
     this.#cancel.hidden = false
     this.say('')
-    this.#fillHarnesses(member.roles.includes('designer') ? ['codex'] : null)
+    this.#fillHarnesses(member.roles.some(isImageAgentRole) ? ['codex'] : null)
     const kind = member.harness ?? ''
     if (!(kind in HARNESS_NAMES) || this.#missing.includes(harnessOf(kind))) return
     let answer = null
@@ -844,7 +845,7 @@ class MemberPicker {
    * The harnesses a member in the role picked may run on: Codex alone draws, and an image
    * designer is given Codex with no model, effort or tier to pick (designer P2).
    */
-  #fillHarnesses(only = this.#role.value === 'designer' ? ['codex'] : null) {
+  #fillHarnesses(only = isImageAgentRole(this.#role.value) ? ['codex'] : null) {
     const designer = this.#designer
     for (const control of this.#modelControls) control.hidden = designer
     this.#picker.reads = !designer
@@ -945,7 +946,7 @@ export class NewProjectDialog {
         pick.model === picked.model &&
         pick.effort === picked.effort
       if (this.#picked.some((pick) => same(pick) && pick.role === role)) {
-        this.#member.say(`${modelShown(picked)} is on the staff as ${ROLE_LABEL[role]} already.`)
+        this.#member.say(`${modelShown(picked)} is on the staff as ${roleLabel(role)} already.`)
         return
       }
       // One member holds each of its roles in one tier: the tier picked now is the member's.
@@ -963,13 +964,14 @@ export class NewProjectDialog {
 
   /** Opens on `directory`; with no harness installed here it refuses, and says where to get one. */
   async open(directory) {
-    const [{ missing = [] }, { staff }, , screen] = await Promise.all([
+    const [{ missing = [], roles }, { staff }, , screen] = await Promise.all([
       this.#page.daemon('harnesses.missing'),
       this.#page.daemon('staff.last'),
       this.#page.readSpecs(),
       this.#sections.computerUse.read({ directory }),
     ])
     this.#missing = missing
+    readRoles(roles)
     this.#sections.computerUse.show(screen)
     readEveryHarness(this.#lists, missing)
     this.#chief.fill(missing)
@@ -1101,7 +1103,7 @@ export class NewProjectDialog {
             )
             this.#draw()
           },
-          `Remove ${ROLE_LABEL[pick.role]} ${pick.name}`,
+          `Remove ${roleLabel(pick.role)} ${pick.name}`,
         )
         const row = staffRow(whoCell(pick.name, runsLabel(pick, false)), pick.role, remove)
         row.dataset.model = pick.model ?? ''
@@ -1119,7 +1121,7 @@ export class NewProjectDialog {
     const staff = new Map()
     for (const { harness, model, effort, tier, role, read } of this.#picked) {
       // An image designer holds no other role: it is a member of its own beside a worker.
-      const key = `${harness} ${model} ${effort ?? ''} ${role === 'designer'}`
+      const key = `${harness} ${model} ${effort ?? ''} ${isImageAgentRole(role)}`
       if (!staff.has(key)) staff.set(key, { harness, model, effort, tier, roles: [] })
       const member = staff.get(key)
       member.roles.push(role)
@@ -1338,8 +1340,8 @@ export class ProjectSettingsDialog {
           const { member } = await page.daemon('member.add', { project, ...picked, roles: [role] })
           page.note(
             held.includes(member.handle)
-              ? `@${member.handle} is ${ROLE_LABEL[role]} now too.`
-              : `@${member.handle} joined the staff as ${ROLE_LABEL[role]}.`,
+              ? `@${member.handle} is ${roleLabel(role)} now too.`
+              : `@${member.handle} joined the staff as ${roleLabel(role)}.`,
           )
         } catch (refused) {
           // The daemon's words go where the human picked, as well as on the status line.
@@ -1552,7 +1554,7 @@ export class ProjectSettingsDialog {
             })
           })
         },
-        `Remove ${ROLE_LABEL[role]} ${name}`,
+        `Remove ${roleLabel(role)} ${name}`,
       )
       // An image designer has nothing to edit: Codex's own model, no effort, no tier.
       const edit = member.designer

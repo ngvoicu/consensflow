@@ -34,8 +34,8 @@ pub use chief::{chief_open_question, devin_chief_questions, devin_data, on_windo
 pub(crate) use copy::on_copy;
 pub use files::{begun, changed, ended, gone, read};
 pub use metrics::{
-    owner_questions_value, Asking, Check, FileRead, LongestResult, MemberQuestions, Metrics, Note,
-    OwnerQuestions, Plumbing, ProjectRef, Reopen, Rounds, Task,
+    is_work_pool, owner_questions_value, Asking, Check, FileRead, LongestResult, MemberQuestions,
+    Metrics, Note, OwnerQuestions, Plumbing, ProjectRef, Reopen, Rounds, Task,
 };
 pub use plumbing::mechanics;
 pub use sentences::{count_questions, owner_questions, question_sentences};

@@ -15,11 +15,15 @@ use super::body::{merged, one, Body, Fields, Said};
 use super::chief::chief_asked;
 use super::Page;
 
-/// `harnesses.missing`: the harnesses not installed here, which the pickers leave out.
+/// `harnesses.missing`: the harnesses not installed here, which the pickers leave out; and
+/// the staff's roles in their order, which the pickers offer and the board names
+/// (`cf_ledger::roles`): the page reads both as it starts and whenever a picker opens, and
+/// holds no list of roles of its own.
 pub(super) async fn missing(page: &Page) -> Result<Fields, Said> {
     let missing = missing_harnesses(&page.env);
     let mut fields = Fields::new();
     fields.insert("missing".to_owned(), serde_json::to_value(&missing)?);
+    fields.insert("roles".to_owned(), cf_ledger::roles::page_view());
     Ok(fields)
 }
 
@@ -91,7 +95,7 @@ pub(super) async fn edit(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let handle = body.text("member").into_owned();
     let found = active_member(page, project, |member| member.handle == handle)?
         .ok_or_else(|| Said(format!("no member @{handle} on this project's staff")))?;
-    let designer = found.roles.iter().any(|role| role == "designer");
+    let designer = cf_ledger::roles::needs_an_image_agent(&found.roles);
     if designer {
         return Err(Said::from(
             "an image designer has nothing to edit: it draws on Codex's own model",
@@ -171,8 +175,11 @@ pub(super) async fn picked_member(
     body: Body<'_>,
     adapter: bool,
 ) -> Result<NewMember, Said> {
-    let roles = parse_roles(Some(body.get("roles").unwrap_or(&json!(["worker"]))))?;
-    let designer = roles.contains(&"designer");
+    let roles = parse_roles(Some(
+        body.get("roles")
+            .unwrap_or(&json!([cf_ledger::roles::WORKER.id])),
+    ))?;
+    let designer = cf_ledger::roles::needs_an_image_agent(&roles);
     let picked = picked(page, body, designer, adapter).await?;
     Ok(NewMember {
         harness: picked.harness.kind().to_owned(),

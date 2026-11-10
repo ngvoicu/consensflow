@@ -315,14 +315,23 @@ mod tests {
         let fields: Vec<Option<&str>> = all().iter().map(Role::field).collect();
         assert_eq!(
             fields,
-            [None, Some("advice"), Some("review"), Some("test"), Some("design")]
+            [
+                None,
+                Some("advice"),
+                Some("review"),
+                Some("test"),
+                Some("design")
+            ]
         );
         assert_eq!(
             all().iter().filter(|role| !role.tiered).collect::<Vec<_>>(),
             [&IMAGE_DESIGNER]
         );
         assert_eq!(
-            all().iter().filter(|role| role.image_agent).collect::<Vec<_>>(),
+            all()
+                .iter()
+                .filter(|role| role.image_agent)
+                .collect::<Vec<_>>(),
             [&IMAGE_DESIGNER]
         );
         let writers: Vec<&str> = all()
@@ -338,7 +347,10 @@ mod tests {
         let asked_by = |fields: &[&str]| asked(|field| fields.contains(&field)).id;
         assert_eq!(asked_by(&[]), "worker");
         assert_eq!(asked_by(&["tier", "purpose"]), "worker");
-        assert_eq!(asked_by(&["test", "review", "advice", "design"]), "designer");
+        assert_eq!(
+            asked_by(&["test", "review", "advice", "design"]),
+            "designer"
+        );
         assert_eq!(asked_by(&["test", "review", "advice"]), "advisor");
         assert_eq!(asked_by(&["test", "review"]), "reviewer");
         assert_eq!(asked_by(&["test"]), "tester");
@@ -346,8 +358,14 @@ mod tests {
 
     #[test]
     fn an_open_task_is_said_by_its_tier_and_role_and_an_untiered_one_by_its_name() {
-        assert_eq!(pool_name(Some("worker"), Some("standard")), "standard worker");
-        assert_eq!(a_pool(Some("advisor"), Some("complex")), "a complex advisor");
+        assert_eq!(
+            pool_name(Some("worker"), Some("standard")),
+            "standard worker"
+        );
+        assert_eq!(
+            a_pool(Some("advisor"), Some("complex")),
+            "a complex advisor"
+        );
         assert_eq!(a_pool(Some("designer"), None), "an image designer");
         assert_eq!(a_pool(Some("designer"), Some("light")), "an image designer");
         assert_eq!(pool_name(None, None), "null null");

@@ -1,6 +1,7 @@
 import { button, element, icon, iconButton, redraw } from '../dom.js'
 import { notePanes } from './computer-use.js'
 import { preview, render } from './markdown.js'
+import { aPool } from './roles.js'
 
 /**
  * The board: a kanban of the project's tasks. One row per participant, one
@@ -302,10 +303,6 @@ function sessionsNote(lane, board) {
 
 /** "T-3, T-4": task numbers in a sentence. */
 const taskNumbers = (numbers) => numbers.map((number) => `T-${number}`).join(', ')
-
-/** Whom a task given by tier waits for: "a light worker", "an image designer". */
-const aPool = (task) =>
-  task.pool === 'designer' ? 'an image designer' : `a ${task.tier} ${task.pool}`
 
 /** Where a task is going or came from, on its card; what it waits for first. */
 function route(task) {

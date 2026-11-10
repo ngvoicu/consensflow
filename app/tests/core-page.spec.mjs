@@ -7,6 +7,11 @@ import { tempEnv } from '../../tests/helpers.mjs'
 import { agentsServer } from './agents-server.mjs'
 import { refusedByPolicy, serveUi } from './serve-ui.mjs'
 
+// The staff's roles as the daemon's table says them (`cf_ledger::roles`, `harnesses.missing`'s
+// `roles`): written from the table by its Rust test (`CF_WRITE_PAGE_ROLES=1`), which fails
+// when they differ.
+const ROLES = JSON.parse(readFileSync(new URL('./fixtures/roles.json', import.meta.url), 'utf8'))
+
 /**
  * The board page (TEST-BDC-13), against a stand-in for the app:
  * `daemon_request` answers from an in-page model and records every call, the way
@@ -310,7 +315,8 @@ function model() {
   }
 }
 
-async function open(page, data = model()) {
+async function open(page, given = model()) {
+  const data = { roles: ROLES, ...given }
   await page.addInitScript((data) => {
     window.__calls = []
     window.__model = data
@@ -386,7 +392,7 @@ async function open(page, data = model()) {
       })
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
-      'harnesses.missing': () => answer({ missing: data.missing ?? [] }),
+      'harnesses.missing': () => answer({ missing: data.missing ?? [], roles: data.roles }),
       // What a harness lists of its models, by its program's name (CHF-07): the fixture's,
       // or a refusal a test names for it (`modelsRefusal`).
       'models.get': ({ harness }) => {
@@ -4647,6 +4653,61 @@ test('adds a member as a tester, or as one more role of a member, in the place a
   await pickMember(dialog, { harness: 'Claude Code', model: 'claude-sonnet-5', tier: 'standard' })
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
   await expect(page.locator('#status')).toHaveText('@zeus is Tester now too.')
+})
+
+test("a role the daemon's table alone names is offered, listed and added in its place among the roles", async ({
+  page,
+}) => {
+  const data = model()
+  // A sixth role, after the reviewer: the page holds no list of roles, and reads the table's.
+  data.roles = [
+    ...ROLES.slice(0, 3),
+    {
+      id: 'scout',
+      name: 'field scout',
+      label: 'Field scout',
+      article: 'a',
+      tiered: false,
+      imageAgent: false,
+    },
+    ...ROLES.slice(3),
+  ]
+  data.boards[1].lanes.push({
+    participant: participant(9, 'argus', 'scout', { harness: 'codex', tier: 'light' }),
+    tasks: [],
+    activity: { state: 'idle' },
+    pane: { id: 'p1-argus', generation: 1 },
+  })
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
+    'Worker',
+    'Advisor',
+    'Reviewer',
+    'Field scout',
+    'Tester',
+    'Image designer',
+  ])
+  const table = dialog.getByRole('table', { name: 'On the staff' })
+  await expect(table.locator('tbody tr').last()).toHaveText(/@argus.*Field scout/)
+  await expect(table.locator('tr[data-handle="argus"][data-role="scout"]')).toHaveCount(1)
+  // A scout is no image agent: any harness installed here may scout.
+  await pickMember(dialog, { role: 'scout', harness: 'Devin', model: 'swe-2', tier: 'light' })
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([
+      {
+        project: 1,
+        harness: 'devin',
+        model: 'swe-2',
+        effort: null,
+        tier: 'light',
+        roles: ['scout'],
+      },
+    ])
+  await expect(page.locator('#status')).toHaveText('@swe-2 joined the staff as Field scout.')
 })
 
 test('an image designer is picked on Codex alone, and Add member says so when Codex is not here', async ({

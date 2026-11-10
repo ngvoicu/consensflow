@@ -67,7 +67,10 @@ fn a_role_in_the_table_alone_is_one_a_member_holds_and_the_refusals_list_it_in_i
             require_roles(&["scout", "worker"], String::new).expect("roles"),
             ["scout", "worker"]
         );
-        assert_eq!(parse_roles(Some(&json!(["scout"]))).expect("roles"), ["scout"]);
+        assert_eq!(
+            parse_roles(Some(&json!(["scout"]))).expect("roles"),
+            ["scout"]
+        );
         assert_eq!(
             said(require_roles(&["captain"], || "captain".to_owned()).unwrap_err()).1,
             "a member is one or more of worker, advisor, reviewer, scout, tester, designer, not captain"

@@ -7,8 +7,9 @@ use rusqlite::{params, OptionalExtension};
 use serde_json::json;
 
 use crate::conversations::current_conversation;
-use crate::model::{sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
+use crate::model::{sql_list, LedgerError, HELD_TASK_STATES};
 use crate::projects::known_project;
+use crate::roles;
 use crate::store::Store;
 use crate::views::ParticipantRow;
 
@@ -171,7 +172,7 @@ pub(crate) fn follow_up_session(
     if let Some(lane) = assignee
         .as_ref()
         .filter(|lane| lane.member_id.is_none() && lane.left_at.is_none())
-        .filter(|lane| MEMBER_ROLES.contains(&lane.role.as_str()))
+        .filter(|lane| roles::is_role(lane.role.as_str()))
     {
         return Err(LedgerError::refused_with(
             "no-window-yet",

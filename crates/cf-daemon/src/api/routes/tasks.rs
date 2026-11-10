@@ -181,17 +181,9 @@ fn given(caller: &Caller, body: &Map<String, Value>, after: Option<f64>) -> Valu
             task.insert("to".to_owned(), json!(handle));
         }
         None => {
-            let pool = if flag("design") {
-                "designer"
-            } else if flag("advice") {
-                "advisor"
-            } else if flag("review") {
-                "reviewer"
-            } else if flag("test") {
-                "tester"
-            } else {
-                "worker"
-            };
+            // The role whose field is true (`design`, `advice`, `review`, `test`), as the
+            // roles' table ranks them; a worker where none is.
+            let pool = cf_ledger::roles::asked(flag).id;
             task.insert("pool".to_owned(), json!(pool));
             for name in ["tier", "purpose"] {
                 if let Some(asked) = body.get(name) {

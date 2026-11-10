@@ -40,10 +40,10 @@ use crate::messages::{
     warnings_queued, withdraw_open_questions, withdraw_paused_answers, Afterwards, Dropped,
 };
 use crate::model::{
-    self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES,
-    MAX_BODY, MEMBER_ROLES,
+    self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES, MAX_BODY,
 };
 use crate::queue::{drop_queued, queue, send, withdraw_gated, withdraw_result, Queued, Sent};
+use crate::roles;
 use crate::staff::{
     bring_back, can_continue, has_task_in_hand, require_free, undecided_results, Giving,
 };
@@ -452,7 +452,7 @@ pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), Le
 
 /// Whether `window` is a member's: a session, or the member's own lane.
 fn a_members_window(window: &ParticipantRow) -> bool {
-    window.member_id.is_some() || MEMBER_ROLES.contains(&window.role.as_str())
+    window.member_id.is_some() || roles::is_role(window.role.as_str())
 }
 
 /// A task that waited on the board for its needs and cannot go to its window,
@@ -676,7 +676,7 @@ pub(crate) fn call_off(
         .map(|id| store.participant_row(id))
         .transpose()?;
     let began = match &assignee {
-        Some(assignee) if MEMBER_ROLES.contains(&assignee.role.as_str()) => store
+        Some(assignee) if roles::is_role(assignee.role.as_str()) => store
             .db
             .prepare(
                 "SELECT 1 FROM message WHERE task_id = ? AND recipient_id = ? AND kind = 'task'

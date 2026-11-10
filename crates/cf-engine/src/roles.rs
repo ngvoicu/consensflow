@@ -33,9 +33,6 @@ pub use specs::ProjectSpecs;
 /// `skill/core/chief.md`.
 const CHIEF: &str = include_str!("../../../skill/core/chief.md");
 
-/// The roles of the staff's members, who have one window a task.
-const MEMBERS: [&str; 5] = ["advisor", "worker", "reviewer", "tester", "designer"];
-
 /// Evals only: a chief measured without ConsensFlow's card gets this file's
 /// text instead of all of it (tiers, staff and its cf too), so nothing tells
 /// it the board exists. Nothing in the app sets it.
@@ -125,7 +122,8 @@ pub fn role_instructions(
     cf: &CfWord,
     specs: Option<&ProjectSpecs<'_>>,
 ) -> Result<String, RoleError> {
-    if role != "chief" && !MEMBERS.contains(&role) {
+    // The staff's members, who have one window a task, hold the roles of the ledger's table.
+    if role != "chief" && !cf_ledger::roles::is_role(role) {
         return Err(RoleError::Unknown(role.to_owned()));
     }
     if role != "chief" {
