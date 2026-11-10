@@ -32,6 +32,9 @@ e2e-rig-live-members = { command = ["cargo", "test", "--offline", "-p", "cf-e2e"
 e2e-rig-launches = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_members::a_window_"], builds = true }
 e2e-live-door = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_door", "the_report_names_the_model_door_model_gave"]
 e2e-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::"]
+# The rig's cases of the effort a row of a real harness is given (T-1369): the daemon takes the member
+# and the chief the kit seats on a model that lists efforts, on the stand-in Codex that lists them.
+e2e-rig-kit-efforts = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "kit_efforts::"], builds = true }
 e2e-live-codex-interrupt = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_codex_interrupt"]
 e2e-live-resume-cut = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_resume_cut"]
 xtask-lib-live = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "live::"]
@@ -160,11 +163,11 @@ runs = ["e2e-live"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
 find = '''
-        let key = if model.harness == Harness::Pi {
-            "thinking"'''
+    if harness == Harness::Pi {
+        "thinking"'''
 replace = '''
-        let key = if model.harness == Harness::Pi {
-            "effort"'''
+    if harness == Harness::Pi {
+        "effort"'''
 
 [[plant]]
 name = "live models: Codex's app-server is given its model and no effort"
@@ -330,7 +333,7 @@ runs = ["e2e-live-door", "e2e-rig-live-members"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
 find = '''
-    for row in rows {
+    for row in &rows {
         log.launched(row);
     }'''
 replace = ""
@@ -343,11 +346,9 @@ runs = ["e2e-live"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
 find = '''
-    let effort = if harness == Harness::Pi {
-        text("thinking")'''
+    let effort = text(effort_key(harness));'''
 replace = '''
-    let effort = if harness == Harness::Pi {
-        text("effort")'''
+    let effort = text("effort");'''
 
 [[plant]]
 name = "live models: the report names the stand-in agent's windows as Claude's"
@@ -411,3 +412,105 @@ find = '''
     )?;'''
 replace = '''
     let log = Log::new("live designer");'''
+
+# The effort a row of a real harness is given (T-1369): the daemon refuses a member or a chief on a
+# model that lists efforts and names none ("pick the effort codex runs gpt-5.6-luna at: …"), so the
+# kit writes the least one the harness lists into the row when it writes the roster. The unit
+# tests hold the choice, and the rig's cases hold that the daemon takes what the kit writes.
+
+[[plant]]
+name = "live models: effort rows, the dearest effort is given where the least is meant"
+meant = "a_row_with_no_effort_is_given_the_first_effort_its_harness_lists_for_its_model"
+runs = ["e2e-live", "e2e-rig-kit-efforts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = ".and_then(|listed| listed.efforts.first().cloned());"
+replace = ".and_then(|listed| listed.efforts.last().cloned());"
+
+[[plant]]
+name = "live models: effort rows, the roster is written with the rows as the run gave them"
+meant = "a_member_on_a_model_that_lists_efforts_is_given_the_least_one_it_lists"
+runs = ["e2e-rig-kit-efforts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = "    let rows = with_efforts(rig, rows, |note| log.say(note));"
+replace = "    let rows = rows.to_vec();"
+
+[[plant]]
+name = "live models: effort rows, a chief's row is given none"
+meant = "a_chief_on_a_model_that_lists_efforts_is_opened_at_the_least_one_it_lists"
+runs = ["e2e-rig-kit-efforts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/project.rs"
+find = '''
+        if let Some(effort) = ["effort", "thinking"]
+            .into_iter()
+            .find_map(|key| row.get(key).filter(|effort| !effort.is_null()))
+        {
+            fields.entry("effort").or_insert_with(|| effort.clone());
+        }'''
+replace = '''
+        let _ = &row;'''
+
+[[plant]]
+name = "live models: effort rows, an effort the run named is read again and given another"
+meant = "a_row_that_needs_no_effort_or_cannot_be_given_one_is_left_as_it_is"
+runs = ["e2e-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = "            if model.effort.is_some() {"
+replace = "            if false && model.effort.is_some() {"
+
+[[plant]]
+name = "live models: effort rows, an image designer's row is given an effort"
+meant = "a_row_that_needs_no_effort_or_cannot_be_given_one_is_left_as_it_is"
+runs = ["e2e-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = "filter(|_| named && row[\"designer\"] != true)"
+replace = "filter(|_| named)"
+
+[[plant]]
+name = "live models: effort rows, a model the harness will not run is given an effort"
+meant = "a_model_the_harness_will_not_run_or_lists_no_effort_for_is_left_for_the_daemon_to_say"
+runs = ["e2e-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = "listed.name == model.name && !listed.disabled"
+replace = "listed.name == model.name"
+
+[[plant]]
+name = "live models: effort rows, a harness that could not be read is read again for each row"
+meant = "a_harness_that_could_not_be_read_is_told_once_with_the_row_it_leaves"
+runs = ["e2e-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = "            if !lists.iter().any(|(harness, _)| *harness == model.harness) {"
+replace = "            if true {"
+
+[[plant]]
+name = "live models: effort rows, the list of a harness is asked by its kind"
+meant = "the_list_of_a_harness_is_asked_by_its_clis_name_and_not_by_its_kind"
+runs = ["e2e-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''    json!({ "harness": harness.name() })'''
+replace = '''    json!({ "harness": harness.kind() })'''
+
+[[plant]]
+name = "live models: effort rows, the Muse cases write their worker's row as it was given"
+meant = "the_roster_of_the_muse_cases_gives_its_worker_the_least_effort_too"
+runs = ["e2e-rig-kit-efforts"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = "agents.extend(crate::live::agents::with_efforts(rig, &[worker], |_| {}));"
+replace = "agents.push(worker);"

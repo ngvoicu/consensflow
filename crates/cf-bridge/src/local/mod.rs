@@ -54,7 +54,10 @@
 //! - A line that is not UTF-8 is read as Node read it, lossily.
 //! - The frames waiting for the output are not bounded, as the buffer of
 //!   Node's bridge's stream was not. A peer that stops reading shows as requests
-//!   that end at their deadlines.
+//!   that end at their deadlines, and never as a bridge that closes.
+//! - The input can be read ahead on a thread of its own ([`read_ahead`]): the
+//!   daemon runs on one thread, and a read that waits for that thread leaves the
+//!   pane host's frames in a pipe that holds 64 KiB while a pass holds it.
 //! - A handler done at its first poll is answered there, where JavaScript
 //!   answered on a later microtask: the answers to requests read together may
 //!   go out in another order (an `unknown-op` no longer overtakes a ready
@@ -70,6 +73,7 @@
 
 mod builder;
 mod lines;
+mod read_ahead;
 mod reader;
 mod registry;
 mod request;
@@ -84,6 +88,7 @@ use std::future::Future;
 use std::rc::Rc;
 
 pub use builder::{BridgeBuilder, Connection, DEFAULT_DEADLINE, DEFAULT_MAX_FRAME_BYTES};
+pub use read_ahead::{read_ahead, ReadAhead, READ_AHEAD_BYTES};
 pub use registry::Subscription;
 use state::Inner;
 

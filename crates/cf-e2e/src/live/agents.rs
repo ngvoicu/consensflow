@@ -66,16 +66,21 @@ pub fn harness_of(agent: &Value) -> Option<Harness> {
 pub fn launched_on(agent: &Value) -> Option<Model> {
     let harness = harness_of(agent)?;
     let text = |key: &str| agent[key].as_str().filter(|text| !text.is_empty());
-    let effort = if harness == Harness::Pi {
-        text("thinking")
-    } else {
-        text("effort")
-    };
+    let effort = text(effort_key(harness));
     Some(Model {
         harness,
         name: text("model").unwrap_or("its own default").to_owned(),
         effort: effort.map(str::to_owned),
     })
+}
+
+/// The field an agent holds its effort in, where its harness reads it: Pi's is its thinking.
+fn effort_key(harness: Harness) -> &'static str {
+    if harness == Harness::Pi {
+        "thinking"
+    } else {
+        "effort"
+    }
 }
 
 /// The id of the agent that runs `harness`.
@@ -88,7 +93,10 @@ pub fn id(harness: Harness) -> String {
 /// 2026-10-11): Claude Code on Sonnet 5.5, Pi on Muse Spark 1.3 through
 /// OpenRouter, which is where the catalog has it, Devin on SWE-2 at medium, Codex
 /// on GPT-5.6 Luna. The model, and the effort where it has one: what a harness
-/// runs on where the run names no other ([`model`]).
+/// runs on where the run names no other ([`model`]). An effort given here is only the one that
+/// is not the harness's to say; a model whose harness lists efforts and a row that names none
+/// is given the least one the harness lists when the roster is written ([`with_efforts`]),
+/// as the daemon refuses a member or a chief that names none (A4-28, T-1369).
 fn cheap(harness: Harness) -> (&'static str, Option<&'static str>) {
     match harness {
         Harness::Claude => ("claude-sonnet-5-5", None),
@@ -316,12 +324,7 @@ pub fn agent(harness: Harness) -> Value {
 pub fn agent_on(model: &Model) -> Value {
     let mut agent = json!({ "kind": model.harness.kind(), "model": model.name });
     if let (Some(effort), Some(fields)) = (&model.effort, agent.as_object_mut()) {
-        let key = if model.harness == Harness::Pi {
-            "thinking"
-        } else {
-            "effort"
-        };
-        fields.insert(key.to_owned(), json!(effort));
+        fields.insert(effort_key(model.harness).to_owned(), json!(effort));
     }
     agent
 }
@@ -343,17 +346,125 @@ pub fn row_on(model: &Model, tier: &str) -> Value {
     row
 }
 
-/// Writes the rig's stand-ins: the agents `rows`, over the ones the rig started with. A
-/// member added from a row runs on the row's harness, model and effort
-/// (`rig::member_body`), so each row of a real harness is what the `log`'s report says
-/// it was launched on.
+/// Writes the rig's stand-ins: the agents `rows`, over the ones the rig started with, each row
+/// of a real harness given an effort where it needs one ([`with_efforts`]). A member added from
+/// a row runs on the row's harness, model and effort (`rig::member_body`), so each row of a
+/// real harness is what the `log`'s report says it was launched on.
 pub fn write_roster(rig: &Rig, rows: &[Value], log: &Log) -> Result {
+    let rows = with_efforts(rig, rows, |note| log.say(note));
     let roster = json!({ "agents": rows });
     rig.stand_ins(&roster)?;
-    for row in rows {
+    for row in &rows {
         log.launched(row);
     }
     Ok(())
+}
+
+/// A model a harness lists, as the daemon's `models.get` answers it: the name `--model` takes
+/// for it (Pi's `provider/id`), the efforts it takes from the lowest as the harness orders
+/// them, and whether the harness will not run it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Listed {
+    name: String,
+    efforts: Vec<String>,
+    disabled: bool,
+}
+
+/// What `models.get` is asked: the harness by its CLI's name (`claude`), which the daemon reads
+/// the list of, and not by its kind (`claude-code`), which a roster row and a member name.
+fn models_asked(harness: Harness) -> Value {
+    json!({ "harness": harness.name() })
+}
+
+/// What `harness` lists now, read by the rig's daemon as the page's picker reads it
+/// (`models.get`: no window, no model turn); why it could not be read, where it could not.
+fn listed_by(rig: &Rig, harness: Harness) -> std::result::Result<Vec<Listed>, String> {
+    let answer = rig
+        .page("models.get", models_asked(harness))
+        .map_err(|why| why.to_string())?;
+    if answer["ok"] != true {
+        let said = answer["error"].as_str().unwrap_or("no reason given");
+        return Err(said.to_owned());
+    }
+    let models = answer["listing"]["models"].as_array();
+    let Some(models) = models.filter(|models| !models.is_empty()) else {
+        return Err("it lists no model".to_owned());
+    };
+    Ok(models
+        .iter()
+        .filter_map(|model| {
+            let id = model["id"].as_str()?;
+            let name = match model["provider"].as_str() {
+                Some(provider) => format!("{provider}/{id}"),
+                None => id.to_owned(),
+            };
+            let efforts = model["efforts"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|effort| effort.as_str().map(str::to_owned))
+                .collect();
+            Some(Listed {
+                name,
+                efforts,
+                disabled: model["disabled"] == true,
+            })
+        })
+        .collect())
+}
+
+/// `rows` with the least effort each row of a real harness is to run at, which the daemon requires
+/// of any member or chief on a model that lists efforts (A4-28: "pick the effort codex runs
+/// gpt-5.6-luna at: low, medium, …"): the first its harness lists for the model, which it orders
+/// from the lowest. A row that names an effort keeps it, and so does a row whose harness could not
+/// be read, whose model it does not list or will not run, or lists no effort for (the daemon's own
+/// check says why at `member.add`); an image designer and the stand-in agent's rows have none to
+/// give. `say` is told why a harness could not be read.
+pub fn with_efforts(rig: &Rig, rows: &[Value], say: impl FnMut(String)) -> Vec<Value> {
+    with_least_efforts(rows, |harness| listed_by(rig, harness), say)
+}
+
+/// [`with_efforts`], of the lists `read` gives (each harness is read once, and only for a row
+/// that needs it).
+fn with_least_efforts(
+    rows: &[Value],
+    mut read: impl FnMut(Harness) -> std::result::Result<Vec<Listed>, String>,
+    mut say: impl FnMut(String),
+) -> Vec<Value> {
+    let mut lists: Vec<(Harness, Vec<Listed>)> = Vec::new();
+    rows.iter()
+        .map(|row| {
+            let mut row = row.clone();
+            let named = row["model"].as_str().is_some_and(|model| !model.is_empty());
+            let Some(model) = launched_on(&row).filter(|_| named && row["designer"] != true) else {
+                return row;
+            };
+            if model.effort.is_some() {
+                return row;
+            }
+            if !lists.iter().any(|(harness, _)| *harness == model.harness) {
+                let listed = read(model.harness).unwrap_or_else(|why| {
+                    say(format!(
+                        "{}'s models could not be read, so its row {} names no effort: {why}",
+                        model.harness.name(),
+                        model.name
+                    ));
+                    Vec::new()
+                });
+                lists.push((model.harness, listed));
+            }
+            let least = lists
+                .iter()
+                .filter(|(harness, _)| *harness == model.harness)
+                .flat_map(|(_, listed)| listed)
+                .find(|listed| listed.name == model.name && !listed.disabled)
+                .and_then(|listed| listed.efforts.first().cloned());
+            if let (Some(effort), Some(fields)) = (least, row.as_object_mut()) {
+                fields.insert(effort_key(model.harness).to_owned(), json!(effort));
+            }
+            row
+        })
+        .collect()
 }
 
 /// What each harness calls its tool for asking the person it works for a
@@ -677,6 +788,156 @@ mod tests {
             agent_on(models.of(Harness::Devin)),
             json!({ "kind": "devin", "model": "swe-2", "effort": "medium" })
         );
+    }
+
+    #[test]
+    fn the_list_of_a_harness_is_asked_by_its_clis_name_and_not_by_its_kind() {
+        assert_eq!(
+            models_asked(Harness::Claude),
+            json!({ "harness": "claude" })
+        );
+        assert_eq!(models_asked(Harness::Muse), json!({ "harness": "muse" }));
+        assert_ne!(Harness::Claude.kind(), Harness::Claude.name());
+    }
+
+    fn listing(models: &[(&str, &[&str])]) -> Vec<Listed> {
+        models
+            .iter()
+            .map(|(name, efforts)| Listed {
+                name: (*name).to_owned(),
+                efforts: efforts.iter().map(|effort| (*effort).to_owned()).collect(),
+                disabled: false,
+            })
+            .collect()
+    }
+
+    /// T-1369: a row of a real harness that names no effort is given the least one its harness
+    /// lists for the model, where the daemon would refuse it for naming none; Pi's goes under its
+    /// thinking, as Pi reads it.
+    #[test]
+    fn a_row_with_no_effort_is_given_the_first_effort_its_harness_lists_for_its_model() {
+        let rows = [
+            row_on(&Model::cheap(Harness::Codex), "standard"),
+            row_on(&Model::cheap(Harness::Claude), "standard"),
+            row_on(
+                &parse(Some("pi=openrouter/meta/muse-spark-1.3"), None)
+                    .unwrap()
+                    .of(Harness::Pi)
+                    .clone(),
+                "standard",
+            ),
+        ];
+        let filled = with_least_efforts(
+            &rows,
+            |harness| {
+                Ok(match harness {
+                    Harness::Codex => listing(&[
+                        ("gpt-5.6-sol", &["low", "ultra"]),
+                        ("gpt-5.6-luna", &["low", "medium", "high"]),
+                    ]),
+                    Harness::Claude => listing(&[("claude-sonnet-5-5", &["low", "medium"])]),
+                    _ => vec![Listed {
+                        name: "openrouter/meta/muse-spark-1.3".to_owned(),
+                        efforts: vec!["off".to_owned(), "high".to_owned()],
+                        disabled: false,
+                    }],
+                })
+            },
+            |note| panic!("{note}"),
+        );
+        assert_eq!(filled[0]["effort"], "low");
+        assert_eq!(filled[1]["effort"], "low");
+        assert_eq!(filled[2]["thinking"], "off");
+        assert!(filled[2].get("effort").is_none());
+        // What a window is asked for on a row is what the row holds.
+        let launched = launched_on(&filled[2]).unwrap();
+        assert_eq!(launched.effort.as_deref(), Some("off"));
+    }
+
+    #[test]
+    fn a_row_that_needs_no_effort_or_cannot_be_given_one_is_left_as_it_is() {
+        let devin = row_on(&Model::cheap(Harness::Devin), "standard");
+        let named = row_on(
+            &parse(Some("codex=gpt-6.1-sol:max"), None)
+                .unwrap()
+                .of(Harness::Codex)
+                .clone(),
+            "standard",
+        );
+        // An image designer draws on Codex's own model: the daemon refuses any it is asked for.
+        let designer =
+            json!({ "id": "pygmalion", "kind": "codex", "model": "gpt-5.6-sol", "designer": true });
+        let stand_in =
+            json!({ "id": "chief", "kind": "claude-code", "model": STAND_IN_CHIEF_MODEL });
+        let unlisted = row_on(&Model::cheap(Harness::Codex), "standard");
+        let none = row_on(&Model::cheap(Harness::Claude), "standard");
+        let rows = [devin, named, designer, stand_in, unlisted, none];
+        let mut read = Vec::new();
+        let kept = with_least_efforts(
+            &rows,
+            |harness| {
+                read.push(harness);
+                match harness {
+                    // Codex lists other models than the row's; Claude's lists none of its own.
+                    Harness::Codex => Ok(listing(&[("gpt-5.6-sol", &["low"])])),
+                    _ => Err("it did not answer".to_owned()),
+                }
+            },
+            |_| {},
+        );
+        assert_eq!(kept, rows);
+        // Only the rows that needed a list read one, and each harness was read once.
+        assert_eq!(read, [Harness::Codex, Harness::Claude]);
+    }
+
+    #[test]
+    fn a_model_the_harness_will_not_run_or_lists_no_effort_for_is_left_for_the_daemon_to_say() {
+        let rows = [
+            row_on(&Model::cheap(Harness::Codex), "standard"),
+            row_on(&Model::cheap(Harness::Claude), "standard"),
+        ];
+        let kept = with_least_efforts(
+            &rows,
+            |harness| {
+                Ok(match harness {
+                    Harness::Codex => vec![Listed {
+                        name: "gpt-5.6-luna".to_owned(),
+                        efforts: vec!["low".to_owned()],
+                        disabled: true,
+                    }],
+                    _ => listing(&[("claude-sonnet-5-5", &[])]),
+                })
+            },
+            |_| {},
+        );
+        assert_eq!(kept, rows);
+    }
+
+    #[test]
+    fn a_harness_that_could_not_be_read_is_told_once_with_the_row_it_leaves() {
+        let rows = [
+            row_on(&Model::cheap(Harness::Codex), "standard"),
+            row_on(
+                &parse(Some("codex=gpt-6.1-sol"), None)
+                    .unwrap()
+                    .of(Harness::Codex)
+                    .clone(),
+                "light",
+            ),
+        ];
+        let mut said = Vec::new();
+        let kept = with_least_efforts(
+            &rows,
+            |_| Err("login expired".to_owned()),
+            |note| said.push(note),
+        );
+        assert_eq!(kept, rows);
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert!(
+            said[0].starts_with("codex's models could not be read"),
+            "{said:?}"
+        );
+        assert!(said[0].ends_with("login expired"), "{said:?}");
     }
 
     /// T-790: a Muse member is launched without its question tools

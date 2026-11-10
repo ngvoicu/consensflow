@@ -12563,6 +12563,54 @@ test('says the daemon is down while it is, why, and what comes next, and reads e
   await expect(page.locator('tr[data-handle="zeus"]')).toHaveCount(1)
 })
 
+test('says a restart of the daemon in its steps, and each thing only once it is true', async ({
+  page,
+}) => {
+  await open(page)
+  const banner = page.getByRole('alert')
+  const daemonStatus = (payload) =>
+    page.evaluate(
+      (payload) => window.__listeners.get('daemon-status')({ event: 'daemon-status', payload }),
+      payload,
+    )
+  // The windows are being closed: nothing is said to be closed, and nothing to be started.
+  await daemonStatus({
+    available: false,
+    cause: "ConsensFlow's daemon stopped; closing its windows…",
+    retrying: true,
+    closing: true,
+  })
+  await expect(banner).toHaveText(
+    "The daemon is not running. ConsensFlow's daemon stopped; closing its windows…",
+  )
+  // They are proven gone: now it is closed, and the daemon is being started.
+  await daemonStatus({
+    available: false,
+    cause: "ConsensFlow's daemon stopped and its windows are closed.",
+    retrying: true,
+  })
+  await expect(banner).toHaveText(
+    "The daemon is not running. ConsensFlow's daemon stopped and its windows are closed. Starting it again…",
+  )
+  // Their end could not be confirmed: that is said, and the person is asked to quit.
+  await daemonStatus({
+    available: false,
+    cause:
+      "ConsensFlow's daemon stopped, and the end of its windows could not be confirmed, so it was not started again while one of them might still run.",
+    retrying: false,
+  })
+  await expect(banner).toHaveText(
+    "The daemon is not running. ConsensFlow's daemon stopped, and the end of its windows could not be confirmed, so it was not started again while one of them might still run. Quit ConsensFlow and open it again.",
+  )
+  // Up again: the banner goes, and what became of the windows and the projects is said,
+  // in the status line, long enough to be read.
+  const notice =
+    "ConsensFlow's daemon was started again. Its windows were closed, and the projects that were open are paused until you resume them."
+  await daemonStatus({ available: true, cause: null, retrying: false, notice })
+  await expect(banner).toBeHidden()
+  await expect(page.locator('#status')).toHaveText(notice)
+})
+
 test('says what to do with no project yet: start one; there is no board to read, no staff to open', async ({
   page,
 }) => {

@@ -1,0 +1,220 @@
+# A member works to 100% of its quota (Gabriel, 2026-11-09, T-1356): "this needs to be removed; we
+# allow 100% even if the task is blocked because of quota and wait as the others". A critical
+# review waited with "T-1355 waits for a free critical advisor: @gpt-6-astra-max is low on quota"
+# while the Codex account had 5% left. Codex and Muse report their usage ahead of a refusal
+# (`Level::Low` from 95 percent: `crates/cf-harness/src/codex/quota.rs`, `muse/usage.rs`), and the
+# scheduler kept such a member from every new task until the reset it named, or for an hour
+# (`low_until`, `is_low`, in `crates/cf-engine/src/scheduler.rs`). Claude Code, Pi and Devin report
+# no count, so their members took work until the harness refused. Now a member is held only when it
+# is out (`out_until`): its harness refused, its account was refused, its model moved, or its server
+# was busy; a quota nearly spent holds nobody, on any harness.
+#
+# The plants put the hold back, as it was: a mark on the member's own record at each look that
+# reports the count low (`dispatcher.rs`, where `record_quota` is called), and a reason in
+# `why_not_free` that reads it. One for every harness, one for Codex alone and one for Muse alone,
+# the two the old hold fell on. The tests are in `crates/cf-engine/tests/dispatcher/quota.rs`: a
+# member at 96 percent is given work, runs out mid-task, and goes on after the reset, on each of
+# Claude Code, Codex and Muse. Two more hold what is kept: a count past 95 percent is an
+# allowance, which brings back a member whose account was unavailable (`shows_an_allowance`); and
+# a Codex refusal at the edge of its allowance takes the reset of the window that is past 95
+# percent (`reset_after`), which picks a reset and holds nobody.
+#
+# Every name holds `no low hold`, so `cargo xtask plants daemon "no low hold"` runs them all.
+
+[run]
+no-low-hold-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "quota::"]
+no-low-hold-accounts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts::"]
+no-low-hold-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
+
+[[plant]]
+name = "no low hold: a member nearly out of quota is given no new work on any harness"
+meant = "a_claude_code_member_is_given_work_runs_out_mid_task_and_goes_on_after_the_reset_as_codex_and_muse_do"
+runs = ["no-low-hold-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+    /// The refusal this window acted on: the same one is history after.
+    pub(crate) handled: Option<Arc<Quota>>,
+'''
+replace = '''
+    /// The refusal this window acted on: the same one is history after.
+    pub(crate) handled: Option<Arc<Quota>>,
+    pub(crate) low_until: Option<String>,
+'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                format!("@{} is out of quota until {until}", member.handle)
+            });
+        }
+        None
+    }
+'''
+replace = '''
+                format!("@{} is out of quota until {until}", member.handle)
+            });
+        }
+        let until = self
+            .record(member.id)
+            .and_then(|record| record.quota.borrow().low_until.clone());
+        if self.out(until.as_deref()) {
+            return Some(format!("@{} is low on quota", member.handle));
+        }
+        None
+    }
+'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        self.record_quota(record, observed.quota.clone());
+'''
+replace = '''
+        self.record_quota(record, observed.quota.clone());
+        let low = observed
+            .quota
+            .as_deref()
+            .filter(|quota| quota.level() == cf_harness::records::Level::Low)
+            .map(|quota| self.reset_of(Some(quota)));
+        self.record_of(owner.id).quota.borrow_mut().low_until = low;
+'''
+
+[[plant]]
+name = "no low hold: a Codex member nearly out of quota is given no new work"
+meant = "a_codex_member_at_96_percent_of_its_quota_is_given_work_runs_out_mid_task_and_goes_on_after_the_reset"
+runs = ["no-low-hold-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+    /// The refusal this window acted on: the same one is history after.
+    pub(crate) handled: Option<Arc<Quota>>,
+'''
+replace = '''
+    /// The refusal this window acted on: the same one is history after.
+    pub(crate) handled: Option<Arc<Quota>>,
+    pub(crate) low_until: Option<String>,
+'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                format!("@{} is out of quota until {until}", member.handle)
+            });
+        }
+        None
+    }
+'''
+replace = '''
+                format!("@{} is out of quota until {until}", member.handle)
+            });
+        }
+        let until = self
+            .record(member.id)
+            .and_then(|record| record.quota.borrow().low_until.clone());
+        if member.harness.as_deref() == Some("codex") && self.out(until.as_deref()) {
+            return Some(format!("@{} is low on quota", member.handle));
+        }
+        None
+    }
+'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        self.record_quota(record, observed.quota.clone());
+'''
+replace = '''
+        self.record_quota(record, observed.quota.clone());
+        let low = observed
+            .quota
+            .as_deref()
+            .filter(|quota| quota.level() == cf_harness::records::Level::Low)
+            .map(|quota| self.reset_of(Some(quota)));
+        self.record_of(owner.id).quota.borrow_mut().low_until = low;
+'''
+
+[[plant]]
+name = "no low hold: a Muse member nearly out of quota is given no new work"
+meant = "a_muse_member_at_96_percent_of_its_quota_is_given_work_runs_out_mid_task_and_goes_on_after_the_reset"
+runs = ["no-low-hold-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+    /// The refusal this window acted on: the same one is history after.
+    pub(crate) handled: Option<Arc<Quota>>,
+'''
+replace = '''
+    /// The refusal this window acted on: the same one is history after.
+    pub(crate) handled: Option<Arc<Quota>>,
+    pub(crate) low_until: Option<String>,
+'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                format!("@{} is out of quota until {until}", member.handle)
+            });
+        }
+        None
+    }
+'''
+replace = '''
+                format!("@{} is out of quota until {until}", member.handle)
+            });
+        }
+        let until = self
+            .record(member.id)
+            .and_then(|record| record.quota.borrow().low_until.clone());
+        if member.harness.as_deref() == Some("muse") && self.out(until.as_deref()) {
+            return Some(format!("@{} is low on quota", member.handle));
+        }
+        None
+    }
+'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        self.record_quota(record, observed.quota.clone());
+'''
+replace = '''
+        self.record_quota(record, observed.quota.clone());
+        let low = observed
+            .quota
+            .as_deref()
+            .filter(|quota| quota.level() == cf_harness::records::Level::Low)
+            .map(|quota| self.reset_of(Some(quota)));
+        self.record_of(owner.id).quota.borrow_mut().low_until = low;
+'''
+
+[[plant]]
+name = "no low hold: a count nearly spent is no allowance for a member whose account was unavailable"
+meant = "an_allowance_nearly_spent_brings_an_unavailable_member_back_too"
+runs = ["no-low-hold-accounts"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                    level: Level::Ok | Level::Low,
+'''
+replace = '''
+                    level: Level::Ok,
+'''
+
+[[plant]]
+name = "no low hold: a Codex refusal at the edge of its allowance takes no reset from a window past 95 percent"
+meant = "a_turn_ended_for_its_usage_limit_is_a_refusal_for_quota_at_its_time_with_the_reset_the_limits_named"
+runs = ["no-low-hold-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+        .filter(|quota| quota.level() != Level::Ok)
+'''
+replace = '''
+        .filter(|quota| quota.level() == Level::Exhausted)
+'''

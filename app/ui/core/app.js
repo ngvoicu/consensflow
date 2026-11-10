@@ -140,18 +140,35 @@ new MutationObserver(placeDaemonDown).observe(document.body, {
   subtree: true,
 })
 
-function daemonStatus({ available, cause, retrying }) {
+/**
+ * The status line says a restart's outcome for this long: the banner goes when the daemon is
+ * up, and what became of the windows and the projects is read after it.
+ */
+const RESTART_NOTE_MS = 30_000
+
+/**
+ * The daemon's state, as the app tells it. `closing`: the cause says what the app is doing
+ * (closing the windows of the daemon that stopped) and nothing follows it, since the app
+ * is not starting the daemon yet. `notice`: said once, when the daemon is up again.
+ */
+function daemonStatus({ available, cause, retrying, closing, notice }) {
   const wasDown = !daemonDown.hidden
   daemonDown.hidden = available
   if (available) {
     placeDaemonDown()
     if (wasDown) void act(readMissing)
+    if (notice) say(notice, 'info', RESTART_NOTE_MS)
     return
   }
+  const next = retrying
+    ? closing
+      ? []
+      : [' Starting it again…']
+    : [' Quit ConsensFlow and open it again.']
   daemonDown.replaceChildren(
     element('strong', null, 'The daemon is not running.'),
     ...(cause ? [` ${sentence(cause)}`] : []),
-    retrying ? ' Starting it again…' : ' Quit ConsensFlow and open it again.',
+    ...next,
   )
   placeDaemonDown()
 }

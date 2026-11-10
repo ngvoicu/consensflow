@@ -357,7 +357,6 @@ impl Dispatcher {
         {
             let mut quota = record.quota.borrow_mut();
             quota.reported = None;
-            quota.low_until = None;
         }
         *record.copied.borrow_mut() = None;
         {
