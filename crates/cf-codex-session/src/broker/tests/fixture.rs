@@ -3,6 +3,7 @@
 //! runtime that is one thread, as the broker's is.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::rc::Rc;
@@ -77,6 +78,20 @@ struct Held {
     message: Value,
 }
 
+/// How the fake server answers a `thread/read` once it is told threads ([`FakeCodex::knows`]),
+/// as Codex's does from what it keeps of each thread.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Reads {
+    /// At once: a thread it was told, as it was told; another, with Codex's error.
+    Answered,
+    /// With this error, whatever the thread (a Codex with no `thread/read`, a failed read).
+    Refused(Value),
+    /// Never.
+    Silent,
+    /// As `Answered`, this long after it was asked.
+    Late(Duration),
+}
+
 struct Peer {
     out: mpsc::UnboundedSender<Message>,
     headers: Vec<(String, String)>,
@@ -99,6 +114,10 @@ struct Inner {
     texts: RefCell<Vec<(usize, String)>>,
     held: RefCell<Vec<Held>>,
     peers: RefCell<Vec<Peer>>,
+    /// The threads it answers a `thread/read` of, by id, with how; none leaves every read
+    /// held for the test.
+    threads: RefCell<Option<HashMap<String, Value>>>,
+    reads: RefCell<Reads>,
 }
 
 /// A Codex server: the broker's own connection is its first peer, then one
@@ -125,6 +144,8 @@ impl Inner {
             texts: RefCell::new(Vec::new()),
             held: RefCell::new(Vec::new()),
             peers: RefCell::new(Vec::new()),
+            threads: RefCell::new(None),
+            reads: RefCell::new(Reads::Answered),
         })
     }
 }
@@ -163,6 +184,32 @@ impl FakeCodex {
             inner,
             accept,
         }
+    }
+
+    /// Keeps `thread` (a thread as `thread/read` names it, its `id` and all) as Codex keeps
+    /// a thread: from now on a `thread/read` is answered from what it keeps, as
+    /// [`FakeCodex::reads`] says, and never held for the test.
+    pub(crate) fn knows(&self, thread: &Value) {
+        let id = thread["id"].as_str().expect("a thread id").to_owned();
+        self.inner
+            .threads
+            .borrow_mut()
+            .get_or_insert_with(HashMap::new)
+            .insert(id, thread.clone());
+    }
+
+    /// Keeps `thread` under `id`, which is not the one it names: a read of `id` answers it.
+    pub(crate) fn knows_as(&self, id: &str, thread: &Value) {
+        self.inner
+            .threads
+            .borrow_mut()
+            .get_or_insert_with(HashMap::new)
+            .insert(id.to_owned(), thread.clone());
+    }
+
+    /// How a `thread/read` is answered from now on.
+    pub(crate) fn reads(&self, reads: Reads) {
+        *self.inner.reads.borrow_mut() = reads;
     }
 
     /// Hold each connection's handshake for `delay` from now on.
@@ -392,9 +439,46 @@ fn answer(inner: &Inner, peer: usize, out: &mpsc::UnboundedSender<Message>, text
         Behaviour::Ready => {
             if message["method"] == "initialize" {
                 reply(json!({ "id": message["id"], "result": {} }));
+            } else if message["method"] == "thread/read" && inner.threads.borrow().is_some() {
+                read(inner, &message, out);
             } else if message.get("id").is_some() {
                 inner.held.borrow_mut().push(Held { peer, message });
             }
+        }
+    }
+}
+
+/// Answers `message`, a `thread/read`, from the threads the server keeps, as Codex does: the
+/// thread as it keeps it, or for one it does not have, the error Codex 0.167.0 answered
+/// (`codex_0_167_threads.json`).
+fn read(inner: &Inner, message: &Value, out: &mpsc::UnboundedSender<Message>) {
+    let id = message["id"].clone();
+    let asked = message["params"]["threadId"].as_str().unwrap_or_default();
+    let known = inner
+        .threads
+        .borrow()
+        .as_ref()
+        .and_then(|threads| threads.get(asked).cloned());
+    let answered = match known {
+        Some(thread) => json!({ "id": id, "result": { "thread": thread } }),
+        None => json!({
+            "id": id,
+            "error": { "code": -32600, "message": format!("thread not loaded: {asked}") },
+        }),
+    };
+    let send = |value: Value| {
+        let _ = out.send(Message::text(value.to_string()));
+    };
+    match inner.reads.borrow().clone() {
+        Reads::Answered => send(answered),
+        Reads::Refused(error) => send(json!({ "id": id, "error": error })),
+        Reads::Silent => {}
+        Reads::Late(after) => {
+            let out = out.clone();
+            tokio::task::spawn_local(async move {
+                tokio::time::sleep(after).await;
+                let _ = out.send(Message::text(answered.to_string()));
+            });
         }
     }
 }
@@ -659,6 +743,19 @@ impl Fixture {
 
     pub(crate) fn address(&self) -> SocketAddr {
         SocketAddr::from(([127, 0, 0, 1], self.broker.port()))
+    }
+
+    /// The window closed and opened again: its broker closed, and a new one started with
+    /// `options` on the same Codex, which keeps every thread it had.
+    pub(crate) async fn reopen(self, options: Options) -> Self {
+        self.broker.close().await;
+        let broker = Broker::start(config_for(&self.codex, options))
+            .await
+            .expect("a broker");
+        Self {
+            codex: self.codex,
+            broker,
+        }
     }
 
     /// A TUI that connected and initialized, as Codex's does.
