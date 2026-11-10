@@ -74,6 +74,7 @@ pub fn request(name: &str, directory: &str) -> NewProject {
         specs: None,
         staff_rules: None,
         compaction: None,
+        advisor_tool: false,
     }
 }
 

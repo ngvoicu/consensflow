@@ -40,6 +40,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod adapters_failing_at_once;
+mod advisor_off;
 mod approval;
 mod assigning;
 mod background;

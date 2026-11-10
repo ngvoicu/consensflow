@@ -34,6 +34,7 @@ fn project(rig: &Rig, name: &str) -> i64 {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
         })
         .unwrap()
         .id;

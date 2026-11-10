@@ -92,6 +92,9 @@ find = '''        if let Some(specs) = &request.specs {
         if let Some(size) = request.compaction {
             set_compaction(store, id, Some(size))?;
         }
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
+        }
         known_project(store, id)
     })
 }'''
@@ -102,6 +105,9 @@ replace = '''        // The setting's own writes, which join this one, so each i
         }
         if let Some(size) = request.compaction {
             set_compaction(store, id, Some(size))?;
+        }
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
         }
         known_project(store, id)
     })
@@ -144,6 +150,9 @@ find = '''        if let Some(wake_up) = wake_up {
         if let Some(size) = request.compaction {
             set_compaction(store, id, Some(size))?;
         }
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
+        }
         known_project(store, id)
     })
 }'''
@@ -157,6 +166,9 @@ replace = '''        if let Some(specs) = &request.specs {
         }
         if let Some(size) = request.compaction {
             set_compaction(store, id, Some(size))?;
+        }
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
         }
         known_project(store, id)
     })
@@ -270,8 +282,15 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/projects.rs"
-find = '    for key in ["gate", "wakeUp", "specs", "rules", "compaction"] {'
-replace = '    for key in ["gate", "wakeUp", "rules", "compaction"] {'
+find = '''    for key in [
+        "gate",
+        "wakeUp",
+        "specs",
+        "rules",
+        "compaction",
+        "advisorTool",
+    ] {'''
+replace = '    for key in ["gate", "wakeUp", "rules", "compaction", "advisorTool"] {'
 
 # --- the page's `project.open` ---
 
@@ -292,8 +311,15 @@ runs = ["daemon-opening-page"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/projects.rs"
-find = '    for key in ["gate", "wakeUp", "specs", "rules", "compaction"] {'
-replace = '    for key in ["gate", "specs", "rules", "compaction"] {'
+find = '''    for key in [
+        "gate",
+        "wakeUp",
+        "specs",
+        "rules",
+        "compaction",
+        "advisorTool",
+    ] {'''
+replace = '    for key in ["gate", "specs", "rules", "compaction", "advisorTool"] {'
 
 [[plant]]
 name = "project settings: New project starts the calls with other words than the ledger's default"

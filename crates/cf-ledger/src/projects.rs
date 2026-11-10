@@ -7,6 +7,7 @@
 //! ([`staff_rules`]) and choose the size its members' windows compact at, whatever
 //! their harness ([`compaction`]).
 
+mod advisor_tool;
 mod compaction;
 mod describing;
 mod staff_rules;
@@ -17,6 +18,8 @@ use cf_proto::specs::SpecsView;
 use rusqlite::{params, OptionalExtension, Row};
 use serde_json::{json, Value};
 
+pub use advisor_tool::parse_advisor_tool;
+pub(crate) use advisor_tool::set_advisor_tool;
 pub(crate) use compaction::set_compaction;
 pub use compaction::{parse_compaction, COMPACTION_MAX, COMPACTION_MIN};
 pub use describing::parse_description;
@@ -69,6 +72,9 @@ pub(crate) struct ProjectRow {
     /// The size in tokens the human chose for the members' windows to compact at,
     /// whatever their harness; null for each harness's own point.
     pub(crate) compaction: Option<u32>,
+    /// 1 where the human has the members run with Claude Code's own advisor tool; 0 (every
+    /// project's until it is ticked) where they run without it.
+    pub(crate) advisor_tool: i64,
 }
 
 impl ProjectRow {
@@ -88,6 +94,7 @@ impl ProjectRow {
             meeting_at: row.get("meeting_at")?,
             staff_rules: row.get("staff_rules")?,
             compaction: row.get("compaction")?,
+            advisor_tool: row.get("advisor_tool")?,
         })
     }
 
@@ -155,6 +162,9 @@ pub struct NewProject {
     /// The size, in tokens, the human chose for its members' windows to compact
     /// at; none starts it on each harness's own point.
     pub compaction: Option<u32>,
+    /// Whether its members run with Claude Code's own advisor tool; false (off) is what
+    /// every project starts with.
+    pub advisor_tool: bool,
 }
 
 impl NewProject {
@@ -205,6 +215,10 @@ impl NewProject {
             specs: SpecsChange::from_opening(value.get("specs"))?,
             staff_rules: parse_staff_rules(value.get("rules"))?,
             compaction: parse_compaction(value.get("compaction"))?,
+            advisor_tool: match value.get("advisorTool") {
+                None => false,
+                said => parse_advisor_tool(said)?,
+            },
         })
     }
 }
@@ -394,6 +408,9 @@ pub(crate) fn create_project(
         if let Some(size) = request.compaction {
             set_compaction(store, id, Some(size))?;
         }
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
+        }
         known_project(store, id)
     })
 }
@@ -431,6 +448,7 @@ pub(crate) fn project(store: &Store, id: i64) -> Result<Option<ProjectView>, Led
         meeting: row.meeting_at,
         staff_rules: row.staff_rules,
         compaction: row.compaction,
+        advisor_tool: row.advisor_tool == 1,
     }))
 }
 

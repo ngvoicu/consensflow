@@ -356,6 +356,15 @@
       <p class="staff-hint members-compaction-hint" role="alert" hidden></p>
       <div class="dialog-actions" data-live><button class="primary-button" type="button" name="members-compaction-save">Save compaction</button></div>
     </fieldset>
+    <!-- Advisor tool (core/advisor-tool.js): whether the project's members run with Claude Code's
+         own advisor tool, off until it is ticked; the chief never; chosen here only. -->
+    <fieldset class="project-section members-advisor-tool">
+      <legend>Advisor tool</legend>
+      <p class="dialog-help">Claude Code's own advisor tool lets a window consult a second model. Off, each Claude Code member runs without it from its next start; on, it has the tool as your own Claude Code setting gives it. The chief is not affected and keeps its harness's own setting. Codex, Pi, Devin and Muse Code have no advisor tool, so this changes nothing for their members. A window already open keeps what it began with.</p>
+      <label class="check"><input type="checkbox" name="members-advisor-tool">Members use Claude Code's own advisor tool</label>
+      <p class="staff-hint members-advisor-tool-hint" role="alert" hidden></p>
+      <div class="dialog-actions" data-live><button class="primary-button" type="button" name="members-advisor-tool-save">Save advisor tool</button></div>
+    </fieldset>
     <fieldset class="project-section">
       <legend>Human approval</legend>
       <label class="check"><input type="checkbox" name="gate">Human approval required: every message between the chief and its staff waits until you pass it on</label>

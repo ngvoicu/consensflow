@@ -248,13 +248,14 @@ async fn a_project_opened_with_rules_and_a_compaction_has_them_and_its_chief_is_
             let answer = ask(
                 &held.app,
                 "project.open",
-                opening(json!({ "rules": RULES, "compaction": 250_000 })),
+                opening(json!({ "rules": RULES, "compaction": 250_000, "advisorTool": true })),
             )
             .await;
             assert_eq!(answer["ok"], true, "{answer}");
             let opened = answer["project"]["id"].as_i64().unwrap();
             assert_eq!(answer["project"]["staffRules"], RULES);
             assert_eq!(answer["project"]["compaction"], 250_000);
+            assert_eq!(answer["project"]["advisorTool"], true);
             // The chief was launched once, as the project opened, and was given the rules then.
             let launches = chief_launches(&held);
             assert_eq!(launches.len(), before + 1);
@@ -271,6 +272,47 @@ async fn a_project_opened_with_rules_and_a_compaction_has_them_and_its_chief_is_
             let board = ask(&held.app, "board.get", json!({ "project": opened })).await;
             assert_eq!(board["board"]["project"]["staffRules"], RULES);
             assert_eq!(board["board"]["project"]["compaction"], 250_000);
+            assert_eq!(board["board"]["project"]["advisorTool"], true);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_project_opened_without_the_flag_has_the_advisor_tool_off_and_one_the_daemon_refuses_makes_no_project(
+) {
+    LocalSet::new()
+        .run_until(async {
+            let held = asked();
+            let answer = ask(&held.app, "project.open", opening(json!({}))).await;
+            assert_eq!(answer["ok"], true, "{answer}");
+            assert!(
+                answer["project"].get("advisorTool").is_none(),
+                "off, no key"
+            );
+            let projects = held.rig.kit.ledger.borrow().projects().unwrap().len();
+            let refused = ask(
+                &held.app,
+                "project.open",
+                opening(json!({ "advisorTool": "yes" })),
+            )
+            .await;
+            assert_eq!(
+                refused,
+                json!({ "ok": false, "error": "the advisor tool is on (true) or off (false)" })
+            );
+            // The words the dialog of a project is refused in for the same.
+            let dialog = ask(
+                &held.app,
+                "project.advisor_tool",
+                json!({ "project": answer["project"]["id"], "advisorTool": "yes" }),
+            )
+            .await;
+            assert_eq!(dialog["error"], refused["error"]);
+            assert_eq!(
+                held.rig.kit.ledger.borrow().projects().unwrap().len(),
+                projects,
+                "no project was made"
+            );
         })
         .await;
 }
