@@ -23,6 +23,7 @@ use tokio::task::LocalSet;
 use super::*;
 use crate::testing::Said;
 
+mod input;
 mod restart;
 mod screens;
 
