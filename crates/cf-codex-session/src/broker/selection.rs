@@ -9,29 +9,27 @@
 //! numbers the requests it sends the TUI on its own, so only a response (a
 //! message with no `method`) ever answers a request of the TUI's.
 //!
-//! A start, resume or fork of the window's own thread is also where the window's role
-//! goes in: the broker gives it the window's developer instructions
-//! (`developerInstructions`, which replace what Codex's own configuration says for that
-//! thread's session, and so already hold that), so the role is on no command line. The
-//! window's own threads are known by their ids: the one the window was launched to
-//! resume (`resume <id>`), each its main starts began, and each fork the user made of
-//! one of them, as Codex's answers named them. Nothing else is given the role: a side
-//! thread (ephemeral, or of a source other than the user's) is no conversation of the
-//! window's, and neither is a sub-agent's, which the TUI resumes with a request shaped
-//! as the window's own (roots and all) when the user selects it (codex-rs 0.167.0
-//! `attach_live_thread_for_selection`): given the role, it took it at its next
-//! compaction in place of its own instructions (T-1402). A thread's turns read the developer message it
-//! began with, and a resumed or forked one keeps it: the instructions a resume
-//! names are written into no turn (probed on Codex 0.162.1 and 0.164.0, a resume
-//! with other instructions answered by the first; codex-rs 0.167.0 renders them
-//! only into a thread's full context, which a resumed thread's rollout already
-//! holds). They are what a compaction rebuilds that message from: Codex rebuilds a
-//! compacted history from the session's own instructions
-//! (`build_compaction_replacement_history`), so a resumed window given none lost
-//! its role at its thread's next compaction, its own or Codex's (T-1388, Codex
-//! 0.167.0; T-1394). A sub-agent Codex spawns starts in the server, never through
-//! here: Codex 0.164.0 gives it the developer instructions of the thread that
-//! spawned it, as it did when they were configuration.
+//! A main start is also where the window's role goes in: the broker gives it the
+//! window's developer instructions (`developerInstructions`, which replace what Codex's
+//! own configuration says for that thread's session, and so already hold that), so the
+//! role is on no command line. A resume or a main fork is given them too, but only of a
+//! thread Codex itself says is top-level ([`super::lineage`]): the TUI names its threads
+//! no other way, a sub-agent's resume when the user selects one has the shape of the
+//! window's own (codex-rs 0.167.0 `attach_live_thread_for_selection`), and a sub-agent's
+//! thread given the role takes it at its next compaction and acts on the board as the
+//! member (T-1402, T-1412). So [`Selection::tui_said`] names the thread whose lineage
+//! decides, and the pair asks Codex before it lets the request go. A thread's turns read
+//! the developer message it began with, and a resumed or forked one keeps it: the
+//! instructions a resume names are written into no turn (probed on Codex 0.162.1 and
+//! 0.164.0, a resume with other instructions answered by the first; codex-rs 0.167.0
+//! renders them only into a thread's full context, which a resumed thread's rollout
+//! already holds). They are what a compaction rebuilds that message from: Codex rebuilds
+//! a compacted history from the session's own instructions
+//! (`build_compaction_replacement_history`), so a resumed window given none loses its
+//! role at its thread's next compaction, its own or Codex's (T-1388, Codex 0.167.0). A
+//! sub-agent Codex spawns starts in the server, never through here: Codex 0.164.0 gives
+//! it the developer instructions of the thread that spawned it, as it did when they were
+//! configuration.
 //!
 //! A start is the window's own when it is durable (`ephemeral` false, or not
 //! said, which is the server's own default) and the user's (`threadSource`
@@ -87,9 +85,6 @@ enum Pending {
         prior: Option<String>,
         prior_empty: bool,
         main_resume: bool,
-        /// Whether it begins or resumes a thread of the window's own, which the
-        /// thread Codex answers it with is then.
-        own: bool,
     },
     /// It names the permissions of the shown thread.
     PermissionChange,
@@ -141,12 +136,10 @@ pub(crate) struct Selection {
     idle: HashMap<String, bool>,
     /// Whether the window's first start is still to open in full-permission mode.
     fresh_bypass: bool,
-    /// The developer instructions every start, resume and fork of the window's own
-    /// threads is given: its role. None for a window given none.
+    /// The developer instructions every main start of the window is given, and every
+    /// resume and main fork of a thread Codex says is top-level: its role. None for a
+    /// window given none.
     role: Option<String>,
-    /// The ids of the window's own threads: the one it was launched to resume, and each
-    /// its main starts and its forks of these began.
-    own: Vec<String>,
     /// ConsensFlow's own variables, each name with its value, which every thread
     /// the TUI starts, resumes or forks is given for its commands.
     shell_env: Vec<(String, String)>,
@@ -158,12 +151,10 @@ pub(crate) struct Selection {
 }
 
 impl Selection {
-    /// `resumed` is the thread the window was launched to resume, if it was.
     pub(crate) fn new(
         fresh_bypass: bool,
         role: Option<String>,
         shell_env: Vec<(String, String)>,
-        resumed: Option<String>,
     ) -> Self {
         Self {
             selected: None,
@@ -174,7 +165,6 @@ impl Selection {
             idle: HashMap::new(),
             fresh_bypass,
             role,
-            own: resumed.into_iter().collect(),
             shell_env,
             told_unclassified: false,
             closed: false,
@@ -277,15 +267,16 @@ impl Selection {
     /// What a TUI connection said to Codex. Remembers it if it may change the
     /// window's thread or permissions, and returns the message to send in its
     /// place: a start, resume or fork given ConsensFlow's variables for its
-    /// commands, a main start and a resume or main fork of the window's own thread
-    /// given the window's role too, and a main start opened in full-permission mode
-    /// while the first start must be.
+    /// commands, a main start given the window's role too, and opened in
+    /// full-permission mode while the first start must be. A resume or main fork, in a
+    /// window with a role, names the thread whose lineage decides whether it is given
+    /// the role as well ([`Told::lineage`]).
     pub(crate) fn tui_said(
         &mut self,
         client: ClientId,
         requests: &mut Requests,
         message: &Value,
-    ) -> Option<Value> {
+    ) -> Told {
         let method = message.get("method").and_then(Value::as_str);
         let none = Map::new();
         let params = message
@@ -302,14 +293,13 @@ impl Selection {
             && params.get("ephemeral") != Some(&Value::Bool(true))
             && user
             && roots;
-        // Whether it resumes or forks a thread of the window's own: by the thread it names,
-        // not by its shape, which a sub-agent's resume has too.
-        let of_own = params
+        // A resume or fork has the role only of a thread Codex says is top-level: its shape
+        // cannot tell, a sub-agent's resume has it too.
+        let lineage = params
             .get("threadId")
             .and_then(Value::as_str)
-            .is_some_and(|thread| self.is_own(thread));
-        let own =
-            main_start || (method == Some("thread/resume") && of_own) || (main_fork && of_own);
+            .filter(|_| self.role.is_some() && (main_resume || main_fork))
+            .map(str::to_owned);
         let id = message.get("id").cloned();
         if main_start || main_resume || main_fork {
             // The window shows none while it switches; an error answer goes back to what it showed.
@@ -330,12 +320,11 @@ impl Selection {
                     prior,
                     prior_empty,
                     main_resume,
-                    own,
                 },
             );
         }
         let bypass = main_start && self.fresh_bypass;
-        let role = self.role.as_deref().filter(|_| own);
+        let role = self.role.as_deref().filter(|_| main_start);
         let env = matches!(
             method,
             Some("thread/start" | "thread/resume" | "thread/fork")
@@ -364,7 +353,12 @@ impl Selection {
                 self.idle.insert(thread.clone(), false);
             }
         }
-        rewritten
+        Told { rewritten, lineage }
+    }
+
+    /// The window's role, if it has one.
+    pub(crate) fn role(&self) -> Option<&str> {
+        self.role.as_deref()
     }
 
     /// What Codex said to a TUI connection: the answer to a request it made,
@@ -383,14 +377,6 @@ impl Selection {
             None
         };
         let failed = js::truthy(message.get("error"));
-        if let (Some(Pending::Switch { own: true, .. }), false) = (&pending, failed) {
-            // The thread it began or resumed is the window's own, whatever the window shows by now.
-            if let Some(thread) = answered_thread(message) {
-                if !self.is_own(thread) {
-                    self.own.push(thread.to_string());
-                }
-            }
-        }
         match pending {
             Some(Pending::PermissionChange) if !failed => self.fresh_bypass = false,
             Some(Pending::Switch {
@@ -398,18 +384,12 @@ impl Selection {
                 prior,
                 prior_empty,
                 main_resume,
-                ..
             }) if self.owner == Some(client) && revision == self.revision => {
                 self.switched(message, failed, prior, prior_empty, main_resume);
             }
             _ => {}
         }
         self.observe(message);
-    }
-
-    /// Whether `thread` is one of the window's own.
-    fn is_own(&self, thread: &str) -> bool {
-        self.own.iter().any(|own| own.eq_ignore_ascii_case(thread))
     }
 
     /// What Codex said to the broker's own connection.
@@ -499,16 +479,6 @@ impl Selection {
     }
 }
 
-/// The thread Codex's answer `message` names (`result.thread.id`), if it is a thread id.
-fn answered_thread(message: &Value) -> Option<&str> {
-    message
-        .get("result")
-        .and_then(|result| result.get("thread"))
-        .and_then(|thread| thread.get("id"))
-        .and_then(Value::as_str)
-        .filter(|id| is_thread_id(id))
-}
-
 /// A thread's `status.type` is `idle`.
 fn status_is_idle(thread: Option<&Value>) -> bool {
     thread
@@ -568,6 +538,25 @@ impl Selection {
         self.told_unclassified = true;
         Some(why)
     }
+}
+
+/// What to send Codex in place of a TUI's message, and what decides whether it is given
+/// the window's role.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct Told {
+    /// The message rewritten (ConsensFlow's variables, a main start's role and
+    /// permissions), or none to send it as it came.
+    pub(crate) rewritten: Option<Value>,
+    /// The thread a resume or main fork names, in a window with a role: it is given the
+    /// role only if Codex says this thread is top-level, and every thread it was forked
+    /// from too. None for everything else.
+    pub(crate) lineage: Option<String>,
+}
+
+/// `message`, a resume or fork as it goes out, with the window's `role` as its developer
+/// instructions in place of any it had.
+pub(crate) fn with_role(message: &Value, role: &str) -> Value {
+    rewritten_start(message, false, Some(role), &[])
 }
 
 /// The start, resume or fork `message` as it goes out: its params opening the

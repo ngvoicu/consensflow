@@ -703,7 +703,6 @@ fn parse(raw: &[u8]) -> Reply {
 pub(crate) struct Options {
     pub(crate) fresh_bypass: bool,
     pub(crate) role: Option<String>,
-    pub(crate) resumed: Option<String>,
     pub(crate) shell_env: Vec<(String, String)>,
     pub(crate) board: Option<Arc<Board>>,
     pub(crate) question_wait: Duration,
@@ -714,7 +713,6 @@ impl Default for Options {
         Self {
             fresh_bypass: false,
             role: None,
-            resumed: None,
             shell_env: Vec::new(),
             board: None,
             question_wait: Duration::from_secs(5),
@@ -878,7 +876,6 @@ pub(crate) fn config_for(codex: &FakeCodex, options: Options) -> Config {
         },
         fresh_bypass: options.fresh_bypass,
         role: options.role,
-        resumed: options.resumed,
         shell_env: options.shell_env,
         board: options.board,
         question_wait: options.question_wait,

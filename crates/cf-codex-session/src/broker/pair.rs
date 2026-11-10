@@ -21,7 +21,7 @@ use tokio::sync::Notify;
 use tokio::task::AbortHandle;
 use tokio_tungstenite::tungstenite::{Message, Utf8Bytes};
 
-use super::selection::{ClientId, Requests};
+use super::selection::{with_role, ClientId, Requests};
 use super::transport::{
     connect, next_frame, queue, reading, write_all, Frame, Inbox, Outbox, Reading, Sent, Socket,
     MAX_FRAME,
@@ -31,6 +31,13 @@ use crate::questions::{Asked, REQUEST_USER_INPUT};
 
 /// What the TUI said before the connection to Codex's server opened.
 struct Waiting {
+    frames: Vec<Utf8Bytes>,
+    bytes: usize,
+}
+
+/// What the TUI said after a resume or fork the broker holds while Codex says whether its
+/// thread is top-level: it goes on, in order, once that one has.
+struct Deciding {
     frames: Vec<Utf8Bytes>,
     bytes: usize,
 }
@@ -99,6 +106,9 @@ pub(super) struct Pair {
     /// Frames from the TUI until its connection to Codex's server opens, in
     /// order; none once it has.
     waiting: RefCell<Option<Waiting>>,
+    /// Frames from the TUI while a resume or fork of its waits for Codex to say whether its
+    /// thread is top-level, in order; none while nothing waits.
+    deciding: RefCell<Option<Deciding>>,
     tui: Outbox,
     native: Outbox,
     /// The questions the board is answering, each with the flag that ends its poll.
@@ -122,6 +132,7 @@ impl Pair {
                 frames: Vec::new(),
                 bytes: 0,
             })),
+            deciding: RefCell::new(None),
             tui,
             native,
             held: RefCell::new(Vec::new()),
@@ -243,14 +254,33 @@ impl Pair {
     /// goes on as it came, except a start, resume or fork, which is given
     /// ConsensFlow's variables, and a main start, the window's role too (and
     /// full-permission mode while the first start must open in it). A start
-    /// that cannot be told is said once.
+    /// that cannot be told is said once. A resume or main fork in a window with a
+    /// role waits for Codex to say whether its thread is top-level, and is given the
+    /// role if it is ([`Pair::decide`]); what the TUI says meanwhile waits behind it.
     fn process_tui(self: &Rc<Self>, text: Utf8Bytes) {
+        let held = match self.deciding.borrow_mut().as_mut() {
+            None => None,
+            Some(deciding) => {
+                deciding.bytes += text.len();
+                Some(deciding.bytes > MAX_FRAME)
+            }
+        };
+        match held {
+            None => {}
+            Some(true) => return self.retire(),
+            Some(false) => {
+                if let Some(deciding) = self.deciding.borrow_mut().as_mut() {
+                    deciding.frames.push(text);
+                }
+                return;
+            }
+        }
         let message = match reading(&text) {
             Reading::Message(message) => message,
             Reading::TooDeep => return self.forward(&self.native, text),
             Reading::NotJson => return self.retire(),
         };
-        let rewritten = self.shared.state.borrow_mut().tui_said(
+        let told = self.shared.state.borrow_mut().tui_said(
             self.id,
             &mut self.requests.borrow_mut(),
             &message,
@@ -259,8 +289,43 @@ impl Pair {
         if let Some(why) = unclassified {
             self.shared.say_unclassified(why);
         }
-        let out = rewritten.map_or(text, |message| Utf8Bytes::from(message.to_string()));
-        self.forward(&self.native, out);
+        match told.lineage {
+            Some(thread) => self.decide(told.rewritten.unwrap_or(message), thread),
+            None => {
+                let out = told
+                    .rewritten
+                    .map_or(text, |message| Utf8Bytes::from(message.to_string()));
+                self.forward(&self.native, out);
+            }
+        }
+    }
+
+    /// Holds `message`, a resume or fork of the TUI's, until Codex says whether `thread`
+    /// is top-level ([`Shared::is_top_level`]): then it goes with the window's role if it
+    /// is, as it is if not, and what the TUI said meanwhile follows it in order. The window
+    /// shows no thread meanwhile, so no delivery is taken.
+    fn decide(self: &Rc<Self>, message: Value, thread: String) {
+        *self.deciding.borrow_mut() = Some(Deciding {
+            frames: Vec::new(),
+            bytes: 0,
+        });
+        let this = Rc::clone(self);
+        self.spawn(async move {
+            let top_level = this.shared.is_top_level(&thread).await;
+            let role = this.shared.state.borrow().role().map(str::to_owned);
+            let out = match role.filter(|_| top_level) {
+                Some(role) => with_role(&message, &role),
+                None => message,
+            };
+            this.forward(&this.native, Utf8Bytes::from(out.to_string()));
+            let deciding = this.deciding.borrow_mut().take();
+            for text in deciding.into_iter().flat_map(|deciding| deciding.frames) {
+                if this.retired.get() {
+                    return;
+                }
+                this.process_tui(text);
+            }
+        });
     }
 
     /// A frame Codex said to the TUI: an answer that names a thread is

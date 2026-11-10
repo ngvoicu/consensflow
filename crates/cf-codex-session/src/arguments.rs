@@ -67,31 +67,6 @@ pub(crate) fn split(args: &[OsString]) -> Result<Split, MissingValue> {
     Ok(split)
 }
 
-/// The thread a window's `args` resume: the id after Codex's `resume`, which ConsensFlow
-/// opens a window on a conversation Codex keeps with (`codex resume <id>`). None for a
-/// window that starts one, and for a `resume` with no id (`--last`, or nothing).
-pub(crate) fn resumed(args: &[OsString]) -> Option<String> {
-    let mut args = args.iter();
-    while let Some(arg) = args.next() {
-        match arg.to_str() {
-            Some("-c" | "--config" | "--enable" | "--disable" | "--model" | "-m") => {
-                args.next();
-            }
-            Some(flag) if flag.starts_with('-') => {}
-            Some("resume") => {
-                return args
-                    .next()
-                    .and_then(|id| id.to_str())
-                    .filter(|id| !id.is_empty() && !id.starts_with('-'))
-                    .map(str::to_owned);
-            }
-            // The first word that is no flag is no `resume`: the window starts its thread.
-            _ => return None,
-        }
-    }
-    None
-}
-
 /// `model="<name>"`, the name written as a JSON string, as Codex reads it.
 fn model(name: &str) -> String {
     format!("model={}", json_string(name))
@@ -372,31 +347,6 @@ mod tests {
                 "--model=inline",
             ])
         );
-    }
-
-    #[test]
-    fn the_thread_a_window_resumes_is_the_id_after_resume() {
-        let resumed = |given: &[&str]| super::resumed(&args(given));
-        assert_eq!(
-            resumed(&["resume", THREAD, "--model", "gpt-5", BYPASS]),
-            Some(THREAD.to_owned())
-        );
-        // Flags before it, with their values, as Codex takes them.
-        assert_eq!(
-            resumed(&["-c", "resume", "--enable", "x", BYPASS, "resume", THREAD]),
-            Some(THREAD.to_owned())
-        );
-        // A window that starts its thread, or one that resumes none by its id.
-        for given in [
-            &["--model", "gpt-5", BYPASS][..],
-            &["hello", "resume", THREAD],
-            &["resume"],
-            &["resume", "--last"],
-            &["resume", ""],
-            &["-m", "resume", "hello"],
-        ] {
-            assert_eq!(resumed(given), None, "{given:?}");
-        }
     }
 
     #[test]

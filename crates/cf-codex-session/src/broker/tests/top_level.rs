@@ -361,12 +361,11 @@ fn rows() -> Vec<Row> {
     rows
 }
 
-/// What a window is launched with: the role, and the thread it resumes, where the
-/// supervisor told the broker (round 2's `resumed`, which the fix takes out).
-fn launched(thread: Option<&str>) -> Options {
+/// What a window is launched with: its role. The thread it resumes is the TUI's to name
+/// (`codex resume <id>`), and its resume is all the broker hears of it.
+fn launched(_thread: Option<&str>) -> Options {
     Options {
         role: Some(ROLE.to_owned()),
-        resumed: thread.map(|name| threads()[name]["id"].as_str().expect("an id").to_owned()),
         ..Options::default()
     }
 }

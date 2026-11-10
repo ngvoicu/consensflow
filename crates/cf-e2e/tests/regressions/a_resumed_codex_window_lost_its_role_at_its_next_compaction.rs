@@ -25,6 +25,12 @@
 //! first window does; its resume is given the role, and the role is said to the thread no
 //! second time (no note of it, and once in the rebuilt history). The chief resumed with its
 //! project is the same.
+//!
+//! But only a thread Codex says is top-level: the window's resume names its thread by an id
+//! the ledger saved, which can be a sub-agent's the user selected, and a sub-agent's thread
+//! given the role acts on the board as the member (T-1402, T-1412). The broker asks Codex
+//! (`thread/read`) before it lets a resume go (T-1414); the stand-in reads every thread as a
+//! sub-agent's with `CF_TEST_CODEX_LINEAGE=sub-agent`.
 
 use std::path::{Path, PathBuf};
 
@@ -222,6 +228,71 @@ fn a_codex_members_follow_up_window_keeps_its_role_and_ask_command_through_a_com
     assert!(
         notes.is_empty(),
         "no note of a role that did not change: {notes:?}"
+    );
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_codex_members_follow_up_window_on_a_thread_codex_calls_a_sub_agents_is_not_given_the_role(
+) -> Outcome {
+    let rig = Rig::start(config_with_codex().var("CF_TEST_CODEX_LINEAGE", "sub-agent"))?;
+    rig.stand_ins(&json!({
+        "schemaVersion": 1,
+        "agents": [
+            { "id": "chief", "kind": "claude-code", "model": "fake-chief" },
+            { "id": "worker", "kind": "codex", "model": "fake", "workTier": "standard" },
+        ],
+    }))?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"]
+        .as_str()
+        .unwrap_or("standard")
+        .to_owned();
+    let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
+    let ran = rig.cf_in_window(
+        &chief,
+        ["task", "add", "--tier", &tier, "Reply with exactly: OK"],
+    )?;
+    assert_eq!(ran.code, Some(0), "{ran}");
+    rig.wait_for("T-1's result", secs(120), || {
+        Ok(!results(&project)?.is_empty())
+    })?;
+    let assignee = project.task(1)?["assignee"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    rig.wait_for("the worker's first window to close", secs(60), || {
+        Ok(project.lane(&assignee)?["activity"]["state"] == "closed")
+    })?;
+    let ran = rig.cf_in_window(&chief, ["task", "accept", "T-1"])?;
+    assert_eq!(ran.code, Some(0), "{ran}");
+    let ran = rig.cf_in_window(&chief, ["task", "add", "--after", "T-1", ASKS_ROLE])?;
+    assert_eq!(ran.code, Some(0), "{ran}");
+    rig.wait_for("T-2's result", secs(120), || {
+        Ok(results(&project)?.len() >= 2)
+    })?;
+    let resumed = resumes(&rig);
+    assert_eq!(
+        resumed.len(),
+        1,
+        "T-2's window resumed the thread: {resumed:?}"
+    );
+    assert!(
+        !names_role(
+            resumed[0]["developerInstructions"]
+                .as_str()
+                .unwrap_or_default(),
+            "worker"
+        ),
+        "a thread Codex calls a sub-agent's is not given the member's role: {:?}",
+        resumed[0]["developerInstructions"]
+    );
+    let second = results(&project)?.remove(1);
+    assert!(
+        !names_role(&second, "worker"),
+        "and its compaction rebuilt no role into it: {second}"
     );
     rig.close()?;
     Ok(())

@@ -61,7 +61,9 @@
 //! `CF_TEST_CODEX_DROP_COMPLETED` ends, which it leaves unsaid, as a notice lost; a read
 //! of the thread (`thread/read`) says whether a turn runs. The thread is the same in every run unless
 //! `CF_TEST_CODEX_THREADS` says `unique`, which a window the daemon opens needs
-//! (two of them in one `CODEX_HOME` would share a rollout). The servers Codex opens
+//! (two of them in one `CODEX_HOME` would share a rollout). A read says of any thread it has
+//! what Codex says of a TUI's main thread, or with `CF_TEST_CODEX_LINEAGE=sub-agent` of a
+//! sub-agent's. The servers Codex opens
 //! with its window are `CF_TEST_CODEX_SERVERS` of them, and the first starts
 //! `CF_TEST_CODEX_WORKERS` processes of its own when the first turn's tools are
 //! called ([`crate::servers`]).
@@ -358,15 +360,33 @@ impl Agent {
         heard
     }
 
-    /// The thread as a read of it says it (`thread/read`'s `thread`): its id, and
-    /// whether a turn runs.
+    /// The thread as a read of it says it (`thread/read`'s `thread`): its id, whether a
+    /// turn runs, and where it comes from, as Codex 0.167.0 says of a thread its TUI began
+    /// on an app-server (`vscode`, no parent, the user's; T-1414), which the broker gives
+    /// the window's role to at a resume.
     pub fn read(&self) -> Value {
         let status = if self.running.load(Ordering::Relaxed) {
             json!({ "type": "active", "activeFlags": [] })
         } else {
             json!({ "type": "idle" })
         };
-        json!({ "id": self.thread(), "status": status, "turns": [] })
+        top_level(&self.thread(), status)
+    }
+
+    /// A read of `asked` (`thread/read`'s `threadId`, none for its own), as Codex answers it
+    /// for any thread it keeps: its own thread as [`Agent::read`] says it, another it has a
+    /// rollout of as idle, and none for a thread it has not (Codex's `thread not loaded`).
+    pub fn read_of(&self, asked: Option<&str>) -> Option<Value> {
+        let own = self.thread();
+        match asked {
+            None => Some(self.read()),
+            Some(asked) if asked.eq_ignore_ascii_case(&own) => Some(self.read()),
+            Some(asked) => self
+                .home
+                .as_ref()
+                .and_then(|home| find_rollout(&home.join("sessions"), asked))
+                .map(|_| top_level(asked, json!({ "type": "idle" }))),
+        }
     }
 
     /// Tells every connection that listens `method` of the thread, as Codex notifies;
@@ -1187,3 +1207,32 @@ mod tests {
         );
     }
 }
+
+/// `thread` as Codex 0.167.0 reads a thread its TUI began on an app-server: `vscode`, no
+/// parent, the user's (T-1414), with `status`. With `CF_TEST_CODEX_LINEAGE=sub-agent`, as it
+/// reads a sub-agent's thread (`subAgent.thread_spawn`, its parent, `subagent`).
+fn top_level(thread: &str, status: Value) -> Value {
+    if own_var("CF_TEST_CODEX_LINEAGE").as_deref() == Some("sub-agent") {
+        return json!({
+            "id": thread,
+            "forkedFromId": null,
+            "parentThreadId": PARENT,
+            "source": { "subAgent": { "thread_spawn": { "parent_thread_id": PARENT, "depth": 1 } } },
+            "threadSource": "subagent",
+            "status": status,
+            "turns": [],
+        });
+    }
+    json!({
+        "id": thread,
+        "forkedFromId": null,
+        "parentThreadId": null,
+        "source": "vscode",
+        "threadSource": "user",
+        "status": status,
+        "turns": [],
+    })
+}
+
+/// The thread a sub-agent's is under, with `CF_TEST_CODEX_LINEAGE=sub-agent`.
+const PARENT: &str = "01a17a05-6f24-7f01-b73d-6e76c4aa01c5";

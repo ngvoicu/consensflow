@@ -407,7 +407,19 @@ fn serve<S: Read + Write + Timed>(
                 hand_over(agent, &request);
                 result(id, json!({ "turn": { "id": "turn-1" } }))
             }
-            Some("thread/read") => result(id, json!({ "thread": agent.read() })),
+            Some("thread/read") => {
+                let asked = request["params"]["threadId"].as_str();
+                match agent.read_of(asked) {
+                    Some(thread) => result(id, json!({ "thread": thread })),
+                    None => json!({
+                        "id": id,
+                        "error": {
+                            "code": -32600,
+                            "message": format!("thread not loaded: {}", asked.unwrap_or_default()),
+                        },
+                    }),
+                }
+            }
             Some("turn/interrupt") => {
                 agent.interrupt();
                 result(id, json!({}))

@@ -7,10 +7,11 @@
 # starts (a file named and unreadable, or empty, opens no window), tells neither program its name,
 # and hands the text to the broker, which gives it to the TUI's main thread starts as their
 # `developerInstructions` (which replace what Codex's configuration says for the thread, so the
-# text holds Codex's own as well), in place of any the TUI named, and to the resumes and forks of the
-# window's own threads the same way (T-1394: a compaction rebuilds the thread's developer message
-# from them; T-1402: told by their ids), and to no side start, no sub-agent's resume, and no side
-# fork. The stand-in Codex begins a thread with what its start names. One plant takes one rule out,
+# text holds Codex's own as well), in place of any the TUI named, and to a resume or a main fork
+# the same way only of a thread Codex's `thread/read` says is top-level, and every thread it was
+# forked from too (T-1414: a compaction rebuilds the thread's developer message from them, T-1388;
+# a sub-agent's thread given them acts as the member, T-1402, T-1412), and to no side start and no
+# side fork. The stand-in Codex begins a thread with what its start names. One plant takes one rule out,
 # or puts the old code back; a test of it fails. The broker's and the supervisor's plants run the
 # crate's own tests, the harness's its role tests and the launch suite (its rule test over both
 # platforms' recordings and the adapter, and the scenarios), the stand-in's its own; the
@@ -48,112 +49,137 @@ runs = ["codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''        let own =
-            main_start || (method == Some("thread/resume") && of_own) || (main_fork && of_own);'''
-replace = '''        let own = (method == Some("thread/resume") && of_own) || (main_fork && of_own);'''
-
-# A resume and fork of the window's own thread are given the role too (T-1394): a compaction
-# rebuilds a thread's developer message from its session's own instructions, and a resumed window
-# given none lost its role at its thread's next compaction (T-1388, Codex 0.167.0). The window's
-# own threads are told by their ids (T-1402): the one it was launched to resume (`resume <id>`),
-# each its main starts began, and their forks. A sub-agent's thread, which the TUI resumes with a
-# request shaped as the window's own when the user selects it, is given none.
+find = '''        let role = self.role.as_deref().filter(|_| main_start);'''
+replace = '''        let role = self.role.as_deref().filter(|_| false);'''
 
 [[plant]]
-name = "codex role file: the broker gives a resume and fork of the window's own thread no role, as before T-1394"
-meant = "a_resume_or_fork_of_the_windows_own_thread_is_given_the_windows_role_in_place_of_the_instructions_it_named"
+name = "codex role file: the broker gives the role to a resume and a fork by their shape, before Codex says what their thread is"
+meant = "no_side_start_resume_fork_or_turn_is_given_the_role"
 runs = ["codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''        let own =
-            main_start || (method == Some("thread/resume") && of_own) || (main_fork && of_own);'''
-replace = '''        let own = main_start;'''
+find = '''        let role = self.role.as_deref().filter(|_| main_start);'''
+replace = '''        let role = self.role.as_deref().filter(|_| main_start || main_resume || main_fork);'''
+
+# A resume or a main fork is given the role only of a thread Codex says is top-level (T-1414), which
+# `broker/lineage.rs` decides from Codex's `thread/read` and the pair waits for. The table
+# (`broker/tests/top_level.rs`) plays each row in one life of the broker and across a reopen.
 
 [[plant]]
-name = "codex role file: the broker gives a fork of the window's own thread no role"
-meant = "a_resume_or_fork_of_the_windows_own_thread_is_given_the_windows_role_in_place_of_the_instructions_it_named"
+name = "codex role file: the broker asks Codex of a resume or fork whatever its shape, a side resume too"
+meant = "a_resume_or_main_fork_names_the_thread_whose_lineage_decides_its_role_and_nothing_else_does"
 runs = ["codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''        let own =
-            main_start || (method == Some("thread/resume") && of_own) || (main_fork && of_own);'''
-replace = '''        let own = main_start || (method == Some("thread/resume") && of_own);'''
+find = '''            .filter(|_| self.role.is_some() && (main_resume || main_fork))'''
+replace = '''            .filter(|_| self.role.is_some())'''
 
 [[plant]]
-name = "codex role file: the broker gives the role by the request's shape, as T-1394 first did (a sub-agent's resume takes it)"
-meant = "a_sub_agents_thread_the_tui_resumes_is_not_given_the_windows_role"
+name = "codex role file: a resume Codex says is top-level goes without the role, as before T-1414"
+meant = "a_resume_and_a_fork_of_a_thread_codex_says_is_top_level_reach_codex_with_the_role_in_place_of_what_they_named"
 runs = ["codex-session"]
 
 [[plant.edit]]
-file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''        let own =
-            main_start || (method == Some("thread/resume") && of_own) || (main_fork && of_own);'''
-replace = '''        let own = main_start || main_resume || main_fork;'''
+file = "crates/cf-codex-session/src/broker/pair.rs"
+find = '''                Some(role) => with_role(&message, &role),'''
+replace = '''                Some(_) => message,'''
 
 [[plant]]
-name = "codex role file: the broker gives the role to every resume and fork, side ones too"
-meant = "no_side_start_side_resume_or_fork_or_turn_is_given_the_role"
+name = "codex role file: what the TUI says while a resume waits for Codex goes before it"
+meant = "what_the_tui_says_while_a_resume_waits_for_codexs_word_follows_it_in_order_and_takes_no_delivery_meanwhile"
 runs = ["codex-session"]
 
 [[plant.edit]]
-file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''        let own =
-            main_start || (method == Some("thread/resume") && of_own) || (main_fork && of_own);'''
-replace = '''        let own = main_start || matches!(method, Some("thread/resume" | "thread/fork"));'''
+file = "crates/cf-codex-session/src/broker/pair.rs"
+find = '''        *self.deciding.borrow_mut() = Some(Deciding {'''
+replace = '''        let _ = Some(Deciding {'''
 
 [[plant]]
-name = "codex role file: a thread a main start or a fork began does not become the window's own"
-meant = "a_resume_or_fork_of_the_windows_own_thread_is_given_the_windows_role_in_place_of_the_instructions_it_named"
+name = "codex role file: a read of another thread is taken for the thread asked"
+meant = "an_answer_that_is_no_read_of_the_thread_asked_says_nothing"
 runs = ["codex-session"]
 
 [[plant.edit]]
-file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''                    self.own.push(thread.to_string());'''
-replace = '''                    let _ = thread;'''
+file = "crates/cf-codex-session/src/broker/lineage.rs"
+find = '''        .is_some_and(|id| id.eq_ignore_ascii_case(asked));'''
+replace = '''        .is_some();'''
 
 [[plant]]
-name = "codex role file: the thread a failed fork named becomes the window's own"
-meant = "a_thread_the_window_did_not_begin_or_resume_is_not_its_own"
+name = "codex role file: a thread with a parent is top-level"
+meant = "a_thread_is_top_level_only_when_every_field_says_so"
 runs = ["codex-session"]
 
 [[plant.edit]]
-file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''        if let (Some(Pending::Switch { own: true, .. }), false) = (&pending, failed) {'''
-replace = '''        if let (Some(Pending::Switch { own: true, .. }), _) = (&pending, failed) {'''
+file = "crates/cf-codex-session/src/broker/lineage.rs"
+find = '''    let no_parent = thread.get("parentThreadId").is_some_and(Value::is_null);'''
+replace = '''    let no_parent = true;'''
 
 [[plant]]
-name = "codex role file: the thread the window was launched to resume is not its own"
-meant = "a_resume_or_fork_of_the_windows_own_thread_is_given_the_windows_role_in_place_of_the_instructions_it_named"
+name = "codex role file: a thread of any source is a user's (an internal session's takes the role)"
+meant = "a_thread_is_top_level_only_when_every_field_says_so"
 runs = ["codex-session"]
 
 [[plant.edit]]
-file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''            own: resumed.into_iter().collect(),'''
-replace = '''            own: resumed.into_iter().filter(|_| false).collect(),'''
+file = "crates/cf-codex-session/src/broker/lineage.rs"
+find = '''        Some("cli" | "vscode" | "exec" | "appServer")'''
+replace = '''        Some(_)'''
 
 [[plant]]
-name = "codex role file: a thread is the window's own only in the case its id was written in"
-meant = "a_resume_or_fork_of_the_windows_own_thread_is_given_the_windows_role_in_place_of_the_instructions_it_named"
+name = "codex role file: a thread of any thread source is a user's (the memory job's takes the role)"
+meant = "a_thread_is_top_level_only_when_every_field_says_so"
 runs = ["codex-session"]
 
 [[plant.edit]]
-file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''        self.own.iter().any(|own| own.eq_ignore_ascii_case(thread))'''
-replace = '''        self.own.iter().any(|own| own == thread)'''
+file = "crates/cf-codex-session/src/broker/lineage.rs"
+find = '''        Some(source) => source.as_str() == Some("user"),'''
+replace = '''        Some(_) => true,'''
 
 [[plant]]
-name = "codex role file: the id after a flag's value is not read for the thread a window resumes"
-meant = "the_thread_a_window_resumes_is_the_id_after_resume"
+name = "codex role file: a thread that names no thread source is not a user's (a user's fork goes without the role)"
+meant = "a_resume_or_fork_is_given_the_windows_role_only_when_codex_says_its_thread_is_top_level"
 runs = ["codex-session"]
 
 [[plant.edit]]
-file = "crates/cf-codex-session/src/arguments.rs"
-find = '''            Some("-c" | "--config" | "--enable" | "--disable" | "--model" | "-m") => {
-                args.next();
-            }'''
-replace = '''            Some("-c" | "--config" | "--enable" | "--disable" | "--model" | "-m") => {}'''
+file = "crates/cf-codex-session/src/broker/lineage.rs"
+find = '''        Some(Value::Null) => true,'''
+replace = '''        Some(Value::Null) => false,'''
+
+[[plant]]
+name = "codex role file: a fork is top-level whatever it was forked from (a fork of a sub-agent's takes the role)"
+meant = "a_resume_or_fork_is_given_the_windows_role_only_when_codex_says_its_thread_is_top_level"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/lineage.rs"
+find = '''                } => asked = from,'''
+replace = '''                } => return !from.is_empty(),'''
+
+[[plant]]
+name = "codex role file: a read Codex refused or never answered says top-level"
+meant = "a_resume_whose_read_codex_never_answers_goes_without_the_role_by_the_deadline"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/lineage.rs"
+find = '''            else {
+                return false;
+            };'''
+replace = '''            else {
+                return true;
+            };'''
+
+[[plant]]
+name = "codex role file rig: a thread Codex calls a sub-agent's is taken for top-level (the regression)"
+meant = "a_codex_members_follow_up_window_on_a_thread_codex_calls_a_sub_agents_is_not_given_the_role"
+runs = ["rig-regression-resumed-role"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/lineage.rs"
+find = '''                Read::Not => return false,'''
+replace = '''                Read::Not => return true,'''
 
 [[plant]]
 name = "codex role file rig: a resumed window is given no role, as before T-1394 (the regression)"
@@ -162,21 +188,9 @@ runs = ["rig-regression-resumed-role"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''        let own =
-            main_start || (method == Some("thread/resume") && of_own) || (main_fork && of_own);'''
-replace = '''        let own = main_start;'''
-
-[[plant]]
-name = "codex role file rig: the supervisor tells the broker of no thread the window resumes (the regression)"
-meant = "a_codex_members_follow_up_window_keeps_its_role_and_ask_command_through_a_compaction"
-runs = ["rig-regression-resumed-role"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-codex-session/src/supervisor.rs"
-find = '''        resumed: arguments::resumed(codex_args),'''
-replace = '''        resumed: None,'''
+file = "crates/cf-codex-session/src/broker/pair.rs"
+find = '''                Some(role) => with_role(&message, &role),'''
+replace = '''                Some(_) => message,'''
 
 [[plant]]
 name = "codex role file: a main start keeps the instructions the TUI named"

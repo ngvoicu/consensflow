@@ -207,8 +207,6 @@ struct Plan<'a> {
     bridge: Bridge,
     /// The developer instructions the window's main threads start with.
     role: Option<String>,
-    /// The thread the window was launched to resume, if it was.
-    resumed: Option<String>,
     /// The configuration its sub-agents start with, which the app-server is told of.
     children: Option<Children>,
     split: Split,
@@ -269,7 +267,6 @@ async fn supervise_with(env: &Env, args: &[OsString], setup: Setup) -> Result<i3
         executable: Path::new(executable),
         bridge,
         role,
-        resumed: arguments::resumed(codex_args),
         children,
         split,
         endpoint,
@@ -369,7 +366,6 @@ impl Session {
             upstream,
             fresh_bypass: plan.bypass,
             role: plan.role.clone(),
-            resumed: plan.resumed.clone(),
             shell_env: consensflow_variables(plan.env),
             board: board_of(plan.env).map(Arc::new),
             question_wait: DOOR_WAIT,

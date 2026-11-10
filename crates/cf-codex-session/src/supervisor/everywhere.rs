@@ -65,7 +65,6 @@ fn neither_of_codexs_programs_is_told_where_the_role_is_nor_given_an_openai_key(
         )
         .unwrap(),
         role: None,
-        resumed: None,
         children: None,
         split: Split::default(),
         endpoint: Endpoint::loopback().unwrap(),

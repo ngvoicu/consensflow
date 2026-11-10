@@ -17,6 +17,7 @@
 mod control;
 mod delivery;
 mod http;
+mod lineage;
 mod pair;
 mod selection;
 mod terminals;
@@ -58,9 +59,6 @@ pub(crate) struct Config {
     /// The developer instructions every main start of the window is given (its
     /// role), read from the file ConsensFlow wrote; none for a window given none.
     pub(crate) role: Option<String>,
-    /// The thread the window was launched to resume, which is its own; none for a window
-    /// that starts its thread.
-    pub(crate) resumed: Option<String>,
     /// ConsensFlow's own variables, each name with its value, which every thread
     /// the TUI starts, resumes or forks is given for its commands.
     pub(crate) shell_env: Vec<(String, String)>,
@@ -114,7 +112,6 @@ impl Broker {
             upstream,
             fresh_bypass,
             role,
-            resumed,
             shell_env,
             board,
             question_wait,
@@ -125,7 +122,7 @@ impl Broker {
             upstream,
             board,
             question_wait,
-            state: RefCell::new(Selection::new(fresh_bypass, role, shell_env, resumed)),
+            state: RefCell::new(Selection::new(fresh_bypass, role, shell_env)),
             control: RefCell::new(None),
             pairs: RefCell::new(HashMap::new()),
             tasks: RefCell::new(Vec::new()),
