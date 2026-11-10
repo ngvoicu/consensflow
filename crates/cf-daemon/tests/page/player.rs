@@ -269,6 +269,12 @@ fn modelled(name: &str, step: &Value) -> Value {
             }
         }
         "project.open" => {
+            // Node's page knew no compaction: a project it opened is on each harness's own
+            // point, which this daemon reads from a request that says `null` (one that says
+            // nothing of it starts on the default size, T-1400).
+            if let Some(fields) = body.as_object_mut() {
+                fields.entry("compaction").or_insert(Value::Null);
+            }
             let opened = step["seams"]
                 .as_array()
                 .into_iter()

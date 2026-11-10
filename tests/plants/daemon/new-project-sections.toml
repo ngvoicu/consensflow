@@ -11,6 +11,7 @@
 nps-page = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "New project|Enter in a field of a section of Project settings|no id is held|described by its own counter"]
 nps-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "opened_with"]
 nps-daemon-opening = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::opening"]
+nps-daemon-compaction = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::compaction"]
 nps-daemon-computer-use = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::computer_use"]
 
 [[plant]]
@@ -52,7 +53,7 @@ runs = ["nps-page"]
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
 find = '''
-    if (compaction !== null) body.compaction = compaction
+    body.compaction = compaction
 '''
 replace = ''
 
@@ -212,7 +213,7 @@ runs = ["nps-page"]
 file = "app/ui/core/compaction.js"
 find = '''
   reset() {
-    this.show(null)
+    this.#start()
   }'''
 replace = '  reset() {}'
 
@@ -318,7 +319,7 @@ runs = ["nps-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/projects.rs"
-find = '            compaction: parse_compaction(value.get("compaction"))?,'
+find = '            compaction: parse_new_compaction(value.get("compaction"))?,'
 replace = '            compaction: None,'
 
 [[plant]]
@@ -338,8 +339,8 @@ runs = ["nps-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/projects.rs"
-find = '            compaction: parse_compaction(value.get("compaction"))?,'
-replace = '            compaction: parse_compaction(value.get("compaction")).unwrap_or(None),'
+find = '            compaction: parse_new_compaction(value.get("compaction"))?,'
+replace = '            compaction: parse_new_compaction(value.get("compaction")).unwrap_or(None),'
 
 [[plant]]
 name = "new project sections: the page leaves the rules out of the request it makes to the ledger"
@@ -378,8 +379,8 @@ runs = ["nps-daemon-opening"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/projects.rs"
-find = '            compaction: parse_compaction(value.get("compaction"))?,'
-replace = '            compaction: parse_compaction(value.get("compaction")).unwrap_or(None),'
+find = '            compaction: parse_new_compaction(value.get("compaction"))?,'
+replace = '            compaction: parse_new_compaction(value.get("compaction")).unwrap_or(None),'
 
 [[plant]]
 name = "new project sections: computer use is not read for a folder"
@@ -624,3 +625,89 @@ replace = '''
         known_project(store, made.id)
     })
 }'''
+
+# A new project's compaction is a size of 300,000 tokens unless the request says null (T-1400). The
+# ledger holds the default and reads a request in JSON that says nothing of it as the default and
+# `null` as the harness's own point; the page says it every time, null for the harness's own point.
+
+[[plant]]
+name = "new project sections: a new project that says nothing of its compaction starts on the harness's own point"
+meant = "a_project_that_says_nothing_of_its_compaction_has_a_size_of_300000_and_logs_it_as_if_said_right_after"
+runs = ["nps-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '        None => Ok(Some(COMPACTION_DEFAULT)),'
+replace = '        None => Ok(None),'
+
+[[plant]]
+name = "new project sections: the default compaction is not 300,000"
+meant = "a_project_that_says_nothing_of_its_compaction_has_a_size_of_300000_and_logs_it_as_if_said_right_after"
+runs = ["nps-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = 'pub const COMPACTION_DEFAULT: u32 = 300_000;'
+replace = 'pub const COMPACTION_DEFAULT: u32 = 400_000;'
+
+[[plant]]
+name = "new project sections: a new project that says null for its compaction starts on the default"
+meant = "a_project_that_says_no_rules_and_the_harness_s_own_point_has_none_and_nothing_is_logged"
+runs = ["nps-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '        None => Ok(Some(COMPACTION_DEFAULT)),'
+replace = '        None | Some(Value::Null) => Ok(Some(COMPACTION_DEFAULT)),'
+
+[[plant]]
+name = "new project sections: the page takes a compaction of null out of the request before the ledger reads it"
+meant = "a_project_opened_with_no_compaction_starts_on_300000_and_null_is_the_harness_s_own_point"
+runs = ["nps-daemon-opening"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '        if let Some(said) = body.get(key) {'
+replace = '        if let Some(said) = body.get(key).filter(|said| !said.is_null()) {'
+
+[[plant]]
+name = "new project sections: the start leaves the harness's own point out of the request, which the daemon reads as the default"
+meant = "New project started without touching the compaction asks for a size of 300,000, and the harness's own point is asked for as none"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''
+    body.compaction = compaction
+'''
+replace = '''
+    if (compaction !== null) body.compaction = compaction
+'''
+
+[[plant]]
+name = "new project sections: New project opens on a size the ledger does not default to"
+meant = "the_pages_range_for_the_size_is_the_ledgers"
+runs = ["nps-daemon-compaction"]
+
+[[plant.edit]]
+file = "app/ui/core/compaction.js"
+find = 'const DEFAULT_SIZE = 300_000'
+replace = 'const DEFAULT_SIZE = 250_000'
+
+[[plant]]
+name = "new project sections: New project opens on the harness's own point"
+meant = "New project has Staff, the rules for the staff, compaction, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has"
+runs = ["nps-page"]
+
+[[plant.edit]]
+file = "app/ui/core/compaction.js"
+find = '''
+    this.#own.checked = false
+    this.#size.checked = true
+    this.#amount.value = String(DEFAULT_SIZE)
+'''
+replace = '''
+    this.#own.checked = true
+    this.#size.checked = false
+    this.#amount.value = ''
+'''

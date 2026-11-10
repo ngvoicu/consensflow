@@ -51,6 +51,31 @@ fn only_a_whole_number_is_a_size() {
 }
 
 #[test]
+fn a_new_project_that_says_nothing_starts_on_300000_and_only_null_is_the_harness_s_own_point() {
+    assert_eq!(COMPACTION_DEFAULT, 300_000);
+    assert!((COMPACTION_MIN..=COMPACTION_MAX).contains(&COMPACTION_DEFAULT));
+    assert_eq!(
+        parse_new_compaction(None).unwrap(),
+        Some(COMPACTION_DEFAULT)
+    );
+    assert_eq!(parse_new_compaction(Some(&json!(null))).unwrap(), None);
+    assert_eq!(
+        parse_new_compaction(Some(&json!(250_000))).unwrap(),
+        Some(250_000)
+    );
+    // What is said and is no size is refused, as a change to a project refuses it.
+    for value in [json!(99_999), json!("300000"), json!(true)] {
+        assert_eq!(
+            parse_new_compaction(Some(&value)).map_err(|refused| refused.to_string()),
+            Err(WORDS.to_owned()),
+            "{value}"
+        );
+    }
+    // A change to an existing project that says nothing is still the harness's own point.
+    assert_eq!(parse_compaction(None).unwrap(), None);
+}
+
+#[test]
 fn the_range_is_claudes_own_hundred_thousand_to_a_million() {
     assert_eq!(COMPACTION_MIN, 100_000);
     assert_eq!(COMPACTION_MAX, 1_000_000);

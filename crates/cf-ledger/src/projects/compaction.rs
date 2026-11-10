@@ -1,7 +1,10 @@
 //! The size the human chooses for every member window of a project to compact at,
 //! whatever its harness, in Project settings ("Compaction"), from [`COMPACTION_MIN`] to
-//! [`COMPACTION_MAX`] tokens. None is each harness's own point, which every project has
-//! until the human chooses a size. It is kept on the project's row (`project.compaction`,
+//! [`COMPACTION_MAX`] tokens. None is each harness's own point: a project made before
+//! [`COMPACTION_DEFAULT`] has it until the human chooses a size, and a new project has it
+//! only where the request says `null` (no migration rewrites an existing project's
+//! value). A new project whose request says nothing of it starts on the default (T-1400).
+//! It is kept on the project's row (`project.compaction`,
 //! which migration 0034 renamed from 0026's `claude_compaction`: it was Claude's alone
 //! until Phase 7 of smaller-contexts) and logged when it changes (`project.compaction`,
 //! with what it was and what it became). Only the page writes it: no route of the agents'
@@ -25,6 +28,13 @@ pub const COMPACTION_MIN: u32 = 100_000;
 
 /// The largest size: the most Claude Code takes for its compaction window.
 pub const COMPACTION_MAX: u32 = 1_000_000;
+
+/// The size a new project starts on where its request says nothing of it: 300,000 tokens
+/// (T-1400). A size above a model's own window leaves that harness's own point, so a model
+/// with a smaller window is given none. It is the ledger's default for a request in JSON
+/// only; the page's New project opens on it too (`app/ui/core/compaction.js`, held to this
+/// by a test of the daemon).
+pub const COMPACTION_DEFAULT: u32 = 300_000;
 
 fn refused() -> LedgerError {
     LedgerError::refused(
@@ -54,6 +64,17 @@ pub fn parse_compaction(value: Option<&Value>) -> Result<Option<u32>, LedgerErro
             size_of(u32::try_from(tokens).map_err(|_| refused())?).map(Some)
         }
         Some(_) => Err(refused()),
+    }
+}
+
+/// `value` as a new project's request says it: a request that says nothing (no `compaction`)
+/// starts on [`COMPACTION_DEFAULT`], `null` is each harness's own point, and a size is what
+/// [`parse_compaction`] takes. A change to an existing project (`project.compaction`) is
+/// read by [`parse_compaction`] alone: it says nothing, or `null`, for the harness's own point.
+pub(crate) fn parse_new_compaction(value: Option<&Value>) -> Result<Option<u32>, LedgerError> {
+    match value {
+        None => Ok(Some(COMPACTION_DEFAULT)),
+        given => parse_compaction(given),
     }
 }
 

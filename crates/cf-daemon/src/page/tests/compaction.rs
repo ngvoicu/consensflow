@@ -5,7 +5,7 @@
 //! whosever token it holds. And the page's own range is the ledger's.
 //! Not held to a Node recording: this operation is this build's own.
 
-use cf_ledger::{COMPACTION_MAX, COMPACTION_MIN};
+use cf_ledger::{COMPACTION_DEFAULT, COMPACTION_MAX, COMPACTION_MIN};
 use hyper::Method;
 
 use super::reading::home_with;
@@ -187,11 +187,16 @@ async fn a_windows_token_reaches_no_route_that_writes_the_size_so_only_the_human
 }
 
 /// The page checks the size the human types against the range and says it in its
-/// words: its copy of the range is held to the ledger's.
+/// words: its copy of the range is held to the ledger's, and so is the size New project
+/// opens on (T-1400).
 #[test]
 fn the_pages_range_for_the_size_is_the_ledgers() {
     let source = include_str!("../../../../../app/ui/core/compaction.js");
-    for (constant, value) in [("LEAST", COMPACTION_MIN), ("MOST", COMPACTION_MAX)] {
+    for (constant, value) in [
+        ("LEAST", COMPACTION_MIN),
+        ("MOST", COMPACTION_MAX),
+        ("DEFAULT_SIZE", COMPACTION_DEFAULT),
+    ] {
         let line = format!("const {constant} = {}\n", group(value));
         assert!(
             source.contains(&line),

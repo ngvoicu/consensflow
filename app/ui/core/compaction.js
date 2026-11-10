@@ -1,7 +1,9 @@
 /**
  * The "Compaction" section of Project settings: the size at which the human has every
  * member window of the project compact, whatever its harness, or each harness's own
- * point (the default, which changes nothing). Each member's launch gives it its harness
+ * point (what a project made before the default has until a size is chosen, and a choice
+ * in New project). A new project opens on a size of 300,000 tokens (T-1400); a project
+ * with none shows the harness's own point as it always did. Each member's launch gives it its harness
  * by that harness's own rule (smaller-contexts, SCX-28 to SCX-30), from 100,000 to
  * 1,000,000 tokens; a size above a model's own window leaves the harness's own point.
  * The chief is never given it. Only the
@@ -18,8 +20,11 @@ const LEAST = 100_000
 /** The largest size: the ledger's `COMPACTION_MAX`. */
 const MOST = 1_000_000
 
-/** The size a first choice starts from: the one the project proposal measured. */
-const START_AT = 400_000
+/**
+ * The size a new project starts on, and a first choice of a size in Project settings: the
+ * ledger's `COMPACTION_DEFAULT`, which a test of the daemon holds this to.
+ */
+const DEFAULT_SIZE = 300_000
 
 /** A number as the hint says it: 100,000. */
 const said = (count) => count.toLocaleString('en')
@@ -61,7 +66,7 @@ export class Compaction {
     }
     this.#amount.addEventListener('input', () => this.#checked())
     this.#save.addEventListener('click', () => void this.#saved())
-    this.show(null)
+    this.#start()
   }
 
   /** Shows the choice `project` has, as its board says it: the harness's own point for a project with none. */
@@ -79,10 +84,10 @@ export class Compaction {
     this.#hint.hidden = words === ''
   }
 
-  /** A choice between the harness's own point and a size: a first size starts from the proposal's. */
+  /** A choice between the harness's own point and a size: a first size starts from the default. */
   #chosen() {
     if (this.#size.checked && this.#amount.value.trim() === '') {
-      this.#amount.value = String(START_AT)
+      this.#amount.value = String(DEFAULT_SIZE)
     }
     this.#say('')
     this.#checked()
@@ -99,12 +104,25 @@ export class Compaction {
     this.#say(bad ? `A size is a whole number from ${said(LEAST)} to ${said(MOST)}.` : '')
   }
 
-  /** The section as it is for a project with no choice: a new project's start. */
-  reset() {
-    this.show(null)
+  /** The section as a new project starts: a size chosen, the default's. */
+  #start() {
+    this.#own.checked = false
+    this.#size.checked = true
+    this.#amount.value = String(DEFAULT_SIZE)
+    this.#say('')
+    this.#checked()
   }
 
-  /** What a new project starts with: the size chosen, or none for each harness's own point. */
+  /** The section as a new project starts it again, whatever was chosen in it before. */
+  reset() {
+    this.#start()
+  }
+
+  /**
+   * What a new project starts with: the size chosen, or null for each harness's own point,
+   * which the project is asked to start with as it is: a request that says nothing starts on
+   * the default.
+   */
   values() {
     return this.#size.checked ? sizeOf(this.#amount.value) : null
   }

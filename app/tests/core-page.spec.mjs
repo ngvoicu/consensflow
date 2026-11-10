@@ -711,7 +711,8 @@ async function open(page, data = model()) {
         if (data.openMakesBoard) {
           Object.assign(project, { state: 'open', gate: body.gate === true })
           if (body.rules !== undefined) project.staffRules = body.rules
-          if (body.compaction !== undefined) project.compaction = body.compaction
+          // The daemon's board says a size only where there is one: null is the harness's own point.
+          if (typeof body.compaction === 'number') project.compaction = body.compaction
           data.projects.push(project)
           data.boards[3] = {
             project,
@@ -4431,6 +4432,7 @@ test("asks the chief's effort where its model lists efforts, and sends it with t
         model: 'claude-opus-5-5',
         effort: 'high',
         gate: false,
+        compaction: 300000,
         staff: [],
       },
     ])
@@ -5369,6 +5371,7 @@ test('starts a project with human approval required, and posts the checkbox with
         harness: 'claude-code',
         model: 'claude-sonnet-5',
         gate: true,
+        compaction: 300000,
         staff: [],
       },
     ])
@@ -5395,7 +5398,14 @@ test('starts no project until its chief is picked, a harness and one of its mode
   await expect
     .poll(() => calls(page, 'project.open'))
     .toEqual([
-      { directory: '/work/fresh', harness: 'pi', model: 'meta/muse-spark', gate: false, staff: [] },
+      {
+        directory: '/work/fresh',
+        harness: 'pi',
+        model: 'meta/muse-spark',
+        gate: false,
+        compaction: 300000,
+        staff: [],
+      },
     ])
   await expect(dialog).toBeHidden()
 })
@@ -5502,13 +5512,15 @@ test('New project has Staff, the rules for the staff, compaction, Human approval
   await expect(made.specs.variant).toHaveValue('')
   await expect(made.specs.variant.locator('option:checked')).toHaveText('As the app says (core)')
   await expect(made.specs.version).toHaveText('Specmint 3.0.0')
-  // The rules and the compaction as a project that never said any has them.
+  // The rules as a project that never said any has them, and the compaction as a new project
+  // has it: a size of 300,000 tokens (T-1400), the harness's own point a choice.
   await expect(made.rules.text).toHaveValue('')
   await expect(made.rules.count).toHaveText('0 of 8,000 bytes · 0 of 150 lines')
-  await expect(made.compaction.own).toBeChecked()
-  await expect(made.compaction.size).not.toBeChecked()
-  await expect(made.compaction.tokens).toBeDisabled()
-  await expect(made.compaction.tokens).toHaveValue('')
+  await expect(made.compaction.size).toBeChecked()
+  await expect(made.compaction.own).not.toBeChecked()
+  await expect(made.compaction.tokens).toBeEnabled()
+  await expect(made.compaction.tokens).toHaveValue('300000')
+  await expect(made.compaction.hint).toBeHidden()
   // Nothing is saved before there is a project: no Save, and nothing of when a change reaches the chief.
   await expect(made.rules.save).toBeHidden()
   await expect(made.compaction.save).toBeHidden()
@@ -5564,6 +5576,7 @@ test('New project has Staff, the rules for the staff, compaction, Human approval
         harness: 'claude-code',
         model: 'claude-sonnet-5',
         gate: false,
+        compaction: 300000,
         staff: [
           {
             harness: 'claude-code',
@@ -5600,6 +5613,7 @@ test('New project: starts a project with its approval, wake-up calls and specs s
         harness: 'claude-code',
         model: 'claude-sonnet-5',
         gate: true,
+        compaction: 300000,
         staff: [],
         wakeUp: { on: true, every: 2, unit: 'days', text: 'Anything left on the board?' },
         specs: { on: true, folder: 'docs/specs', variant: 'tdd' },
@@ -5632,6 +5646,7 @@ test('New project: says all of its specs and all of its wake-up calls once eithe
         harness: 'claude-code',
         model: 'claude-sonnet-5',
         gate: false,
+        compaction: 300000,
         staff: [],
         wakeUp: { on: false, every: 45, unit: 'minutes', text: DEFAULT_WAKE_UP_WORDS },
         specs: { on: null, folder: null, variant: 'core-html' },
@@ -5976,9 +5991,9 @@ test('New project opens on the defaults every time: what was set in it before is
   await page.getByRole('button', { name: 'New project' }).click()
   await expect(made.rules.text).toHaveValue('')
   await expect(made.rules.count).toHaveText('0 of 8,000 bytes · 0 of 150 lines')
-  await expect(made.compaction.own).toBeChecked()
-  await expect(made.compaction.tokens).toHaveValue('')
-  await expect(made.compaction.tokens).toBeDisabled()
+  await expect(made.compaction.size).toBeChecked()
+  await expect(made.compaction.tokens).toHaveValue('300000')
+  await expect(made.compaction.tokens).toBeEnabled()
   await expect(made.approval).not.toBeChecked()
   await expect(made.calls.on).not.toBeChecked()
   await expect(made.calls.every).toHaveValue('1')
@@ -5987,6 +6002,60 @@ test('New project opens on the defaults every time: what was set in it before is
   await expect(made.specs.folder).toHaveValue('')
   await expect(made.specs.variant).toHaveValue('')
   await expect(made.specs.folder).toBeEnabled()
+})
+
+test("New project started without touching the compaction asks for a size of 300,000, and the harness's own point is asked for as none", async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+        compaction: 300000,
+      },
+    ])
+  // The harness's own point is still a choice: said as null, which the daemon reads as none
+  // (a request that said nothing starts on the size).
+  await page.getByRole('button', { name: 'New project' }).click()
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await made.compaction.own.check()
+  await expect(made.compaction.tokens).toBeDisabled()
+  await made.start.click()
+  await expect.poll(() => calls(page, 'project.open')).toHaveLength(2)
+  expect((await calls(page, 'project.open'))[1]).toEqual({
+    directory: '/work/fresh',
+    harness: 'claude-code',
+    model: 'claude-sonnet-5',
+    gate: false,
+    staff: [],
+    compaction: null,
+  })
+})
+
+test('New project made without touching the compaction opens in Project settings on its size of 300,000', async ({
+  page,
+}) => {
+  const data = model()
+  data.openMakesBoard = true
+  await open(page, data)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await made.start.click()
+  await expect(made.dialog).toBeHidden()
+  await expect(page.locator('#project-title')).toHaveText('new')
+  const section = await compactionGroup(page)
+  await expect(section.size).toBeChecked()
+  await expect(section.own).not.toBeChecked()
+  await expect(section.amount).toHaveValue('300000')
 })
 
 /** The legends of a dialog's sections, in the order they are drawn, hidden ones too. */
@@ -6042,10 +6111,10 @@ test('New project: the rules for the staff and the compaction are written as the
   await made.rules.text.fill(STAFF_RULES)
   await expect(made.rules.count).toHaveText('75 of 8,000 bytes · 2 of 150 lines')
   await expect(made.rules.group).toContainText('No secrets: no passwords, tokens or keys')
-  // A size is checked as it is typed, and a first one starts from the proposal's.
-  await made.compaction.size.check()
+  // A size is checked as it is typed, and New project opens on the default's.
+  await expect(made.compaction.size).toBeChecked()
   await expect(made.compaction.tokens).toBeEnabled()
-  await expect(made.compaction.tokens).toHaveValue('400000')
+  await expect(made.compaction.tokens).toHaveValue('300000')
   await made.compaction.tokens.fill('250000')
   await expect(made.compaction.hint).toBeHidden()
   await made.start.click()
@@ -6207,6 +6276,7 @@ test("New project: computer use is read for the folder picked, shown while the c
   await made.start.click()
   await expect.poll(async () => (await calls(page, 'project.open')).length).toBe(1)
   expect(Object.keys((await calls(page, 'project.open'))[0]).sort()).toEqual([
+    'compaction',
     'directory',
     'gate',
     'harness',
@@ -6763,6 +6833,7 @@ test('New project says what following the app means as Project settings does, an
         harness: 'claude-code',
         model: 'claude-sonnet-5',
         gate: false,
+        compaction: 300000,
         staff: [],
       },
     ])
@@ -6993,10 +7064,10 @@ test("saves the choice of a size by its own Save, shows what the daemon kept, an
 }) => {
   await open(page)
   const section = await compactionGroup(page)
-  // A first size starts from the one the proposal measured.
+  // A first size starts from the one a new project starts on: 300,000.
   await section.size.check()
   await expect(section.amount).toBeEnabled()
-  await expect(section.amount).toHaveValue('400000')
+  await expect(section.amount).toHaveValue('300000')
   await section.amount.fill('250000')
   expect(await calls(page, 'project.compaction')).toEqual([])
   await section.save.click()
@@ -10369,6 +10440,7 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
         harness: 'pi',
         model: 'meta/muse-spark',
         gate: false,
+        compaction: 300000,
         staff: [
           {
             harness: 'claude-code',

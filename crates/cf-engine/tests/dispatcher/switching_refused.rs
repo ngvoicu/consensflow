@@ -66,10 +66,13 @@ fn keeps_a_chief_on_its_harnesss_own_default_model_as_it_is_until_switch_chief_m
 ) {
     let context = with_codex();
     // Opened before a chief was always a saved agent: its record names none.
+    // Node's ledger knew no compaction, so the trace this test is held to has no
+    // `project.compaction` event: the project is on each harness's own point (T-1400).
     let created = NewProject::from_json(&json!({
         "directory": "/work/app",
         "name": "app",
         "chief": { "harness": "claude-code" },
+        "compaction": null,
     }))
     .unwrap();
     let project = context

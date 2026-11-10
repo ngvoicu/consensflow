@@ -17,8 +17,8 @@ use cf_proto::specs::SpecsView;
 use rusqlite::{params, OptionalExtension, Row};
 use serde_json::{json, Value};
 
-pub(crate) use compaction::set_compaction;
-pub use compaction::{parse_compaction, COMPACTION_MAX, COMPACTION_MIN};
+pub use compaction::{parse_compaction, COMPACTION_DEFAULT, COMPACTION_MAX, COMPACTION_MIN};
+pub(crate) use compaction::{parse_new_compaction, set_compaction};
 pub use describing::parse_description;
 pub(crate) use describing::{describe_project, rename_project};
 pub(crate) use staff_rules::set_staff_rules;
@@ -153,7 +153,9 @@ pub struct NewProject {
     /// The rules the human wrote for its staff; none starts it with none.
     pub staff_rules: Option<String>,
     /// The size, in tokens, the human chose for its members' windows to compact
-    /// at; none starts it on each harness's own point.
+    /// at; none starts it on each harness's own point. A request in JSON that says
+    /// nothing of it is read as [`COMPACTION_DEFAULT`] (`from_json`), and one that says
+    /// `null` as none; a request built by hand says it either way.
     pub compaction: Option<u32>,
 }
 
@@ -204,7 +206,7 @@ impl NewProject {
             wake_up: NewWakeUp::from_opening(value.get("wakeUp"))?,
             specs: SpecsChange::from_opening(value.get("specs"))?,
             staff_rules: parse_staff_rules(value.get("rules"))?,
-            compaction: parse_compaction(value.get("compaction"))?,
+            compaction: parse_new_compaction(value.get("compaction"))?,
         })
     }
 }

@@ -408,12 +408,12 @@ fn a_project_opened_with_rules_and_a_compaction_has_them_when_it_is_first_seen_a
 }
 
 #[test]
-fn a_project_that_says_no_rules_and_no_size_has_none_and_nothing_is_logged() {
+fn a_project_that_says_no_rules_and_the_harness_s_own_point_has_none_and_nothing_is_logged() {
     let dir = tempfile::tempdir().expect("a home");
     let mut ledger = ledger_in(&dir);
     for said in [
-        json!({}),
         json!({ "rules": null, "compaction": null }),
+        json!({ "compaction": null }),
         json!({ "rules": "  \n ", "compaction": null }),
     ] {
         let request = NewProject::from_json(&asked_with(said.clone())).expect("a request");
@@ -434,6 +434,83 @@ fn a_project_that_says_no_rules_and_no_size_has_none_and_nothing_is_logged() {
             "{said}"
         );
     }
+}
+
+/// A new project that says nothing of its compaction (a request with no `compaction`, as `cf`,
+/// the API, the kit and the evals ask) has a size of 300,000 tokens, kept in the write that makes
+/// it and logged as if the human had said it right after; only an explicit `null` is each
+/// harness's own point (T-1400).
+#[test]
+fn a_project_that_says_nothing_of_its_compaction_has_a_size_of_300000_and_logs_it_as_if_said_right_after(
+) {
+    let dir = tempfile::tempdir().expect("a home");
+    let mut ledger = ledger_in(&dir);
+    for said in [
+        json!({}),
+        json!({ "rules": null }),
+        json!({ "rules": RULES }),
+    ] {
+        let request = NewProject::from_json(&asked_with(said.clone())).expect("a request");
+        assert_eq!(request.compaction, Some(300_000), "{said}");
+        let opened = ledger.create_project(&request).expect("a project");
+        assert_eq!(opened.compaction, Some(300_000), "{said}");
+        let view = serde_json::to_value(&opened).expect("the view");
+        assert_eq!(view["compaction"], 300_000, "{said}");
+        assert_eq!(
+            ledger
+                .project(opened.id)
+                .expect("read")
+                .expect("it is there")
+                .compaction,
+            Some(300_000),
+            "{said}"
+        );
+        assert_eq!(
+            logged(&ledger, opened.id, &["project.compaction"]),
+            [(
+                "project.compaction".to_owned(),
+                json!({ "from": null, "to": 300_000 })
+            )],
+            "{said}"
+        );
+    }
+    // A size said is the size, and the default is no size said by anyone else.
+    let request =
+        NewProject::from_json(&asked_with(json!({ "compaction": 250_000 }))).expect("a request");
+    assert_eq!(request.compaction, Some(250_000));
+    // A project made by hand as the harness's own point stays on it.
+    let own = ledger.create_project(&project("own")).expect("a project");
+    assert_eq!(own.compaction, None);
+}
+
+/// An existing project whose compaction is unset keeps the harness's own point: opening its
+/// ledger again (which runs the migrations) writes no size into it, and nothing is logged. A
+/// guard that holds before and after the default (T-1400), for a row the default never made.
+#[test]
+fn a_project_whose_compaction_is_unset_keeps_the_harness_s_own_point_when_its_ledger_is_opened_again(
+) {
+    let dir = tempfile::tempdir().expect("a home");
+    let id = {
+        let mut ledger = ledger_in(&dir);
+        ledger
+            .create_project(&project("old"))
+            .expect("a project")
+            .id
+    };
+    let ledger = ledger_in(&dir);
+    let read = ledger.project(id).expect("read").expect("it is there");
+    assert_eq!(read.compaction, None);
+    assert_eq!(logged(&ledger, id, &["project.compaction"]), []);
+    assert_eq!(
+        ledger
+            .projects()
+            .expect("the list")
+            .into_iter()
+            .find(|listed| listed.id == id)
+            .expect("listed")
+            .compaction,
+        None
+    );
 }
 
 /// A request in JSON is read by `NewProject::from_json` and refused there, before any write: it

@@ -1025,7 +1025,8 @@ export class NewProjectDialog {
     if (wakeUp !== null) body.wakeUp = wakeUp
     if (specs !== null) body.specs = specs
     if (rules !== null) body.rules = rules
-    if (compaction !== null) body.compaction = compaction
+    // Always said, null for the harness's own point: a request that says nothing starts on the default.
+    body.compaction = compaction
     this.#say('')
     let refused = null
     try {
