@@ -5,7 +5,8 @@
 use cf_base::js;
 use cf_ledger::model::{parse_gate, parse_meeting};
 use cf_ledger::{
-    parse_compaction, parse_description, parse_name, parse_staff_rules, NewMember, NewProject,
+    parse_advisor_tool, parse_compaction, parse_description, parse_name, parse_staff_rules,
+    NewMember, NewProject,
 };
 use serde_json::{json, Map, Value};
 
@@ -69,7 +70,14 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
             "modelName": chief.model_name,
         }),
     );
-    for key in ["gate", "wakeUp", "specs", "rules", "compaction"] {
+    for key in [
+        "gate",
+        "wakeUp",
+        "specs",
+        "rules",
+        "compaction",
+        "advisorTool",
+    ] {
         if let Some(said) = body.get(key) {
             request.insert(key.to_owned(), said.clone());
         }
@@ -218,6 +226,21 @@ pub(super) async fn compaction(page: &Page, body: Body<'_>) -> Result<Fields, Sa
         .ledger
         .borrow_mut()
         .set_compaction(body.whole("project")?, size)?;
+    one("project", project)
+}
+
+/// `project.advisor_tool`: whether the human has the project's members run with Claude
+/// Code's own advisor tool: a flag, checked before the project is looked for. Off is every
+/// project's until it is ticked. Only the page chooses it: no route of the agents' API does,
+/// so no `cf` command, the chief's or a member's, changes it. Each member window of the
+/// project is given the switch when it next starts (the Claude adapter's launch); an open
+/// window keeps what it began with, and the chief's never is given it.
+pub(super) async fn advisor_tool(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let on = parse_advisor_tool(body.get("advisorTool"))?;
+    let project = page
+        .ledger
+        .borrow_mut()
+        .set_advisor_tool(body.whole("project")?, on)?;
     one("project", project)
 }
 
@@ -421,6 +444,7 @@ mod tests {
                     specs: None,
                     staff_rules: None,
                     compaction: None,
+                    advisor_tool: false,
                 },
                 "{what}"
             );

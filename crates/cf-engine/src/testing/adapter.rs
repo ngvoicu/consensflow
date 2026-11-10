@@ -1177,7 +1177,14 @@ impl Asked {
                 Err(reason)
             });
         }
-        fake.prepared.borrow_mut().push(asked);
+        // What a test sees of a launch holds the advisor switch where it is on, which is every
+        // member's of a project that has not ticked "Advisor tool"; the call written down above
+        // does not, so no recorded trace moves for a key Node's never had.
+        let mut seen = asked;
+        if launch.advisor_off {
+            seen["advisorOff"] = json!(true);
+        }
+        fake.prepared.borrow_mut().push(seen);
         fake.first_message_ms
             .borrow_mut()
             .push(launch.first_message_ms);

@@ -418,6 +418,7 @@ async fn an_operation_is_begun_where_its_frame_is_read_and_its_turns_end_before_
         .await;
 }
 
+mod advisor_tool;
 mod app_specs;
 mod compaction;
 mod computer_use;

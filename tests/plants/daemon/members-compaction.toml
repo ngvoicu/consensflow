@@ -129,9 +129,9 @@ runs = ["mc-ledger-described"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/projects.rs"
 find = '''        compaction: row.compaction,
-    }))'''
+'''
 replace = '''        compaction: None,
-    }))'''
+'''
 
 [[plant]]
 name = "members compaction: a project on the harness's own point has the key of it in its view"
@@ -193,8 +193,8 @@ runs = ["mc-proto-page"]
 [[plant.edit]]
 file = "app/src-tauri/src/commands.rs"
 find = '''    "project.compaction",
-    "models.get",'''
-replace = '''    "models.get",'''
+    "project.advisor_tool",'''
+replace = '''    "project.advisor_tool",'''
 
 [[plant]]
 name = "members compaction: the page's lowest size is not the ledger's"

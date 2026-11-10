@@ -111,6 +111,7 @@ impl Root {
                 specs: None,
                 staff_rules: None,
                 compaction: None,
+                advisor_tool: false,
             })
             .expect("a project");
         let question = ledger

@@ -63,6 +63,7 @@ fn launch<'a>(id: &'a LaunchId, resume: Option<&'a str>) -> Launch<'a> {
         instructions: "# ConsensFlow worker",
         specs: None,
         compaction: None,
+        advisor_off: false,
         first_message_ms: 1,
         starts_given_up: 0,
     }
@@ -486,6 +487,43 @@ fn a_role_that_needs_more_hooks_than_muse_was_measured_to_take_is_refused_in_wor
     assert!(prepared_with(&env, None, &allowed).is_ok());
 }
 
+/// Claude Code's own advisor tool (A5-20): Muse Code has none (a strict scan of 1.4.15's binary
+/// for the word found only its public-suffix domain list), so a Muse member's launch is the
+/// launch it always was whether the project has its members run with the tool or not (the
+/// engine tells every harness the same; only Claude's adapter acts on it).
+#[test]
+fn a_muse_members_launch_is_the_same_whether_the_advisor_tool_is_switched_off_or_not() {
+    let home = tempfile::tempdir().unwrap();
+    let env = installed(home.path(), Some("1.4.14-R7309.1"));
+    let id = LaunchId::new(LAUNCH).unwrap();
+    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+        for resume in [None, Some("0f8fad5b-d9cb-469f-a165-70867728950e")] {
+            let prepare = |advisor_off: bool| {
+                let launch = Launch {
+                    role,
+                    advisor_off,
+                    ..launch(&id, resume)
+                };
+                finished(adapter(&env).prepare(&launch)).unwrap()
+            };
+            let (plain, off) = (prepare(false), prepare(true));
+            assert_eq!(
+                off.argv, plain.argv,
+                "{role} {resume:?}: the same command line"
+            );
+            assert_eq!(
+                off.env, plain.env,
+                "{role} {resume:?}: the same environment"
+            );
+            assert_eq!(off.drop_env, plain.drop_env, "{role} {resume:?}");
+            assert_eq!(
+                off.native_session, plain.native_session,
+                "{role} {resume:?}"
+            );
+        }
+    }
+}
+
 /// The words a launch gives Muse its compaction limit by, where it gives one.
 fn limits_of(argv: &[String]) -> Vec<String> {
     argv.windows(2)
@@ -565,6 +603,7 @@ fn the_size_is_given_to_a_window_resumed_as_to_one_launched() {
     let id = LaunchId::new(LAUNCH).unwrap();
     let launch = Launch {
         compaction: Some(250_000),
+        advisor_off: false,
         ..launch(&id, Some("01a17923-56fa-7f60-9d86-84709f9d4b25"))
     };
     let argv = finished(adapter(&env).prepare(&launch)).unwrap().argv;
