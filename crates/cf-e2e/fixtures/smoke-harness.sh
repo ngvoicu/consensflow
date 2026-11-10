@@ -26,8 +26,11 @@
 LC_ALL=C
 export LC_ALL
 # The daemon's read of the models Claude Code lists (`claude -p --input-format stream-json`: no
-# window, no turn) is answered here with the models the rig seats on the script, and ends with
-# the input; it draws nothing and notes no pid of a window (A4-28, T-1329).
+# window, no turn) is answered here with the models the rig seats on the script and the two the
+# page's self-test opens its project with (a chief on claude-fable-5-1, a worker on terpsichore:
+# the daemon takes no model its harness does not list, and the smoke is red on a built app and
+# nowhere else without them, T-1362), and ends with the input; it draws nothing and notes no pid
+# of a window (A4-28, T-1329).
 if [ "$1" = "-p" ]; then
   while IFS= read -r line; do
     case "$line" in
@@ -36,7 +39,7 @@ if [ "$1" = "-p" ]; then
         id=${id%%'"'*}
         printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s","response":{"models":[' "$id"
         sep=''
-        for model in fake fake-2 fake-chief chief worker; do
+        for model in fake fake-2 fake-chief chief worker claude-fable-5-1 terpsichore; do
           printf '%s{"value":"%s","displayName":"%s","resolvedModel":"%s","supportsEffort":false}' "$sep" "$model" "$model" "$model"
           sep=','
         done

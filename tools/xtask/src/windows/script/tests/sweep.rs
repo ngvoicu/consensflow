@@ -179,71 +179,6 @@ fn what_is_removed_is_removed_without_a_question_and_said_and_what_is_not_ends_t
 }
 
 #[test]
-fn the_tarballs_runs_left_beside_the_copy_are_taken_away_an_hour_after_they_were_written() {
-    let text = sweep_script();
-    let at = |what: &str| {
-        text.find(what)
-            .unwrap_or_else(|| panic!("{what} is not there: {text}"))
-    };
-    // Named by the copy's folder, with a dot in it a dot: the names `upload_name` makes,
-    // and the one the runs had before each had its own.
-    assert!(
-        text.contains(
-            r"$own = '^' + [regex]::Escape($root.Name) + '(\.[0-9a-f]{8}-[0-9a-f]{8})?\.tgz$'"
-        ),
-        "{text}"
-    );
-    assert!(text.contains("$beside = $root.Parent.FullName\n"), "{text}");
-    let line = line_with(&text, "$_.Name -match $own");
-    assert!(
-        line.contains("Get-ChildItem -LiteralPath $beside -File"),
-        "{line}"
-    );
-    assert!(
-        line.contains("$_.Name -match $own -and $_.LastWriteTime -lt (Get-Date).AddHours(-1)"),
-        "{line}"
-    );
-    // It never fails the run, and it comes after the sweep has said what it removed.
-    assert!(
-        line.starts_with("try { ") && line.ends_with(" } catch {}"),
-        "{line}"
-    );
-    assert!(at("== removed $name") < at("$_.Name -match $own"));
-    assert!(at("$failed.Count") < at("$_.Name -match $own"));
-}
-
-#[test]
-fn the_uploads_of_a_folder_that_is_gone_are_taken_away_a_day_after_they_were_written() {
-    let text = sweep_script();
-    // Any `<folder>.<id>.tgz` beside the copy whose folder is no folder there any more,
-    // written to more than a day ago (a folder in use keeps its uploads an hour; these
-    // belong to runs of folders nobody removes the tarballs of).
-    assert!(
-        text.contains(r"$left = '^(?<folder>.+)\.[0-9a-f]{8}-[0-9a-f]{8}\.tgz$'"),
-        "{text}"
-    );
-    let line = line_with(&text, "$_.Name -match $left");
-    assert!(
-        line.contains("Get-ChildItem -LiteralPath $beside -File"),
-        "{line}"
-    );
-    assert!(
-        line.contains("-and -not (Test-Path -LiteralPath (Join-Path $beside $Matches.folder))"),
-        "{line}"
-    );
-    assert!(
-        line.contains("-and $_.LastWriteTime -lt (Get-Date).AddDays(-1)"),
-        "{line}"
-    );
-    assert!(
-        line.starts_with("try { ") && line.ends_with(" } catch {}"),
-        "{line}"
-    );
-    // And these two lines are all the sweep removes with `Remove-Item`.
-    assert_eq!(text.matches("Remove-Item").count(), 2, "{text}");
-}
-
-#[test]
 fn the_files_unpacked_are_held_to_the_tree_that_was_sent_and_a_run_whose_files_differ_ends() {
     let text = sweep_script();
     let at = |what: &str| {
@@ -279,9 +214,9 @@ fn the_files_unpacked_are_held_to_the_tree_that_was_sent_and_a_run_whose_files_d
         "{text}"
     );
     // After what the sweep removed is said (what is removed is not in the list), and before the
-    // tarballs beside the copy are looked at.
+    // copy is made a checkout, with which the sweep ends.
     assert!(at("== removed $name") < at("$sha = "));
-    assert!(at("if ($unpacked -ne $sent)") < at("$beside = "));
+    assert!(at("if ($unpacked -ne $sent)") < at("Save-Tree }"));
 }
 
 #[test]
@@ -809,83 +744,6 @@ fn powershell_does_not_prune_what_a_reports_folder_that_is_a_link_goes_to() {
         assert!(elsewhere.path().join(kept).exists(), "{kept}");
     }
     assert!(dir.join("evals/reports").exists());
-}
-
-/// The sweep run by the machine's PowerShell beside tarballs that runs left: only those of
-/// the copy's folder (this run's own among them, which is an hour young), the ones the
-/// runs sent before each had its own, and only when they were written an hour ago.
-#[cfg(windows)]
-#[test]
-fn powershell_takes_away_the_tarballs_runs_left_an_hour_ago_or_of_a_folder_gone_a_day_ago_and_no_other_file(
-) {
-    use std::fs;
-    use std::time::{Duration, SystemTime};
-
-    let profile = tempfile::tempdir().unwrap();
-    let dir = profile.path().join("consensflow-build");
-    fs::create_dir_all(&dir).unwrap();
-    fs::write(dir.join(SYNCED), "keep.txt\n").unwrap();
-    fs::write(dir.join("keep.txt"), "kept").unwrap();
-    say_the_tree(&dir, &["keep.txt"]);
-    // Written long ago (2001), or just now: the time of day is read in one place, and the
-    // case needs only a file that is far older than an hour and one that is not.
-    let old = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
-    let make = |name: &str, written: Option<SystemTime>| {
-        let path = profile.path().join(name);
-        fs::write(&path, name).unwrap();
-        if let Some(written) = written {
-            fs::File::options()
-                .write(true)
-                .open(&path)
-                .unwrap()
-                .set_modified(written)
-                .unwrap();
-        }
-    };
-    // Folders beside the copy, of runs that went on: one is there, one is gone.
-    fs::create_dir_all(profile.path().join("other")).unwrap();
-    let (removed, stays) = (
-        [
-            "consensflow-build.0000abcd-12345678.tgz",
-            "consensflow-build.tgz",
-            // The upload of a folder that is gone, written two days ago (the system's
-            // way of saying "a day" is a time in 2001, which is further).
-            "gone.0000abcd-12345678.tgz",
-            "gone.with.dots.0000abcd-12345678.tgz",
-            // A folder of a name like the copy's, which is not there: its upload is gone's too.
-            "consensflow-build2.0000abcd-12345678.tgz",
-        ],
-        [
-            // A run's own tarball, written just now: it is being unpacked, or is on its way.
-            ("consensflow-build.0000abce-12345678.tgz", None),
-            // The upload of a folder that is gone, as old as it should be to go if it were
-            // not just now: it stays, written less than a day ago.
-            ("gone-a-moment-ago.0000abcd-12345678.tgz", None),
-            // Another folder's, which is there: its own runs take theirs away an hour after.
-            ("other.0000abcd-12345678.tgz", Some(old)),
-            // Not of this copy's folder, not a name a run gives, not a tarball.
-            ("consensflow-build.0000abcd-1234567.tgz", Some(old)),
-            ("consensflow-build.0000abcd-12345678.tgz.part", Some(old)),
-            ("consensflow-build.x.tgz", Some(old)),
-            ("consensflow-build.0000abcd-12345678.txt", Some(old)),
-        ],
-    );
-    for name in removed {
-        make(name, Some(old));
-    }
-    for (name, written) in stays {
-        make(name, written);
-    }
-    fs::write(dir.join(SWEEP), sweep_script()).unwrap();
-    let ran = run_sweep(&dir);
-    assert_eq!(ran.code, 0, "{}", said(&ran));
-    for name in removed {
-        assert!(!profile.path().join(name).exists(), "{name} stayed");
-    }
-    for (name, _) in stays {
-        assert!(profile.path().join(name).exists(), "{name} went");
-    }
-    assert!(dir.join("keep.txt").exists());
 }
 
 /// The sweep's hash, made by the machine's PowerShell, is the one the Mac makes of the same

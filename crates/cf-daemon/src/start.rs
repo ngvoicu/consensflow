@@ -98,9 +98,20 @@ impl Options {
     /// The daemon of this process: its standard streams, its own exit, the
     /// bundle beside its binary, and the signals that end it.
     pub fn process(on_out: OnOut) -> io::Result<Self> {
+        Self::process_reading(on_out, io::stdin())
+    }
+
+    /// [`Options::process`] over `input` as its standard input, which is read
+    /// on a thread of its own as it comes ([`cf_bridge::local::read_ahead`]):
+    /// the daemon runs on one thread, and one that a pass holds for seconds
+    /// must not leave the pane host's frames unread in a pipe that holds 64 KiB.
+    pub(crate) fn process_reading(
+        on_out: OnOut,
+        input: impl io::Read + Send + 'static,
+    ) -> io::Result<Self> {
         let exe = std::env::current_exe()?;
         Ok(Self {
-            input: Box::new(tokio::io::stdin()),
+            input: Box::new(cf_bridge::local::read_ahead(input)),
             output: Box::new(tokio::io::stdout()),
             stderr: Box::new(io::stderr()),
             on_out,

@@ -9,7 +9,7 @@ use cf_engine::testing::Context;
 use cf_ledger::{NewNote, NewTask};
 use serde_json::json;
 
-use crate::fixtures::{assert_match, low, placed, Tiers};
+use crate::fixtures::{assert_match, placed, soon, Tiers};
 use crate::traces::held_to;
 
 const SUITES: &[&str] = &["the dispatcher assigns open tasks"];
@@ -330,24 +330,33 @@ fn stops_no_window_for_a_task_that_may_not_go_back_to_the_board() {
 fn tells_the_requester_once_when_nobody_of_the_tier_is_free_and_assigns_when_one_frees_up() {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus", "diana"]);
-    // Nothing caps a member's sessions: only quota keeps one from new work.
+    // Nothing caps a member's sessions: only being out of quota keeps one from new work.
     tiers.open_body("One");
     tiers.open_body("Two");
     context.pass().unwrap();
     context.pass().unwrap();
-    context.adapter.quota("zeus", Some(low(97)));
-    context.adapter.quota("diana", Some(low(96)));
-    context.pass().unwrap();
     context.adapter.answer("zeus", "done");
     context.adapter.answer("diana", "done");
     context.pass().unwrap();
+    // Both are out of quota for an hour. A quota nearly spent (`low`) holds nobody.
+    let until = soon(&context, 1);
+    for member in ["zeus", "diana"] {
+        let id = tiers.id(member);
+        context
+            .ledger
+            .borrow_mut()
+            .mark_out(id, &until, "out of quota")
+            .unwrap();
+    }
     tiers.open_body("Third");
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(tiers.task(3).task.state, "open");
     assert_eq!(
         tiers.notes("chief"),
-        ["T-3 waits for a free standard worker: @zeus is low on quota; @diana is low on quota."]
+        [format!(
+            "T-3 waits for a free standard worker: @zeus is out of quota until {until}; @diana is out of quota until {until}."
+        )]
     );
     context.pass().unwrap();
     assert_eq!(tiers.notes("chief").len(), 1, "told once");

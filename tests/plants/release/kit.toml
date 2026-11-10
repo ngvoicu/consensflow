@@ -74,7 +74,7 @@ publish = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "
 # What the smoke is made of apart from the apps: its versions, keys, feed and bundles.
 smoke-kit = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "updater_smoke::versions", "updater_smoke::build", "updater_smoke::bundle", "updater_smoke::processes", "updater_smoke::signing", "updater_smoke::feed"]
 # The workflow's own text: who may publish, what holds the token, and the steps that call the publisher.
-workflow = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "release_publish", "--test", "release_steps", "--test", "release_mac", "--test", "workflow_scripts"]
+workflow = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-publish", "--test", "release_publish", "--test", "release_steps", "--test", "release_mac", "--test", "workflow_scripts", "--test", "ci_packaged"]
 # What xtask starts programs with (tools/xtask/src/process.rs), which the smoke starts its app by.
 xtask-process = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "process::tests"]
 # xtask run as a process, handing its words to a stand-in for node and answering its status.

@@ -5,7 +5,9 @@ use serde_json::Value;
 
 use crate::shared::quota::{date, Level, Quota};
 
-/// From this much of a window used, the quota is low.
+/// From this much of a window used, the quota is called low: information only, which holds
+/// no member from work (T-1356). A refusal at the edge of the allowance takes the reset of
+/// the window that is this full (`record.rs`, `reset_after`).
 const LOW_PERCENT: f64 = 95.0;
 
 /// The quota `limits` says: the fuller of its two windows (the primary on a

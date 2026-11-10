@@ -185,11 +185,8 @@ const HOLD_THEN_GOES_ON: &str = "the note that T-1 is held says the member may b
 
 /// What the engine does with the task of a member that runs out of quota while
 /// another of its tier is free (dip-agentos, 2026-10-19): it waits with its
-/// window, where its work is.
-const QUOTA_KEEPS_THE_WORK: &str = "zeus runs out of quota mid-task with diana free and its reset an hour or more away: T-1 is held with zeus's window until the reset (`hold_task`, the requester told it waits), where Node took it back to the board for diana (`ran out of quota after starting`)";
-
-/// The same, and what the engine says when the words that resumed the task at
-/// the reset are refused again (the review of the quota wait, T-88).
+/// window, where its work is; and what it says when the words that resumed the
+/// task at the reset are refused again (the review of the quota wait, T-88).
 const QUOTA_REFUSED_AGAIN: &str = "zeus runs out of quota mid-task with diana free and its reset an hour away: T-1 is held with zeus's window until the reset, where Node took it back to the board for diana; and when the words that resumed it at the reset are refused again, T-1 is held again and the human is told once that zeus's account may need them, where the requester would be told again that T-1 waits";
 
 /// What the engine does when the human resumes a project whose Close paused its
@@ -308,7 +305,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "tells the requester once when nobody of the tier is free, and assigns when one frees up",
-        "the daemon gives T-3 to @zeus while the note that T-3 waits for a free standard worker, which the chief had not been given, is queued: the note is withdrawn (`T-3 was taken by @zeus`), where Node leaves it queued to be pasted after the task was taken; and the chief's window, at work through the two hours, holds @diana's result on T-2 (m-4) at the head of its queue, which the human is told of at ten minutes and the chief's lane says (T-958), where Node said nothing",
+        "the daemon gives T-3 to @zeus while the note that T-3 waits for a free standard worker, which the chief had not been given, is queued: the note is withdrawn (`T-3 was taken by @zeus`), where Node leaves it queued to be pasted after the task was taken; and the chief's window, at work through the two hours, holds @diana's result on T-2 (m-4) at the head of its queue, which the human is told of at ten minutes and the chief's lane says (T-958), where Node said nothing; and nobody is free because both workers are out of quota for an hour (`mark_out`), the note saying `@zeus is out of quota until …; @diana is out of quota until …`, where Node's test made them low on quota (`adapter.quota`, 97 and 96 percent) and its note said `is low on quota`: a member works to the end of its allowance now, held only for being out (T-1356)",
     ),
     (
         "closes the old window of a task the human reassigned and gives the task to another member",
@@ -329,10 +326,6 @@ const DEPARTED: &[(&str, &str)] = &[
     (
         "keeps a member out only until its reset, though its harness still shows the old refusal",
         QUOTA_REFUSED_AGAIN,
-    ),
-    (
-        "gives no new work to a member low on quota, keeps one out for an hour when its reset is unknown, and takes it again after",
-        QUOTA_KEEPS_THE_WORK,
     ),
     (
         "holds the task with its window when the reset is near, and goes on by itself when it passes",

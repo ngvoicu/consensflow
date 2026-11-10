@@ -595,6 +595,86 @@ fn says_in_the_log_which_window_a_pass_went_on_without_and_how_long_its_step_too
 }
 
 #[test]
+fn a_window_a_pass_went_on_without_does_not_make_the_passes_after_it_wait_again() {
+    // Gabriel's board, 2026-11-09: two windows whose steps took 30 s each, again and again
+    // for fifteen minutes, and every pass that began one of them waited its 5 s for it:
+    // each ended as one that went on without them, and the windows that answered at once
+    // were stepped once in five seconds instead of once in one.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let zeus = tiers.assignee(1);
+    // A hold on the next look of zeus's window, which lets go of nothing else once it is
+    // opened: the first hold that picks a call is the one that holds it, so one opened
+    // is put out before the next is made.
+    let stuck = |handle: &str| {
+        let launch = context.adapter.agent(handle).launch;
+        let on = Rc::new(Cell::new(true));
+        let (picks, asked) = (Rc::clone(&on), looks_at(launch));
+        let gate = context
+            .adapter
+            .observe_holds
+            .hold(move |args| picks.get() && asked(args));
+        (gate, on)
+    };
+    // Whether a pass ran its wait for steps ([`STEP_WAIT`]) out: it says so in the log, at
+    // most once a minute, so each pass is a minute after the last.
+    let waited = |context: &Context| {
+        context.advance(61_000);
+        let before = logged(context, "a pass went on").len();
+        context.pass().unwrap();
+        logged(context, "a pass went on").len() - before == 1
+    };
+
+    // The first pass waits for it, as it always did: a step answers in well under a second.
+    let (first, first_on) = stuck("zeus");
+    assert!(waited(&context));
+    // Its step ends at last, and the next pass begins another that is held as long.
+    first.open();
+    first_on.set(false);
+    context.settle();
+    let (second, second_on) = stuck("zeus");
+    assert!(
+        !waited(&context),
+        "the pass waited again for @{zeus}, whose last step it had gone on without"
+    );
+    // The step goes on for half a minute and ends: the log says so, in a line of its own,
+    // since no pass named it, and the window is still one the passes do not wait for.
+    context.advance(31_000);
+    second.open();
+    second_on.set(false);
+    context.settle();
+    assert_eq!(
+        logged(&context, "the step of"),
+        [
+            format!("the step of @{zeus} ended 0 s after its pass began"),
+            format!(
+                "the step of @{zeus}, which no pass waits for since one went on without it, ended 31 s after its pass began"
+            ),
+        ]
+    );
+    let (third, third_on) = stuck("zeus");
+    assert!(
+        !waited(&context),
+        "the pass waited for @{zeus} before one of its steps ended in time"
+    );
+    // The window answers again: its step ends in no time, and the passes wait for it once more.
+    third.open();
+    third_on.set(false);
+    context.settle();
+    let (fourth, _) = stuck("zeus");
+    assert!(
+        waited(&context),
+        "a window that answered was still gone on without"
+    );
+    fourth.open();
+    context.settle();
+}
+
+#[test]
 fn writes_down_every_step_that_fails_after_its_pass_ended_at_the_first() {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);

@@ -163,18 +163,6 @@ pub const REPORTS_KEPT_DAYS: u32 = 14;
 /// kind of thing.
 pub const RUNS_KEPT_DAYS: u32 = 14;
 
-/// How old a folder of the test families in the user's Temp is before the sweep takes it away, in
-/// days (T-1333): by the last change of the folder itself. The sweep runs under the lock, so no run
-/// of this runner (or Kluris's) is using one, and a test folder that is a day old is a dead
-/// run's: a test whose `TempDir` could not be removed (Windows will not remove a folder from under
-/// a file a program has open) or a process that was killed before it dropped it.
-pub const TEMP_KEPT_DAYS: u32 = 1;
-
-/// The most folders of those families one sweep takes away, oldest first: a machine that has not
-/// been swept holds tens of thousands (zeewin and zeewin2 held 45,000 on 2026-11-07), and a run is
-/// not held up for all of them. The next run takes the next ones.
-pub const TEMP_SWEPT_AT_MOST: u32 = 3000;
-
 /// What `--build` runs first: the packages, the page, a pane's cf.exe and the pane host.
 pub const BUILD_STEPS: [&str; 6] = [
     "npm ci --no-audit --no-fund",
@@ -382,6 +370,14 @@ pub struct Script<'a> {
 /// Nothing of what the run is asked for is in it: its size does not depend on the steps,
 /// the variables or the command.
 ///
+/// The first thing it does in either folder is look at them (T-1368, the third check): if the profile or
+/// the copy is a link (a junction, a symbolic link) it names it and ends the run with 1, with nothing made,
+/// locked or unpacked there. The unpack is `tar -xmzf` into the copy, and tar replaces a file of the same
+/// name: through a link into a folder that holds the owner's `README.md`, the tree's would replace it.
+/// A copy that is not there yet is no link. The sweep looks again, as it removes (it is the sweep's own
+/// condition); this look is for what comes before it, and is one line because the bootstrap is what goes
+/// on ssh's command line (`the_longest_run_there_is_leaves_the_command_line_a_margin_of_a_thousand_and_more`).
+///
 /// The run's tarball is removed whichever way the script ends, a refusal by the lock
 /// too: the one thing it takes away is its own, and the lock's records only if they are
 /// its (the `finally`). A tarball a run left there when it never got so far (this program
@@ -498,6 +494,15 @@ fn limits_of(limits: Option<Limits>) -> String {
 /// (`== removed <name>`), and what could not be removed is said and left in `$failed`,
 /// which ends the run.
 ///
+/// - First of all (T-1368, the second review), before it removes or writes anything, it looks at
+///   the profile (`%USERPROFILE%`) and at the copy: if either is a link (a junction, a symbolic
+///   link), it names it, removes nothing (not the tree's strays, not the reports', not the
+///   tasks' logs) and fails the run. A link leads to a folder that is not the copy's, and a file
+///   the tree does not list is not the copy's to remove there. A person who moves the build to
+///   another disk with a junction has the runs refused with that line until the copy is a real
+///   folder again. (The bootstrap looks at the same two folders before it makes, locks or unpacks
+///   anything, so the unpack cannot replace a file through a link either: [`REMOTE`]. The sweep keeps
+///   its own look because what it does is delete, and it is run by the tests on its own.)
 /// - The list is read as UTF-8, as it was written, and names are compared in any case,
 ///   as Windows finds a file: a file renamed by its case alone is the tree's.
 /// - A folder that is a link (a junction, a symbolic link) is not looked into, and only
@@ -536,15 +541,21 @@ fn limits_of(limits: Option<Limits>) -> String {
 ///   committed. What [`KEPT`] names is left out of what git says of the copy
 ///   (`.git/info/exclude`): the run's own files and the build's, which a run writes. A
 ///   git that is not there, or fails, is said in `$failed`, which ends the run.
-/// - Last, the tarballs runs left beside the copy: this folder's own (`<folder>.<id>.tgz`,
-///   [`upload_name`], and the `<folder>.tgz` the runs sent before each had its own) that
-///   were written to more than an hour ago, and those of folders that are gone
-///   (`<gone>.<id>.tgz`, no folder of that name beside it) written to more than a day
-///   ago. A run removes its own, so these are of runs that never got so far (this
-///   program killed, the connection lost, an upload cut short). The hour is safe for a
-///   folder that is in use: a run's tarball is written seconds before its script asks
-///   for the lock. It never fails the run, and it runs with the lock held, which no run
-///   is waiting on.
+///
+/// It takes nothing from the user's Temp, and no part of a run does (T-1368). It once took
+/// the test families out of it by their names (T-1333), and that cannot be done safely from
+/// here: a name does not tell whose a folder is (another program's `.tmpA1b2C3` that holds a
+/// `data` folder, a person's `T-42-holiday`), a Temp that is a link leads outside the profile,
+/// "no command line names it" does not tell that nothing runs from a folder, and a folder's own
+/// time is not the age of what is in it. zeewin2 is Gabriel's laptop. What the tests leave in
+/// Temp is the tests' to drop (each test struct drops its folder last, a ledger lets go of its
+/// file), and the folders of earlier days are cleaned by a person, by hand, after a review.
+///
+/// Nor does it remove anything beside the copy (T-1368, the second review). It once took the tarballs
+/// runs left in the profile by the shape of their names (`<folder>.<id>.tgz`) and their age, and any
+/// program's file can have that shape. A run removes its own tarball by its exact name, in the script
+/// that made it ([`REMOTE`]) and in the stop ([`stop_script`]); what a run that was killed leaves
+/// beside the copy stays until a person removes it.
 pub fn sweep_script() -> String {
     let kept: Vec<String> = KEPT.iter().map(|name| quoted(name)).collect();
     let excluded: Vec<String> = KEPT
@@ -560,35 +571,6 @@ pub fn sweep_script() -> String {
             ("excluded", &excluded.join(", ")),
             ("days", &REPORTS_KEPT_DAYS.to_string()),
             ("runs_days", &RUNS_KEPT_DAYS.to_string()),
-            ("temp", &temp_sweep()),
-        ],
-    )
-}
-
-/// The sweep of the test families in the user's Temp, as the sweep holds it (T-1333): the
-/// function that takes them away and its call. The marks around the function are what the tests
-/// take it out by.
-///
-/// Which folders are ours is told by their names alone, and the whole name: `cf-dispatch-` and
-/// `consensflow-integration-` and six letters or digits (a folder, and the `-left.txt` file beside
-/// the second), `cf-pane-probe-…`, `T-<number>-…` (a task's probe), and `.tmp` and six letters or
-/// digits (the `tempfile` crate's own name, which every program that uses it shares) when the
-/// folder is empty or holds only what ConsensFlow's tests make in one: the ledger and its files,
-/// the log and the trace, the stand-in homes of the harnesses. Nothing else in Temp is looked at
-/// (zeewin2's, which is Gabriel's, held 4,416 such `.tmp` folders on 2026-11-08, every one of
-/// them one of these, and a Codex, a Chrome, a Muse and PostgreSQL's installer besides).
-///
-/// A folder is taken only when it is a day old ([`TEMP_KEPT_DAYS`]) and no program runs from it
-/// or has its name on its command line; where the programs cannot be listed nothing is taken.
-/// Windows refuses to remove a folder with a file open in it, which is the last word. Only a Temp
-/// that is under the user's profile is swept. At most
-/// [`TEMP_SWEPT_AT_MOST`] go in a sweep. What cannot be taken is said and never ends the run.
-fn temp_sweep() -> String {
-    fill(
-        TEMP_SWEEP,
-        &[
-            ("days", &TEMP_KEPT_DAYS.to_string()),
-            ("most", &TEMP_SWEPT_AT_MOST.to_string()),
         ],
     )
 }
@@ -719,6 +701,7 @@ function Free-Machine {
 }
 function Exit-Run([int]$code) { Free-Machine; Write-Output "`n«exit»$code"; exit $code }
 try {
+$env:USERPROFILE,$dir|%{if((gi -Lit $_ -Force -EA 0).Attributes -band 1024){"$_ is a link: nothing was made or unpacked";Exit-Run 1}}
 New-Item -ItemType Directory -Force $dir | Out-Null
 try { $lock = [IO.File]::Open((Join-Path $dir '«lock»'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {} catch { $why = $_.Exception.Message }
 $holder = Get-Content $running -ErrorAction SilentlyContinue
@@ -947,10 +930,17 @@ public static class CfJob {
 /// things it left in the folder it was given, and says nothing else, so what it
 /// removed and could not are kept in lists and said once it is done.
 const SWEEP_TEMPLATE: &str = r##"
+$failed = [Collections.Generic.List[string]]::new()
+foreach ($folder in @($env:USERPROFILE, $dir)) {
+  if ((Get-Item -LiteralPath $folder -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    Write-Output "$folder is a link, so the copy is not swept and nothing is removed from it: what a link leads to is none of the copy's. Make the profile and the copy real folders."
+    $failed.Add("$folder is a link")
+    return
+  }
+}
 $now = [Collections.Generic.HashSet[string]]::new([string[]](Get-Content -Encoding UTF8 (Join-Path $dir '«synced»')), [StringComparer]::OrdinalIgnoreCase)
 $kept = @(«kept»)
 $removed = [Collections.Generic.List[string]]::new()
-$failed = [Collections.Generic.List[string]]::new()
 function Clear-Stale([IO.DirectoryInfo]$folder) {
   $left = 0
   try { $items = $folder.GetFileSystemInfos() } catch { $failed.Add("$($folder.FullName): $($_.Exception.Message)"); return 1 }
@@ -1046,77 +1036,6 @@ function Save-Tree {
 if (-not $failed.Count) {
   if (Get-Command git -ErrorAction SilentlyContinue) { Save-Tree } else { $failed.Add('git is not on the PATH, so the copy cannot be made a checkout of what went over') }
   if ($failed.Count) { Write-Output "The copy could not be made a checkout of what went over: $($failed -join '; ')" }
-}
-$beside = $root.Parent.FullName
-$own = '^' + [regex]::Escape($root.Name) + '(\.[0-9a-f]{8}-[0-9a-f]{8})?\.tgz$'
-$left = '^(?<folder>.+)\.[0-9a-f]{8}-[0-9a-f]{8}\.tgz$'
-try { Get-ChildItem -LiteralPath $beside -File | Where-Object { $_.Name -match $own -and $_.LastWriteTime -lt (Get-Date).AddHours(-1) } | Remove-Item -Force -ErrorAction SilentlyContinue } catch {}
-try { Get-ChildItem -LiteralPath $beside -File | Where-Object { $_.Name -match $left -and -not (Test-Path -LiteralPath (Join-Path $beside $Matches.folder)) -and $_.LastWriteTime -lt (Get-Date).AddDays(-1) } | Remove-Item -Force -ErrorAction SilentlyContinue } catch {}
-«temp»"##;
-
-/// The sweep of the test families in Temp ([`temp_sweep`]).
-const TEMP_SWEEP: &str = r##"# temp: begin
-function Clear-TestTemp {
-  param([string]$Temp, $Processes, [DateTime]$Now, [int]$Cap, [switch]$DryRun)
-  $result = [pscustomobject]@{ Removed = 0; Held = 0; Failed = @(); Left = 0; Skipped = $false; Taken = [Collections.Generic.List[string]]::new() }
-  if ($null -eq $Processes) { $result.Skipped = $true; return $result }
-  $cutoff = $Now.ToUniversalTime().AddDays(-«days»)
-  $made = @('consensflow.db', 'consensflow.db-wal', 'consensflow.db-shm', 'consensflow.db-journal', 'events.jsonl', 'events.jsonl.lock', 'daemon.log', 'daemon.log.lock', 'data', 'home', 'consensflow', 'profile', 'tree', 'sessions.db', 'wire.jsonl')
-  $found = [Collections.Generic.List[IO.FileSystemInfo]]::new()
-  foreach ($item in ([IO.DirectoryInfo]::new($Temp)).GetFileSystemInfos()) {
-    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { continue }
-    $name = $item.Name
-    $folder = $item -is [IO.DirectoryInfo]
-    $ours = $false
-    if ($folder -and $name -cmatch '^(cf-dispatch|consensflow-integration)-[A-Za-z0-9]{6}$') { $ours = $true }
-    elseif (-not $folder -and $name -cmatch '^consensflow-integration-[A-Za-z0-9]{6}-left\.txt$') { $ours = $true }
-    elseif ($folder -and $name -cmatch '^cf-pane-probe-[A-Za-z0-9._-]+$') { $ours = $true }
-    elseif ($folder -and $name -cmatch '^T-[0-9]{2,5}-[A-Za-z0-9._-]+$') { $ours = $true }
-    elseif ($folder -and $name -cmatch '^\.tmp[A-Za-z0-9]{6}$') {
-      $ours = $true
-      try { foreach ($inside in $item.GetFileSystemInfos()) { if ($made -notcontains $inside.Name.ToLowerInvariant()) { $ours = $false; break } } } catch { $ours = $false }
-    }
-    if ($ours -and $item.LastWriteTimeUtc -lt $cutoff) { $found.Add($item) }
-  }
-  $order = @($found | Sort-Object LastWriteTimeUtc)
-  $result.Left = [Math]::Max(0, $order.Count - $Cap)
-  foreach ($item in ($order | Select-Object -First $Cap)) {
-    $path = $item.FullName
-    # By its name, which has its random part in it: a path may be written as 8.3 short names (GitHub's
-    # runner) by a program and as long ones by .NET Framework, and a program that names the folder
-    # runs from it or in it.
-    $name = $item.Name
-    $holds = @($Processes | Where-Object { ($_.ExecutablePath -and $_.ExecutablePath.IndexOf($name, [StringComparison]::OrdinalIgnoreCase) -ge 0) -or ($_.CommandLine -and $_.CommandLine.IndexOf($name, [StringComparison]::OrdinalIgnoreCase) -ge 0) })
-    if ($holds.Count) { $result.Held++; continue }
-    try {
-      if ($DryRun) { }
-      elseif ($item -is [IO.FileInfo]) { $item.Attributes = [IO.FileAttributes]::Normal; $item.Delete() }
-      else {
-        try { $item.Delete($true) } catch {
-          foreach ($inner in Get-ChildItem -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue) { try { $inner.Attributes = [IO.FileAttributes]::Normal } catch {} }
-          $item.Delete($true)
-        }
-      }
-      $result.Removed++
-      $result.Taken.Add($item.Name)
-    } catch { $result.Failed += $item.Name }
-  }
-  $result
-}
-# temp: end
-$swept = $null
-# Only the Temp that is under the user's profile, which is the user's own (the tests of this
-# program give a case a profile of its own, and must not sweep the Temp of the person running them).
-if ([IO.Path]::GetTempPath().StartsWith($env:USERPROFILE.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
-  try {
-    $running = try { @(Get-CimInstance Win32_Process -ErrorAction Stop) } catch { $null }
-    $swept = Clear-TestTemp -Temp ([IO.Path]::GetTempPath()) -Processes $running -Now (Get-Date) -Cap «most»
-  } catch { Write-Output "The test folders in Temp could not be looked at: $($_.Exception.Message)" }
-}
-if ($swept -and $swept.Skipped) { Write-Output '== temp: the programs of this machine could not be listed, so no test folder of the user''s Temp was taken away' }
-elseif ($swept -and ($swept.Removed -or $swept.Held -or $swept.Failed.Count -or $swept.Left)) {
-  Write-Output "== temp: $($swept.Removed) test folders a day old or more taken away from the user's Temp, $($swept.Held) kept (a program runs from them), $($swept.Failed.Count) that Windows would not remove, $($swept.Left) left for the next run"
-  if ($swept.Failed.Count) { Write-Output "The test folders in Temp that could not be removed: $(@($swept.Failed | Select-Object -First 5) -join '; ')" }
 }
 "##;
 
