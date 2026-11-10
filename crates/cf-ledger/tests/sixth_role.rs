@@ -168,3 +168,46 @@ fn a_role_with_no_tier_takes_a_task_with_none_and_its_tier_is_not_changed() {
         );
     });
 }
+
+/// The words of the CHECK `name` of `table`'s schema, as the ledger has it after every
+/// migration: the quoted words after its `IN (`.
+fn checked(ledger: &Ledger, table: &str, name: &str) -> Vec<String> {
+    let sql: String = ledger
+        .sqlite()
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+            [table],
+            |row| row.get(0),
+        )
+        .expect("the table's schema");
+    let check = &sql[sql
+        .find(name)
+        .unwrap_or_else(|| panic!("no {name} in {sql}"))..];
+    let list = &check[check.find("IN (").expect("a list") + 4..];
+    list[..list.find(')').expect("its end")]
+        .split(',')
+        .map(|word| word.trim().trim_matches('\'').to_owned())
+        .collect()
+}
+
+#[test]
+fn the_ledgers_checks_hold_the_tables_roles_and_a_new_row_needs_a_migration() {
+    // A role is a row of the table and a word of two CHECKs, which only a migration writes:
+    // a row added without its migration fails here before any member of it is refused by
+    // SQLite.
+    let dir = tempfile::tempdir().expect("a home");
+    let ledger =
+        open_ledger(&dir.path().join("consensflow.db"), Options::default()).expect("a ledger");
+    let roles = cf_ledger::roles::ids();
+    let mut members = checked(&ledger, "participant", "participant_role_check");
+    members.retain(|role| role != "human" && role != "chief");
+    let sorted = |mut words: Vec<String>| {
+        words.sort();
+        words
+    };
+    let ours = sorted(roles.iter().map(|role| (*role).to_owned()).collect());
+    assert_eq!(sorted(members.clone()), ours);
+    assert_eq!(sorted(checked(&ledger, "task", "task_pool_check")), ours);
+    // The scout is a row and no word of the CHECKs: this test is what fails.
+    with_a_scout(|| assert!(cf_ledger::roles::ids().len() > members.len()));
+}
