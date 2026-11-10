@@ -162,8 +162,8 @@ runs = ["xtask-suites"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "    needs: [checks, platform-free, workspace, daemons, live-matrix]\n    if: always()\n"
-replace = "    needs: [checks, platform-free, workspace, daemons, live-matrix]\n"
+find = "    needs: [checks, platform-free, workspace, daemons, live-matrix, packaged]\n    if: always()\n"
+replace = "    needs: [checks, platform-free, workspace, daemons, live-matrix, packaged]\n"
 
 [[plant]]
 name = "wiring: the gate's check does not wait for the daemons"
@@ -172,8 +172,18 @@ runs = ["xtask-suites"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "needs: [checks, platform-free, workspace, daemons, live-matrix]"
-replace = "needs: [checks, platform-free, workspace, live-matrix]"
+find = "needs: [checks, platform-free, workspace, daemons, live-matrix, packaged]"
+replace = "needs: [checks, platform-free, workspace, live-matrix, packaged]"
+
+[[plant]]
+name = "wiring: the gate's check does not wait for the packaged job"
+meant = "the_gate_is_green_only_when_every_other_job_of_ci_passed"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "needs: [checks, platform-free, workspace, daemons, live-matrix, packaged]"
+replace = "needs: [checks, platform-free, workspace, daemons, live-matrix]"
 
 # A shard of a suite (tools/xtask/src/suites/shard.rs): the shards between them run each
 # case once, each by its whole name, and a run is the shard its variable names.
@@ -413,6 +423,6 @@ runs = ["xtask-suites"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "    needs: [checks, platform-free, workspace, daemons, live-matrix]"
-replace = "    needs: [checks, platform-free, workspace, daemons]"
+find = "    needs: [checks, platform-free, workspace, daemons, live-matrix, packaged]"
+replace = "    needs: [checks, platform-free, workspace, daemons, packaged]"
 

@@ -194,8 +194,8 @@ runs = ["reports-ci"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = '''$(node -p "require('os').tmpdir()")'''
-replace = '''$(node -p "process.env.RUNNER_TEMP")'''
+find = '''RIG_TEMP=$(node -p "require('os').tmpdir()")'''
+replace = '''RIG_TEMP=$(node -p "process.env.RUNNER_TEMP")'''
 
 [[plant]]
 name = "rig reports: CI looks for files the rig never writes"

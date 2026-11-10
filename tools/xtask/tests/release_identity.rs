@@ -166,28 +166,47 @@ fn only_the_release_workflows_name_the_release_configuration() {
     assert_eq!(named, allowed, "who names {RELEASE_CONFIGURATION}");
 }
 
+/// What CI's packaged job builds the app with (T-904, T-1362): the smoke's identifier, inline,
+/// `dev.ngvoicu.consensflow.smoke`. It is the one build of a workflow that is not the release's,
+/// and it carries an identifier no person's grant and no installed app is keyed by: the rule is
+/// that no build carries the release's, which the release workflows' build alone does.
+fn smoke_configuration() -> String {
+    format!(
+        "--config '{{\"identifier\":\"{}\"}}'",
+        cf_base::bundle::SMOKE
+    )
+}
+
 #[test]
 fn every_workflow_that_builds_the_app_builds_it_with_the_release_configuration() {
     let root = checkout().join(".github/workflows");
     let mut building = Vec::new();
     for entry in fs::read_dir(&root).unwrap() {
         let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
         let text = fs::read_to_string(&path).unwrap();
         for line in text.lines() {
             let builds = line.contains("run build") || line.contains("tauri build");
             if !builds || line.trim_start().starts_with('#') {
                 continue;
             }
+            // CI's packaged job builds the app of the smoke's identity; any other build of
+            // it, and any other workflow's, is the release's configuration.
+            let wanted = if name == "ci.yml" {
+                smoke_configuration()
+            } else {
+                format!("--config src-tauri/{RELEASE_CONFIGURATION}")
+            };
             assert!(
-                line.contains(&format!("--config src-tauri/{RELEASE_CONFIGURATION}")),
-                "{} builds the app without the release configuration: {line}",
+                line.contains(&wanted),
+                "{} builds the app without {wanted}: {line}",
                 path.display()
             );
-            building.push(path.file_name().unwrap().to_string_lossy().into_owned());
+            building.push(name.clone());
         }
     }
     building.sort();
-    assert_eq!(building, ["release.yml", "windows-build.yml"]);
+    assert_eq!(building, ["ci.yml", "release.yml", "windows-build.yml"]);
 }
 
 /// The step run with `vars` set, and the release's identifier given by the

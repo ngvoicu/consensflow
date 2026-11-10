@@ -470,6 +470,42 @@ fn smoke_runs_the_smoke_test_from_the_root_asking_for_its_ignored_case_and_the_a
     );
 }
 
+#[test]
+#[cfg(target_os = "macos")]
+fn smoke_leaves_out_the_cases_its_variable_names_and_says_which_before_it_starts() {
+    let tools = programs(&["cargo"]);
+    let ran = xtask(
+        &checkout(),
+        tools.path(),
+        &[("CONSENSFLOW_SMOKE_SKIP", "one, two")],
+        &["smoke", "--app", "dist/ConsensFlow.app"],
+    );
+    assert!(ran.status.success(), "{}", err(&ran));
+    assert_eq!(
+        arg_lines(&out(&ran)),
+        [
+            "test",
+            "-p",
+            "cf-e2e",
+            "--test",
+            "smoke",
+            "--",
+            "--ignored",
+            "--test-threads=1",
+            "--nocapture",
+            "--skip",
+            "one",
+            "--skip",
+            "two"
+        ]
+        .map(arg_line)
+    );
+    assert_eq!(
+        err(&ran),
+        "smoke: leaving out one, two (CONSENSFLOW_SMOKE_SKIP): what they hold is not shown by this run\n"
+    );
+}
+
 /// What `ioreg -n Root -d1` says of a console, cut to its lock.
 #[cfg(target_os = "macos")]
 const LOCKED: &str = "      \"IOConsoleLocked\" = Yes\n";

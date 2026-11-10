@@ -1166,17 +1166,23 @@ const COLLECTED_LIVE: &str =
 const COLLECTED_MATRIX: &str =
     "path: ${{ env.MATRIX_RIG_TEMP }}/consensflow-integration-*-left.txt";
 
+/// The path the packaged smoke's job collects from (T-904): the machines a failed smoke keeps in
+/// the temp folder (`cf-smoke-*`, smoke/machine.rs), which its own step names.
+const COLLECTED_SMOKE: &str = "path: ${{ env.SMOKE_TEMP }}/cf-smoke-*";
+
 #[test]
 fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file() -> Outcome {
     let steps = ci_steps()?;
     let names = step_with(&steps, "echo \"RIG_TEMP=")?;
     let matrix_names = step_with(&steps, "MATRIX_RIG_TEMP=")?;
+    let smoke_names = step_with(&steps, "SMOKE_TEMP=")?;
     let uploads = steps_with(&steps, "uses: actions/upload-artifact@");
     assert_eq!(
         uploads.len(),
-        5,
+        6,
         "one upload for the temp folder's reports, one for the live rigs', one for the checks job's \
-         live cases, and the live matrix's two, its rigs' reports and its evidence: {uploads:?}"
+         live cases, the live matrix's two, its rigs' reports and its evidence, and the packaged \
+         smoke's machines: {uploads:?}"
     );
     let upload_of = |path: &str| {
         uploads
@@ -1187,6 +1193,7 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
     };
     let (temp_upload, live_upload) = (upload_of(COLLECTED)?, upload_of(COLLECTED_LIVE)?);
     let matrix_upload = upload_of(COLLECTED_MATRIX)?;
+    let smoke_upload = upload_of(COLLECTED_SMOKE)?;
 
     // Only for a failed job, a pinned action, a week, and nothing said where there is nothing.
     for (what, step) in [
@@ -1195,6 +1202,8 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
         ("the upload of the live rigs' reports", live_upload),
         ("the step that names the matrix's folder", matrix_names),
         ("the upload of the matrix's reports", matrix_upload),
+        ("the step that names the smoke's folder", smoke_names),
+        ("the upload of the smoke's machines", smoke_upload),
     ] {
         assert!(
             step.iter().any(|line| line == "if: failure()"),
@@ -1215,6 +1224,7 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
             matrix_upload,
             "name: matrix-rig-reports-${{ matrix.os }}-${{ strategy.job-index }}",
         ),
+        (smoke_upload, "name: smoke-machines"),
     ] {
         assert!(
             upload.iter().any(|line| pinned.is_match(line)),
