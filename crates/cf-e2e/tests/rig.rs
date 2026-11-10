@@ -114,6 +114,8 @@ mod homes;
 #[path = "rig/kept_config.rs"]
 #[cfg(unix)]
 mod kept_config;
+#[path = "rig/kit_efforts.rs"]
+mod kit_efforts;
 #[path = "rig/last_exits.rs"]
 mod last_exits;
 #[path = "rig/live_base.rs"]

@@ -18,6 +18,7 @@ app-update-identity = ["cargo", "xtask", "app", "test", "update_install::"]
 rig-shipped = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "cf-e2e", "--lib", "--", "shipped::"]
 app-builds = ["cargo", "xtask", "app", "test", "tests::a_"]
 windows-gate = ["node", "--test", "tests/built-identity.test.mjs"]
+windows-smoke-page = ["node", "--test", "tests/windows-smoke-page.test.mjs"]
 app-identity = ["cargo", "xtask", "app", "test", "identity"]
 app-daemon-wait = ["cargo", "xtask", "app", "test", "the_first_start_runs_apart_and_what_a_page_asks_waits_for_it"]
 app-fresh = ["cargo", "xtask", "app", "fresh"]
@@ -416,6 +417,67 @@ runs = ["live-app-rules"]
 file = "app/scripts/windows-smoke-desktop.mjs"
 find = "const refused = refusalOf(exe)"
 replace = "const refused = null"
+
+# What the Windows smoke names of the page and the daemon (T-1369): the screens Settings has, the
+# chief's harness and model that project.open takes, and the stand-in claude that lists that model.
+# The smoke needs a desktop and runs in no CI job, so a node test holds what it names.
+
+[[plant]]
+name = "live app: the Windows smoke opens a screen Settings no longer has"
+meant = "the page has the screens the smoke opens from Settings, and the smoke opens each one"
+runs = ["windows-smoke-page"]
+
+[[plant.edit]]
+file = "app/scripts/windows-smoke.mjs"
+find = "for (const screen of ['Harnesses']) {"
+replace = "for (const screen of ['Agents', 'Harnesses']) {"
+
+[[plant]]
+name = "live app: the Windows smoke opens its project by a saved agent's name"
+meant = "the smoke opens its project as the New project dialog does: the chief by its harness and its model"
+runs = ["windows-smoke-page"]
+
+[[plant.edit]]
+file = "app/scripts/windows-smoke.mjs"
+find = '''
+      harness: SMOKE_HARNESS,
+      model: SMOKE_MODEL,'''
+replace = '''
+      agent: 'terpsichore','''
+
+[[plant]]
+name = "live app: the Windows smoke's stand-in claude lists another model than the chief's"
+meant = "the harness the smoke opens its project on is one it has drawn, and lists the model it names"
+runs = ["windows-smoke-page"]
+
+[[plant.edit]]
+file = "app/scripts/windows-smoke.mjs"
+find = "const model = ${JSON.stringify(SMOKE_MODEL)}"
+replace = "const model = 'claude-fable-5-0'"
+
+[[plant]]
+name = "live app: the Windows smoke's stand-in claude is not first on the app's PATH"
+meant = "the harness the smoke opens its project on is one it has drawn, and lists the model it names"
+runs = ["windows-smoke-page"]
+
+[[plant.edit]]
+file = "app/scripts/windows-smoke.mjs"
+find = '''
+const path = [
+  bin,'''
+replace = '''
+const path = [
+  join(bin, 'nowhere'),'''
+
+[[plant]]
+name = "live app: the Windows smoke's claude.cmd is not the shim npm writes"
+meant = "the harness the smoke opens its project on is one it has drawn, and lists the model it names"
+runs = ["windows-smoke-page"]
+
+[[plant.edit]]
+file = "app/scripts/windows-smoke.mjs"
+find = "'fake-claude.mjs')}\" %*"
+replace = "'fake-claude.mjs')}\""
 
 [[plant]]
 name = "live app: a build takes no identity from what Tauri was given"
