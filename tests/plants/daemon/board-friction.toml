@@ -128,8 +128,8 @@ runs = ["friction-cancel"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '        Some(assignee) if MEMBER_ROLES.contains(&assignee.role.as_str()) => store'
-replace = '        Some(assignee) if task.state != "failed" && MEMBER_ROLES.contains(&assignee.role.as_str()) => store'
+find = '        Some(assignee) if roles::is_role(assignee.role.as_str()) => store'
+replace = '        Some(assignee) if task.state != "failed" && roles::is_role(assignee.role.as_str()) => store'
 
 [[plant]]
 name = "board friction: cancel: the waiters of a failed task are told to let it finish"

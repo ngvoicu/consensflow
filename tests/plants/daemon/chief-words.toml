@@ -78,8 +78,12 @@ runs = ["cw-text"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles/skill.rs"
-find = '''            None if member.roles == ["designer"] => "none",'''
-replace = '''            None => "none",'''
+find = '''            None if !member.roles.is_empty()
+                && member
+                    .roles
+                    .iter()
+                    .all(|role| cf_ledger::roles::untiered(role)) =>'''
+replace = '            None if true =>'
 
 [[plant]]
 name = "chief-words: the chief is not told its model is the human's to change"
@@ -261,8 +265,13 @@ runs = ["cw-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/image_facts.rs"
-find = '''    if task.pool.as_deref() == Some(DESIGNER_POOL) {'''
-replace = '''    if true {'''
+find = '''    if task
+        .pool
+        .as_deref()
+        .and_then(cf_ledger::roles::find)
+        .is_some_and(|role| role.image_agent)
+    {'''
+replace = '    if true {'
 
 [[plant]]
 name = "chief-words: Finish takes the designer's words with no lines"

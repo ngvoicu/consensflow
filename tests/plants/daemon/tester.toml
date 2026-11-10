@@ -17,6 +17,8 @@
 [run]
 # The ledger's words for roles and pools, and what it checks them with.
 ledger-lib-model = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "model::"]
+# The ledger's tests of a tester: its pool read from JSON and refused by name among them.
+ledger-tester = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "tester"]
 # What holds the recordings of Node's ledger apart from the schema this one has beyond.
 ledger-lib-testing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::"]
 # The texts of the roles, and what the chief reads of them: not the golden of Node's chief text, which
@@ -36,18 +38,23 @@ runs = ["ledger-lib-model"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/model.rs"
-find = 'pub const MEMBER_ROLES: [&str; 5] = ["worker", "advisor", "reviewer", "tester", "designer"];'
-replace = 'pub const MEMBER_ROLES: [&str; 4] = ["worker", "advisor", "reviewer", "designer"];'
+find = '        match roles::find(role.as_ref()).map(|role| role.id) {'
+replace = '        match roles::find(role.as_ref()).map(|role| role.id).filter(|role| *role != "tester") {'
 
 [[plant]]
 name = "tester: a task may not be for the testers"
-meant = "a_tester_is_a_role_a_member_holds_and_a_pool_a_task_is_for_next_to_the_reviewer"
-runs = ["ledger-lib-model"]
+meant = "a_task_read_from_json_may_be_for_the_testers_and_a_pool_that_is_none_names_them"
+runs = ["ledger-tester"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/model.rs"
-find = 'pub const POOLS: [&str; 5] = ["worker", "advisor", "reviewer", "tester", "designer"];'
-replace = 'pub const POOLS: [&str; 4] = ["worker", "advisor", "reviewer", "designer"];'
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '            if !pool.and_then(Value::as_str).is_some_and(roles::is_role) {'
+replace = '            if !pool.and_then(Value::as_str).is_some_and(|pool| pool != "tester" && roles::is_role(pool)) {'
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '        if !roles::is_role(pool) {'
+replace = '        if pool == "tester" || !roles::is_role(pool) {'
 
 [[plant]]
 name = "tester: migration 0012 leaves the tester out of the role check, and no tester can join the staff"
@@ -160,8 +167,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles.rs"
-find = 'const MEMBERS: [&str; 5] = ["advisor", "worker", "reviewer", "tester", "designer"];'
-replace = 'const MEMBERS: [&str; 4] = ["advisor", "worker", "reviewer", "designer"];'
+find = '    if role != "chief" && !cf_ledger::roles::is_role(role) {'
+replace = '    if role != "chief" && (role == "tester" || !cf_ledger::roles::is_role(role)) {'
 
 [[plant]]
 name = "tester: the tester's text says it changes no file, as a reviewer's does, and not that it runs things"
@@ -243,11 +250,8 @@ runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/tasks.rs"
-find = '''
-            } else if flag("test") {
-                "tester"
-            } else {'''
-replace = "            } else {"
+find = '            let pool = cf_ledger::roles::asked(flag).id;'
+replace = '            let pool = cf_ledger::roles::asked(|field| field != "test" && flag(field)).id;'
 
 [[plant]]
 name = "tester: a test asked for beside a review is for the testers, not the reviewers"
@@ -255,19 +259,9 @@ meant = "the_kind_of_staff_asked_for_is_the_first_flag_that_is_true_design_advic
 runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/src/api/routes/tasks.rs"
-find = '''
-            } else if flag("review") {
-                "reviewer"
-            } else if flag("test") {
-                "tester"
-            } else {'''
-replace = '''
-            } else if flag("test") {
-                "tester"
-            } else if flag("review") {
-                "reviewer"
-            } else {'''
+file = "crates/cf-ledger/src/roles.rs"
+find = 'const ROLES: [Role; 5] = [WORKER, ADVISOR, REVIEWER, TESTER, IMAGE_DESIGNER];'
+replace = 'const ROLES: [Role; 5] = [WORKER, ADVISOR, TESTER, REVIEWER, IMAGE_DESIGNER];'
 
 [[plant]]
 name = "tester: a test the chief asks for is for a pool the ledger does not know"
@@ -276,12 +270,8 @@ runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/tasks.rs"
-find = '''
-                "tester"
-            } else {'''
-replace = '''
-                "testers"
-            } else {'''
+find = '            let pool = cf_ledger::roles::asked(flag).id;'
+replace = '            let pool = match cf_ledger::roles::asked(flag).id { "tester" => "testers", id => id };'
 
 [[plant]]
 name = "tester rig: a test the chief asks for goes to a worker, and no tester's window opens"
@@ -291,11 +281,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/tasks.rs"
-find = '''
-            } else if flag("test") {
-                "tester"
-            } else {'''
-replace = "            } else {"
+find = '            let pool = cf_ledger::roles::asked(flag).id;'
+replace = '            let pool = cf_ledger::roles::asked(|field| field != "test" && flag(field)).id;'
 
 [[plant]]
 name = "tester page: Project settings does not offer the tester among the roles"
@@ -305,8 +292,8 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "const ROLES = ['worker', 'advisor', 'reviewer', 'tester', 'designer']"
-replace = "const ROLES = ['worker', 'advisor', 'reviewer', 'designer']"
+find = '    for (const role of roleIds()) {'
+replace = '''    for (const role of roleIds().filter((role) => role !== 'tester')) {'''
 
 [[plant]]
 name = "tester page: Project settings has no word for the tester"
@@ -315,11 +302,9 @@ runs = ["page-tester"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
-file = "app/ui/core/dialogs.js"
-find = '''
-  tester: 'Tester',
-  designer: 'Image designer','''
-replace = "  designer: 'Image designer',"
+file = "app/ui/core/roles.js"
+find = 'export const roleLabel = (id) => roleOf(id)?.label'
+replace = '''export const roleLabel = (id) => (id === 'tester' ? undefined : roleOf(id)?.label)'''
 
 [[plant]]
 name = "tester page: Project settings does not say what a tester is for"
