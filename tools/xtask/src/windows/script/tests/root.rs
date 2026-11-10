@@ -21,7 +21,7 @@ use super::*;
 
 /// A link at `at` to the folder `to`, made by the machine's PowerShell: a junction on Windows (a
 /// symbolic link takes a privilege there), a symbolic link on the Mac.
-fn link(shell: &str, folder: &Path, at: &Path, to: &Path) {
+pub(super) fn link(shell: &str, folder: &Path, at: &Path, to: &Path) {
     powershell::run(
         shell,
         folder,

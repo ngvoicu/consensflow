@@ -291,8 +291,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "try {\nNew-Item -ItemType Directory -Force $dir | Out-Null\n"
-replace = "New-Item -ItemType Directory -Force $dir | Out-Null\n"
+find = "try {\n$env:USERPROFILE,$dir|%{"
+replace = "$env:USERPROFILE,$dir|%{"
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"

@@ -3,6 +3,7 @@
 //! the run script; what the bootstrap does (the lock, the unpack, the tree said) in
 //! the bootstrap.
 
+mod bootstrap;
 mod golden;
 #[cfg(windows)]
 mod lock;
@@ -453,10 +454,10 @@ fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went()
             r#"function Exit-Run([int]$code) { Free-Machine; Write-Output "`n== exit $code"; exit $code }"#
         ]
     );
-    // And it is what the lock, a machine with no tar of its own, the unpacking and the
-    // sweep leave by (the bootstrap), and a step, a preparation that could not be done and the
-    // command (the run script).
-    assert_eq!(boot.matches("Exit-Run ").count(), 4, "{boot}");
+    // And it is what a profile or a copy that is a link, the lock, a machine with no tar of its
+    // own, the unpacking and the sweep leave by (the bootstrap), and a step, a preparation that
+    // could not be done and the command (the run script).
+    assert_eq!(boot.matches("Exit-Run ").count(), 5, "{boot}");
     assert_eq!(run.matches("Exit-Run ").count(), 3, "{run}");
     assert!(
         boot.contains("if ($failed.Count) { Exit-Run 1 }\n"),

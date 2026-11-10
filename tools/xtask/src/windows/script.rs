@@ -370,6 +370,14 @@ pub struct Script<'a> {
 /// Nothing of what the run is asked for is in it: its size does not depend on the steps,
 /// the variables or the command.
 ///
+/// The first thing it does in either folder is look at them (T-1368, the third check): if the profile or
+/// the copy is a link (a junction, a symbolic link) it names it and ends the run with 1, with nothing made,
+/// locked or unpacked there. The unpack is `tar -xmzf` into the copy, and tar replaces a file of the same
+/// name: through a link into a folder that holds the owner's `README.md`, the tree's would replace it.
+/// A copy that is not there yet is no link. The sweep looks again, as it removes (it is the sweep's own
+/// condition); this look is for what comes before it, and is one line because the bootstrap is what goes
+/// on ssh's command line (`the_longest_run_there_is_leaves_the_command_line_a_margin_of_a_thousand_and_more`).
+///
 /// The run's tarball is removed whichever way the script ends, a refusal by the lock
 /// too: the one thing it takes away is its own, and the lock's records only if they are
 /// its (the `finally`). A tarball a run left there when it never got so far (this program
@@ -492,8 +500,9 @@ fn limits_of(limits: Option<Limits>) -> String {
 ///   tasks' logs) and fails the run. A link leads to a folder that is not the copy's, and a file
 ///   the tree does not list is not the copy's to remove there. A person who moves the build to
 ///   another disk with a junction has the runs refused with that line until the copy is a real
-///   folder again. (The unpack and the lock come before the sweep and are not held to this: they
-///   write the tree where the run was told to put it.)
+///   folder again. (The bootstrap looks at the same two folders before it makes, locks or unpacks
+///   anything, so the unpack cannot replace a file through a link either: [`REMOTE`]. The sweep keeps
+///   its own look because what it does is delete, and it is run by the tests on its own.)
 /// - The list is read as UTF-8, as it was written, and names are compared in any case,
 ///   as Windows finds a file: a file renamed by its case alone is the tree's.
 /// - A folder that is a link (a junction, a symbolic link) is not looked into, and only
@@ -692,6 +701,7 @@ function Free-Machine {
 }
 function Exit-Run([int]$code) { Free-Machine; Write-Output "`n«exit»$code"; exit $code }
 try {
+$env:USERPROFILE,$dir|%{if((gi -Lit $_ -Force -EA 0).Attributes -band 1024){"$_ is a link: nothing was made or unpacked";Exit-Run 1}}
 New-Item -ItemType Directory -Force $dir | Out-Null
 try { $lock = [IO.File]::Open((Join-Path $dir '«lock»'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {} catch { $why = $_.Exception.Message }
 $holder = Get-Content $running -ErrorAction SilentlyContinue
