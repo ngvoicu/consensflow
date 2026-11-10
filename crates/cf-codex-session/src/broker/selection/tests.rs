@@ -3,6 +3,8 @@ use serde_json::json;
 
 const A: &str = "01a09094-938f-7fd1-a2d3-315cf92b4559";
 const B: &str = "01a09094-a559-7db0-bf50-e2309856c3c0";
+const C: &str = "01a09094-c0de-7aaa-8bbb-0123456789ab";
+const D: &str = "01a09094-d00d-7ccc-9ddd-0123456789ab";
 const TUI: ClientId = ClientId(1);
 const OTHER: ClientId = ClientId(2);
 
@@ -24,7 +26,17 @@ impl Window {
     /// A window that opens in full-permission mode where `fresh_bypass` says so,
     /// and whose main starts are given `role`.
     fn with(fresh_bypass: bool, role: Option<&str>) -> Self {
-        let mut selection = Selection::new(fresh_bypass, role.map(str::to_owned), Vec::new());
+        Self::launched(fresh_bypass, role, None)
+    }
+
+    /// A window as [`Window::with`], launched to resume `resumed` where it names one.
+    fn launched(fresh_bypass: bool, role: Option<&str>, resumed: Option<&str>) -> Self {
+        let mut selection = Selection::new(
+            fresh_bypass,
+            role.map(str::to_owned),
+            Vec::new(),
+            resumed.map(str::to_owned),
+        );
         selection.ready();
         Self {
             selection,
@@ -369,7 +381,7 @@ fn an_older_answer_before_the_latest_leaves_the_window_switching() {
 
 #[test]
 fn another_connections_answer_does_not_apply_to_the_owner() {
-    let mut selection = Selection::new(false, None, Vec::new());
+    let mut selection = Selection::new(false, None, Vec::new(), None);
     selection.ready();
     let (mut first, mut second) = (Requests::default(), Requests::default());
     selection.tui_said(TUI, &mut first, &start(1));
@@ -408,7 +420,7 @@ fn the_owners_connection_lost_forgets_the_thread_and_another_ones_does_not() {
 
 #[test]
 fn a_connection_lost_before_it_chose_leaves_what_was_chosen() {
-    let mut selection = Selection::new(false, None, Vec::new());
+    let mut selection = Selection::new(false, None, Vec::new(), None);
     selection.ready();
     let mut owner = Requests::default();
     selection.tui_said(TUI, &mut owner, &start(1));
@@ -662,7 +674,7 @@ fn a_closed_broker_shows_no_thread_and_takes_nothing() {
 
 #[test]
 fn a_broker_is_not_available_before_its_connection_is_initialized() {
-    let mut selection = Selection::new(false, None, Vec::new());
+    let mut selection = Selection::new(false, None, Vec::new(), None);
     let mut requests = Requests::default();
     selection.tui_said(TUI, &mut requests, &start(1));
     selection.codex_said(TUI, &mut requests, &idle(1, A));
@@ -783,11 +795,55 @@ fn no_side_start_side_resume_or_fork_or_turn_is_given_the_role() {
 }
 
 #[test]
-fn a_main_resume_or_fork_is_given_the_windows_role_in_place_of_the_instructions_it_named() {
+fn a_sub_agents_thread_the_tui_resumes_is_not_given_the_windows_role() {
+    // The TUI attaches a live sub-agent the user selects with a resume of default parameters
+    // (codex-rs 0.167.0 `attach_live_thread_for_selection`), whose workspace roots go as
+    // null: a request shaped as the window's own. Given the role, the sub-agent's thread
+    // would take it at its next compaction in place of its own instructions (T-1402).
+    let mut window = Window::with(false, Some("the role"));
+    window.starts(1, json!({ "id": A }));
+    let attach = json!({
+        "id": 2,
+        "method": "thread/resume",
+        "params": { "threadId": B, "runtimeWorkspaceRoots": null },
+    });
+    let sent = window.says(attach.clone());
+    assert_eq!(
+        sent.as_ref()
+            .and_then(|sent| sent["params"].get("developerInstructions")),
+        None,
+        "{sent:?}"
+    );
+    window.answers(idle(2, B));
+    // With roots named too, and once the window shows the sub-agent, a fork of it is no
+    // thread of the window's either.
+    for message in [
+        resume(3, B),
+        json!({ "id": 4, "method": "thread/fork", "params": { "threadId": B, "threadSource": "user", "runtimeWorkspaceRoots": [] } }),
+    ] {
+        let sent = window.says(message.clone());
+        assert_eq!(
+            sent.as_ref()
+                .and_then(|sent| sent["params"].get("developerInstructions")),
+            None,
+            "{message}"
+        );
+    }
+}
+
+/// The developer instructions `message` goes to Codex with, if the broker gave it any.
+fn given_role(sent: Option<Value>) -> Option<Value> {
+    sent.and_then(|sent| sent["params"].get("developerInstructions").cloned())
+}
+
+#[test]
+fn a_resume_or_fork_of_the_windows_own_thread_is_given_the_windows_role_in_place_of_the_instructions_it_named(
+) {
     // A resumed thread's turns read the developer message it began with, but a compaction
     // rebuilds that message from the session's own instructions: a resume given none lost
     // the role at its thread's next compaction (T-1388, T-1394).
-    let mut window = Window::with(false, Some("the role"));
+    let mut window = Window::launched(false, Some("the role"), Some(B));
+    // The window's first request resumes the thread it was launched on, before any start.
     let sent = json!({
         "id": 1,
         "method": "thread/resume",
@@ -800,23 +856,77 @@ fn a_main_resume_or_fork_is_given_the_windows_role_in_place_of_the_instructions_
         )
     );
     window.answers(idle(1, B));
-    let fork = json!({
-        "id": 2,
-        "method": "thread/fork",
-        "params": { "threadId": B, "threadSource": "user", "runtimeWorkspaceRoots": [], "developerInstructions": "the TUI's" },
-    });
+    // A fork the user makes of it, and a fork of that fork, are the window's own.
+    let fork = |id: u64, thread: &str| {
+        json!({
+            "id": id,
+            "method": "thread/fork",
+            "params": { "threadId": thread, "threadSource": "user", "runtimeWorkspaceRoots": [], "developerInstructions": "the TUI's" },
+        })
+    };
+    assert_eq!(given_role(window.says(fork(2, B))), Some("the role".into()));
+    window.answers(idle(2, C));
+    assert_eq!(given_role(window.says(fork(3, C))), Some("the role".into()));
+    window.answers(idle(3, D));
+    // A second resume of the thread, whichever the window shows, and in any case of its id.
     assert_eq!(
-        window.says(fork).unwrap()["params"]["developerInstructions"],
-        "the role"
+        given_role(window.says(resume(4, B))),
+        Some("the role".into())
+    );
+    window.answers(idle(4, B));
+    assert_eq!(
+        given_role(window.says(resume(5, &D.to_uppercase()))),
+        Some("the role".into())
+    );
+    // A thread a main start began is the window's own once Codex names it.
+    let mut fresh = Window::with(false, Some("the role"));
+    fresh.starts(1, json!({ "id": A }));
+    fresh.starts(2, json!({ "id": C }));
+    assert_eq!(
+        given_role(fresh.says(resume(3, A))),
+        Some("the role".into())
     );
     // The first start alone is opened in full-permission mode: a resume is given the role
     // and nothing of the start's.
-    let mut fresh = Window::with(true, Some("the role"));
-    let params = &fresh.says(resume(1, B)).unwrap()["params"];
+    let mut bypassing = Window::launched(true, Some("the role"), Some(B));
+    let params = &bypassing.says(resume(1, B)).unwrap()["params"];
     assert_eq!(params["developerInstructions"], "the role");
     assert_eq!(params.get("approvalPolicy"), None, "{params}");
     // A window given no role has its resumes go as they are.
-    assert_eq!(Window::new().says(resume(1, B)), None);
+    assert_eq!(
+        Window::launched(false, None, Some(B)).says(resume(1, B)),
+        None
+    );
+}
+
+#[test]
+fn a_thread_the_window_did_not_begin_or_resume_is_not_its_own() {
+    let role = Some("the role");
+    // A resume before any start of a thread the window was not launched on (the TUI's
+    // /resume of another conversation).
+    assert_eq!(
+        given_role(Window::with(false, role).says(resume(1, B))),
+        None
+    );
+    assert_eq!(
+        given_role(Window::launched(false, role, Some(A)).says(resume(1, B))),
+        None
+    );
+    let mut window = Window::launched(false, role, Some(A));
+    window.says(resume(1, A));
+    window.answers(idle(1, A));
+    // A fork that failed, or a side one, begins no thread of the window's own.
+    window.says(json!({ "id": 2, "method": "thread/fork", "params": { "threadId": A, "threadSource": "user", "runtimeWorkspaceRoots": [] } }));
+    window.answers(
+        json!({ "id": 2, "error": { "message": "no" }, "result": { "thread": { "id": C } } }),
+    );
+    window.says(json!({ "id": 3, "method": "thread/fork", "params": { "threadId": A, "threadSource": "user", "runtimeWorkspaceRoots": [], "ephemeral": true } }));
+    window.answers(idle(3, D));
+    window.says(json!({ "id": 4, "method": "thread/start", "params": { "ephemeral": true, "threadSource": "user" } }));
+    window.answers(idle(4, B));
+    for thread in [C, D, B] {
+        assert_eq!(given_role(window.says(resume(5, thread))), None, "{thread}");
+    }
 }
 
 #[test]
@@ -901,7 +1011,7 @@ fn every_start_resume_and_fork_is_given_consensflows_variables_in_its_config_ove
             "http://127.0.0.1:1".to_owned(),
         ),
     ];
-    let mut selection = Selection::new(false, None, env);
+    let mut selection = Selection::new(false, None, env, None);
     selection.ready();
     let mut requests = Requests::default();
     let mut says = |message: Value| selection.tui_said(TUI, &mut requests, &message);

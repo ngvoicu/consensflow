@@ -8,15 +8,18 @@
 //! `write_file`), and the file is as private as the folder it is in, under
 //! ConsensFlow's own in the user's profile (`AppData`), whose inherited permissions give
 //! the user, SYSTEM and administrators alone, as Devin's role file is. The window's supervisor
-//! reads it before Codex starts, and its broker gives it to the TUI's main thread
-//! starts, resumes and forks as their developer instructions (`developerInstructions`, which replace
+//! reads it before Codex starts, and its broker gives it to the TUI's main starts and to
+//! the resumes and forks of the window's own threads as their developer instructions
+//! (`developerInstructions`, which replace
 //! what Codex's configuration says for that thread: probed on Codex 0.164.0, so the
 //! text holds Codex's own as well). It is on no command line, where every user of
 //! the machine could read it (`ps` is setuid root on macOS) and a pattern matching
 //! its words matched the window; a role's length is no command line's limit either.
 //! The file goes with the launch's folder, when its window closes.
 //!
-//! The broker gives it to the window's main resume and fork too: a thread's turns read
+//! The broker gives it to the resumes and forks of the window's own threads too (the one
+//! it was launched to resume, those its main starts began, and their forks: never a
+//! sub-agent's, T-1402): a thread's turns read
 //! the developer message its first turn wrote, which a resumed thread keeps
 //! ([`crate::contract::Adapter::keeps_first_instructions`], which the Codex adapter
 //! answers yes to), but a compaction rebuilds that message from the instructions of

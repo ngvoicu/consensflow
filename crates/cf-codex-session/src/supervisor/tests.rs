@@ -793,6 +793,7 @@ fn the_servers_standard_error_is_read_for_as_long_as_it_runs_not_only_until_it_i
             executable: &codex,
             bridge: Bridge::parse(BRIDGE).unwrap(),
             role: None,
+            resumed: None,
             children: None,
             split: Split::default(),
             endpoint: Endpoint::open(&home.env).unwrap(),

@@ -18,8 +18,9 @@
 //! so a chief's specs turned on, a member added to the staff or a release that
 //! rewrote a text would never reach a conversation that is resumed. The engine says
 //! it itself. The resume is given the role all the same (its broker gives it to the
-//! window's main start, resume and fork, T-1394): a compaction rebuilds the thread's
-//! developer message from the session's own instructions, and a resumed window
+//! window's main start and to its resumes and forks of its own threads, T-1394): a
+//! compaction rebuilds the thread's developer message from the session's own
+//! instructions, and a resumed window
 //! given none lost its role at its thread's next compaction (T-1388, Codex 0.167.0).
 //! A role told by a note is then in the thread twice once it compacts, the note among
 //! its messages and the text the resume was given as the developer's: the same text.
