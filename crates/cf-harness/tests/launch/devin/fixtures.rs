@@ -177,6 +177,24 @@ impl Store {
             .unwrap();
     }
 
+    /// The row `node` of the session holding `message`, below `parent` (the first of a
+    /// chain of its own where there is none): the main chain's head from now.
+    pub(super) fn writes(&self, session: &str, node: &str, parent: Option<&str>, message: &Value) {
+        self.0
+            .execute(
+                "INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at)
+                 VALUES (?, ?, ?, ?, '2026-11-10T20:35:15Z')",
+                (session, node, parent, message.to_string()),
+            )
+            .unwrap();
+        self.0
+            .execute(
+                "UPDATE sessions SET main_chain_id = ? WHERE id = ?",
+                (node, session),
+            )
+            .unwrap();
+    }
+
     /// A message of `role` on the session's main chain, the first of it.
     pub(super) fn says(&self, session: &str, role: &str, text: &str) {
         let node = format!("{session}-node-1");

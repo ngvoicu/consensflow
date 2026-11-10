@@ -87,6 +87,45 @@ struct Said {
     mine: bool,
 }
 
+/// What one launch's log says of each session's turns, by the rules the record reads every
+/// log by ([`Said::visit`]): whether one is open. A window's own launch writes the log, and
+/// no other process does: the turns it holds are the window's own (`adapter`'s `observe`).
+#[derive(Default)]
+pub(in crate::devin) struct Turns {
+    /// What the log says so far, by the session each line names.
+    said: HashMap<String, Said>,
+}
+
+impl Turns {
+    /// One line of the log. A line the record's look would fail on still says what it
+    /// says of a turn: the record's look tells of the failure.
+    pub(in crate::devin) fn follow(&mut self, event: &Value) {
+        let Some(session) = event.get("sessionId").and_then(Value::as_str) else {
+            return;
+        };
+        let said = self.said.entry(session.to_owned()).or_default();
+        // How the turns ended is the record's to keep: here, each end is an end.
+        let _ = said.visit(
+            event,
+            session,
+            &mut Ended {
+                outcomes: &mut HashMap::new(),
+                natives: &mut HashMap::new(),
+            },
+        );
+    }
+
+    /// The log is read again from its start: what it says now is read anew.
+    pub(in crate::devin) fn read_anew(&mut self) {
+        self.said.clear();
+    }
+
+    /// Whether a turn is open on `session` in the log: begun, and its end not said.
+    pub(in crate::devin) fn open(&self, session: &str) -> bool {
+        self.said.get(session).is_some_and(|said| said.open)
+    }
+}
+
 /// A reply being streamed: its stream, its text so far, the request it
 /// answers once the log names it, and the model's request the turn ends in, once the
 /// log names that (`turnRequestId`, beside the request as the turn ends: what the

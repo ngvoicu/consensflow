@@ -850,6 +850,20 @@ impl Window for DevinWindow {
             } else if self.begun_on_the_store(&observed) {
                 observed.settled = false;
             }
+            // A turn the window's own launch began on the conversation and has not ended is
+            // the window's own, and its log is written by no other process: nothing the
+            // record holds reads the window at rest before the log says that turn ended. Not
+            // what the record held at the open (a compaction that kept none of the turn gives
+            // back the chain of the open, T-1401), not a chain Devin's compactor left holding
+            // nothing of the turn, nor a step whose answer Devin has not stored when it says
+            // it waits (`blocked` comes before the end). The log is read on from where the
+            // last look stopped, so a turn begun between two looks is seen at the next,
+            // whatever the record showed between them. Once the turn ended, the record and
+            // what it held at the open speak again: the old process's turn the snapshot
+            // speaks of is still no turn of this window's (T-1403).
+            if self.wire.turn_open(&session) {
+                observed.settled = false;
+            }
             Ok(match wire.shown {
                 None => unnamed(observed, HOLD),
                 Some(shown) if !self.known(&shown) => switched_to(observed, shown),
