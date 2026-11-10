@@ -1,0 +1,113 @@
+# The staff's roles as one table (FD-03, T-1416): `crates/cf-ledger/src/roles.rs` holds a row a
+# role (its id, name and article, its switch of `cf task add`, whether its work has a tier,
+# whether only an image agent holds it), and every site that names a role reads it: the
+# ledger's model and pools, the scheduler's notes, the daemon's flag of `task.add` and the
+# page's `roles`, `cf task add`'s switches. A sixth role put in the table for a test alone (the
+# seam's scout) is held, asked for and named everywhere. Each plant breaks one reading of the
+# table and the test written for it fails.
+#
+# Every name holds `role registry`, so `npm run plants:daemon -- "role registry"` runs them all.
+
+[run]
+rr-ledger-sixth = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "sixth_role"]
+rr-ledger-edit-tier = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "edit_tier"]
+rr-ledger-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "model::"]
+rr-ledger-roles = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "roles::"]
+rr-engine-sixth = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "sixth_role::"]
+rr-daemon-members = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::members"]
+rr-daemon-roles = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::roles"]
+rr-cf-task = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::task"]
+
+[[plant]]
+name = "role registry: a lookup answers for another role"
+meant = "a_task_for_a_role_nobody_holds_is_refused_by_the_roles_name"
+runs = ["rr-ledger-sixth"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''    all().iter().find(|role| role.id == id)'''
+replace = '''    all().iter().find(|role| role.id == id).map(|_| &all()[0])'''
+
+[[plant]]
+name = "role registry: a role with no tier is read as one with tiers"
+meant = "a_role_with_no_tier_takes_a_task_with_none_and_its_tier_is_not_changed"
+runs = ["rr-ledger-sixth"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''    find(pool).is_some_and(|role| !role.tiered)'''
+replace = '''    find(pool).is_some_and(|role| role.tiered)'''
+
+[[plant]]
+name = "role registry: the image designer's row has tiers"
+meant = "a_task_given_by_name_or_for_the_designer_has_no_tier_to_change"
+runs = ["rr-ledger-edit-tier"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''    tiered: false,
+    image_agent: true,'''
+replace = '''    tiered: true,
+    image_agent: true,'''
+
+[[plant]]
+name = "role registry: the image designer's row needs no image agent"
+meant = "takes_an_image_designer_for_an_image_model_alone"
+runs = ["rr-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''    image_agent: true,'''
+replace = '''    image_agent: false,'''
+
+[[plant]]
+name = "role registry: the staff page asks an image agent for every role but the designer"
+meant = "an_image_designer_is_added_on_codex_with_no_model_effort_or_tier"
+runs = ["rr-daemon-members"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''        .any(|role| find(role.as_ref()).is_some_and(|role| role.image_agent))'''
+replace = '''        .any(|role| find(role.as_ref()).is_some_and(|role| !role.image_agent))'''
+
+[[plant]]
+name = "role registry: a task asks for a role with tiers before the designer"
+meant = "a_task_asks_for_the_image_designer_before_anything_else_then_advice_review_and_test"
+runs = ["rr-ledger-roles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''    flagged(false)
+        .or_else(|| flagged(true))'''
+replace = '''    flagged(true)
+        .or_else(|| flagged(false))'''
+
+[[plant]]
+name = "role registry: the scheduler's note says the role's id, not its name"
+meant = "a_task_for_a_role_nobody_holds_any_more_waits_and_says_it_by_the_roles_name"
+runs = ["rr-engine-sixth"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''.map_or("member", cf_ledger::roles::name_of)'''
+replace = '''.map_or("member", |pool| pool)'''
+
+[[plant]]
+name = "role registry: cf task add knows the four switches of today alone"
+meant = "a_role_in_the_table_alone_is_asked_for_by_its_switch_and_named_by_its_row"
+runs = ["rr-cf-task"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''        .chain(roles::all().iter().filter_map(|role| role.switch))'''
+replace = '''        .chain(["--advice", "--review", "--test", "--design"])'''
+
+[[plant]]
+name = "role registry: the page is not given the roles"
+meant = "the_page_reads_the_roles_from_the_table_in_its_order_and_its_tests_read_the_same"
+runs = ["rr-daemon-roles"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''    fields.insert("roles".to_owned(), cf_ledger::roles::page_view());'''
+replace = '''    let _ = cf_ledger::roles::page_view;'''
