@@ -785,7 +785,9 @@ impl Rollout {
 /// exhausted, past 95 percent) and it comes after `at` (ms). Codex names its
 /// fullest window in every snapshot, a weekly one days from its reset and mostly
 /// unspent on this Mac's account: a limit it is not is no wait of a week, and
-/// takes the hour a refusal that names no reset waits (T-96).
+/// takes the hour a refusal that names no reset waits (T-96). This is the one use of
+/// the low level that is kept: it picks which reset a refusal carries, and holds
+/// nobody (T-1356).
 fn reset_after(quota: Option<&Quota>, at: Option<i64>) -> Option<String> {
     quota
         .filter(|quota| quota.level() != Level::Ok)

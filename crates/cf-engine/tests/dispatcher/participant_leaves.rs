@@ -10,7 +10,7 @@ use cf_harness::records::Role;
 use cf_ledger::{NewMember, ParticipantView};
 use serde_json::{json, Value};
 
-use crate::fixtures::{low, Tiers};
+use crate::fixtures::Tiers;
 use crate::traces::held_to;
 
 const SUITES: &[&str] = &["a participant that leaves"];
@@ -53,34 +53,6 @@ fn revoked(context: &Context) -> Vec<Value> {
         .into_iter()
         .map(|(_, given)| given[0].clone())
         .collect()
-}
-
-#[test]
-fn is_forgotten_a_member_that_comes_back_to_the_staff_starts_clean_not_low_on_quota() {
-    let context = Context::new();
-    let tiers = Tiers::new(&context, &["zeus"]);
-    tiers.open();
-    context.pass().unwrap();
-    context.pass().unwrap();
-    context.adapter.quota("zeus", Some(low(97)));
-    context.pass().unwrap();
-    context.remove_member(tiers.project.id, "zeus").unwrap();
-    add_worker(&context, tiers.project.id, "zeus");
-    tiers.open_body("Write the lexer");
-    context.pass().unwrap();
-    assert!(
-        tiers
-            .task(2)
-            .task
-            .assignee
-            .is_some_and(|session| session.starts_with("zeus-")),
-        "zeus takes it: the low quota was before"
-    );
-    held_to(
-        context.close(),
-        SUITES,
-        "is forgotten: a member that comes back to the staff starts clean, not low on quota",
-    );
 }
 
 #[test]
