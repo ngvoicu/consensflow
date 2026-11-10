@@ -14,6 +14,8 @@
 //! same as a fresh one.
 
 use super::*;
+use crate::shared::record::drawn::Kind;
+use crate::shared::record::reading::Role;
 
 /// The model's request the answer is of.
 const ANSWERED: &str = "model-2";
@@ -472,4 +474,69 @@ fn a_compacted_turn_devin_stamps_is_at_work_by_its_wire_alone_until_its_end_and_
         staged.wire("launch-1", &then);
     });
     assert_eq!(said(&ended), settled());
+}
+
+#[test]
+fn a_chain_compacted_at_rest_is_a_conversation_at_rest_and_the_turn_after_it_reads_as_any() {
+    // T-1388 (Devin 3000.12.43, `/compact` through `devin acp` on a finished session): the
+    // main chain is a new one, the system messages Devin opens a chain with and the
+    // summary (`kept_turns` 0), and no message of the user's: what it summed up is off the
+    // chain, with no copy of a step to lead back to it.
+    let record_of = |staged: &Staged| match &*look(&mut staged.reader()) {
+        Reading::Known(record) => record.clone(),
+        other => panic!("{other:?}"),
+    };
+    let staged = Staged::new();
+    let system =
+        |id: &str| json!({ "message_id": id, "role": "system", "content": "Devin's own." });
+    staged.chain(&[system("p-1"), system("p-2"), summary("s-1")]);
+    let at_rest = record_of(&staged);
+    assert_eq!(
+        at_rest
+            .items
+            .iter()
+            .map(|item| (item.role, item.kind()))
+            .collect::<Vec<_>>(),
+        [
+            (Role::Custom, Kind::Notice),
+            (Role::Custom, Kind::Notice),
+            (Role::Custom, Kind::Compaction),
+        ],
+        "all the harness's own, the last a compaction, none a message of the user's"
+    );
+    assert!(
+        !at_rest.in_flight && !at_rest.failed && !at_rest.asking,
+        "a conversation summed up is not one at work"
+    );
+    assert_eq!(
+        at_rest.settlement,
+        Settlement::Settled,
+        "no turn is open on a chain of Devin's own words and a summary, whatever the chain before it"
+    );
+
+    // The same words with no summary among them are a chain no turn was begun on, and say
+    // nothing of one.
+    let bare = Staged::new();
+    bare.chain(&[system("p-1"), system("p-2")]);
+    assert_eq!(record_of(&bare).settlement, Settlement::Unknown);
+
+    // A turn a window opened on it begins: the user's message and its answer, below the summary.
+    staged.node(
+        Some("n-4"),
+        Some("n-3"),
+        &user("u-2", Some(json!("request-2"))),
+    );
+    staged.node(Some("n-5"), Some("n-4"), &stopped("a-2", "Done."));
+    staged.head("n-5");
+    let then = record_of(&staged);
+    assert_eq!(then.settlement, Settlement::Settled);
+    assert!(!then.in_flight);
+    assert_eq!(
+        then.items
+            .iter()
+            .map(|item| (&*item.id, item.role, item.complete))
+            .collect::<Vec<_>>()[3..],
+        [("u-2", Role::User, true), ("a-2", Role::Assistant, true)],
+        "the turn after the compaction is read as one after any chain, the summary in no way its own"
+    );
 }

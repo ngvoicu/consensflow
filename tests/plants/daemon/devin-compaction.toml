@@ -17,7 +17,11 @@
 # - no user's message is read back, a step's newest row off the chain is taken for its
 #   original, a row on the walk to the message is not read as its original (a step written
 #   between two compactions, Calliope's P2-1 on T-655), or a message the chain holds is
-#   read back as well.
+#   read back as well;
+# - a chain of Devin's own words and a compaction's summary, no message of the user's on it
+#   (a conversation compacted at rest, T-1388), reads as a turn not known to have ended, or
+#   any chain of Devin's own words reads as one at rest, or a chain with a turn on it after the
+#   summary reads so.
 #
 # And a turn Devin 3000.11 stamps (T-660, from T-656's reading of the live suites): every
 # record of its work stamped with its time, as a replay is, and Devin's own word on the turn
@@ -221,3 +225,33 @@ runs = ["harness-lib-devin-compaction"]
 file = "crates/cf-harness/src/devin/record/chain.rs"
 find = "            at = original;"
 replace = "            let _ = original;"
+
+[[plant]]
+name = "devin compaction: a chain compacted at rest has a turn open"
+meant = "a_chain_compacted_at_rest_is_a_conversation_at_rest_and_the_turn_after_it_reads_as_any"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = "    } else if last_complete || cancelled || failed || compacted_at_rest {"
+replace = "    } else if last_complete || cancelled || failed {"
+
+[[plant]]
+name = "devin compaction: any chain of Devin's own words is a conversation compacted at rest"
+meant = "a_chain_compacted_at_rest_is_a_conversation_at_rest_and_the_turn_after_it_reads_as_any"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = "            .any(|entry| entry.item.kind() == Kind::Compaction);"
+replace = "            .any(|_| true);"
+
+[[plant]]
+name = "devin compaction: a chain with a turn on it after the summary is a conversation compacted at rest"
+meant = "the_end_of_a_compacted_turn_that_names_no_model_request_or_two_proves_nothing"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = "    let compacted_at_rest = last.is_none()\n        && chain"
+replace = "    let compacted_at_rest = chain"

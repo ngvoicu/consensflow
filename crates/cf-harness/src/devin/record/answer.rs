@@ -13,7 +13,8 @@
 //! tells that turn ended. Whether Devin is still on a turn is judged by the
 //! launch whose wire was written last (a resume opens a new one). A user's
 //! message that is what ConsensFlow gave a launch behind `/bypass` is read as
-//! the prompt it ran, however Devin stores the command.
+//! the prompt it ran, however Devin stores the command. A chain of Devin's own words and the
+//! summary of a compaction, with no message of the user's (compacted at rest), has no turn open.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,6 +24,7 @@ use super::comparable::comparable;
 use super::wires::{Cause, Outcome, Wires};
 use crate::devin::adapter::BYPASS;
 use crate::shared::quota::{busy_refusal, Quota};
+use crate::shared::record::drawn::Kind;
 use crate::shared::record::key::Key;
 use crate::shared::record::reading::{Record, Role, Settlement};
 
@@ -97,10 +99,20 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
             because: said.trim().chars().take(300).collect(),
         }));
     }
+    // A chain of Devin's own words alone with a compaction's summary among them is a
+    // conversation compacted at rest (T-1388, `/compact` on a finished session; a window at rest
+    // that `/compact` is typed into): the summary stands for the turns it summed up, no message of
+    // the user's is on the chain and no turn is open on it. Without a summary the same words are
+    // a chain no turn was begun on, and say nothing.
+    let compacted_at_rest = last.is_none()
+        && chain
+            .entries
+            .iter()
+            .any(|entry| entry.item.kind() == Kind::Compaction);
     record.in_flight = working || (last_open && !cancelled && !failed);
     record.settlement = if working {
         Settlement::InFlight
-    } else if last_complete || cancelled || failed {
+    } else if last_complete || cancelled || failed || compacted_at_rest {
         Settlement::Settled
     } else {
         Settlement::Unknown

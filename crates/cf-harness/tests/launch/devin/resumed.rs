@@ -159,6 +159,50 @@ fn a_window_opened_with_a_message_of_its_own_is_not_at_rest_on_the_turn_before_i
     }
 }
 
+/// A window of Devin opened again on `SESSION` in the store `store` is made in, read through
+/// the adapter's own reader (the real one: what the store says is what the window reads).
+fn reopened_on_the_store(home: &Home) -> Rc<dyn cf_harness::contract::Window> {
+    let adapter = home.adapter();
+    let window = window(&adapter, &Request::resumed(SESSION));
+    fs::create_dir_all(home.folder()).unwrap();
+    home.selects(SESSION);
+    window
+}
+
+#[test]
+fn a_window_opened_again_on_a_session_devin_compacted_at_rest_is_at_rest() {
+    // T-1388: the chain is Devin's own words and the summary, and no message of the user's.
+    let home = Home::new();
+    let store = home.store();
+    store.begins(SESSION);
+    store.says(SESSION, "user", "Write the parser");
+    store.replies(SESSION, "Done.");
+    store.is_compacted(SESSION);
+    let window = reopened_on_the_store(&home);
+    assert!(
+        at_rest(&window),
+        "nothing was given to it, and nothing is at work in a summary"
+    );
+}
+
+#[test]
+fn a_window_at_rest_stays_at_rest_when_devin_compacts_its_conversation_under_it() {
+    // The human types `/compact` into a Devin window at rest (a chief's, say): the chain it
+    // read as a finished turn becomes the summary and no message of the user's.
+    let home = Home::new();
+    let store = home.store();
+    store.begins(SESSION);
+    store.says(SESSION, "user", "Write the parser");
+    store.replies(SESSION, "Done.");
+    let window = reopened_on_the_store(&home);
+    assert!(at_rest(&window), "a finished turn, nothing given since");
+    store.is_compacted(SESSION);
+    assert!(
+        at_rest(&window),
+        "a summary where the turn was: nothing is at work in it"
+    );
+}
+
 #[test]
 fn a_window_whose_record_grew_is_read_by_the_record_and_not_by_the_turn_it_was_opened_on() {
     let home = Home::new();
