@@ -3,12 +3,14 @@
 //! the run script; what the bootstrap does (the lock, the unpack, the tree said) in
 //! the bootstrap.
 
+mod bootstrap;
 mod golden;
 #[cfg(windows)]
 mod lock;
 mod packages;
 mod powershell;
 mod reports;
+mod root;
 mod runs;
 #[cfg(windows)]
 mod stage;
@@ -452,10 +454,10 @@ fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went()
             r#"function Exit-Run([int]$code) { Free-Machine; Write-Output "`n== exit $code"; exit $code }"#
         ]
     );
-    // And it is what the lock, a machine with no tar of its own, the unpacking and the
-    // sweep leave by (the bootstrap), and a step, a preparation that could not be done and the
-    // command (the run script).
-    assert_eq!(boot.matches("Exit-Run ").count(), 4, "{boot}");
+    // And it is what a profile or a copy that is a link, the lock, a machine with no tar of its
+    // own, the unpacking and the sweep leave by (the bootstrap), and a step, a preparation that
+    // could not be done and the command (the run script).
+    assert_eq!(boot.matches("Exit-Run ").count(), 5, "{boot}");
     assert_eq!(run.matches("Exit-Run ").count(), 3, "{run}");
     assert!(
         boot.contains("if ($failed.Count) { Exit-Run 1 }\n"),
@@ -649,10 +651,10 @@ fn a_run_is_named_to_the_width_a_script_is_made_for_and_no_two_runs_are_named_al
     );
     // The run's process is the first of its name.
     assert!(ids[0].starts_with(&format!("{:08x}-", std::process::id())));
-    // The sweep that takes the tarballs of runs that never got so far away knows the shape.
+    // The sweep reads no such name: it removes no tarball by the shape of its name (T-1368).
     assert!(
-        sweep_script().contains(r"(\.[0-9a-f]{8}-[0-9a-f]{8})?\.tgz$"),
-        "the sweep does not read the names runs are given"
+        !sweep_script().contains(".tgz"),
+        "the sweep reads the names runs are given"
     );
 }
 
