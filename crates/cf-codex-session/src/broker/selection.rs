@@ -9,15 +9,23 @@
 //! numbers the requests it sends the TUI on its own, so only a response (a
 //! message with no `method`) ever answers a request of the TUI's.
 //!
-//! A main start is also where the window's role goes in: the broker gives it the
-//! window's developer instructions (`developerInstructions`, which replace what
-//! Codex's own configuration says for that thread, and so already hold that), so
-//! the role is on no command line. Nothing else is given them. A resumed or forked
-//! thread keeps the developer message it began with (probed on Codex 0.162.1 and
-//! 0.164.0), and a side thread (ephemeral, or of a source other than the user's) is
-//! no conversation of the window's. A sub-agent Codex spawns starts in the server,
-//! never through here: Codex 0.164.0 gives it the developer instructions of the
-//! thread that spawned it, as it did when they were configuration.
+//! A main start, resume or fork is also where the window's role goes in: the broker
+//! gives it the window's developer instructions (`developerInstructions`, which
+//! replace what Codex's own configuration says for that thread's session, and so
+//! already hold that), so the role is on no command line. Nothing else is given
+//! them: a side thread (ephemeral, or of a source other than the user's) is no
+//! conversation of the window's. A thread's turns read the developer message it
+//! began with, and a resumed or forked one keeps it: the instructions a resume
+//! names are written into no turn (probed on Codex 0.162.1 and 0.164.0, a resume
+//! with other instructions answered by the first; codex-rs 0.167.0 renders them
+//! only into a thread's full context, which a resumed thread's rollout already
+//! holds). They are what a compaction rebuilds that message from: Codex rebuilds a
+//! compacted history from the session's own instructions
+//! (`build_compaction_replacement_history`), so a resumed window given none lost
+//! its role at its thread's next compaction, its own or Codex's (T-1388, Codex
+//! 0.167.0; T-1394). A sub-agent Codex spawns starts in the server, never through
+//! here: Codex 0.164.0 gives it the developer instructions of the thread that
+//! spawned it, as it did when they were configuration.
 //!
 //! A start is the window's own when it is durable (`ephemeral` false, or not
 //! said, which is the server's own default) and the user's (`threadSource`
@@ -254,8 +262,8 @@ impl Selection {
     /// What a TUI connection said to Codex. Remembers it if it may change the
     /// window's thread or permissions, and returns the message to send in its
     /// place: a start, resume or fork given ConsensFlow's variables for its
-    /// commands, and a main start given the window's role too, and opened in
-    /// full-permission mode while the first start must be.
+    /// commands, a main start, resume or fork given the window's role too, and a
+    /// main start opened in full-permission mode while the first start must be.
     pub(crate) fn tui_said(
         &mut self,
         client: ClientId,
@@ -302,7 +310,10 @@ impl Selection {
             );
         }
         let bypass = main_start && self.fresh_bypass;
-        let role = self.role.as_deref().filter(|_| main_start);
+        let role = self
+            .role
+            .as_deref()
+            .filter(|_| main_start || main_resume || main_fork);
         let env = matches!(
             method,
             Some("thread/start" | "thread/resume" | "thread/fork")

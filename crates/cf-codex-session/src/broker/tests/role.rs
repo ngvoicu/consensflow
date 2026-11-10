@@ -1,5 +1,6 @@
 //! The window's role, as Codex's server is given it: the developer instructions of
-//! the TUI's main start, and of nothing else that passes through the broker.
+//! the TUI's main start, resume and fork, and of nothing else that passes through the
+//! broker.
 
 use serde_json::{json, Value};
 
@@ -11,7 +12,7 @@ const B: &str = "01a09094-a559-7db0-bf50-e2309856c3c0";
 const ROLE: &str = "Codex's own instructions.\n\nYour ConsensFlow role is worker.";
 
 #[test]
-fn the_main_start_reaches_codex_with_the_role_and_a_resume_fork_or_side_start_as_the_tui_sent_it() {
+fn the_main_start_resume_and_fork_reach_codex_with_the_role_and_a_side_start_as_the_tui_sent_it() {
     run(async {
         let f = Fixture::with(Options {
             role: Some(ROLE.to_owned()),
@@ -30,12 +31,21 @@ fn the_main_start_reaches_codex_with_the_role_and_a_resume_fork_or_side_start_as
             .await;
         assert_eq!(started["developerInstructions"], ROLE);
         assert_eq!(f.read().await["sessionId"], A);
-        for (id, method, params) in [
-            (
+        let side =
+            json!({ "ephemeral": true, "threadSource": "user", "developerInstructions": null });
+        let sent = f
+            .call(
+                &tui,
                 2,
                 "thread/start",
-                json!({ "ephemeral": true, "threadSource": "user", "developerInstructions": null }),
-            ),
+                side.clone(),
+                json!({ "thread": { "id": B } }),
+            )
+            .await;
+        assert_eq!(sent, side, "a side start goes as the TUI sent it");
+        // The window's own resume and fork: a compaction rebuilds the thread's developer
+        // message from the instructions they name (T-1394).
+        for (id, method, params) in [
             (
                 3,
                 "thread/resume",
@@ -56,7 +66,9 @@ fn the_main_start_reaches_codex_with_the_role_and_a_resume_fork_or_side_start_as
                     json!({ "thread": { "id": B } }),
                 )
                 .await;
-            assert_eq!(sent, params, "{method}");
+            let mut expected = params;
+            expected["developerInstructions"] = ROLE.into();
+            assert_eq!(sent, expected, "{method}");
         }
         assert_eq!(f.read().await["sessionId"], B);
     });

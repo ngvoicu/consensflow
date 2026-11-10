@@ -9,17 +9,19 @@
 //! ConsensFlow's own in the user's profile (`AppData`), whose inherited permissions give
 //! the user, SYSTEM and administrators alone, as Devin's role file is. The window's supervisor
 //! reads it before Codex starts, and its broker gives it to the TUI's main thread
-//! starts as their developer instructions (`developerInstructions`, which replace
+//! starts, resumes and forks as their developer instructions (`developerInstructions`, which replace
 //! what Codex's configuration says for that thread: probed on Codex 0.164.0, so the
 //! text holds Codex's own as well). It is on no command line, where every user of
 //! the machine could read it (`ps` is setuid root on macOS) and a pattern matching
 //! its words matched the window; a role's length is no command line's limit either.
 //! The file goes with the launch's folder, when its window closes.
 //!
-//! It is read once for a thread: the developer message a thread's first turn
-//! wrote is the one it keeps, and a resumed thread is not given it again
+//! The broker gives it to the window's main resume and fork too: a thread's turns read
+//! the developer message its first turn wrote, which a resumed thread keeps
 //! ([`crate::contract::Adapter::keeps_first_instructions`], which the Codex adapter
-//! answers yes to). A role that changed since the thread began reaches it as a
+//! answers yes to), but a compaction rebuilds that message from the instructions of
+//! the session that compacts, and a resume given none lost the role there (T-1388,
+//! T-1394). A role that changed since the thread began reaches its turns as a
 //! message the engine says.
 //!
 //! A sub-agent the window's agent starts (Codex's `spawn_agent`) is a thread the

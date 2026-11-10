@@ -7,8 +7,9 @@
 # starts (a file named and unreadable, or empty, opens no window), tells neither program its name,
 # and hands the text to the broker, which gives it to the TUI's main thread starts as their
 # `developerInstructions` (which replace what Codex's configuration says for the thread, so the
-# text holds Codex's own as well), in place of any the TUI named, and to no other start, resume or
-# fork. The stand-in Codex begins a thread with what its start names. One plant takes one rule out,
+# text holds Codex's own as well), in place of any the TUI named, and to its main resumes and forks
+# the same way (T-1394: a compaction rebuilds the thread's developer message from them), and to no
+# side start, resume or fork. The stand-in Codex begins a thread with what its start names. One plant takes one rule out,
 # or puts the old code back; a test of it fails. The broker's and the supervisor's plants run the
 # crate's own tests, the harness's its role tests and the launch suite (its rule test over both
 # platforms' recordings and the adapter, and the scenarios), the stand-in's its own; the
@@ -32,6 +33,8 @@ harness-launch-secrets = ["cargo", "test", "--offline", "-p", "cf-harness", "--t
 # The regression: a Codex chief's role on no command line, fresh and resumed, and its thread
 # begins with it once.
 rig-regression-role-file = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_codex_windows_role_was_on_its_command_line::"]
+# The regression of a resumed window that lost its role at its next compaction (T-1394).
+rig-regression-resumed-role = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_resumed_codex_window_lost_its_role_at_its_next_compaction::"]
 # The rig's case of a Codex chief given specs: its thread begins with its role.
 rig-specs-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "specs_codex::"]
 
@@ -44,18 +47,70 @@ runs = ["codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''        let role = self.role.as_deref().filter(|_| main_start);'''
+find = '''        let role = self
+            .role
+            .as_deref()
+            .filter(|_| main_start || main_resume || main_fork);'''
 replace = '''        let role = self.role.as_deref().filter(|_| false);'''
 
+# A main resume and fork are given the role too (T-1394): a compaction rebuilds a thread's
+# developer message from its session's own instructions, and a resumed window given none lost its
+# role at its thread's next compaction (T-1388, Codex 0.167.0).
+
 [[plant]]
-name = "codex role file: the broker gives the role to a resume and a fork too"
-meant = "no_side_start_resume_fork_or_turn_is_given_the_role"
+name = "codex role file: the broker gives a main resume and fork no role, as before T-1394"
+meant = "a_main_resume_or_fork_is_given_the_windows_role_in_place_of_the_instructions_it_named"
 runs = ["codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/broker/selection.rs"
-find = '''        let role = self.role.as_deref().filter(|_| main_start);'''
-replace = '''        let role = self.role.as_deref().filter(|_| main_start || main_resume || main_fork);'''
+find = '''        let role = self
+            .role
+            .as_deref()
+            .filter(|_| main_start || main_resume || main_fork);'''
+replace = '''        let role = self.role.as_deref().filter(|_| main_start);'''
+
+[[plant]]
+name = "codex role file: the broker gives a main fork no role"
+meant = "a_main_resume_or_fork_is_given_the_windows_role_in_place_of_the_instructions_it_named"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/selection.rs"
+find = '''        let role = self
+            .role
+            .as_deref()
+            .filter(|_| main_start || main_resume || main_fork);'''
+replace = '''        let role = self.role.as_deref().filter(|_| main_start || main_resume);'''
+
+[[plant]]
+name = "codex role file: the broker gives the role to every resume and fork, side ones too"
+meant = "no_side_start_side_resume_or_fork_or_turn_is_given_the_role"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/selection.rs"
+find = '''        let role = self
+            .role
+            .as_deref()
+            .filter(|_| main_start || main_resume || main_fork);'''
+replace = '''        let role = self.role.as_deref().filter(|_| {
+            main_start || matches!(method, Some("thread/resume" | "thread/fork"))
+        });'''
+
+[[plant]]
+name = "codex role file rig: a resumed window is given no role, as before T-1394 (the regression)"
+meant = "a_codex_members_follow_up_window_keeps_its_role_and_ask_command_through_a_compaction"
+runs = ["rig-regression-resumed-role"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/selection.rs"
+find = '''        let role = self
+            .role
+            .as_deref()
+            .filter(|_| main_start || main_resume || main_fork);'''
+replace = '''        let role = self.role.as_deref().filter(|_| main_start);'''
 
 [[plant]]
 name = "codex role file: a main start keeps the instructions the TUI named"
@@ -219,11 +274,10 @@ runs = ["fake-codex-own"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_codex/agent.rs"
-find = '''        *held(&self.developer) = params["developerInstructions"]
-            .as_str()
-            .map(str::to_owned)
-            .or_else(|| self.configured.clone());'''
-replace = '''        let _ = params;
+find = '''    pub fn started(&self, params: &Value) {
+        *held(&self.developer) = self.instructions_of(params);'''
+replace = '''    pub fn started(&self, params: &Value) {
+        let _ = params;
         *held(&self.developer) = self.configured.clone();'''
 
 # --- the review's items (T-764, T-765): starts the broker cannot tell, and ConsensFlow's

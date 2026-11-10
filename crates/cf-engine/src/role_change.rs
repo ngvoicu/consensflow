@@ -13,12 +13,16 @@
 //! instructions "Your code word is now ROLETWO; this replaces any earlier code
 //! word.", and the same turn was answered ROLEONE again. Neither the
 //! `developer_instructions` setting of a resumed window's server nor that field of
-//! the resume request replaces what the thread began with (and since T-698 a
-//! resumed window is given neither: its broker gives the role to a thread that
-//! starts, and to nothing else; a thread resumed by an app-server given no
-//! instructions answered ROLEONE on Codex 0.164.0, 2026-10-26), so a chief's
-//! specs turned on, a member added to the staff or a release that rewrote a text
-//! would never reach a conversation that is resumed. The engine says it itself.
+//! the resume request replaces what the thread's turns read (a thread resumed by an
+//! app-server given no instructions answered ROLEONE on Codex 0.164.0, 2026-10-26),
+//! so a chief's specs turned on, a member added to the staff or a release that
+//! rewrote a text would never reach a conversation that is resumed. The engine says
+//! it itself. The resume is given the role all the same (its broker gives it to the
+//! window's main start, resume and fork, T-1394): a compaction rebuilds the thread's
+//! developer message from the session's own instructions, and a resumed window
+//! given none lost its role at its thread's next compaction (T-1388, Codex 0.167.0).
+//! A role told by a note is then in the thread twice once it compacts, the note among
+//! its messages and the text the resume was given as the developer's: the same text.
 //!
 //! A chief whose window is open when its specs or the rules for its staff change is told
 //! of the change at its next rest, on every harness, in a note of that section alone
@@ -35,7 +39,8 @@
 //! way every message goes in (`next_in_line`): then the message the launch would
 //! have given first (a handoff, a brief, the note that its turn was cut), then
 //! the rest of the queue in its order. The role goes in once, as the developer
-//! instructions a window always had (which a resumed thread does not use). What the launch owes the note
+//! instructions a window always had (which a resumed thread's turns do not read until
+//! it compacts). What the launch owes the note
 //! until it is told, and what comes of a launch that cannot tell it, is in
 //! [`prelude`].
 //!

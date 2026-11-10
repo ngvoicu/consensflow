@@ -764,7 +764,7 @@ fn the_role_and_the_first_starts_full_permissions_go_in_one_message() {
 }
 
 #[test]
-fn no_side_start_resume_fork_or_turn_is_given_the_role() {
+fn no_side_start_side_resume_or_fork_or_turn_is_given_the_role() {
     let mut window = Window::with(false, Some("the role"));
     window.starts(1, json!({ "id": A }));
     for message in [
@@ -773,13 +773,50 @@ fn no_side_start_resume_fork_or_turn_is_given_the_role() {
         json!({ "id": 4, "method": "thread/start", "params": { "ephemeral": false, "threadSource": "system" } }),
         json!({ "id": 5, "method": "thread/start", "params": { "threadSource": "user", "ephemeral": true } }),
         json!({ "id": 6, "method": "thread/start", "params": null }),
-        resume(7, B),
-        json!({ "id": 8, "method": "thread/fork", "params": { "threadId": A, "threadSource": "user", "runtimeWorkspaceRoots": [] } }),
+        // A resume or a fork that names no workspace roots is not the TUI's own.
+        json!({ "id": 7, "method": "thread/resume", "params": { "threadId": B } }),
         json!({ "id": 9, "method": "thread/fork", "params": { "threadId": A, "threadSource": "user", "runtimeWorkspaceRoots": [], "ephemeral": true } }),
         json!({ "id": 10, "method": "turn/start", "params": { "threadId": A, "input": [] } }),
     ] {
         assert_eq!(window.says(message.clone()), None, "{message}");
     }
+}
+
+#[test]
+fn a_main_resume_or_fork_is_given_the_windows_role_in_place_of_the_instructions_it_named() {
+    // A resumed thread's turns read the developer message it began with, but a compaction
+    // rebuilds that message from the session's own instructions: a resume given none lost
+    // the role at its thread's next compaction (T-1388, T-1394).
+    let mut window = Window::with(false, Some("the role"));
+    let sent = json!({
+        "id": 1,
+        "method": "thread/resume",
+        "params": { "threadId": B, "runtimeWorkspaceRoots": null, "developerInstructions": null },
+    });
+    assert_eq!(
+        window.says(sent).unwrap().to_string(),
+        format!(
+            r#"{{"id":1,"method":"thread/resume","params":{{"threadId":"{B}","runtimeWorkspaceRoots":null,"developerInstructions":"the role"}}}}"#
+        )
+    );
+    window.answers(idle(1, B));
+    let fork = json!({
+        "id": 2,
+        "method": "thread/fork",
+        "params": { "threadId": B, "threadSource": "user", "runtimeWorkspaceRoots": [], "developerInstructions": "the TUI's" },
+    });
+    assert_eq!(
+        window.says(fork).unwrap()["params"]["developerInstructions"],
+        "the role"
+    );
+    // The first start alone is opened in full-permission mode: a resume is given the role
+    // and nothing of the start's.
+    let mut fresh = Window::with(true, Some("the role"));
+    let params = &fresh.says(resume(1, B)).unwrap()["params"];
+    assert_eq!(params["developerInstructions"], "the role");
+    assert_eq!(params.get("approvalPolicy"), None, "{params}");
+    // A window given no role has its resumes go as they are.
+    assert_eq!(Window::new().says(resume(1, B)), None);
 }
 
 #[test]
