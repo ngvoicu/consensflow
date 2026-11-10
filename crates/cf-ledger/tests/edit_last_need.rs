@@ -42,6 +42,7 @@ fn ledger_with_a_project(dir: &tempfile::TempDir) -> Ledger {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
         })
         .expect("a project");
     ledger

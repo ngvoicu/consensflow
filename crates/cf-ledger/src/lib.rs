@@ -68,8 +68,9 @@ pub use messages::{
 pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;
 pub use projects::{
-    parse_compaction, parse_description, parse_name, parse_staff_rules, NewChief, NewMember,
-    NewProject, COMPACTION_DEFAULT, COMPACTION_MAX, COMPACTION_MIN, STAFF_RULES_MAX_BYTES,
+    parse_advisor_tool, parse_compaction, parse_description, parse_name, parse_staff_rules,
+    NewChief, NewMember, NewProject, COMPACTION_DEFAULT, COMPACTION_MAX, COMPACTION_MIN,
+    STAFF_RULES_MAX_BYTES,
     STAFF_RULES_MAX_LINES,
 };
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};

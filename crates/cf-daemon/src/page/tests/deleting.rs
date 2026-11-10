@@ -38,6 +38,7 @@ fn staffed(rig: &Rig) -> (i64, i64) {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
         })
         .unwrap();
     let zeus = project

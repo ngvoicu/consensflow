@@ -55,6 +55,7 @@ fn project(name: &str) -> NewProject {
         specs: None,
         staff_rules: None,
         compaction: None,
+        advisor_tool: false,
     }
 }
 
@@ -558,6 +559,7 @@ fn typed(name: &str, rules: Option<&str>, size: Option<u32>) -> NewProject {
     NewProject {
         staff_rules: rules.map(str::to_owned),
         compaction: size,
+        advisor_tool: false,
         ..project(name)
     }
 }

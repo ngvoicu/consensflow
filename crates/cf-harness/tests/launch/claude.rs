@@ -28,6 +28,7 @@ use cf_proto::specs::Variant;
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
+mod advisor_off;
 mod agents;
 mod closed_at_rest;
 mod compact_cancelled;
@@ -149,6 +150,8 @@ struct Request {
     specs: Option<Variant>,
     /// The size the project chose for its members' windows to compact at.
     compaction: Option<u32>,
+    /// Whether the project has its members run without Claude Code's own advisor tool.
+    advisor_off: bool,
     /// The folder its project keeps its specs in, relative to the project.
     folder: &'static str,
     /// The project's folder, where the window opens.
@@ -172,6 +175,7 @@ impl Default for Request {
             }),
             specs: None,
             compaction: None,
+            advisor_off: false,
             folder: ".specs",
             directory: "/work/app".to_owned(),
         }
@@ -225,6 +229,7 @@ fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, Strin
                 skill,
             }),
         compaction: request.compaction,
+        advisor_off: request.advisor_off,
         first_message_ms: FIRST_MESSAGE_MS,
         starts_given_up: 0,
     };
