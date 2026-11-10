@@ -32,6 +32,7 @@ fn request() -> NewProject {
         specs: None,
         staff_rules: None,
         compaction: None,
+        advisor_tool: false,
     }
 }
 

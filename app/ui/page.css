@@ -695,6 +695,8 @@ tr[data-session] .row-name { font-weight: 500; }
 .members-compaction input[type="text"] { width: 10em; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--foam); font: 13px var(--mono); }
 .members-compaction input[aria-invalid="true"] { border-color: var(--buoy); }
 .members-compaction .staff-hint { color: var(--buoy); }
+/* Whether the project's members run with Claude Code's own advisor tool: a switch. */
+.members-advisor-tool .staff-hint { color: var(--buoy); }
 /* The project's specs: the controls one under another. */
 .project-specs .specs-help { margin: 0; font-size: 12px; color: var(--muted); }
 .project-specs :disabled { opacity: .5; }

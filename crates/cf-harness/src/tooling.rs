@@ -304,12 +304,17 @@ fn claude_settings(question: &Value) -> Result<Value, String> {
         .and_then(Value::as_u64)
         .map(|size| u32::try_from(size).map_err(|_| format!("the compaction {size} is too large")))
         .transpose()?;
+    let advisor_off = question
+        .get("advisorOff")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let cf = launch::bundle_of(Path::new(text(question, "cf")?)).pane_cf;
     Ok(json!(install::settings(
         &env(question)?,
         &launch,
         board_questions,
         compaction,
+        advisor_off,
         &cf,
         // A question that names no folder gets the file Node wrote: no folder is denied.
         question.get("directory").and_then(Value::as_str),

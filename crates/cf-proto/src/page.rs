@@ -95,6 +95,10 @@ pub enum PageOperation {
     /// compact at, or takes away: every member window of the project is given it
     /// when it next starts.
     ProjectCompaction,
+    /// Whether the human has a project's members run with Claude Code's own advisor tool
+    /// (Project settings, "Advisor tool"): every member's Claude Code window is launched with
+    /// it switched off or on from its next start; the chief's never is switched.
+    ProjectAdvisorTool,
     /// The models a harness lists and the efforts each takes, as the home keeps them: read
     /// from the harness at the first ask of the daemon's life, and again at the human's
     /// Refresh (CHF-03). For the chief's picker and the staff chains' editor.
@@ -107,7 +111,7 @@ pub enum PageOperation {
 impl PageOperation {
     /// Every operation, in the order Node's page listed them, then those this
     /// build added, in the order it added them.
-    pub const ALL: [PageOperation; 49] = [
+    pub const ALL: [PageOperation; 50] = [
         Self::ProjectsList,
         Self::ProjectOpen,
         Self::ProjectResume,
@@ -155,6 +159,7 @@ impl PageOperation {
         Self::ProjectMeeting,
         Self::ProjectRules,
         Self::ProjectCompaction,
+        Self::ProjectAdvisorTool,
         Self::ModelsGet,
         Self::MemberEdit,
     ];
@@ -209,6 +214,7 @@ impl PageOperation {
             Self::ProjectMeeting => "project.meeting",
             Self::ProjectRules => "project.rules",
             Self::ProjectCompaction => "project.compaction",
+            Self::ProjectAdvisorTool => "project.advisor_tool",
             Self::ModelsGet => "models.get",
             Self::MemberEdit => "member.edit",
         }
@@ -274,7 +280,7 @@ mod tests {
             .unwrap();
         let mut forwarded: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         let mut named: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(named.len(), 49);
+        assert_eq!(named.len(), 50);
         forwarded.sort_unstable();
         named.sort_unstable();
         assert_eq!(named, forwarded);
@@ -330,7 +336,7 @@ mod tests {
             "message.approve",
             "message.decline",
         ];
-        const ADDED: [&str; 21] = [
+        const ADDED: [&str; 22] = [
             "wakeup.get",
             "wakeup.set",
             "project.specs",
@@ -350,6 +356,7 @@ mod tests {
             "project.meeting",
             "project.rules",
             "project.compaction",
+            "project.advisor_tool",
             "models.get",
             "member.edit",
         ];

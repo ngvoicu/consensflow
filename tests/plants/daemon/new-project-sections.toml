@@ -348,8 +348,15 @@ runs = ["nps-daemon-opening"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/projects.rs"
-find = '    for key in ["gate", "wakeUp", "specs", "rules", "compaction"] {'
-replace = '    for key in ["gate", "wakeUp", "specs", "compaction"] {'
+find = '''    for key in [
+        "gate",
+        "wakeUp",
+        "specs",
+        "rules",
+        "compaction",
+        "advisorTool",
+    ] {'''
+replace = '    for key in ["gate", "wakeUp", "specs", "compaction", "advisorTool"] {'
 
 [[plant]]
 name = "new project sections: the page leaves the compaction out of the request it makes to the ledger"
@@ -358,8 +365,15 @@ runs = ["nps-daemon-opening"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/projects.rs"
-find = '    for key in ["gate", "wakeUp", "specs", "rules", "compaction"] {'
-replace = '    for key in ["gate", "wakeUp", "specs", "rules"] {'
+find = '''    for key in [
+        "gate",
+        "wakeUp",
+        "specs",
+        "rules",
+        "compaction",
+        "advisorTool",
+    ] {'''
+replace = '    for key in ["gate", "wakeUp", "specs", "rules", "advisorTool"] {'
 
 [[plant]]
 name = "new project sections: rules the page sends the daemon cannot read are let through"
@@ -552,12 +566,18 @@ find = '''
         if let Some(size) = request.compaction {
             set_compaction(store, id, Some(size))?;
         }
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
+        }
         known_project(store, id)
     })
 }'''
 replace = '''
         if let Some(size) = request.compaction {
             set_compaction(store, id, Some(size))?;
+        }
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
         }
         known_project(store, id)
     })
@@ -580,10 +600,16 @@ find = '''
         if let Some(size) = request.compaction {
             set_compaction(store, id, Some(size))?;
         }
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
+        }
         known_project(store, id)
     })
 }'''
 replace = '''
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
+        }
         known_project(store, id)
     })
     .and_then(|made| {
@@ -608,10 +634,16 @@ find = '''
         if let Some(size) = request.compaction {
             set_compaction(store, id, Some(size))?;
         }
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
+        }
         known_project(store, id)
     })
 }'''
 replace = '''
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
+        }
         known_project(store, id)
     })
     .and_then(|made| {

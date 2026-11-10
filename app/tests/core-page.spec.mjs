@@ -585,6 +585,19 @@ async function open(page, data = model()) {
         }
         return answer({ project: shownProject(project)[0] })
       },
+      // Whether the project's Claude Code members run with Claude Code's own advisor tool, as the
+      // daemon keeps it: on (true) or off (false, the default), refused in its words otherwise. A
+      // board says it only where it is on.
+      'project.advisor_tool': ({ project, advisorTool }) => {
+        if (typeof advisorTool !== 'boolean') {
+          return { ok: false, error: 'the advisor tool is on (true) or off (false)' }
+        }
+        for (const shown of shownProject(project)) {
+          if (advisorTool) shown.advisorTool = true
+          else delete shown.advisorTool
+        }
+        return answer({ project: shownProject(project)[0] })
+      },
       'wakeup.get': ({ project }) => answer({ wakeUp: wakeUpOf(project) }),
       'wakeup.set': ({ project, on, every, unit, text }) => {
         if (!(unit in UNIT_MS) || !Number.isInteger(every) || every < 1) {
@@ -712,6 +725,7 @@ async function open(page, data = model()) {
           Object.assign(project, { state: 'open', gate: body.gate === true })
           if (body.rules !== undefined) project.staffRules = body.rules
           if (body.compaction !== undefined) project.compaction = body.compaction
+          if (body.advisorTool === true) project.advisorTool = true
           data.projects.push(project)
           data.boards[3] = {
             project,
@@ -5448,11 +5462,17 @@ async function newProject(page) {
         name: 'Save compaction',
       }),
     },
+    advisorTool: {
+      group: section('Advisor tool'),
+      tool: section('Advisor tool').getByRole('checkbox'),
+      hint: section('Advisor tool').locator('.members-advisor-tool-hint'),
+      save: section('Advisor tool').getByRole('button', { name: 'Save advisor tool' }),
+    },
     computerUse: section('Computer use'),
   }
 }
 
-test('New project has Staff, the rules for the staff, compaction, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has', async ({
+test('New project has Staff, the rules for the staff, compaction, the advisor tool, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has', async ({
   page,
 }) => {
   const data = model()
@@ -5477,6 +5497,7 @@ test('New project has Staff, the rules for the staff, compaction, Human approval
     'Staff',
     'Rules for the staff',
     'Compaction',
+    'Advisor tool',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -5551,7 +5572,7 @@ test('New project has Staff, the rules for the staff, compaction, Human approval
     await markup('new-project-dialog'),
     await markup('project-settings-dialog'),
   ]
-  expect(here).toHaveLength(6)
+  expect(here).toHaveLength(7)
   expect(here).toEqual(there)
   // Left as it opened, the start says nothing of what a project has anyway: the request is the one it was.
   await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
@@ -5829,7 +5850,13 @@ test('Enter in any field of New project starts no project, and is a new line in 
     if (isText) expect(await field.inputValue(), `Enter in ${name}`).toBe(`${before}\n`)
   }
   // None of it saved anything either: there is no project to save for.
-  for (const operation of ['wakeup.set', 'project.specs', 'project.rules', 'project.compaction']) {
+  for (const operation of [
+    'wakeup.set',
+    'project.specs',
+    'project.rules',
+    'project.compaction',
+    'project.advisor_tool',
+  ]) {
     expect(await calls(page, operation), operation).toEqual([])
   }
   // Enter keeps what it is for on a button: its press.
@@ -5877,6 +5904,7 @@ test('Enter in a field of a section of Project settings adds nobody to the staff
     'project.specs',
     'project.rules',
     'project.compaction',
+    'project.advisor_tool',
   ]
   const tally = async () =>
     Object.fromEntries(
@@ -6029,7 +6057,7 @@ test('New project holds every section Project settings holds, in its order, but 
     expect(reason.length, `${legend} has no reason`).toBeGreaterThan(20)
   }
   expect(made).toEqual(settings.filter((legend) => !(legend in NEW_PROJECT_LACKS)))
-  expect(made).toHaveLength(7)
+  expect(made).toHaveLength(8)
 })
 
 test('New project: the rules for the staff and the compaction are written as they are in Project settings, counted and checked as typed, and start with the project', async ({
@@ -6064,7 +6092,7 @@ test('New project: the rules for the staff and the compaction are written as the
     ])
   await expect(made.dialog).toBeHidden()
   // They start with the project, in the one write that makes it: nothing is saved afterwards.
-  for (const operation of ['project.rules', 'project.compaction']) {
+  for (const operation of ['project.rules', 'project.compaction', 'project.advisor_tool']) {
     expect(await calls(page, operation), operation).toEqual([])
   }
 })
@@ -6391,7 +6419,7 @@ test('shows and sets human approval from Project settings, which has no review p
   await expect(gate).toBeChecked()
 })
 
-test("names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
+test("names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Advisor tool, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
   page,
 }) => {
   await open(page)
@@ -6407,6 +6435,7 @@ test("names the board's button and its dialog Project settings, with Staff, Rule
     'Staff',
     'Rules for the staff',
     'Compaction',
+    'Advisor tool',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -6416,6 +6445,7 @@ test("names the board's button and its dialog Project settings, with Staff, Rule
     'Staff',
     'Rules for the staff',
     'Compaction',
+    'Advisor tool',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -7084,6 +7114,154 @@ test("says a refusal of the members' compaction in its section and keeps what wa
   await expect(section.hint).toContainText('the daemon stopped')
   await expect(section.amount).toHaveValue('300000')
   await expect(section.size).toBeChecked()
+})
+
+/** Project settings open on project 1, and its Advisor tool section. */
+async function advisorToolGroup(page) {
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const group = dialog.getByRole('group', { name: 'Advisor tool', exact: true })
+  return {
+    dialog,
+    group,
+    tool: group.getByRole('checkbox'),
+    hint: group.locator('.members-advisor-tool-hint'),
+    save: group.getByRole('button', { name: 'Save advisor tool' }),
+  }
+}
+
+test("Project settings has the advisor tool off for the project's members until the human ticks it, and says in one line whom it is for", async ({
+  page,
+}) => {
+  await open(page)
+  const section = await advisorToolGroup(page)
+  await expect(section.tool).not.toBeChecked()
+  await expect(section.save).toBeEnabled()
+  await expect(section.hint).toBeHidden()
+  // One line, in the section, true as written: Claude Code's own tool, its members, the chief
+  // left alone, and the other harnesses having none.
+  await expect(section.group.locator('.dialog-help')).toHaveText([
+    "Claude Code's own advisor tool lets a window consult a second model. Off, each Claude Code member runs without it from its next start; on, it has the tool as your own Claude Code setting gives it. The chief is not affected and keeps its harness's own setting. Codex, Pi, Devin and Muse Code have no advisor tool, so this changes nothing for their members. A window already open keeps what it began with.",
+  ])
+  // Opening sends nothing.
+  expect(await calls(page, 'project.advisor_tool')).toEqual([])
+})
+
+test('Project settings shows the advisor tool as the board has it for the project', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].project.advisorTool = true
+  await open(page, data)
+  const section = await advisorToolGroup(page)
+  await expect(section.tool).toBeChecked()
+  expect(await calls(page, 'project.advisor_tool')).toEqual([])
+})
+
+test('saves the advisor tool by its own Save, shows what the daemon kept, and saves it off again', async ({
+  page,
+}) => {
+  await open(page)
+  const section = await advisorToolGroup(page)
+  await section.tool.check()
+  // Ticking sends nothing: the section has its own Save.
+  expect(await calls(page, 'project.advisor_tool')).toEqual([])
+  await section.save.click()
+  await expect
+    .poll(() => calls(page, 'project.advisor_tool'))
+    .toEqual([{ project: 1, advisorTool: true }])
+  await expect(section.tool).toBeChecked()
+  await expect(page.locator('#status')).toHaveText(
+    "The project's Claude Code members have the advisor tool as your own Claude Code setting gives it: each window is given that when it next starts.",
+  )
+  // No other section saved with it.
+  for (const operation of [
+    'project.rules',
+    'project.compaction',
+    'wakeup.set',
+    'project.specs',
+    'project.gate',
+  ]) {
+    expect(await calls(page, operation)).toEqual([])
+  }
+  await section.dialog.getByRole('button', { name: 'Close' }).click()
+  const again = await advisorToolGroup(page)
+  await expect(again.tool).toBeChecked()
+  await again.tool.uncheck()
+  await again.save.click()
+  await expect.poll(() => calls(page, 'project.advisor_tool')).toHaveLength(2)
+  expect((await calls(page, 'project.advisor_tool'))[1]).toEqual({
+    project: 1,
+    advisorTool: false,
+  })
+  await expect(again.tool).not.toBeChecked()
+  await expect(page.locator('#status')).toHaveText(
+    "The project's Claude Code members run without the advisor tool: windows that start from now on are launched without it.",
+  )
+})
+
+test('says a refusal of the advisor tool in its section and keeps what was chosen', async ({
+  page,
+}) => {
+  await open(page)
+  const section = await advisorToolGroup(page)
+  await section.tool.check()
+  await page.evaluate(() => {
+    window.__down = 'the daemon stopped'
+  })
+  await section.save.click()
+  await expect(section.hint).toBeVisible()
+  await expect(section.hint).toContainText('the daemon stopped')
+  await expect(section.tool).toBeChecked()
+})
+
+test('New project has the advisor tool off, and sends it only when the human ticks it, to start with the project', async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await expect(made.advisorTool.tool).not.toBeChecked()
+  // Its own Save is for a saved project: New project does not show it.
+  await expect(made.advisorTool.save).toBeHidden()
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+      },
+    ])
+  await expect(made.dialog).toBeHidden()
+  expect(await calls(page, 'project.advisor_tool')).toEqual([])
+})
+
+test('New project with the advisor tool ticked starts the project with it, in the one write that makes it', async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await made.advisorTool.tool.check()
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+        advisorTool: true,
+      },
+    ])
+  await expect(made.dialog).toBeHidden()
+  expect(await calls(page, 'project.advisor_tool')).toEqual([])
 })
 
 const DEFAULT_WAKE_UP_WORDS =
@@ -8809,6 +8987,7 @@ test('project menu: Project settings… opens the dialog of the board’s Projec
     'Staff',
     'Rules for the staff',
     'Compaction',
+    'Advisor tool',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -9682,6 +9861,7 @@ test('Project settings: the sections are the same distance apart and spaced alik
     'Staff',
     'Rules for the staff',
     'Compaction',
+    'Advisor tool',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -9696,6 +9876,7 @@ test('Project settings: the sections are the same distance apart and spaced alik
   expect(saves).toEqual([
     ['Rules for the staff', { text: 'Save rules', primary: true, inActions: true, fromEdge: 0 }],
     ['Compaction', { text: 'Save compaction', primary: true, inActions: true, fromEdge: 0 }],
+    ['Advisor tool', { text: 'Save advisor tool', primary: true, inActions: true, fromEdge: 0 }],
     ['Wake-up calls', { text: 'Save wake-up calls', primary: true, inActions: true, fromEdge: 0 }],
     ['Specs', { text: 'Save specs', primary: true, inActions: true, fromEdge: 0 }],
   ])
