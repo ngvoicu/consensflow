@@ -876,6 +876,35 @@ fn what_it_says(text: &str) -> (Duration, String) {
     (Duration::ZERO, said)
 }
 
+/// `thread` as Codex 0.167.0 reads a thread its TUI began on an app-server: `vscode`, no
+/// parent, the user's (T-1414), with `status`. With `CF_TEST_CODEX_LINEAGE=sub-agent`, as it
+/// reads a sub-agent's thread (`subAgent.thread_spawn`, its parent, `subagent`).
+fn top_level(thread: &str, status: Value) -> Value {
+    if own_var("CF_TEST_CODEX_LINEAGE").as_deref() == Some("sub-agent") {
+        return json!({
+            "id": thread,
+            "forkedFromId": null,
+            "parentThreadId": PARENT,
+            "source": { "subAgent": { "thread_spawn": { "parent_thread_id": PARENT, "depth": 1 } } },
+            "threadSource": "subagent",
+            "status": status,
+            "turns": [],
+        });
+    }
+    json!({
+        "id": thread,
+        "forkedFromId": null,
+        "parentThreadId": null,
+        "source": "vscode",
+        "threadSource": "user",
+        "status": status,
+        "turns": [],
+    })
+}
+
+/// The thread a sub-agent's is under, with `CF_TEST_CODEX_LINEAGE=sub-agent`.
+const PARENT: &str = "01a17a05-6f24-7f01-b73d-6e76c4aa01c5";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1207,32 +1236,3 @@ mod tests {
         );
     }
 }
-
-/// `thread` as Codex 0.167.0 reads a thread its TUI began on an app-server: `vscode`, no
-/// parent, the user's (T-1414), with `status`. With `CF_TEST_CODEX_LINEAGE=sub-agent`, as it
-/// reads a sub-agent's thread (`subAgent.thread_spawn`, its parent, `subagent`).
-fn top_level(thread: &str, status: Value) -> Value {
-    if own_var("CF_TEST_CODEX_LINEAGE").as_deref() == Some("sub-agent") {
-        return json!({
-            "id": thread,
-            "forkedFromId": null,
-            "parentThreadId": PARENT,
-            "source": { "subAgent": { "thread_spawn": { "parent_thread_id": PARENT, "depth": 1 } } },
-            "threadSource": "subagent",
-            "status": status,
-            "turns": [],
-        });
-    }
-    json!({
-        "id": thread,
-        "forkedFromId": null,
-        "parentThreadId": null,
-        "source": "vscode",
-        "threadSource": "user",
-        "status": status,
-        "turns": [],
-    })
-}
-
-/// The thread a sub-agent's is under, with `CF_TEST_CODEX_LINEAGE=sub-agent`.
-const PARENT: &str = "01a17a05-6f24-7f01-b73d-6e76c4aa01c5";

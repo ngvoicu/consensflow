@@ -119,6 +119,9 @@ enum Step {
 
 use Step::{Fork, Misread, Other, Reads as ReadsAs, Reopen, Resume, Start};
 
+/// How a row's steps are made, each time they are played.
+type Steps = fn() -> Vec<Step>;
+
 /// A row: what it is, played in one life of the broker, and across a close and a reopen.
 struct Row {
     name: &'static str,
@@ -316,7 +319,7 @@ fn rows() -> Vec<Row> {
         one_life,
         reopened,
     });
-    let unread: [(&'static str, fn() -> Vec<Step>); 5] = [
+    let unread: [(&'static str, Steps); 5] = [
         ("a Codex with no thread/read", || {
             vec![ReadsAs(Reads::Refused(
                 json!({ "code": -32601, "message": "Method not found" }),
