@@ -94,6 +94,10 @@ struct PasteRequest {
     /// window's adapter read its input box empty on the screen.
     #[serde(default, rename = "readEmpty")]
     read_empty: Option<u64>,
+    /// Only into a window none of the human's keys has reached since it opened
+    /// ([`cf_proto::panes::UNTYPED`]).
+    #[serde(default)]
+    untyped: bool,
 }
 
 #[derive(Deserialize)]
@@ -243,8 +247,13 @@ fn register(
     // reached the window, a request it could not read included.
     let paste_queue = Arc::clone(&inputs);
     builder.on("pane.write_paste", move |_bridge, body| {
-        let pasted = paste_request(body).and_then(|(key, body, read_empty)| {
-            wait_for_input_blocking(paste_queue.paste(key, body.into_bytes(), read_empty)?)
+        let pasted = paste_request(body).and_then(|(key, request)| {
+            wait_for_input_blocking(paste_queue.paste(
+                key,
+                request.body.into_bytes(),
+                request.read_empty,
+                request.untyped,
+            )?)
         });
         Ok(match pasted {
             Ok(()) => json!({"ok":true}),
@@ -574,11 +583,11 @@ fn parse_body<T: DeserializeOwned>(body: Value) -> Result<T, String> {
 
 /// A paste's pane and body. A request that does not name them was refused
 /// before anything was written.
-fn paste_request(body: Value) -> Result<(PaneKey, String, Option<u64>), InputError> {
+fn paste_request(body: Value) -> Result<(PaneKey, PasteRequest), InputError> {
     let refused = |cause| InputError::refused(INVALID_BODY, cause);
     let request: PasteRequest = parse_body(body).map_err(refused)?;
     let key = pane_key(&request.id, request.generation).map_err(refused)?;
-    Ok((key, request.body, request.read_empty))
+    Ok((key, request))
 }
 
 /// Everything a `pane.open` asks for, checked before anything is spawned; the
@@ -614,6 +623,39 @@ mod tests {
     use std::sync::mpsc;
     #[cfg(unix)]
     use std::time::Duration;
+
+    /// A paste asks for a window nobody typed into only where it says so: a request that does
+    /// not is read as every paste was before (T-1474).
+    #[test]
+    fn a_paste_asks_for_a_window_nobody_typed_into_only_where_it_says_so() {
+        let read = |body: Value| {
+            paste_request(body)
+                .map(|(_, request)| request.untyped)
+                .map_err(|error| error.to_string())
+        };
+        let pane = |more: Value| {
+            let mut body = json!({"id":"p1-zeus","generation":1,"body":"/bypass hi"});
+            for (name, value) in more.as_object().into_iter().flatten() {
+                body[name] = value.clone();
+            }
+            body
+        };
+        assert_eq!(read(pane(json!({}))), Ok(false));
+        assert_eq!(
+            read(pane(json!({ (cf_proto::panes::UNTYPED): true }))),
+            Ok(true)
+        );
+        assert_eq!(
+            read(pane(
+                json!({ (cf_proto::panes::UNTYPED): true, "readEmpty": 3 })
+            )),
+            Ok(true)
+        );
+        assert_eq!(
+            read(pane(json!({ (cf_proto::panes::UNTYPED): false }))),
+            Ok(false)
+        );
+    }
 
     #[cfg(unix)]
     use crate::headless::MAX_FRAME_BYTES;

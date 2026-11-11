@@ -56,7 +56,7 @@ use cf_base::js;
 use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
 use cf_proto::models::ModelListing;
-use cf_proto::panes::{HumanInput, SilentPaste, SCREEN_QUIET_MS};
+use cf_proto::panes::{HumanInput, SilentPaste, SCREEN_QUIET_MS, TYPED_INTO};
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
@@ -518,6 +518,9 @@ struct DevinWindow {
     /// When the first look was that found its log naming the conversation it is known to be
     /// on, and configuring none (`shows`).
     unannounced_since: Cell<Option<i64>>,
+    /// Whether the pane host has said that a key of the human's reached the window since it
+    /// opened, at a readiness's look or by refusing a paste for it (`shows`).
+    typed_into: Cell<bool>,
 }
 
 /// Which conversation a window's log says it shows, as `DevinWindow::shows` tells it.
@@ -561,6 +564,7 @@ impl DevinWindow {
             input: RefCell::default(),
             left_open: RefCell::new(left_open),
             unannounced_since: Cell::default(),
+            typed_into: Cell::default(),
         }
     }
 
@@ -669,6 +673,13 @@ impl DevinWindow {
     /// within 2.3 s (T-1417 and T-1432, nine windows). Its lines carry no times, so the
     /// while is the window's own looks'. Any other conversation named, a second, or a
     /// configuration, ends it.
+    ///
+    /// Nothing tells a `/new` that writes no line from the window still on its conversation
+    /// (T-1466's review: not the log, the process, the launch's arguments or the store), and
+    /// ConsensFlow types no command into a window: only a person could have switched it. So a
+    /// window the pane host has said a key of the human's reached since it opened is held as one
+    /// that has said nothing, until its log configures; and the paste itself asks the host to
+    /// go in only while none has (`channel::send`).
     fn shows(&self, said: &Said) -> Shows {
         let unannounced = said
             .unannounced
@@ -685,7 +696,7 @@ impl DevinWindow {
         let now = self.time.wall_ms();
         let since = *self.unannounced_since.get().get_or_insert(now);
         self.unannounced_since.set(Some(since));
-        if now - since >= UNANNOUNCED_MS {
+        if now - since >= UNANNOUNCED_MS && !self.typed_into.get() {
             Shows::Unannounced
         } else {
             Shows::Unsaid
@@ -768,7 +779,16 @@ impl Window for DevinWindow {
             let snapshot = pane::snapshot(host, pane)
                 .await
                 .map_err(|failed| failed.message)?;
-            self.input.replace(HumanInput::of(&snapshot));
+            let input = HumanInput::of(&snapshot);
+            // The host's count is of this window's launch, and outlives a daemon's restart.
+            if input
+                .as_ref()
+                .and_then(|input| input.typed)
+                .is_some_and(|typed| typed > 0)
+            {
+                self.typed_into.set(true);
+            }
+            self.input.replace(input);
             if snapshot.get("ok") != Some(&Value::Bool(true))
                 || js::truthy(snapshot.get("pasteInFlight"))
             {
@@ -851,6 +871,10 @@ impl Window for DevinWindow {
                 read_empty,
             )
             .await;
+            // A key of the human's came between the readiness's look and the paste.
+            if sent.refused && sent.error.as_deref() == Some(TYPED_INTO) {
+                self.typed_into.set(true);
+            }
             Ok(admission(&sent, "Devin refused the paste", false))
         })
     }

@@ -35,6 +35,18 @@ use serde_json::Value;
 /// whether the window answered the human's last key at all.
 pub const SCREEN_QUIET_MS: &str = "screenQuietMs";
 
+/// The field of a `pane.write_paste` that asks the host to paste only into a window none of
+/// the human's keys has reached since it opened (this generation of the pane's `typed` is
+/// still 0): checked as the paste is made, after every key the pane's worker took before it,
+/// so a key of theirs is either counted and the paste refused unwritten, or comes after the
+/// paste's Enter. Absent or false, a paste is made as it always was. The daemon's own keys
+/// (`pane.input`), the terminal's replies and the window's paste are not the human's, and a
+/// terminal's reports of itself on their path (focus, mouse, strings) are no key.
+pub const UNTYPED: &str = "untyped";
+
+/// The error of a paste [`UNTYPED`] refused because the human has typed into the window.
+pub const TYPED_INTO: &str = "typed-into";
+
 /// The kinds of bytes a write of the human's path into a pane can hold, as the host
 /// names them in a snapshot's `humanWrites`: characters typed; a bracketed paste; Enter;
 /// Backspace or Ctrl+U; another control key; an escape sequence (an arrow, a function key,

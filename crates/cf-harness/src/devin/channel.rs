@@ -6,7 +6,7 @@ use std::path::Path;
 use super::wire::naming;
 use crate::contract::{Pane, PaneHost};
 use crate::shared::admission::Sent;
-use crate::shared::pane::write_paste;
+use crate::shared::pane::{write_paste, write_paste_untyped};
 
 /// A refusal before the paste is made: nothing was written.
 fn refused(error: &str) -> Sent {
@@ -18,6 +18,9 @@ fn refused(error: &str) -> Sent {
     }
 }
 
+/// Why a paste the log does not allow is refused.
+const ANOTHER: &str = "Devin is displaying another conversation";
+
 /// What a paste needs the log to say of the conversation the window shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Guard {
@@ -25,7 +28,8 @@ pub(super) enum Guard {
     Configured,
     /// That, or that the log configured none and names it alone, on every line that names one
     /// (`wire::Naming::unannounced`): a window opened again silent, whose delivery goes behind
-    /// `/bypass` (the adapter's `DevinWindow::shows`).
+    /// `/bypass` (the adapter's `DevinWindow::shows`), and then only into a window the human
+    /// has not typed into since it opened.
     Unannounced,
 }
 
@@ -46,13 +50,18 @@ pub(super) async fn send(
     let Ok(naming) = naming(wire) else {
         return refused("Devin conversation is unavailable");
     };
-    let shows = |session: &str| {
-        naming.shown() == Some(session)
-            || (guard == Guard::Unannounced && naming.unannounced() == Some(session))
+    let Some(session) = session.filter(|session| !session.is_empty()) else {
+        return refused(ANOTHER);
     };
-    match session.filter(|session| !session.is_empty()) {
-        Some(session) if shows(session) => write_paste(host, pane, text, read_empty).await,
-        _ => refused("Devin is displaying another conversation"),
+    if naming.shown() == Some(session) {
+        write_paste(host, pane, text, read_empty).await
+    } else if guard == Guard::Unannounced && naming.unannounced() == Some(session) {
+        // Only the human could have taken a window that says nothing to another conversation
+        // (ConsensFlow types no command into it): the host pastes only while none of their keys
+        // has reached it, checked as it pastes.
+        write_paste_untyped(host, pane, text, read_empty).await
+    } else {
+        refused(ANOTHER)
     }
 }
 

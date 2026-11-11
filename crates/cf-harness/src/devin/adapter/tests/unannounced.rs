@@ -185,3 +185,95 @@ fn a_silent_window_the_human_takes_to_another_conversation_is_held_again() {
     assert!(finished(window.deliver(&host, &pane(), NOTE)).is_ok());
     assert!(pastes(&host.asked).is_empty());
 }
+
+/// A pane host whose screen is drawn and whose count says `typed` writes of the human's keys
+/// reached the window since it opened, none left unsent (an Escape, an arrow, words erased, a
+/// command sent), and that answers a paste as `paste` does.
+fn typed_into(
+    typed: u64,
+    paste: Value,
+) -> AnsweringHost<impl Fn(&str) -> Result<Value, crate::contract::HostError>> {
+    AnsweringHost::new(move |op| {
+        Ok(match op {
+            "pane.snapshot" => json!({ "ok": true, "outputQuietMs": 0, "screenQuietMs": 2_000.0,
+                "typed": typed, "unsent": false }),
+            "pane.write_paste" => paste.clone(),
+            _ => json!({ "ok": true }),
+        })
+    })
+}
+
+/// Whether each paste the host was asked for asked for a window nobody typed into.
+fn untyped(asked: &RefCell<Vec<(String, Value)>>) -> Vec<bool> {
+    asked
+        .borrow()
+        .iter()
+        .filter(|(op, _)| op == "pane.write_paste")
+        .map(|(_, body)| body.get(cf_proto::panes::UNTYPED) == Some(&json!(true)))
+        .collect()
+}
+
+#[test]
+fn a_silent_window_the_human_typed_into_is_held_as_before_until_its_log_configures() {
+    // A `/new` that writes no line would leave the log naming the conversation the window
+    // left (T-1466's review): only a person types into a member's window, and once one has,
+    // the log's silence says nothing of where the window is (T-1474).
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, silent("mild-coin")).unwrap();
+    let fakes = Fakes::new(&Env::default());
+    let window = window(&fakes, &wire, Some("mild-coin"));
+    let host = typed_into(1, json!({ "ok": true }));
+    assert_eq!(finished(window.ready(&host, &pane())), Ok(hold()));
+    fakes.time.settle_at(EPOCH_MS + 10 * UNANNOUNCED_MS);
+    assert_eq!(finished(window.ready(&host, &pane())), Ok(hold()));
+    assert!(finished(window.observe()).unwrap().unnamed);
+    assert!(finished(window.deliver(&host, &pane(), NOTE)).is_ok());
+    assert!(pastes(&host.asked).is_empty(), "{:?}", pastes(&host.asked));
+    // Its log configures it (a message of the human's, `/bypass`): a delivery as any.
+    append(&wire, &bypassed("mild-coin"));
+    assert_eq!(finished(window.ready(&host, &pane())), Ok(Readiness::Ready));
+    assert!(finished(window.deliver(&host, &pane(), NOTE)).is_ok());
+    assert_eq!(pastes(&host.asked).len(), 1);
+    assert!(!pastes(&host.asked)[0].starts_with(BYPASS));
+    assert_eq!(untyped(&host.asked), [false]);
+}
+
+#[test]
+fn a_silent_window_nobody_typed_into_asks_the_host_for_that_as_it_pastes_and_a_key_that_came_first_holds_it(
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, silent("mild-coin")).unwrap();
+    // Nobody typed: the delivery goes behind /bypass, as the host is asked to paste it only
+    // into a window no key of the human's has reached.
+    let fakes = Fakes::new(&Env::default());
+    let untouched = window(&fakes, &wire, Some("mild-coin"));
+    let host = typed_into(0, json!({ "ok": true }));
+    assert_eq!(finished(untouched.ready(&host, &pane())), Ok(hold()));
+    fakes.time.settle_at(EPOCH_MS + UNANNOUNCED_MS);
+    assert_eq!(
+        finished(untouched.ready(&host, &pane())),
+        Ok(Readiness::Ready)
+    );
+    assert!(finished(untouched.deliver(&host, &pane(), NOTE)).is_ok());
+    assert!(pastes(&host.asked)[0].starts_with(BYPASS));
+    assert_eq!(untyped(&host.asked), [true]);
+    // A key of the human's after the readiness's look and before the paste: the host refuses
+    // it unwritten, and the window is held from then on, whatever the next look's count says.
+    let fakes = Fakes::new(&Env::default());
+    let again = window(&fakes, &wire, Some("mild-coin"));
+    let host = typed_into(
+        0,
+        json!({ "ok": false, "admitted": false, "bytesWritten": 0,
+            "error": cf_proto::panes::TYPED_INTO,
+            "cause": "the human has typed into the window since it opened" }),
+    );
+    assert_eq!(finished(again.ready(&host, &pane())), Ok(hold()));
+    fakes.time.settle_at(EPOCH_MS + UNANNOUNCED_MS);
+    assert_eq!(finished(again.ready(&host, &pane())), Ok(Readiness::Ready));
+    let given = finished(again.deliver(&host, &pane(), NOTE)).unwrap();
+    assert!(matches!(given, Admission::Refused { .. }), "{given:?}");
+    assert_eq!(finished(again.ready(&host, &pane())), Ok(hold()));
+    assert!(finished(again.observe()).unwrap().unnamed);
+}

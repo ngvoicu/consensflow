@@ -44,6 +44,9 @@ pub enum ArbiterError {
     InputFailed,
     /// The human has typed in the window and not sent it yet.
     Unsent,
+    /// A paste asked for a window the human has not typed into, and they have
+    /// ([`cf_proto::panes::UNTYPED`]).
+    TypedInto,
     InvalidBody(SanitizeError),
     /// The write itself failed, once begun: some of the input may have
     /// reached the pane.
@@ -58,6 +61,10 @@ impl fmt::Display for ArbiterError {
             Self::Busy => write!(formatter, "a paste is already in flight"),
             Self::InputFailed => write!(formatter, "pane input is failed until restart"),
             Self::Unsent => write!(formatter, "the human has unsent text in the window"),
+            Self::TypedInto => write!(
+                formatter,
+                "the human has typed into the window since it opened"
+            ),
             Self::InvalidBody(error) => write!(formatter, "invalid paste body: {error}"),
             Self::Pane(error) => error.fmt(formatter),
             Self::LockPoisoned => write!(formatter, "input arbiter lock is poisoned"),
@@ -693,15 +700,17 @@ impl InputArbiter {
     /// A paste and its Enter, held while the human's keys left text unsent,
     /// unless `read_empty`: the window's adapter read its input box empty when
     /// the pane had taken that many writes of the human's keys, and none came
-    /// since.
+    /// since. With `untyped`, refused unwritten once any key of the human's has
+    /// reached this generation of the pane ([`cf_proto::panes::UNTYPED`]).
     pub(crate) fn write_paste(
         &self,
         table: &PaneTable,
         pane: &PaneKey,
         body: &[u8],
         read_empty: Option<u64>,
+        untyped: bool,
     ) -> Result<(), ArbiterError> {
-        self.write_paste_via(table, pane, body, read_empty)
+        self.write_paste_into_via(table, pane, body, read_empty, untyped)
     }
 
     /// Admit a native-channel send (a harness's own server, inbox or socket)
@@ -714,8 +723,8 @@ impl InputArbiter {
         validate_admission(&state, pane)
     }
 
-    /// A paste and its Enter. While it goes in, the pane's snapshot says so,
-    /// and a newer generation of the pane cannot take its place.
+    /// A paste and its Enter, into any window the human has typed into or not.
+    #[cfg(test)]
     fn write_paste_via<W: PaneInputWriter + ?Sized>(
         &self,
         writer: &W,
@@ -723,11 +732,30 @@ impl InputArbiter {
         body: &[u8],
         read_empty: Option<u64>,
     ) -> Result<(), ArbiterError> {
+        self.write_paste_into_via(writer, pane, body, read_empty, false)
+    }
+
+    /// A paste and its Enter. While it goes in, the pane's snapshot says so,
+    /// and a newer generation of the pane cannot take its place. The human's
+    /// keys reach the pane through its worker one write at a time, as this
+    /// paste does, so what `untyped` reads of them under the lock is every key
+    /// before the paste, and none after it.
+    fn write_paste_into_via<W: PaneInputWriter + ?Sized>(
+        &self,
+        writer: &W,
+        pane: &PaneKey,
+        body: &[u8],
+        read_empty: Option<u64>,
+        untyped: bool,
+    ) -> Result<(), ArbiterError> {
         let body = sanitize(body)?;
         let state = self.pane_state(pane)?;
         let (output, enter) = {
             let mut state = lock_state(&state)?;
             validate_admission(&state, pane)?;
+            if untyped && state.typed > 0 {
+                return Err(ArbiterError::TypedInto);
+            }
             if state.unsent > 0 {
                 if read_empty != Some(state.typed) {
                     return Err(ArbiterError::Unsent);
@@ -1697,6 +1725,61 @@ mod tests {
             .write_typed_via(writer.as_ref(), &key, b"x")
             .expect("the human's key");
         assert_eq!(quiet(), Some(0), "a key of the human's starts it again");
+    }
+
+    /// A paste that asks for a window nobody typed into (`untyped`, T-1474) goes in past the
+    /// daemon's own keys, the terminal's replies and its reports of itself on the human's path,
+    /// and is refused unwritten once a key of the human's came, one that leaves nothing unsent
+    /// too; a paste that does not ask goes in as before, and a new generation of the pane, a new
+    /// launch, is one nobody typed into.
+    #[test]
+    fn a_paste_for_a_window_nobody_typed_into_is_refused_unwritten_once_a_key_of_the_humans_came() {
+        let key = PaneKey::new("untyped", 1);
+        let (writer, _observed) = RecordingWriter::new(None);
+        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
+        arbiter.register(&key).expect("register pane");
+        // The daemon's Escape and Enter (`pane.input`), a reply to where the cursor is
+        // (`pane.reply`), and the terminal's reports on the human's path: focus, a mouse
+        // report, a colour.
+        for own in [b"\x1b".as_slice(), b"\r", b"\x1b[12;1R"] {
+            arbiter
+                .write_via(writer.as_ref(), &key, own)
+                .expect("the daemon's keys");
+        }
+        for report in [
+            b"\x1b[I".as_slice(),
+            b"\x1b[O",
+            b"\x1b[<0;10;5M",
+            b"\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\",
+        ] {
+            arbiter
+                .write_typed_via(writer.as_ref(), &key, report)
+                .expect("a report");
+        }
+        arbiter
+            .write_paste_into_via(writer.as_ref(), &key, b"first", None, true)
+            .expect("nobody typed into it");
+        // The human's Escape: a key, and nothing left unsent.
+        arbiter
+            .write_typed_via(writer.as_ref(), &key, b"\x1b")
+            .expect("the human's Escape");
+        let read = arbiter.snapshot(&key).expect("snapshot");
+        assert_eq!((read.typed, read.unsent), (1, false));
+        let written = writer.records().len();
+        assert!(matches!(
+            arbiter.write_paste_into_via(writer.as_ref(), &key, b"second", None, true),
+            Err(ArbiterError::TypedInto)
+        ));
+        assert_eq!(writer.records().len(), written, "nothing of it was written");
+        assert!(!arbiter.snapshot(&key).expect("snapshot").paste_in_flight);
+        arbiter
+            .write_paste_into_via(writer.as_ref(), &key, b"third", None, false)
+            .expect("a paste that does not ask goes in as before");
+        let next = PaneKey::new("untyped", 2);
+        arbiter.register(&next).expect("the pane's next generation");
+        arbiter
+            .write_paste_into_via(writer.as_ref(), &next, b"fourth", None, true)
+            .expect("a new launch nobody typed into");
     }
 
     /// What the human typed and has not sent holds a paste back until they
@@ -3458,7 +3541,7 @@ mod tests {
             Err(ArbiterError::Stale)
         ));
         assert!(matches!(
-            arbiter.write_paste(&without_the_pane, &key, b"body", None),
+            arbiter.write_paste(&without_the_pane, &key, b"body", None, false),
             Err(ArbiterError::Stale)
         ));
         let snapshot = arbiter.snapshot(&key).expect("the pane's input");
@@ -3730,7 +3813,7 @@ mod tests {
             };
             let pasted = Instant::now();
             arbiter
-                .write_paste(&table, &key, brief, None)
+                .write_paste(&table, &key, brief, None, false)
                 .expect("the delivery");
             let entered = pasted.elapsed();
             // A paste its window did not send, having read it, is pressed Enter on again, as the
@@ -3858,7 +3941,7 @@ mod tests {
             read_until(&table, &key, &output, "READY");
 
             arbiter
-                .write_paste(&table, &key, b"pasted words", None)
+                .write_paste(&table, &key, b"pasted words", None, false)
                 .expect("paste into the pane");
             let text = read_until(&table, &key, &output, "#");
             assert!(text.contains("GOT=[pasted words]"), "{text:?}");

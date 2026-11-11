@@ -299,3 +299,56 @@ fn what_the_pane_host_says_of_the_paste_is_what_the_send_says() {
         (false, false, Some("bridge ended"), Some("eof"))
     );
 }
+
+#[test]
+fn a_paste_into_a_window_that_configured_none_goes_in_only_while_the_human_has_not_typed_into_it() {
+    // A window that says nothing could be on another conversation only by a person's keys
+    // (T-1474): the paste the adapter puts behind /bypass asks the host to go in only while
+    // none has reached it, and the host checks that as it pastes. A paste the log allows by its
+    // configuration asks nothing more.
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    let untyped = |host: &AnsweringHost<_>| {
+        host.asked
+            .borrow()
+            .iter()
+            .filter(|(op, _)| op == "pane.write_paste")
+            .map(|(_, body)| body.get(cf_proto::panes::UNTYPED).cloned())
+            .collect::<Vec<_>>()
+    };
+    let send_as = |host: &dyn PaneHost, guard| {
+        finished(Box::pin(send(
+            host,
+            &pane(),
+            &wire,
+            Some("mild-coin"),
+            guard,
+            "/bypass hi",
+            None,
+        )))
+    };
+    fs::write(&wire, names("mild-coin")).unwrap();
+    let host = taking();
+    assert!(send_as(&host, Guard::Unannounced).ok);
+    assert_eq!(untyped(&host), [Some(json!(true))]);
+    // The host's word that a key of the human's came first: refused, nothing written.
+    let typed_into = AnsweringHost::new(|_| {
+        Ok(json!({ "ok": false, "admitted": false, "bytesWritten": 0,
+            "error": cf_proto::panes::TYPED_INTO,
+            "cause": "the human has typed into the window since it opened" }))
+    });
+    let sent = send_as(&typed_into, Guard::Unannounced);
+    assert!(sent.refused, "{sent:?}");
+    assert_eq!(sent.error.as_deref(), Some(cf_proto::panes::TYPED_INTO));
+    // Configured, by its own: a paste as any, whichever the guard.
+    fs::write(
+        &wire,
+        format!("{}{}", names("mild-coin"), shows("mild-coin")),
+    )
+    .unwrap();
+    for guard in [Guard::Unannounced, Guard::Configured] {
+        let host = taking();
+        assert!(send_as(&host, guard).ok);
+        assert_eq!(untyped(&host), [None], "{guard:?}");
+    }
+}

@@ -54,6 +54,7 @@ fn devin_window(
         input: RefCell::default(),
         left_open: RefCell::new(None),
         unannounced_since: Cell::default(),
+        typed_into: Cell::default(),
     })
 }
 
