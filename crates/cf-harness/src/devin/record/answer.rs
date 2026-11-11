@@ -115,10 +115,15 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
             .iter()
             .any(|entry| entry.item.kind() == Kind::Compaction)
         && !wires.turn_open();
-    record.in_flight = working || (last_open && !cancelled && !failed);
+    // A conversation the human reverted to its first step has no prompt left, by the log's
+    // `steps` (its chain is Devin's own words): with no turn open on the wire it is at rest,
+    // whatever was open before the Revert, gone with its prompt (T-1511: Devin 3000.12.43 said it
+    // was idle, and a result waited for the window, read at work, as long as it was watched).
+    let reverted_to_none = wires.emptied();
+    record.in_flight = working || (last_open && !cancelled && !failed && !reverted_to_none);
     record.settlement = if working {
         Settlement::InFlight
-    } else if last_complete || cancelled || failed || compacted_at_rest {
+    } else if last_complete || cancelled || failed || compacted_at_rest || reverted_to_none {
         Settlement::Settled
     } else {
         Settlement::Unknown

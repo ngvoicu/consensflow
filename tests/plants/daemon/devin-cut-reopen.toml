@@ -160,3 +160,38 @@ runs = ["harness-lib-devin"]
 file = "crates/cf-harness/src/devin/adapter.rs"
 find = "                .is_some_and(|typed| typed > 0)\n            {"
 replace = "                .is_some_and(|typed| typed > 0)\n                && self.unannounced_since.get().is_none()\n            {"
+
+# A conversation the human reverted to its first step (T-1511, Devin 3000.12.43): its log's last
+# `steps` line lists no prompt where one before it listed some, and with no turn open the window
+# is at rest (`wires::Said::emptied`, `answer::answer`). Its cases are in
+# `crates/cf-harness/src/devin/record/tests/reverted.rs`.
+
+[[plant]]
+name = "devin cut reopen: a conversation reverted to its first step reads at work"
+meant = "a_devin_conversation_reverted_to_its_first_step_is_at_rest"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = "    let reverted_to_none = wires.emptied();"
+replace = "    let reverted_to_none = false;"
+
+[[plant]]
+name = "devin cut reopen: a new conversation's empty steps are read as a revert"
+meant = "a_new_devin_conversation_that_lists_no_prompt_yet_reads_as_before"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "        self.emptied = prompts.clone().next().is_none() && !known.is_empty();"
+replace = "        self.emptied = prompts.clone().next().is_none();"
+
+[[plant]]
+name = "devin cut reopen: empty steps settle a turn still open"
+meant = "a_devin_turn_open_when_its_steps_list_no_prompt_is_open_until_its_end"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "            .is_some_and(|said| said.emptied && !said.open)"
+replace = "            .is_some_and(|said| said.emptied)"

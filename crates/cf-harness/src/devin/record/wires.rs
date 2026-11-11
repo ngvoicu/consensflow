@@ -104,6 +104,9 @@ struct Said {
     /// The user's messages of the prompts the log has listed as the session's steps
     /// ([`Said::listed`]), from its first `steps` line on: none before it.
     steps: Option<HashSet<String>>,
+    /// The log's last `steps` line lists no prompt, where one before it listed some: the human
+    /// took every prompt back ("Revert to step 1", T-1511), and the conversation has none.
+    emptied: bool,
 }
 
 /// The text of a message a line says back with no word of whether it is live: a
@@ -365,6 +368,14 @@ impl Wires {
         self.said_last().is_some_and(|said| said.open)
     }
 
+    /// Whether the same log's last `steps` line lists no prompt where one before it listed
+    /// some, and no turn is open: a conversation the human reverted to its first step, which
+    /// has nothing to finish (T-1511, Devin 3000.12.43).
+    pub(super) fn emptied(&self) -> bool {
+        self.said_last()
+            .is_some_and(|said| said.emptied && !said.open)
+    }
+
     /// What the log written last of those that said something of the session says (see
     /// [`Wires::working`]).
     fn said_last(&self) -> Option<&Said> {
@@ -460,6 +471,7 @@ impl Said {
             self.steps = Some(prompts.map(|(message, _)| message.to_owned()).collect());
             return None;
         };
+        self.emptied = prompts.clone().next().is_none() && !known.is_empty();
         let new = prompts
             .filter(|(message, _)| known.insert((*message).to_owned()))
             .map(|(_, summary)| {
