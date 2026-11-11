@@ -149,12 +149,11 @@ fn utf16(bytes: &[u8], unit: fn([u8; 2]) -> u16) -> Result<String, String> {
     let damaged = || {
         refused("it begins with a UTF-16 byte order mark but is cut or damaged (an odd byte or half a surrogate pair)")
     };
-    let pairs = bytes.chunks_exact(2);
-    if !pairs.remainder().is_empty() {
+    let (pairs, odd) = bytes.as_chunks::<2>();
+    if !odd.is_empty() {
         return Err(damaged());
     }
-    let units = pairs.filter_map(|pair| <[u8; 2]>::try_from(pair).ok().map(unit));
-    char::decode_utf16(units)
+    char::decode_utf16(pairs.iter().map(|&pair| unit(pair)))
         .map(|each| each.map_err(|_| damaged()))
         .collect()
 }
