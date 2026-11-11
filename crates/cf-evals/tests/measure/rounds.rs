@@ -403,3 +403,27 @@ fn a_turn_the_harness_gave_no_time_is_placed_where_the_daemon_copied_it() {
         ["2026-10-31T10:05:00.000Z", "2026-10-31T10:06:00.000Z"]
     );
 }
+
+/// Work is what a worker or a frontend designer builds (spec new-roles, FD-04): a fix a
+/// review sends either of them is rework. The architect's design, which runs nothing, the
+/// researcher's findings and the integrator's landing, which changes no behaviour, are not,
+/// nor is any role of the product's table this crate does not know.
+#[test]
+fn work_is_a_workers_or_a_frontend_designers_and_no_other_roles() {
+    use cf_evals::measure::is_work_pool;
+    for pool in [None, Some("worker"), Some("frontend")] {
+        assert!(is_work_pool(pool), "{pool:?}");
+    }
+    for pool in [
+        "architect",
+        "researcher",
+        "integrator",
+        "advisor",
+        "reviewer",
+        "tester",
+        "designer",
+        "scout",
+    ] {
+        assert!(!is_work_pool(Some(pool)), "{pool}");
+    }
+}

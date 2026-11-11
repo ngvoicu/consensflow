@@ -301,7 +301,7 @@ pub(crate) fn tasks_of(board: &Value) -> Vec<&Value> {
 }
 
 /// Whether the first worker task of a board, the lowest number that is work
-/// ([`crate::measure::is_work_pool`]: no advice, review, test or image), has its
+/// ([`crate::measure::is_work_pool`]: a worker's or a frontend designer's), has its
 /// result in: done, or accepted already.
 fn first_result_in(tasks: &[&Value]) -> bool {
     tasks

@@ -69,12 +69,14 @@ pub struct Rounds {
     pub accepted_at: Option<String>,
 }
 
-/// Whether a task of `pool` is work for a worker: the worker's pool, or none (a task given
-/// to a window by name). Said by the worker's own pool, not by a list of the others: a role
-/// this crate knows nothing of yet (another row of the product's roles' table, which an
-/// eval does not read) is no worker's.
+/// Whether a task of `pool` is work: what builds the product, the worker's pool or the
+/// frontend designer's (spec new-roles), or none (a task given to a window by name). A fix a
+/// review sends either is rework. Said by those pools, not by a list of the others: the
+/// architect's design runs nothing and the integrator's landing changes no behaviour, so
+/// neither is work here, and a role this crate knows nothing of yet (another row of the
+/// product's roles' table, which an eval does not read) is no work.
 pub fn is_work_pool(pool: Option<&str>) -> bool {
-    matches!(pool, None | Some("worker"))
+    matches!(pool, None | Some("worker" | "frontend"))
 }
 
 impl Rounds {
