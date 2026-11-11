@@ -315,3 +315,84 @@ fn a_build_of_0035_could_hold_no_member_of_a_new_role() {
         );
     }
 }
+
+fn tier_of(project: &ProjectView, handle: &str) -> Option<String> {
+    project
+        .participants
+        .iter()
+        .find(|participant| participant.handle == handle)
+        .and_then(|participant| participant.tier.clone())
+}
+
+#[test]
+fn a_member_with_no_chosen_tier_gains_a_role_with_tiers_only_with_a_tier_and_one_that_drops_them_is_kept_in_the_lowest(
+) {
+    let dir = tempfile::tempdir().expect("a home");
+    let mut ledger =
+        open_ledger(&dir.path().join("consensflow.db"), Options::default()).expect("a ledger");
+    let project = project(
+        &mut ledger,
+        vec![
+            member("janus", &["integrator"], "light"),
+            member("zeus", &["worker", "integrator"], "complex"),
+        ],
+    );
+    // An integrator alone was given no tier: a worker's work has one, which it must be given.
+    let refused = ledger
+        .set_roles(project.id, "janus", &["integrator", "worker"], None)
+        .expect_err("a worker's tier is the human's choice");
+    assert_eq!(
+        (refused.code(), refused.to_string()),
+        (
+            Some("tier-required"),
+            "janus has no tier: a worker's tasks have one, so its tier comes with the role"
+                .to_owned()
+        )
+    );
+    let unchanged = ledger.project(project.id).unwrap().unwrap();
+    assert_eq!(tier_of(&unchanged, "janus").as_deref(), Some("light"));
+
+    // A member that keeps a role with tiers keeps its tier; one left with none has the lowest.
+    ledger
+        .set_roles(project.id, "zeus", &["integrator"], None)
+        .expect("zeus only integrates");
+    let now = ledger.project(project.id).unwrap().unwrap();
+    assert_eq!(tier_of(&now, "zeus").as_deref(), Some("light"));
+
+    // With its tier the worker comes, and a later change of roles keeps it.
+    let given = ledger
+        .set_roles(
+            project.id,
+            "janus",
+            &["integrator", "worker"],
+            Some("standard"),
+        )
+        .expect("a worker at standard");
+    assert_eq!(
+        (given.roles.clone(), given.tier.as_deref()),
+        (
+            vec!["integrator".to_owned(), "worker".to_owned()],
+            Some("standard")
+        )
+    );
+    let kept = ledger
+        .set_roles(
+            project.id,
+            "janus",
+            &["worker", "integrator", "reviewer"],
+            None,
+        )
+        .expect("a reviewer too");
+    assert_eq!(kept.tier.as_deref(), Some("standard"));
+    let moved = ledger
+        .set_roles(project.id, "janus", &["worker"], Some("complex"))
+        .expect("a worker at complex");
+    assert_eq!(moved.tier.as_deref(), Some("complex"));
+    // A word that is no tier is refused before anything changes.
+    let refused = ledger
+        .set_roles(project.id, "janus", &["worker"], Some("huge"))
+        .expect_err("no such tier");
+    assert_eq!(refused.code(), Some("invalid-tier"));
+    let after = ledger.project(project.id).unwrap().unwrap();
+    assert_eq!(tier_of(&after, "janus").as_deref(), Some("complex"));
+}

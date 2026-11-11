@@ -178,14 +178,14 @@ fn a_member_may_hold_the_tester_role_beside_another_or_lead_with_it() {
     assert!(handles("tester", &ledger).is_empty());
 
     let beside = ledger
-        .set_roles(project.id, "zeus", &["worker", "tester"])
+        .set_roles(project.id, "zeus", &["worker", "tester"], None)
         .expect("a worker may test too");
     assert_eq!((beside.role.as_str(), beside.roles.len()), ("worker", 2));
     assert_eq!(handles("tester", &ledger), ["zeus"]);
     assert_eq!(handles("worker", &ledger), ["zeus"]);
 
     let leading = ledger
-        .set_roles(project.id, "zeus", &["tester", "worker"])
+        .set_roles(project.id, "zeus", &["tester", "worker"], None)
         .expect("and may lead with it");
     assert_eq!(leading.role, "tester", "the first role leads");
 }
