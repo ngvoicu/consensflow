@@ -7,6 +7,7 @@ import { listenForFileDrops } from './file-drop.js'
 import { HistoryViewer } from './history-viewer.js'
 import { Layout } from './layout.js'
 import { ProjectMenu } from './project-menu.js'
+import { poolName, readRoles } from './roles.js'
 import { SpecsSettings } from './specs-settings.js'
 import { SpecsViewer } from './specs-viewer.js'
 import { TerminalsView } from './terminals.js'
@@ -96,10 +97,14 @@ async function daemon(operation, body = {}) {
   return result
 }
 
-/** The harnesses not installed here, read again: Add member and the chief's pickers offer none of them. */
+/**
+ * The harnesses not installed here, read again: Add member and the chief's pickers offer none of
+ * them; and the staff's roles, which the pickers offer and the board names.
+ */
 async function readMissing() {
-  const { missing = [] } = await daemon('harnesses.missing')
+  const { missing = [], roles } = await daemon('harnesses.missing')
   state.missing = missing
+  readRoles(roles)
 }
 
 /**
@@ -140,18 +145,35 @@ new MutationObserver(placeDaemonDown).observe(document.body, {
   subtree: true,
 })
 
-function daemonStatus({ available, cause, retrying }) {
+/**
+ * The status line says a restart's outcome for this long: the banner goes when the daemon is
+ * up, and what became of the windows and the projects is read after it.
+ */
+const RESTART_NOTE_MS = 30_000
+
+/**
+ * The daemon's state, as the app tells it. `closing`: the cause says what the app is doing
+ * (closing the windows of the daemon that stopped) and nothing follows it, since the app
+ * is not starting the daemon yet. `notice`: said once, when the daemon is up again.
+ */
+function daemonStatus({ available, cause, retrying, closing, notice }) {
   const wasDown = !daemonDown.hidden
   daemonDown.hidden = available
   if (available) {
     placeDaemonDown()
     if (wasDown) void act(readMissing)
+    if (notice) say(notice, 'info', RESTART_NOTE_MS)
     return
   }
+  const next = retrying
+    ? closing
+      ? []
+      : [' Starting it again…']
+    : [' Quit ConsensFlow and open it again.']
   daemonDown.replaceChildren(
     element('strong', null, 'The daemon is not running.'),
     ...(cause ? [` ${sentence(cause)}`] : []),
-    retrying ? ' Starting it again…' : ' Quit ConsensFlow and open it again.',
+    ...next,
   )
   placeDaemonDown()
 }
@@ -241,9 +263,7 @@ const drawer = new TaskDrawer($('#task-drawer'), {
   onReassign: (task) =>
     act(async () => {
       await daemon('task.reassign', { project: task.projectId, task: task.number })
-      note(
-        `T-${task.number} is back on the board for another ${task.pool === 'designer' ? 'image designer' : `${task.tier} ${task.pool}`}.`,
-      )
+      note(`T-${task.number} is back on the board for another ${poolName(task)}.`)
     }),
   onFinish: (task) =>
     act(async () => {
@@ -440,6 +460,17 @@ async function rereadTask() {
 
 let refreshing = null
 let again = false
+
+/**
+ * The board of a `board.get` answer, whose roles are kept first: a card and a lane name the role
+ * a task waits for and a member holds by the daemon's table, which comes with every board, so a
+ * board is never drawn without the roles it names (`cf_ledger::roles`).
+ */
+function boardOf(read) {
+  readRoles(read.roles)
+  return read.board
+}
+
 async function refresh() {
   if (refreshing !== null) {
     again = true
@@ -460,16 +491,9 @@ async function refresh() {
       // boards say when those end. One that cannot be read says nothing yet.
       const elsewhere = open
         .filter((project) => project.id !== selected && terminals.holds(project.id))
-        .map((project) =>
-          daemon('board.get', { project: project.id }).then(
-            (read) => read.board,
-            () => null,
-          ),
-        )
+        .map((project) => daemon('board.get', { project: project.id }).then(boardOf, () => null))
       const [board, inbox, ...others] = await Promise.all([
-        selected === null
-          ? null
-          : daemon('board.get', { project: selected }).then((read) => read.board),
+        selected === null ? null : daemon('board.get', { project: selected }).then(boardOf),
         selected === null
           ? NO_NOTES
           : daemon('inbox.get', { project: selected, participant: 'human', unread: true }),

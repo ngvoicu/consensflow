@@ -324,6 +324,16 @@ mod tests {
     const T1300_FLAGS_HOOK: &str = "        listed: true,\n        members_only: false,\n";
     const T1300_FLAGS_OFFER: &str = "            listed: true,\n            members_only: false,\n";
 
+    /// What T-1399 added to `claude/adapter.rs`: the launch's `advisor_off` is handed to the
+    /// settings file's writer, in the one call that writes it. Nothing the corpus borrows reads
+    /// it; the line is taken out again, where it was added, before the file is hashed.
+    const T1399_ADVISOR_OFF: &str = "                launch.advisor_off,\n";
+
+    /// What T-1423 added to `muse/window.rs`: the look a window gives before its session is
+    /// known says no delivery began (`Observed::begun`, a field the contract gained). Nothing
+    /// the corpus borrows reads it; the line is taken out again before the file is hashed.
+    const T1423_BEGUN: &str = "                    begun: Vec::new(),\n";
+
     /// What T-1328 changed in `claude/adapter.rs`: `default_model` answers `NoDefault` where it
     /// answered a `String`, and the import of it. Nothing the corpus borrows reads either; each is
     /// taken back to the release head's text before the file is hashed.
@@ -355,6 +365,9 @@ mod tests {
                 .replace(T1300_FLAGS_OFFER, "")
                 .replace(T1328_IMPORT.0, T1328_IMPORT.1)
                 .replace(T1328_DEFAULT.0, T1328_DEFAULT.1)
+                .replace(T1399_ADVISOR_OFF, "")
+        } else if file == "muse/window.rs" {
+            text.replacen(T1423_BEGUN, "", 1)
         } else {
             text.to_owned()
         }

@@ -83,7 +83,11 @@ pub enum Refusal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
     Ok,
-    /// Past 95 percent.
+    /// Past 95 percent: a count the harness reports ahead of a refusal (Codex's and Muse's).
+    /// It holds no member from work (T-1356: a member works to the end of its allowance, as
+    /// the harnesses that report no count do, and waits only when its harness says it is out).
+    /// What it tells is that this window is the one a refusal at the edge of the allowance is
+    /// for, so that the refusal takes its reset (Codex's `reset_after`).
     Low,
     Exhausted,
 }

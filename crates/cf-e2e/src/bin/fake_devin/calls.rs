@@ -41,9 +41,12 @@ impl<W: Write> Said<'_, W> {
         let mut drawn = Ok(());
         let call = {
             let screen = &mut *self.screen;
+            let wire = &mut *self.wire;
+            let id = &self.call;
             self.permission.call(prompt_file, || {
-                drawn = screen
-                    .write_all(format!("⏺ {what}\n{DIALOG}").as_bytes())
+                drawn = wire
+                    .asking(id, what)
+                    .and_then(|()| screen.write_all(format!("⏺ {what}\n{DIALOG}").as_bytes()))
                     .and_then(|()| screen.flush())
                     .map_err(said);
             })

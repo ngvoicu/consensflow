@@ -115,6 +115,12 @@ pub struct ProjectView {
     /// given it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compaction: Option<u32>,
+    /// Whether the human has the project's members run with Claude Code's own advisor tool
+    /// (Project settings, "Advisor tool"): said only when on, so a project with it off, which
+    /// every project is until the human ticks it, reads as it always did. The chief's window is
+    /// never given the switch, whatever this says.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub advisor_tool: bool,
 }
 
 impl ProjectView {

@@ -22,6 +22,7 @@ fn waiting(reason: Option<&str>) -> Observed {
         took_back: false,
         at_prompt: false,
         shared: false,
+        begun: Vec::new(),
     }
 }
 

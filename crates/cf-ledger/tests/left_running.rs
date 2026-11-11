@@ -32,6 +32,7 @@ fn ledger_with_two_tasks_at_work(dir: &tempfile::TempDir) -> Ledger {
                 harness: "claude-code".into(),
                 model: Some("apollo".into()),
                 effort: None,
+                model_name: None,
             },
             staff: vec![NewMember {
                 model: None,
@@ -47,6 +48,7 @@ fn ledger_with_two_tasks_at_work(dir: &tempfile::TempDir) -> Ledger {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
         })
         .expect("a project");
     let zeus = ledger

@@ -65,6 +65,7 @@ fn world_with(gate: bool) -> World {
                 harness: "claude-code".to_owned(),
                 model: Some("apollo".to_owned()),
                 effort: None,
+                model_name: None,
             },
             staff: vec![NewMember {
                 model: None,
@@ -80,6 +81,7 @@ fn world_with(gate: bool) -> World {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
         })
         .expect("a project");
     World {

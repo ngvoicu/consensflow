@@ -35,6 +35,7 @@ fn world() -> (tempfile::TempDir, Ledger, i64) {
                 harness: "claude-code".into(),
                 model: Some("apollo".into()),
                 effort: None,
+                model_name: None,
             },
             staff: vec![member("zeus", "critical"), member("diana", "standard")],
             gate: false,
@@ -42,6 +43,7 @@ fn world() -> (tempfile::TempDir, Ledger, i64) {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
         })
         .unwrap();
     (dir, ledger, project.id)

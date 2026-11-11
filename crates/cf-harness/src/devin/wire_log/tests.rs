@@ -531,6 +531,39 @@ fn a_turn_ended_for_its_quota_is_exhausted_with_the_words_it_gives() {
 }
 
 #[test]
+fn a_turn_ended_for_its_quota_is_a_turn_ended_and_one_that_works_is_open() {
+    // The refusal Devin is seen to write (poker-lab, 2026-10-03) ends the turn it refuses:
+    // the window's own turn is then over, as for any other end (T-1403).
+    let working = line(&json!({
+        "sessionId": "s",
+        "update": {
+            "sessionUpdate": "session_info_update",
+            "_meta": { "cognition.ai/statusEnum": "working" },
+        },
+    }));
+    let log = Log::new();
+    log.write(&format!("{}{working}", shows("s")));
+    log.said();
+    assert!(log.wire.turn_open("s"));
+    assert!(!log.wire.turn_open("another"));
+    log.append(&line(&json!({
+        "cause": "quota_exhausted",
+        "errorMessage": "Your daily usage quota has been exhausted.",
+        "sessionId": "s",
+    })));
+    assert_eq!(log.quota(), Some(exhausted_at(EPOCH_MS, None)));
+    assert!(!log.wire.turn_open("s"));
+    // A log read again from its start says only what it holds now.
+    let log = Log::new();
+    log.write(&format!("{}{working}", shows("s")));
+    log.said();
+    assert!(log.wire.turn_open("s"));
+    log.write(&shows("s"));
+    log.said();
+    assert!(!log.wire.turn_open("s"));
+}
+
+#[test]
 fn an_object_that_has_a_to_string_of_its_own_cannot_be_the_words_of_a_refusal() {
     let log = Log::new();
     log.write(&line(

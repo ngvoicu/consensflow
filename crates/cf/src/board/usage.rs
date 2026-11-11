@@ -78,6 +78,26 @@ fn covers(line: &str, path: &[&str]) -> bool {
 mod tests {
     use super::*;
 
+    // The usage is words written by hand: a role of the roles' table with a switch is in it,
+    // by its switch and its name, and in what `cf task add` says when given too little. A row
+    // added to the table without its words fails here.
+    #[test]
+    fn every_role_asked_for_by_a_switch_has_its_line_and_its_name_in_the_usage() {
+        for role in cf_ledger::roles::all() {
+            let Some(switch) = role.switch else { continue };
+            let line = usage()
+                .split("\n  cf ")
+                .find(|command| command.starts_with(&format!("task add {switch} ")))
+                .unwrap_or_else(|| panic!("no line of cf task add {switch}"));
+            assert!(
+                line.contains(role.name),
+                "the line of {switch} names no {}: {line}",
+                role.name
+            );
+            assert!(ADD_USAGE.contains(switch), "{ADD_USAGE} has no {switch}");
+        }
+    }
+
     #[test]
     fn a_command_is_its_line_of_the_list_with_the_lines_that_go_on_from_it() {
         assert_eq!(

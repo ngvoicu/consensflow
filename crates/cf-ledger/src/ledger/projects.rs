@@ -89,6 +89,14 @@ impl Ledger {
         projects::set_compaction(&mut self.store, id, window)
     }
 
+    /// Switches the project's advisor tool for its members: on is the owner's own setting
+    /// (as every member had before), off, which every project has until it is ticked, is
+    /// members launched without Claude Code's own advisor tool. It reaches each member when
+    /// it next starts.
+    pub fn set_advisor_tool(&mut self, id: i64, on: bool) -> Result<ProjectView, LedgerError> {
+        projects::set_advisor_tool(&mut self.store, id, on)
+    }
+
     /// What the project says of specs: whether they are on, the folder and the
     /// Specmint variant, all three at once. A chief whose window is open is told at its
     /// next rest, and any other takes it at its next launch.

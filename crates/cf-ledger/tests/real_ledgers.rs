@@ -28,7 +28,8 @@
 //!   requesters and assignees, messages' senders, recipients, tasks and carriers, windows'
 //!   members, conversations' participants, History's items' conversations, task needs, and
 //!   what a message was pasted into), row by row against a copy of the ledger taken before the
-//!   migration, and every row of tasks, messages, conversations and task needs whole, and
+//!   migration, each row named by its table's primary key (so that two rows that exchange their
+//!   owners are two differences, not none), and every row of tasks, messages, conversations and task needs whole, and
 //!   each participant's project, member, role, roles, harness, tier, designer, times and quota
 //!   marks.
 //!
@@ -268,51 +269,78 @@ fn foreign_keys_of(db: &Connection, table: &str) -> Vec<String> {
     .collect()
 }
 
-/// `table`'s rows read at `columns`, each as the text of its values: by its `id` where it has
-/// one, else the rows themselves, sorted (a table of pairs has no row to name).
-fn rows_at(db: &Connection, table: &str, columns: &[String]) -> BTreeMap<String, String> {
-    let keyed = columns_of(db, table).iter().any(|name| name == "id");
-    let list = columns
-        .iter()
-        .map(|name| format!("\"{name}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sql = if keyed {
-        format!("SELECT id, {list} FROM \"{table}\"")
+/// The columns that name a row of `table`, which stay with the row whatever else changes: its
+/// primary key as the schema declares it, in the key's order (an `id`, an `item`, a pair like
+/// a conversation and an item's id); a table with no declared key is named by its `rowid`.
+/// Never what the row holds: the columns this test compares are the ones a migration could
+/// rewire, so a row named by them could not be told from its neighbour with whom it swapped.
+fn identity_of(db: &Connection, table: &str) -> Vec<String> {
+    let key: Vec<String> = db
+        .prepare(&format!(
+            "SELECT name FROM pragma_table_info('{table}') WHERE pk > 0 ORDER BY pk"
+        ))
+        .unwrap()
+        .query_map([], |row| row.get::<_, String>(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    if key.is_empty() {
+        vec!["rowid".to_owned()]
     } else {
-        format!("SELECT {list} FROM \"{table}\"")
+        key
+    }
+}
+
+/// `table`'s rows read at `columns`, each as the text of its values, each named by `identity`
+/// (the values of those columns, whole numbers padded so that they sort as numbers).
+fn rows_at(
+    db: &Connection,
+    table: &str,
+    identity: &[String],
+    columns: &[String],
+) -> BTreeMap<String, String> {
+    let quoted = |names: &[String]| {
+        names
+            .iter()
+            .map(|name| {
+                if name == "rowid" {
+                    name.clone()
+                } else {
+                    format!("\"{name}\"")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
     };
+    let sql = format!(
+        "SELECT {}, {} FROM \"{table}\"",
+        quoted(identity),
+        quoted(columns)
+    );
     let mut read = db.prepare(&sql).unwrap();
-    let skip = usize::from(keyed);
     let mut found = BTreeMap::new();
     let mut rows = read.query([]).unwrap();
-    let mut number = 0_u64;
     while let Some(row) = rows.next().unwrap() {
+        let name = (0..identity.len())
+            .map(
+                |at| match row.get::<_, rusqlite::types::Value>(at).unwrap() {
+                    rusqlite::types::Value::Integer(number) => format!("{number:020}"),
+                    rusqlite::types::Value::Text(text) => text,
+                    other => format!("{other:?}"),
+                },
+            )
+            .collect::<Vec<_>>()
+            .join("/");
         let text = (0..columns.len())
             .map(|at| {
-                let value: rusqlite::types::Value = row.get(at + skip).unwrap();
+                let value: rusqlite::types::Value = row.get(identity.len() + at).unwrap();
                 format!("{}={value:?}", columns[at])
             })
             .collect::<Vec<_>>()
             .join(";");
-        let key = if keyed {
-            format!("{:020}", row.get::<_, i64>(0).unwrap())
-        } else {
-            // Rows with no id are a set: the text names the row, and a repeat counts again.
-            number += 1;
-            format!("{text}#{number}")
-        };
-        found.insert(key, text);
-    }
-    if !keyed {
-        // Order does not matter for a set of rows: key them by their text, in order of it.
-        let mut texts: Vec<String> = found.into_values().collect();
-        texts.sort();
-        return texts
-            .into_iter()
-            .enumerate()
-            .map(|(at, text)| (format!("{at:012}"), text))
-            .collect();
+        // The key is unique, so two rows never have one name.
+        let twice = found.insert(name.clone(), text);
+        assert!(twice.is_none(), "{table}: {name} names two rows");
     }
     found
 }
@@ -372,9 +400,21 @@ fn compare_links(
         if wanted.is_empty() {
             continue;
         }
+        // The rows are named by the key of the table as it is now; a ledger from before has it too
+        // (a migration that rebuilt a table would be a difference to read, not to match by luck).
+        let identity = identity_of(after, &table);
+        if let Some(missing) = identity
+            .iter()
+            .find(|column| *column != "rowid" && !had.contains(column))
+        {
+            problems.push(format!(
+                "{name}: {table} had no {missing}, which names its rows now"
+            ));
+            continue;
+        }
         let (was, is) = (
-            rows_at(before, &table, &wanted),
-            rows_at(after, &table, &wanted),
+            rows_at(before, &table, &identity, &wanted),
+            rows_at(after, &table, &identity, &wanted),
         );
         compared_tables += 1;
         compared_rows += was.len();
@@ -843,6 +883,121 @@ fn the_link_comparison_finds_a_link_moved_to_another_participant_that_exists() {
     let mut found = Vec::new();
     compare_links("renamed", &linked(), &renamed, &mut found);
     assert!(found.is_empty(), "{found:?}");
+}
+
+/// `linked()` with a second conversation (of `b`) and the copies of both conversations' items:
+/// the tables that name no row by an `id` (`transcript`, `transcript_head`, `transcript_part`,
+/// `transcript_diff`), each with one row for conversation 1 and one for conversation 2.
+fn with_transcripts() -> Connection {
+    let db = linked();
+    db.execute_batch(
+        "INSERT INTO conversation (id, participant_id, harness, native_session, started_at)
+           VALUES (2, 4, 'codex', 'session-2', 't');
+         INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at) VALUES
+           (1, 'i1', 1, 'user', 'one', 1, NULL, 't'),
+           (2, 'i2', 1, 'user', 'two', 1, NULL, 't');
+         INSERT INTO transcript_head (item, conversation_id, role, bytes, parts, id_shown, complete, at, compaction) VALUES
+           (1, 1, 'user', 3, 1, 'i1', 1, NULL, 0),
+           (2, 2, 'user', 3, 2, 'i2', 1, NULL, 0);
+         INSERT INTO transcript_part (item, part, tail, text) VALUES
+           (1, 0, '', 'one'),
+           (2, 1, '', 'two');
+         INSERT INTO transcript_diff (item, text) VALUES (1, 'd1'), (2, 'd2');",
+    )
+    .unwrap();
+    db
+}
+
+/// A row of a table with no `id` column is named by the table's primary key, not by what it
+/// holds: two rows that exchange their owners (a conversation's item, an item's part) leave the
+/// same owners in the same number, and they are still different rows. A set of the owners cannot
+/// tell the exchange from nothing (T-1335, from the reviews of T-1271 and T-1274).
+#[test]
+fn the_link_comparison_finds_two_rows_of_a_table_with_no_id_that_exchanged_owners() {
+    let mut problems = Vec::new();
+    compare_links(
+        "same",
+        &with_transcripts(),
+        &with_transcripts(),
+        &mut problems,
+    );
+    assert!(problems.is_empty(), "{problems:?}");
+    let mut missed = Vec::new();
+    for (change, table) in [
+        // The exchanges: the same two owners, in the same number, on the other rows.
+        (
+            "UPDATE transcript_head SET conversation_id = 3 - conversation_id",
+            "transcript_head",
+        ),
+        (
+            "UPDATE transcript SET conversation_id = 3 - conversation_id",
+            "transcript",
+        ),
+        (
+            "UPDATE transcript_part SET item = 3 - item",
+            "transcript_part",
+        ),
+        // What a set of owners did find, and still does: one owner moved, a row lost.
+        (
+            "UPDATE transcript_head SET conversation_id = 1 WHERE item = 2",
+            "transcript_head",
+        ),
+        ("DELETE FROM transcript WHERE item_id = 'i2'", "transcript"),
+        (
+            "DELETE FROM transcript_diff WHERE item = 2",
+            "transcript_diff",
+        ),
+    ] {
+        let changed = with_transcripts();
+        changed.execute_batch(change).unwrap();
+        let mut found = Vec::new();
+        compare_links("changed", &with_transcripts(), &changed, &mut found);
+        if !found
+            .iter()
+            .any(|said| said.contains(&format!("changed: {table} (")))
+        {
+            missed.push(format!("{change} (found: {found:?})"));
+        }
+    }
+    assert!(missed.is_empty(), "not found: {missed:#?}");
+}
+
+/// A row is named by its table's primary key, in the key's order, and by its `rowid` where the
+/// table declares none; every table of the schema has a key, so the second is held on a table
+/// made here.
+#[test]
+fn a_row_is_named_by_its_tables_key_or_by_its_rowid() {
+    let db = with_transcripts();
+    for (table, key) in [
+        ("participant", vec!["id"]),
+        ("transcript_head", vec!["item"]),
+        ("transcript", vec!["conversation_id", "item_id"]),
+        ("transcript_part", vec!["item", "part"]),
+        ("task_need", vec!["task_id", "needs_id"]),
+    ] {
+        assert_eq!(identity_of(&db, table), key, "{table}");
+    }
+    db.execute_batch(
+        "CREATE TABLE loose (owner INTEGER NOT NULL); INSERT INTO loose VALUES (7), (7);",
+    )
+    .unwrap();
+    let identity = identity_of(&db, "loose");
+    assert_eq!(identity, vec!["rowid"]);
+    // Two rows of one owner are two rows, named apart.
+    let rows = rows_at(&db, "loose", &identity, &["owner".to_owned()]);
+    assert_eq!(
+        rows.into_iter().collect::<Vec<_>>(),
+        vec![
+            (
+                "00000000000000000001".to_owned(),
+                "owner=Integer(7)".to_owned()
+            ),
+            (
+                "00000000000000000002".to_owned(),
+                "owner=Integer(7)".to_owned()
+            ),
+        ]
+    );
 }
 
 #[test]

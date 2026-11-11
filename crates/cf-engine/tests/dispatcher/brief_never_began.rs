@@ -295,6 +295,132 @@ fn a_brief_whose_turn_began_is_never_pressed_however_quiet_its_screen() {
     assert!(pause_notes(&tiers).is_empty());
 }
 
+/// A window inside one long model call (T-1396: in a measurement run of 2026-11-10 a Devin
+/// window thought 146 s on a send-back, its record showing nothing after the message and its
+/// screen drawing nothing, and the task was pressed Enter at 61 s and paused at 126 s, its
+/// window at work). Devin 3000.12 says the message back as its turn takes it in, on the
+/// window's own launch's log (T-1417), and the window's look says so of the message
+/// (`Observed::begun`): the turn is the turn's, however long its record and its screen stay
+/// quiet. Nothing is pressed, the task stays working, and nobody is told. Once the turn ended
+/// with nothing after the message, the window is one that began nothing: its Enter, then the
+/// pause, as ever.
+fn a_brief_its_window_said_back_is_neither_pressed_nor_paused(at_rest: bool) {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let brief = a_follow_up_whose_window_never_begins(&context, &tiers, at_rest);
+    context
+        .adapter
+        .with("zeus", |agent| agent.begun = vec![brief]);
+    // The screen of the field's window: its last answer, its idle box, its status line.
+    context.host.set_snapshot(json!({
+        "outputQuietMs": 600_000,
+        "screenQuietMs": 600_000,
+        "tail": ["❭ Ask Devin to build features, fix bugs, or work on your code", "SWE-2 Max · bypass"],
+    }));
+    let before = enters(&context);
+    for _ in 0..4 {
+        context.advance(PAST_ARRIVAL);
+        context.pass().unwrap();
+        context.pass().unwrap();
+    }
+    assert_eq!(enters(&context), before, "no Enter into a turn at work");
+    assert_eq!(tiers.task(2).task.state, "working");
+    assert!(pause_notes(&tiers).is_empty(), "nobody is told");
+
+    // The turn ends, and nothing follows the message: a turn that came to nothing, watched
+    // from the look that finds it so.
+    context.adapter.with("zeus", |agent| agent.begun.clear());
+    context.pass().unwrap();
+    context.advance(PAST_ARRIVAL);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(enters(&context), before + 1, "its Enter, pressed once more");
+    assert_eq!(tiers.task(2).task.state, "working");
+    context.advance(PAST_ARRIVAL);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(2).task.state, "paused");
+    let notes = pause_notes(&tiers);
+    assert_eq!(notes.len(), 1, "{notes:#?}");
+    assert!(notes[0].contains(&format!("m-{brief}")), "{}", notes[0]);
+}
+
+/// The window read in flight, as a Devin's is while its turn is open on its log.
+#[test]
+fn a_brief_its_window_said_back_into_an_open_turn_is_neither_pressed_nor_paused() {
+    a_brief_its_window_said_back_is_neither_pressed_nor_paused(false);
+}
+
+/// The same, the window read at rest by its items.
+#[test]
+fn a_brief_its_window_said_back_into_an_open_turn_is_left_be_read_at_rest() {
+    a_brief_its_window_said_back_is_neither_pressed_nor_paused(true);
+}
+
+/// Another message said back is no word of this one (T-1405, the review of T-1396, where an
+/// older launch's word that a turn worked switched the rule off): a turn open on the window's
+/// log that took in another message says nothing of T-2's brief.
+/// The window reads at rest or in flight and begins no turn on it: it is pressed Enter once
+/// and its task paused, its requester told.
+#[test]
+fn a_brief_whose_window_said_back_only_another_message_is_still_pressed_and_paused() {
+    for at_rest in [true, false] {
+        let context = Context::new();
+        let tiers = Tiers::new(&context, &["zeus"]);
+        let brief = a_follow_up_whose_window_never_begins(&context, &tiers, at_rest);
+        // The board's message before the brief: whatever it was, it is not the brief.
+        let first = brief - 1;
+        context
+            .adapter
+            .with("zeus", |agent| agent.begun = vec![first]);
+        context
+            .host
+            .set_snapshot(json!({ "outputQuietMs": 600_000, "screenQuietMs": 600_000 }));
+        let before = enters(&context);
+        context.advance(PAST_ARRIVAL);
+        context.pass().unwrap();
+        context.pass().unwrap();
+        assert_eq!(
+            enters(&context),
+            before + 1,
+            "at rest {at_rest}: its Enter, pressed once more"
+        );
+        assert_eq!(tiers.task(2).task.state, "working");
+        context.advance(PAST_ARRIVAL);
+        context.pass().unwrap();
+        context.pass().unwrap();
+        assert_eq!(tiers.task(2).task.state, "paused", "at rest {at_rest}");
+        let notes = pause_notes(&tiers);
+        assert_eq!(notes.len(), 1, "at rest {at_rest}: {notes:#?}");
+        assert!(notes[0].contains(&format!("m-{brief}")), "{}", notes[0]);
+    }
+}
+
+/// The live word apart from the record (Codex's broker, `Window::at_work`) is no word of a turn
+/// begun: the broker marks the thread at work itself as it hands a message over, before Codex
+/// says a turn began, and a turn that never begins leaves it so. A brief such a window began no
+/// turn on is pressed Enter once and its task paused all the same.
+#[test]
+fn a_brief_whose_window_reads_at_work_only_by_a_live_word_apart_from_its_record_is_still_pressed_and_paused(
+) {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    a_follow_up_whose_window_never_begins(&context, &tiers, false);
+    context.adapter.with("zeus", |agent| agent.at_work = true);
+    context
+        .host
+        .set_snapshot(json!({ "outputQuietMs": 600_000, "screenQuietMs": 600_000 }));
+    let before = enters(&context);
+    for _ in 0..2 {
+        context.advance(PAST_ARRIVAL);
+        context.pass().unwrap();
+        context.pass().unwrap();
+    }
+    assert_eq!(enters(&context), before + 1, "its Enter, pressed once more");
+    assert_eq!(tiers.task(2).task.state, "paused");
+    assert_eq!(pause_notes(&tiers).len(), 1);
+}
+
 /// Words the human typed into the window and did not send would go with an Enter: none is
 /// pressed, and the task is paused all the same, its note saying why nothing was pressed.
 #[test]

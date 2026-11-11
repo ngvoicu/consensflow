@@ -22,6 +22,47 @@ const LINK_KEY = MAC ? 'Cmd' : 'Ctrl'
 const opensLink = (event) => event.button === 0 && (MAC ? event.metaKey : event.ctrlKey)
 
 /**
+ * What a window is sent for Shift+Enter (T-1330, T-1336, T-1348): a line feed, Ctrl+J, **one byte,
+ * in every harness on a Mac and on Windows.** xterm.js 6 has neither the kitty keyboard protocol
+ * nor modifyOtherKeys, and sends the plain Enter's CR for Shift+Enter, so a message was sent where
+ * the human asked for a new line, in every harness. A window is not asked what it takes; the page
+ * sends the key every harness lists, as the byte a terminal writes for it.
+ *
+ * **A pane's key never starts with Escape.** A program takes a lone Escape for "stop", and a read
+ * that ends between the two bytes of a write reads the Escape alone, then the rest: a pty whose
+ * input queue is nearly full (a window behind a long paste, slow to read: on a Mac, Codex read
+ * `ESC CR` as Escape and Enter, which stops a turn and sends the message), the console host's
+ * 4,096-byte read on Windows. Only a single byte cannot be split.
+ *
+ * - **A Mac:** every harness lists Ctrl+J as a new line (Claude Code's `chat:newline`, Codex's and
+ *   Muse's keymaps, Devin's `ctrl-j`, Pi's `tui.input.newLine`), and a program in raw mode reads it
+ *   as the key it is.
+ * - **Windows, Claude Code and Pi:** they set the console's virtual-terminal input, which hands the
+ *   byte on whole, so it is their new line there too.
+ * - **Windows, Codex, Devin and Muse:** they read the console's key events, which make a line feed
+ *   the Enter key with Control, bound to nothing: **Shift+Enter does nothing there, safely** (it
+ *   used to send the message). Their new line is Alt+Enter, `ESC CR`, which a read can split into
+ *   the Escape key and then Enter; and the kitty protocol's `CSI 13;2u` reaches them as seven key
+ *   events, which Codex's own reader rebuilds as Shift+Enter, except where the console host's
+ *   read ends after `ESC [` (it reads Alt+[ and types `13;2u`: measured, T-1348). A guard in the
+ *   pane host that waited for an empty pipe before an Escape-led write was built and taken out
+ *   (T-1336, T-1348): it waits for ever on a host whose pending read is smaller than the pipe's
+ *   quota.
+ *
+ * Alt+Enter and Ctrl+J typed by the human stay xterm's.
+ */
+const SHIFT_ENTER = '\n'
+
+/** Whether `event` is Shift+Enter alone, typed (not an input method choosing a candidate). */
+const isShiftEnter = (event) =>
+  event.key === 'Enter' &&
+  event.shiftKey &&
+  !event.ctrlKey &&
+  !event.altKey &&
+  !event.metaKey &&
+  !event.isComposing
+
+/**
  * The letter a key types for a shortcut: its own on a Latin layout, else the
  * one its place on the keyboard has (Ctrl+C on a Cyrillic layout is still
  * the C key).
@@ -110,14 +151,23 @@ export class XtermEmulator {
   }
 
   /**
-   * Whether xterm sends `event` to the program, and not when it copies.
-   * Where Ctrl+C is the program's interrupt (Windows, Linux), Ctrl+C copies
+   * Whether xterm sends `event` to the program, and not when it copies; and what Shift+Enter
+   * is sent as, which xterm cannot say. Where Ctrl+C is the program's interrupt (Windows, Linux), Ctrl+C copies
    * the text selected instead, as Windows Terminal does, and the selection
    * goes, so the next one interrupts; Ctrl+Shift+C copies on every system.
    * The copy is the page's own, which xterm fills with the selection, as it
    * does for Cmd+C on a Mac.
    */
   #programKey(event) {
+    if (isShiftEnter(event)) {
+      // Typed as a key press the window hears (the human's), once, on the key going down; the
+      // press xterm would make of the rest of it (the keypress after the keydown) is none.
+      if (event.type === 'keydown') {
+        event.preventDefault()
+        this.terminal.input(SHIFT_ENTER)
+      }
+      return false
+    }
     if (event.type !== 'keydown' || !event.ctrlKey || event.altKey || event.metaKey) return true
     if (shortcutLetter(event) !== 'c') return true
     if (!event.shiftKey && (MAC || !this.terminal.hasSelection())) return true

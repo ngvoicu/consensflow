@@ -1,0 +1,42 @@
+[
+  {
+    "id": "worker",
+    "name": "worker",
+    "label": "Worker",
+    "article": "a",
+    "tiered": true,
+    "imageAgent": false
+  },
+  {
+    "id": "advisor",
+    "name": "advisor",
+    "label": "Advisor",
+    "article": "an",
+    "tiered": true,
+    "imageAgent": false
+  },
+  {
+    "id": "reviewer",
+    "name": "reviewer",
+    "label": "Reviewer",
+    "article": "a",
+    "tiered": true,
+    "imageAgent": false
+  },
+  {
+    "id": "tester",
+    "name": "tester",
+    "label": "Tester",
+    "article": "a",
+    "tiered": true,
+    "imageAgent": false
+  },
+  {
+    "id": "designer",
+    "name": "image designer",
+    "label": "Image designer",
+    "article": "an",
+    "tiered": false,
+    "imageAgent": true
+  }
+]

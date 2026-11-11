@@ -21,7 +21,8 @@ use super::told::{arrived_after_all, behind_held_words, fail_for, kept_for_resum
 use super::{known_message, message_task, messages, require_message, settle_answered, NewNote};
 use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::meeting::held_by_meeting;
-use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
+use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES};
+use crate::roles;
 use crate::store::Store;
 use crate::tasks::{pause_again, release_ready, withdrawn_late};
 use crate::views::MESSAGE_SELECT;
@@ -101,7 +102,7 @@ fn next_delivery_among(
     if busy {
         return Ok(None);
     }
-    let serial = i64::from(MEMBER_ROLES.contains(&participant.role.as_str()));
+    let serial = i64::from(roles::is_role(participant.role.as_str()));
     let next = store
         .db
         .prepare(&format!(
@@ -305,7 +306,7 @@ pub(crate) fn begin_delivery(
         // At work on another task: the words that resume a task its window is at work on
         // (`work_while_resumed`) are its own.
         let working = message.kind == "task"
-            && MEMBER_ROLES.contains(&message.recipient_role.as_str())
+            && roles::is_role(message.recipient_role.as_str())
             && store
                 .db
                 .prepare(

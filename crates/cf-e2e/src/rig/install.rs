@@ -103,6 +103,11 @@ pub(super) fn environment(
     }
     if let Some(devin) = &config.devin {
         env.push(("CF_TEST_DEVIN".to_owned(), text(devin)));
+        // A run of the suite on another Devin's wire log (T-1417): the shape the test's own
+        // environment names (`FAKE_DEVIN_STAMPS=3000.12`), under what a case sets itself.
+        if let Some(shape) = crate::process::own_var("FAKE_DEVIN_STAMPS") {
+            env.push(("FAKE_DEVIN_STAMPS".to_owned(), shape));
+        }
     }
     env.push(("TERM".to_owned(), "xterm-256color".to_owned()));
     // No harness updates itself in a window of a rig: a live run keeps the owner's `HOME`, so a

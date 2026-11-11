@@ -7,6 +7,11 @@ import { tempEnv } from '../../tests/helpers.mjs'
 import { agentsServer } from './agents-server.mjs'
 import { refusedByPolicy, serveUi } from './serve-ui.mjs'
 
+// The staff's roles as the daemon's table says them (`cf_ledger::roles`, `harnesses.missing`'s
+// `roles`): written from the table by its Rust test (`CF_WRITE_PAGE_ROLES=1`), which fails
+// when they differ.
+const ROLES = JSON.parse(readFileSync(new URL('./fixtures/roles.json', import.meta.url), 'utf8'))
+
 /**
  * The board page (TEST-BDC-13), against a stand-in for the app:
  * `daemon_request` answers from an in-page model and records every call, the way
@@ -310,7 +315,8 @@ function model() {
   }
 }
 
-async function open(page, data = model()) {
+async function open(page, given = model()) {
+  const data = { roles: ROLES, ...given }
   await page.addInitScript((data) => {
     window.__calls = []
     window.__model = data
@@ -354,6 +360,8 @@ async function open(page, data = model()) {
     // Why the daemon is down, while a test has it down: the app answers every
     // core request with this, as Rust does with no bridge to the daemon.
     window.__down = null
+    // How many of the first reads of the harnesses the daemon refuses: a test's `missingRefused`.
+    window.__missingRefused = data.missingRefused ?? 0
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
     // A project's wake-up calls as the daemon says them: the interval in the
     // largest unit that holds it whole, the default words where none were written.
@@ -386,7 +394,13 @@ async function open(page, data = model()) {
       })
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
-      'harnesses.missing': () => answer({ missing: data.missing ?? [] }),
+      'harnesses.missing': () => {
+        if (window.__missingRefused > 0) {
+          window.__missingRefused -= 1
+          return { ok: false, error: 'not-available-yet', detail: 'the daemon is starting' }
+        }
+        return answer({ missing: data.missing ?? [], roles: data.roles })
+      },
       // What a harness lists of its models, by its program's name (CHF-07): the fixture's,
       // or a refusal a test names for it (`modelsRefusal`).
       'models.get': ({ harness }) => {
@@ -475,7 +489,7 @@ async function open(page, data = model()) {
         lane.participant.roles = roles
         return answer({ member: lane.participant })
       },
-      'board.get': ({ project }) => answer({ board: data.boards[project] }),
+      'board.get': ({ project }) => answer({ board: data.boards[project], roles: data.roles }),
       // A project's computer use, as the daemon reads it (`computerUse` of the model, on macOS
       // with no grant and Claude Code's off, unless a test says otherwise), and the System
       // Settings panes it opens, by name.
@@ -582,6 +596,19 @@ async function open(page, data = model()) {
         for (const shown of shownProject(project)) {
           if (size === null) delete shown.compaction
           else shown.compaction = size
+        }
+        return answer({ project: shownProject(project)[0] })
+      },
+      // Whether the project's Claude Code members run with Claude Code's own advisor tool, as the
+      // daemon keeps it: on (true) or off (false, the default), refused in its words otherwise. A
+      // board says it only where it is on.
+      'project.advisor_tool': ({ project, advisorTool }) => {
+        if (typeof advisorTool !== 'boolean') {
+          return { ok: false, error: 'the advisor tool is on (true) or off (false)' }
+        }
+        for (const shown of shownProject(project)) {
+          if (advisorTool) shown.advisorTool = true
+          else delete shown.advisorTool
         }
         return answer({ project: shownProject(project)[0] })
       },
@@ -712,6 +739,7 @@ async function open(page, data = model()) {
           Object.assign(project, { state: 'open', gate: body.gate === true })
           if (body.rules !== undefined) project.staffRules = body.rules
           if (body.compaction !== undefined) project.compaction = body.compaction
+          if (body.advisorTool === true) project.advisorTool = true
           data.projects.push(project)
           data.boards[3] = {
             project,
@@ -3031,6 +3059,67 @@ test("says on the chief's card the model its window ran on, where the human swit
   ])
 })
 
+test("says on a Devin chief's card the id its harness lists for the model, not the id its launch passes", async ({
+  page,
+}) => {
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  // As migration 0031 and 0033 leave a Devin chief: `model` is the joined id Devin's launch
+  // passes (`swe-2-high`), `modelName` the id Devin's list gives the model (`swe-2`), the card of
+  // every other participant says the second.
+  Object.assign(chief.participant, {
+    harness: 'devin',
+    model: 'swe-2-high',
+    effort: 'high',
+    modelName: 'swe-2',
+  })
+  await open(page, data)
+  const meta = page.locator('#stage .terminal-card[data-handle="chief"] .terminal-meta')
+  await expect(meta).toHaveText('Devin · swe-2')
+  // Where its window ran on another model, the card says that one, as it did (O7).
+  await changed(page, () => {
+    const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+    lane.participant.ranOn = 'swe-2-medium'
+  })
+  await expect(meta).toHaveText('Devin · swe-2-medium')
+  // And a chief left to its harness's model says no model, as it did.
+  await changed(page, () => {
+    const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+    Object.assign(lane.participant, { ranOn: undefined, model: null, modelName: null })
+  })
+  await expect(meta).toHaveText('Devin')
+})
+
+test("says on a Devin chief's card the id Devin lists after a switch to Devin, and the model it moved to after a switch away", async ({
+  page,
+}) => {
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  Object.assign(chief.participant, { harness: 'claude-code', model: 'claude-opus-5-5' })
+  await open(page, data)
+  const meta = page.locator('#stage .terminal-card[data-handle="chief"] .terminal-meta')
+  await expect(meta).toHaveText('Claude Code · claude-opus-5-5')
+  // The daemon holds the id Devin lists beside the id its launch is given (T-1345): picked in
+  // New project or switched to, the chief's row says `swe-2` beside `swe-2-max`.
+  const as = (fields) =>
+    changed(
+      page,
+      (fields) => {
+        const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+        Object.assign(lane.participant, { effort: null, modelName: null, ...fields })
+      },
+      fields,
+    )
+  await as({ harness: 'devin', model: 'swe-2-max', effort: 'max', modelName: 'swe-2' })
+  await expect(meta).toHaveText('Devin · swe-2')
+  // A switch away takes the name with it: the card says the model it moved to, whether the
+  // daemon named it or not.
+  await as({ harness: 'codex', model: 'gpt-6-astra', modelName: 'gpt-6-astra' })
+  await expect(meta).toHaveText('Codex · gpt-6-astra')
+  await as({ harness: 'claude-code', model: 'claude-sonnet-5-5' })
+  await expect(meta).toHaveText('Claude Code · claude-sonnet-5-5')
+})
+
 test("keeps the chief's card in the dock while its window is down, and Switch chief is the way on", async ({
   page,
 }) => {
@@ -3453,6 +3542,239 @@ test.describe('on Windows', () => {
   })
 })
 
+// The user agents the page tells its system by (a Mac's Cmd and Ctrl, Windows' Ctrl).
+const MAC_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
+const WINDOWS_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 Edg/140.0'
+
+// Shift+Enter in a window (T-1330, T-1336, T-1348). xterm.js 6 has no kitty keyboard protocol and no
+// modifyOtherKeys, and sends the plain Enter's byte for Shift+Enter, so a message was sent where the
+// human asked for a new line, in every harness. `fixtures/pane-keys/newline-cases.json` holds what the
+// page writes for it (`sends`, by harness and platform), what that does in each harness's input box
+// (`shiftEnter`), and what each harness's input box does with each byte string a pane might write, at
+// rest and while a turn runs (`make-newline-cases.mjs` says how each was found: Pi's editor and
+// Codex's key readers run, the others read from their source and documentation). These presses are
+// made in a real xterm and held to what the page sent. **A pane's key never starts with Escape**: a
+// program takes a lone Escape for "stop", and a read that ends between the two bytes of a write
+// reads it alone (T-1336). It is a line feed, one byte, in every harness on both platforms.
+const NEWLINE_CASES = JSON.parse(
+  readFileSync(new URL('./fixtures/pane-keys/newline-cases.json', import.meta.url), 'utf8'),
+)
+
+/** What `harness`'s input box does with the `bytes` a window was sent, on `platform`; `busy` while a turn runs. */
+function inputBoxDoes(harness, platform, bytes, busy = false) {
+  const table = NEWLINE_CASES.harnesses[harness].rows[platform]
+  const known = table.find((each) => each.bytes.join() === bytes.join())
+  if (!known) return `unknown bytes ${JSON.stringify(bytes)}`
+  return busy ? known.whileBusy : known.does
+}
+
+/**
+ * The bytes a real xterm in the chief's window sent when `press` was done there, the chief
+ * running `harness`; nothing else is typed first.
+ */
+async function sentByPress(page, harness, press) {
+  const data = model()
+  data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').participant.harness =
+    harness
+  await open(page, { ...data, realTerminals: true })
+  const input = page.locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea')
+  await input.focus()
+  await press(input)
+  let bytes = []
+  await expect
+    .poll(async () => {
+      bytes = await page.evaluate(() =>
+        window.__calls
+          .filter(([command]) => command === 'pane_input_enqueue')
+          .flatMap(([, args]) => args.bytes),
+      )
+      return bytes.length
+    })
+    .toBeGreaterThan(0)
+  // Anything else the press sent comes in the same turn of the page: give it one more.
+  await page.waitForTimeout(100)
+  return page.evaluate(() =>
+    window.__calls
+      .filter(([command]) => command === 'pane_input_enqueue')
+      .flatMap(([, args]) => args.bytes),
+  )
+}
+
+for (const [platform, agent] of [
+  ['mac', MAC_AGENT],
+  ['windows', WINDOWS_AGENT],
+]) {
+  test.describe(`Shift+Enter in a window, ${platform === 'mac' ? 'on a Mac' : 'on Windows'}`, () => {
+    test.use({ userAgent: agent })
+
+    for (const harness of Object.keys(NEWLINE_CASES.harnesses)) {
+      // A new line where the harness has a key for the bytes the page writes; nothing, safely, where it
+      // has none (Codex, Devin and Muse on Windows: a line feed is the Enter key with Control, which
+      // none binds): never the message sent, a follow-up queued or a turn interrupted.
+      const does = NEWLINE_CASES.harnesses[harness].shiftEnter[platform]
+      test(`is ${does === 'newline' ? 'a new line' : 'no key at all'} in a ${harness} window, and Enter is still the message sent`, async ({
+        page,
+      }) => {
+        expect(['newline', 'nothing'], `${harness} on ${platform}`).toContain(does)
+        const shifted = await sentByPress(page, harness, (input) => input.press('Shift+Enter'))
+        expect(
+          inputBoxDoes(harness, platform, shifted),
+          `${harness} was sent ${JSON.stringify(shifted)} for Shift+Enter`,
+        ).toBe(does)
+        expect(
+          inputBoxDoes(harness, platform, shifted, true),
+          `${harness} was sent ${JSON.stringify(shifted)} for Shift+Enter while a turn runs`,
+        ).toBe(does)
+        expect(shifted, `what the fixture says ${harness} is sent`).toEqual(
+          NEWLINE_CASES.harnesses[harness].sends[platform],
+        )
+      })
+
+      // A read that ends between the two bytes of a key's write (a pty's input queue nearly full, the
+      // console host's 4,096-byte read) reads an Escape alone, which stops a running turn, and then the
+      // rest, which may send the message: only a single byte cannot be read in two (T-1336;
+      // `crates/cf-panes/src/pty/keys.rs` holds the reads). So the page writes one byte, in every
+      // harness and on both platforms (T-1348).
+      test(`is one byte, never an Escape, for a ${harness} window`, async ({ page }) => {
+        const shifted = await sentByPress(page, harness, (input) => input.press('Shift+Enter'))
+        expect(shifted, `${harness} was sent ${JSON.stringify(shifted)}`).toEqual([10])
+      })
+    }
+
+    test('Enter alone is still the message sent, in every harness', async ({ page }) => {
+      for (const harness of Object.keys(NEWLINE_CASES.harnesses)) {
+        const plain = await sentByPress(page, harness, (input) => input.press('Enter'))
+        expect(inputBoxDoes(harness, platform, plain), `${harness} Enter`).toBe('submit')
+      }
+    })
+  })
+}
+
+test.describe('The keys around Shift+Enter in a window', () => {
+  /**
+   * The bytes of the chief's window's input after `act` (the page's), sorted by what carried
+   * them, the chief running `harness`.
+   */
+  const heard = async (page, act, harness = 'claude-code') => {
+    const data = model()
+    data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').participant.harness =
+      harness
+    await open(page, { ...data, realTerminals: true })
+    const input = page.locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea')
+    await input.focus()
+    await act(input)
+    await page.waitForTimeout(150)
+    return page.evaluate(() => {
+      const sent = (command) =>
+        window.__calls
+          .filter(([name]) => name === command)
+          .map(([, args]) => String.fromCharCode(...args.bytes))
+      return { typed: sent('pane_input_enqueue'), replies: sent('pane_reply_enqueue') }
+    })
+  }
+
+  test("Alt+Enter and Ctrl+J are xterm's: Pi's Alt+Enter queues a follow-up, so it stays ESC CR", async ({
+    page,
+  }) => {
+    const { typed } = await heard(page, async (input) => {
+      await input.press('Alt+Enter')
+      await input.press('Control+j')
+    })
+    expect(typed).toEqual(['\x1b\r', '\n'])
+  })
+
+  // Shift+Enter is the key alone: with another modifier held it is a key of the program's own,
+  // which xterm sends as it does (Pi is asked for, where Shift+Enter is a line feed).
+  for (const [keys, sent] of [
+    ['Shift+Alt+Enter', '\x1b\r'],
+    ['Shift+Control+Enter', '\r'],
+    ['Shift+Meta+Enter', '\r'],
+  ]) {
+    test(`${keys} is not Shift+Enter`, async ({ page }) => {
+      const { typed } = await heard(page, (input) => input.press(keys), 'pi')
+      expect(typed).toEqual([sent])
+    })
+  }
+
+  // The premise of the page's choice, measured in a real xterm 6.0.0: it answers a program's
+  // device-attributes query and nothing of the keyboard protocols (the kitty query `CSI ? u`, and
+  // the request for modifyOtherKeys `CSI > 4 ; 2 m` that Pi makes when it gets no kitty answer),
+  // so Pi runs without extended keys and reads a line feed, and no sequence of a protocol, as
+  // Shift+Enter. If a newer xterm answers the kitty query, a program that asks for the protocol is
+  // owed all its keys in it, and this fails.
+  test('xterm answers no keyboard-protocol query: a Pi that asked is sent Ctrl+J all the same', async ({
+    page,
+  }) => {
+    const { typed, replies } = await heard(
+      page,
+      async (input) => {
+        await page.evaluate(
+          (bytes) => window.__output.onmessage({ id: 'p1-chief', generation: 5, seq: 1, bytes }),
+          [...new TextEncoder().encode('\x1b[>7u\x1b[?u\x1b[>4;2m\x1b[c')],
+        )
+        await expect
+          .poll(() =>
+            page.evaluate(() => window.__calls.filter(([n]) => n === 'pane_reply_enqueue').length),
+          )
+          .toBeGreaterThan(0)
+        await input.focus()
+        await input.press('Shift+Enter')
+      },
+      'pi',
+    )
+    expect(replies).toEqual(['\x1b[?1;2c'])
+    expect(typed).toEqual(['\n'])
+  })
+
+  test('an input method choosing a candidate with Shift+Enter is not a new line', async ({
+    page,
+  }) => {
+    const { typed } = await heard(
+      page,
+      (input) =>
+        input.evaluate((field) =>
+          field.dispatchEvent(
+            new KeyboardEvent('keydown', {
+              key: 'Enter',
+              shiftKey: true,
+              isComposing: true,
+              bubbles: true,
+              cancelable: true,
+            }),
+          ),
+        ),
+      'pi',
+    )
+    expect(typed).not.toContain('\n')
+  })
+
+  test('Shift+Enter is typed once, as the human typed it, and no Enter comes after it', async ({
+    page,
+  }) => {
+    let prevented = null
+    const { typed, replies } = await heard(page, async (input) => {
+      // The key is the page's: nothing is left for the textarea to do with it (an Enter there
+      // would be a line break typed into xterm's own field). This listens after xterm's own.
+      await input.evaluate((field) => {
+        field.addEventListener('keydown', (event) => {
+          window.__keydownPrevented = event.defaultPrevented
+        })
+      })
+      await input.press('Shift+Enter')
+      prevented = await page.evaluate(() => window.__keydownPrevented)
+    })
+    expect(typed).toEqual(['\n'])
+    expect(replies).toEqual([])
+    expect(prevented).toBe(true)
+  })
+})
+
+// A window's keys are its harness's as launched (T-1336). Editing a member changes the harness its
+// next window runs (the ledger says so at once), and the window already open runs on, so the pane
+// carries the harness it was launched with (`pane.harness`, from the daemon), and a window's keys
+// follow that, across a page reload too.
 test("New project and Switch chief say the same of the chief's model: the harness's own switch in the chief's window keeps its conversation and a reopen keeps the model", async ({
   page,
 }) => {
@@ -3477,17 +3799,14 @@ test("New project and Switch chief say the same of the chief's model: the harnes
   }
 })
 
-// Links in a pane (T-1291): an address a program prints is a link, a plain URL and an OSC 8
-// hyperlink (words with the address hidden behind them) alike. It is underlined and titled with
-// what opens it as the pointer comes onto it, and it opens in the human's browser, through the
-// app's `open_link`, only for a click with the system's key held (Cmd on a Mac, Ctrl on Windows,
-// as VS Code's terminal does), so a click into a pane to type never opens one. What the page asks
-// of the app is the address exactly as the program printed it; what may open is the app's to say
+// Links in a pane (T-1291): only an OSC 8 hyperlink (words with the address hidden behind them) is
+// a link; a web address a program prints as text is none, in any form (T-1323). A link is
+// underlined and titled with what opens it as the pointer comes onto it, and it opens in the
+// human's browser, through the app's `open_link`, only for a click with the system's key held
+// (Cmd on a Mac, Ctrl on Windows, as VS Code's terminal does), so a click into a pane to type
+// never opens one. What the page asks of the app is the address exactly as the program printed it;
+// what may open is the app's to say
 // (`link.rs`), so an address a program hides behind words that is no web page reaches nothing.
-const MAC_AGENT =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
-const WINDOWS_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 Edg/140.0'
 const CHIEF_TERMINAL = '#stage .terminal-card[data-handle="chief"] .xterm'
 
 /** An OSC 8 hyperlink as a program prints it: `words`, with `uri` behind them. */
@@ -3833,10 +4152,11 @@ for (const [system, agent, key, other] of [
 // (address)` each falls back to) and on (what ConsensFlow's launch asks of Pi and Claude Code), at
 // the widths a pane has; `app/tests/fixtures/pane-links/make-harness-cases.mjs` says how each was
 // made. Each case is held to one of two things: a click on the address opens exactly the address the
-// program meant, or it is no link and opens nothing. Never a shortened one. A plain address a
-// program broke over rows of its own (Pi writes its rows with CR/LF, so xterm does not mark them
-// wrapped) may go on in the next row, and then it is no link; an OSC 8 hyperlink carries its address
-// whole on every row it is drawn on.
+// program meant (an OSC 8 hyperlink), or it is no link and opens nothing (a plain address, however
+// the program laid it out). Never a shortened one. A program that lays its text out in rows of its
+// own (Pi writes its rows with CR/LF, so xterm does not mark them wrapped) cuts a plain address
+// with nothing on the screen to say so, which is why none is a link; an OSC 8 hyperlink carries its
+// address whole on every row it is drawn on.
 const HARNESS_CASES = JSON.parse(
   readFileSync(new URL('./fixtures/pane-links/harness-cases.json', import.meta.url), 'utf8'),
 )
@@ -4341,6 +4661,118 @@ test('adds a member as a tester, or as one more role of a member, in the place a
   await pickMember(dialog, { harness: 'Claude Code', model: 'claude-sonnet-5', tier: 'standard' })
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
   await expect(page.locator('#status')).toHaveText('@zeus is Tester now too.')
+})
+
+test("a role the daemon's table alone names is offered, listed and added in its place among the roles, with no tier where its row has none", async ({
+  page,
+}) => {
+  const data = model()
+  // A sixth role, after the reviewer: the page holds no list of roles, and reads the table's.
+  data.roles = [
+    ...ROLES.slice(0, 3),
+    {
+      id: 'scout',
+      name: 'field scout',
+      label: 'Field scout',
+      article: 'a',
+      tiered: false,
+      imageAgent: false,
+    },
+    ...ROLES.slice(3),
+  ]
+  data.boards[1].lanes.push(
+    {
+      participant: participant(9, 'argus', 'scout', {
+        harness: 'codex',
+        model: 'gpt-6-astra',
+        modelName: 'gpt-6-astra',
+        effort: null,
+        tier: 'light',
+      }),
+      tasks: [],
+      activity: { state: 'idle' },
+      pane: { id: 'p1-argus', generation: 1 },
+    },
+    {
+      // A worker that scouts too keeps its tier, for its work.
+      participant: participant(10, 'castor', 'worker', {
+        harness: 'codex',
+        roles: ['worker', 'scout'],
+        tier: 'complex',
+      }),
+      tasks: [],
+      activity: { state: 'idle' },
+      pane: { id: 'p1-castor', generation: 1 },
+    },
+  )
+  await open(page, data)
+  // The board says no tier in a row of a role with none, and the tier in one of a role with one,
+  // of the same member.
+  const row = (name) => page.getByRole('row', { name })
+  await expect(row(/^@argus scout · Codex/)).toBeVisible()
+  await expect(row(/^@argus scout/).locator('.meta-tier')).toHaveCount(0)
+  await expect(row(/^@castor scout/).locator('.meta-tier')).toHaveCount(0)
+  await expect(row(/^@castor worker/).locator('.meta-tier')).toHaveText('complex')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
+    'Worker',
+    'Advisor',
+    'Reviewer',
+    'Field scout',
+    'Tester',
+    'Image designer',
+  ])
+  const table = dialog.getByRole('table', { name: 'On the staff' })
+  await expect(table.locator('tbody tr').last()).toHaveText(/@argus.*Field scout/)
+  await expect(table.locator('tr[data-handle="argus"][data-role="scout"]')).toHaveCount(1)
+  // No tier in the row of a role with none; the member's tier in the row of one with tiers.
+  await expect(table.locator('tr[data-handle="argus"]')).not.toContainText('light')
+  await expect(table.locator('tr[data-handle="castor"][data-role="scout"]')).not.toContainText(
+    'complex',
+  )
+  await expect(table.locator('tr[data-handle="castor"][data-role="worker"]')).toContainText(
+    '· complex ·',
+  )
+  // A scout is no image agent: any harness installed here may scout, and it is asked no tier.
+  await pickMember(dialog, { role: 'scout', harness: 'Devin', model: 'swe-2' })
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([
+      {
+        project: 1,
+        harness: 'devin',
+        model: 'swe-2',
+        effort: null,
+        roles: ['scout'],
+      },
+    ])
+  await expect(page.locator('#status')).toHaveText('@swe-2 joined the staff as Field scout.')
+  // Back to a role with tiers: the tier is asked for again.
+  await dialog.getByLabel('Role').selectOption('worker')
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
+  // Edit member asks a scout no tier either, and saves it with none.
+  await dialog.getByRole('button', { name: 'Edit @argus', exact: true }).click()
+  await expect(dialog.locator('[name="memberModel"]')).toHaveValue('gpt-6-astra')
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Save member' }).click()
+  await expect
+    .poll(() => calls(page, 'member.edit'))
+    .toEqual([
+      {
+        project: 1,
+        member: 'argus',
+        harness: 'codex',
+        model: 'gpt-6-astra',
+        effort: null,
+        unchanged: true,
+      },
+    ])
+  // A worker that scouts too is asked its tier.
+  await dialog.getByRole('button', { name: 'Edit @castor', exact: true }).first().click()
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
 })
 
 test('an image designer is picked on Codex alone, and Add member says so when Codex is not here', async ({
@@ -5156,11 +5588,17 @@ async function newProject(page) {
         name: 'Save compaction',
       }),
     },
+    advisorTool: {
+      group: section('Advisor tool'),
+      tool: section('Advisor tool').getByRole('checkbox'),
+      hint: section('Advisor tool').locator('.members-advisor-tool-hint'),
+      save: section('Advisor tool').getByRole('button', { name: 'Save advisor tool' }),
+    },
     computerUse: section('Computer use'),
   }
 }
 
-test('New project has Staff, the rules for the staff, compaction, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has', async ({
+test('New project has Staff, the rules for the staff, compaction, the advisor tool, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has', async ({
   page,
 }) => {
   const data = model()
@@ -5185,6 +5623,7 @@ test('New project has Staff, the rules for the staff, compaction, Human approval
     'Staff',
     'Rules for the staff',
     'Compaction',
+    'Advisor tool',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -5259,7 +5698,7 @@ test('New project has Staff, the rules for the staff, compaction, Human approval
     await markup('new-project-dialog'),
     await markup('project-settings-dialog'),
   ]
-  expect(here).toHaveLength(6)
+  expect(here).toHaveLength(7)
   expect(here).toEqual(there)
   // Left as it opened, the start says nothing of what a project has anyway: the request is the one it was.
   await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
@@ -5537,7 +5976,13 @@ test('Enter in any field of New project starts no project, and is a new line in 
     if (isText) expect(await field.inputValue(), `Enter in ${name}`).toBe(`${before}\n`)
   }
   // None of it saved anything either: there is no project to save for.
-  for (const operation of ['wakeup.set', 'project.specs', 'project.rules', 'project.compaction']) {
+  for (const operation of [
+    'wakeup.set',
+    'project.specs',
+    'project.rules',
+    'project.compaction',
+    'project.advisor_tool',
+  ]) {
     expect(await calls(page, operation), operation).toEqual([])
   }
   // Enter keeps what it is for on a button: its press.
@@ -5585,6 +6030,7 @@ test('Enter in a field of a section of Project settings adds nobody to the staff
     'project.specs',
     'project.rules',
     'project.compaction',
+    'project.advisor_tool',
   ]
   const tally = async () =>
     Object.fromEntries(
@@ -5737,7 +6183,7 @@ test('New project holds every section Project settings holds, in its order, but 
     expect(reason.length, `${legend} has no reason`).toBeGreaterThan(20)
   }
   expect(made).toEqual(settings.filter((legend) => !(legend in NEW_PROJECT_LACKS)))
-  expect(made).toHaveLength(7)
+  expect(made).toHaveLength(8)
 })
 
 test('New project: the rules for the staff and the compaction are written as they are in Project settings, counted and checked as typed, and start with the project', async ({
@@ -5772,7 +6218,7 @@ test('New project: the rules for the staff and the compaction are written as the
     ])
   await expect(made.dialog).toBeHidden()
   // They start with the project, in the one write that makes it: nothing is saved afterwards.
-  for (const operation of ['project.rules', 'project.compaction']) {
+  for (const operation of ['project.rules', 'project.compaction', 'project.advisor_tool']) {
     expect(await calls(page, operation), operation).toEqual([])
   }
 })
@@ -6099,7 +6545,7 @@ test('shows and sets human approval from Project settings, which has no review p
   await expect(gate).toBeChecked()
 })
 
-test("names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
+test("names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Advisor tool, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
   page,
 }) => {
   await open(page)
@@ -6115,6 +6561,7 @@ test("names the board's button and its dialog Project settings, with Staff, Rule
     'Staff',
     'Rules for the staff',
     'Compaction',
+    'Advisor tool',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -6124,6 +6571,7 @@ test("names the board's button and its dialog Project settings, with Staff, Rule
     'Staff',
     'Rules for the staff',
     'Compaction',
+    'Advisor tool',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -6792,6 +7240,154 @@ test("says a refusal of the members' compaction in its section and keeps what wa
   await expect(section.hint).toContainText('the daemon stopped')
   await expect(section.amount).toHaveValue('300000')
   await expect(section.size).toBeChecked()
+})
+
+/** Project settings open on project 1, and its Advisor tool section. */
+async function advisorToolGroup(page) {
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const group = dialog.getByRole('group', { name: 'Advisor tool', exact: true })
+  return {
+    dialog,
+    group,
+    tool: group.getByRole('checkbox'),
+    hint: group.locator('.members-advisor-tool-hint'),
+    save: group.getByRole('button', { name: 'Save advisor tool' }),
+  }
+}
+
+test("Project settings has the advisor tool off for the project's members until the human ticks it, and says in one line whom it is for", async ({
+  page,
+}) => {
+  await open(page)
+  const section = await advisorToolGroup(page)
+  await expect(section.tool).not.toBeChecked()
+  await expect(section.save).toBeEnabled()
+  await expect(section.hint).toBeHidden()
+  // One line, in the section, true as written: Claude Code's own tool, its members, the chief
+  // left alone, and the other harnesses having none.
+  await expect(section.group.locator('.dialog-help')).toHaveText([
+    "Claude Code's own advisor tool lets a window consult a second model. Off, each Claude Code member runs without it from its next start; on, it has the tool as your own Claude Code setting gives it. The chief is not affected and keeps its harness's own setting. Codex, Pi, Devin and Muse Code have no advisor tool, so this changes nothing for their members. A window already open keeps what it began with.",
+  ])
+  // Opening sends nothing.
+  expect(await calls(page, 'project.advisor_tool')).toEqual([])
+})
+
+test('Project settings shows the advisor tool as the board has it for the project', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].project.advisorTool = true
+  await open(page, data)
+  const section = await advisorToolGroup(page)
+  await expect(section.tool).toBeChecked()
+  expect(await calls(page, 'project.advisor_tool')).toEqual([])
+})
+
+test('saves the advisor tool by its own Save, shows what the daemon kept, and saves it off again', async ({
+  page,
+}) => {
+  await open(page)
+  const section = await advisorToolGroup(page)
+  await section.tool.check()
+  // Ticking sends nothing: the section has its own Save.
+  expect(await calls(page, 'project.advisor_tool')).toEqual([])
+  await section.save.click()
+  await expect
+    .poll(() => calls(page, 'project.advisor_tool'))
+    .toEqual([{ project: 1, advisorTool: true }])
+  await expect(section.tool).toBeChecked()
+  await expect(page.locator('#status')).toHaveText(
+    "The project's Claude Code members have the advisor tool as your own Claude Code setting gives it: each window is given that when it next starts.",
+  )
+  // No other section saved with it.
+  for (const operation of [
+    'project.rules',
+    'project.compaction',
+    'wakeup.set',
+    'project.specs',
+    'project.gate',
+  ]) {
+    expect(await calls(page, operation)).toEqual([])
+  }
+  await section.dialog.getByRole('button', { name: 'Close' }).click()
+  const again = await advisorToolGroup(page)
+  await expect(again.tool).toBeChecked()
+  await again.tool.uncheck()
+  await again.save.click()
+  await expect.poll(() => calls(page, 'project.advisor_tool')).toHaveLength(2)
+  expect((await calls(page, 'project.advisor_tool'))[1]).toEqual({
+    project: 1,
+    advisorTool: false,
+  })
+  await expect(again.tool).not.toBeChecked()
+  await expect(page.locator('#status')).toHaveText(
+    "The project's Claude Code members run without the advisor tool: windows that start from now on are launched without it.",
+  )
+})
+
+test('says a refusal of the advisor tool in its section and keeps what was chosen', async ({
+  page,
+}) => {
+  await open(page)
+  const section = await advisorToolGroup(page)
+  await section.tool.check()
+  await page.evaluate(() => {
+    window.__down = 'the daemon stopped'
+  })
+  await section.save.click()
+  await expect(section.hint).toBeVisible()
+  await expect(section.hint).toContainText('the daemon stopped')
+  await expect(section.tool).toBeChecked()
+})
+
+test('New project has the advisor tool off, and sends it only when the human ticks it, to start with the project', async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await expect(made.advisorTool.tool).not.toBeChecked()
+  // Its own Save is for a saved project: New project does not show it.
+  await expect(made.advisorTool.save).toBeHidden()
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+      },
+    ])
+  await expect(made.dialog).toBeHidden()
+  expect(await calls(page, 'project.advisor_tool')).toEqual([])
+})
+
+test('New project with the advisor tool ticked starts the project with it, in the one write that makes it', async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await made.advisorTool.tool.check()
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+        advisorTool: true,
+      },
+    ])
+  await expect(made.dialog).toBeHidden()
+  expect(await calls(page, 'project.advisor_tool')).toEqual([])
 })
 
 const DEFAULT_WAKE_UP_WORDS =
@@ -8517,6 +9113,7 @@ test('project menu: Project settings… opens the dialog of the board’s Projec
     'Staff',
     'Rules for the staff',
     'Compaction',
+    'Advisor tool',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -9390,6 +9987,7 @@ test('Project settings: the sections are the same distance apart and spaced alik
     'Staff',
     'Rules for the staff',
     'Compaction',
+    'Advisor tool',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -9404,6 +10002,7 @@ test('Project settings: the sections are the same distance apart and spaced alik
   expect(saves).toEqual([
     ['Rules for the staff', { text: 'Save rules', primary: true, inActions: true, fromEdge: 0 }],
     ['Compaction', { text: 'Save compaction', primary: true, inActions: true, fromEdge: 0 }],
+    ['Advisor tool', { text: 'Save advisor tool', primary: true, inActions: true, fromEdge: 0 }],
     ['Wake-up calls', { text: 'Save wake-up calls', primary: true, inActions: true, fromEdge: 0 }],
     ['Specs', { text: 'Save specs', primary: true, inActions: true, fromEdge: 0 }],
   ])
@@ -9989,6 +10588,21 @@ test('resizes no terminal when the projects fold away and come back: the board t
   expect(await resizes()).toBe(1)
 })
 
+test('names the role a task waits for on every board it shows, though every read of the harnesses is refused', async ({
+  page,
+}) => {
+  const data = model()
+  data.missingRefused = 1000
+  data.boards[1].open.push(
+    task(7, 'Draw the logo', 'open', 'chief', null, 1, { pool: 'designer', tier: null }),
+  )
+  await open(page, data)
+  // The roles come with the board: a board shown is one whose roles are read.
+  await expect(page.locator('button.card[data-task="7"]')).toContainText('for an image designer')
+  // Every read of the harnesses was refused: the page asked, and was told nothing.
+  await expect.poll(() => page.evaluate(() => window.__missingRefused)).toBeLessThan(1000)
+})
+
 test('folds the panels for this page when the browser keeps no storage', async ({ page }) => {
   // A browser that refuses storage (its data blocked, say) throws at every touch.
   await page.addInitScript(() => {
@@ -10100,6 +10714,86 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
             roles: ['advisor'],
           },
           { harness: 'codex', roles: ['designer'] },
+        ],
+      },
+    ])
+})
+
+test('New project asks no tier of a role whose row has none, and a member that holds it beside a role with tiers keeps its tier', async ({
+  page,
+}) => {
+  const data = model()
+  // A sixth role with no tier, which is no image agent: the daemon's table alone names it.
+  data.roles = [
+    ...ROLES.slice(0, 3),
+    {
+      id: 'scout',
+      name: 'field scout',
+      label: 'Field scout',
+      article: 'a',
+      tiered: false,
+      imageAgent: false,
+    },
+    ...ROLES.slice(3),
+  ]
+  data.lastStaff = [
+    lastMember('hera', 'codex', ['scout'], 'light'),
+    lastMember('zeus', 'claude-code', ['scout', 'worker'], 'complex'),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const table = dialog.getByRole('table', { name: 'Members for the staff' })
+  // The last staff's scouts are picked as they were and said with no tier, and the one that
+  // works too keeps its tier for its work.
+  const scouts = table.locator('tbody tr', { hasText: 'Field scout' })
+  await expect(table.locator('tbody tr')).toHaveText([
+    /^claude-sonnet-5.*complex.*Worker/,
+    /^claude-sonnet-5.*Field scout/,
+    /^gpt-6-astra.*Codex · max.*Field scout/,
+  ])
+  await expect(scouts.filter({ hasText: /complex|light/ })).toHaveCount(0)
+  await pickChief(dialog, 'Pi', 'meta/muse-spark')
+  // A worker is asked a tier; a scout on the same model after it is not, and leaves the
+  // member's tier as it was.
+  await pickMember(dialog, {
+    role: 'worker',
+    harness: 'Pi',
+    model: 'meta/muse-spark',
+    tier: 'complex',
+  })
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await pickMember(dialog, { role: 'scout', harness: 'Pi', model: 'meta/muse-spark' })
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(scouts).toHaveCount(3)
+  await expect(scouts.filter({ hasText: /complex|light/ })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'pi',
+        model: 'meta/muse-spark',
+        gate: false,
+        staff: [
+          { harness: 'codex', model: 'gpt-6-astra', effort: 'max', roles: ['scout'] },
+          {
+            harness: 'claude-code',
+            model: 'claude-sonnet-5',
+            effort: 'high',
+            tier: 'complex',
+            roles: ['scout', 'worker'],
+          },
+          {
+            harness: 'pi',
+            model: 'meta/muse-spark',
+            effort: null,
+            tier: 'complex',
+            roles: ['worker', 'scout'],
+          },
         ],
       },
     ])
@@ -12271,6 +12965,54 @@ test('says the daemon is down while it is, why, and what comes next, and reads e
   await expect(page.locator('tr[data-handle="zeus"]')).toHaveCount(1)
 })
 
+test('says a restart of the daemon in its steps, and each thing only once it is true', async ({
+  page,
+}) => {
+  await open(page)
+  const banner = page.getByRole('alert')
+  const daemonStatus = (payload) =>
+    page.evaluate(
+      (payload) => window.__listeners.get('daemon-status')({ event: 'daemon-status', payload }),
+      payload,
+    )
+  // The windows are being closed: nothing is said to be closed, and nothing to be started.
+  await daemonStatus({
+    available: false,
+    cause: "ConsensFlow's daemon stopped; closing its windows…",
+    retrying: true,
+    closing: true,
+  })
+  await expect(banner).toHaveText(
+    "The daemon is not running. ConsensFlow's daemon stopped; closing its windows…",
+  )
+  // They are proven gone: now it is closed, and the daemon is being started.
+  await daemonStatus({
+    available: false,
+    cause: "ConsensFlow's daemon stopped and its windows are closed.",
+    retrying: true,
+  })
+  await expect(banner).toHaveText(
+    "The daemon is not running. ConsensFlow's daemon stopped and its windows are closed. Starting it again…",
+  )
+  // Their end could not be confirmed: that is said, and the person is asked to quit.
+  await daemonStatus({
+    available: false,
+    cause:
+      "ConsensFlow's daemon stopped, and the end of its windows could not be confirmed, so it was not started again while one of them might still run.",
+    retrying: false,
+  })
+  await expect(banner).toHaveText(
+    "The daemon is not running. ConsensFlow's daemon stopped, and the end of its windows could not be confirmed, so it was not started again while one of them might still run. Quit ConsensFlow and open it again.",
+  )
+  // Up again: the banner goes, and what became of the windows and the projects is said,
+  // in the status line, long enough to be read.
+  const notice =
+    "ConsensFlow's daemon was started again. Its windows were closed, and the projects that were open are paused until you resume them."
+  await daemonStatus({ available: true, cause: null, retrying: false, notice })
+  await expect(banner).toBeHidden()
+  await expect(page.locator('#status')).toHaveText(notice)
+})
+
 test('says what to do with no project yet: start one; there is no board to read, no staff to open', async ({
   page,
 }) => {
@@ -12856,6 +13598,25 @@ test.describe('file drop on Windows', () => {
     await humanPaste(page, 'chief', 'a — b')
     await expect.poll(async () => (await typedInto(page, 'p1-chief')).at(-1)).toBe('a — b')
   })
+
+  // What a drop may carry is the harness the window was launched with, which the daemon says with
+  // its pane (T-1336): a member edited to another harness runs it from its next window.
+  for (const [launched, configured, typed, asked] of [
+    ['devin', 'codex', [`"${SMILING}"`], []],
+    ['codex', 'devin', ['C:\\Users\\me\\A-B~1.PNG'], [[SMILING]]],
+  ]) {
+    test(`goes by ${launched}, which a window was launched with, and not ${configured}, which its member is set to run now`, async ({
+      page,
+    }) => {
+      const data = chiefOn(configured, ALIASED)
+      const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+      chief.pane = { ...CHIEF_PANE, harness: launched }
+      await sideBySide(page, data)
+      await dragged.drop(page, [SMILING], told(await middleOf(page, 'chief'), 2))
+      await expect.poll(() => typedInto(page, 'p1-chief')).toEqual(typed)
+      expect(await askedShort(page)).toEqual(asked)
+    })
+  }
 
   test('types nothing into a Codex window for a path with a character Codex drops and no short name it takes, and says why in the app’s words', async ({
     page,

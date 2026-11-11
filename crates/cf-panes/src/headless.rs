@@ -4,7 +4,7 @@
 //! host tells the exits of the windows it ends as it stops; the window's quit does not.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cf_bridge::{Bridge, BridgeBuilder};
 use cf_proto::bridge::Role;
@@ -71,6 +71,70 @@ fn close_all(panes: &PaneTable, close: fn(&PaneTable, &PaneKey) -> Result<(), Pa
 /// tree is not looked at, so the quit does not wait for the second look.
 pub fn reap_all(panes: &PaneTable) {
     close_all(panes, PaneTable::reap);
+}
+
+/// How [`reap_until_clean`] ended.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Reaped {
+    /// The table holds no pane, no close is under way and no program's end is unproven: no
+    /// window it held can still run.
+    Clean,
+    /// Something was still being ended when the time was out (a program that uses its whole
+    /// grace, a close that does not return).
+    TooLate,
+    /// A program's end was never proven, now or before: it may run still.
+    Unconfirmed,
+}
+
+/// Closes every window the table holds, as [`reap_all`] does, and then waits for every close
+/// that had taken a pane out of it, and closes again what came into it meanwhile, until no
+/// window of the table can still run, or `within` is out. A table that is not clean by then
+/// is left to its closes (they end on their own); the caller is told, so that it starts
+/// nothing beside what may still run.
+pub fn reap_until_clean(panes: &Arc<PaneTable>, within: Duration) -> Reaped {
+    let deadline = Instant::now() + within;
+    loop {
+        let (done, reaped) = std::sync::mpsc::channel();
+        let closing = Arc::clone(panes);
+        if std::thread::Builder::new()
+            .name("consensflow-reap".to_string())
+            .spawn(move || {
+                reap_all(&closing);
+                let _ = done.send(());
+            })
+            .is_err()
+        {
+            return Reaped::TooLate;
+        }
+        if reaped
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .is_err()
+        {
+            return Reaped::TooLate;
+        }
+        loop {
+            let Ok(pending) = panes.pending() else {
+                return Reaped::TooLate;
+            };
+            if pending.unconfirmed != 0 {
+                return Reaped::Unconfirmed;
+            }
+            if pending.is_clean() {
+                return Reaped::Clean;
+            }
+            // A pane that came into the table since the look closes again.
+            if pending.open != 0 {
+                break;
+            }
+            if Instant::now() >= deadline {
+                return Reaped::TooLate;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if Instant::now() >= deadline {
+            return Reaped::TooLate;
+        }
+    }
 }
 
 /// [`reap_all`] for a stop that has a peer to hear it: each window is closed as the

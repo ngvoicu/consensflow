@@ -7,6 +7,7 @@
 //! ([`staff_rules`]) and choose the size its members' windows compact at, whatever
 //! their harness ([`compaction`]).
 
+mod advisor_tool;
 mod compaction;
 mod describing;
 mod staff_rules;
@@ -17,6 +18,8 @@ use cf_proto::specs::SpecsView;
 use rusqlite::{params, OptionalExtension, Row};
 use serde_json::{json, Value};
 
+pub use advisor_tool::parse_advisor_tool;
+pub(crate) use advisor_tool::set_advisor_tool;
 pub(crate) use compaction::set_compaction;
 pub use compaction::{parse_compaction, COMPACTION_MAX, COMPACTION_MIN};
 pub use describing::parse_description;
@@ -69,6 +72,9 @@ pub(crate) struct ProjectRow {
     /// The size in tokens the human chose for the members' windows to compact at,
     /// whatever their harness; null for each harness's own point.
     pub(crate) compaction: Option<u32>,
+    /// 1 where the human has the members run with Claude Code's own advisor tool; 0 (every
+    /// project's until it is ticked) where they run without it.
+    pub(crate) advisor_tool: i64,
 }
 
 impl ProjectRow {
@@ -88,6 +94,7 @@ impl ProjectRow {
             meeting_at: row.get("meeting_at")?,
             staff_rules: row.get("staff_rules")?,
             compaction: row.get("compaction")?,
+            advisor_tool: row.get("advisor_tool")?,
         })
     }
 
@@ -110,6 +117,10 @@ pub struct NewChief {
     pub model: Option<String>,
     /// The effort it runs its model at; none for its harness's own.
     pub effort: Option<String>,
+    /// What its harness's list calls the model, its id (Devin's `swe-2` for the `swe-2-high` its
+    /// launch is given), which its card says; none where the list was never read. Held with
+    /// the model only: a chief on its harness's default has none.
+    pub model_name: Option<String>,
 }
 
 /// A member a new project starts with.
@@ -151,6 +162,9 @@ pub struct NewProject {
     /// The size, in tokens, the human chose for its members' windows to compact
     /// at; none starts it on each harness's own point.
     pub compaction: Option<u32>,
+    /// Whether its members run with Claude Code's own advisor tool; false (off) is what
+    /// every project starts with.
+    pub advisor_tool: bool,
 }
 
 impl NewProject {
@@ -167,6 +181,8 @@ impl NewProject {
             given => Some(model::parse_model_id(given)?),
         };
         let chief_effort = model::parse_effort(chief.and_then(|chief| chief.get("effort")))?;
+        let chief_model_name =
+            model::parse_model_name(chief.and_then(|chief| chief.get("modelName")))?;
         let gate = match value.get("gate") {
             None => false,
             gate => model::parse_gate(gate)?,
@@ -191,6 +207,7 @@ impl NewProject {
                 harness: harness.to_string(),
                 model: chief_model,
                 effort: chief_effort,
+                model_name: chief_model_name,
             },
             staff,
             gate,
@@ -198,6 +215,10 @@ impl NewProject {
             specs: SpecsChange::from_opening(value.get("specs"))?,
             staff_rules: parse_staff_rules(value.get("rules"))?,
             compaction: parse_compaction(value.get("compaction"))?,
+            advisor_tool: match value.get("advisorTool") {
+                None => false,
+                said => parse_advisor_tool(said)?,
+            },
         })
     }
 }
@@ -230,7 +251,13 @@ impl NewMember {
         let shown =
             crate::handles::model_shown(model_name.as_deref(), model.as_deref(), Some(harness));
         model::require_fitting_roles(&shown, designer, &roles)?;
-        let tier = model::parse_tier(value.get("tier"))?;
+        // A member whose roles have no tier is given none, and kept in the lowest.
+        let tier = match value.get("tier") {
+            None | Some(Value::Null) if crate::roles::takes_no_tier(&roles) => {
+                crate::roles::NO_TIER
+            }
+            given => model::parse_tier(given)?,
+        };
         Ok(Self {
             harness: harness.to_string(),
             model,
@@ -310,6 +337,14 @@ pub(crate) fn create_project(
     if let Some(chief_model) = &request.chief.model {
         model::require_model_id(chief_model)?;
     }
+    model::parse_model_name(
+        request
+            .chief
+            .model_name
+            .as_ref()
+            .map(|name| json!(name))
+            .as_ref(),
+    )?;
     let members = request
         .staff
         .iter()
@@ -341,8 +376,18 @@ pub(crate) fn create_project(
             NewParticipant::coordinator("chief", Some(chief_harness)),
         )?;
         store.db.execute(
-            "UPDATE participant SET model = ?, effort = ? WHERE id = ?",
-            params![request.chief.model, request.chief.effort, chief.id],
+            "UPDATE participant SET model = ?, effort = ?, model_name = ? WHERE id = ?",
+            params![
+                request.chief.model,
+                request.chief.effort,
+                // A name goes with a model: none for the harness's own default.
+                request
+                    .chief
+                    .model
+                    .as_ref()
+                    .and(request.chief.model_name.as_ref()),
+                chief.id
+            ],
         )?;
         for (member, roles) in &members {
             let handle = member.handle(store, id)?;
@@ -368,6 +413,9 @@ pub(crate) fn create_project(
         }
         if let Some(size) = request.compaction {
             set_compaction(store, id, Some(size))?;
+        }
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
         }
         known_project(store, id)
     })
@@ -406,6 +454,7 @@ pub(crate) fn project(store: &Store, id: i64) -> Result<Option<ProjectView>, Led
         meeting: row.meeting_at,
         staff_rules: row.staff_rules,
         compaction: row.compaction,
+        advisor_tool: row.advisor_tool == 1,
     }))
 }
 

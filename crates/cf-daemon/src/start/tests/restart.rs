@@ -49,6 +49,7 @@ fn ledger_before_the_start(root: &Path) -> (Ledger, i64) {
                 harness: "claude-code".to_owned(),
                 model: Some("mybuilder".to_owned()),
                 effort: None,
+                model_name: None,
             },
             staff: Vec::new(),
             gate: false,
@@ -56,6 +57,7 @@ fn ledger_before_the_start(root: &Path) -> (Ledger, i64) {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
         })
         .unwrap();
     (ledger, project.id)
@@ -391,6 +393,7 @@ async fn a_devin_chiefs_first_message_behind_bypass_is_received_though_its_windo
                         harness: "devin".to_owned(),
                         model: Some("mydevin".to_owned()),
                         effort: None,
+                        model_name: None,
                     },
                     staff: Vec::new(),
                     gate: false,
@@ -398,6 +401,7 @@ async fn a_devin_chiefs_first_message_behind_bypass_is_received_though_its_windo
                     specs: None,
                     staff_rules: None,
                     compaction: None,
+                    advisor_tool: false,
                 })
                 .unwrap()
                 .id;

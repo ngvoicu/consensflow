@@ -27,6 +27,7 @@ fn project(ledger: &mut Ledger, name: &str) -> ProjectView {
                 harness: "codex".into(),
                 model: Some("diana".into()),
                 effort: None,
+                model_name: None,
             },
             staff: Vec::new(),
             gate: false,
@@ -34,6 +35,7 @@ fn project(ledger: &mut Ledger, name: &str) -> ProjectView {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
         })
         .expect("a project")
 }

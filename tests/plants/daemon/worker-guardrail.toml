@@ -153,8 +153,8 @@ runs = ["evals-scenarios"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/scenarios/uncommitted_work.rs"
-find = '''Some("advisor" | "reviewer" | "tester" | "designer")'''
-replace = '''Some("advisor")'''
+find = '        .filter(|task| crate::measure::is_work_pool(task.pool.as_deref()))'
+replace = '        .filter(|task| crate::measure::is_work_pool(task.pool.as_deref()) || task.pool.as_deref() == Some("reviewer"))'
 
 [[plant]]
 name = "worker guardrail: the eval holds a follow-up still working to a restore it never reported"
@@ -205,8 +205,8 @@ runs = ["evals-lib-card"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/run/card.rs"
-find = '''Some("advisor" | "reviewer" | "tester" | "designer")'''
-replace = '''Some("advisor")'''
+find = '        .filter(|task| crate::measure::is_work_pool(task["pool"].as_str()))'
+replace = '        .filter(|task| crate::measure::is_work_pool(task["pool"].as_str()) || task["pool"].as_str() == Some("reviewer"))'
 
 [[plant]]
 name = "worker guardrail: the page kept at T-1's result is read again at a later message of the owner's, the undone page too"

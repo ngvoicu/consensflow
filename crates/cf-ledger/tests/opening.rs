@@ -42,6 +42,7 @@ fn project(name: &str, harness: &str) -> NewProject {
             harness: harness.into(),
             model: None,
             effort: None,
+            model_name: None,
         },
         staff: Vec::new(),
         gate: false,
@@ -49,6 +50,7 @@ fn project(name: &str, harness: &str) -> NewProject {
         specs: None,
         staff_rules: None,
         compaction: None,
+        advisor_tool: false,
     }
 }
 

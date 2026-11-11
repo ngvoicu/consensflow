@@ -122,6 +122,34 @@ pub fn register_pane_handlers(
     output: Arc<OutputHub>,
     inputs: Arc<InputQueue>,
 ) {
+    register(builder, panes, arbiter, output, inputs, false);
+}
+
+/// [`register_pane_handlers`] for a host that may outlive its daemon and start another (the
+/// app): a launch the daemon asked for is not opened once its bridge has closed, however late
+/// its handler reaches the table. A launch is admitted when it is asked for, and the bridge's
+/// closing stops no handler already admitted; without this one slow to begin (a loaded Mac)
+/// inserted a pane of a daemon that had stopped, and nothing owned it. The headless host
+/// does without: it ends every window it holds when its peer's input ends, the launches
+/// admitted before waited for ([`crate::headless::shut_down`]).
+pub fn register_fenced_pane_handlers(
+    builder: &mut BridgeBuilder,
+    panes: Arc<PaneTable>,
+    arbiter: Arc<InputArbiter>,
+    output: Arc<OutputHub>,
+    inputs: Arc<InputQueue>,
+) {
+    register(builder, panes, arbiter, output, inputs, true);
+}
+
+fn register(
+    builder: &mut BridgeBuilder,
+    panes: Arc<PaneTable>,
+    arbiter: Arc<InputArbiter>,
+    output: Arc<OutputHub>,
+    inputs: Arc<InputQueue>,
+    fenced: bool,
+) {
     let open_panes = Arc::clone(&panes);
     let open_arbiter = Arc::clone(&arbiter);
     let open_inputs = Arc::clone(&inputs);
@@ -135,7 +163,10 @@ pub fn register_pane_handlers(
             pixel_width: 0,
             pixel_height: 0,
         };
-        let streamed = match open_panes.open_streamed_at(
+        let streamed = match open_panes.open_streamed_at_while(
+            // Asked with the table's lock held, at the insertion: a bridge that has
+            // closed has no daemon to own the window.
+            &|| !fenced || !bridge.is_closed(),
             key,
             &request.cwd,
             &request.argv,

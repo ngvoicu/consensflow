@@ -239,6 +239,7 @@ async fn an_inbox_is_the_humans_unless_the_page_names_a_handle_in_text() {
                         harness: "claude-code".to_owned(),
                         model: Some("zeus".to_owned()),
                         effort: None,
+                        model_name: None,
                     },
                     // A member whose handle is a number's digits.
                     staff: vec![NewMember {
@@ -255,6 +256,7 @@ async fn an_inbox_is_the_humans_unless_the_page_names_a_handle_in_text() {
                     specs: None,
                     staff_rules: None,
                     compaction: None,
+                    advisor_tool: false,
                 })
                 .unwrap()
                 .id;

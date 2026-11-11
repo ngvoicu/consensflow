@@ -14,7 +14,7 @@ use cf_ledger::{NewMember, ParticipantView};
 use serde_json::Value;
 
 use crate::chiefs::{chief_of, replace_project};
-use crate::fixtures::{low, Tiers};
+use crate::fixtures::Tiers;
 use crate::traces::held_to;
 
 const SUITES: &[&str] = &["work in flight when its participant is forgotten"];
@@ -55,52 +55,6 @@ fn add_worker(context: &Context, project: i64, agent: &str) -> ParticipantView {
             },
         )
         .unwrap()
-}
-
-#[test]
-fn leaves_no_low_quota_mark_on_a_member_taken_off_the_staff_while_its_sessions_window_was_looked_at(
-) {
-    let context = Context::new();
-    let tiers = Tiers::new(&context, &["zeus"]);
-    tiers.open();
-    context.pass().unwrap();
-    context.pass().unwrap();
-    assert_eq!(tiers.task(1).task.state, "working");
-    // The next look at the session's window waits on its harness, and finds it low on quota.
-    context.adapter.quota("zeus", Some(low(97)));
-    let launch = context.adapter.agent("zeus").launch;
-    let release = context.adapter.observe_holds.hold(looks_at(launch));
-    let looking = context.begin_pass();
-    // Meanwhile the human takes zeus off the staff, and adds it back.
-    let removing = context.begin_remove_member(tiers.project.id, "zeus");
-    context.settle();
-    add_worker(&context, tiers.project.id, "zeus");
-    release.open();
-    context.settle();
-    looking.take().unwrap().unwrap();
-    removing.take().unwrap().unwrap();
-    tiers.open_body("Write the lexer");
-    context.pass().unwrap();
-    assert!(
-        tiers
-            .notes("chief")
-            .iter()
-            .all(|note| !note.starts_with("T-2 waits")),
-        "nothing holds zeus back"
-    );
-    assert!(
-        tiers
-            .task(2)
-            .task
-            .assignee
-            .is_some_and(|assignee| assignee.starts_with("zeus-")),
-        "zeus takes it: the low quota was before"
-    );
-    held_to(
-        context.close(),
-        SUITES,
-        "leaves no low quota mark on a member taken off the staff while its session's window was looked at",
-    );
 }
 
 #[test]

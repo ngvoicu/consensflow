@@ -45,6 +45,7 @@ fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
                 harness: "claude-code".into(),
                 model: Some("claude-opus-5-5".into()),
                 effort: None,
+                model_name: None,
             },
             staff,
             gate: false,
@@ -52,6 +53,7 @@ fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
         })
         .expect("a project")
 }
@@ -593,6 +595,7 @@ fn a_member_with_no_tier_is_refused_at_a_project_s_start_and_at_an_add() {
                 harness: "claude-code".into(),
                 model: Some("claude-opus-5-5".into()),
                 effort: None,
+                model_name: None,
             },
             staff: vec![untiered.clone()],
             gate: false,
@@ -600,6 +603,7 @@ fn a_member_with_no_tier_is_refused_at_a_project_s_start_and_at_an_add() {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
         })
         .expect_err("refused");
     assert_eq!(refused.code(), Some("invalid-tier"));

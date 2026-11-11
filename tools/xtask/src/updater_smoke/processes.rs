@@ -162,12 +162,34 @@ pub fn alive(pid: u32) -> bool {
     shown.code == 0 && !state.is_empty() && !state.starts_with('Z')
 }
 
-/// The pids in `table` whose command is a program of one of `folders` (each a folder's path
-/// ending in `/`): what the process table shows started from there.
-pub fn started_from(table: &[Row], folders: &[String]) -> Vec<u32> {
+/// The names the process table may show the program `binary` under: its path, and the path the
+/// system resolves it to (a temporary folder's `/var` is `/private/var`).
+pub fn programs_of(binary: &Path) -> Vec<String> {
+    let mut names = vec![binary.display().to_string()];
+    if let Ok(real) = std::fs::canonicalize(binary) {
+        let real = real.display().to_string();
+        if !names.contains(&real) {
+            names.push(real);
+        }
+    }
+    names
+}
+
+/// The pids in `table` whose command is one of `programs` (each a program's path, see
+/// [`programs_of`]), with its arguments or none: what the process table shows started from
+/// there. A program beside it in the same folder (the Node a bridge's daemon runs on, which lives
+/// in the bundle's `Contents/MacOS/` beside the app) is another program, and one whose name only
+/// begins with the same letters is another.
+pub fn started_from(table: &[Row], programs: &[String]) -> Vec<u32> {
     table
         .iter()
-        .filter(|row| folders.iter().any(|folder| row.command.starts_with(folder)))
+        .filter(|row| {
+            programs.iter().any(|program| {
+                row.command
+                    .strip_prefix(program.as_str())
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with(' '))
+            })
+        })
         .map(|row| row.pid)
         .collect()
 }
@@ -176,25 +198,64 @@ pub fn started_from(table: &[Row], folders: &[String]) -> Vec<u32> {
 /// quits at once, which one with no input does.
 const WATCH_EVERY: Duration = Duration::from_millis(50);
 
-/// Every process started from some folders while it runs, read from the process table on a
-/// thread of its own: the smoke's count of the apps an update starts (T-941).
+/// How many looks at the process table a process whose parent is a watched program too is seen in
+/// before it counts as a start of it. A program that starts another forks first, and between the
+/// fork and the exec the table shows the child with its parent's command: the app's daemon, its
+/// shell and every tool it runs are the app, for a few milliseconds (T-1338: the flip leg counted
+/// the daemon of the update as a second start of the app, pids 30879 and 30886). A start that
+/// lasts is seen again and again; one by a launcher the table shows with another parent (launchd
+/// starts the app Tauri restarts) counts at the first look, for it may quit at once.
+const CONFIRMED_IN: u32 = 3;
+
+/// The processes of some programs that the process table has shown, and which of them are starts.
+#[derive(Debug, Default)]
+pub struct Starts {
+    looks: std::collections::BTreeMap<u32, u32>,
+    counted: std::collections::BTreeSet<u32>,
+}
+
+impl Starts {
+    /// Takes one look at `table`.
+    pub fn look(&mut self, table: &[Row], programs: &[String]) {
+        let watched = started_from(table, programs);
+        for row in table.iter().filter(|row| watched.contains(&row.pid)) {
+            if watched.contains(&row.ppid) {
+                let looks = self.looks.entry(row.pid).or_default();
+                *looks += 1;
+                if *looks >= CONFIRMED_IN {
+                    self.counted.insert(row.pid);
+                }
+            } else {
+                self.counted.insert(row.pid);
+            }
+        }
+    }
+
+    /// The pids that are starts of the programs, by what has been looked at.
+    pub fn pids(&self) -> std::collections::BTreeSet<u32> {
+        self.counted.clone()
+    }
+}
+
+/// Every start of some programs while it runs, read from the process table on a thread of its
+/// own: the smoke's count of the apps an update starts (T-941).
 pub struct Watch {
     stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
     seen: thread::JoinHandle<Result<std::collections::BTreeSet<u32>>>,
 }
 
 impl Watch {
-    /// Starts watching for programs of `folders` (see [`started_from`]).
-    pub fn start(folders: Vec<String>) -> Self {
+    /// Starts watching for the `programs` (see [`started_from`]).
+    pub fn start(programs: Vec<String>) -> Self {
         let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         let stopped = std::sync::Arc::clone(&stop);
         let seen = thread::spawn(move || {
-            let mut seen = std::collections::BTreeSet::new();
+            let mut starts = Starts::default();
             loop {
                 let last = stopped.load(std::sync::atomic::Ordering::Acquire);
-                seen.extend(started_from(&process_table()?, &folders));
+                starts.look(&process_table()?, &programs);
                 if last {
-                    return Ok(seen);
+                    return Ok(starts.pids());
                 }
                 thread::sleep(WATCH_EVERY);
             }
@@ -202,7 +263,7 @@ impl Watch {
         Self { stop, seen }
     }
 
-    /// Stops watching, after one more look, and answers every pid it saw.
+    /// Stops watching, after one more look, and answers every start it saw.
     pub fn stop(self) -> Result<std::collections::BTreeSet<u32>> {
         self.stop.store(true, std::sync::atomic::Ordering::Release);
         self.seen

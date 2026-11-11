@@ -338,6 +338,13 @@ pub struct Launch<'a> {
     /// (Claude's `autoCompactWindow`, Codex's `model_auto_compact_token_limit`, Devin's
     /// thresholds, Pi's extension, Muse's context limit up to its real window).
     pub compaction: Option<u32>,
+    /// The project has its members run without Claude Code's own advisor tool (its Project
+    /// settings' "Advisor tool" left off, which every project is until the human ticks it):
+    /// only a member's launch is given it, and with it false the launch is as it always was.
+    /// Only Claude's adapter reads it, by the launch's own settings file (`env`'s
+    /// `CLAUDE_CODE_DISABLE_ADVISOR_TOOL`): the other four harnesses have no advisor tool,
+    /// and their launches are the same whatever it says.
+    pub advisor_off: bool,
     /// How long the window has to show its first message, in milliseconds: the
     /// engine's limit for a launch (`CONSENSFLOW_LAUNCH_TIMEOUT_MS`). What a
     /// window waits for before that message can show, such as the conversation
@@ -984,6 +991,14 @@ pub struct Observed {
     /// too, written as the window's are, and nothing in it tells them apart. False
     /// from a harness that cannot tell.
     pub shared: bool,
+    /// The deliveries, by the header that begins each, that the window's harness said back
+    /// as taken into a turn of the window's own that has not ended (Devin's wire log of the
+    /// window's launch, which no other process writes: 3000.12 says a message back live as
+    /// its turn takes it, 3000.11 just after its word that the turn works): each has begun,
+    /// whatever the
+    /// record shows after it, until that turn's end. Empty from a harness that says no such
+    /// thing, for a message with no header of ConsensFlow's, and once the turn ended.
+    pub begun: Vec<i64>,
 }
 
 impl Observed {
@@ -1185,7 +1200,7 @@ const PASTED: &str = "pasted_content";
 /// Code attached and the line that opens its wrapper of a paste (`<pasted_content id="b118">`):
 /// the same reading as `cf-engine`'s `is_paste_of`, which a test of that crate holds this to.
 /// None for any other text, a header quoted after words included: it names no delivery.
-fn delivery_of(text: &str) -> Option<i64> {
+pub(crate) fn delivery_of(text: &str) -> Option<i64> {
     let mut rest = text.trim_start();
     // The placeholders: each `[Image #N]`, one space between them.
     while let Some(after) = rest.strip_prefix(IMAGE) {

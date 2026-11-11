@@ -1301,6 +1301,12 @@ impl Dispatcher {
             // alike, and each adapter gives it its harness by its own route; the chief's
             // launch never is (2026-10-31).
             compaction: project.compaction.filter(|_| participant.role != "chief"),
+            // The project leaves Claude Code's own advisor tool off until the human ticks it in
+            // Project settings: every member's launch is told to switch it off, at launch and on
+            // resume alike, and each adapter acts on it by its own harness (only Claude Code has
+            // such a tool); the chief's launch never is, and keeps its harness's own setting
+            // (2026-11-10).
+            advisor_off: !project.advisor_tool && participant.role != "chief",
             first_message_ms: self.seams.limits.launch_ms,
             starts_given_up: record.window.borrow().starts_given_up,
         };

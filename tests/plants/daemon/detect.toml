@@ -383,7 +383,7 @@ runs = ["admin-source"]
 [[plant.edit]]
 file = "crates/cf-harness/src/admin/source.rs"
 find = '''
-            ("/.pi/agent/bin/", &["update"]),
+            (Place::Folder("/.pi/agent/bin/"), &["update"]),
 '''
 replace = ""
 
@@ -394,8 +394,8 @@ runs = ["admin-source"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/admin/source.rs"
-find = '            ("/.pi/agent/bin/", &["update"]),'
-replace = '            ("/.pi/agent/bin/", &["update", "--self"]),'
+find = '            (Place::Folder("/.pi/agent/bin/"), &["update"]),'
+replace = '            (Place::Folder("/.pi/agent/bin/"), &["update", "--self"]),'
 
 # The agent folder as Pi reads it, a relative one the home's (T-141, P3-4); a custom agent folder is
 # told by the file its installer wrote (P3-5).

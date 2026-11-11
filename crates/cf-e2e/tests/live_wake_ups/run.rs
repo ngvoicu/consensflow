@@ -28,6 +28,7 @@ use cf_e2e::live::members::{
     self, find, Account, LongCommand, Members, Plan, BENCH_BRIEF, STAND_IN_WORKER,
 };
 use cf_e2e::live::{text, Log, Who};
+use cf_e2e::rig::member_body;
 use cf_e2e::Result;
 use serde_json::{json, Value};
 
@@ -396,10 +397,9 @@ impl Chief<'_> {
             case.fail("the log never said the words were edited");
             return Ok(false);
         };
-        let added = self.members.page(
-            "member.add",
-            json!({ "agent": STAND_IN_WORKER, "roles": ["worker"] }),
-        )?;
+        // Added as Add member adds one: its harness, model and tier, as its row says them.
+        let body = member_body(self.members.rig(), STAND_IN_WORKER, Some(json!(["worker"])))?;
+        let added = self.members.page("member.add", body)?;
         let tier = added["member"]["tier"].as_str().unwrap_or_default();
         let mut task: Vec<String> = vec!["task".to_owned(), "add".to_owned()];
         task.extend(members::tier_flag(tier));

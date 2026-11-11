@@ -43,6 +43,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use cf_base::env::Env;
+use cf_base::home::config_root;
 use cf_base::startup::{harness_exit, StartKind, StartRefusal, SOCKET_FOLDER_LEFT};
 use cf_board::door::{board_of, DOOR_WAIT};
 use cf_process::{not_spawned, runnable, start_owned, Ending, Owned};
@@ -369,6 +370,7 @@ impl Session {
             shell_env: consensflow_variables(plan.env),
             board: board_of(plan.env).map(Arc::new),
             question_wait: DOOR_WAIT,
+            log_home: config_root(plan.env),
         });
         let broker = self.until_started(starting, &mut signals).await?;
         let port = broker.port();

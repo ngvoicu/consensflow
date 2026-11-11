@@ -757,7 +757,114 @@ async fn a_chief_is_held_and_launched_on_the_model_and_effort_picked_on_each_har
         .await;
 }
 
+/// The chiefs picked in the tests below: (harness, model as the picker sends it, effort, model
+/// held, the id the harness lists for it).
+const LISTED_PICKS: [(&str, &str, &str, &str, &str); 5] = [
+    ("devin", "swe-2", "max", "swe-2-max", "swe-2"),
+    (
+        "claude-code",
+        "claude-opus-5-5",
+        "high",
+        "claude-opus-5-5",
+        "claude-opus-5-5",
+    ),
+    (
+        "codex",
+        "gpt-6.1-sol",
+        "ultra",
+        "gpt-6.1-sol",
+        "gpt-6.1-sol",
+    ),
+    (
+        "pi",
+        "anthropic/claude-fable-5",
+        "max",
+        "anthropic/claude-fable-5",
+        "anthropic/claude-fable-5",
+    ),
+    (
+        "muse",
+        "muse-wonder-1.0",
+        "low",
+        "muse-wonder-1.0",
+        "muse-wonder-1.0",
+    ),
+];
+
+/// A chief is held with the id its harness lists for its model beside the id its launch is
+/// given, as a member is (T-1345, the issue T-1335 found): picked in New project, a Devin
+/// chief's `model` is the exact id its launch is given (`swe-2-max`) and its `model_name` the
+/// id Devin lists (`swe-2`), which its card says; every other harness lists the id it takes.
+#[tokio::test]
+async fn a_chief_picked_in_new_project_keeps_the_id_its_harness_lists_beside_its_launch_id() {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            for (harness, model, effort, held, listed) in LISTED_PICKS {
+                let opened = ask(
+                    &staffing.app,
+                    "project.open",
+                    json!({
+                        "directory": format!("/work/listed-{harness}"),
+                        "harness": harness, "model": model, "effort": effort, "staff": [],
+                    }),
+                )
+                .await;
+                assert_eq!(opened["ok"], true, "{harness}: {opened}");
+                let chief = staffing.chief_of(opened["project"]["id"].as_i64().unwrap());
+                assert_eq!(
+                    (chief.model.as_deref(), chief.model_name.as_deref()),
+                    (Some(held), Some(listed)),
+                    "{harness}"
+                );
+            }
+        })
+        .await;
+}
+
+/// The same for Switch chief, in one project from one pick to the next: each switch replaces
+/// the name with the new pick's, so none outlives its model.
+#[tokio::test]
+async fn a_chief_switched_to_keeps_the_id_its_harness_lists_beside_its_launch_id() {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            for (harness, model, effort, held, listed) in LISTED_PICKS {
+                let switched = staffing
+                    .driven(
+                        "chief.switch",
+                        json!({
+                            "project": staffing.project,
+                            "harness": harness, "model": model, "effort": effort, "when": "now",
+                        }),
+                    )
+                    .await;
+                assert_eq!(switched["ok"], true, "{harness}: {switched}");
+                let chief = staffing.chief_of(staffing.project);
+                assert_eq!(
+                    (chief.model.as_deref(), chief.model_name.as_deref()),
+                    (Some(held), Some(listed)),
+                    "{harness}"
+                );
+            }
+        })
+        .await;
+}
+
 impl Staffing {
+    /// What the app asks and gets back, the engine's own work run meanwhile as the daemon's
+    /// executor runs it (the kit's is run by whoever drives the test): a switch waits on it.
+    async fn driven(&self, operation: &str, body: Value) -> Value {
+        let answer = ask(&self.app, operation, body);
+        tokio::pin!(answer);
+        loop {
+            tokio::select! {
+                answer = &mut answer => return answer,
+                () = tokio::task::yield_now() => self.rig.kit.settle(),
+            }
+        }
+    }
+
     /// The chief of `project` as the ledger holds it.
     fn chief_of(&self, project: i64) -> cf_ledger::ParticipantView {
         self.rig
@@ -1115,6 +1222,110 @@ async fn swe_2_at_high_is_checked_and_launched_as_swe_2_high_on_every_pick_path_
                 .unwrap();
                 assert_eq!(target.model, "swe-2-high", "{state}");
             }
+        })
+        .await;
+}
+
+impl Staffing {
+    /// The scout of `cf_ledger::roles::seam` in the table while the guard lives, and the
+    /// ledger's CHECKs off, which name the five roles of today alone.
+    fn with_a_scout(&self) -> cf_ledger::roles::seam::Put {
+        let put = cf_ledger::roles::seam::put(&cf_ledger::roles::seam::WITH_A_SCOUT);
+        self.rig
+            .kit
+            .ledger
+            .borrow()
+            .sqlite()
+            .execute_batch("PRAGMA ignore_check_constraints = ON")
+            .unwrap();
+        put
+    }
+}
+
+/// A member whose roles have no tier (a role of the table alone, the scout, which is no image
+/// agent) is added on the model picked with no tier, and kept in the lowest, as an image
+/// designer is; a tier asked for it is refused, and Edit member moves it with none.
+#[tokio::test]
+async fn a_member_whose_roles_have_no_tier_is_added_and_edited_with_none() {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            let _scout = staffing.with_a_scout();
+            let added = staffing
+                .add(json!({ "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high", "roles": ["scout"] }))
+                .await;
+            assert_eq!(added["ok"], true, "{added}");
+            assert_eq!(added["member"]["roles"], json!(["scout"]));
+            assert_eq!(staffing.member("claude-opus-5-5-high").tier.as_deref(), Some("light"));
+            let refused = staffing
+                .add(json!({ "harness": "claude-code", "model": "claude-sonnet-5-5", "effort": "medium", "tier": "complex", "roles": ["scout"] }))
+                .await;
+            assert_eq!(
+                refused,
+                json!({ "ok": false, "error": "a field scout takes no tier: its tasks have none" })
+            );
+            let edited = ask(
+                &staffing.app,
+                "member.edit",
+                json!({
+                    "project": staffing.project,
+                    "member": "claude-opus-5-5-high",
+                    "harness": "codex",
+                    "model": "gpt-6-astra",
+                    "effort": "max",
+                }),
+            )
+            .await;
+            assert_eq!(edited["ok"], true, "{edited}");
+            assert_eq!(edited["member"]["handle"], "gpt-6-astra-max");
+            assert_eq!(staffing.member("gpt-6-astra-max").tier.as_deref(), Some("light"));
+            // An edit that keeps its model and effort is asked no tier either.
+            let kept = ask(
+                &staffing.app,
+                "member.edit",
+                json!({
+                    "project": staffing.project,
+                    "member": "gpt-6-astra-max",
+                    "harness": "codex",
+                    "unchanged": true,
+                }),
+            )
+            .await;
+            assert_eq!(kept["ok"], true, "{kept}");
+            assert_eq!(staffing.member("gpt-6-astra-max").tier.as_deref(), Some("light"));
+        })
+        .await;
+}
+
+/// A member that holds a role with tiers and one without keeps the tier it has for the role
+/// with tiers: a scout's role added to a worker on its model leaves its tier as it was, and
+/// such a member added at once is asked for a tier.
+#[tokio::test]
+async fn a_member_holding_a_role_with_tiers_and_one_without_keeps_its_tier() {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            let _scout = staffing.with_a_scout();
+            let worker = staffing
+                .add(json!({ "harness": "claude-code", "model": "claude-sonnet-5-5", "effort": "medium", "tier": "complex", "roles": ["worker"] }))
+                .await;
+            assert_eq!(worker["ok"], true, "{worker}");
+            let scout = staffing
+                .add(json!({ "harness": "claude-code", "model": "claude-sonnet-5-5", "effort": "medium", "roles": ["scout"] }))
+                .await;
+            assert_eq!(scout["ok"], true, "{scout}");
+            let member = staffing.member("claude-sonnet-5-5-medium");
+            assert_eq!(
+                (member.roles, member.tier.as_deref()),
+                (vec!["worker".to_owned(), "scout".to_owned()], Some("complex"))
+            );
+            let both = staffing
+                .add(json!({ "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high", "roles": ["scout", "worker"] }))
+                .await;
+            assert_eq!(
+                both,
+                json!({ "ok": false, "error": "pick the member's tier: critical, complex, standard or light" })
+            );
         })
         .await;
 }

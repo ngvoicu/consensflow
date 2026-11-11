@@ -31,6 +31,9 @@ pub struct SwitchTo {
     pub model: String,
     /// The effort the chief runs its model at; none for its harness's own.
     pub effort: Option<String>,
+    /// What the harness's list calls the model, its id (Devin's `swe-2` for the `swe-2-high` its
+    /// launch is given), which the chief's card says; none where the list was never read.
+    pub model_name: Option<String>,
 }
 
 /// A switch waiting for the end of the chief's turn: whether the human wanted
@@ -347,13 +350,13 @@ impl Dispatcher {
                 harness: to.harness,
                 model: to.model,
                 effort: to.effort,
+                model_name: to.model_name,
                 cut,
             },
         )?;
         {
             let mut quota = record.quota.borrow_mut();
             quota.reported = None;
-            quota.low_until = None;
         }
         *record.copied.borrow_mut() = None;
         {

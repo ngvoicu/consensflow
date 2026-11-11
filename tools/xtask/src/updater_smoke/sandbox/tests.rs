@@ -172,7 +172,7 @@ fn the_pids_the_stand_ins_wrote_are_the_files_of_one_each_and_nothing_that_is_no
 
 #[cfg(unix)]
 mod on_unix {
-    use std::io::{BufRead, BufReader};
+    use std::io::{BufRead, BufReader, Read, Write};
     use std::os::unix::fs::{FileTypeExt, PermissionsExt};
     use std::process::Stdio;
 
@@ -230,6 +230,54 @@ mod on_unix {
         .unwrap();
         drop(child.stdin.take());
         assert!(child.wait().unwrap().success());
+    }
+
+    /// The daemon reads the models Claude Code lists when a project opens (`claude -p
+    /// --input-format stream-json`: no window, no turn), and a project cannot be opened on a model
+    /// the stand-in does not list (T-1338: the own-update leg, whose installed app is this
+    /// checkout's, ended at `project.open returned no project` once the daemon read the list, A4-28).
+    /// The stand-in answers the read with the model the page opens its projects on, ends with its
+    /// input, and records no window: a read is no chief.
+    #[test]
+    fn the_stand_in_claude_answers_the_daemons_read_of_the_models_and_is_no_window() {
+        let (_parent, sandbox) = made();
+        let env = sandbox.terminal_env(&sandbox.state);
+        let mut child = process::spawn(
+            &Invocation::new("claude", &sandbox.probe).args([
+                "-p",
+                "--input-format",
+                "stream-json",
+            ]),
+            &env,
+            Stdio::piped(),
+            false,
+        )
+        .unwrap();
+        let mut input = child.stdin.take().unwrap();
+        writeln!(
+            input,
+            r#"{{"type":"control_request","request_id":"r7","request":{{"subtype":"initialize"}}}}"#
+        )
+        .unwrap();
+        drop(input);
+        let mut said = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_to_string(&mut said)
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+        let answer: serde_json::Value = serde_json::from_str(said.trim()).unwrap();
+        assert_eq!(answer["type"], "control_response");
+        assert_eq!(answer["response"]["subtype"], "success");
+        assert_eq!(answer["response"]["request_id"], "r7");
+        let models: Vec<&str> = answer["response"]["response"]["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|model| model["value"].as_str())
+            .collect();
+        assert!(models.contains(&"claude-fable-5-1"), "{models:?}");
+        assert_eq!(sandbox.recorded_pids().unwrap(), Vec::<u32>::new());
+        assert!(!said.contains("CFUPDATER-ALIVE"), "{said}");
     }
 
     #[test]

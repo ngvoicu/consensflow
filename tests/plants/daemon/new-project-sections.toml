@@ -348,8 +348,15 @@ runs = ["nps-daemon-opening"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/projects.rs"
-find = '    for key in ["gate", "wakeUp", "specs", "rules", "compaction"] {'
-replace = '    for key in ["gate", "wakeUp", "specs", "compaction"] {'
+find = '''    for key in [
+        "gate",
+        "wakeUp",
+        "specs",
+        "rules",
+        "compaction",
+        "advisorTool",
+    ] {'''
+replace = '    for key in ["gate", "wakeUp", "specs", "compaction", "advisorTool"] {'
 
 [[plant]]
 name = "new project sections: the page leaves the compaction out of the request it makes to the ledger"
@@ -358,8 +365,15 @@ runs = ["nps-daemon-opening"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/projects.rs"
-find = '    for key in ["gate", "wakeUp", "specs", "rules", "compaction"] {'
-replace = '    for key in ["gate", "wakeUp", "specs", "rules"] {'
+find = '''    for key in [
+        "gate",
+        "wakeUp",
+        "specs",
+        "rules",
+        "compaction",
+        "advisorTool",
+    ] {'''
+replace = '    for key in ["gate", "wakeUp", "specs", "rules", "advisorTool"] {'
 
 [[plant]]
 name = "new project sections: rules the page sends the daemon cannot read are let through"
@@ -367,9 +381,9 @@ meant = "rules_and_a_size_the_daemon_refuses_refuse_the_whole_start_in_the_dialo
 runs = ["nps-daemon-opening"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/src/page/projects.rs"
-find = '        staff_rules: parse_staff_rules(request.get("rules")).ok()?,'
-replace = '        staff_rules: parse_staff_rules(request.get("rules")).unwrap_or(None),'
+file = "crates/cf-ledger/src/projects.rs"
+find = '            staff_rules: parse_staff_rules(value.get("rules"))?,'
+replace = '            staff_rules: parse_staff_rules(value.get("rules")).unwrap_or(None),'
 
 [[plant]]
 name = "new project sections: a size the page sends the daemon cannot read is let through"
@@ -377,9 +391,9 @@ meant = "rules_and_a_size_the_daemon_refuses_refuse_the_whole_start_in_the_dialo
 runs = ["nps-daemon-opening"]
 
 [[plant.edit]]
-file = "crates/cf-daemon/src/page/projects.rs"
-find = '        compaction: parse_compaction(request.get("compaction")).ok()?,'
-replace = '        compaction: parse_compaction(request.get("compaction")).unwrap_or(None),'
+file = "crates/cf-ledger/src/projects.rs"
+find = '            compaction: parse_compaction(value.get("compaction"))?,'
+replace = '            compaction: parse_compaction(value.get("compaction")).unwrap_or(None),'
 
 [[plant]]
 name = "new project sections: computer use is not read for a folder"
@@ -552,12 +566,18 @@ find = '''
         if let Some(size) = request.compaction {
             set_compaction(store, id, Some(size))?;
         }
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
+        }
         known_project(store, id)
     })
 }'''
 replace = '''
         if let Some(size) = request.compaction {
             set_compaction(store, id, Some(size))?;
+        }
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
         }
         known_project(store, id)
     })
@@ -580,10 +600,16 @@ find = '''
         if let Some(size) = request.compaction {
             set_compaction(store, id, Some(size))?;
         }
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
+        }
         known_project(store, id)
     })
 }'''
 replace = '''
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
+        }
         known_project(store, id)
     })
     .and_then(|made| {
@@ -608,10 +634,16 @@ find = '''
         if let Some(size) = request.compaction {
             set_compaction(store, id, Some(size))?;
         }
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
+        }
         known_project(store, id)
     })
 }'''
 replace = '''
+        if request.advisor_tool {
+            set_advisor_tool(store, id, true)?;
+        }
         known_project(store, id)
     })
     .and_then(|made| {

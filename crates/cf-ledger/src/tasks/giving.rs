@@ -7,15 +7,13 @@ use cf_proto::ledger::{TaskCreated, TaskMoved, TaskReleased, TaskRetiered};
 use rusqlite::params;
 use serde_json::{json, Map, Value};
 
-use super::{
-    a_pool, delivery_body, m_list, pool_name, release_ready, require_task_state, task_by_id,
-    task_row_by_id,
-};
+use super::{delivery_body, m_list, release_ready, require_task_state, task_by_id, task_row_by_id};
 use crate::messages::{leave_pause_notes, transfer, Afterwards};
 use crate::model::{
-    self, title_of, LedgerError, ACTIVE_TASK_STATES, COORDINATOR_ROLES, MAX_BODY, POOLS, PURPOSES,
+    self, title_of, LedgerError, ACTIVE_TASK_STATES, COORDINATOR_ROLES, MAX_BODY, PURPOSES,
 };
 use crate::queue::{queue, send, Queued, Sent};
+use crate::roles::{self, a_pool, pool_name};
 use crate::staff::{
     follow_up_session, has_members_of_tier, holders_of_tier, nearest_tier, require_free,
     require_member_row, start_session, Giving,
@@ -59,13 +57,10 @@ impl NewTask {
         let mut tier = text("tier");
         if to.is_none() && after.is_none() {
             let pool = value.get("pool");
-            if !pool
-                .and_then(Value::as_str)
-                .is_some_and(|pool| POOLS.contains(&pool))
-            {
+            if !pool.and_then(Value::as_str).is_some_and(roles::is_role) {
                 return Err(invalid_pool(&cf_base::js::text(pool)));
             }
-            if pool.and_then(Value::as_str) != Some("designer") {
+            if !pool.and_then(Value::as_str).is_some_and(roles::untiered) {
                 tier = Some(model::parse_tier(value.get("tier"))?.to_string());
             }
         }
@@ -85,17 +80,17 @@ impl NewTask {
     }
 
     /// The pool, tier and purpose of a task given by neither name nor
-    /// follow-up, checked as the Node ledger did: its pool and, for any but
-    /// the designer, its tier; the tier it is for (none for the designer).
+    /// follow-up, checked as the Node ledger did: its pool and, for a role with
+    /// tiers, its tier; the tier it is for (none for a role with none).
     fn check_work(&self) -> Result<Option<String>, LedgerError> {
         if self.to.is_some() || self.after.is_some() {
             return Ok(self.tier.clone());
         }
         let pool = self.pool.as_deref().unwrap_or("undefined");
-        if !POOLS.contains(&pool) {
+        if !roles::is_role(pool) {
             return Err(invalid_pool(pool));
         }
-        if pool == "designer" {
+        if roles::untiered(pool) {
             return Ok(None);
         }
         let tier = model::parse_tier(self.tier.as_deref().map(Value::from).as_ref())?;
@@ -117,7 +112,7 @@ impl NewTask {
 fn invalid_pool(pool: &str) -> LedgerError {
     LedgerError::refused(
         "invalid-pool",
-        format!("a pool is {}, not {pool}", POOLS.join(", ")),
+        format!("a pool is {}, not {pool}", roles::ids().join(", ")),
     )
 }
 
@@ -176,7 +171,7 @@ pub(crate) fn create_task(
             ));
         }
         // Advice is the chief's alone to ask: the human gives the chief work, not its advisors.
-        if pool == "advisor" && !named && requester.role != "chief" {
+        if pool == roles::ADVISOR.id && !named && requester.role != "chief" {
             return Err(LedgerError::refused_with(
                 "advice-for-the-chief",
                 "only the chief asks an advisor",
@@ -225,7 +220,7 @@ pub(crate) fn create_task(
                 "no-member-of-tier",
                 format!(
                     "no {} is on the staff: ask the human for one, in your terminal",
-                    if pool == "designer" { "image designer" } else { pool }
+                    roles::name_of(pool)
                 ),
                 409,
             ));

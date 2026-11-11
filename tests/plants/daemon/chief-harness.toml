@@ -394,9 +394,9 @@ runs = ["chm-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/chief.rs"
 find = '''
-model_name = NULL, agent = NULL, launched_model = NULL,'''
+model_name = ?, agent = NULL, launched_model = NULL,'''
 replace = '''
-model_name = NULL, agent = NULL,'''
+model_name = ?, agent = NULL,'''
 
 [[plant]]
 name = 'chief: a switch keeps the model found gone'
@@ -750,9 +750,11 @@ runs = ["chm-page-card"]
 [[plant.edit]]
 file = "app/ui/core/board.js"
 find = '''
-  participant.needsEdit ? 'no model: needs an edit' : (participant.ranOn ?? participant.model)'''
+    : (participant.ranOn ?? (participant.model ? modelShown(participant) : null))
+'''
 replace = '''
-  participant.needsEdit ? 'no model: needs an edit' : participant.model'''
+    : (participant.model ? modelShown(participant) : null)
+'''
 
 [[plant]]
 name = "chief: Switch chief takes the pick for the model the chief is on"

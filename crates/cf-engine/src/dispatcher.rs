@@ -207,6 +207,22 @@ impl Dispatcher {
             .and_then(|record| record.window.borrow().pane.clone())
     }
 
+    /// The harness the participant's live window was launched with: what it runs, whatever
+    /// the participant is configured to run now (a member edited while its window is open runs
+    /// the new harness from its next window, T-1143). None while it has no window, or its
+    /// launch did not say.
+    pub fn window_harness(&self, participant: i64) -> Option<String> {
+        self.record(participant).and_then(|record| {
+            let part = record.window.borrow();
+            part.pane.as_ref()?;
+            // The window keeps the name its programs go by (`claude`); the board says `claude-code`.
+            cf_proto::agents::Harness::ALL
+                .into_iter()
+                .find(|harness| harness.as_str() == part.harness)
+                .map(|harness| harness.kind().to_owned())
+        })
+    }
+
     /// Whether the participant has a window whose open went unanswered and which the
     /// host has not said it ended ([`crate::windows::WindowPart::abandoned`]).
     fn abandoned(&self, participant: i64) -> bool {
@@ -1405,7 +1421,7 @@ impl Dispatcher {
             self.follow(participant, record, session)?;
             return self.greet_switched(project, participant, record, session);
         }
-        self.record_quota(record, &owner, observed.quota.clone());
+        self.record_quota(record, observed.quota.clone());
         self.tell_drift(project, participant, record, &observed)?;
         // A chief's turn its busy model refused is the human's to hear, as before (T-1112): the
         // chief has no task to hold and try again, and a hold would lose its turn unheard.

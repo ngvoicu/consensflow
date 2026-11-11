@@ -21,6 +21,14 @@
 //! is no turn of this window's. A window opened with a message of its own has
 //! no old turn to speak of, since the message is its turn, which is the
 //! dispatcher's to watch arrive.
+//!
+//! The record of all but one harness only grows: Claude's, Codex's and Pi's readers
+//! keep every item through a compaction, so a message given to the window is counted for
+//! good. Devin's compactor begins a chain of its own that can hold none of the turn's
+//! message, or only the turn before's (T-1401): the chain then holds what it held at the
+//! open, and Devin's window reads itself at work over this while its own launch's log says
+//! a turn of the window's is open. Once that turn ended, the snapshot speaks again: a chain
+//! put back as at the open holds the old process's turn, and no turn of the window's.
 
 use std::sync::Arc;
 

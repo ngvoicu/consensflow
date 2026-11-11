@@ -144,8 +144,6 @@ pub(crate) struct QuotaPart {
     pub(crate) reported: Option<Arc<Quota>>,
     /// The refusal this window acted on: the same one is history after.
     pub(crate) handled: Option<Arc<Quota>>,
-    /// On a member's own record: until when it is low, and gets no new work.
-    pub(crate) low_until: Option<String>,
     /// The words that resumed the window's task whose going on its requester
     /// was told of (`tell_it_went_on`): the ledger tells it once anyway.
     pub(crate) told_going_on: Option<i64>,
@@ -329,15 +327,7 @@ impl Dispatcher {
                     .waiting_noted
                     .borrow_mut()
                     .insert(task.id, project.id);
-                let pool = if task.pool.as_deref() == Some("designer") {
-                    "image designer".to_owned()
-                } else {
-                    format!(
-                        "{} {}",
-                        task.tier.as_deref().unwrap_or("null"),
-                        task.pool.as_deref().unwrap_or("null")
-                    )
-                };
+                let pool = cf_ledger::roles::pool_name(task.pool.as_deref(), task.tier.as_deref());
                 let mut why: Vec<String> = candidates
                     .iter()
                     .filter_map(|member| self.why_not_free(member))
@@ -348,11 +338,9 @@ impl Dispatcher {
                     why.push(match candidates.is_empty() {
                         true => format!(
                             "no {} is on the staff (ask the human for one, in your terminal)",
-                            if task.pool.as_deref() == Some("designer") {
-                                "image designer"
-                            } else {
-                                task.pool.as_deref().unwrap_or("member")
-                            }
+                            task.pool
+                                .as_deref()
+                                .map_or("member", cf_ledger::roles::name_of)
                         ),
                         false => "none of them is free".to_owned(),
                     });
@@ -406,8 +394,10 @@ impl Dispatcher {
     }
 
     /// Why a member is not free, the first reason that holds for it: on a
-    /// harness whose windows open, not out of quota, not low on it; none when
-    /// it is free.
+    /// harness whose windows open, not out (of quota, or held for its account or
+    /// its model); none when it is free. A quota nearly spent holds nobody: a
+    /// member works to the end of its allowance, on every harness, and waits
+    /// only when its harness says it is out (T-1356).
     fn why_not_free(&self, candidate: &Candidate) -> Option<String> {
         let member = &candidate.member;
         let harness = member.harness.as_deref().unwrap_or("null");
@@ -444,9 +434,6 @@ impl Dispatcher {
                 format!("@{} is out of quota until {until}", member.handle)
             });
         }
-        if self.is_low(member.id) {
-            return Some(format!("@{} is low on quota", member.handle));
-        }
         None
     }
 
@@ -472,14 +459,6 @@ impl Dispatcher {
         until
             .and_then(time::parse)
             .is_some_and(|until| until > self.now())
-    }
-
-    /// Whether a member is low on quota now, as its own record says.
-    fn is_low(&self, member: i64) -> bool {
-        let until = self
-            .record(member)
-            .and_then(|record| record.quota.borrow().low_until.clone());
-        self.out(until.as_deref())
     }
 
     /// Whether the refusal a window shows is news for it: each window of a
@@ -627,22 +606,12 @@ impl Dispatcher {
             }))
     }
 
-    /// What a window's harness says of its quota, as of this look. Low is
-    /// soft: the current task continues, nothing new comes until the reset it
-    /// names (an hour when it names none). It outlives the window, on the
-    /// member's own record, so a low member is not asked again at once.
-    pub(crate) fn record_quota(
-        &self,
-        record: &Record,
-        owner: &ParticipantView,
-        quota: Option<Arc<Quota>>,
-    ) {
-        record.quota.borrow_mut().reported = quota.clone();
-        let Some(quota) = quota else {
-            return;
-        };
-        let low_until = (quota.level() == Level::Low).then(|| self.reset_of(Some(&quota)));
-        self.record_of(owner.id).quota.borrow_mut().low_until = low_until;
+    /// What a window's harness says of its quota, as of this look. Only a
+    /// refusal acts (`refused_here`); a count that is nearly spent, which Codex
+    /// and Muse report ahead of time, holds nothing: the member is given work
+    /// until its harness refuses.
+    pub(crate) fn record_quota(&self, record: &Record, quota: Option<Arc<Quota>>) {
+        record.quota.borrow_mut().reported = quota;
     }
 
     /// When a refusal happened: the time its record names, or now.

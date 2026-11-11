@@ -55,6 +55,7 @@
 //! its database), which migration 0013 took away, is taken out of what Node
 //! recorded, where this ledger's has none to take out.
 
+mod advisor_tool;
 mod chief_model;
 mod chosen_tier;
 mod compaction;
@@ -77,6 +78,7 @@ mod staff_rules;
 
 use serde_json::{Map, Value};
 
+pub use advisor_tool::undo_migration_0035;
 pub use chief_model::undo_migration_0028;
 pub use chosen_tier::undo_migration_0030;
 pub use compaction::undo_migration_0020;
@@ -123,16 +125,18 @@ const NODE_NEVER_WRITES: [(&str, &str); 4] = [
     ("message", "door_closed_at"),
 ];
 
-/// The columns migrations 0014, 0017, 0025 and 0026 added to the `project` table,
+/// The columns migrations 0014, 0017, 0025, 0026 and 0035 added to the `project` table,
 /// each as the migration says it (`wake_up_on INTEGER NOT NULL DEFAULT 0 CONSTRAINT …`,
-/// `description TEXT`, `meeting_at TEXT`, `staff_rules TEXT`, one to a line there), and
-/// 0026's compaction as migration 0034 renamed it: what Node's schema never had.
+/// `description TEXT`, `meeting_at TEXT`, `staff_rules TEXT`, `advisor_tool INTEGER NOT NULL
+/// DEFAULT 0`, one to a line there), and 0026's compaction as migration 0034 renamed it: what
+/// Node's schema never had.
 fn added_columns() -> impl Iterator<Item = &'static str> {
     [
         include_str!("../migrations/0014.sql"),
         include_str!("../migrations/0017.sql"),
         include_str!("../migrations/0025.sql"),
         include_str!("../migrations/0026.sql"),
+        include_str!("../migrations/0035.sql"),
     ]
     .into_iter()
     .flat_map(str::lines)

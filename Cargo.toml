@@ -13,7 +13,7 @@ members = ["app/src-tauri", "crates/*", "tools/*"]
 exclude = ["tools/probes"]
 
 [workspace.package]
-version = "3.0.7-alpha.3"
+version = "3.0.7-alpha.4"
 edition = "2021"
 rust-version = "1.95"
 

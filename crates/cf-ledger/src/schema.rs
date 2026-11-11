@@ -12,7 +12,7 @@ use serde_json::json;
 
 use crate::model::LedgerError;
 
-pub const MIGRATIONS: [&str; 34] = [
+pub const MIGRATIONS: [&str; 35] = [
     include_str!("../migrations/0001.sql"),
     include_str!("../migrations/0002.sql"),
     include_str!("../migrations/0003.sql"),
@@ -47,6 +47,7 @@ pub const MIGRATIONS: [&str; 34] = [
     include_str!("../migrations/0032.sql"),
     include_str!("../migrations/0033.sql"),
     include_str!("../migrations/0034.sql"),
+    include_str!("../migrations/0035.sql"),
 ];
 
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
@@ -154,7 +155,7 @@ mod tests {
     #[test]
     fn keeps_each_migration_byte_for_byte_as_it_shipped() {
         use sha2::{Digest, Sha256};
-        const SHIPPED: [&str; 34] = [
+        const SHIPPED: [&str; 35] = [
             "51006450d3168c24b6a42ce41afdcf525994957ea22161b4a82f12bf26b65c01",
             "2c6ed236d1829599fbb378164b0c830893fac89eb9780f634688f9ca40f7f0f0",
             "14165bc20e6cb9d4c3c46a81bee45a95b4962ab759f4622aa1cebb8f8edc1ff2",
@@ -189,6 +190,7 @@ mod tests {
             "e2f198e8ebb4711a7b9ab5191caf31af81e396a5ab0239612d5c259a0e67d96f",
             "ebe5513f98819c8e3ae9d12c0a7fdf6c6d7a8663cb8e4a7a2d84ba11099f5acf",
             "8d9ec8a1c0f6ce15f70d6feb72d39de99b76fd247c0170bf5aa0af3616b57143",
+            "363f49e1e6d210167cbe4e5abe1a743b0f28f0b4feeeff4fa5923ac6843dfd43",
         ];
         // A migration added with no hash would pass by the zip below unpinned.
         assert_eq!(
@@ -239,6 +241,91 @@ mod tests {
         assert_eq!(
             files, SCHEMA_VERSION,
             "the folder's migrations and the list's"
+        );
+    }
+
+    /// What each migration takes out of the schema, as the migrations themselves do it: a
+    /// column of a table that is there before and after, or a whole table, by the number of the
+    /// migration. The updater smoke does not take a column gone from a ledger it kept for a loss
+    /// where this list says a migration took it out on purpose (`migrations/dropped.json`,
+    /// T-1338), so the list is held to the migrations both ways: a migration that drops what
+    /// the list does not name, and a name that no migration drops, each fail here.
+    #[test]
+    fn the_list_of_what_the_migrations_drop_is_what_they_drop() {
+        use std::collections::BTreeMap;
+
+        fn schema(db: &Connection) -> BTreeMap<String, Vec<String>> {
+            let tables: Vec<String> = db
+                .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            tables
+                .into_iter()
+                .map(|table| {
+                    let columns = db
+                        .prepare(&format!("PRAGMA table_info(\"{table}\")"))
+                        .unwrap()
+                        .query_map([], |row| row.get::<_, String>(1))
+                        .unwrap()
+                        .collect::<Result<_, _>>()
+                        .unwrap();
+                    (table, columns)
+                })
+                .collect()
+        }
+
+        let db = Connection::open_in_memory().unwrap();
+        let mut seen: Vec<(u64, String, Option<String>)> = Vec::new();
+        let mut added: BTreeMap<(u64, String), Vec<String>> = BTreeMap::new();
+        let mut before = schema(&db);
+        for number in 1..=MIGRATIONS.len() {
+            migrate(&db, &MIGRATIONS[..number]).unwrap();
+            let now = schema(&db);
+            let number = number as u64;
+            for (table, was) in &before {
+                match now.get(table) {
+                    None => seen.push((number, table.clone(), None)),
+                    Some(is) => {
+                        for column in was.iter().filter(|column| !is.contains(column)) {
+                            seen.push((number, table.clone(), Some(column.clone())));
+                            let new = is.iter().filter(|column| !was.contains(column)).cloned();
+                            added.insert((number, table.clone()), new.collect());
+                        }
+                    }
+                }
+            }
+            before = now;
+        }
+        let listed: Vec<serde_json::Value> =
+            serde_json::from_str(include_str!("../migrations/dropped.json")).unwrap();
+        let mut named: Vec<(u64, String, Option<String>)> = Vec::new();
+        for entry in &listed {
+            let text = |key: &str| entry.get(key).and_then(|value| value.as_str());
+            let number = entry["migration"].as_u64().expect("the migration's number");
+            let table = text("table").expect("the table").to_string();
+            let column = text("column").map(str::to_string);
+            assert!(
+                text("why").is_some_and(|why| !why.trim().is_empty()),
+                "migration {number} drops {table}.{column:?} and does not say why"
+            );
+            if let Some(new) = text("renamed_to") {
+                assert!(
+                    added
+                        .get(&(number, table.clone()))
+                        .is_some_and(|added| added.iter().any(|column| column == new)),
+                    "migration {number} does not add {table}.{new}, which {table}.{column:?} was renamed to"
+                );
+            }
+            named.push((number, table, column));
+        }
+        seen.sort();
+        named.sort();
+        assert_eq!(
+            named, seen,
+            "migrations/dropped.json names what the migrations drop (migration, table, column), and nothing else"
         );
     }
 

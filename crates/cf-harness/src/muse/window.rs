@@ -391,6 +391,7 @@ impl Window for MuseWindow {
                     took_back: false,
                     at_prompt: false,
                     shared: false,
+                    begun: Vec::new(),
                 });
             };
             let reading = self

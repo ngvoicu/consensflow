@@ -24,6 +24,7 @@ fn project(name: &str) -> NewProject {
             harness: "claude-code".to_owned(),
             model: Some("apollo".to_owned()),
             effort: None,
+            model_name: None,
         },
         staff: vec![NewMember {
             model: None,
@@ -39,6 +40,7 @@ fn project(name: &str) -> NewProject {
         specs: None,
         staff_rules: None,
         compaction: None,
+        advisor_tool: false,
     }
 }
 

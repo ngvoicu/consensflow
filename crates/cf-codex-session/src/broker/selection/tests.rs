@@ -34,7 +34,9 @@ impl Window {
 
     /// What the TUI says; what goes to Codex in its place, if anything.
     fn says(&mut self, message: Value) -> Option<Value> {
-        self.selection.tui_said(TUI, &mut self.requests, &message)
+        self.selection
+            .tui_said(TUI, &mut self.requests, &message)
+            .rewritten
     }
 
     /// What Codex answers the TUI.
@@ -783,6 +785,43 @@ fn no_side_start_resume_fork_or_turn_is_given_the_role() {
 }
 
 #[test]
+fn a_resume_or_main_fork_names_the_thread_whose_lineage_decides_its_role_and_nothing_else_does() {
+    let lineage = |role: Option<&str>, message: Value| {
+        let mut window = Window::with(false, role);
+        window.starts(1, json!({ "id": A }));
+        window
+            .selection
+            .tui_said(TUI, &mut window.requests, &message)
+            .lineage
+    };
+    let role = Some("the role");
+    // The TUI's resume, its roots a list or null (a sub-agent selected has them null), and
+    // the user's fork: the thread it names is the one Codex is asked of.
+    for message in [
+        resume(2, B),
+        json!({ "id": 2, "method": "thread/resume", "params": { "threadId": B, "runtimeWorkspaceRoots": null } }),
+        json!({ "id": 2, "method": "thread/fork", "params": { "threadId": B, "threadSource": "user", "runtimeWorkspaceRoots": [] } }),
+    ] {
+        assert_eq!(
+            lineage(role, message.clone()),
+            Some(B.to_owned()),
+            "{message}"
+        );
+        assert_eq!(lineage(None, message.clone()), None, "no role: {message}");
+    }
+    for message in [
+        start(2),
+        json!({ "id": 2, "method": "thread/resume", "params": { "threadId": B } }),
+        json!({ "id": 2, "method": "thread/resume", "params": { "path": "/x.jsonl", "runtimeWorkspaceRoots": [] } }),
+        json!({ "id": 2, "method": "thread/fork", "params": { "threadId": B, "threadSource": "user", "runtimeWorkspaceRoots": [], "ephemeral": true } }),
+        json!({ "id": 2, "method": "thread/fork", "params": { "threadId": B, "runtimeWorkspaceRoots": [] } }),
+        json!({ "id": 2, "method": "turn/start", "params": { "threadId": A, "input": [] } }),
+    ] {
+        assert_eq!(lineage(role, message.clone()), None, "{message}");
+    }
+}
+
+#[test]
 fn a_start_that_does_not_say_whether_it_is_ephemeral_is_the_windows_own_and_is_given_the_role() {
     let mut window = Window::with(false, Some("the role"));
     let sent = json!({ "id": 1, "method": "thread/start", "params": { "threadSource": "user" } });
@@ -867,7 +906,7 @@ fn every_start_resume_and_fork_is_given_consensflows_variables_in_its_config_ove
     let mut selection = Selection::new(false, None, env);
     selection.ready();
     let mut requests = Requests::default();
-    let mut says = |message: Value| selection.tui_said(TUI, &mut requests, &message);
+    let mut says = |message: Value| selection.tui_said(TUI, &mut requests, &message).rewritten;
     for message in [
         start(1),
         json!({ "id": 2, "method": "thread/start", "params": { "ephemeral": true, "config": { "model": "m", "shell_environment_policy.set.CONSENSFLOW_TOKEN": "stale" } } }),

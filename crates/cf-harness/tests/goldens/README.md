@@ -392,7 +392,9 @@ and the hash that names a bundle of an extension is `$HASH`.
   starts with `PI_HYPERLINKS=1` (its `detectCapabilities`), the last variable of its environment
   and for that launch alone: no settings file of the owner's is written, and Pi's own
   `terminal.hyperlinks` setting is read after the variable, so an owner's choice wins. Nothing else
-  in Pi's tree reads the variable, so the commands a window runs are not changed by it. **Claude
+  in Pi's tree reads the variable, but the commands a window runs inherit it, and one that imports
+  Pi's TUI library can write OSC 8 into piped output (T-1323 reproduced it); the general
+  `supports-hyperlinks` package ignores it, so the commands that use it are unchanged. **Claude
   Code is not given one** (taken out again, T-1323): `FORCE_HYPERLINK=1` is the switch of its
   check, but `supports-hyperlinks` answers it before it asks whether stdout is a terminal, so the
   commands the window runs inherited it and wrote OSC 8 into their output (ESLint's pretty
@@ -414,3 +416,25 @@ and the hash that names a bundle of an extension is `$HASH`.
   else. The move is `tools/move_harness_dialog_goldens.py`, which leaves an answer already
   moved as it is: after a merge brings rows of the old shape, run it on each file and let
   the scenarios test check it.
+- **A Devin turn its own launch began is no window at rest before it ends** (2026-11-10, T-1403,
+  from the review of T-1401). A turn that this window's launch began on its wire log (Devin's own
+  work streamed, a tool's `blocked`) and has not ended there (`cause`) reads at work, whatever the
+  record shows, the snapshot of a turn the window was opened on (`left_open`) as well: Devin's
+  compactor can leave a chain that holds none of the turn's message, and the record alone then
+  read the window at rest, so a Stop was paid while Devin worked on. Node read the record alone. `launch/` moved for it in 17 steps of eight scenarios, in
+  both platforms' recordings, each now with a `kept` difference, `settled: false` where Node said
+  `true`: 16 in the seven scenarios whose hand-written wire puts Devin's words (of a refusal, or
+  words that are not one) in message chunks and writes no end line (the refusal Devin is seen to write ends the turn,
+  `cause: quota_exhausted`, and the hold reads it ended; a prompt refused by a JSON-RPC error,
+  known only from Devin's binary, names no conversation and ends nothing), and step 3
+  of `devin: a wire log Devin wrote itself (native-tui.json) is read as it grew, in pieces cut in
+  the middle of a line`, where the log is cut inside the turn's `{"cause":"`.
+- **A Devin look reads its wire log once the record is back** (2026-11-11, T-1423, from the
+  review T-1411 of T-1403). Node read the record and the launch's wire log at once, each as it
+  was when the look began, so a look could pair a record that already shows a turn's effect with
+  a log from before the turn opened, and read the window at rest while Devin worked. The log is
+  now read after the record, in the same look. `launch/` moved for it in one step, in both
+  platforms' recordings, with a `kept` difference: step 14 of `devin: a look reads the wire log
+  as it is when it begins, and the record when released`, whose log says, while the record is
+  held, that the window moved to another conversation; the look sees the move (`switched`,
+  `settled: false`, what Node said at the next look, step 15) where Node saw it a look later.
