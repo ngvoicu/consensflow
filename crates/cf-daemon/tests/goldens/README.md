@@ -29,6 +29,10 @@ recordings in four ways, none of them by recording again.
   and `-021`: changed by hand, in those words alone.
 - The refusal that lists the roles a member may hold lists the tester, in
   `corners-page-005`: changed by hand in the same way.
+- Spec new-roles (2026-11-11) moved the same prints again, by hand, in those words alone:
+  the usage has the entries of `--frontend`, `--architect`, `--research` and `--integrate`
+  (`cf-board-028`, `-029`), the sentence of `cf task add` names them (`cf-board-019`,
+  `-021`), and the refusal in `corners-page-005` lists the nine roles.
 - `cf tell`'s usage has a third line, for a task still queued (the field report of
   2026-10-15: a tell to a queued task waits for its window), in `cf-board-028` and
   `-029`: changed by hand, that line alone.
