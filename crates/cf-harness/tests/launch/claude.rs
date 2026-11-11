@@ -37,6 +37,7 @@ mod dialogs;
 mod moves;
 mod outside;
 mod private_folders;
+mod prompt_suggestion_off;
 mod relaunched;
 mod resumed;
 mod specs;

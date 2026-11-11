@@ -44,6 +44,16 @@ once, with the reason here and in the commit.
   `private_reads`). `launch/scenarios.darwin.json` moved for it in the 43 settings files its
   Claude scenarios recorded (`tools/move_claude_private_reads_goldens.py`, which can be run again
   after a merge); the Windows recording is as Node left it, since nothing is denied there.
+- **A Claude member's window has Claude Code's prompt suggestion off** (2026-11-11, T-1434, RS-29).
+  Node wrote a window's settings file without an `env` block. After each turn Claude Code makes a
+  call of its own, a fork of the whole conversation read from the cache, to guess the person's next
+  prompt; in a member's window nobody reads it, since ConsensFlow types the next message, and it was
+  7 to 10 % of a member window's tokens in the measured runs. The Rust adapter writes `env` with
+  `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` as `false` into every member's file (`claude/install.rs`,
+  `PROMPT_SUGGESTION_SWITCH`), launched or resumed, with no project setting; the chief's file, the
+  human's window, is as Node wrote it. Both `launch/scenarios.<platform>.json` moved for it in the
+  42 member settings files each recorded (`tools/move_claude_member_suggestion_goldens.py`, which
+  can be run again after a merge); no chief file, no argv, no environment and no other step moved.
 - **A Claude window opened again on a turn the app's quit cut** (2026-10-11, the
   human's report that the daemon seemed not to send responses; found by
   `npm run live:resume-cut` and `npm run live:restart-cut`). The quit ends a

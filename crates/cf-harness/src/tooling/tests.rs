@@ -496,8 +496,16 @@ fn a_claude_window_gets_the_settings_file_of_its_launch() {
         members["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
         json!("'/bundle/bin/cf' hook claude")
     );
-    // A question that is not put to the board is Claude's own: the hook is not there.
-    assert_eq!(settings(false)["hooks"]["PreToolUse"], json!([]));
+    // A member's window has Claude Code's prompt suggestion off, in the file's own `env`.
+    assert_eq!(
+        members["env"],
+        json!({ "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false" })
+    );
+    // A question that is not put to the board is Claude's own: the hook is not there, and the
+    // window is the human's, with its prompt suggestion as Claude Code has it.
+    let chiefs = settings(false);
+    assert_eq!(chiefs["hooks"]["PreToolUse"], json!([]));
+    assert!(chiefs.get("env").is_none());
     assert!(home
         .path()
         .join("integrations")

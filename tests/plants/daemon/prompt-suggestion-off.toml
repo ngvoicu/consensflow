@@ -1,0 +1,95 @@
+# Claude Code's prompt suggestion, which every member's window runs without (RS-29, T-1434):
+# after each turn Claude Code makes a call of its own, a fork of the whole conversation read from
+# the cache, to guess the person's next prompt, and in a member's window nobody reads it. The
+# Claude adapter writes `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false` in the `env` of the launch's own
+# settings file (`crates/cf-harness/src/claude/install.rs`), for a member's launch, resumed or
+# not, never for the chief's and never in the owner's files. Claude Code 2.1.322 run against a stub
+# of the API makes the call with the variable on and none with it off (the stub's runs are in
+# T-1434's folder). Each plant breaks one of these and the test written for it fails.
+#
+# Every name holds `prompt suggestion off`, so `npm run plants:daemon -- "prompt suggestion off"`
+# runs them all.
+
+[run]
+pso-harness-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::"]
+pso-harness-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::"]
+
+[[plant]]
+name = "prompt suggestion off: the Claude adapter writes no switch"
+meant = "every_members_launch_has_the_suggestion_switched_off_in_its_own_file_and_nothing_else_moves"
+runs = ["pso-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '''        variables.insert(PROMPT_SUGGESTION_SWITCH.to_owned(), json!("false"));'''
+replace = '''        let _ = PROMPT_SUGGESTION_SWITCH;'''
+
+[[plant]]
+name = "prompt suggestion off: the Claude adapter switches it off in the chief's file too"
+meant = "the_chiefs_launch_has_its_file_as_it_always_was_launched_or_resumed"
+runs = ["pso-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '''    if member {
+        variables.insert(PROMPT_SUGGESTION_SWITCH'''
+replace = '''    if true {
+        variables.insert(PROMPT_SUGGESTION_SWITCH'''
+
+[[plant]]
+name = "prompt suggestion off: the Claude adapter names another variable"
+meant = "every_members_launch_has_the_suggestion_switched_off_in_its_own_file_and_nothing_else_moves"
+runs = ["pso-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '''"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION";'''
+replace = '''"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTIONS";'''
+
+[[plant]]
+name = "prompt suggestion off: the Claude adapter writes the word that turns it on"
+meant = "every_members_launch_has_the_suggestion_switched_off_in_its_own_file_and_nothing_else_moves"
+runs = ["pso-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '''variables.insert(PROMPT_SUGGESTION_SWITCH.to_owned(), json!("false"));'''
+replace = '''variables.insert(PROMPT_SUGGESTION_SWITCH.to_owned(), json!("true"));'''
+
+[[plant]]
+name = "prompt suggestion off: the Claude adapter takes the chief for a member"
+meant = "the_chiefs_launch_has_its_file_as_it_always_was_launched_or_resumed"
+runs = ["pso-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''                launch.role != "chief",
+                launch.compaction,'''
+replace = '''                true,
+                launch.compaction,'''
+
+[[plant]]
+name = "prompt suggestion off: the suggestion's switch takes the advisor's place in the file"
+meant = "the_advisor_switch_the_size_and_the_suggestion_are_in_the_one_file_and_none_moves_another"
+runs = ["pso-harness-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '''        file["env"] = serde_json::Value::Object(variables);'''
+replace = '''        file["env"] = if member {
+            json!({ PROMPT_SUGGESTION_SWITCH: "false" })
+        } else {
+            serde_json::Value::Object(variables)
+        };'''
+
+[[plant]]
+name = "prompt suggestion off: the tooling's settings for a member carry no switch"
+meant = "a_claude_window_gets_the_settings_file_of_its_launch"
+runs = ["pso-harness-tooling"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/tooling.rs"
+find = '''        &launch,
+        member,'''
+replace = '''        &launch,
+        false,'''

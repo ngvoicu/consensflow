@@ -348,8 +348,9 @@ pub fn clearing(kind: &str) -> Result<Option<Vec<u8>>> {
 
 /// The settings file of a Claude window's launch (`launch`, a lowercase uuid),
 /// written in the ConsensFlow folder `env` names, and the arguments that load it
-/// (`--settings <file>`). `board_questions` has a member's question tool
-/// answered from the board, by the hook that `cf` runs (a path: the daemon's own).
+/// (`--settings <file>`). `board_questions` (the wire's `boardQuestions`) is a member's
+/// file: its question tool answered from the board, by the hook that `cf` runs (a path:
+/// the daemon's own), and Claude Code's prompt suggestion off; false is a chief's.
 pub fn claude_settings(
     env: &[(String, String)],
     launch: &str,

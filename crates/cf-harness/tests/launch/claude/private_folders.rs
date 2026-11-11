@@ -138,7 +138,7 @@ fn a_window_on_windows_has_the_settings_file_it_always_had() {
     );
 }
 
-const WORKER_SETTINGS_BEFORE: &str = r#"{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"{cf} hook claude","timeout":3600}]}],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
+const WORKER_SETTINGS_BEFORE: &str = r#"{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"{cf} hook claude","timeout":3600}]}],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]},"env":{"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION":"false"}}"#;
 
 /// [`WORKER_SETTINGS_BEFORE`] as `home`'s adapter writes it: the question hook runs its bundle's
 /// own `cf`, quoted (T-1049).

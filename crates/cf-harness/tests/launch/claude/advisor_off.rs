@@ -14,9 +14,18 @@ use super::compaction_window::{
 };
 use super::*;
 
-/// The file's `env` block as the switch writes it.
+/// The file's `env` block of a member as the switch writes it: the member's own file has
+/// Claude Code's prompt suggestion off besides (RS-29, `prompt_suggestion_off`).
 fn switched() -> Value {
-    json!({ "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1" })
+    json!({
+        "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1",
+        "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false",
+    })
+}
+
+/// The file's `env` block of a member of a project with the tool on: the suggestion's alone.
+fn unswitched() -> Value {
+    json!({ "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false" })
 }
 
 #[test]
@@ -24,8 +33,11 @@ fn a_launch_of_a_project_with_the_tool_on_writes_the_settings_file_it_always_wro
     let home = Home::new();
     let adapter = home.adapter();
     let plain = settings_text(&prepare(&adapter, &Request::default()).unwrap());
-    assert!(!plain.contains("env"), "{plain}");
     assert!(!plain.contains("ADVISOR"), "{plain}");
+    assert_eq!(
+        settings_of(&prepare(&adapter, &Request::default()).unwrap())["env"],
+        unswitched()
+    );
     assert_eq!(plain, worker_settings(&home));
     // And the chief's, which the engine never asks to be switched.
     assert_eq!(
@@ -53,8 +65,12 @@ fn every_members_launch_of_a_project_with_the_tool_off_has_it_switched_in_its_ow
         let given = prepare(&adapter, &off).unwrap();
         let mut settings = settings_of(&given);
         assert_eq!(settings["env"], switched(), "{role}");
-        // Nothing else of the file moves, and nothing of the launch beyond it.
-        settings.as_object_mut().unwrap().remove("env");
+        // Nothing else of the file moves, and nothing of the launch beyond it: the member's own
+        // file, with the advisor's switch the one more entry of `env`.
+        settings["env"]
+            .as_object_mut()
+            .unwrap()
+            .remove("CLAUDE_CODE_DISABLE_ADVISOR_TOOL");
         assert_eq!(settings, without_settings, "{role}");
         assert_eq!(
             without_session(&given.argv),
@@ -86,7 +102,7 @@ fn the_switch_is_given_to_a_window_resumed_as_to_one_launched_and_a_resumed_wind
     // A window resumed on a project with the tool on is as it was: the owner's setting, which
     // brings back an advisor an earlier window of the conversation had switched off.
     let plain = prepare(&adapter, &Request::resumed(session)).unwrap();
-    assert!(settings_of(&plain).get("env").is_none());
+    assert_eq!(settings_of(&plain)["env"], unswitched());
     assert_eq!(settings_text(&plain), worker_settings(&home));
 }
 
