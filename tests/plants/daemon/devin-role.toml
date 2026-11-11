@@ -56,8 +56,8 @@ runs = ["devin-role-lib-hook"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/session_hook.rs"
-find = "        if selected_session(wire_log).ok().flatten().as_deref() == Some(session) {"
-replace = "        if selected_session(wire_log).ok().flatten().is_some() {"
+find = "        if naming.shown().or(naming.unannounced()) == Some(session) {"
+replace = "        if naming.shown().or(naming.unannounced()).is_some() {"
 
 [[plant]]
 name = "devin role: a log that names another conversation throughout gives its role text"
@@ -66,8 +66,8 @@ runs = ["devin-role-lib-hook"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/session_hook.rs"
-find = "        if selected_session(wire_log).ok().flatten().as_deref() == Some(session) {"
-replace = "        if selected_session(wire_log).ok().flatten().is_some() {"
+find = "        if naming.shown().or(naming.unannounced()) == Some(session) {"
+replace = "        if naming.shown().or(naming.unannounced()).is_some() {"
 
 [[plant]]
 name = "devin role: the wait is longer than Devin gives the hook"

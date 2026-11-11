@@ -31,6 +31,8 @@ pub struct Wire {
     file: File,
     session: String,
     shape: Shape,
+    /// The prompt steps its `steps` lines list so far.
+    steps: Vec<Value>,
 }
 
 /// Which Devin's log a window writes.
@@ -84,6 +86,7 @@ impl Wire {
             file: OpenOptions::new().create(true).append(true).open(path)?,
             session: session.to_owned(),
             shape: Shape::Requests,
+            steps: Vec::new(),
         })
     }
 
@@ -224,6 +227,25 @@ impl Wire {
                 ],
             },
         }))
+    }
+
+    /// The conversation's steps, the prompt `text` among them, as Devin 3000.12.43 lists them
+    /// (T-1432: every prompt, a line of them all, its summary the prompt's first line with no
+    /// `/bypass`). The stand-in lists them only where Devin says no message back: a window
+    /// opened again silent, and the message it is given behind `/bypass`.
+    pub fn listed(&mut self, text: &str) -> io::Result<()> {
+        let number = self.steps.len() + 1;
+        self.steps.push(json!({
+            "stepId": format!("step-{number}"),
+            "stepNumber": number,
+            "kind": "prompt",
+            "userMessageId": format!("message-{number}"),
+            "revertTargetNodeId": number * 10,
+            "forkTargetNodeId": number * 10 + 2,
+            "summary": text.lines().next().unwrap_or_default(),
+        }));
+        let steps = json!({ "sessionId": self.session, "steps": self.steps });
+        self.raw(&steps)
     }
 
     /// The conversation's mode changed to `mode`: its configuration, and the change on
@@ -414,6 +436,7 @@ impl Wire {
             file: self.file.try_clone()?,
             session: self.session.clone(),
             shape: self.shape,
+            steps: Vec::new(),
         })
     }
 }

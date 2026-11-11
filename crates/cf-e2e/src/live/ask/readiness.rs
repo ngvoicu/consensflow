@@ -32,6 +32,9 @@ pub struct DevinReadiness {
     /// What the window was given meanwhile: the text of each paste, and `⏎` for each
     /// Enter pressed alone.
     pub given: Vec<String>,
+    /// Whether the delivery it was given once ready was admitted, where it was given one
+    /// ([`devin_readiness_then`]).
+    pub delivered: Option<bool>,
 }
 
 /// The pane host's request `op` with `body`, as what the window was given says it,
@@ -53,6 +56,19 @@ pub fn devin_readiness(
     wire: &Path,
     within: Duration,
 ) -> Result<DevinReadiness> {
+    devin_readiness_then(rig, window, wire, within, None)
+}
+
+/// The readiness of `window` as [`devin_readiness`] drives it, and once it is ready the
+/// delivery of `deliver`, where there is one, as the engine hands the window one: what it
+/// pastes is the product's.
+pub fn devin_readiness_then(
+    rig: &Rig,
+    window: &Window,
+    wire: &Path,
+    within: Duration,
+    deliver: Option<&str>,
+) -> Result<DevinReadiness> {
     let pane = window.pane();
     let session = window
         .session()
@@ -65,6 +81,7 @@ pub fn devin_readiness(
         "pane": pane,
         "withinMs": millis(within),
         "everyMs": millis(EVERY),
+        "deliver": deliver,
     });
     let mut given = Vec::new();
     let answer = relaying(
@@ -86,6 +103,7 @@ pub fn devin_readiness(
         answers,
         ready: answer["ready"] == true,
         given,
+        delivered: answer["delivered"].as_bool(),
     })
 }
 

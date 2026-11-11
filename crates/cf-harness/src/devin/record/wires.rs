@@ -23,6 +23,7 @@ use cf_base::file::is_missing;
 use cf_base::{js, path};
 use serde_json::Value;
 
+use crate::devin::adapter::BYPASS;
 use crate::devin::kept::{self, behind_bypass, KeptFiles};
 use crate::shared::record::find::entries;
 use crate::shared::record::home;
@@ -100,6 +101,9 @@ struct Said {
     asking: Option<String>,
     /// The log said something of the session.
     mine: bool,
+    /// The user's messages of the prompts the log has listed as the session's steps
+    /// ([`Said::listed`]), from its first `steps` line on: none before it.
+    steps: Option<HashSet<String>>,
 }
 
 /// The text of a message a line says back with no word of whether it is live: a
@@ -436,6 +440,40 @@ fn record(
 }
 
 impl Said {
+    /// The summaries of the prompts a `steps` line lists that no `steps` line of the log listed
+    /// before, by the user's message each began with, the command they were given behind taken
+    /// off: Devin keeps a prompt's first line as its summary, the header of ours, and 3000.11 keeps
+    /// `/bypass` ahead of it (the kit's `devin-resume-after-note-bypass`). The log's first `steps`
+    /// line lists what it found (a reopened window's replay, a new one's none) and is no prompt's.
+    /// Every prompt a log listed new was a message taken in, and its turn ended in a `cause`
+    /// (T-1432: 38 in Devin 3000.12.43's 21 kept logs and the 3000.11 kit's 34), but in the
+    /// launches killed in their turn. None for a line that is no `steps` line.
+    fn listed(&mut self, event: &Value) -> Option<Vec<String>> {
+        let listed = event.get("steps")?.as_array()?;
+        let prompts = listed.iter().filter_map(|step| {
+            (step.get("kind").and_then(Value::as_str) == Some("prompt"))
+                .then(|| step.get("userMessageId").and_then(Value::as_str))
+                .flatten()
+                .map(|message| (message, step.get("summary").and_then(Value::as_str)))
+        });
+        let Some(known) = self.steps.as_mut() else {
+            self.steps = Some(prompts.map(|(message, _)| message.to_owned()).collect());
+            return None;
+        };
+        let new = prompts
+            .filter(|(message, _)| known.insert((*message).to_owned()))
+            .map(|(_, summary)| {
+                let summary = summary.unwrap_or("");
+                summary
+                    .strip_prefix(BYPASS)
+                    .filter(|rest| rest.starts_with(char::is_whitespace))
+                    .map_or(summary, str::trim_start)
+                    .to_owned()
+            })
+            .collect();
+        Some(new)
+    }
+
     /// A record of the log (`visitWire`): what it says of the session's
     /// turn. A line that names the session is never JSON's `null`.
     fn visit(&mut self, event: &Value, session: &str, ended: &mut Ended<'_>) -> Result<(), Stop> {
@@ -476,6 +514,12 @@ impl Said {
         if let Some(text) = said_back_live(event) {
             self.busy = true;
             self.said_back.push(text.to_owned());
+        }
+        // A prompt the log lists among the steps for the first time is a message the turn took
+        // in, where Devin says none back: `/bypass <message>` (T-1432) is said back by no line.
+        if let Some(prompts) = self.listed(event) {
+            self.busy |= !prompts.is_empty();
+            self.said_back.extend(prompts);
         }
         // An older Devin's message said back is the turn's where a turn is open around it: at
         // its line (3000.11 says `working` first) or by the turn's first work before the next

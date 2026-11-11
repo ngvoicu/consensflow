@@ -145,6 +145,11 @@ impl Store {
         self.finished_a_turn
     }
 
+    /// Whether the session ended in a turn a quit cut when it was opened.
+    pub fn ends_cut(&self) -> bool {
+        self.cut.is_some()
+    }
+
     /// The user's message of the turn a quit cut, which the session ended in when it
     /// was opened: given once.
     pub fn take_cut(&mut self) -> Option<String> {

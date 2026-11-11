@@ -2636,11 +2636,11 @@ runs = ["muse-devin-launch"]
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
 find = '''
-            let mut observed = observed_from(Arc::clone(&reading), wire.quota);
+            let mut observed = observed_from(Arc::clone(&reading), wire.quota.clone());
 '''
 replace = '''
             let mut observed = observed_from(Arc::clone(&reading), None);
-            observed.quota = wire.quota;
+            observed.quota = wire.quota.clone();
 '''
 
 
