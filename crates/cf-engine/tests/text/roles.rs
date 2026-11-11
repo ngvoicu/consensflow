@@ -302,7 +302,7 @@ fn tells_every_window_it_never_has_to_wait_for_what_the_board_brings() {
         r"You never have to poll or wait for a result: ConsensFlow brings each one to\s+you as a message when it is ready",
         &instructions("chief", &[zeus()])
     ));
-    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+    for role in cf_ledger::roles::ids() {
         assert!(
             found(
                 r"Never wait for an answer\s+in your shell \(no `sleep`",
@@ -384,9 +384,7 @@ fn tells_the_chief_a_follow_up_is_for_what_its_window_knows_and_other_work_start
 
 #[test]
 fn tells_every_window_its_messages_arrive_pasted_and_are_its_to_act_on() {
-    for role in [
-        "chief", "worker", "advisor", "reviewer", "tester", "designer",
-    ] {
+    for role in std::iter::once("chief").chain(cf_ledger::roles::ids()) {
         assert!(
             found(
                 r"Each message ConsensFlow brings you is typed into this terminal, headed\s+`\[ConsensFlow m-… · T-… · …\]`; your harness may show it as pasted text\. It is\s+ConsensFlow's delivery, and acting on it is your role\.",
@@ -478,9 +476,7 @@ fn every_text_for(cf: &CfWord) -> Vec<(String, String, usize)> {
         skill: "/home/me/.consensflow/skills/specmint-tdd/SKILL.md",
     };
     let mut texts = Vec::new();
-    for role in [
-        "chief", "worker", "advisor", "reviewer", "tester", "designer",
-    ] {
+    for role in std::iter::once("chief").chain(cf_ledger::roles::ids()) {
         for specs in [None, Some(&specs)] {
             let text = role_instructions(&Env::default(), role, &[zeus()], cf, specs).unwrap();
             // The commands each starts with: the chief's table and prose, a member's table and
@@ -599,9 +595,7 @@ fn names_no_agent_to_pick_no_preset_no_nickname_and_no_cf_agent_or_catalog_in_an
     )
     .unwrap();
     let staff = [zeus()];
-    for role in [
-        "chief", "worker", "advisor", "reviewer", "tester", "designer",
-    ] {
+    for role in std::iter::once("chief").chain(cf_ledger::roles::ids()) {
         let text = instructions(role, &staff);
         let said = removed.find(&text);
         assert!(
@@ -945,7 +939,10 @@ fn tells_the_reviewer_to_begin_with_whether_the_work_is_ready_and_to_number_each
         ],
     );
     // The reviewer's rules are its own: no other member is asked to number findings.
-    for role in ["worker", "advisor", "tester", "designer"] {
+    for role in cf_ledger::roles::ids()
+        .into_iter()
+        .filter(|role| *role != "reviewer")
+    {
         let text = instructions(role, &[zeus()]);
         assert!(
             !says(&text, "numbered so a later review can name it"),
@@ -1046,7 +1043,7 @@ fn tells_the_chief_every_member_has_the_projects_rules_so_a_brief_does_not_repea
 
 #[test]
 fn gives_each_member_the_projects_rules_for_the_staff_under_their_own_heading_after_its_role() {
-    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+    for role in cf_ledger::roles::ids() {
         let role_text = instructions(role, &[zeus()]);
         let text = with_staff_rules(role_text.clone(), role, Some(HUMANS_RULES));
         assert!(
@@ -1092,9 +1089,7 @@ fn shows_the_chief_the_same_rules_marked_as_what_every_member_already_has() {
 
 #[test]
 fn a_project_with_no_rules_for_its_staff_leaves_every_text_as_it_was_to_the_byte() {
-    for role in [
-        "chief", "worker", "advisor", "reviewer", "tester", "designer",
-    ] {
+    for role in std::iter::once("chief").chain(cf_ledger::roles::ids()) {
         let role_text = instructions(role, &[zeus()]);
         assert_eq!(
             with_staff_rules(role_text.clone(), role, None),
@@ -1102,5 +1097,83 @@ fn a_project_with_no_rules_for_its_staff_leaves_every_text_as_it_was_to_the_byte
             "{role}"
         );
         assert!(!role_text.contains(STAFF_RULES_HEADING), "{role}");
+    }
+}
+
+/// Every role of the table has its text (spec new-roles, FD-04): its title by its name, its
+/// own description and intro, and the shared rules; a row added to the table without its
+/// parts in `staff.md` fails here, as the engine refuses a missing slot.
+#[test]
+fn every_role_of_the_table_has_its_own_text_under_its_name() {
+    let mut intros = Vec::new();
+    for role in cf_ledger::roles::all() {
+        let text = role_instructions(&Env::default(), role.id, &[zeus()], &CfWord::bare(), None)
+            .unwrap_or_else(|refused| panic!("{}: {refused}", role.id));
+        assert!(
+            text.contains(&format!("\n# ConsensFlow {}\n", role.name)),
+            "{}: {text}",
+            role.id
+        );
+        assert!(
+            text.contains(&format!("Keep this {} role", role.id)),
+            "{}",
+            role.id
+        );
+        assert!(
+            found(r"Never wait for an answer\s+in your shell", &text),
+            "{}",
+            role.id
+        );
+        let intro = text
+            .split("\n# ConsensFlow ")
+            .nth(1)
+            .and_then(|rest| rest.split("\n## Your commands").next())
+            .unwrap_or_default()
+            .to_owned();
+        assert!(
+            !intros.contains(&intro),
+            "{}: another role's intro",
+            role.id
+        );
+        intros.push(intro);
+    }
+}
+
+/// The four roles' texts say what their rules give each (spec new-roles): the frontend
+/// designer decides the look and asks for images through the chief, the architect writes
+/// nothing that runs, the researcher changes no file, and the integrator changes no
+/// behaviour and releases only when told so.
+#[test]
+fn the_four_new_roles_texts_say_their_own_territory() {
+    let text = |role: &str| instructions(role, &[zeus()]);
+    let frontend = text("frontend");
+    for said in [
+        r"The look is\s+yours to decide",
+        r"Look at the project's screens, styles and components first",
+        r"When you need an image, ask the chief with a drawing order",
+        r"where\s+it cannot, say it was not looked at",
+        r"why you chose\s+what you chose",
+    ] {
+        assert!(found(said, &frontend), "frontend: {said}");
+    }
+    let architect = text("architect");
+    for said in [
+        r"Nothing you\s+write runs",
+        r"Read the code as it stands and the project's documents first",
+        r"what that rework\s+would cost and buy",
+    ] {
+        assert!(found(said, &architect), "architect: {said}");
+    }
+    assert!(found(
+        r"A research task changes no file",
+        &text("researcher")
+    ));
+    let integrator = text("integrator");
+    for said in [
+        r"You change no\s+behaviour",
+        r"Tag,\s+release or deploy only where the brief says so in words",
+        r"showing both sides",
+    ] {
+        assert!(found(said, &integrator), "integrator: {said}");
     }
 }

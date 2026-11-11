@@ -65,7 +65,17 @@ fn a_launch_with_no_size_writes_the_settings_file_it_always_wrote_byte_for_byte(
 #[test]
 fn every_members_launch_is_given_the_size_as_the_window_in_its_settings_file_and_nothing_else_moves(
 ) {
-    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+    for role in [
+        "worker",
+        "frontend",
+        "architect",
+        "researcher",
+        "advisor",
+        "reviewer",
+        "tester",
+        "integrator",
+        "designer",
+    ] {
         let home = Home::new();
         let adapter = home.adapter();
         let plain = Request {

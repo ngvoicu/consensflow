@@ -496,7 +496,17 @@ fn a_muse_members_launch_is_the_same_whether_the_advisor_tool_is_switched_off_or
     let home = tempfile::tempdir().unwrap();
     let env = installed(home.path(), Some("1.4.14-R7309.1"));
     let id = LaunchId::new(LAUNCH).unwrap();
-    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+    for role in [
+        "worker",
+        "frontend",
+        "architect",
+        "researcher",
+        "advisor",
+        "reviewer",
+        "tester",
+        "integrator",
+        "designer",
+    ] {
         for resume in [None, Some("0f8fad5b-d9cb-469f-a165-70867728950e")] {
             let prepare = |advisor_off: bool| {
                 let launch = Launch {
@@ -546,7 +556,17 @@ fn a_members_window_is_given_a_size_up_to_muse_s_real_window_as_its_limit_and_no
     let home = tempfile::tempdir().unwrap();
     let env = installed(home.path(), Some("1.4.14-R7309.1"));
     let id = LaunchId::new(LAUNCH).unwrap();
-    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+    for role in [
+        "worker",
+        "frontend",
+        "architect",
+        "researcher",
+        "advisor",
+        "reviewer",
+        "tester",
+        "integrator",
+        "designer",
+    ] {
         let argv = |compaction: Option<u32>| {
             let launch = Launch {
                 role,
