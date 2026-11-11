@@ -708,3 +708,188 @@ fn a_window_that_ends_by_itself_under_queued_words_loses_and_doubles_none_of_the
         context.close();
     }
 }
+
+/// What the chief has been told, as notes and results, oldest first: the words.
+fn chief_news(context: &Context, project: i64) -> Vec<String> {
+    let mut news: Vec<String> = context
+        .inbox(context.id(project, "chief"))
+        .into_iter()
+        .map(|message| format!("{}: {}", message.kind, message.body))
+        .collect();
+    news.reverse();
+    news
+}
+
+/// T-1487 (a): the extension ends a Pi process that did not settle its compaction (T-1487's end of
+/// the process), and the window's task is done with nothing queued: the engine finds the window
+/// gone and writes nothing to the chief and pauses nothing, as for any window of a done task that
+/// ends by itself (main writes none either: the same exit with no compaction in it is shown).
+#[test]
+fn a_done_tasks_window_whose_pi_ends_under_its_compaction_tells_the_chief_nothing_and_pauses_nothing(
+) {
+    let mut seen = Vec::new();
+    for compacting in [true, false] {
+        let context = Context::new();
+        context.host.exits_showing(None, Some("SIGKILL"), None);
+        let project = context.with_staff(&["zeus"]);
+        let _window = at_work(&context, project.id);
+        if compacting {
+            answers_compacting(&context);
+        } else {
+            context.adapter.answer("zeus", "Parser done");
+            context.pass().unwrap();
+            context.pass().unwrap();
+        }
+        assert_eq!(context.task(project.id, 1).task.state, "done");
+        let opened = context.host.opened().len();
+        let before = chief_news(&context, project.id);
+        context.exit("zeus");
+        word(&context, None);
+        for _ in 0..4 {
+            context.pass().unwrap();
+            context.advance(15_000);
+        }
+        assert_eq!(context.task(project.id, 1).task.state, "done");
+        assert_eq!(
+            context.host.opened().len(),
+            opened,
+            "no window opens for a done task"
+        );
+        let after = chief_news(&context, project.id);
+        assert_eq!(
+            after, before,
+            "compacting: {compacting}: the chief is told nothing"
+        );
+        assert!(
+            after.iter().all(|line| !line.contains("is paused")),
+            "nothing is paused"
+        );
+        seen.push(after);
+        context.close();
+    }
+    assert_eq!(
+        seen[0], seen[1],
+        "the same as for a window that ends with no compaction in it"
+    );
+}
+
+/// T-1487 (b): after the extension ends a Pi that did not settle, the reopen's new window is on
+/// the conversation as it was left (the same `resume`), a compaction hung again at its own rest is
+/// ended the same way, and nothing is opened but once for each end.
+#[test]
+fn a_second_compaction_that_hangs_in_the_new_window_ends_it_the_same_way_once_a_rest() {
+    let context = Context::new();
+    context.host.exits_showing(None, Some("SIGKILL"), None);
+    let project = context.with_staff(&["zeus"]);
+    let _window = at_work(&context, project.id);
+    let native = native_of(&context, context.id(project.id, "zeus"));
+    let opened = context.host.opened().len();
+    for (round, words) in ["Fix the tests", "Fix the lint"].into_iter().enumerate() {
+        // The window compacts (its extension's word stands) and answers; the chief reopens.
+        answers_compacting(&context);
+        assert_eq!(
+            context.task(project.id, 1).task.state,
+            "done",
+            "round {round}"
+        );
+        context
+            .ledger
+            .borrow_mut()
+            .reopen_task(project.id, 1, "chief", words)
+            .unwrap();
+        for _ in 0..3 {
+            context.pass().unwrap();
+            context.advance(15_000);
+        }
+        assert_eq!(
+            pastes(&context, words),
+            0,
+            "round {round}: Busy while it hangs"
+        );
+        assert_eq!(
+            context.host.opened().len(),
+            opened + round,
+            "round {round}: no window yet"
+        );
+        // Its limit, its grace, the end of its process.
+        context.advance(BOUND_MS + 15_000);
+        context.exit("zeus");
+        word(&context, None);
+        for _ in 0..6 {
+            context.pass().unwrap();
+            context.advance(1_000);
+        }
+        assert_eq!(
+            context.host.opened().len(),
+            opened + round + 1,
+            "round {round}: one window"
+        );
+        assert_eq!(pastes(&context, words), 1, "round {round}: the words once");
+        assert_eq!(context.task(project.id, 1).task.state, "working");
+        let launch = context
+            .adapter
+            .prepared()
+            .into_iter()
+            .rev()
+            .find(|launch| {
+                launch["participant"]["handle"]
+                    .as_str()
+                    .is_some_and(|handle| handle.starts_with("zeus"))
+            })
+            .expect("the new window's launch");
+        assert_eq!(
+            launch["resume"].as_str(),
+            native.as_deref(),
+            "round {round}: same conversation"
+        );
+        // The new window's own word is its own: none until it rests again, so nothing loops.
+        assert_eq!(context.adapter.agent("zeus").compaction_asked, None);
+        for _ in 0..4 {
+            context.pass().unwrap();
+            context.advance(1_000);
+        }
+        assert_eq!(
+            context.host.opened().len(),
+            opened + round + 1,
+            "round {round}: no loop"
+        );
+    }
+    context.close();
+}
+
+/// T-1487 (c): the note the chief gets when a window ends under an answer to a question: a pause
+/// note that says what to run, and what ended it (the extension's kill, a signal ConsensFlow did
+/// not send; or the exit of Pi's own graceful shutdown, which ends with code 0).
+#[test]
+fn the_chief_is_told_what_to_do_when_a_window_ends_under_an_answer_to_a_question() {
+    for (code, signal, said) in [
+        (
+            None,
+            Some("SIGKILL"),
+            " (ended by signal SIGKILL, which ConsensFlow did not send: it had sent no kill)",
+        ),
+        (Some(0), None, " (exit code 0)"),
+    ] {
+        let context = Context::new();
+        context.host.exits_showing(code, signal, None);
+        let project = context.with_staff(&["zeus"]);
+        let _window = at_work(&context, project.id);
+        queued_for_the_window(&context, project.id, Words::Answer);
+        context.exit("zeus");
+        word(&context, None);
+        for _ in 0..3 {
+            context.pass().unwrap();
+        }
+        let notes: Vec<String> = chief_news(&context, project.id)
+            .into_iter()
+            .filter(|line| line.contains("is paused"))
+            .collect();
+        assert_eq!(
+            notes,
+            [format!(
+                "note: T-1 is paused: @zeus's window closed{said}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+            )]
+        );
+        context.close();
+    }
+}

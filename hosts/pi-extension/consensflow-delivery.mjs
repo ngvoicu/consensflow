@@ -89,8 +89,12 @@ function frontierOf(ctx) {
  * before the ask (and before the settlement evidence the engine takes the result by) and taken back
  * when that compaction ends, completed, failed or aborted, and at shutdown: only for the compaction
  * this extension asked for, never for Pi's own or another extension's. The engine keeps the close of
- * a done task's window open while it stands, up to its own bound from `startedAt` (T-1475: the
- * close, ten seconds after the result, aborted the summary, which takes 39 to 80 seconds).
+ * a done task's window open while it stands, for at most 300 s from the engine's first sight of it
+ * (T-1475: the close, ten seconds after the result, aborted the summary, which takes 39 to 80
+ * seconds); `startedAt` only tells one word from another. A compaction that does not end at the
+ * extension's own limit is aborted; one Pi has still not settled 15 s later has its process ended
+ * (TERM, then KILL after 10 s; on Windows `TerminateProcess` at once), and the engine opens the
+ * window again on the same conversation.
  * `settled/<launchId>.shown.json` says `{launchId, sessionId}`: the
  * conversation the window shows, written whenever this extension starts on
  * one (Pi starts it anew at every /new, /resume or /fork), so ConsensFlow
@@ -124,6 +128,20 @@ export function createDeliveryExtension(
     // holds a done task's window by the word for the same length (`COMPACTION_HOLD_MS`), so
     // nothing, a reopen's words included, waits past it (T-1475).
     compactionLimitMs = 300_000,
+    // How long after that limit Pi may take to settle the compaction it was told to abort
+    // (`abort` only signals it: Pi clears its Busy state when the summary work settles, and a
+    // provider or another extension that ignores the signal never lets it). Past it the process
+    // is ended, as a close of the window ends it. 15 s: Pi's own shutdown aborts the summary the
+    // same way and a cooperative one settles in well under that.
+    compactionGraceMs = 15_000,
+    // After the TERM, how long Pi's own shutdown is given (it waits for the same compaction to
+    // settle) before the kill: the window close's grace (`CLOSE_GRACE`, 10 s).
+    endKillMs = 10_000,
+    // How the process is ended: Node's `process.kill` on this process. On Unix the signal Pi
+    // handles for a graceful shutdown (TERM, which aborts the summary and writes nothing to the
+    // session) and, if that waits, KILL; on Windows both are `TerminateProcess` at once, which
+    // is what a close does there.
+    endProcess = (signal) => process.kill(process.pid, signal),
   } = {},
 ) {
   let context
@@ -519,9 +537,12 @@ export function createDeliveryExtension(
   // The ask now at work, counted: the end of an earlier one, late, is not this one's.
   let asks = 0
   let limit
+  let grace
+  let endTimer
   const askCompaction = (ctx) => {
     asks += 1
     const mine = asks
+    clearTimeout(grace)
     const over = () => {
       if (mine !== asks) return
       clearTimeout(limit)
@@ -555,6 +576,27 @@ export function createDeliveryExtension(
         logError(`could not abort it: ${cause?.message ?? String(cause)}`)
       }
       over()
+      // Pi told to abort, and not settled a grace later: nothing of Pi's compaction frees the
+      // window (a reopened task's words wait for it, Busy), so the process is ended, and the
+      // engine, finding the window gone, opens it again on the same conversation.
+      grace = setTimeout(() => {
+        if (mine !== asks || !compactingNow()) return
+        logError(
+          `compaction at ${compaction} tokens not settled ${Math.round(compactionGraceMs / 1000)} s after its abort: ending the process`,
+        )
+        const end = (signal) => {
+          try {
+            endProcess(signal)
+          } catch (cause) {
+            logError(`could not end the process (${signal}): ${cause?.message ?? String(cause)}`)
+          }
+        }
+        end('SIGTERM')
+        // Not cleared at shutdown: Pi's own shutdown waits for this compaction too.
+        endTimer = setTimeout(() => end('SIGKILL'), endKillMs)
+        endTimer.unref?.()
+      }, compactionGraceMs)
+      grace.unref?.()
     }, compactionLimitMs)
     limit.unref?.()
   }
@@ -589,6 +631,7 @@ export function createDeliveryExtension(
   })
   pi.on('session_shutdown', async () => {
     clearTimeout(limit)
+    clearTimeout(grace)
     await takeCompactionWordBack()
     watcher?.close()
     watcher = undefined
