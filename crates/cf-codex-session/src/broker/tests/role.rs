@@ -225,6 +225,90 @@ fn a_resume_whose_read_codex_never_answers_goes_without_the_role_by_the_deadline
     });
 }
 
+/// The lines the broker wrote to the daemon's log in `home`.
+fn logged(home: &std::path::Path) -> Vec<String> {
+    std::fs::read_to_string(home.join("daemon.log"))
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn a_resume_given_no_role_by_the_rule_is_one_line_in_the_daemons_log_with_its_thread_and_why() {
+    run(async {
+        let home = tempfile::tempdir().unwrap();
+        let f = Fixture::with(Options {
+            role: Some(ROLE.to_owned()),
+            log_home: Some(home.path().to_owned()),
+            ..Options::default()
+        })
+        .await;
+        f.codex.knows(&top_level(A));
+        f.codex.knows(&sub_agent(B, A));
+        let tui = f.connect().await;
+        // The window's own thread is given its role, and nothing is written of it.
+        f.call(
+            &tui,
+            1,
+            "thread/resume",
+            json!({ "threadId": A, "runtimeWorkspaceRoots": [] }),
+            json!({ "thread": top_level(A) }),
+        )
+        .await;
+        assert_eq!(logged(home.path()), Vec::<String>::new());
+        // A sub-agent's is not, and the log says which thread and which of Codex's words.
+        f.call(
+            &tui,
+            2,
+            "thread/resume",
+            json!({ "threadId": B, "runtimeWorkspaceRoots": [] }),
+            json!({ "thread": sub_agent(B, A) }),
+        )
+        .await;
+        let lines = logged(home.path());
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        let line = &lines[0];
+        assert!(
+            line.contains(" info cf codex-session gave Codex's thread/resume of thread 01a09094-a559-7db0-bf50-e2309856c3c0 no role: Codex's thread/read says it is not top-level: its parentThreadId is 01a09094-938f-7fd1-a2d3-315cf92b4559"),
+            "{line}"
+        );
+        assert!(!line.contains(ROLE), "{line}");
+    });
+}
+
+#[test]
+fn a_resume_whose_read_codex_never_answers_is_one_line_in_the_daemons_log_with_its_thread_and_why()
+{
+    run(async {
+        let home = tempfile::tempdir().unwrap();
+        let f = Fixture::with(Options {
+            role: Some(ROLE.to_owned()),
+            log_home: Some(home.path().to_owned()),
+            ..Options::default()
+        })
+        .await;
+        f.codex.knows(&top_level(A));
+        f.codex.reads(Reads::Silent);
+        let tui = f.connect().await;
+        f.call(
+            &tui,
+            1,
+            "thread/resume",
+            json!({ "threadId": A, "runtimeWorkspaceRoots": [] }),
+            json!({ "thread": top_level(A) }),
+        )
+        .await;
+        let lines = logged(home.path());
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(
+            lines[0].contains(" info cf codex-session gave Codex's thread/resume of thread 01a09094-938f-7fd1-a2d3-315cf92b4559 no role: Codex did not answer its thread/read within 0.3 s"),
+            "{}",
+            lines[0]
+        );
+    });
+}
+
 #[test]
 fn a_window_given_no_role_has_its_main_start_go_as_the_tui_sent_it() {
     run(async {

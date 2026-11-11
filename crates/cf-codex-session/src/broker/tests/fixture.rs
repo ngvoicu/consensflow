@@ -706,6 +706,7 @@ pub(crate) struct Options {
     pub(crate) shell_env: Vec<(String, String)>,
     pub(crate) board: Option<Arc<Board>>,
     pub(crate) question_wait: Duration,
+    pub(crate) log_home: Option<std::path::PathBuf>,
 }
 
 impl Default for Options {
@@ -716,6 +717,7 @@ impl Default for Options {
             shell_env: Vec::new(),
             board: None,
             question_wait: Duration::from_secs(5),
+            log_home: None,
         }
     }
 }
@@ -879,5 +881,6 @@ pub(crate) fn config_for(codex: &FakeCodex, options: Options) -> Config {
         shell_env: options.shell_env,
         board: options.board,
         question_wait: options.question_wait,
+        log_home: options.log_home,
     }
 }

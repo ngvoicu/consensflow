@@ -30,6 +30,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::Ipv4Addr;
+use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
@@ -66,6 +67,9 @@ pub(crate) struct Config {
     pub(crate) board: Option<Arc<Board>>,
     /// How long a question waits for the board before the TUI's dialog takes over.
     pub(crate) question_wait: Duration,
+    /// The home whose log (`daemon.log`) is told of a resume or fork given no role by
+    /// the rule ([`lineage`]); none for a window with no home.
+    pub(crate) log_home: Option<PathBuf>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -90,6 +94,7 @@ struct Shared {
     upstream: Upstream,
     board: Option<Arc<Board>>,
     question_wait: Duration,
+    log_home: Option<PathBuf>,
     state: RefCell<Selection>,
     control: RefCell<Option<Rc<Control>>>,
     /// The TUI connections' proxies, to end them when the broker closes.
@@ -115,6 +120,7 @@ impl Broker {
             shell_env,
             board,
             question_wait,
+            log_home,
         } = config;
         let port = bridge.port;
         let shared = Rc::new(Shared {
@@ -122,6 +128,7 @@ impl Broker {
             upstream,
             board,
             question_wait,
+            log_home,
             state: RefCell::new(Selection::new(fresh_bypass, role, shell_env)),
             control: RefCell::new(None),
             pairs: RefCell::new(HashMap::new()),

@@ -301,7 +301,7 @@ impl Pair {
     }
 
     /// Holds `message`, a resume or fork of the TUI's, until Codex says whether `thread`
-    /// is top-level ([`Shared::is_top_level`]): then it goes with the window's role if it
+    /// is top-level ([`Shared::top_level`]): then it goes with the window's role if it
     /// is, as it is if not, and what the TUI said meanwhile follows it in order. The window
     /// shows no thread meanwhile, so no delivery is taken.
     fn decide(self: &Rc<Self>, message: Value, thread: String) {
@@ -311,7 +311,15 @@ impl Pair {
         });
         let this = Rc::clone(self);
         self.spawn(async move {
-            let top_level = this.shared.is_top_level(&thread).await;
+            let verdict = this.shared.top_level(&thread).await;
+            if let Err(refusal) = &verdict {
+                let method = message
+                    .get("method")
+                    .and_then(Value::as_str)
+                    .unwrap_or("request");
+                this.shared.log_refusal(method, &thread, refusal);
+            }
+            let top_level = verdict.is_ok();
             let role = this.shared.state.borrow().role().map(str::to_owned);
             let out = match role.filter(|_| top_level) {
                 Some(role) => with_role(&message, &role),

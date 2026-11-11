@@ -154,7 +154,7 @@ runs = ["codex-session"]
 [[plant.edit]]
 file = "crates/cf-codex-session/src/broker/lineage.rs"
 find = '''                } => asked = from,'''
-replace = '''                } => return !from.is_empty(),'''
+replace = '''                } => return if from.is_empty() { Err(Refusal::Forks) } else { Ok(()) },'''
 
 [[plant]]
 name = "codex role file: a read Codex refused or never answered says top-level"
@@ -163,12 +163,18 @@ runs = ["codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/broker/lineage.rs"
-find = '''            else {
-                return false;
-            };'''
-replace = '''            else {
-                return true;
-            };'''
+find = '''                Asked::Unanswered if now_ms() >= expires_at => return Err(Refusal::Unanswered),'''
+replace = '''                Asked::Unanswered if now_ms() >= expires_at => return Ok(()),'''
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/lineage.rs"
+find = '''                Read::Refused(code) => {
+                    return Err(Refusal::Refused {
+                        thread: asked,
+                        code,
+                    })
+                }'''
+replace = '''                Read::Refused(_) => return Ok(()),'''
 
 [[plant]]
 name = "codex role file rig: a thread Codex calls a sub-agent's is taken for top-level (the regression)"
@@ -178,8 +184,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/broker/lineage.rs"
-find = '''                Read::Not => return false,'''
-replace = '''                Read::Not => return true,'''
+find = '''                Read::Not(why) => return Err(Refusal::Not { thread: asked, why }),'''
+replace = '''                Read::Not(_) => return Ok(()),'''
 
 [[plant]]
 name = "codex role file rig: a resumed window is given no role, as before T-1394 (the regression)"
