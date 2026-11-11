@@ -198,3 +198,69 @@ fn a_note_whose_line_ended_with_a_move_is_shown_again_with_no_row_more() {
     // Once shown, it is shown; and no note of anyone else's is.
     assert!(!w.ledger.show_again(w.project, note.id).expect("a write"));
 }
+
+#[test]
+fn a_task_taken_back_with_nothing_bound_to_it_is_shown_to_the_chief_not_typed() {
+    let mut w = world();
+    let (task, session) = with_zeus(&mut w);
+    w.ledger
+        .release_task(w.project, task, "by @human")
+        .expect("released");
+    let note = w
+        .ledger
+        .inbox(w.id("chief"), 100)
+        .expect("the inbox")
+        .into_iter()
+        .find(|message| message.body.starts_with("T-1 was taken back from"))
+        .expect("the chief's inbox lists the note");
+    assert_eq!(
+        note.body,
+        format!(
+            "T-1 was taken back from @{session} (by @human) and waits for another standard worker."
+        )
+    );
+    // It goes on by itself: the chief has nothing to decide, and nothing is typed.
+    assert_eq!(note.state, "read");
+    assert_eq!(
+        w.next("chief"),
+        None,
+        "nothing is typed into the chief's window"
+    );
+    assert_eq!(
+        aside(&w, task).as_deref(),
+        Some(
+            format!(
+                "was taken back from @{session} (by @human) and waits for another standard worker."
+            )
+            .as_str()
+        )
+    );
+}
+
+#[test]
+fn a_task_taken_back_with_a_follow_up_bound_to_its_window_is_typed_to_the_chief() {
+    let mut w = world();
+    let (task, _) = with_zeus(&mut w);
+    let after = w
+        .follow_up(task, "Part 2", &[])
+        .expect("a follow-up")
+        .task
+        .number;
+    w.ledger
+        .release_task(w.project, task, "by @human")
+        .expect("released");
+    let note = w
+        .ledger
+        .inbox(w.id("chief"), 100)
+        .expect("the inbox")
+        .into_iter()
+        .find(|message| message.body.starts_with("T-1 was taken back from"))
+        .expect("the note");
+    // The follow-up stays bound to a window that no longer has T-1: the chief decides.
+    assert!(
+        note.body.contains(&format!("T-{after} stays bound to @")),
+        "{}",
+        note.body
+    );
+    assert_eq!(note.state, "queued");
+}

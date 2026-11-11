@@ -676,6 +676,9 @@ pub(crate) fn release_inside(
                 .collect::<rusqlite::Result<_>>()?,
             None => Vec::new(),
         };
+        // It goes on by itself unless a follow-up stays bound or a message went with it: then
+        // the chief has a decision, and it is typed; else shown (RS-25).
+        let asks = !bound.is_empty() || carried.as_ref().is_some_and(|c| !c.gated.is_empty());
         let note = match (&member, bound.as_slice()) {
             (Some(member), [only]) => format!(
                 "{note} {only} stays bound to @{}, which no longer has T-{number}: cancel it, or add it again for a tier with --needs T-{number}.",
@@ -696,6 +699,9 @@ pub(crate) fn release_inside(
                 task: Some(number),
                 kind: "note",
                 body: &note,
+                shown: (!asks)
+                    .then(|| note.strip_prefix(&format!("T-{number} ")))
+                    .flatten(),
                 ..Sent::default()
             },
         )?;

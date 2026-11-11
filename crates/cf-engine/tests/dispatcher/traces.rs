@@ -195,7 +195,7 @@ const CLOSE_RESUMED: &str = "the human resumes the project the Close suspended: 
 
 /// What the engine does when the human reassigns a paused task whose stall
 /// has been told to its requester in a note not yet given.
-const STALL_LEFT: &str = "the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`T-1 was taken back`), where Node pastes it into the chief's window";
+const STALL_LEFT: &str = "the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`T-1 was taken back`), where Node pastes it into the chief's window; and the note that T-1 was taken back and waits for another worker asks the chief nothing: it is shown on T-1's line, not typed (RS-25), where Node pastes it into the chief's window";
 
 /// A resumed window's record is copied after the items the copy kept (T-1118).
 const RESUMED_COPY: &str = "the window the session opens again resumes a record the copy of it has more of, and the copy puts the record's new items after the ones it kept (`seq`; T-1118), where Node's took the older ones' places and sorted among them";
@@ -316,7 +316,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "closes the old window of a task the human reassigned and gives the task to another member",
-        "the daemon gives T-1 to @diana before the chief was given the note that T-1 was taken back and waits for another worker: the note is withdrawn (`T-1 was taken by @diana`), so the chief is never given it, where Node pastes it into the chief's window",
+        "the note that T-1 was taken back and waits for another worker asks the chief nothing: it is shown on T-1's line, not typed (RS-25), where Node pastes it into the chief's window, so it is never typed whoever takes T-1 (the daemon gives T-1 to @diana meanwhile)",
     ),
     (
         "stops the window of a task the human reassigns before the task leaves it, even one the human opened",

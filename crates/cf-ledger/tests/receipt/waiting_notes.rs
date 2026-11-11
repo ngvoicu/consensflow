@@ -96,14 +96,15 @@ fn a_task_another_member_takes_withdraws_the_notes_of_its_wait_its_requester_has
             "T-1 was taken back from @{session} (ran out of quota after starting) and waits for another standard worker."
         )
     );
-    assert_eq!(w.states(&[taken_back.id, waits.id]), ["queued", "queued"]);
+    // The note of the release asks the chief nothing: it is shown, so given (RS-25).
+    assert_eq!(w.states(&[taken_back.id, waits.id]), ["read", "queued"]);
 
     w.assign(task, "diana");
     let withdrawn = (
         "cancelled".to_owned(),
         Some("T-1 was taken by @diana".to_owned()),
     );
-    assert_eq!(fate(&w, taken_back.id), withdrawn);
+    assert_eq!(fate(&w, taken_back.id), ("read".to_owned(), None), "it was given");
     assert_eq!(fate(&w, waits.id), withdrawn);
 }
 
@@ -115,8 +116,8 @@ fn a_task_another_member_takes_leaves_what_was_given_what_others_wrote_and_what_
     w.ledger
         .release_task(w.project, task, "ran out of quota after starting")
         .expect("released");
+    // The note of the release is shown, so given (RS-25).
     let given = told_chief(&w).remove(0);
-    w.deliver(given.id);
     let chiefs = w.note("chief", "chief", task, "A reminder from the chief.");
     let for_the_human = consensflow_notes(&mut w, "human", Some(task), "T-1 is back on the board.");
     let of_another = consensflow_notes(
@@ -135,7 +136,7 @@ fn a_task_another_member_takes_leaves_what_was_given_what_others_wrote_and_what_
     w.assign(task, "diana");
     assert_eq!(
         fate(&w, given.id),
-        ("delivered".to_owned(), None),
+        ("read".to_owned(), None),
         "a note its reader has been given"
     );
     for (kept, why) in [
@@ -215,13 +216,13 @@ fn a_task_taken_back_withdraws_the_notes_of_the_wait_it_leaves_and_keeps_its_own
     assert_eq!(
         (release.state.as_str(), release.body.as_str()),
         (
-            "queued",
+            "read",
             format!(
                 "T-1 was taken back from @{session} (by @human) and waits for another standard worker."
             )
             .as_str()
         ),
-        "what the release says of itself stays"
+        "what the release says of itself stays, shown: it asks the chief nothing (RS-25)"
     );
 }
 
