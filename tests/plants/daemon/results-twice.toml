@@ -66,8 +66,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = "                observed.settled = false;"
-replace = ""
+find = "            } else if self.begun_on_the_store(&observed) {\n                observed.settled = false;"
+replace = "            } else if self.begun_on_the_store(&observed) {"
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
@@ -99,8 +99,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = "                observed.settled = false;"
-replace = ""
+find = "            } else if self.begun_on_the_store(&observed) {\n                observed.settled = false;"
+replace = "            } else if self.begun_on_the_store(&observed) {"
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"

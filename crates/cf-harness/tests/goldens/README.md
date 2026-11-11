@@ -416,3 +416,16 @@ and the hash that names a bundle of an extension is `$HASH`.
   else. The move is `tools/move_harness_dialog_goldens.py`, which leaves an answer already
   moved as it is: after a merge brings rows of the old shape, run it on each file and let
   the scenarios test check it.
+- **A Devin turn its own launch began is no window at rest before it ends** (2026-11-10, T-1403,
+  from the review of T-1401). A turn that this window's launch began on its wire log (Devin's own
+  work streamed, a tool's `blocked`) and has not ended there (`cause`) reads at work, whatever the
+  record shows, the snapshot of a turn the window was opened on (`left_open`) as well: Devin's
+  compactor can leave a chain that holds none of the turn's message, and the record alone then
+  read the window at rest, so a Stop was paid while Devin worked on. Node read the record alone. `launch/` moved for it in 17 steps of eight scenarios, in
+  both platforms' recordings, each now with a `kept` difference, `settled: false` where Node said
+  `true`: 16 in the seven scenarios whose hand-written wire puts Devin's words (of a refusal, or
+  words that are not one) in message chunks and writes no end line (the refusal Devin is seen to write ends the turn,
+  `cause: quota_exhausted`, and the hold reads it ended; a prompt refused by a JSON-RPC error,
+  known only from Devin's binary, names no conversation and ends nothing), and step 3
+  of `devin: a wire log Devin wrote itself (native-tui.json) is read as it grew, in pieces cut in
+  the middle of a line`, where the log is cut inside the turn's `{"cause":"`.

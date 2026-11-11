@@ -78,8 +78,52 @@ struct Said {
     active: Option<Active>,
     /// Devin is on a turn.
     busy: bool,
+    /// A turn began (work was said, or Devin's word that it works) and its end was not
+    /// said: `blocked` is no end, it comes where Devin waits for its user and before the
+    /// turn's end (T-660), so a turn that waits is still one that is open. Only the turn's
+    /// own end (`cause`) closes it.
+    open: bool,
     /// The log said something of the session.
     mine: bool,
+}
+
+/// What one launch's log says of each session's turns, by the rules the record reads every
+/// log by ([`Said::visit`]): whether one is open. A window's own launch writes the log, and
+/// no other process does: the turns it holds are the window's own (`adapter`'s `observe`).
+#[derive(Default)]
+pub(in crate::devin) struct Turns {
+    /// What the log says so far, by the session each line names.
+    said: HashMap<String, Said>,
+}
+
+impl Turns {
+    /// One line of the log. A line the record's look would fail on still says what it
+    /// says of a turn: the record's look tells of the failure.
+    pub(in crate::devin) fn follow(&mut self, event: &Value) {
+        let Some(session) = event.get("sessionId").and_then(Value::as_str) else {
+            return;
+        };
+        let said = self.said.entry(session.to_owned()).or_default();
+        // How the turns ended is the record's to keep: here, each end is an end.
+        let _ = said.visit(
+            event,
+            session,
+            &mut Ended {
+                outcomes: &mut HashMap::new(),
+                natives: &mut HashMap::new(),
+            },
+        );
+    }
+
+    /// The log is read again from its start: what it says now is read anew.
+    pub(in crate::devin) fn read_anew(&mut self) {
+        self.said.clear();
+    }
+
+    /// Whether a turn is open on `session` in the log: begun, and its end not said.
+    pub(in crate::devin) fn open(&self, session: &str) -> bool {
+        self.said.get(session).is_some_and(|said| said.open)
+    }
 }
 
 /// A reply being streamed: its stream, its text so far, the request it
@@ -211,7 +255,20 @@ impl Wires {
     /// later, says nothing of this one. Of two written at once, the one
     /// listed later says.
     pub(super) fn working(&self) -> bool {
-        let mut working = false;
+        self.said_last().is_some_and(|said| said.busy)
+    }
+
+    /// Whether a turn is open on the session, as the same log says: one that began and whose
+    /// end it did not say. Devin says `blocked` where it waits for its user and before the
+    /// turn's end, so a turn that is not at work may be open still; the end alone closes it.
+    pub(super) fn turn_open(&self) -> bool {
+        self.said_last().is_some_and(|said| said.open)
+    }
+
+    /// What the log written last of those that said something of the session says (see
+    /// [`Wires::working`]).
+    fn said_last(&self) -> Option<&Said> {
+        let mut said = None;
         let mut latest = -1.0;
         for launch in &self.launches {
             let Some(log) = self.logs.get(launch) else {
@@ -220,11 +277,11 @@ impl Wires {
             if let (true, Some(seen)) = (log.said.mine, &log.seen) {
                 if seen.mtime_ms() >= latest {
                     latest = seen.mtime_ms();
-                    working = log.said.busy;
+                    said = Some(&log.said);
                 }
             }
         }
-        working
+        said
     }
 
     /// What ConsensFlow gave the session's launches as their first messages behind
@@ -316,6 +373,9 @@ impl Said {
                 _ => {}
             }
         }
+        // A turn is open from its first work, or Devin's word that it works: `blocked` ends
+        // nothing, the turn's own end does (below).
+        self.open |= self.busy;
         if kind == Some("agent_message_chunk") {
             // History replay has timestamps but no streaming UUID.
             let Some(Value::String(id)) = meta("cognition.ai/streamingMessageId") else {
@@ -393,6 +453,7 @@ impl Said {
         }
         self.active = None;
         self.busy = false;
+        self.open = false;
         Ok(())
     }
 }

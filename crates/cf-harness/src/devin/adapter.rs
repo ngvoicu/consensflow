@@ -74,7 +74,7 @@ use crate::contract::{
     STAFF_RULES_HEADING,
 };
 use crate::detect::executable;
-use crate::records::{Options, Reading, Role};
+use crate::records::{Kind, Options, Reading, Role};
 use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box::{self, Unsent};
@@ -392,10 +392,14 @@ impl Adapter for DevinAdapter {
     /// open as with one: a session with a message of the user's in it had a turn
     /// and is gone on with, and one the store holds with none, or holds no row of
     /// (Devin writes the row with the first message), has nothing to go on with. A
-    /// store that cannot be read tells nothing, and the engine goes on with the
-    /// session as it did before it asked. Devin resumed on a session it has no
-    /// row of opens idle and drops what is typed to it (live, 3000.11.3,
-    /// 2026-10-14).
+    /// session Devin compacted holds none of the user's on its main chain, which is
+    /// a new one of its own: the system messages it opens with, the skills it loaded
+    /// and the summary of the conversation (T-655; T-1388: `/compact` through
+    /// `devin acp` on a finished session). That summary is the conversation, so
+    /// a session whose chain holds one is gone on with as well. A store that
+    /// cannot be read tells nothing, and the engine goes on with the session as it
+    /// did before it asked. Devin resumed on a session it has no row of opens idle
+    /// and drops what is typed to it (live, 3000.11.3, 2026-10-14).
     fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
         Box::pin(async move {
             let looked = self
@@ -404,9 +408,12 @@ impl Adapter for DevinAdapter {
                 .look(Harness::Devin, session, &Options::default())
                 .await;
             match &*looked {
-                Reading::Known(record) => {
-                    Some(record.items.iter().any(|item| item.role == Role::User))
-                }
+                Reading::Known(record) => Some(
+                    record
+                        .items
+                        .iter()
+                        .any(|item| item.role == Role::User || item.kind() == Kind::Compaction),
+                ),
                 Reading::Missing(_) => Some(false),
                 Reading::Unknown(_) => None,
             }
@@ -841,6 +848,20 @@ impl Window for DevinWindow {
             {
                 observed.settled = true;
             } else if self.begun_on_the_store(&observed) {
+                observed.settled = false;
+            }
+            // A turn the window's own launch began on the conversation and has not ended is
+            // the window's own, and its log is written by no other process: nothing the
+            // record holds reads the window at rest before the log says that turn ended. Not
+            // what the record held at the open (a compaction that kept none of the turn gives
+            // back the chain of the open, T-1401), not a chain Devin's compactor left holding
+            // nothing of the turn, nor a step whose answer Devin has not stored when it says
+            // it waits (`blocked` comes before the end). The log is read on from where the
+            // last look stopped, so a turn begun between two looks is seen at the next,
+            // whatever the record showed between them. Once the turn ended, the record and
+            // what it held at the open speak again: the old process's turn the snapshot
+            // speaks of is still no turn of this window's (T-1403).
+            if self.wire.turn_open(&session) {
                 observed.settled = false;
             }
             Ok(match wire.shown {
