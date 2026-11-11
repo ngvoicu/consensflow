@@ -113,6 +113,8 @@ portable-pty.workspace = true
 # no window of a rig started inside such a session may be given (T-971): a case enumerates
 # the product's own list, so a harness added to it is held at once.
 cf-proto.workspace = true
+# The product's roles' table, which the seating's pools and their tiers are held to.
+cf-ledger.workspace = true
 
 # Signals by process id, whether a process is there, the group it is in, and the
 # terminal's raw mode, which std does not give (this crate allows unsafe code only in
