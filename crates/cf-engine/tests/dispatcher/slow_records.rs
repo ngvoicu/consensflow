@@ -782,14 +782,15 @@ fn pastes_nothing_more_in_the_passes_that_find_a_paste_still_going_in() {
 }
 
 #[test]
-fn pastes_a_note_about_a_task_its_recipient_has_no_task_message_for_alone_and_a_second_one_alone() {
+fn pastes_two_notes_about_a_task_its_recipient_has_no_task_message_for_in_one_chain() {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);
     tiers.open();
     context.pass().unwrap();
     context.pass().unwrap();
-    // Two notes about T-1 for the chief, which was never sent a task message
-    // about it: nothing for them to ride in.
+    // Two notes of ConsensFlow's for the chief, which was never sent a task message
+    // about T-1: no task message carries them, and the first carries the second, a
+    // chain (RS-25), with one header.
     let first = context.note_from_consensflow(tiers.project.id, "chief", "T-1 was looked at");
     let second =
         context.note_from_consensflow(tiers.project.id, "chief", "T-1 was looked at again");
@@ -798,13 +799,23 @@ fn pastes_a_note_about_a_task_its_recipient_has_no_task_message_for_alone_and_a_
         context.adapter.answer("chief", "noted");
     }
     let items = given(&context, "chief");
-    assert_eq!(items.len(), 2, "{items:?}");
-    for (text, note) in items.iter().zip([&first, &second]) {
-        assert_eq!(
-            text,
-            &delivery_text(&context.message(note.id), &[], &CfWord::bare())
-        );
-        assert_eq!(text.matches("[ConsensFlow m-").count(), 1, "{text}");
+    assert_eq!(items.len(), 1, "{items:?}");
+    assert_eq!(
+        items[0],
+        delivery_text(
+            &context.message(first.id),
+            &[context.message(second.id)],
+            &CfWord::bare()
+        )
+    );
+    assert_eq!(
+        items[0].matches("[ConsensFlow m-").count(),
+        1,
+        "{}",
+        items[0]
+    );
+    for note in [&first, &second] {
+        assert_eq!(context.message(note.id).state, "delivered");
     }
 }
 

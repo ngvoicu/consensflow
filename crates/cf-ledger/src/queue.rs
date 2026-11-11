@@ -8,7 +8,7 @@ use cf_proto::ledger::{MessageView, Question};
 use rusqlite::params;
 use serde_json::json;
 
-use crate::messages::{adopt, release_carried};
+use crate::messages::{adopt, release_carried, release_riders};
 use crate::model::{self, LedgerError, MAX_BODY};
 use crate::store::Store;
 use crate::views::TaskRow;
@@ -196,12 +196,17 @@ pub(crate) fn send(
 }
 
 /// A gated message the human never passed on: declined, answered, or overtaken.
-pub(crate) fn withdraw(store: &Store, message_id: i64, reason: &str) -> Result<(), LedgerError> {
+pub(crate) fn withdraw(
+    store: &mut Store,
+    message_id: i64,
+    reason: &str,
+) -> Result<(), LedgerError> {
     store.db.execute(
         "UPDATE message SET state = 'cancelled', reason = ? WHERE id = ?",
         params![reason, message_id],
     )?;
-    Ok(())
+    // A chain's note withdrawn on its way: the notes it carried wait on their own.
+    release_riders(store, message_id)
 }
 
 /// A task's messages still held at the gate, withdrawn; what a withdrawn

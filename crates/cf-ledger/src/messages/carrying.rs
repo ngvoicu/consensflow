@@ -213,6 +213,20 @@ pub(crate) fn adopt(store: &mut Store, id: i64) -> Result<(), LedgerError> {
 /// whatever its carrier's transport let go (`delivery`'s `admit`), but for a
 /// continuation whose task is no longer at work, which goes (`continuations`).
 /// Withdrawing a carrier's transport never takes what it carried with it.
+/// The notes a chain's note `carrier` carried (`delivery`'s `gather_chain`) are their own
+/// again, and wait as they did: it goes again, is withdrawn or failed, and carries none from
+/// now. A chain is gathered as its first note's delivery begins, from what waits then; only a
+/// chain's note carries notes, so a task message's set is left as `release_carried` leaves it.
+pub(crate) fn release_riders(store: &mut Store, carrier: i64) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE message SET carried_by = NULL, handed_at = NULL
+          WHERE carried_by = ?1 AND state = 'queued'
+            AND EXISTS (SELECT 1 FROM message c WHERE c.id = ?1 AND c.kind = 'note')",
+        [carrier],
+    )?;
+    Ok(())
+}
+
 pub(crate) fn release_carried(store: &mut Store, task_id: i64) -> Result<(), LedgerError> {
     let released = ids(
         store,

@@ -471,12 +471,12 @@ fn a_message_that_quotes_the_windows_error_is_no_part_of_the_error_on_its_screen
 
 #[test]
 fn what_the_chiefs_screen_shows_of_its_paste_is_known_however_many_messages_wait_behind_it() {
-    // An outage builds a backlog: each failed turn takes the next message, and
-    // its screen shows that one. Five and more wait behind it.
+    // An outage builds a backlog: a failed turn takes the next message, and its screen
+    // shows that one; the eight notes behind it go as one chain (RS-25), whose lines
+    // fill the screen above the error.
     let context = Context::new();
     let tiers = working(&context);
     let error = "Error: provider unreachable";
-    let chief = tiers.id("chief");
     chief_screen(&context, &[error]);
     chief_fails_on_screen(&context);
     context.pass().unwrap();
@@ -486,9 +486,13 @@ fn what_the_chiefs_screen_shows_of_its_paste_is_known_however_many_messages_wait
     for _ in 0..3 {
         context.pass().unwrap();
         context.pass().unwrap();
-        let on_screen = context.ledger.borrow().last_given(chief).unwrap().unwrap();
-        let words = context.message(on_screen).body;
-        chief_screen(&context, &[&header(&context, on_screen), &words, "", error]);
+        // The screen shows the paste as it was typed: a chain's lines (RS-25).
+        let pasted = crate::fixtures::given(&context, "chief")
+            .pop()
+            .expect("a paste");
+        let mut screen: Vec<&str> = pasted.lines().collect();
+        screen.extend(["", error]);
+        chief_screen(&context, &screen);
         chief_fails_on_screen(&context);
         context.pass().unwrap();
     }

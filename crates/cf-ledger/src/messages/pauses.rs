@@ -246,10 +246,13 @@ pub(crate) fn join_pause_note(
     harness_gone: bool,
 ) -> Result<Option<MessageView>, LedgerError> {
     store.write(|store| {
-        let Some(note) = store
-            .message(id)?
-            .filter(|note| note.kind == "note" && note.sender.is_none() && note.state == "queued")
-        else {
+        let handed = store
+            .db
+            .prepare("SELECT 1 FROM message WHERE id = ? AND handed_at IS NOT NULL")?
+            .exists([id])?;
+        let Some(note) = store.message(id)?.filter(|note| {
+            note.kind == "note" && note.sender.is_none() && note.state == "queued" && !handed
+        }) else {
             return Ok(None);
         };
         let Some(mut paused) = read(&note.body) else {
@@ -402,7 +405,8 @@ pub(crate) fn tell_kept(
         .prepare(
             "SELECT id, body FROM message
        WHERE project_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'
-         AND state = 'queued' AND (task_id = ? OR task_id IS NULL) ORDER BY id DESC",
+         AND state = 'queued' AND handed_at IS NULL AND (task_id = ? OR task_id IS NULL)
+       ORDER BY id DESC",
         )?
         .query_map(
             params![task.project_id, task.requester_id, task.id],
@@ -494,7 +498,8 @@ pub(crate) fn leave_pause_notes(
         .prepare(
             "UPDATE message SET state = 'cancelled', reason = ?
        WHERE task_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'
-         AND state = 'queued' AND body != ? AND substr(body, 1, length(?)) != ?
+         AND state = 'queued' AND handed_at IS NULL AND body != ?
+         AND substr(body, 1, length(?)) != ?
          AND substr(body, 1, length(?)) != ? RETURNING body",
         )?
         .query_map(
@@ -519,7 +524,7 @@ pub(crate) fn leave_pause_notes(
         .prepare(
             "SELECT id, body FROM message
        WHERE project_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'
-         AND task_id IS NULL AND state = 'queued' ORDER BY id",
+         AND task_id IS NULL AND state = 'queued' AND handed_at IS NULL ORDER BY id",
         )?
         .query_map(params![task.project_id, task.requester_id], |row| {
             Ok((row.get::<_, i64>("id")?, row.get::<_, String>("body")?))
@@ -565,7 +570,7 @@ pub(crate) fn warnings_queued(store: &Store, task: &TaskRow) -> Result<Vec<Strin
         .prepare(
             "SELECT body FROM message
              WHERE kind = 'note' AND sender_id IS NULL AND state = 'queued'
-               AND recipient_id = ? AND task_id = ? ORDER BY id",
+               AND handed_at IS NULL AND recipient_id = ? AND task_id = ? ORDER BY id",
         )?
         .query_map(params![task.requester_id, task.id], |row| row.get(0))?
         .collect::<rusqlite::Result<_>>()?;

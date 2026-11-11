@@ -287,6 +287,10 @@ pub(crate) fn note(
     })
 }
 
+/// What [`notes_of`] takes for the notes still to give: queued, and in no paste handed over
+/// (a chain's, RS-25), which the reader has as a note on its way.
+const NOT_HANDED: &str = "not handed";
+
 /// The notes of this kind that ConsensFlow wrote to `task`'s requester about it, with their
 /// ids, in the order written; only those in `state` when it is given.
 fn notes_of(
@@ -299,7 +303,9 @@ fn notes_of(
         .prepare(
             "SELECT id, body FROM message
              WHERE task_id = ?1 AND recipient_id = ?2 AND sender_id IS NULL AND kind = 'note'
-               AND (?3 IS NULL OR state = ?3) ORDER BY id",
+               AND (?3 IS NULL OR state = ?3
+                    OR (?3 = 'not handed' AND state = 'queued' AND handed_at IS NULL))
+             ORDER BY id",
         )?
         .query_map(params![task.id, task.requester_id, state], |row| {
             Ok((row.get::<_, i64>("id")?, row.get::<_, String>("body")?))
@@ -365,7 +371,7 @@ pub(crate) fn tell_on_its_way(
 /// not yet pasted into their reader's window say so, and that what they hold is not the
 /// task's result.
 pub(crate) fn keep_moved(store: &Store, task: &TaskRow) -> Result<(), LedgerError> {
-    for (id, said) in notes_of(store, task, Some("queued"))? {
+    for (id, said) in notes_of(store, task, Some(NOT_HANDED))? {
         if matches!(said.then, Then::Paused(_)) {
             let body = render(&Answered {
                 then: Then::Moved,
@@ -384,7 +390,7 @@ pub(crate) fn keep_moved(store: &Store, task: &TaskRow) -> Result<(), LedgerErro
 /// ids. A task that fails drops what is queued for it, and these wait for its reopen
 /// ([`put_back`]).
 pub(crate) fn queued(store: &Store, task: &TaskRow) -> Result<Vec<i64>, LedgerError> {
-    Ok(notes_of(store, task, Some("queued"))?
+    Ok(notes_of(store, task, Some(NOT_HANDED))?
         .into_iter()
         .map(|(id, _)| id)
         .collect())
@@ -403,9 +409,9 @@ pub(crate) fn put_back(store: &Store, ids: &[i64]) -> Result<(), LedgerError> {
 }
 
 /// The task is finished with these words as its result: the notes not yet pasted are moot.
-pub(crate) fn withdraw(store: &Store, task: &TaskRow, why: &str) -> Result<(), LedgerError> {
+pub(crate) fn withdraw(store: &mut Store, task: &TaskRow, why: &str) -> Result<(), LedgerError> {
     let reason = format!("T-{} {why}", task.number);
-    for (id, _) in notes_of(store, task, Some("queued"))? {
+    for (id, _) in notes_of(store, task, Some(NOT_HANDED))? {
         withdraw_message(store, id, &reason)?;
     }
     Ok(())

@@ -87,8 +87,10 @@ fn text_of(
 ) -> String {
     let id = message.id;
     let from = from_of(message);
+    // A chain's notes are about several tasks: its header names none.
     let task = message
         .task_number
+        .filter(|_| !is_chain(message, carried))
         .map_or_else(String::new, |number| format!(" · T-{number}"));
     let (whole, read_all) = words_of(message, carried, cf);
     let length = utf16_len(&whole);
@@ -115,6 +117,12 @@ fn words_of<'a>(
     cf: &CfWord,
 ) -> (Cow<'a, str>, String) {
     let id = message.id;
+    if is_chain(message, carried) {
+        return (
+            Cow::Owned(chain(message, carried, cf)),
+            format!("{cf} inbox"),
+        );
+    }
     match message.task_number.filter(|_| !carried.is_empty()) {
         None => (body_of(message, cf), format!("{cf} inbox read m-{id}")),
         Some(number) => (
@@ -122,6 +130,35 @@ fn words_of<'a>(
             format!("{cf} task get T-{number}"),
         ),
     }
+}
+
+/// Whether `message` is the first note of a chain (RS-25): a note of ConsensFlow's own that
+/// carries others, which only a chain's note does (`cf-ledger`'s `gather_chain`).
+fn is_chain(message: &MessageView, carried: &[MessageView]) -> bool {
+    message.kind == "note" && message.sender.is_none() && !carried.is_empty()
+}
+
+/// What a chain's paste says: how many notes it holds, and each, in the order written, on a
+/// line of its own that begins with its id and its task; a note's further lines are indented
+/// under it.
+fn chain(first: &MessageView, carried: &[MessageView], cf: &CfWord) -> String {
+    let mut notes: Vec<&MessageView> = [first].into_iter().chain(carried).collect();
+    notes.sort_by_key(|note| note.id);
+    let lines: Vec<String> = notes
+        .iter()
+        .map(|note| {
+            let task = note
+                .task_number
+                .map_or_else(String::new, |number| format!(" · T-{number}"));
+            let body = body_of(note, cf).replace('\n', "\n  ");
+            format!("m-{}{task}: {body}", note.id)
+        })
+        .collect();
+    format!(
+        "{} notes at once, a line each:\n{}",
+        notes.len(),
+        lines.join("\n")
+    )
 }
 
 /// The words of `row`, its commands started by `cf` where ConsensFlow wrote them
@@ -1265,8 +1302,32 @@ mod tests {
     }
 
     #[test]
+    fn a_chain_of_consensflows_notes_reads_as_one_message_a_line_each() {
+        // RS-25: the notes that wait for a chief together go in the first one's paste.
+        let first = message(9, Some(1), "T-1's window closed.".to_owned());
+        let carried = [
+            message(
+                10,
+                Some(2),
+                "T-2's window closed;\nits lock is free.".to_owned(),
+            ),
+            message(11, None, "The human changed the staff's rules.".to_owned()),
+        ];
+        assert_eq!(
+            delivery_text(&first, &carried, &CfWord::bare()),
+            "[ConsensFlow m-9 · note from ConsensFlow]\n3 notes at once, a line each:\nm-9 · T-1: T-1's window closed.\nm-10 · T-2: T-2's window closed;\n  its lock is free.\nm-11: The human changed the staff's rules."
+        );
+        assert!(is_paste_of(
+            &delivery_text(&first, &carried, &CfWord::bare()),
+            9,
+            None
+        ));
+    }
+
+    #[test]
     fn a_message_that_carries_others_goes_whole_by_the_words_of_all_of_them() {
-        let carrier = message(9, Some(1), "x".repeat(8_000));
+        let mut carrier = message(9, Some(1), "x".repeat(8_000));
+        carrier.kind = "task".to_owned();
         let carried = [message(8, Some(1), "y".repeat(8_000))];
         // Its own words are short of the limit; with the row it carries, and the
         // line over the row, they are not.

@@ -248,6 +248,13 @@ const NO_CAUSE_QUOTED: &str = "a launch that did not start is told by its stage 
 /// [`NO_CAUSE_QUOTED`] in a test that [`ACCEPT_IN_THE_FAIL_NOTE`] already departs in.
 const ACCEPT_AND_NO_CAUSE: &str = "the note that T-1 failed says how to reopen it and then `, or accept it with what you checked: cf task accept T-1 \"…\"`, where Node's ends at the reopen (a failed task whose work is done is accepted by the chief on its word); and the reason of the launch that did not start says its stage and the kind of failure its producer typed, and no word of the adapter's or the host's, which the log holds, masked, in a line of its own, where Node's reason quoted them (T-1328)";
 
+/// [`ACCEPT_AND_NO_CAUSE`] in a test whose two failures wait for the chief together: they
+/// go as one chain (RS-25).
+const ACCEPT_AND_NO_CAUSE_CHAINED: &str = "the note that T-1 failed says how to reopen it and then `, or accept it with what you checked: cf task accept T-1 \"…\"`, where Node's ends at the reopen (a failed task whose work is done is accepted by the chief on its word); the reason of the launch that did not start says its stage and the kind of failure its producer typed, and no word of the adapter's or the host's, which the log holds, masked, in a line of its own, where Node's reason quoted them (T-1328); and the two notes of failure, which wait for the chief together, go in one paste, the first one's, a line each under `2 notes at once, a line each:` and a header that names no task (a chain, RS-25), where Node pastes each on its own";
+
+/// Notes of ConsensFlow's own that wait for the chief together go in one paste (RS-25).
+const CHAINED: &str = "the notes of ConsensFlow's own that wait for the chief together (the human cancelled three tasks) go in one paste, the first one's, a line each under `3 notes at once, a line each:` and a header that names no task (a chain, RS-25), where Node pastes each on its own, one turn of the chief's a note";
+
 /// [`NO_CAUSE_QUOTED`] in a test that already departs from Node's trace because a member runs on
 /// its own model, with no saved agent to lose (harness-models).
 const NO_AGENT_AND_NO_CAUSE: &str = "a member runs on its own model, with no saved agent the human could delete: a session's window opened again opens, where Node's said its agent was gone; and the reason of a window that did not open says its stage and the kind of failure, and no word of the host's, which the log holds, masked, where Node's reason quoted them (T-1328)";
@@ -509,8 +516,12 @@ const DEPARTED: &[(&str, &str)] = &[
         "the note that asks the chief where things stand is written only when the engine pastes it, with the chief at rest, so no `cf inbox read` in the chief's turn can receive it and let the switch go without its answer (T-351): its `message.sent` comes in the pass after the switch was asked, where Node wrote the note when the switch was asked",
     ),
     (
+        "stops its window: an agent at work on it is interrupted, the window closes, and the session stays",
+        CHAINED,
+    ),
+    (
         "begins the preparation of every launch of a pass before it writes the failure of the first",
-        ACCEPT_AND_NO_CAUSE,
+        ACCEPT_AND_NO_CAUSE_CHAINED,
     ),
     (
         "fails what was given to a member on it by name, and its requester hears why",

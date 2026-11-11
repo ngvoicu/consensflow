@@ -823,7 +823,7 @@ fn a_resume_keeps_for_the_chief_the_word_that_a_program_the_close_could_not_end_
         given.iter().all(|text| !text.contains(" is paused: ")),
         "{given:?}"
     );
-    // The first is in its window, and the next waits for its turn to end.
+    // Both are in its window, in one paste: a chain is one message (RS-25).
     let told: Vec<(String, String)> = context
         .inbox(tiers.id("chief"))
         .into_iter()
@@ -840,8 +840,18 @@ fn a_resume_keeps_for_the_chief_the_word_that_a_program_the_close_could_not_end_
         told,
         [
             ("delivered".to_owned(), warning(1, "zeus-amber-pine")),
-            ("queued".to_owned(), warning(2, "diana-brisk-birch")),
+            ("delivered".to_owned(), warning(2, "diana-brisk-birch")),
         ]
+    );
+    let chained: Vec<&String> = given
+        .iter()
+        .filter(|text| text.contains(" resumed. Before that, "))
+        .collect();
+    assert_eq!(chained.len(), 1, "{chained:?}");
+    assert!(
+        chained[0].contains("2 notes at once, a line each:"),
+        "{}",
+        chained[0]
     );
 }
 
