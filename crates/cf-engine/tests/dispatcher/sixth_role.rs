@@ -109,3 +109,42 @@ fn a_task_for_a_role_nobody_holds_any_more_waits_and_says_it_by_the_roles_name()
         );
     });
 }
+
+#[test]
+fn the_chiefs_staff_table_says_no_tier_for_a_member_whose_roles_have_none() {
+    with_a_scout(|| {
+        let context = Context::new();
+        context
+            .ledger
+            .borrow()
+            .sqlite()
+            .execute_batch("PRAGMA ignore_check_constraints = ON")
+            .unwrap();
+        let project = context
+            .open_project(json!({
+                "directory": "/work/app",
+                "name": "app",
+                "chief": { "harness": "claude-code", "model": "apollo" },
+                "staff": [
+                    // Kept in the lowest tier, as the ledger keeps one given none.
+                    { "agent": "argus", "harness": "claude-code", "roles": ["scout"], "tier": "light" },
+                    { "agent": "zeus", "harness": "claude-code", "roles": ["worker", "scout"], "tier": "complex" },
+                    { "agent": "hera", "harness": "claude-code", "roles": ["worker"], "tier": "standard" },
+                ],
+            }))
+            .unwrap()
+            .expect("the project");
+        let tiers: Vec<(String, Option<&str>)> = cf_engine::roles::staff_of(&project)
+            .into_iter()
+            .map(|row| (row.name, row.work_tier.map(|tier| tier.as_str())))
+            .collect();
+        assert_eq!(
+            tiers,
+            [
+                ("argus".to_owned(), None),
+                ("zeus".to_owned(), Some("complex")),
+                ("hera".to_owned(), Some("standard")),
+            ]
+        );
+    });
+}

@@ -4663,7 +4663,7 @@ test('adds a member as a tester, or as one more role of a member, in the place a
   await expect(page.locator('#status')).toHaveText('@zeus is Tester now too.')
 })
 
-test("a role the daemon's table alone names is offered, listed and added in its place among the roles", async ({
+test("a role the daemon's table alone names is offered, listed and added in its place among the roles, with no tier where its row has none", async ({
   page,
 }) => {
   const data = model()
@@ -4680,13 +4680,31 @@ test("a role the daemon's table alone names is offered, listed and added in its 
     },
     ...ROLES.slice(3),
   ]
-  data.boards[1].lanes.push({
-    participant: participant(9, 'argus', 'scout', { harness: 'codex', tier: 'light' }),
-    tasks: [],
-    activity: { state: 'idle' },
-    pane: { id: 'p1-argus', generation: 1 },
-  })
+  data.boards[1].lanes.push(
+    {
+      participant: participant(9, 'argus', 'scout', { harness: 'codex', tier: 'light' }),
+      tasks: [],
+      activity: { state: 'idle' },
+      pane: { id: 'p1-argus', generation: 1 },
+    },
+    {
+      // A worker that scouts too keeps its tier, for its work.
+      participant: participant(10, 'castor', 'worker', {
+        harness: 'codex',
+        roles: ['worker', 'scout'],
+        tier: 'complex',
+      }),
+      tasks: [],
+      activity: { state: 'idle' },
+      pane: { id: 'p1-castor', generation: 1 },
+    },
+  )
   await open(page, data)
+  // The board says no tier for a member whose roles have none, and its tier for one with both.
+  const identityOf = (roles) => page.locator(`span:has(> .meta-role:text-is("${roles}"))`).first()
+  await expect(identityOf('scout')).toBeVisible()
+  await expect(identityOf('scout').locator('.meta-tier')).toHaveCount(0)
+  await expect(identityOf('worker+scout').locator('.meta-tier')).toHaveText('complex')
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
@@ -4700,8 +4718,13 @@ test("a role the daemon's table alone names is offered, listed and added in its 
   const table = dialog.getByRole('table', { name: 'On the staff' })
   await expect(table.locator('tbody tr').last()).toHaveText(/@argus.*Field scout/)
   await expect(table.locator('tr[data-handle="argus"][data-role="scout"]')).toHaveCount(1)
-  // A scout is no image agent: any harness installed here may scout.
-  await pickMember(dialog, { role: 'scout', harness: 'Devin', model: 'swe-2', tier: 'light' })
+  await expect(table.locator('tr[data-handle="argus"]')).not.toContainText('Light work')
+  await expect(table.locator('tr[data-handle="castor"][data-role="worker"]')).toContainText(
+    'Complex work',
+  )
+  // A scout is no image agent: any harness installed here may scout, and it is asked no tier.
+  await pickMember(dialog, { role: 'scout', harness: 'Devin', model: 'swe-2' })
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
   await expect
     .poll(() => calls(page, 'member.add'))
@@ -4711,11 +4734,13 @@ test("a role the daemon's table alone names is offered, listed and added in its 
         harness: 'devin',
         model: 'swe-2',
         effort: null,
-        tier: 'light',
         roles: ['scout'],
       },
     ])
   await expect(page.locator('#status')).toHaveText('@swe-2 joined the staff as Field scout.')
+  // Back to a role with tiers: the tier is asked for again.
+  await dialog.getByLabel('Role').selectOption('worker')
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
 })
 
 test('an image designer is picked on Codex alone, and Add member says so when Codex is not here', async ({
@@ -10531,17 +10556,19 @@ test('resizes no terminal when the projects fold away and come back: the board t
   expect(await resizes()).toBe(1)
 })
 
-test('names the role a task waits for when the first read of the roles was refused', async ({
+test('names the role a task waits for on every board it shows, though every read of the harnesses is refused', async ({
   page,
 }) => {
   const data = model()
-  data.missingRefused = 1
+  data.missingRefused = 1000
   data.boards[1].open.push(
     task(7, 'Draw the logo', 'open', 'chief', null, 1, { pool: 'designer', tier: null }),
   )
   await open(page, data)
-  // The page reads the roles again with the board, and says the role by its name.
+  // The roles come with the board: a board shown is one whose roles are read.
   await expect(page.locator('button.card[data-task="7"]')).toContainText('for an image designer')
+  await expect.poll(() => calls(page, 'harnesses.missing')).not.toEqual([])
+  expect(await page.evaluate(() => window.__answered.includes('harnesses.missing'))).toBe(false)
 })
 
 test('folds the panels for this page when the browser keeps no storage', async ({ page }) => {

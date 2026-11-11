@@ -221,3 +221,68 @@ fn the_ledgers_checks_hold_the_tables_roles_and_a_new_row_needs_a_migration() {
         assert!(with_scout.contains(&"scout".to_owned()), "{with_scout:?}");
     });
 }
+
+/// A member as JSON gives it: on claude-code, as `agent`, in `roles`, with the fields of
+/// `more` (a tier, or none).
+fn member_json(agent: &str, roles: &[&str], more: serde_json::Value) -> serde_json::Value {
+    let mut member = json!({ "harness": "claude-code", "modelName": agent, "roles": roles });
+    member
+        .as_object_mut()
+        .expect("a member")
+        .extend(more.as_object().expect("its fields").clone());
+    member
+}
+
+#[test]
+fn a_member_whose_roles_have_no_tier_is_given_none_and_kept_in_the_lowest() {
+    with_a_scout(|| {
+        // Given no tier, a scout alone is kept in the lowest, as an image designer is:
+        // none of its tasks has a tier, so it decides nothing.
+        let scout = NewMember::from_json(&member_json("argus", &["scout"], json!({})))
+            .expect("a scout takes no tier");
+        assert_eq!(scout.tier, "light");
+        let dir = tempfile::tempdir().expect("a home");
+        let mut ledger =
+            open_ledger(&dir.path().join("consensflow.db"), Options::default()).expect("a ledger");
+        ledger
+            .sqlite()
+            .execute_batch("PRAGMA ignore_check_constraints = ON")
+            .expect("the CHECKs off");
+        let project = project(&mut ledger, vec![scout]).expect("a project with a scout");
+        let argus = project
+            .participants
+            .iter()
+            .find(|participant| participant.role == "scout")
+            .expect("the scout");
+        assert_eq!(argus.tier.as_deref(), Some("light"));
+        // A role with tiers beside it asks for one, which is kept for the work of that role.
+        for roles in [&["worker"][..], &["scout", "worker"][..]] {
+            assert_eq!(
+                said(NewMember::from_json(&member_json("zeus", roles, json!({}))).unwrap_err()),
+                (
+                    "invalid-tier".to_owned(),
+                    "a tier is critical, complex, standard, light, not undefined".to_owned()
+                ),
+                "{roles:?}"
+            );
+        }
+        let both = NewMember::from_json(&member_json(
+            "zeus",
+            &["scout", "worker"],
+            json!({ "tier": "complex" }),
+        ))
+        .expect("a scout and a worker");
+        assert_eq!((both.roles.as_slice(), both.tier.as_str()), (&["scout".to_owned(), "worker".to_owned()][..], "complex"));
+    });
+}
+
+#[test]
+fn the_image_designer_given_no_tier_is_kept_in_the_lowest_as_its_row_says() {
+    // The image designer's row has no tier: read from JSON with none, it is kept where the
+    // page's Add member keeps it, in the lowest.
+    let designer = NewMember::from_json(&json!({
+        "harness": "codex", "roles": ["designer"], "designer": true
+    }))
+    .expect("an image designer takes no tier");
+    assert_eq!((designer.tier.as_str(), designer.designer), ("light", true));
+}
