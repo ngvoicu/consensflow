@@ -543,6 +543,19 @@ pub struct Decline {
     pub members_only: bool,
 }
 
+/// What a window's extension says of a compaction it asked its harness for
+/// ([`Window::compaction_asked`]): no word (the file is absent, or is another launch's or another
+/// conversation's), the word with the time it says it was written, or a word that is there and
+/// cannot be read or parsed this time (a read that met a rename, a half-written file). Only an
+/// absent word says the compaction is over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CompactionWord {
+    #[default]
+    Absent,
+    Asked(i64),
+    Unreadable,
+}
+
 /// What a window's harness says of a dialog of its own being open, beside the screen
 /// ([`Window::dialog_sign`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -645,16 +658,15 @@ pub trait Window {
     fn compacting(&self, _screen: &[String]) -> bool {
         false
     }
-    /// When, in milliseconds since the epoch, the window's own extension said it asked its
-    /// harness to compact the conversation, and has not said the compaction over: the one
-    /// ConsensFlow's extension asked for at a rest for the project's size (Pi's
-    /// `compacting/<launch>.json`). None where it says none, where its word is another
-    /// conversation's or another launch's, and from a harness that says nothing of the kind
-    /// (the default). The engine keeps the close of a done task's window waiting for it,
-    /// up to a bound of its own ([`Dispatcher::still_drawing`]); the word is told stale by
-    /// its age there.
-    fn compaction_asked(&self) -> Option<i64> {
-        None
+    /// What the window's own extension says of the compaction it asked its harness for at a
+    /// rest for the project's size, and has not said over (Pi's `settled/<launch>.compacting.json`):
+    /// absent where it says none, where its word is another conversation's or another
+    /// launch's, and from a harness that says nothing of the kind (the default); the word's
+    /// time, only to tell one word from another; or unreadable, a word that is there and cannot
+    /// be read this time. The engine keeps the close of a done task's window waiting for it,
+    /// up to a bound of its own ([`Dispatcher::still_drawing`]).
+    fn compaction_asked(&self) -> CompactionWord {
+        CompactionWord::Absent
     }
     /// What the window's harness says of a dialog of its own being open, by the look
     /// `observed`: the window's own question tool, where it waits on one, is no such dialog

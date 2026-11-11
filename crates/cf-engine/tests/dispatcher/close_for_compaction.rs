@@ -14,7 +14,7 @@ use cf_harness::contract::Pane;
 use cf_harness::seams::Time;
 use serde_json::json;
 
-use crate::fixtures::{hold_notes, Tiers};
+use crate::fixtures::{hold_notes, native_of, Tiers};
 
 /// The longest the window waits for a compaction from its word: `windows.rs`'
 /// `COMPACTION_HOLD_MS`.
@@ -163,24 +163,6 @@ fn a_new_word_is_a_new_first_sight_with_a_bound_of_its_own() {
     context.advance(1);
     context.pass().unwrap();
     assert_eq!(context.host.killed(), [window]);
-    context.close();
-}
-
-#[test]
-fn a_stale_word_holds_nothing() {
-    let context = Context::new();
-    let project = context.with_staff(&["zeus"]);
-    let window = at_work(&context, project.id);
-    // A Pi that died, or hung, in a compaction asked for the bound ago.
-    word(&context, Some(BOUND_MS));
-    context.adapter.answer("zeus", "Parser done");
-    context.pass().unwrap();
-    context.pass().unwrap();
-    assert_eq!(
-        context.host.killed(),
-        [window],
-        "closed in the step that took the result"
-    );
     context.close();
 }
 
@@ -413,4 +395,316 @@ fn a_reopen_past_the_bound_with_the_word_standing_closes_no_window_under_its_tas
     assert_eq!(context.task(project.id, 1).task.state, "working");
     assert!(open(&context, &window));
     context.close();
+}
+
+/// The word's file is there and cannot be read this time (or no word yet): `Some(true)`; the
+/// word as it was: `Some(false)`.
+fn unreadable(context: &Context, yes: bool) {
+    context
+        .adapter
+        .with("zeus", |agent| agent.compaction_unreadable = yes);
+}
+
+/// A read that fails is not a word that is gone (T-1486): the first sight stays, the hold is not
+/// restarted by the next good read, and the close does not cut the compaction at once.
+#[test]
+fn a_read_that_fails_keeps_the_first_sight_and_the_next_good_read_does_not_start_a_new_bound() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let window = at_work(&context, project.id);
+    answers_compacting(&context);
+    context.advance(200_000);
+    context.pass().unwrap();
+    // The file is there and cannot be read for a look or two.
+    unreadable(&context, true);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(open(&context, &window), "a failed read ends nothing");
+    unreadable(&context, false);
+    context.advance(BOUND_MS - 200_000 - 1);
+    context.pass().unwrap();
+    assert!(
+        open(&context, &window),
+        "a millisecond before the first sight's bound"
+    );
+    context.advance(1);
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.killed(),
+        [window],
+        "the bound is the first sight's, not a fresh one from the good read"
+    );
+    context.close();
+}
+
+/// With no first sight yet, a word that cannot be read holds the window as drawing for the look and
+/// is read again at the next; the bound runs from the first look that met it.
+#[test]
+fn a_word_unreadable_at_the_first_look_holds_the_window_and_is_bounded_from_that_look() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let window = at_work(&context, project.id);
+    unreadable(&context, true);
+    context.adapter.answer("zeus", "Parser done");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(open(&context, &window), "held for the look");
+    assert_eq!(context.task(project.id, 1).task.state, "done");
+    context.advance(BOUND_MS - 1);
+    context.pass().unwrap();
+    assert!(open(&context, &window), "a millisecond before the bound");
+    context.advance(1);
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.killed(),
+        [window],
+        "a file that stays unreadable is bounded"
+    );
+    context.close();
+}
+
+/// A word unreadable at the first look and read at the next goes on from that first look.
+#[test]
+fn a_word_that_becomes_readable_after_an_unreadable_first_look_keeps_that_look_s_bound() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let window = at_work(&context, project.id);
+    unreadable(&context, true);
+    context.adapter.answer("zeus", "Parser done");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.advance(100_000);
+    unreadable(&context, false);
+    word(&context, Some(0));
+    context.pass().unwrap();
+    assert!(open(&context, &window));
+    context.advance(BOUND_MS - 100_000 - 1);
+    context.pass().unwrap();
+    assert!(open(&context, &window));
+    context.advance(1);
+    context.pass().unwrap();
+    assert_eq!(context.host.killed(), [window]);
+    context.close();
+}
+
+/// Only a file that is absent ends the hold: after a failed read the word is taken back, and the
+/// window closes in that step.
+#[test]
+fn only_an_absent_word_ends_the_hold_after_a_failed_read() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let window = at_work(&context, project.id);
+    answers_compacting(&context);
+    unreadable(&context, true);
+    context.pass().unwrap();
+    assert!(open(&context, &window));
+    unreadable(&context, false);
+    word(&context, None);
+    context.pass().unwrap();
+    assert_eq!(context.host.killed(), [window]);
+    context.close();
+}
+
+/// What the chief's reopen, a `cf tell` of its own or an answer to a question of the worker's
+/// puts to the window of a task that was reopened during the compaction.
+#[derive(Clone, Copy, Debug)]
+enum Words {
+    Reopen,
+    Tell,
+    Answer,
+}
+
+const REOPEN: &str = "Fix the tests";
+const TELL: &str = "Use the v2 grammar";
+const ANSWER: &str = "Use the strict grammar";
+
+impl Words {
+    fn text(self) -> &'static str {
+        match self {
+            Words::Reopen => REOPEN,
+            Words::Tell => TELL,
+            Words::Answer => ANSWER,
+        }
+    }
+}
+
+/// The extension compacts at a rest and Pi answers Busy to the words the chief sends, each
+/// queued for the window (no attempt spent). `Reopen` and `Tell`: zeus answered, T-1 is done and
+/// the chief reopens it (a task in hand keeps its window) and tells it. `Answer`: zeus asked the
+/// chief a question (T-1 waits, a task that cannot be reopened) and is at rest compacting when
+/// the chief answers.
+fn queued_for_the_window(context: &Context, project: i64, words: Words) {
+    if let Words::Answer = words {
+        // The turn ends on a question to the chief, which the engine puts to it as one.
+        word(context, Some(0));
+        context.adapter.answer(
+            "zeus",
+            "Question for you: which grammar should I use? I'm waiting for your answer.",
+        );
+        context.pass().unwrap();
+        context.pass().unwrap();
+        assert_eq!(context.task(project, 1).task.state, "waiting");
+        let question = context
+            .inbox(context.id(project, "chief"))
+            .into_iter()
+            .find(|message| message.kind == "question")
+            .expect("its question")
+            .id;
+        context.advance(10_000);
+        context.answer(project, question, ANSWER);
+    } else {
+        answers_compacting(context);
+        context.advance(10_000);
+        context
+            .ledger
+            .borrow_mut()
+            .reopen_task(project, 1, "chief", REOPEN)
+            .unwrap();
+        if let Words::Tell = words {
+            context
+                .ledger
+                .borrow_mut()
+                .tell_queued(project, 1, "chief", TELL)
+                .unwrap();
+        }
+    }
+    for _ in 0..4 {
+        context.pass().unwrap();
+        context.advance(15_000);
+    }
+}
+
+/// Each of the three kinds of words, sent to a reopened task during the compaction, goes into
+/// the window once after it, and not before.
+#[test]
+fn a_tell_and_an_answer_to_a_reopened_task_go_into_the_same_window_once_after_the_compaction() {
+    for words in [Words::Tell, Words::Answer] {
+        let context = Context::new();
+        let project = context.with_staff(&["zeus"]);
+        let window = at_work(&context, project.id);
+        let opened = context.host.opened().len();
+        queued_for_the_window(&context, project.id, words);
+        let text = words.text();
+        assert_eq!(
+            pastes(&context, text),
+            0,
+            "{words:?}: nothing while it compacts"
+        );
+        assert!(
+            open(&context, &window),
+            "{words:?}: a task in hand keeps its window"
+        );
+
+        word(&context, None);
+        for _ in 0..4 {
+            context.pass().unwrap();
+            context.advance(15_000);
+        }
+        assert_eq!(pastes(&context, text), 1, "{words:?}: once, after it");
+        assert!(open(&context, &window), "{words:?}: the same window");
+        assert_eq!(
+            context.host.opened().len(),
+            opened,
+            "{words:?}: no other window"
+        );
+        for _ in 0..3 {
+            context.pass().unwrap();
+        }
+        assert_eq!(pastes(&context, text), 1, "{words:?}: and not again");
+        context.close();
+    }
+}
+
+/// T-1487 step 1: the Pi window's process ends by itself while the words wait for it (Pi
+/// answered Busy). A reopened task (and a `cf tell` to it) is queued, in no window's hand: the
+/// engine opens the window again on the same conversation with the words, once, and pauses
+/// nothing. An answer's task waits in the window: it is paused, the chief is told once, and the
+/// resume's words carry the answer into the new window, once, on the same conversation.
+#[test]
+fn a_window_that_ends_by_itself_under_queued_words_loses_and_doubles_none_of_them() {
+    for words in [Words::Reopen, Words::Tell, Words::Answer] {
+        let context = Context::new();
+        context.host.exits_showing(Some(1), None, None);
+        let project = context.with_staff(&["zeus"]);
+        let window = at_work(&context, project.id);
+        let native = native_of(&context, context.id(project.id, "zeus"));
+        queued_for_the_window(&context, project.id, words);
+        let text = words.text();
+        let before = context.host.opened().len();
+        assert_eq!(pastes(&context, text), 0, "{words:?}");
+        let state = |context: &Context| context.task(project.id, 1).task.state;
+        let told = |context: &Context| {
+            context
+                .inbox(context.id(project.id, "chief"))
+                .into_iter()
+                .filter(|message| message.kind == "note" && message.body.contains("is paused: "))
+                .count()
+        };
+
+        // The process ends by itself; its extension's word goes with it.
+        context.exit("zeus");
+        word(&context, None);
+        let paused = matches!(words, Words::Answer);
+        if paused {
+            for _ in 0..3 {
+                context.pass().unwrap();
+            }
+            assert_eq!(state(&context), "paused", "{words:?}");
+            assert_eq!(told(&context), 1, "{words:?}: the chief is told once");
+            assert_eq!(
+                context.host.opened().len(),
+                before,
+                "{words:?}: no window yet"
+            );
+            context.resume_task(project.id, 1, "Carry on");
+        } else {
+            assert_eq!(
+                told(&context),
+                0,
+                "{words:?}: nothing is paused, nothing to tell"
+            );
+        }
+        for _ in 0..4 {
+            context.pass().unwrap();
+            context.advance(15_000);
+        }
+        assert_eq!(state(&context), "working", "{words:?}");
+        assert_eq!(
+            context.host.opened().len(),
+            before + 1,
+            "{words:?}: one new window"
+        );
+        assert_ne!(context.host.last("zeus").unwrap().pane, window, "{words:?}");
+        let launch = context
+            .adapter
+            .prepared()
+            .into_iter()
+            .rev()
+            .find(|launch| {
+                launch["participant"]["handle"]
+                    .as_str()
+                    .is_some_and(|handle| handle.starts_with("zeus"))
+            })
+            .expect("the new window's launch");
+        assert_eq!(
+            launch["resume"].as_str(),
+            native.as_deref(),
+            "{words:?}: on the same conversation"
+        );
+        assert_eq!(
+            pastes(&context, text),
+            1,
+            "{words:?}: the words went in once"
+        );
+        assert_eq!(
+            told(&context),
+            usize::from(paused),
+            "{words:?}: told no more"
+        );
+        for _ in 0..3 {
+            context.pass().unwrap();
+        }
+        assert_eq!(pastes(&context, text), 1, "{words:?}: and not again");
+        context.close();
+    }
 }

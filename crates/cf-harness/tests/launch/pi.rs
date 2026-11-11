@@ -25,8 +25,8 @@ use std::sync::Arc;
 use cf_base::env::Env;
 use cf_base::path;
 use cf_harness::contract::{
-    Adapter, Admission, Agent, Held, Launch, LaunchId, Pane, Prepared, Readiness, Records, Specs,
-    Work, NOT_ADMITTED,
+    Adapter, Admission, Agent, CompactionWord, Held, Launch, LaunchId, Pane, Prepared, Readiness,
+    Records, Specs, Work, NOT_ADMITTED,
 };
 use cf_harness::pi::{prepare_extension, Extension, PiAdapter};
 use cf_harness::records::{Item, Options, PiSettlement, Quota, Reading, Record, Role, Settlement};
@@ -694,15 +694,25 @@ fn a_window_says_when_its_extension_asked_for_a_compaction_while_the_word_stands
     let (adapter, _fakes) = adapter_with(&home, Rc::clone(&stand) as Rc<dyn Records>);
     let plan = prepare(&adapter, &Request::default()).unwrap();
     let (window, native) = (plan.window, plan.native_session.unwrap());
-    assert_eq!(window.compaction_asked(), None, "before any word");
+    assert_eq!(
+        window.compaction_asked(),
+        CompactionWord::Absent,
+        "before any word"
+    );
     asks_for_a_compaction(&home, &native, 1_790_000_000_000);
-    assert_eq!(window.compaction_asked(), Some(1_790_000_000_000));
+    assert_eq!(
+        window.compaction_asked(),
+        CompactionWord::Asked(1_790_000_000_000)
+    );
     // The window was switched to another conversation (a /new or /resume): the word was the
     // earlier one's.
     window.follow("0199a6f0-4cc1-7d3e-9f7a-3c5b2e1d0a98");
-    assert_eq!(window.compaction_asked(), None);
+    assert_eq!(window.compaction_asked(), CompactionWord::Absent);
     window.follow(&native);
-    assert_eq!(window.compaction_asked(), Some(1_790_000_000_000));
+    assert_eq!(
+        window.compaction_asked(),
+        CompactionWord::Asked(1_790_000_000_000)
+    );
     // Taken back as the compaction ends.
     let settled = path::join(&[&home.launch_folder(), "settled"]);
     fs::remove_file(path::join(&[
@@ -710,7 +720,7 @@ fn a_window_says_when_its_extension_asked_for_a_compaction_while_the_word_stands
         &format!("{LAUNCH}.compacting.json"),
     ]))
     .unwrap();
-    assert_eq!(window.compaction_asked(), None);
+    assert_eq!(window.compaction_asked(), CompactionWord::Absent);
 }
 
 #[test]

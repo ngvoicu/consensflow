@@ -12,7 +12,7 @@ use cf_base::file::read_file;
 use cf_base::json::from_slice_lossy;
 use cf_base::path;
 
-use crate::contract::{LaunchId, Pane, PaneHost};
+use crate::contract::{CompactionWord, LaunchId, Pane, PaneHost};
 use crate::shared::launch_files::launch_folder;
 
 pub use send::{send, Target};
@@ -114,24 +114,36 @@ impl Channel {
         }
     }
 
-    /// When the extension said it asked Pi to compact the conversation `session` for the
-    /// project's size, in milliseconds since the epoch, and has not taken its word back
-    /// (`compacting/<launch>.json` beside the settlement evidence, written before the ask and
-    /// removed when the compaction ends, completed, failed or aborted). None where there is
-    /// no such file, where it is no JSON, where it is another launch's or another
-    /// conversation's, or where the system will not read it: a word that cannot be read holds
-    /// nothing, and the close goes as it always did.
-    pub(super) fn compaction_asked(&self, session: &str) -> Option<i64> {
+    /// What the extension says of the compaction it asked Pi for, for the project's size, in
+    /// the conversation `session` (`<launch>.compacting.json` beside the settlement evidence,
+    /// written before the ask and removed when the compaction ends, completed, failed or
+    /// aborted). Absent only where the file is absent (ENOENT) or is another launch's or
+    /// another conversation's; the word's time where it is ours; unreadable where the file is
+    /// there and the system will not read it, or it is no word (a read that met the extension's
+    /// rename on Windows, a half-written file): that is not a compaction that is over.
+    pub(super) fn compaction_asked(&self, session: &str) -> CompactionWord {
         let file = path::join(&[
             &self.settled,
             &format!("{}.compacting.json", self.launch_id),
         ]);
-        let bytes = read_file(Path::new(&file)).ok()?;
-        let word = from_slice_lossy(&bytes).ok()?;
-        let ours = word.get("launchId")?.as_str()? == self.launch_id
-            && word.get("sessionId")?.as_str()? == session;
-        let at = word.get("startedAt")?.as_i64()?;
-        ours.then_some(at)
+        let bytes = match read_file(Path::new(&file)) {
+            Ok(bytes) => bytes,
+            Err(failed) if failed.code() == "ENOENT" => return CompactionWord::Absent,
+            Err(_) => return CompactionWord::Unreadable,
+        };
+        let Ok(word) = from_slice_lossy(&bytes) else {
+            return CompactionWord::Unreadable;
+        };
+        let text = |name: &str| word.get(name).and_then(|value| value.as_str());
+        let (Some(launch), Some(conversation)) = (text("launchId"), text("sessionId")) else {
+            return CompactionWord::Unreadable;
+        };
+        if launch != self.launch_id || conversation != session {
+            return CompactionWord::Absent;
+        }
+        word.get("startedAt")
+            .and_then(|at| at.as_i64())
+            .map_or(CompactionWord::Unreadable, CompactionWord::Asked)
     }
 
     /// The conversation the extension says the window shows (it writes it

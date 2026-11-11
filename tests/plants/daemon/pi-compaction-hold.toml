@@ -9,7 +9,7 @@
 # as that compaction ends, however it ends and at shutdown; the Pi window says it
 # (`Window::compaction_asked`); and the engine holds the close (`Dispatcher::compaction_held`, in
 # `still_drawing`, so the session's next task waits as for a screen) while it stands, at most
-# `COMPACTION_HOLD_MS` from the word's time. Each plant breaks one half and the test written for it
+# `COMPACTION_HOLD_MS` from the engine's first sight of it (a read that fails is not a word that is gone). Each plant breaks one half and the test written for it
 # fails.
 #
 # Every name holds `pi compaction hold`, so `npm run plants:daemon -- "pi compaction hold"` runs
@@ -28,8 +28,8 @@ runs = ["pch-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "        !seen.stale && mono - seen.since < COMPACTION_HOLD_MS"
-replace = "        !seen.stale && mono - seen.since < 0"
+find = "        mono - seen.since < COMPACTION_HOLD_MS"
+replace = "        mono - seen.since < 0"
 
 [[plant]]
 name = "pi compaction hold: the engine holds for as long as the word stands, with no bound"
@@ -38,8 +38,8 @@ runs = ["pch-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "        !seen.stale && mono - seen.since < COMPACTION_HOLD_MS"
-replace = "        !seen.stale && mono - seen.since < i64::MAX"
+find = "        mono - seen.since < COMPACTION_HOLD_MS"
+replace = "        mono - seen.since < i64::MAX"
 
 [[plant]]
 name = "pi compaction hold: the bound is counted on the wall clock, which a step of it moves"
@@ -48,8 +48,8 @@ runs = ["pch-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "let (wall, mono) = (self.now(), self.seams.time.monotonic_ms());"
-replace = "let (wall, mono) = (self.now(), self.now());"
+find = "let mono = self.seams.time.monotonic_ms();"
+replace = "let mono = self.now();"
 
 [[plant]]
 name = "pi compaction hold: the bound is counted from the word's own time"
@@ -58,8 +58,12 @@ runs = ["pch-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "                    since: mono,"
-replace = "                    since: mono - (wall - asked).max(0),"
+find = """            (CompactionWord::Asked(at), _) => CompactionSeen {
+                asked: Some(at),
+                since: mono,"""
+replace = """            (CompactionWord::Asked(at), _) => CompactionSeen {
+                asked: Some(at),
+                since: mono - (self.now() - at).max(0),"""
 
 [[plant]]
 name = "pi compaction hold: a word ahead of the clock is counted from its time once the clock reaches it"
@@ -68,18 +72,12 @@ runs = ["pch-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "                    since: mono,"
-replace = "                    since: mono + (asked - wall).max(0),"
-
-[[plant]]
-name = "pi compaction hold: a word older than the bound is held"
-meant = "a_stale_word_holds_nothing"
-runs = ["pch-engine"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/windows.rs"
-find = "                    stale: wall - asked >= COMPACTION_HOLD_MS,"
-replace = "                    stale: false,"
+find = """            (CompactionWord::Asked(at), _) => CompactionSeen {
+                asked: Some(at),
+                since: mono,"""
+replace = """            (CompactionWord::Asked(at), _) => CompactionSeen {
+                asked: Some(at),
+                since: mono + (at - self.now()).max(0),"""
 
 [[plant]]
 name = "pi compaction hold: another word is taken for the one seen"
@@ -88,8 +86,8 @@ runs = ["pch-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "            Some(seen) if seen.asked == asked => seen,"
-replace = "            Some(seen) => seen,"
+find = "if seen.asked.is_none_or(|was| was == at) =>"
+replace = "if true =>"
 
 [[plant]]
 name = "pi compaction hold: the engine does not hold the window of the next task of the session"
@@ -118,8 +116,8 @@ runs = ["pch-channel"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/channel.rs"
-find = '''            && word.get("sessionId")?.as_str()? == session;'''
-replace = '''            && word.get("sessionId")?.as_str().is_some();'''
+find = "if launch != self.launch_id || conversation != session {"
+replace = "if launch != self.launch_id {"
 
 [[plant]]
 name = "pi compaction hold: the channel takes another launch's word"
@@ -128,10 +126,66 @@ runs = ["pch-channel"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/channel.rs"
-find = '''        let ours = word.get("launchId")?.as_str()? == self.launch_id
-            && word'''
-replace = '''        let ours = word.get("launchId")?.as_str().is_some()
-            && word'''
+find = "if launch != self.launch_id || conversation != session {"
+replace = "if conversation != session {"
+
+[[plant]]
+name = "pi compaction hold: a read that fails ends the hold and erases the first sight"
+meant = "a_read_that_fails_keeps_the_first_sight_and_the_next_good_read_does_not_start_a_new_bound"
+runs = ["pch-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            (CompactionWord::Unreadable, Some(seen)) => seen,"
+replace = """            (CompactionWord::Unreadable, Some(_)) => {
+                part.compaction_seen = None;
+                return false;
+            }"""
+
+[[plant]]
+name = "pi compaction hold: a word unreadable at the first look holds nothing"
+meant = "a_word_unreadable_at_the_first_look_holds_the_window_and_is_bounded_from_that_look"
+runs = ["pch-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = """            (CompactionWord::Unreadable, None) => CompactionSeen {
+                asked: None,
+                since: mono,
+            },"""
+replace = """            (CompactionWord::Unreadable, None) => return false,"""
+
+[[plant]]
+name = "pi compaction hold: the good read after a look that failed starts a bound of its own"
+meant = "a_word_that_becomes_readable_after_an_unreadable_first_look_keeps_that_look_s_bound"
+runs = ["pch-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "                    since: seen.since,"
+replace = "                    since: mono,"
+
+[[plant]]
+name = "pi compaction hold: the channel reads a file it cannot read as a word that is gone"
+meant = "a_word_file_the_system_will_not_read_is_unreadable_and_one_that_is_not_there_is_absent"
+runs = ["pch-channel"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/channel.rs"
+find = "            Err(_) => return CompactionWord::Unreadable,"
+replace = "            Err(_) => return CompactionWord::Absent,"
+
+[[plant]]
+name = "pi compaction hold: the channel reads a file that is no word as a word that is gone"
+meant = "the_extension_s_word_of_a_compaction_it_asked_for_is_its_own_launch_s_and_the_conversation_s_and_a_time"
+runs = ["pch-channel"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/channel.rs"
+find = """        let Ok(word) = from_slice_lossy(&bytes) else {
+            return CompactionWord::Unreadable;"""
+replace = """        let Ok(word) = from_slice_lossy(&bytes) else {
+            return CompactionWord::Absent;"""
 
 [[plant]]
 name = "pi compaction hold: the Pi window says no word of its extension's"
@@ -141,7 +195,7 @@ runs = ["pch-launch"]
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/adapter.rs"
 find = "        self.channel.compaction_asked(&self.session.borrow())"
-replace = "        None"
+replace = "        CompactionWord::Absent"
 
 [[plant]]
 name = "pi compaction hold: the extension writes no word"

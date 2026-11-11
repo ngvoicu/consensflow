@@ -104,6 +104,9 @@ pub struct FakeAgent {
     /// When its extension said it asked its harness to compact the conversation for the
     /// project's size, and has not said it over (`Window::compaction_asked`, Pi's).
     pub compaction_asked: Option<i64>,
+    /// Its word is there and cannot be read this time (`CompactionWord::Unreadable`): it
+    /// says so whatever `compaction_asked` is.
+    pub compaction_unreadable: bool,
     /// How often the engine told the window it pressed the interrupt keys.
     pub interrupted: u32,
     /// The window stops where it is when it is interrupted, writing nothing:
@@ -1029,7 +1032,7 @@ impl FakeAdapter {
             }
             // Pi's extension sends nothing into a window while the compaction it asked for is at
             // work, whatever the word (its own `compacting` flag): refused busy, no attempt spent.
-            if agent.compaction_asked.is_some() {
+            if agent.compaction_asked.is_some() || agent.compaction_unreadable {
                 return Admission::Busy {
                     reason: "Pi is at work: its extension sends nothing until it is idle"
                         .to_owned(),
@@ -1257,6 +1260,7 @@ impl Asked {
             lost_records: HashMap::new(),
             unnamed: None,
             compaction_asked: None,
+            compaction_unreadable: false,
             interrupted: 0,
             stops_when_interrupted: false,
             takes_back: false,
