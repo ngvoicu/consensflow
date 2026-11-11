@@ -10,7 +10,9 @@
 //! It is the size as the human chose it: the ledger does no sum with any harness's own
 //! margin. The engine gives every member's launch the size at launch and on resume, and a
 //! chief's launch never; each harness's adapter gives it its harness by that harness's own
-//! rule, and a size above a model's own window leaves the harness's own point.
+//! rule, and a size above a model's own window leaves the harness's own point. A size the row
+//! holds under [`COMPACTION_MIN`] (an earlier build took less) stays as it is in the row and
+//! is given to a launch as [`COMPACTION_MIN`] ([`launch_size`]).
 
 use cf_proto::ledger::ProjectView;
 use rusqlite::params;
@@ -30,6 +32,16 @@ pub const COMPACTION_MIN: u32 = 250_000;
 
 /// The largest size: the most Claude Code takes for its compaction window.
 pub const COMPACTION_MAX: u32 = 1_000_000;
+
+/// The size a member's launch is given for the one the project's row holds: the row's own
+/// size, and [`COMPACTION_MIN`] where the row holds less. 3.0.7-alpha.4 took any size from
+/// 100,000, and a project that chose one there keeps it (nothing rewrites the row, and the
+/// page says it holds one under the least), but a window launched with it is the dead one
+/// [`COMPACTION_MIN`] is there to prevent, on every launch, until the human changes the
+/// size (T-1439). The engine's launch is the one place a size goes to a harness.
+pub fn launch_size(stored: u32) -> u32 {
+    stored.max(COMPACTION_MIN)
+}
 
 fn refused() -> LedgerError {
     LedgerError::refused(

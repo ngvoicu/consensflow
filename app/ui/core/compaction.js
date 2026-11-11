@@ -40,6 +40,7 @@ export class Compaction {
   #size
   #amount
   #hint
+  #held
   #save
   #page
 
@@ -54,6 +55,7 @@ export class Compaction {
     this.#size = group.querySelector('[name="members-compaction-choice"][value="size"]')
     this.#amount = group.querySelector('[name="members-compaction-size"]')
     this.#hint = group.querySelector('.members-compaction-hint')
+    this.#held = group.querySelector('.members-compaction-held')
     this.#save = group.querySelector('[name="members-compaction-save"]')
     this.#page = page
     for (const choice of [this.#own, this.#size]) {
@@ -70,8 +72,22 @@ export class Compaction {
     this.#own.checked = size === undefined
     this.#size.checked = size !== undefined
     this.#amount.value = size === undefined ? '' : String(size)
+    this.#holds(size)
     this.#say('')
     this.#checked()
+  }
+
+  /**
+   * Says what a size the project holds under the least comes to: it is kept as the human
+   * chose it, and the engine gives every window of the project the least until a size is
+   * saved here (T-1439). It goes with the size, once one in the range or none is saved.
+   */
+  #holds(size) {
+    const low = typeof size === 'number' && size < LEAST
+    this.#held.textContent = low
+      ? `This project holds ${said(size)}, under the least size of ${said(LEAST)}: its members' windows run at ${said(LEAST)} until the size is changed here.`
+      : ''
+    this.#held.hidden = !low
   }
 
   #say(words) {

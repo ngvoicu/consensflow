@@ -83,10 +83,13 @@ fn the_floor_leaves_a_claude_window_twenty_calls_above_the_largest_context_a_com
     const CLAUDES_MARGIN: u32 = 33_000;
     const LARGEST_AFTER_A_COMPACTION: u32 = 161_268;
     const TWENTY_CALLS: u32 = 20 * 2_500;
+    // Where Claude Code fires for a size (a function, so that the sum is a test and not a
+    // constant the compiler has already settled).
+    let fires_at = |size: u32| size - CLAUDES_MARGIN;
     assert!(
-        COMPACTION_MIN - CLAUDES_MARGIN >= LARGEST_AFTER_A_COMPACTION + TWENTY_CALLS,
+        fires_at(COMPACTION_MIN) >= LARGEST_AFTER_A_COMPACTION + TWENTY_CALLS,
         "{COMPACTION_MIN} fires Claude Code at {} and a window that left {LARGEST_AFTER_A_COMPACTION} compacts every few calls",
-        COMPACTION_MIN - CLAUDES_MARGIN
+        fires_at(COMPACTION_MIN)
     );
 }
 
@@ -94,4 +97,19 @@ fn the_floor_leaves_a_claude_window_twenty_calls_above_the_largest_context_a_com
 fn the_size_just_under_the_floor_is_refused_and_the_floor_itself_is_a_size() {
     assert_eq!(window(json!(COMPACTION_MIN - 1)), Err(WORDS.to_owned()));
     assert_eq!(window(json!(COMPACTION_MIN)), Ok(Some(COMPACTION_MIN)));
+}
+
+#[test]
+fn a_launch_is_given_the_least_for_a_size_the_row_holds_under_it_and_every_other_size_as_it_is() {
+    // 3.0.7-alpha.4 took any size from 100,000, so a row can hold one of them (T-1439).
+    for stored in [0, 1, 100_000, 150_000, 200_000, 249_999] {
+        assert_eq!(launch_size(stored), COMPACTION_MIN, "{stored}");
+    }
+    for stored in [250_000, 250_001, 300_000, 999_999, 1_000_000] {
+        assert_eq!(launch_size(stored), stored, "{stored}");
+    }
+    // What a launch is given is always one the ledger itself would have taken.
+    for stored in [0, 100_000, 249_999, 250_000, 1_000_000] {
+        assert_eq!(size_of(launch_size(stored)).unwrap(), launch_size(stored));
+    }
 }

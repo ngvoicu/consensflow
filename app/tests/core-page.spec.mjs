@@ -7103,6 +7103,7 @@ async function compactionGroup(page) {
     size: group.getByRole('radio', { name: 'A size' }),
     amount: group.getByLabel('Size in tokens, 250,000 to 1,000,000'),
     hint: group.locator('.members-compaction-hint'),
+    held: group.locator('.members-compaction-held'),
     save: group.getByRole('button', { name: 'Save compaction' }),
   }
 }
@@ -7144,11 +7145,11 @@ test("Project settings shows the size the board has for the members' compaction"
   expect(await calls(page, 'project.compaction')).toEqual([])
 })
 
-test("Project settings shows a size the board has under the least a size can now be as it is, says why it cannot be saved again, and keeps the harness's own point open", async ({
+test("Project settings shows a size the board has under the least a size can now be as it is, says why it cannot be saved again and that the windows run at the least meanwhile, and keeps the harness's own point open", async ({
   page,
 }) => {
   // A project that chose a size before the floor was raised (T-1439) keeps it: nothing here
-  // changes it, and nothing reads it as another number.
+  // changes it, but the engine gives its windows the least, and the section says so.
   const data = model()
   data.boards[1].project.compaction = 150000
   await open(page, data)
@@ -7157,20 +7158,61 @@ test("Project settings shows a size the board has under the least a size can now
   await expect(section.amount).toHaveValue('150000')
   await expect(section.amount).toHaveAttribute('aria-invalid', 'true')
   await expect(section.hint).toHaveText('A size is a whole number from 250,000 to 1,000,000.')
+  await expect(section.held).toBeVisible()
+  await expect(section.held).toHaveText(
+    "This project holds 150,000, under the least size of 250,000: its members' windows run at 250,000 until the size is changed here.",
+  )
   await expect(section.save).toBeDisabled()
   expect(await calls(page, 'project.compaction')).toEqual([])
-  // Put right, it saves; or the harness's own point is chosen, which is saved whatever the field holds.
+  // Put right, it saves; or the harness's own point is chosen, which is saved whatever the field
+  // holds. What the project runs at is still the least until one is saved.
   await section.amount.fill('250000')
   await expect(section.save).toBeEnabled()
   await expect(section.hint).toBeHidden()
+  await expect(section.held).toBeVisible()
   await section.amount.fill('150000')
   await expect(section.save).toBeDisabled()
   await section.own.check()
   await expect(section.save).toBeEnabled()
+  await expect(section.held).toBeVisible()
   await section.save.click()
   await expect
     .poll(() => calls(page, 'project.compaction'))
     .toEqual([{ project: 1, compaction: null }])
+  // The size is changed: the words go with it.
+  await expect(section.held).toBeHidden()
+})
+
+test('Project settings says nothing of the least for a size in the range, and for none', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].project.compaction = 250000
+  await open(page, data)
+  const section = await compactionGroup(page)
+  await expect(section.size).toBeChecked()
+  await expect(section.held).toBeHidden()
+  await section.own.check()
+  await expect(section.held).toBeHidden()
+})
+
+test('Project settings takes the words about the least away when a size in the range is saved over a size under it', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].project.compaction = 99999
+  await open(page, data)
+  const section = await compactionGroup(page)
+  await expect(section.held).toHaveText(
+    "This project holds 99,999, under the least size of 250,000: its members' windows run at 250,000 until the size is changed here.",
+  )
+  await section.amount.fill('300000')
+  await section.save.click()
+  await expect
+    .poll(() => calls(page, 'project.compaction'))
+    .toEqual([{ project: 1, compaction: 300000 }])
+  await expect(section.held).toBeHidden()
+  await expect(section.amount).toHaveValue('300000')
 })
 
 test("saves the choice of a size by its own Save, shows what the daemon kept, and saves the harness's own point again as none", async ({
