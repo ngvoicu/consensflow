@@ -298,8 +298,8 @@ runs = ["harness-lib-devin-compaction"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/record/wires.rs"
-find = "        self.busy = false;\n        self.open = false;\n        Ok(())"
-replace = "        self.busy = false;\n        Ok(())"
+find = "        self.busy = false;\n        self.open = false;\n        self.said_back.clear();"
+replace = "        self.busy = false;\n        self.said_back.clear();"
 
 [[plant]]
 name = "devin compaction: a turn's work, and Devin's word that it works, open no turn"

@@ -111,6 +111,11 @@ impl Wire {
         self
     }
 
+    /// Which Devin's log this is.
+    pub fn shape_of(&self) -> Shape {
+        self.shape
+    }
+
     /// Devin's word on the turn, `working` or `blocked`, stamped as Devin stamps it: none
     /// in a log of a Devin that says none.
     fn status(&mut self, state: &str) -> io::Result<()> {
@@ -133,7 +138,8 @@ impl Wire {
 
     /// The last turn of the conversation, replayed into a window opened again on it as
     /// Devin 3000.11 replays one: the user's message and the answer, stamped and in no
-    /// stream, and Devin's word that it waits, with no end of the turn (3000.12.43: no word).
+    /// stream, the turn named on a line of its own with no cause, and Devin's word that it
+    /// waits (15 of 15 replays in the kit's logs, T-1423; 3000.12.43: no word).
     ///
     /// Devin 3000.12.43 (T-1417, run 3) replays the message with its client message and an
     /// event id of its own, the turn's work stamped in no stream, and a bare
@@ -150,17 +156,27 @@ impl Wire {
                 let mut said = json!({
                     "update": { "sessionUpdate": kind, "content": { "type": "text", "text": text } },
                 });
+                if kind == "user_message_chunk" {
+                    // 3000.11 replays the message as it said it live (127 of 127 in the kit's
+                    // logs): its client message and its part, no event type, no event id.
+                    said["update"]["_meta"] = json!({
+                        "cognition.ai/clientMessageId": REPLAYED,
+                        "cognition.ai/messageSubIndex": 0,
+                    });
+                }
                 if self.shape == Shape::Unsaid && kind == "user_message_chunk" {
                     said["update"]["_meta"] = json!({
                         "cognition.ai/clientMessageId": REPLAYED,
                         "cognition.ai/eventId": "1",
                         "cognition.ai/eventType": "user_message",
+                        "cognition.ai/message": text,
+                        "cognition.ai/messageSubIndex": 0,
                     });
                 }
                 self.record(said)?;
             }
         }
-        if self.shape == Shape::Unsaid && user.is_some() {
+        if user.is_some() {
             self.raw(&json!({ "sessionId": self.session, "turnClientMessageId": REPLAYED }))?;
         }
         self.status("blocked")
@@ -266,17 +282,21 @@ impl Wire {
             // Devin 3000.11 logs no request of its TUI's: it says it works, and says the
             // message back. Devin 3000.12.43 only says it back, naming the client message.
             self.status("working")?;
+            // 3000.11's names the client message and the part (the kit's 34 logs); 3000.12.43's
+            // the message's own text and its event type too, and no event id (T-1417, T-1423).
             let mut said = json!({
                 "update": {
                     "sessionUpdate": "user_message_chunk",
                     "content": { "type": "text", "text": text },
+                    "_meta": {
+                        "cognition.ai/clientMessageId": client,
+                        "cognition.ai/messageSubIndex": 0,
+                    },
                 },
             });
             if self.shape == Shape::Unsaid {
-                said["update"]["_meta"] = json!({
-                    "cognition.ai/clientMessageId": client,
-                    "cognition.ai/eventType": "user_message",
-                });
+                said["update"]["_meta"]["cognition.ai/eventType"] = json!("user_message");
+                said["update"]["_meta"]["cognition.ai/message"] = json!(text);
             }
             return self.record(said);
         }
@@ -317,13 +337,24 @@ impl Wire {
         }))
     }
 
-    /// The TUI asks its agent to cancel the turn.
+    /// The TUI asks its agent to cancel the turn: a request of its own on the stand-in's
+    /// log and 3000.11's; none on 3000.12.43's, which says only the turn's end (T-1423).
     pub fn cancel(&mut self) -> io::Result<()> {
+        if self.shape == Shape::Unsaid {
+            return Ok(());
+        }
         self.record(json!({ "method": "session/cancel" }))
     }
 
-    /// The turn that answers `client` ended: `complete`, or `cancelled`.
+    /// The turn that answers `client` ended: `complete`, or `cancelled`. Devin 3000.12.43
+    /// names the turn on a line of its own, then says the cause on the next, with no word
+    /// before them (T-1423, the app's Stop over its thoughts: a bare `turnClientMessageId`
+    /// and `cancelled`).
     pub fn ended(&mut self, cause: &str, client: &str) -> io::Result<()> {
+        if self.shape == Shape::Unsaid {
+            self.raw(&json!({ "sessionId": self.session, "turnClientMessageId": client }))?;
+            return self.raw(&json!({ "sessionId": self.session, "cause": cause, "stats": {} }));
+        }
         self.status("blocked")?;
         self.record(json!({ "turnClientMessageId": client, "cause": cause }))
     }
@@ -489,13 +520,18 @@ mod tests {
         // Its word that it waits, then the end.
         assert_eq!(meta(4, "cognition.ai/statusEnum"), "blocked");
         assert_eq!(records[5]["cause"], "complete");
-        // The replay: stamped, in no stream, and Devin's word that it waits with no end.
+        // The replay: stamped, in no stream, the turn named with no cause (the kit's 15 of 15),
+        // and Devin's word that it waits.
         assert_eq!(kind(6), "user_message_chunk");
+        assert!(meta(6, "cognition.ai/eventId").is_null());
+        assert!(meta(6, "cognition.ai/eventType").is_null());
         assert_eq!(kind(7), "agent_message_chunk");
         assert!(meta(7, "cognition.ai/timestamp").is_string());
         assert!(meta(7, "cognition.ai/streamingMessageId").is_null());
-        assert_eq!(meta(8, "cognition.ai/statusEnum"), "blocked");
-        assert_eq!(records.len(), 9);
+        assert_eq!(records[8]["turnClientMessageId"], REPLAYED);
+        assert!(records[8].get("cause").is_none());
+        assert_eq!(meta(9, "cognition.ai/statusEnum"), "blocked");
+        assert_eq!(records.len(), 10);
         // A log not stamped replays nothing.
         let plain = folder.path().join("plain.jsonl");
         Wire::open(&plain, "calm-river")
@@ -547,18 +583,21 @@ mod tests {
         assert_eq!(kind(2), "tool_call");
         assert!(meta(2, "cognition.ai/streamingMessageId").is_null());
         assert_eq!(meta(3, "cognition.ai/streamingMessageId"), "stream-1");
-        assert_eq!(records[4]["cause"], "complete");
+        // The end: the turn named on a line of its own, then its cause.
+        assert_eq!(records[4]["turnClientMessageId"], "client-1");
+        assert!(records[4].get("cause").is_none());
+        assert_eq!(records[5]["cause"], "complete");
         // The replay: stamped, in no stream, the message with an event id of its own, and
         // the turn named with no cause.
-        assert_eq!(kind(5), "user_message_chunk");
-        assert_eq!(meta(5, "cognition.ai/eventId"), "1");
-        assert_eq!(kind(6), "agent_message_chunk");
-        assert!(meta(6, "cognition.ai/streamingMessageId").is_null());
-        assert!(records[7]["turnClientMessageId"].is_string());
-        assert!(records[7].get("cause").is_none());
-        assert_eq!(records[8]["toolCall"]["toolCallId"], "exec:0#call-1");
-        assert_eq!(records[8]["options"][0]["kind"], "allow_once");
-        assert_eq!(records.len(), 9);
+        assert_eq!(kind(6), "user_message_chunk");
+        assert_eq!(meta(6, "cognition.ai/eventId"), "1");
+        assert_eq!(kind(7), "agent_message_chunk");
+        assert!(meta(7, "cognition.ai/streamingMessageId").is_null());
+        assert!(records[8]["turnClientMessageId"].is_string());
+        assert!(records[8].get("cause").is_none());
+        assert_eq!(records[9]["toolCall"]["toolCallId"], "exec:0#call-1");
+        assert_eq!(records[9]["options"][0]["kind"], "allow_once");
+        assert_eq!(records.len(), 10);
         assert_eq!(Shape::Unsaid.version(), "devin 3000.12.43 (stand-in)");
         assert_eq!(Shape::named(Some("1")), Shape::Stamped);
         assert_eq!(Shape::named(None), Shape::Requests);
@@ -574,6 +613,35 @@ mod tests {
         let records = records(&path);
         assert_eq!(records[0]["method"], "session/cancel");
         assert_eq!(records[1]["cause"], "cancelled");
+    }
+
+    #[test]
+    fn a_cancel_of_devin_3000_12_is_the_turn_named_and_its_cause_with_no_request_of_the_tui() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("wire.jsonl");
+        let mut wire = Wire::open(&path, "calm-river")
+            .unwrap()
+            .shape(Shape::Unsaid);
+        wire.prompt(2, "[ConsensFlow m-1 · note]\nhello", "client-1")
+            .unwrap();
+        wire.cancel().unwrap();
+        wire.ended("cancelled", "client-1").unwrap();
+        let records = records(&path);
+        assert_eq!(records.len(), 3, "{records:#?}");
+        let meta = &records[0]["update"]["_meta"];
+        assert_eq!(meta["cognition.ai/eventType"], "user_message");
+        assert_eq!(meta["cognition.ai/clientMessageId"], "client-1");
+        assert_eq!(
+            meta["cognition.ai/message"],
+            "[ConsensFlow m-1 · note]\nhello"
+        );
+        assert!(meta.get("cognition.ai/eventId").is_none());
+        assert_eq!(
+            records[1],
+            json!({ "sessionId": "calm-river", "turnClientMessageId": "client-1" })
+        );
+        assert_eq!(records[2]["cause"], "cancelled");
+        assert_eq!(records[2]["sessionId"], "calm-river");
     }
 
     #[test]

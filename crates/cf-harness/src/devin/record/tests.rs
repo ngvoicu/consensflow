@@ -5,6 +5,7 @@
 mod cells;
 mod compaction;
 mod drawn;
+mod kept_wires;
 mod last_call;
 mod logs;
 mod messages;

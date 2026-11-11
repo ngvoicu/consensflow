@@ -58,7 +58,6 @@ use cf_proto::agents::Harness;
 use cf_proto::models::ModelListing;
 use cf_proto::panes::{HumanInput, SilentPaste, SCREEN_QUIET_MS};
 use cf_proto::specs::Variant;
-use futures_util::future::join;
 use serde_json::Value;
 
 use super::channel;
@@ -818,19 +817,24 @@ impl Window for DevinWindow {
                     took_back: false,
                     at_prompt: false,
                     shared: false,
+                    begun: Vec::new(),
                 });
             };
-            // The record and the wire log are read together: the log as it is
-            // when the look begins, the record when its reading is released. A turn is
-            // read from the record: a message of the user's its agent has not answered
-            // is one at work, from the moment the store has it (`record_state`).
-            let (reading, wire) = join(
-                self.records
-                    .look(Harness::Devin, &session, &Options::default()),
-                async { self.wire.read(self.time.wall_ms()) },
-            )
-            .await;
-            let wire = wire?;
+            // The record first, and the launch's wire log once its reading is back: the log
+            // is read no earlier than the record, so whatever the record shows of a turn of
+            // this window's, the log as read holds the turn's opening, which Devin writes as
+            // the turn takes its message in and before anything of the turn reaches its store
+            // (26 of 26 live messages, T-1417 and T-1423: the store changed 0.5 to 27 s after
+            // the message was said back). Read the other way round, or together, a look could
+            // pair the log from before the turn with a record that still read as at the open,
+            // and read at rest (the review T-1411 of T-1403). A turn is read from the record
+            // too: a message of the user's its agent has not answered is one at work, from the
+            // moment the store has it (`record_state`).
+            let reading = self
+                .records
+                .look(Harness::Devin, &session, &Options::default())
+                .await;
+            let wire = self.wire.read(self.time.wall_ms())?;
             self.looked.set(self.history().map(|seen| seen.prompts));
             // What Devin's wire says of its quota is the live word beside the record's.
             let mut observed = observed_from(Arc::clone(&reading), wire.quota);
@@ -864,6 +868,9 @@ impl Window for DevinWindow {
             if self.wire.turn_open(&session) {
                 observed.settled = false;
             }
+            // What the turn took in, by the messages it said back, has begun (T-1423): the
+            // engine's watch for a message no turn began on leaves those be (`never_began`).
+            observed.begun = self.wire.said_back(&session);
             Ok(match wire.shown {
                 None => unnamed(observed, HOLD),
                 Some(shown) if !self.known(&shown) => switched_to(observed, shown),

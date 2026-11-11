@@ -244,6 +244,7 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
             .as_deref()
             .filter(|_| launch.resume.is_none()),
     );
+    let unbegun = Fault::of(own_var(faults::UNBEGUN_VARIABLE).as_deref());
     let folder = std::env::current_dir().map_err(said)?;
     let stores_commands =
         own_var(turn::STORES_COMMANDS_VARIABLE).is_some_and(|stores| !stores.is_empty());
@@ -254,6 +255,7 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
             let mut window = Window::new(store, wire, stop, io::stdout(), pace)
                 .in_mode(permission, folder)
                 .crashing_on(crash)
+                .beginning_nothing_on(unbegun)
                 .storing_commands(stores_commands);
             if let Some(folder) = jobs {
                 window = window.leaving_jobs_in(folder, std::process::id(), command::THINKING);

@@ -17,6 +17,18 @@
 //!   chief's question goes in after it.
 //! - A window opened again on its conversation, which replays its last turn stamped and
 //!   with no end, is at rest: the note that its turn was cut goes in, once.
+//! - A turn whose agent thinks past both of the never-began rule's waits, its store showing
+//!   nothing after the brief and its screen drawing nothing, is at work: no Enter is pressed,
+//!   the task is not paused, nobody is told, and its answer is the result (T-1396: a Devin
+//!   window thought 146 s on a send-back in a measurement run of 2026-11-10, and was pressed
+//!   Enter at 61 s and paused at 126 s). On 3000.12.43's log, by the brief said back into the
+//!   turn (T-1423).
+//! - A brief the window's store takes and no turn begins on (`FAKE_DEVIN_UNBEGUN`) is
+//!   pressed Enter once, and its task paused and its requester told, on either log.
+
+/// The never-began rule's waits, cut to 15 s each (`CONSENSFLOW_ARRIVAL_TIMEOUT_MS`): Enter
+/// once the brief has stood alone 15 s with the screen quiet 10 s, the pause 15 s after it.
+const ARRIVAL_MS: &str = "15000";
 
 use std::thread::sleep;
 use std::time::Instant;
@@ -91,7 +103,6 @@ fn a_devin_turn_stamped_as_devin_3000_11_stamps_it_is_at_work_through_a_silent_s
 }
 
 #[test]
-#[ignore = "red on main: Devin 3000.12.43 writes no working/blocked (T-1417)"]
 fn a_devin_3000_12_turn_is_at_work_through_a_silent_stretch_and_its_answer_is_the_result() -> Outcome
 {
     at_work_through_a_silent_stretch(DEVIN_3000_12)
@@ -143,7 +154,6 @@ fn a_pause_stops_a_devin_turn_stamped_as_devin_3000_11_stamps_it_and_the_chiefs_
 }
 
 #[test]
-#[ignore = "red on main: Devin 3000.12.43 writes no working/blocked (T-1417)"]
 fn a_pause_stops_a_devin_3000_12_turn_and_the_chiefs_question_goes_in_after() -> Outcome {
     a_pause_stops_the_turn(DEVIN_3000_12)
 }
@@ -265,6 +275,115 @@ fn opened_again_takes_the_note_once(shape: &str) -> Outcome {
     rig.wait_for("T-1 to be done", secs(90), || {
         Ok(project.task(1)?["state"] == "done")
     })?;
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_devin_turn_stamped_as_devin_3000_11_stamps_it_that_thinks_past_both_never_began_waits_is_neither_pressed_nor_paused(
+) -> Outcome {
+    thinks_past_both_never_began_waits(DEVIN_3000_11)
+}
+
+#[test]
+fn a_devin_3000_12_turn_that_thinks_past_both_never_began_waits_in_silence_is_neither_pressed_nor_paused(
+) -> Outcome {
+    thinks_past_both_never_began_waits(DEVIN_3000_12)
+}
+
+/// A turn whose agent thinks 50 s before its first word, past both of the never-began
+/// rule's waits, on the wire log of the Devin `shape` names.
+fn thinks_past_both_never_began_waits(shape: &str) -> Outcome {
+    let rig =
+        Rig::start(stamped_rig(shape).daemon_var("CONSENSFLOW_ARRIVAL_TIMEOUT_MS", ARRIVAL_MS))?;
+    let project = given(&rig, "THINK 50 Reply with exactly: T1_DONE")?;
+    let pane = project.lane("devin-worker")?["pane"]["id"]
+        .as_str()
+        .ok_or("the worker has no window")?
+        .to_owned();
+    rig.wait_for("T-1 to be done", secs(120), || {
+        Ok(project.task(1)?["state"] == "done")
+    })?;
+    let events = rig.events();
+    let pressed: Vec<&Value> = events
+        .iter()
+        .filter(|event| event["kind"] == "delivery.enter_again")
+        .collect();
+    assert!(
+        pressed.is_empty(),
+        "Enter was pressed into its turn: {pressed:?}"
+    );
+    assert!(
+        rig.presses(&pane, &[13]).is_empty(),
+        "an Enter reached its window"
+    );
+    let paused = when_of(&events, "task.state", |event| {
+        event["data"]["to"] == "paused"
+    });
+    assert_eq!(paused, None, "T-1 was paused at work");
+    let inbox = project.inbox("chief")?;
+    assert!(
+        !inbox.iter().any(|message| message["body"]
+            .as_str()
+            .is_some_and(|body| body.contains("began no turn"))),
+        "the chief was told its window began no turn: {inbox:?}"
+    );
+    assert!(
+        inbox.iter().any(|message| message["kind"] == "result"
+            && message["body"]
+                .as_str()
+                .is_some_and(|body| body.contains("T1_DONE"))),
+        "its answer is the result: {inbox:?}"
+    );
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_brief_a_devin_window_stamped_as_devin_3000_11_stamps_it_begins_no_turn_on_is_pressed_once_then_paused(
+) -> Outcome {
+    begins_no_turn(DEVIN_3000_11)
+}
+
+#[test]
+fn a_brief_a_devin_3000_12_window_begins_no_turn_on_is_pressed_once_then_paused() -> Outcome {
+    begins_no_turn(DEVIN_3000_12)
+}
+
+/// A brief the window's store takes and whose turn never begins: nothing said back, no work,
+/// nothing drawn, on the wire log of the Devin `shape` names.
+fn begins_no_turn(shape: &str) -> Outcome {
+    let rig = Rig::start(
+        stamped_rig(shape)
+            .var("FAKE_DEVIN_UNBEGUN", "T1_NEVER")
+            .daemon_var("CONSENSFLOW_ARRIVAL_TIMEOUT_MS", ARRIVAL_MS),
+    )?;
+    let project = given(&rig, "Reply with exactly: T1_NEVER")?;
+    let pane = project.lane("devin-worker")?["pane"]["id"]
+        .as_str()
+        .ok_or("the worker has no window")?
+        .to_owned();
+    rig.wait_for("T-1 to be paused", secs(120), || {
+        Ok(project.task(1)?["state"] == "paused")
+    })?;
+    let events = rig.events();
+    let pressed = events
+        .iter()
+        .filter(|event| event["kind"] == "delivery.enter_again")
+        .count();
+    assert_eq!(pressed, 1, "its Enter, pressed once more");
+    assert!(
+        !rig.presses(&pane, &[13]).is_empty(),
+        "the Enter reached its window"
+    );
+    let notes: Vec<String> = project
+        .inbox("chief")?
+        .into_iter()
+        .filter_map(|message| message["body"].as_str().map(str::to_owned))
+        .filter(|body| body.starts_with("T-1 is paused"))
+        .collect();
+    assert_eq!(notes.len(), 1, "told once: {notes:#?}");
+    assert!(notes[0].contains("began no turn"), "{}", notes[0]);
     rig.close()?;
     Ok(())
 }

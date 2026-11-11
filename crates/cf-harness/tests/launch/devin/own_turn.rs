@@ -17,9 +17,17 @@
 //! every step, and with looks only at the open and at the end (two looks that straddle
 //! the delivery and the compaction never see the chain with the message on it).
 //!
-//! The invariant: no row with a turn of this window's open reads at rest, and every row
-//! with none open (nothing given, its turn's end said) does, so nothing holds a window
-//! at rest for good. Rows left out, each for one reason:
+//! Every row is played on each shape of the wire (T-1423): Devin 3000.11's, which says
+//! `working` as a turn begins and `blocked` where it waits or ends; Devin 3000.12.43's,
+//! which says neither and says the message back live as the turn takes it in (T-1417); and
+//! a log with both, which no Devin recorded has written, so that the rule hangs on what the
+//! log holds and on no version.
+//!
+//! The invariant, held at every look of a row played with a look at every step: no step
+//! with a turn of this window's open reads at rest, and every step with none open (nothing
+//! given, its turn's end said) does, so nothing holds a window at rest for good, or at work.
+//! The one look not held is the open of a window given a first message, before anything of
+//! the message reached the store or the log. Rows left out, each for one reason:
 //! - a turn that waits (`blocked`) or ended with nothing of it in the store: a turn that
 //!   came to its end has its message in the store, and that is the "delivered" row;
 //! - a compaction in the middle of a turn with a silent wire: Devin says `working` as a
@@ -27,7 +35,11 @@
 //!   probes; T-1401 did not count the order's other way as a blocker, and this table
 //!   does not build for it: such a row reads at rest, see the result of T-1403);
 //! - a compaction at rest with the wire saying a turn works or waits: a compaction while
-//!   a turn is open is one of the mid-turn rows.
+//!   a turn is open is one of the mid-turn rows;
+//! - `blocked` on 3000.12.43's shape, which says no such word;
+//! - a dialog, a cancel or a message said back with nothing after where the turn is not one
+//!   given since the open with nothing compacted under it: each is a step of a turn, and the
+//!   compactions are rows of their own.
 
 use std::fs;
 use std::rc::Rc;
@@ -83,25 +95,47 @@ enum Then {
     CompactedAtRest,
 }
 
+/// The shape of the launch's wire log: which Devin wrote it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    /// Devin 3000.11: `working` as a turn begins, then the message said back with neither its
+    /// text's event type nor an event id; `blocked` where the turn waits and before its end.
+    Words,
+    /// Devin 3000.12.43: no word of its own on a turn; the message said back live as the turn
+    /// takes it in (its event type, its client id, no event id); a dialog a line of its own.
+    Unsaid,
+    /// Both: 3000.12.43's lines and 3000.11's words.
+    Both,
+}
+
 /// What the launch's wire log says at the look.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Wire {
     /// Nothing more than the window's configuration.
     Silent,
-    /// The history a reopened window replays: stamped, in no stream.
+    /// The history a reopened window replays: stamped, in no stream; on 3000.12.43 each item
+    /// with its event id, and the turn named with no cause.
     Replayed,
     /// What the TUI answers itself at once to a command of its own (`/bypass`).
     Instant,
-    /// Devin's word that the turn works, and its thought.
+    /// The turn's opening (3000.11's `working`, 3000.12.43's message said back) and nothing
+    /// after it: a model's first call that says nothing for as long as it takes.
+    SaidBack,
+    /// The turn's opening, and its thought.
     Working,
-    /// Then Devin's word that it waits, before the turn's end.
+    /// Then the dialog that asks the user to allow a call (3000.11 said `blocked` before it).
+    Asks,
+    /// Then Devin's word that it waits, before the turn's end (no 3000.12.43 says it).
     Blocked,
     /// Then the turn's end.
     Ended,
+    /// Then the turn cancelled, as the app's Stop cancels it (T-1423).
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct Row {
+    shape: Shape,
     opened: Opened,
     at_open: AtOpen,
     then: Then,
@@ -114,8 +148,8 @@ impl Row {
     fn turn_open(self) -> bool {
         let given = !matches!(self.then, Then::Nothing | Then::CompactedAtRest);
         match self.wire {
-            Wire::Ended => false,
-            Wire::Working | Wire::Blocked => true,
+            Wire::Ended | Wire::Cancelled => false,
+            Wire::SaidBack | Wire::Working | Wire::Asks | Wire::Blocked => true,
             Wire::Silent | Wire::Replayed | Wire::Instant => given,
         }
     }
@@ -128,6 +162,15 @@ impl Row {
             Then::KeptSteps | Then::KeptNoStep | Then::KeptTheTurnBefore
         );
         let quiet = matches!(self.wire, Wire::Silent | Wire::Replayed | Wire::Instant);
+        if self.shape == Shape::Unsaid && self.wire == Wire::Blocked {
+            return false;
+        }
+        if matches!(self.wire, Wire::Asks | Wire::Cancelled) {
+            return self.then == Then::Delivered;
+        }
+        if self.wire == Wire::SaidBack {
+            return matches!(self.then, Then::Nothing | Then::Delivered);
+        }
         match self.then {
             Then::Nothing => !matches!(self.wire, Wire::Blocked | Wire::Ended),
             Then::Delivered => true,
@@ -156,6 +199,13 @@ struct Scene {
     looks: Looks,
     head: String,
     compactions: u32,
+    /// Whether a turn of the window's own is open now: from its message taken, in the store
+    /// or said on the wire, to its end said.
+    open: std::cell::Cell<bool>,
+    /// What the step just played was, for a look that reads it wrong.
+    step: std::cell::RefCell<String>,
+    /// The looks that read wrong: the step, and what it read.
+    wrong: std::cell::RefCell<Vec<String>>,
 }
 
 fn status(state: &str) -> Value {
@@ -259,6 +309,9 @@ impl Scene {
             looks,
             head: head.to_owned(),
             compactions: 0,
+            open: std::cell::Cell::new(false),
+            step: std::cell::RefCell::new("the open".to_owned()),
+            wrong: std::cell::RefCell::new(Vec::new()),
         };
         if row.at_open == AtOpen::Compacted {
             scene.compacts(&[]);
@@ -308,6 +361,7 @@ impl Scene {
             parent = this;
         }
         self.head = parent;
+        *self.step.borrow_mut() = format!("compaction {at}");
         self.looks_now();
     }
 
@@ -316,19 +370,40 @@ impl Scene {
         self.store
             .writes(SESSION, node, Some(&self.head.clone()), written);
         self.head = node.to_owned();
+        if node == "n-asks" {
+            self.open.set(true);
+        }
+        *self.step.borrow_mut() = format!("store {node}");
         self.looks_now();
     }
 
-    fn says(&self, lines: &[Value]) {
+    /// Lines of the wire, `what` they are, which open the window's own turn or end it.
+    fn says_that(&self, what: &str, lines: &[Value], opens: Option<bool>) {
         for line in lines {
             self.home.appends(&format!("{line}\n"));
         }
+        if let Some(open) = opens {
+            self.open.set(open);
+        }
+        *self.step.borrow_mut() = format!("wire {what}");
         self.looks_now();
     }
 
+    fn says(&self, what: &str, lines: &[Value]) {
+        self.says_that(what, lines, None);
+    }
+
+    /// A look after the step just played, held to whether a turn of the window's own is open.
     fn looks_now(&self) {
         if self.looks == Looks::EveryStep && self.window.is_some() {
-            let _ = self.at_rest();
+            let read = self.at_rest();
+            if read == self.open.get() {
+                self.wrong.borrow_mut().push(format!(
+                    "after {}: {}",
+                    self.step.borrow(),
+                    if read { "at rest" } else { "at work" }
+                ));
+            }
         }
     }
 
@@ -394,8 +469,160 @@ fn answered_before() -> Value {
     )
 }
 
-/// Plays `row` with `looks`, and what the window reads at the end.
-fn play(row: Row, looks: Looks) -> bool {
+/// The user's message as Devin 3000.12.43 says it back live as its turn takes it in.
+fn said_back_live() -> Value {
+    json!({
+        "sessionId": SESSION,
+        "update": {
+            "sessionUpdate": "user_message_chunk",
+            "content": { "type": "text", "text": TASK },
+            "_meta": {
+                "cognition.ai/clientMessageId": "request-now",
+                "cognition.ai/eventType": "user_message",
+                "cognition.ai/message": TASK,
+                "cognition.ai/messageSubIndex": 0,
+                "cognition.ai/timestamp": "2026-11-10T20:35:14.000000+00:00",
+            },
+        },
+    })
+}
+
+/// The user's message as Devin 3000.11 says it back, live or replayed: its client id, its
+/// part and its stamp alone.
+fn said_back_old(stamp: &str) -> Value {
+    json!({
+        "sessionId": SESSION,
+        "update": {
+            "sessionUpdate": "user_message_chunk",
+            "content": { "type": "text", "text": TASK },
+            "_meta": {
+                "cognition.ai/clientMessageId": "request-now",
+                "cognition.ai/messageSubIndex": 0,
+                "cognition.ai/timestamp": stamp,
+            },
+        },
+    })
+}
+
+/// The dialog that asks the user to allow the turn's call, a line of its own.
+fn asked() -> Value {
+    json!({
+        "sessionId": SESSION,
+        "toolCall": {
+            "toolCallId": "exec:0#call-now",
+            "_meta": { "cognition.ai/editableCommand": "cargo test" },
+        },
+        "options": [
+            { "optionId": "allow_once", "name": "Allow", "kind": "allow_once" },
+            { "optionId": "reject_once", "name": "Reject", "kind": "reject_once" },
+        ],
+    })
+}
+
+impl Shape {
+    /// The lines a turn opens with.
+    fn opening(self) -> Vec<Value> {
+        match self {
+            Self::Words => vec![
+                status("working"),
+                said_back_old("2026-11-10T20:35:14.000000+00:00"),
+            ],
+            Self::Unsaid => vec![said_back_live()],
+            Self::Both => vec![status("working"), said_back_live()],
+        }
+    }
+
+    /// The turn's opening, and its thought.
+    fn working(self) -> Vec<Value> {
+        let mut lines = self.opening();
+        lines.push(chunk(
+            "agent_thought_chunk",
+            "Reading the next file.",
+            json!({
+                "cognition.ai/timestamp": "2026-11-10T20:35:15.000000+00:00",
+                "cognition.ai/streamingMessageId": "stream-now",
+            }),
+        ));
+        lines
+    }
+
+    fn says_it_waits(self) -> Vec<Value> {
+        match self {
+            Self::Unsaid => Vec::new(),
+            Self::Words | Self::Both => vec![status("blocked")],
+        }
+    }
+
+    fn ended(self) -> Vec<Value> {
+        let mut lines = self.says_it_waits();
+        lines.extend([
+            json!({ "sessionId": SESSION, "turnClientMessageId": "request-now",
+                "turnRequestId": "model-now-2" }),
+            json!({ "sessionId": SESSION, "cause": "complete", "stats": {} }),
+        ]);
+        lines
+    }
+
+    /// The turn cancelled: 3000.11's as the kit recorded it (no `blocked`), 3000.12.43's as
+    /// the app's Stop over its thoughts did (T-1423 run 5).
+    fn cancelled(self) -> Vec<Value> {
+        match self {
+            Self::Words => vec![
+                json!({ "sessionId": SESSION, "turnClientMessageId": "request-now",
+                    "turnRequestId": "model-now-2" }),
+                json!({ "sessionId": SESSION, "cause": "cancelled", "stats": {} }),
+            ],
+            Self::Unsaid | Self::Both => {
+                let mut lines = self.says_it_waits();
+                lines.extend([
+                    json!({ "sessionId": SESSION, "turnClientMessageId": "request-now" }),
+                    json!({ "cause": "cancelled", "stats": {}, "sessionId": SESSION }),
+                    json!({ "durationMs": 4886, "blockIndex": 0, "sessionId": SESSION }),
+                ]);
+                lines
+            }
+        }
+    }
+
+    fn asks(self) -> Vec<Value> {
+        let mut lines = self.says_it_waits();
+        lines.push(asked());
+        lines
+    }
+
+    /// What a reopened window replays of the turn before.
+    fn replayed(self) -> Vec<Value> {
+        match self {
+            Self::Words => vec![
+                said_back_old("2026-10-13T10:00:00.000000+00:00"),
+                chunk(
+                    "agent_message_chunk",
+                    "Done.",
+                    json!({ "cognition.ai/timestamp": "2026-10-13T10:00:05.000000+00:00" }),
+                ),
+            ],
+            Self::Unsaid | Self::Both => {
+                let mut user = said_back_live();
+                user["update"]["_meta"]["cognition.ai/eventId"] = json!("3");
+                vec![
+                    user,
+                    chunk(
+                        "agent_message_chunk",
+                        "Done.",
+                        json!({ "cognition.ai/timestamp": "2026-10-13T10:00:05.000000+00:00",
+                            "cognition.ai/eventId": "5" }),
+                    ),
+                    json!({ "sessionId": SESSION, "turnClientMessageId": "request-before" }),
+                ]
+            }
+        }
+    }
+}
+
+/// Plays `row` with `looks`: what the window reads at the end, and the looks before it that
+/// read wrong.
+fn play(row: Row, looks: Looks) -> (bool, Vec<String>) {
+    let shape = row.shape;
     let mut scene = Scene::new(row, looks);
     let at_open = scene.at_rest();
     if row.opened == Opened::WithNone {
@@ -404,119 +631,128 @@ fn play(row: Row, looks: Looks) -> bool {
             "{row:?}: a window given nothing is at rest at its open"
         );
     }
-    let working = || {
-        vec![
-            status("working"),
-            chunk(
-                "agent_thought_chunk",
-                "Reading the next file.",
-                json!({
-                    "cognition.ai/timestamp": "2026-11-10T20:35:15.000000+00:00",
-                    "cognition.ai/streamingMessageId": "stream-now",
-                }),
-            ),
-        ]
-    };
-    let ended = || {
-        vec![
-            status("blocked"),
-            json!({ "sessionId": SESSION, "turnClientMessageId": "request-now" }),
-            json!({ "sessionId": SESSION, "cause": "complete", "stats": {} }),
-        ]
+    // A turn given: 3000.11 stores the message, then says it works; 3000.12.43 says the
+    // message back first, and stores it 0.5 to 27 s after (T-1423).
+    let delivers = |scene: &mut Scene, lines: Vec<Value>| {
+        if shape == Shape::Words {
+            scene.adds("n-asks", &asks());
+            if !lines.is_empty() {
+                scene.says_that("the opening", &lines, Some(true));
+            }
+        } else {
+            if !lines.is_empty() {
+                scene.says_that("the opening", &lines, Some(true));
+            }
+            scene.adds("n-asks", &asks());
+        }
     };
     match row.then {
         Then::Nothing | Then::CompactedAtRest => {
             if row.then == Then::CompactedAtRest && row.wire == Wire::Ended {
                 // A turn of its own, ended, then the compaction at rest.
-                scene.adds("n-asks", &asks());
-                scene.says(&working());
+                delivers(&mut scene, shape.working());
                 scene.adds("n-answers", &answers());
-                scene.says(&ended());
+                scene.says_that("the end", &shape.ended(), Some(false));
             }
             match row.wire {
-                Wire::Replayed => scene.says(&[chunk(
-                    "agent_message_chunk",
-                    "Done.",
-                    json!({ "cognition.ai/timestamp": "2026-10-13T10:00:05.000000+00:00" }),
-                )]),
-                Wire::Instant => scene.says(&[chunk(
-                    "agent_message_chunk",
-                    "Bypass mode on.",
-                    json!({
-                        "cognition.ai/instant": true,
-                        "cognition.ai/streamingMessageId": "stream-instant",
-                    }),
-                )]),
-                Wire::Working => scene.says(&working()),
-                Wire::Silent | Wire::Ended | Wire::Blocked => {}
+                Wire::Replayed => scene.says("the replay", &shape.replayed()),
+                Wire::Instant => scene.says(
+                    "the TUI's own answer",
+                    &[chunk(
+                        "agent_message_chunk",
+                        "Bypass mode on.",
+                        json!({
+                            "cognition.ai/instant": true,
+                            "cognition.ai/streamingMessageId": "stream-instant",
+                        }),
+                    )],
+                ),
+                Wire::Working => scene.says_that("the opening", &shape.working(), Some(true)),
+                Wire::SaidBack => scene.says_that("the opening", &shape.opening(), Some(true)),
+                _ => {}
             }
             if row.then == Then::CompactedAtRest {
                 scene.compacts(&[]);
             }
         }
-        _ => {
-            scene.adds("n-asks", &asks());
-            if row.wire != Wire::Silent {
-                scene.says(&working());
+        _ => match row.wire {
+            Wire::Silent => delivers(&mut scene, Vec::new()),
+            Wire::SaidBack => delivers(&mut scene, shape.opening()),
+            _ => {
+                delivers(&mut scene, shape.working());
                 scene.adds("n-step", &step());
-                scene.adds("n-tool", &tool());
-                match row.then {
-                    Then::KeptSteps => scene.compacts(&[(STEP, step()), (TOOL, tool())]),
-                    Then::KeptNoStep => scene.compacts(&[]),
-                    Then::KeptTheTurnBefore => {
-                        scene.compacts(&[(ANSWERED, answered_before())]);
-                    }
-                    _ => {}
-                }
-                match row.wire {
-                    Wire::Blocked => scene.says(&[status("blocked")]),
-                    Wire::Ended => {
-                        // Its answer, below whatever the chain holds, unless the compaction
-                        // kept nothing of the turn at its end.
-                        if row.then != Then::KeptNoStep {
-                            scene.adds("n-answers", &answers());
+                if row.wire == Wire::Asks {
+                    scene.says("the dialog", &shape.asks());
+                } else {
+                    scene.adds("n-tool", &tool());
+                    match row.then {
+                        Then::KeptSteps => scene.compacts(&[(STEP, step()), (TOOL, tool())]),
+                        Then::KeptNoStep => scene.compacts(&[]),
+                        Then::KeptTheTurnBefore => {
+                            scene.compacts(&[(ANSWERED, answered_before())]);
                         }
-                        scene.says(&ended());
+                        _ => {}
                     }
-                    _ => {}
+                    match row.wire {
+                        Wire::Blocked => scene.says("blocked", &[status("blocked")]),
+                        Wire::Ended => {
+                            // Its answer, below whatever the chain holds, unless the
+                            // compaction kept nothing of the turn at its end.
+                            if row.then != Then::KeptNoStep {
+                                scene.adds("n-answers", &answers());
+                            }
+                            scene.says_that("the end", &shape.ended(), Some(false));
+                        }
+                        Wire::Cancelled => {
+                            scene.says_that("the cancel", &shape.cancelled(), Some(false));
+                        }
+                        _ => {}
+                    }
                 }
             }
-        }
+        },
     }
-    scene.at_rest()
+    let wrong = scene.wrong.borrow().clone();
+    (scene.at_rest(), wrong)
 }
 
 fn rows() -> Vec<Row> {
     let mut rows = Vec::new();
-    for opened in [Opened::WithAMessage, Opened::WithNone] {
-        for at_open in [AtOpen::Messages, AtOpen::Compacted] {
-            for then in [
-                Then::Nothing,
-                Then::Delivered,
-                Then::KeptSteps,
-                Then::KeptNoStep,
-                Then::KeptTheTurnBefore,
-                Then::CompactedAtRest,
-            ] {
-                for wire in [
-                    Wire::Silent,
-                    Wire::Replayed,
-                    Wire::Instant,
-                    Wire::Working,
-                    Wire::Blocked,
-                    Wire::Ended,
+    for shape in [Shape::Words, Shape::Unsaid, Shape::Both] {
+        for opened in [Opened::WithAMessage, Opened::WithNone] {
+            for at_open in [AtOpen::Messages, AtOpen::Compacted] {
+                for then in [
+                    Then::Nothing,
+                    Then::Delivered,
+                    Then::KeptSteps,
+                    Then::KeptNoStep,
+                    Then::KeptTheTurnBefore,
+                    Then::CompactedAtRest,
                 ] {
-                    let row = Row {
-                        opened,
-                        at_open,
-                        then,
-                        wire,
-                    };
-                    // The replay and the TUI's own answer are looked at where nothing was
-                    // given: they are no turn, and nothing else is said of them.
-                    let only_at_rest = matches!(wire, Wire::Replayed | Wire::Instant);
-                    if row.happens() && (!only_at_rest || then == Then::Nothing) {
-                        rows.push(row);
+                    for wire in [
+                        Wire::Silent,
+                        Wire::Replayed,
+                        Wire::Instant,
+                        Wire::SaidBack,
+                        Wire::Working,
+                        Wire::Asks,
+                        Wire::Blocked,
+                        Wire::Ended,
+                        Wire::Cancelled,
+                    ] {
+                        let row = Row {
+                            shape,
+                            opened,
+                            at_open,
+                            then,
+                            wire,
+                        };
+                        // The replay and the TUI's own answer are looked at where nothing was
+                        // given: they are no turn, and nothing else is said of them.
+                        let only_at_rest = matches!(wire, Wire::Replayed | Wire::Instant);
+                        if row.happens() && (!only_at_rest || then == Then::Nothing) {
+                            rows.push(row);
+                        }
                     }
                 }
             }
@@ -531,19 +767,26 @@ fn a_window_that_began_a_turn_of_its_own_is_never_at_rest_before_that_turn_ends(
     let mut wrong = Vec::new();
     for row in rows() {
         for looks in [Looks::EveryStep, Looks::OpenAndEnd] {
-            let read = play(row, looks);
+            let (read, steps) = play(row, looks);
             let meant = !row.turn_open();
+            let right = read == meant && steps.is_empty();
             let line = format!(
-                "{:<12} {:<9} {:<17} {:<8} {:<10} reads {:<7} {}",
+                "{:<6} {:<12} {:<9} {:<17} {:<9} {:<10} reads {:<7} {}{}",
+                format!("{:?}", row.shape),
                 format!("{:?}", row.opened),
                 format!("{:?}", row.at_open),
                 format!("{:?}", row.then),
                 format!("{:?}", row.wire),
                 format!("{looks:?}"),
                 if read { "at rest" } else { "at work" },
-                if read == meant { "" } else { "WRONG" },
+                if right { "" } else { "WRONG" },
+                if steps.is_empty() {
+                    String::new()
+                } else {
+                    format!(" ({})", steps.join("; "))
+                },
             );
-            if read != meant {
+            if !right {
                 wrong.push(line.clone());
             }
             table.push(line);
@@ -564,17 +807,27 @@ fn the_case_the_review_found_is_a_row_of_the_table() {
     // T-1401: opened again with no message on a chain compacted at rest, a task delivered,
     // a compaction in the middle of its turn that keeps no step, and Devin's `blocked`
     // before the turn's end.
-    let row = Row {
-        opened: Opened::WithNone,
-        at_open: AtOpen::Compacted,
-        then: Then::KeptNoStep,
-        wire: Wire::Blocked,
-    };
-    assert!(rows()
-        .iter()
-        .any(|listed| format!("{listed:?}") == format!("{row:?}")));
-    for looks in [Looks::EveryStep, Looks::OpenAndEnd] {
-        assert!(!play(row, looks), "{looks:?}: a turn of its own is open");
+    for shape in [Shape::Words, Shape::Unsaid, Shape::Both] {
+        let row = Row {
+            shape,
+            opened: Opened::WithNone,
+            at_open: AtOpen::Compacted,
+            then: Then::KeptNoStep,
+            // 3000.12.43 says no `blocked`: its turn goes on in silence.
+            wire: if shape == Shape::Unsaid {
+                Wire::Working
+            } else {
+                Wire::Blocked
+            },
+        };
+        assert!(rows()
+            .iter()
+            .any(|listed| format!("{listed:?}") == format!("{row:?}")));
+        for looks in [Looks::EveryStep, Looks::OpenAndEnd] {
+            let (read, wrong) = play(row, looks);
+            assert!(!read, "{row:?} {looks:?}: a turn of its own is open");
+            assert!(wrong.is_empty(), "{row:?} {looks:?}: {wrong:?}");
+        }
     }
 }
 
@@ -587,25 +840,32 @@ fn a_turn_of_its_own_that_ended_leaves_the_window_at_rest_on_a_chain_put_back_as
     // holds the user's messages it held at the open; and the turn's end is said with
     // nothing stored after the compaction. The window's turn is over, and the record has
     // nothing of a turn of its own open: at rest, not held at work by the old cut turn.
-    let row = Row {
-        opened: Opened::WithNone,
-        at_open: AtOpen::Cut,
-        then: Then::KeptTheTurnBefore,
-        wire: Wire::Ended,
-    };
-    for looks in [Looks::EveryStep, Looks::OpenAndEnd] {
-        let mut scene = Scene::new(row, looks);
-        assert!(scene.at_rest(), "{looks:?}: at rest at its open");
-        scene.adds("n-asks", &asks());
-        scene.says(&[status("working")]);
-        scene.adds("n-step", &step());
-        scene.adds("n-tool", &tool());
-        scene.compacts(&[(CUT, cut_step())]);
-        scene.says(&[
-            status("blocked"),
-            json!({ "sessionId": SESSION, "turnClientMessageId": "request-now" }),
-            json!({ "sessionId": SESSION, "cause": "complete", "stats": {} }),
-        ]);
-        assert!(scene.at_rest(), "{looks:?}: the turn of its own ended");
+    for shape in [Shape::Words, Shape::Unsaid, Shape::Both] {
+        let row = Row {
+            shape,
+            opened: Opened::WithNone,
+            at_open: AtOpen::Cut,
+            then: Then::KeptTheTurnBefore,
+            wire: Wire::Ended,
+        };
+        for looks in [Looks::EveryStep, Looks::OpenAndEnd] {
+            let mut scene = Scene::new(row, looks);
+            assert!(scene.at_rest(), "{shape:?} {looks:?}: at rest at its open");
+            scene.says_that("the opening", &shape.opening(), Some(true));
+            scene.adds("n-asks", &asks());
+            scene.adds("n-step", &step());
+            scene.adds("n-tool", &tool());
+            scene.compacts(&[(CUT, cut_step())]);
+            scene.says_that("the end", &shape.ended(), Some(false));
+            assert!(
+                scene.at_rest(),
+                "{shape:?} {looks:?}: the turn of its own ended"
+            );
+            assert!(
+                scene.wrong.borrow().is_empty(),
+                "{shape:?} {looks:?}: {:?}",
+                scene.wrong.borrow()
+            );
+        }
     }
 }

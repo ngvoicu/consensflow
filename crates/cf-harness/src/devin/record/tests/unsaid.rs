@@ -179,12 +179,12 @@ fn the_turn_a_reopened_devin_3000_12_window_replays_is_no_work() {
 }
 
 #[test]
-#[ignore = "red on main: Devin 3000.12.43 writes no working (T-1417)"]
 fn a_devin_3000_12_turn_is_at_work_from_the_message_it_says_back_before_its_first_streamed_word() {
     // Devin 3000.11 said `working` before it said the message back; 3000.12.43 says nothing of
     // its own, and the turn's first streamed word came 1-6.6 s after the message in three live
-    // runs (T-1417). Read by its stamps, the message said back is a replay's, and the window
-    // reads at rest until the model's first word.
+    // runs (T-1417). Read by its stamps alone, the message said back is a replay's, and the
+    // window read at rest until the model's first word: the message said back live opens the
+    // turn (T-1423).
     let staged = Staged::new();
     let mut reader = staged.reader();
     staged.chain(&[user("u-1", Some(json!("request-1")))]);
@@ -193,7 +193,6 @@ fn a_devin_3000_12_turn_is_at_work_from_the_message_it_says_back_before_its_firs
 }
 
 #[test]
-#[ignore = "red on main: Devin 3000.12.43 writes no blocked before a permission dialog (T-1417)"]
 fn a_devin_3000_12_turn_that_asks_its_user_to_allow_a_call_is_no_work_while_it_waits() {
     // Devin 3000.11 said `blocked` before its dialog, and the window read at rest while it
     // waited; 3000.12.43 writes the dialog as a line of its own with no word that it waits
@@ -211,4 +210,277 @@ fn a_devin_3000_12_turn_that_asks_its_user_to_allow_a_call_is_no_work_while_it_w
     wire.push(asked());
     staged.wire("launch-1", &wire);
     assert_eq!(both(&staged, &mut reader, "asking"), settled());
+    // Allowed, the call goes on (its update, T-1417 run 3), and so does the turn's work.
+    wire.push(running_call("in_progress"));
+    staged.wire("launch-1", &wire);
+    assert_eq!(both(&staged, &mut reader, "allowed"), at_work());
+    wire.extend(ended("complete"));
+    staged.wire("launch-1", &wire);
+    assert_eq!(both(&staged, &mut reader, "ended"), settled());
+}
+
+/// What the shell says of the turn's call, by its id, with no stamp.
+fn running_call(status: &str) -> Value {
+    record(json!({
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "exec:0#call-1",
+        "status": status,
+        "_meta": { "cognition.ai/inferenceToolName": "exec" },
+    }))
+}
+
+/// The call cancelled by the user's interrupt, as Devin 3000.12.43 says it (T-1423).
+fn interrupted() -> Value {
+    record(json!({
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "exec:0#call-1",
+        "status": "failed",
+        "content": [{ "type": "content",
+            "content": { "type": "text", "text": "Canceled due to user interrupt" } }],
+        "_meta": { "cognition.ai/inferenceToolName": "exec", "cognition.ai/canceled": true },
+    }))
+}
+
+#[test]
+fn a_permission_dialog_left_with_escape_ends_the_devin_3000_12_turn() {
+    // T-1423 run 4: Escape over the dialog failed the call and cancelled the turn in 0.1 s.
+    let staged = Staged::new();
+    let mut reader = staged.reader();
+    staged.chain(&[user("u-1", Some(json!("request-1")))]);
+    let mut wire = vec![said_back("Review T-1"), call(), asked()];
+    staged.wire("launch-1", &wire);
+    assert_eq!(both(&staged, &mut reader, "asking"), settled());
+    wire.push(interrupted());
+    wire.push(json!({ "sessionId": SESSION, "requestId": "permission-1" }));
+    wire.extend(ended("cancelled"));
+    staged.wire("launch-1", &wire);
+    assert_eq!(both(&staged, &mut reader, "escaped"), settled());
+}
+
+#[test]
+fn a_devin_3000_12_turn_the_app_stops_ends_at_its_cancel_whatever_it_was_doing() {
+    // T-1423 run 5, the product's Stop over each of three working turns.
+    let thinking = vec![
+        said_back("Review T-1"),
+        stamped("agent_thought_chunk", Some("…"), Some("stream-0")),
+    ];
+    let mut over_thoughts = thinking.clone();
+    over_thoughts.extend([
+        json!({ "sessionId": SESSION, "turnClientMessageId": "request-1" }),
+        json!({ "cause": "cancelled", "stats": { "requestId": "model-2" }, "sessionId": SESSION }),
+        json!({ "durationMs": 4886, "blockIndex": 0, "sessionId": SESSION }),
+    ]);
+    let mut over_a_command = vec![said_back("Review T-1"), call(), running_call("in_progress")];
+    over_a_command.push(interrupted());
+    over_a_command.extend(ended("cancelled"));
+    // The command's own end, after the turn's.
+    over_a_command.push(exited());
+    let mut in_the_background = vec![said_back("Review T-1"), call(), backgrounded()];
+    in_the_background.extend([interrupted(), running_call("in_progress")]);
+    in_the_background.extend(ended("cancelled"));
+    for (what, wire) in [
+        ("over its thoughts", over_thoughts),
+        ("over a command", over_a_command),
+        ("over a command in the background", in_the_background),
+    ] {
+        let staged = Staged::new();
+        let mut reader = staged.reader();
+        staged.chain(&[user("u-1", Some(json!("request-1")))]);
+        staged.wire("launch-1", &thinking);
+        assert_eq!(both(&staged, &mut reader, what), at_work(), "{what}");
+        staged.wire("launch-1", &wire);
+        assert_eq!(both(&staged, &mut reader, what), settled(), "{what}");
+    }
+}
+
+#[test]
+fn a_message_typed_into_a_devin_3000_12_turn_at_work_is_taken_by_it_and_ended_with_it() {
+    // T-1417 run 2, T-1423 run 4: a message pasted while the turn works is said back into the
+    // turn, and the one cause ends both.
+    let staged = Staged::new();
+    let mut reader = staged.reader();
+    staged.chain(&[user("u-1", Some(json!("request-1")))]);
+    let mut wire = vec![
+        said_back("Review T-1"),
+        stamped("agent_thought_chunk", Some("…"), Some("stream-0")),
+        said_back("And T-2"),
+    ];
+    staged.wire("launch-1", &wire);
+    assert_eq!(both(&staged, &mut reader, "both taken"), at_work());
+    wire.push(json!({ "sessionId": SESSION, "turnClientMessageId": "request-1" }));
+    wire.extend(ended("complete"));
+    staged.wire("launch-1", &wire);
+    assert_eq!(both(&staged, &mut reader, "ended"), settled());
+}
+
+#[test]
+fn a_devin_turn_ends_at_a_cause_this_reader_has_no_name_for() {
+    // A cause is the turn's end, whatever its name: a word a later Devin adds holds no window at
+    // work for good.
+    let staged = Staged::new();
+    let mut reader = staged.reader();
+    staged.chain(&[user("u-1", Some(json!("request-1")))]);
+    let mut wire = vec![
+        said_back("Review T-1"),
+        stamped("agent_thought_chunk", Some("…"), Some("stream-0")),
+    ];
+    staged.wire("launch-1", &wire);
+    assert_eq!(both(&staged, &mut reader, "thinking"), at_work());
+    wire.extend(ended("refused"));
+    staged.wire("launch-1", &wire);
+    assert_eq!(both(&staged, &mut reader, "ended"), settled());
+}
+
+#[test]
+fn a_message_devin_3000_11_says_back_opens_no_turn_live_or_replayed() {
+    // Devin 3000.11 says its messages back with neither an event type nor an event id (127 of
+    // 127 in the kit's logs): its turn opens at `working`, and a reopened window's replay of the
+    // same line is no work.
+    let staged = Staged::new();
+    staged.chain(&[
+        user("u-1", Some(json!("request-1"))),
+        stopped("a-1", "Done."),
+    ]);
+    let mut reader = staged.reader();
+    let old = record(json!({
+        "sessionUpdate": "user_message_chunk",
+        "content": { "type": "text", "text": "[ConsensFlow m-1 · T-1 · task from @chief]" },
+        "_meta": {
+            "cognition.ai/clientMessageId": "request-1",
+            "cognition.ai/messageSubIndex": 0,
+            "cognition.ai/timestamp": 1_792_976_967_738_i64,
+        },
+    }));
+    staged.wire("launch-2", &[old]);
+    assert_eq!(both(&staged, &mut reader, "said back"), settled());
+}
+
+#[test]
+fn the_deliveries_a_devin_turn_took_in_are_its_own_and_none_once_it_ended() {
+    // What the window tells the engine has begun (`Observed::begun`): the messages said back
+    // into the turn open now, by their headers; none of a turn that ended, and none of a
+    // message with no header of ConsensFlow's.
+    let mut turns = super::super::wires::Turns::default();
+    let said = |turns: &mut super::super::wires::Turns, lines: &[Value]| {
+        for line in lines {
+            turns.follow(line);
+        }
+        turns.said_back(SESSION)
+    };
+    assert_eq!(said(&mut turns, &[]), Vec::<i64>::new());
+    assert_eq!(
+        said(
+            &mut turns,
+            &[said_back("[ConsensFlow m-7 · T-1 · task from @chief]\nGo")]
+        ),
+        vec![7]
+    );
+    assert_eq!(
+        said(
+            &mut turns,
+            &[
+                said_back("[ConsensFlow m-9 · T-1 · note from @chief]\nAnd this"),
+                said_back("typed by the human"),
+            ]
+        ),
+        vec![7, 9]
+    );
+    assert_eq!(said(&mut turns, &ended("complete")), Vec::<i64>::new());
+    assert!(!turns.open(SESSION));
+    // The next turn took in its own message alone.
+    assert_eq!(
+        said(
+            &mut turns,
+            &[said_back(
+                "[ConsensFlow m-12 · T-2 · task from @chief]\nNext"
+            )]
+        ),
+        vec![12]
+    );
+}
+
+#[test]
+fn a_message_an_older_devin_says_back_is_its_turns_where_a_turn_opens_around_it_and_a_replays_is_none(
+) {
+    // Devin 3000.11 says each message back with no event type and no event id, live or replayed
+    // (the kit's 34 logs of 2026-10-21 and 2026-11-05, T-1423): just after its `working` where it
+    // is taken in live, before the turn's first streamed word in some older logs, and with no
+    // turn after it, ended by a bare `turnClientMessageId`, where a reopened window replays it.
+    // The message is the turn's where a turn opens around it before the next end; a replay's is
+    // dropped at that end, and the next turn does not take it.
+    let old = |text: &str| {
+        json!({
+            "sessionId": SESSION,
+            "update": {
+                "sessionUpdate": "user_message_chunk",
+                "content": { "type": "text", "text": text },
+                "_meta": {
+                    "cognition.ai/clientMessageId": "request-1",
+                    "cognition.ai/timestamp": "2026-11-05T17:01:53.911552+00:00",
+                    "cognition.ai/messageSubIndex": 0,
+                },
+            },
+        })
+    };
+    let working = json!({
+        "sessionId": SESSION,
+        "update": {
+            "sessionUpdate": "session_info_update",
+            "_meta": { "cognition.ai/statusEnum": "working" },
+        },
+    });
+    let streamed = stamped("agent_thought_chunk", Some("Reading"), Some("stream-1"));
+    let replayed_word = stamped("agent_message_chunk", Some("Done."), None);
+    let bare_end = json!({ "sessionId": SESSION, "turnClientMessageId": "request-1" });
+    let follow = |turns: &mut super::super::wires::Turns, lines: &[Value]| {
+        for line in lines {
+            turns.follow(line);
+        }
+        turns.said_back(SESSION)
+    };
+
+    // Live, after `working`: the turn's own until its end.
+    let mut turns = super::super::wires::Turns::default();
+    let taken = follow(
+        &mut turns,
+        &[
+            working.clone(),
+            old("[ConsensFlow m-3 · T-1 · task from @chief]\nGo"),
+        ],
+    );
+    assert_eq!(taken, vec![3], "said back after working");
+    assert_eq!(follow(&mut turns, &ended("complete")), Vec::<i64>::new());
+
+    // Live, before the turn's first streamed word (no `working`): the turn's once it streams.
+    let mut turns = super::super::wires::Turns::default();
+    let said = old("[ConsensFlow m-4 · T-1 · task from @chief]\nGo");
+    assert_eq!(
+        follow(&mut turns, &[said]),
+        Vec::<i64>::new(),
+        "no turn open yet"
+    );
+    assert!(
+        !turns.open(SESSION),
+        "an older Devin's said-back opens nothing"
+    );
+    assert_eq!(
+        follow(&mut turns, std::slice::from_ref(&streamed)),
+        vec![4],
+        "its first word"
+    );
+
+    // Replayed by a reopened window: no turn, a bare end; the next turn takes its own alone.
+    let mut turns = super::super::wires::Turns::default();
+    let replay = [
+        old("[ConsensFlow m-1 · T-1 · task from @chief]\nGo"),
+        replayed_word,
+        bare_end,
+    ];
+    assert_eq!(follow(&mut turns, &replay), Vec::<i64>::new(), "a replay");
+    assert!(!turns.open(SESSION), "a replay opens no turn");
+    let next = [
+        working,
+        old("[ConsensFlow m-5 · T-1 · note from ConsensFlow]\nCut"),
+    ];
+    assert_eq!(follow(&mut turns, &next), vec![5], "the next turn");
 }

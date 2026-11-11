@@ -164,6 +164,12 @@ impl WireLog {
     pub(super) fn turn_open(&self, session: &str) -> bool {
         self.state.borrow().turns.open(session)
     }
+
+    /// The deliveries, by their headers, that the log said back as the turn open on
+    /// `session` took them in, as far as the last look read it (`Turns::said_back`).
+    pub(super) fn said_back(&self, session: &str) -> Vec<i64> {
+        self.state.borrow().turns.said_back(session)
+    }
 }
 
 /// The hash of the first `length` bytes of `file`, as [`State`]'s `read` hashes what a

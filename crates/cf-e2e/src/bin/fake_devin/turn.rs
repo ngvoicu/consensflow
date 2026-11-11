@@ -56,6 +56,7 @@ use crate::permission::{self, Call, Permission, BYPASS, SWITCHED};
 use crate::said;
 use crate::stop::Stop;
 use crate::store::Store;
+use crate::wire::Shape;
 use crate::wire::Wire;
 
 /// What the note of a quit that cut a turn asks: the engine's own words
@@ -240,6 +241,8 @@ pub struct Window<W: Write> {
     jobs: Option<Jobs>,
     /// The message the window ends at, once it is recorded (`faults`).
     crash: Fault,
+    /// The message the window's store takes and its agent begins no turn on (`faults`).
+    unbegun: Fault,
     /// The window's permission mode, which its key reader answers a dialog of.
     permission: Arc<Permission>,
     /// The folder its tools make files in: the one it runs in.
@@ -275,6 +278,7 @@ impl<W: Write> Window<W> {
             turns: 0,
             jobs: None,
             crash: Fault::default(),
+            unbegun: Fault::default(),
             permission: Arc::new(Permission::new(true)),
             folder: std::env::current_dir().unwrap_or_default(),
             calls: 0,
@@ -295,6 +299,13 @@ impl<W: Write> Window<W> {
     #[must_use]
     pub fn crashing_on(mut self, crash: Fault) -> Self {
         self.crash = crash;
+        self
+    }
+
+    /// The window's store takes the message `unbegun` meets, and its agent begins no turn.
+    #[must_use]
+    pub fn beginning_nothing_on(mut self, unbegun: Fault) -> Self {
+        self.unbegun = unbegun;
         self
     }
 
@@ -390,10 +401,22 @@ impl<W: Write> Window<W> {
             Some(cut) => plan_of(&cut, self.pace).going_on(self.pace),
             None => plan_of(text, self.pace),
         };
-        self.store.user(stored, &client)?;
-        self.wire
-            .prompt(self.turns + 1, text, &client)
-            .map_err(said)?;
+        if self.unbegun.meets(text) {
+            return self.store.user(stored, &client);
+        }
+        // Devin 3000.12.43 says the message back as its turn takes it in, and stores it 0.5
+        // to 27 s after (T-1423); 3000.11 stored it first.
+        if self.wire.shape_of() == Shape::Unsaid {
+            self.wire
+                .prompt(self.turns + 1, text, &client)
+                .map_err(said)?;
+            self.store.user(stored, &client)?;
+        } else {
+            self.store.user(stored, &client)?;
+            self.wire
+                .prompt(self.turns + 1, text, &client)
+                .map_err(said)?;
+        }
         if self.crash.meets(text) {
             crate::leave(1);
         }

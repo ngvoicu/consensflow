@@ -429,3 +429,12 @@ and the hash that names a bundle of an extension is `$HASH`.
   known only from Devin's binary, names no conversation and ends nothing), and step 3
   of `devin: a wire log Devin wrote itself (native-tui.json) is read as it grew, in pieces cut in
   the middle of a line`, where the log is cut inside the turn's `{"cause":"`.
+- **A Devin look reads its wire log once the record is back** (2026-11-11, T-1423, from the
+  review T-1411 of T-1403). Node read the record and the launch's wire log at once, each as it
+  was when the look began, so a look could pair a record that already shows a turn's effect with
+  a log from before the turn opened, and read the window at rest while Devin worked. The log is
+  now read after the record, in the same look. `launch/` moved for it in one step, in both
+  platforms' recordings, with a `kept` difference: step 14 of `devin: a look reads the wire log
+  as it is when it begins, and the record when released`, whose log says, while the record is
+  held, that the window moved to another conversation; the look sees the move (`switched`,
+  `settled: false`, what Node said at the next look, step 15) where Node saw it a look later.

@@ -380,3 +380,170 @@ fn rows_the_old_process_wrote_after_the_open_are_no_turn_the_window_began() {
     *record.0.borrow_mut() = later;
     assert!(at_rest(&window), "the old process wrote it");
 }
+
+#[test]
+fn a_look_whose_record_comes_back_late_reads_the_wire_as_it_is_when_the_record_is_back() {
+    // The review T-1411 of T-1403: the record and the wire log were read together, the log
+    // when the look began and the record when its reading came back, which the engine's
+    // worker takes a second over on a long transcript. A window opened again on a session
+    // Devin compacted holds the chain of the open, and reads at rest by it until its record
+    // changes (T-1401); a turn that opened in that second, its message not yet in the store
+    // (Devin stored it 0.5 to 27 s after it said it back, T-1423), was read by the log from
+    // before it and the record from after: at rest, and a Stop owed to it paid with no key.
+    // The log is read once the record is back (T-1423), on Devin 3000.11's words and on
+    // 3000.12.43's, which says the message back and no word of its own.
+    use std::task::{Context, Poll, Waker};
+    let thought = json!({
+        "sessionId": SESSION,
+        "update": {
+            "sessionUpdate": "agent_thought_chunk",
+            "content": { "type": "text", "text": "Reading the next file." },
+            "_meta": {
+                "cognition.ai/timestamp": "2026-11-10T20:35:15.000000+00:00",
+                "cognition.ai/streamingMessageId": "stream-1",
+            },
+        },
+    });
+    let working = json!({
+        "sessionId": SESSION,
+        "update": {
+            "sessionUpdate": "session_info_update",
+            "_meta": {
+                "cognition.ai/timestamp": 1_792_976_967_738_i64,
+                "cognition.ai/eventType": "status_update",
+                "cognition.ai/statusEnum": "working",
+            },
+        },
+    });
+    let said_back = json!({
+        "sessionId": SESSION,
+        "update": {
+            "sessionUpdate": "user_message_chunk",
+            "content": { "type": "text", "text": "Go on" },
+            "_meta": {
+                "cognition.ai/clientMessageId": "request-2",
+                "cognition.ai/eventType": "user_message",
+                "cognition.ai/message": "Go on",
+                "cognition.ai/messageSubIndex": 0,
+                "cognition.ai/timestamp": "2026-11-10T20:35:14.000000+00:00",
+            },
+        },
+    });
+    for (shape, begun) in [
+        ("3000.11", vec![working, thought.clone()]),
+        ("3000.12.43", vec![said_back, thought.clone()]),
+    ] {
+        let home = Home::new();
+        let store = home.store();
+        store.begins(SESSION);
+        store.says(SESSION, "user", "Write the parser");
+        store.replies(SESSION, "Done.");
+        store.is_compacted(SESSION);
+        let window = reopened_on_the_store(&home);
+        assert!(at_rest(&window), "{shape}: a summary, nothing given since");
+
+        home.fakes.records.hold(true);
+        let mut look = window.observe();
+        let mut context = Context::from_waker(Waker::noop());
+        assert!(
+            look.as_mut().poll(&mut context).is_pending(),
+            "{shape}: the record is being read"
+        );
+        // While it is, a turn opens, and nothing of it is in the store yet.
+        for line in &begun {
+            home.appends(&format!("{line}\n"));
+        }
+        assert!(home.fakes.records.release(), "{shape}: a look was held");
+        let Poll::Ready(observed) = look.as_mut().poll(&mut context) else {
+            panic!("{shape}: the look waits on nothing more");
+        };
+        home.fakes.records.hold(false);
+        assert!(
+            !observed.unwrap().settled,
+            "{shape}: the turn's opening was in the log before the record came back"
+        );
+        assert!(
+            !at_rest(&window),
+            "{shape}: and the next look reads it so too"
+        );
+    }
+}
+
+#[test]
+fn a_message_said_back_into_the_windows_own_turn_has_begun_until_that_turn_ends() {
+    // T-1423: the window tells the engine which deliveries its own launch's log said back into
+    // the turn open now (`Observed::begun`), and the engine's watch for a message no turn began
+    // on leaves those be. Devin 3000.11 says its messages back with no event type, just after
+    // its word that the turn works: the message is the turn's all the same; with no turn around
+    // it (a replay's), it tells nothing.
+    let line = |text: &str, live: bool| {
+        let mut meta = json!({
+            "cognition.ai/clientMessageId": "request-2",
+            "cognition.ai/messageSubIndex": 0,
+            "cognition.ai/timestamp": "2026-11-10T20:35:14.000000+00:00",
+        });
+        if live {
+            meta["cognition.ai/eventType"] = json!("user_message");
+            meta["cognition.ai/message"] = json!(text);
+        }
+        json!({
+            "sessionId": SESSION,
+            "update": {
+                "sessionUpdate": "user_message_chunk",
+                "content": { "type": "text", "text": text },
+                "_meta": meta,
+            },
+        })
+    };
+    let begun =
+        |window: &Rc<dyn cf_harness::contract::Window>| finished(window.observe()).unwrap().begun;
+    for live in [true, false] {
+        let home = Home::new();
+        let store = home.store();
+        store.begins(SESSION);
+        store.says(SESSION, "user", "Write the parser");
+        store.replies(SESSION, "Done.");
+        let window = reopened_on_the_store(&home);
+        assert_eq!(begun(&window), Vec::<i64>::new(), "nothing given");
+        if !live {
+            // A replay's: no turn around it, ended bare.
+            home.appends(&format!(
+                "{}\n{}\n",
+                line(
+                    "[ConsensFlow m-40 · T-3 · task from @chief]\nThe parser",
+                    live
+                ),
+                json!({ "sessionId": SESSION, "turnClientMessageId": "request-1" })
+            ));
+            assert_eq!(begun(&window), Vec::<i64>::new(), "a replay's");
+            home.appends(&format!(
+                "{}\n",
+                json!({
+                    "sessionId": SESSION,
+                    "update": {
+                        "sessionUpdate": "session_info_update",
+                        "_meta": { "cognition.ai/statusEnum": "working" },
+                    },
+                })
+            ));
+        }
+        home.appends(&format!(
+            "{}\n",
+            line(
+                "[ConsensFlow m-41 · T-3 · task from @chief]\nThe lexer",
+                live
+            )
+        ));
+        assert_eq!(begun(&window), vec![41], "live {live}: said back");
+        home.appends(&format!(
+            "{}\n{}\n",
+            json!({ "sessionId": SESSION, "turnClientMessageId": "request-2" }),
+            json!({ "sessionId": SESSION, "cause": "complete", "stats": {} })
+        ));
+        assert_eq!(
+            begun(&window),
+            Vec::<i64>::new(),
+            "live {live}: its turn ended"
+        );
+    }
+}
