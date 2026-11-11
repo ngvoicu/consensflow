@@ -52,7 +52,7 @@
 //! and every status `running`; the reader held the five for good, 25 minutes, until the
 //! owner's hand ended the task). A child that ended stays ended: no record shows a second
 //! attempt of one (the binary's strings name retries: `workflow_lifecycle_retries`, an
-//! `attempt_ref`; the issue `muse-unknown-endings-close-outcome` keeps the gap), and the
+//! `attempt_ref`; the issue `a-muse-child-end-named-in-its-binary-and-never-recorded-is-held-for-good` keeps the gap), and the
 //! workflow's own task holds the turn while it is open.
 //!
 //! **A workflow that ended is pending for one bounded wait** ([`NOTICE_WAIT_MS`]). Its task
