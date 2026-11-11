@@ -32,6 +32,8 @@ windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 cf-board = { workspace = true, features = ["test-support"] }
+# The role texts a window is given, for the Windows cases that run the command a text teaches.
+cf-engine.workspace = true
 # The daemon as a process: a home of its own with a ledger and a fake `claude`.
 cf-harness = { workspace = true, features = ["test-support"] }
 # A ledger of the daemon's for a test, and a role put in the roles' table for one.

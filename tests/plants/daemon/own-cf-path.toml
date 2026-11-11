@@ -122,8 +122,8 @@ runs = ["engine-text-roles", "engine-text-goldens-roles"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles.rs"
-find = "return member::text(role, cf.as_str());"
-replace = 'return member::text(role, "cf");'
+find = "return member::text(role, cf);"
+replace = "return member::text(role, &CfWord::bare());"
 
 [[plant]]
 name = "own cf path: the parts of a member's text are not given the cf"
@@ -164,8 +164,8 @@ runs = ["proto-lib-cf-word", "engine-text-roles"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/cf_word.rs"
-find = "        if path.is_empty() {"
-replace = "        if false {"
+find = "        let word = if path.is_empty() {"
+replace = "        let word = if false {"
 
 [[plant]]
 name = "own cf path: a path already written is written again"

@@ -10,20 +10,40 @@
 
 use std::collections::HashMap;
 
-use super::RoleError;
+use cf_proto::cf_word::CfWord;
+
+use super::{shells, RoleError};
 
 /// `skill/core/staff.md`.
 const STAFF: &str = include_str!("../../../../skill/core/staff.md");
 
 /// `role`'s window instructions, from the shared text of `staff.md`, its
-/// commands starting with `cf`.
-pub(super) fn text(role: &str, cf: &str) -> Result<String, RoleError> {
-    filled(STAFF, role, cf)
+/// commands starting with `cf`, and the paragraphs that depend on the shell of
+/// the window's `cf` as `shells.md` has them.
+pub(super) fn text(role: &str, cf: &CfWord) -> Result<String, RoleError> {
+    let input = shells::paragraph(cf.shell(), "member_input")?;
+    let removal = shells::paragraph(cf.shell(), "removal")?;
+    filled(
+        STAFF,
+        role,
+        cf.as_str(),
+        &[("member_input", input), ("removal", removal)],
+    )
 }
 
-fn filled(staff: &str, role: &str, cf: &str) -> Result<String, RoleError> {
+/// `staff`, the shared text, for `role`: each slot from the part under its marker, and each
+/// of `shell_parts` (the slot and its text, in which `{{cf}}` is read as in a part).
+fn filled(
+    staff: &str,
+    role: &str,
+    cf: &str,
+    shell_parts: &[(&'static str, &str)],
+) -> Result<String, RoleError> {
     let (head, parts) = split(staff);
     let mut own = HashMap::from([("role", role.to_owned()), ("cf", cf.to_owned())]);
+    for (slot, text) in shell_parts {
+        own.insert(*slot, text.replace("{{cf}}", cf));
+    }
     for (part_role, slot, text) in parts {
         if part_role == role {
             // A part is inserted as it is, never read for slots again: its `cf` is
@@ -53,7 +73,7 @@ fn filled(staff: &str, role: &str, cf: &str) -> Result<String, RoleError> {
 
 /// The text before the first marker, and each marker's role and slot with the
 /// text after it, up to the next marker.
-fn split(staff: &str) -> (&str, Vec<(&str, &str, &str)>) {
+pub(super) fn split(staff: &str) -> (&str, Vec<(&str, &str, &str)>) {
     let mut markers = Vec::new();
     let mut at = 0;
     for line in staff.split_inclusive('\n') {
@@ -168,11 +188,11 @@ the advisor
     #[test]
     fn a_role_gets_the_head_with_its_slots_filled_and_the_opening_comment_gone() {
         assert_eq!(
-            filled(SAMPLE, "worker", "cf").unwrap(),
+            filled(SAMPLE, "worker", "cf", &[]).unwrap(),
             "# the worker for worker\n{worker}\n"
         );
         assert_eq!(
-            filled(SAMPLE, "advisor", "cf").unwrap(),
+            filled(SAMPLE, "advisor", "cf", &[]).unwrap(),
             "# the advisor for advisor\n{advisor}\n"
         );
     }
@@ -182,12 +202,12 @@ the advisor
         let text = "run {{cf}} a\n<!-- worker: more -->\nthen {{cf}} b\n\n";
         let text = format!("# {{{{more}}}} and {{{{cf}}}} c\n{text}");
         assert_eq!(
-            filled(&text, "worker", "/bin/cf").unwrap(),
+            filled(&text, "worker", "/bin/cf", &[]).unwrap(),
             "# then /bin/cf b and /bin/cf c\nrun /bin/cf a\n"
         );
         // A path that reads as a slot is text.
         assert_eq!(
-            filled(&text, "worker", "/{{role}}/cf").unwrap(),
+            filled(&text, "worker", "/{{role}}/cf", &[]).unwrap(),
             "# then /{{role}}/cf b and /{{role}}/cf c\nrun /{{role}}/cf a\n"
         );
     }
@@ -196,11 +216,11 @@ the advisor
     fn a_slot_the_role_does_not_have_is_named() {
         let text = "# {{title}} {{extra}}\n<!-- worker: title -->\nw\n";
         assert_eq!(
-            filled(text, "worker", "cf").unwrap_err().to_string(),
+            filled(text, "worker", "cf", &[]).unwrap_err().to_string(),
             "staff.md has no extra for the worker role"
         );
         assert_eq!(
-            filled(text, "pm", "cf").unwrap_err().to_string(),
+            filled(text, "pm", "cf", &[]).unwrap_err().to_string(),
             "staff.md has no title for the pm role"
         );
     }

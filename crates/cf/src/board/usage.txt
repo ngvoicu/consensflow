@@ -54,7 +54,7 @@ cf inside a ConsensFlow window: the board's commands.
                                     the chief's: what the human and the chiefs before you
                                     said, newest page first (after the chief was switched)
 
-Any "…" can be - to read the text from standard input, as written:
+Any "…" can be - to read the text from standard input, as written (bash, zsh, Git Bash; in PowerShell use --file):
   cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)
 A long one is surest in a file, which no shell cuts (every command that takes words):
   cf task add --tier standard --file brief.md

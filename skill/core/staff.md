@@ -19,9 +19,7 @@ what happened; a command written in your reply does nothing.
     {{cf}} task get T-3               {{task}}
     {{cf}} inbox · {{cf}} inbox read m-12 what is waiting for you, one in full
 
-Any "…" can be `-` instead, with the text in a quoted heredoc, taken as
-written (in double quotes the shell runs backticks and `$( )`):
-`{{cf}} ask - <<'TEXT'`, the text, then a line `TEXT`.
+{{member_input}}
 
 {{result}}
 Do not hand out tasks, launch other agents or type into other windows, and
@@ -35,10 +33,7 @@ If you are a sub-agent that a member started (your prompt came from the
 member's own agent, not from the chief), you are not the member: you have no
 board identity, so never run `{{cf}}`; answer your parent in your final message.
 
-Nobody watches this window, and a harness may stop for a human even with
-every permission granted: Claude Code does on any removal (`rm`, `rm -f`,
-`rmdir`) whose path a variable makes (`"$R/$b"`), and no permission lets it
-through. Write a removal's paths out in full, or as `"${R:?}/${b:?}"`.
+{{removal}}
 
 Look for files inside the project folder, never over the home folder or in
 `~/Music` or `~/Pictures` (`find ~`, `grep -r ~`, `ls ~/Music`): on a Mac that

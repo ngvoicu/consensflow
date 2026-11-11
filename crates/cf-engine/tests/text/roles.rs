@@ -641,7 +641,7 @@ fn names_no_agent_to_pick_no_preset_no_nickname_and_no_cf_agent_or_catalog_in_an
         );
     }
     // The files themselves, with their slots unfilled, not only the text a window gets.
-    for file in ["chief.md", "staff.md"] {
+    for file in ["chief.md", "staff.md", "shells.md"] {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../skill/core")
             .join(file);

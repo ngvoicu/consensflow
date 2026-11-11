@@ -16,6 +16,7 @@
 
 mod member;
 pub(crate) mod news;
+mod shells;
 mod skill;
 mod specs;
 
@@ -61,6 +62,8 @@ pub enum RoleError {
     Unknown(String),
     #[error("staff.md has no {slot} for the {role} role")]
     MissingSlot { role: String, slot: String },
+    #[error("shells.md has no {slot} for the {shell} shell")]
+    MissingShell { shell: String, slot: String },
     /// Node threw a TypeError reading a tier that is none of the four.
     #[error("{member} has no work tier to name in the staff table")]
     NoWorkTier { member: String },
@@ -107,7 +110,8 @@ pub fn staff_of(project: &ProjectView) -> Vec<StaffRow> {
 /// ConsensFlow's, or the Cloud Foundry CLI: a Devin worker's `cf` was the live
 /// app's older one, 2026-09-26), and no order of a `PATH` matters to a full
 /// path. Where there is no path ([`CfWord::bare`]) the commands say `cf`, as a
-/// shell finds it.
+/// shell finds it. The shell also decides the paragraphs on how a text is passed
+/// to a command and how a removal is written (`shells.md`).
 ///
 /// A chief whose project has specs on is given `specs`, and its text has the
 /// section of them after the rest; a member's never does, whatever is given,
@@ -128,7 +132,7 @@ pub fn role_instructions(
         return Err(RoleError::Unknown(role.to_owned()));
     }
     if role != "chief" {
-        return member::text(role, cf.as_str());
+        return member::text(role, cf);
     }
     if let Some(card) = env.path(CARD) {
         // Node read its environment as UTF-8: a byte that is none was U+FFFD.
@@ -137,6 +141,11 @@ pub fn role_instructions(
     }
     // The `cf` goes in last, so nothing in a path is read as a slot.
     let chief = CHIEF
+        .replacen(
+            "{{chief_input}}",
+            shells::paragraph(cf.shell(), "chief_input")?,
+            1,
+        )
         .replacen("{{tiers}}", &work_tier_list(), 1)
         .replacen("{{staff}}", &team_table(staff)?, 1)
         .replace("{{cf}}", cf.as_str());

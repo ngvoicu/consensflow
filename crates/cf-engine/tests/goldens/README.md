@@ -249,3 +249,13 @@ and the shell-dependent paragraphs by shell below. By hand, in those words alone
 The role-change budgets moved with the shorter text: read whole to 152 rows with specs on
 (174 without), and to 15 and 39 with the most rules for the staff, 51 bytes and 57 lines to
 spare for the 15.
+
+The paragraphs of a text that depend on the shell of the window's commands (how a text is passed
+to `cf`, and how a removal whose path a variable makes is written: the chief's input, a member's
+input and its removal) are in `skill/core/shells.md`, a part for each shell, and `chief.md` and
+`staff.md` name them as slots. The goldens here are played for `Shell::Posix`, the shell of
+bash, zsh and Git Bash (every harness off Windows, and Claude Code, Pi and Devin on it), whose
+parts are the words these paragraphs always had, so no row moved. The PowerShell parts (Codex's
+and Muse's on Windows) are pinned in `tests/text/shells.rs`: their words, that a PowerShell
+text holds no heredoc and no bash removal, that it is no longer than the bash text with the same
+word for `cf`, and which lines differ.

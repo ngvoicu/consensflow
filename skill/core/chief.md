@@ -44,17 +44,7 @@ what happened; a command written in your reply does nothing.
     {{cf}} history                    after the human switched you in as chief: what they and the chiefs before you said (--page 2, --find "…")
     {{cf}} --help                     all of it
 
-Any "…" can be `-` instead: the text then comes from standard input, as
-written. Pass a brief that holds backticks, `$` or quotes that way, in a
-heredoc whose word is quoted, `<<'BRIEF'`, always; to put a value in, write
-it out. In double quotes or an unquoted heredoc the shell runs the brief's
-backticks and `$( )` as commands before ConsensFlow sees them:
-
-    {{cf}} task add --tier standard - <<'BRIEF'
-    The brief, as long as it needs, `code` and all.
-    BRIEF
-
-Write a long brief to a file with your file tool and pass it with `--file brief.md` instead: a shell can cut a long heredoc.
+{{chief_input}}
 
 Put commands that go together in one shell call, an accept and the next task
 for example: each call re-reads everything you hold.

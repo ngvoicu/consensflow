@@ -264,6 +264,22 @@ fn the_word_may_stand_after_the_number_a_command_takes_first_or_beside_its_flags
     assert!(api.received().is_empty());
 }
 
+/// A heredoc is bash's, zsh's and Git Bash's, and PowerShell has none (T-1435): the usage says
+/// which shells take `-` with a heredoc, and that a file is what PowerShell takes.
+#[test]
+fn the_usage_says_a_heredoc_is_for_bash_like_shells_and_powershell_takes_a_file() {
+    let usage = board_usage();
+    assert!(
+        usage.contains(concat!(
+            "Any \"…\" can be - to read the text from standard input, as written (bash, zsh, Git Bash; in PowerShell use --file):\n",
+            "  cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)\n",
+            "A long one is surest in a file, which no shell cuts (every command that takes words):\n",
+            "  cf task add --tier standard --file brief.md\n",
+        )),
+        "{usage}"
+    );
+}
+
 #[test]
 fn json_asked_for_is_the_usage_in_a_key() {
     let api = api();
