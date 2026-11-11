@@ -252,8 +252,8 @@ runs = ["ledger-told-edges"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
 find = '''
-            sql_list(&HELD_TASK_STATES),
-            behind_held_words("m")'''
+        sql_list(&HELD_TASK_STATES),
+        behind_held_words("m")'''
 replace = '''
             sql_list(&HELD_TASK_STATES),
             "(1 = 0)"'''

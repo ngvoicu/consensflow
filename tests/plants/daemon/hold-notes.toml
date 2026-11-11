@@ -143,8 +143,8 @@ runs = ["hn-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "                    Some(told) if told.task == hold.task => stuck && !told.stuck,"
-replace = "                    Some(told) if told.task == hold.task => { let _ = told; true }"
+find = "                    Some(told) => told.aside.is_none(),"
+replace = "                    Some(_) => true,"
 
 [[plant]]
 name = "hold notes: a held task is told again when the number of its jobs changes"
@@ -153,8 +153,8 @@ runs = ["hn-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "                    Some(told) if told.task == hold.task => stuck && !told.stuck,"
-replace = "                    Some(told) if told.task == hold.task => (stuck && !told.stuck) || hold.jobs != 1,"
+find = "                    Some(told) => told.aside.is_none(),"
+replace = "                    Some(told) => told.aside.is_none() || hold.jobs != 1,"
 
 [[plant]]
 name = "hold notes: a hold nothing but Finish ends is told once more no more"
@@ -163,8 +163,8 @@ runs = ["hn-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "                    Some(told) if told.task == hold.task => stuck && !told.stuck,"
-replace = "                    Some(told) if told.task == hold.task => { let _ = told; false }"
+find = "                    Some(told) if stuck => !told.stuck,"
+replace = "                    Some(_) if stuck => false,"
 
 [[plant]]
 name = "hold notes: a hold nothing but Finish ends is told at every turn"
@@ -173,8 +173,8 @@ runs = ["hn-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "                    Some(told) if told.task == hold.task => stuck && !told.stuck,"
-replace = "                    Some(told) if told.task == hold.task => stuck,"
+find = "                    Some(told) if stuck => !told.stuck,"
+replace = "                    Some(_) if stuck => true,"
 
 [[plant]]
 name = "hold notes: a hold nothing but Finish ends is told to be an ordinary one at its first note"

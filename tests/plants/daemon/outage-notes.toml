@@ -98,7 +98,7 @@ runs = ["on-engine"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/outage.rs"
 find = '''
-const PENDING: &str = "(state = 'queued' OR (state = 'delivering' AND handed_at IS NULL))";'''
+const PENDING: &str = "(state IN ('queued', 'delivering') AND handed_at IS NULL)";'''
 replace = 'const PENDING: &str = "(1 = 1)";'
 
 [[plant]]
@@ -109,7 +109,7 @@ runs = ["on-engine"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/outage.rs"
 find = '''
-const PENDING: &str = "(state = 'queued' OR (state = 'delivering' AND handed_at IS NULL))";'''
+const PENDING: &str = "(state IN ('queued', 'delivering') AND handed_at IS NULL)";'''
 replace = 'const PENDING: &str = "(1 = 1)";'
 
 [[plant]]
@@ -168,8 +168,8 @@ runs = ["on-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/background.rs"
-find = 'self.seams.ledger.borrow_mut().tell_closed('
-replace = 'self.seams.ledger.borrow_mut().note('
+find = 'self.seams.ledger.borrow_mut().show_closed('
+replace = 'self.seams.ledger.borrow_mut().show('
 
 [[plant]]
 name = "outage notes: the closes that wait when a failure joins a note stay notes of their own"
@@ -180,10 +180,10 @@ runs = ["on-engine"]
 file = "crates/cf-ledger/src/tasks/outage.rs"
 find = '''
     if members.len() > 1 {
-        for (number, message, line)'''
+        for (number, message, line, waits)'''
 replace = '''
     if false {
-        for (number, message, line)'''
+        for (number, message, line, waits)'''
 
 [[plant]]
 name = "outage notes: the close of a window joins no note of failures"
@@ -277,9 +277,9 @@ runs = ["on-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/outage.rs"
 find = '''
-const PENDING: &str = "(state = 'queued' OR (state = 'delivering' AND handed_at IS NULL))";'''
+const PENDING: &str = "(state IN ('queued', 'delivering') AND handed_at IS NULL)";'''
 replace = '''
-const PENDING: &str = "(state = 'queued')";'''
+const PENDING: &str = "(state = 'queued' AND handed_at IS NULL)";'''
 
 [[plant]]
 name = "outage notes: only the newest two hundred failures told are looked at for a note still to be given"

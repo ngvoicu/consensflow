@@ -199,7 +199,7 @@ runs = ["engine-paused-answers", "ledger-pause-notes"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
-find = "    for (id, said) in notes_of(store, task, Some(\"queued\"))? {"
+find = "    for (id, said) in notes_of(store, task, Some(NOT_HANDED))? {"
 replace = "    for (id, said) in notes_of(store, task, None)? {"
 
 [[plant]]
@@ -209,7 +209,7 @@ runs = ["engine-paused-answers", "ledger-pause-notes"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
-find = "    for (id, _) in notes_of(store, task, Some(\"queued\"))? {"
+find = "    for (id, _) in notes_of(store, task, Some(NOT_HANDED))? {"
 replace = "    for (id, _) in notes_of(store, task, None)? {"
 
 [[plant]]

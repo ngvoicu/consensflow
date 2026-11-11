@@ -147,10 +147,10 @@ runs = ["busy-models-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-        if !self.told_busy(project, task)? {
+        if let Some((note, over)) = self.told_busy(project, task)? {
 '''
 replace = '''
-        if !self.told_busy(project, task)? || tries > 0 {
+        if let Some((note, over)) = self.told_busy(project, task)?.filter(|_| tries == 0) {
 '''
 
 [[plant]]

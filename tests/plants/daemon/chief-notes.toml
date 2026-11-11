@@ -1,0 +1,270 @@
+# Nothing is told to the chief that it need not decide (RS-25, T-1491; Gabriel, 2026-11-11: "if
+# you see issues with consensflow and interaction and many useless messages sent to the chief we
+# act"). Each note typed into the chief's window is a turn: one model call on its whole
+# conversation. A note of ConsensFlow's own that asks the chief no decision is shown, not typed:
+# it is a row of the ledger landed `read` with its receipt `{"shown": <words>}` (the ledger's
+# `queue::send`), its task's line says those words while the task holds (`aside`), and the
+# chief's inbox lists it as `[not typed]`.
+#
+# The rules: shown are the holds and their ends (`holds.rs`), a window closed leaving work
+# (`background.rs`, `show_closed`), a paused window still open (`background.rs`), a task that
+# goes on in a new conversation (`ownership.rs`), a task still at work in the background unless
+# it cannot end by itself (`turn_end.rs`), a busy model's one note of a wait, shown again on
+# each try (`scheduler.rs`, `show_again`), and a task taken back with nothing bound to its window
+# (`giving.rs`). A task held in the background an hour with no turn of its own is told once,
+# typed (`STILL_WORKING_REMINDED_AFTER_MS`). A shown close still joins a typed failure of the
+# same window (`outage.rs`, `queued_closes`). The notes of ConsensFlow's own that wait for a chief
+# together go in the first one's paste, a line each (a chain: `delivery.rs`, `gather_chain`), up
+# to the first row of another kind and within `CHAIN_CHARS`; given back, withdrawn or failed, the
+# chain lets its notes go (`release_riders`); a note handed in a chain is on its way (`PENDING`).
+#
+# Every name holds `chief-notes`, so `cargo xtask plants daemon chief-notes` runs them all.
+
+[run]
+chief-notes-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "note_chains::", "shown_notes::", "waiting_notes::"]
+chief-notes-engine-chains = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "note_chains::"]
+chief-notes-engine-busy = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "busy_models::"]
+chief-notes-engine-outage = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "outage_notes::"]
+chief-notes-engine-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::"]
+chief-notes-engine-paused-left = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_left::"]
+chief-notes-engine-waiting = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "waiting_notes::"]
+
+[[plant]]
+name = "chief-notes: a shown note is queued and typed as any note"
+meant = "shown_notes::a_hold_note_to_the_chief_is_shown_on_its_task_and_never_typed"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/queue.rs"
+find = '''
+    } else if message.from_window || message.shown.is_some() {
+'''
+replace = '''
+    } else if message.from_window {
+'''
+
+[[plant]]
+name = "chief-notes: no chain is gathered: each note is a paste of its own"
+meant = "note_chains::the_notes_that_wait_together_for_the_chief_go_in_one_paste"
+runs = ["chief-notes-ledger", "chief-notes-engine-chains"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        gather_chain(store, &message)?;
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "chief-notes: a chain runs on past a row that is not ConsensFlow's note"
+meant = "note_chains::a_chain_ends_at_the_first_row_that_is_not_consensflows_note"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        if !ours || chars > CHAIN_CHARS {
+'''
+replace = '''
+        if !ours && chars > CHAIN_CHARS {
+'''
+
+[[plant]]
+name = "chief-notes: a chain has no size"
+meant = "note_chains::a_chain_holds_no_more_than_chain_chars_of_notes_and_the_rest_wait_for_the_next"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        if !ours || chars > CHAIN_CHARS {
+'''
+replace = '''
+        if !ours {
+'''
+
+[[plant]]
+name = "chief-notes: a chain withdrawn keeps its notes carried"
+meant = "note_chains::a_chain_withdrawn_before_it_was_handed_over_lets_its_notes_go_on_their_own"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        release_riders(store, message_id)?;
+        known_message(store, message_id)
+    })
+'''
+replace = '''
+        known_message(store, message_id)
+    })
+'''
+
+[[plant]]
+name = "chief-notes: a chain given back keeps what it carried"
+meant = "note_chains::a_chain_given_back_carries_none_and_is_gathered_again_from_what_waits"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        withdraw_stale_among(store, &riding)?;
+        release_riders(store, message_id)?;
+'''
+replace = '''
+        withdraw_stale_among(store, &riding)?;
+'''
+
+[[plant]]
+name = "chief-notes: a chain that failed keeps its notes carried"
+meant = "note_chains::a_chain_whose_delivery_failed_lets_its_notes_go_on_their_own"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+            looked(json!({ "message": message_id, "reason": reason }), look),
+        )?;
+        release_riders(store, message_id)?;
+'''
+replace = '''
+            looked(json!({ "message": message_id, "reason": reason }), look),
+        )?;
+'''
+
+[[plant]]
+name = "chief-notes: a failure handed in a chain is still one to write again"
+meant = "note_chains::a_failure_handed_over_in_a_chain_is_not_written_again_into_the_note_of_the_next"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '''
+const PENDING: &str = "(state IN ('queued', 'delivering') AND handed_at IS NULL)";
+'''
+replace = '''
+const PENDING: &str = "(state IN ('queued', 'delivering'))";
+'''
+
+[[plant]]
+name = "chief-notes: a task taken back is typed though nothing is bound to its window"
+meant = "shown_notes::a_task_taken_back_with_nothing_bound_to_it_is_shown_to_the_chief_not_typed"
+runs = ["chief-notes-ledger", "chief-notes-engine-waiting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+                shown: (!asks)
+'''
+replace = '''
+                shown: (asks)
+'''
+
+[[plant]]
+name = "chief-notes: a task taken back with a follow-up bound is shown, not typed"
+meant = "shown_notes::a_task_taken_back_with_a_follow_up_bound_to_its_window_is_typed_to_the_chief"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+        let asks = !bound.is_empty() || carried.as_ref().is_some_and(|c| !c.gated.is_empty());
+'''
+replace = '''
+        let asks = carried.as_ref().is_some_and(|c| !c.gated.is_empty());
+'''
+
+[[plant]]
+name = "chief-notes: a task still at work in the background is typed"
+meant = "shown_notes::a_hold_that_ends_by_itself_is_shown_on_its_task_and_not_typed"
+runs = ["chief-notes-engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+        let aside = if held.stuck {
+            self.seams.ledger.borrow_mut().note(project.id, &note)?;
+'''
+replace = '''
+        let aside = if true {
+            self.seams.ledger.borrow_mut().note(project.id, &note)?;
+'''
+
+[[plant]]
+name = "chief-notes: a task held in the background an hour is never told"
+meant = "shown_notes::one_note_is_typed_when_a_task_is_held_an_hour_with_no_turn_of_its_own_and_one_only"
+runs = ["chief-notes-engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+        if now - since < STILL_WORKING_REMINDED_AFTER_MS {
+'''
+replace = '''
+        if now - since < STILL_WORKING_REMINDED_AFTER_MS * 1000 {
+'''
+
+[[plant]]
+name = "chief-notes: a busy model's note is not shown again on a try"
+meant = "busy_models::a_note_shown_to_the_chief_tells_while_its_hold_holds_and_the_next_try_shows_it_again"
+runs = ["chief-notes-engine-busy"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            if over {
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .show_again(project.id, note)?;
+            }
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "chief-notes: a shown close is not joined to its window's failure"
+meant = "outage_notes::the_closes_of_those_windows_are_a_line_each_of_the_note_and_no_note_of_their_own"
+runs = ["chief-notes-engine-outage"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '''
+                   AND ({PENDING} OR (state = 'read' AND json_valid(receipt)
+'''
+replace = '''
+                   AND ({PENDING} OR (state = 'never' AND json_valid(receipt)
+'''
+
+[[plant]]
+name = "chief-notes: a paused window still open is typed"
+meant = "paused_left::the_note_that_a_paused_window_stays_open_is_shown_on_its_line_and_never_typed"
+runs = ["chief-notes-engine-paused-left"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''
+        self.seams.ledger.borrow_mut().show(
+            project.id,
+            &NewNote {
+                from: None,
+                to: thread.task.requester.clone(),
+                task: Some(number),
+                body,
+            },
+            &aside,
+        )?;
+'''
+replace = '''
+        let _ = &aside;
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: thread.task.requester.clone(),
+                task: Some(number),
+                body,
+            },
+        )?;
+'''

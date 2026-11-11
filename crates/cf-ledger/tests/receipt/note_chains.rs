@@ -81,6 +81,25 @@ fn a_chain_ends_at_the_first_row_that_is_not_consensflows_note() {
 }
 
 #[test]
+fn a_chain_holds_no_more_than_chain_chars_of_notes_and_the_rest_wait_for_the_next() {
+    let mut w = world();
+    let (one, two) = two_tasks(&mut w);
+    let words = |n: usize| "a".repeat(n);
+    let first = told(&mut w, Some(one), &words(6_000));
+    let second = told(&mut w, Some(two), &words(3_000));
+    let third = told(&mut w, None, &words(2_000));
+    // CHAIN_CHARS, the ledger's limit, is 10,000.
+    let begun = w.begin(first.id);
+    assert_eq!(
+        carried(&begun),
+        [second.id],
+        "9,000 characters fit; 11,000 do not"
+    );
+    w.confirm(first.id);
+    assert_eq!(w.next("chief"), Some(third.id));
+}
+
+#[test]
 fn a_chain_withdrawn_before_it_was_handed_over_lets_its_notes_go_on_their_own() {
     let mut w = world();
     let (one, two) = two_tasks(&mut w);

@@ -104,7 +104,11 @@ fn a_task_another_member_takes_withdraws_the_notes_of_its_wait_its_requester_has
         "cancelled".to_owned(),
         Some("T-1 was taken by @diana".to_owned()),
     );
-    assert_eq!(fate(&w, taken_back.id), ("read".to_owned(), None), "it was given");
+    assert_eq!(
+        fate(&w, taken_back.id),
+        ("read".to_owned(), None),
+        "it was given"
+    );
     assert_eq!(fate(&w, waits.id), withdrawn);
 }
 
@@ -349,6 +353,52 @@ fn the_news_that_a_held_task_went_on_is_not_taken_back_by_a_hold_that_comes_afte
         .cancel_task(w.project, task, "chief")
         .expect("called off");
     assert_eq!(w.message(news).state, "read", "what was given stays");
+}
+
+#[test]
+fn the_news_a_human_requester_waits_for_is_not_taken_back_by_a_hold_that_comes_after_it() {
+    // To anyone but a chief the news is queued, not shown: a hold after it must still leave it.
+    let mut w = world();
+    let task = w
+        .ledger
+        .create_task(
+            w.project,
+            &cf_ledger::NewTask {
+                from: "human".into(),
+                pool: Some("worker".into()),
+                tier: Some("standard".into()),
+                body: "Parser".into(),
+                ..Default::default()
+            },
+        )
+        .expect("a task")
+        .task
+        .number;
+    let moved = w.assign(task, "zeus");
+    let session = moved.task.assignee.clone().expect("a session");
+    w.deliver(moved.message.expect("its brief").id);
+    w.hold(task);
+    let first = w
+        .ledger
+        .note_hold(w.project, "human", task, &session, UNTIL)
+        .expect("the human is told");
+    w.ledger.mark_read(first.id).expect("the human reads it");
+    w.daemon_resumes(task);
+    w.went_on(task);
+    let news = w
+        .ledger
+        .inbox(w.id("human"), 100)
+        .expect("the human's inbox")
+        .into_iter()
+        .find(|message| message.body == GOES_ON)
+        .expect("the human is told it goes on");
+    assert_eq!(news.state, "queued");
+    w.hold(task);
+    w.ledger
+        .note_hold(w.project, "human", task, &session, UNTIL)
+        .expect("told again");
+    w.daemon_resumes(task);
+    assert_eq!(fate(&w, news.id), ("queued".to_owned(), None));
 }
 
 #[test]
