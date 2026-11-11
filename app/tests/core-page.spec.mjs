@@ -10852,6 +10852,7 @@ test('New project asks no tier of a role whose row has none, and a member that h
         harness: 'pi',
         model: 'meta/muse-spark',
         gate: false,
+        compaction: 300000,
         staff: [
           { harness: 'codex', model: 'gpt-6-astra', effort: 'max', roles: ['scout'] },
           {
