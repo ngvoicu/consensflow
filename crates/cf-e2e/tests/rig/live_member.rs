@@ -344,9 +344,10 @@ fn silent_on_3000_12(
         "{readiness:?}"
     );
     assert_eq!(readiness.delivered, Some(true), "{readiness:?}");
+    // As the app pastes it: Devin on Windows gets its marks in ASCII (`console_text`).
     assert_eq!(
         readiness.given,
-        [format!("/bypass {note}")],
+        [format!("/bypass {}", again.given(note)?)],
         "{readiness:?}"
     );
     // The turn says the mode as it begins, and runs: its answer is in the store, and its
