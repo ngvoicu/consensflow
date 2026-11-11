@@ -359,7 +359,7 @@ replace = "const UNSET = { on: false, every: 2, unit: 'hours', text: DEFAULT_WAK
 
 [[plant]]
 name = "project settings: the board's button is still called Staff"
-meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Human approval, Wake-up calls and Specs as its sections, in that order"
+meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Advisor tool, Human approval, Wake-up calls and Specs as its sections, in that order"
 runs = ["page-project-settings-named"]
 
 [[plant.edit]]
@@ -369,7 +369,7 @@ replace = '<button class="quiet-button" id="project-settings-button" type="butto
 
 [[plant]]
 name = "project settings: the dialog is still titled Project staff"
-meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Human approval, Wake-up calls and Specs as its sections, in that order"
+meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Advisor tool, Human approval, Wake-up calls and Specs as its sections, in that order"
 runs = ["page-project-settings"]
 
 [[plant.edit]]
@@ -379,7 +379,7 @@ replace = '<h2 id="project-settings-title">Project staff</h2>'
 
 [[plant]]
 name = "project settings: the approval section is not called Human approval"
-meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Human approval, Wake-up calls and Specs as its sections, in that order"
+meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Advisor tool, Human approval, Wake-up calls and Specs as its sections, in that order"
 runs = ["page-project-settings"]
 
 [[plant.edit]]
@@ -391,7 +391,7 @@ replace = '''    <fieldset class="project-section">
 
 [[plant]]
 name = "project settings: the sections come before the staff"
-meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Human approval, Wake-up calls and Specs as its sections, in that order"
+meant = "names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Advisor tool, Human approval, Wake-up calls and Specs as its sections, in that order"
 runs = ["page-project-settings"]
 
 [[plant.edit]]
