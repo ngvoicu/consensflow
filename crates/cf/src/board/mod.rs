@@ -488,10 +488,19 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
                     None | Some(Value::Null) => String::new(),
                     tier => format!(" · {}", js::text(tier)),
                 };
+                // Each role by its name: the frontend designer and the image designer are
+                // never one word (spec new-roles).
+                let roles = list(member.get("roles"))
+                    .iter()
+                    .map(|role| {
+                        let id = js::text(Some(role));
+                        cf_ledger::roles::name_of(&id).to_owned()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("+");
                 format!(
-                    "@{}{runs} · {}{tier} · {}",
+                    "@{}{runs} · {roles}{tier} · {}",
                     js::text(member.get("handle")),
-                    js::join(list(member.get("roles")), "+"),
                     js::text(member.get("harnessName"))
                 )
             })

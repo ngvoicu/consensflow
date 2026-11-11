@@ -220,3 +220,9 @@ play it, not by hand.
 - **The image designer's tier** is none (a design task has none): in the 2 `staffOf` rows
   that hold one, `osiris` reads without the tier its participant holds, and a chief's table
   says `none` for it, from a staff row that has no tier and the one role of a designer.
+
+The staff table (the `table` row of `teamTable` and the two chief's texts whose staff holds
+an image designer) says "image designer" where Node's said `designer`: since spec new-roles
+(FD-04) a frontend designer can be on the staff too, and the table says each role by its
+name (`cf_ledger::roles`), so the two are never one word. Changed by hand, in that cell
+alone, on 2026-11-11.

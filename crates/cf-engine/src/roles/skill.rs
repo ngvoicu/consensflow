@@ -37,7 +37,15 @@ pub fn team_table(members: &[StaffRow]) -> Result<String, RoleError> {
             Some(model) => format!("{} ({model})", member.name),
             None => member.name.clone(),
         };
-        let cells = [named.as_str(), &member.roles.join(", "), tier];
+        // Each role by its name: the frontend designer and the image designer are never one
+        // word (spec new-roles).
+        let roles = member
+            .roles
+            .iter()
+            .map(|role| cf_ledger::roles::name_of(role))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let cells = [named.as_str(), &roles, tier];
         table.push(format!("| {} |", cells.map(cell).join(" | ")));
     }
     Ok(table.join("\n"))

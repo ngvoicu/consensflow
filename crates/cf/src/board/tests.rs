@@ -1087,6 +1087,34 @@ fn the_staff_says_a_tier_for_a_member_that_has_one_and_none_for_an_image_designe
     assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
     assert_eq!(
         ran.out,
-        "@claude-opus-5-5-high · worker · standard · Claude Code\n@codex-default · Codex default · designer · Codex\n"
+        "@claude-opus-5-5-high · worker · standard · Claude Code\n@codex-default · Codex default · image designer · Codex\n"
+    );
+}
+
+/// Roles are said by their names, so the frontend designer and the image designer are never
+/// one word (spec new-roles, FD-04), and a member of a role with tiers beside one without
+/// says its tier.
+#[test]
+fn the_staff_says_each_role_by_its_name() {
+    let members = json!({ "members": [
+        { "handle": "claude-opus-5-5-high", "role": "frontend", "roles": ["frontend"], "tier": null,
+          "harnessName": "Claude Code", "nameApart": false, "modelName": "claude-opus-5-5", "effort": "high" },
+        { "handle": "claude-sonnet-5-5-medium", "role": "worker", "roles": ["worker", "integrator"], "tier": "standard",
+          "harnessName": "Claude Code", "nameApart": false, "modelName": "claude-sonnet-5-5", "effort": "medium" },
+        { "handle": "gpt-6-astra-high", "role": "architect", "roles": ["architect", "researcher"], "tier": null,
+          "harnessName": "Codex", "nameApart": false, "modelName": "gpt-6-astra", "effort": "high" },
+        { "handle": "codex-default", "role": "designer", "roles": ["designer"], "tier": null,
+          "harnessName": "Codex", "nameApart": true, "modelName": "Codex default", "effort": null },
+    ] });
+    let ran = cf(&["staff"], vec![reply(200, members)]);
+    assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
+    assert_eq!(
+        ran.out,
+        concat!(
+            "@claude-opus-5-5-high · frontend designer · Claude Code\n",
+            "@claude-sonnet-5-5-medium · worker+integrator · standard · Claude Code\n",
+            "@gpt-6-astra-high · architect+researcher · Codex\n",
+            "@codex-default · Codex default · image designer · Codex\n",
+        )
     );
 }
