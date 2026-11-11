@@ -440,9 +440,12 @@ impl Dispatcher {
                     aside,
                 });
                 held.lost_said = held.lost_said.or(lost);
-            } else if let Some(told) = told.filter(|_| !to_tell && !stuck) {
-                let aside = told.aside.expect("a hold shown, not typed");
-                if told.turn != turn {
+            } else if let Some((aside, told_turn)) = told
+                .filter(|_| !to_tell && !stuck)
+                .and_then(|told| Some((told.aside?, told.turn)))
+            {
+                // Not told now, and not stuck: the hold was shown (`to_tell` else).
+                if told_turn != turn {
                     // A turn of its own left it held again: its line says what runs now, and
                     // the hour counts from now. Nothing is written where the task moved on.
                     let said_now =
