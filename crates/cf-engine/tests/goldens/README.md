@@ -272,3 +272,16 @@ an image designer) says "image designer" where Node's said `designer`: since spe
 (FD-04) a frontend designer can be on the staff too, and the table says each role by its
 name (`cf_ledger::roles`), so the two are never one word. Changed by hand, in that cell
 alone, on 2026-11-11.
+
+The chief's text was taught the four roles of spec new-roles (FD-06, FD-07; T-1480), in the twelve
+chief's rows that hold `chief.md` and in no other row, changed by hand on 2026-11-11 with the same
+exact replacements as the file: the card has a line for `--frontend`, `--architect`, `--research`
+and `--integrate`, and `--design`'s line points to its paragraph; "## Choose the tier, not the
+member" is "## Choose the role, not the member", which names the role and its tier where its
+command takes one, and has a paragraph for the architect, the frontend designer and the
+integrator, and the image designer's with the flow of a member's drawing orders; what the card
+says (the commands of a note, an answer and a review's brief) and what the text said twice (the
+opening's list of who gets what, What you never do's first two bullets, `--after`'s when and when
+not, the session files) is said once. A window left for hours is a new task too. The role-change
+budgets moved: read whole to 143 rows with specs on (168 without), and to 7 and 32 with the most
+rules for the staff, 26 bytes and 53 lines to spare for the 7.

@@ -50,7 +50,7 @@ impl ProjectSpecs<'_> {
              \n\
              The spec is a second exception to changing nothing yourself: you write the spec and its registry in `{folder}` with your own tools, and never give that writing to the staff. Everything Specmint calls research beyond searching and reading, or implementation, goes on the board as tasks for the staff, and you do none of it yourself or in a subagent.\n\
              \n\
-             Write the spec before any of its tasks go on the board. Then put them on the board in phase order: each task of a later phase has `--needs` the tasks of the phase before it, and each brief names the spec item it comes from and carries all its worker needs, since a member never reads the spec. After you accept a task, mark the spec's progress as the skill says: its checkbox in SPEC.md and its count in the registry.\n"
+             Write the spec before any of its tasks go on the board. Then put them on the board in phase order: each task of a later phase has `--needs` the tasks of the phase before it, and each brief names the spec item it comes from and carries all its worker needs, since a member never reads the spec. With an architect, the spec says the work and its order and points to the architect's files for what the software is. After you accept a task, mark the spec's progress as the skill says: its checkbox in SPEC.md and its count in the registry.\n"
         )
     }
 }

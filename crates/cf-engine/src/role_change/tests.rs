@@ -211,11 +211,12 @@ fn printed_by_cf(note: &MessageView) -> String {
 /// it is read.
 #[test]
 fn the_real_text_of_a_chief_with_specs_and_a_large_staff_is_told_whole_or_told_and_read() {
-    // A staff of 25 with no rules; with the most rules the ledger takes, a staff of 15, the
+    // A staff of 25 with no rules; with the most rules the ledger takes, a staff of 7, the
     // most the chief's words leave room for (T-1234: 19 with a model column in the table,
-    // 29 before it; the words of the designer and of the chief's own model took the rest).
+    // 29 before it; the words of the designer and of the chief's own model took some of it,
+    // and T-1480's of the four roles of spec new-roles 8 rows more, 15 before them).
     let most = the_most_rules();
-    for (rows, rules) in [(25, None), (15, Some(most.as_str()))] {
+    for (rows, rules) in [(25, None), (7, Some(most.as_str()))] {
         told_whole_or_told_and_read(&a_chiefs_role_with(rows, true, rules));
     }
 }
@@ -272,13 +273,13 @@ fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
     );
     assert_eq!(
         rows_while(true, &read),
-        151,
-        "docs: read to 151 rows with specs on"
+        143,
+        "docs: read to 143 rows with specs on"
     );
     assert_eq!(
         rows_while(false, &read),
-        174,
-        "docs: read to 174 rows without"
+        168,
+        "docs: read to 168 rows without"
     );
     // With the most rules for the staff the ledger takes.
     let most = the_most_rules();
@@ -296,13 +297,13 @@ fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
     };
     assert_eq!(
         rows_with_the_most(true),
-        15,
-        "docs: read to 15 rows with specs on and the most rules"
+        7,
+        "docs: read to 7 rows with specs on and the most rules"
     );
     assert_eq!(
         rows_with_the_most(false),
-        38,
-        "docs: read to 38 rows without specs and the most rules"
+        32,
+        "docs: read to 32 rows without specs and the most rules"
     );
 }
 
@@ -1100,15 +1101,17 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
     // A case: its name, the window's `cf`, the staff's rows, specs on or off, the rules, and the
     // lines the part after the first begins with.
     type Case<'a> = (&'a str, CfWord, usize, bool, Option<&'a str>, &'a [&'a str]);
+    // The image designer's paragraph in the chief's section on roles (T-1480).
+    const IMAGES: &str = "An image comes from the image designer (`--design`). Give it";
     let cases: [Case; 4] = [
-        ("a Mac, no staff", a_mac(), 0, false, None, &["The tiers:"]),
+        ("a Mac, no staff", a_mac(), 0, false, None, &[IMAGES]),
         (
             "a Mac, the largest chief",
             a_mac(),
             25,
             true,
             Some(&utf8),
-            &["The tiers:"],
+            &[IMAGES],
         ),
         (
             "Windows, the largest chief",
@@ -1116,7 +1119,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&utf8),
-            &["## Choose the tier, not the member"],
+            &["Where the staff has an integrator, it lands accepted work; a"],
         ),
         (
             "a Mac, the most escaped rules",
@@ -1124,7 +1127,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&escaped),
-            &["The tiers:"],
+            &[IMAGES],
         ),
     ];
     for (name, cf, rows, specs, rules, expected) in cases {

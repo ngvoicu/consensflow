@@ -170,7 +170,10 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
         true,
     );
     ledger
-        .create_task(other.id, &task("worker", Some("standard"), "Fix the footer"))
+        .create_task(
+            other.id,
+            &task("worker", Some("standard"), "Fix the footer"),
+        )
         .expect("a task");
     ledger
         .cancel_task(project.id, 6, "chief")
@@ -211,7 +214,11 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     ledger.close().expect("closed");
     let raw = Connection::open(&file).unwrap();
     assert_eq!(version(&raw), SCHEMA_VERSION as i64);
-    assert_eq!(kept(&raw), before, "every row of the two tables and the projects kept");
+    assert_eq!(
+        kept(&raw),
+        before,
+        "every row of the two tables and the projects kept"
+    );
     let wide = schema(&raw);
     let narrowed: Vec<(String, String)> = wide
         .iter()

@@ -97,9 +97,10 @@ fn teaches_only_the_boards_commands(role: &str) {
             r"## Reviews\n\nNothing is reviewed unless you ask\.",
             &text
         ));
-        // The tester is one more role the chief names the tier of, and one line of the reviews' section.
+        // The tester is one more role the chief names the tier of, and one line of the reviews' section;
+        // what each role gives back is its line of the card (spec new-roles, FD-06).
         assert!(found(
-            r"a tester\s+of that tier \(`--test`\) runs the work to check it and changes no product code\.",
+            r#"cf task add --test --tier <tier> "…"\s+a test for a tester: what to run and what to check; results with evidence back, no product code changed"#,
             &text
         ));
         // An advisor and a reviewer change no project file, as their own texts say: each may
@@ -107,7 +108,6 @@ fn teaches_only_the_boards_commands(role: &str) {
         for said in [
             r#"cf task add --advice --tier <tier> "…"\s+a question for an advisor: findings back, no project file changed"#,
             r#"what to review and what to check; findings back, no project file changed"#,
-            r"answers\s+a\s+question\s+and\s+changes\s+no\s+project\s+file;\s+a\s+reviewer\s+of\s+that\s+tier\s+\(`--review`\)\s+checks\s+finished\s+work\s+and\s+changes\s+no\s+project\s+file;",
         ] {
             assert!(found(said, &text), "{said}");
         }
@@ -135,7 +135,7 @@ fn teaches_only_the_boards_commands(role: &str) {
             &text
         ));
         assert!(found(
-            r"A\s+revision goes back to its window with `--after`; its result names the file\.",
+            r"A\s+revision goes back to its window with `--after`\.",
             &text
         ));
         assert!(!found(r"say what to draw", &text));
@@ -353,11 +353,40 @@ fn tells_the_tester_to_run_the_work_report_with_evidence_and_change_no_product_c
     assert!(!found(r"read-only|changes no file", &text));
 }
 
+/// Every role of the table is a command of the chief's card (spec new-roles, FD-06): a role
+/// whose switch the card does not show is one the chief cannot give work to, and a role with no
+/// tier is shown with none.
+#[test]
+fn shows_the_chief_a_command_for_every_role_of_the_table_with_a_tier_only_where_it_has_them() {
+    let text = instructions("chief", &[zeus()]);
+    let card = section(&text, "Your commands");
+    for role in cf_ledger::roles::all() {
+        let shown = match (role.switch, role.tiered) {
+            (None, _) => "cf task add --tier <critical|complex|standard|light> \"…\"".to_owned(),
+            (Some(switch), true) => format!("cf task add {switch} --tier <tier> \"…\""),
+            (Some(switch), false) => format!("cf task add {switch} \"…\""),
+        };
+        assert!(
+            card.contains(&shown),
+            "{}: the card does not show {shown}",
+            role.id
+        );
+    }
+}
+
 #[test]
 fn tells_the_chief_one_member_runs_as_many_tasks_at_once_as_it_is_given() {
+    // Item 2 says to give parallel work together however few members a role has; the staff's
+    // section says why: a member runs any number of tasks at once (T-1480 took the second
+    // saying of it out of item 2).
+    let text = instructions("chief", &[zeus()]);
     assert!(found(
-        r"however few\s+members a tier has: one worker runs as many tasks at once as you give it,\s+and so does one advisor or one reviewer",
-        &instructions("chief", &[zeus()])
+        r"Independent tasks run side by side, each in a fresh window, however few\s+members a role has, so give work that can go in parallel as separate\s+tasks, together\.",
+        &text
+    ));
+    assert!(found(
+        r"it runs any number of tasks at once, each in its own\s+window\.",
+        &text
     ));
 }
 
@@ -401,10 +430,16 @@ fn tells_the_chief_a_member_is_a_model_that_runs_any_number_of_tasks_at_once_eac
 #[test]
 fn tells_the_chief_a_follow_up_is_for_what_its_window_knows_and_other_work_starts_at_once_beside_it(
 ) {
-    assert!(found(
-        r"the next step of that window's own work, only when it needs what that window already knows \(carry out the plan or findings it just wrote, part 2 after its part 1\); reviews, parallel work and work for another role stay fresh, and start at once beside that window's work\n",
-        &instructions("chief", &[zeus()])
-    ));
+    // Said once, in the section on continuing a window (the card's line names the command).
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "The one exception: continuing a window"),
+        "the chief's section on continuing a window",
+        &[
+            "The next step of that window's own work, only when it needs what that window already knows (carry out the plan or findings it just wrote, part 2 after its part 1), goes to it with `cf task add --after T-3 \"…\"`",
+            "All other work (reviews, parallel work and work for another role) stays fresh, and starts at once beside that window's work.",
+        ],
+    );
 }
 
 #[test]
@@ -439,17 +474,17 @@ fn says_so_when_the_staff_is_empty() {
         "the one way to continue a window"
     );
     assert!(
-        text.contains("the next step of that window's own work"),
+        text.contains("The next step of that window's own work"),
         "and when"
     );
     assert!(
-        text.contains("reviews, parallel work and work for another role stay fresh"),
+        text.contains("(reviews, parallel work and work for another role) stays fresh"),
         "and when not"
     );
     assert!(instructions("chief", &[zeus()]).contains("## What you do"));
     assert!(instructions("chief", &[zeus()]).contains("## What you never do"));
     assert!(found(
-        r"## What you never do\n\n- Change the project yourself: edit a file, commit, push, build or deploy",
+        r"## What you never do\n\n- Send work to another window: the board is the only channel",
         &instructions("chief", &[zeus()])
     ));
 }
@@ -866,9 +901,11 @@ fn tells_the_chief_to_start_a_fresh_window_for_the_next_round_after_about_three_
         "the chief's section on continuing a window",
         &[
             "After about three rounds of the same work (reopens, `--after`), a window's conversation is long and every step re-reads it.",
-            "For the next round add a new task that says where things stand (branch and head, done, left, findings still open), then accept the old one: its open findings go on in the new task.",
+            // A follow-up in a window left for hours wrote 300,000 to 660,000 tokens again
+            // (T-1446's measurements): a late one is a new task too.
+            "One that finished hours ago reads it all again at its first call.",
+            "For the next round, or a late follow-up, add a new task that says where things stand (branch and head, done, left, findings still open), then accept the old one: its open findings go on in the new task.",
             "Accepting releases whatever `--needs` it, so if tasks wait on it, add the new task `--before` them first.",
-            "`--after` is for the next step of a window's own work, not for round after round.",
         ],
     );
 }
@@ -879,13 +916,20 @@ fn tells_the_chief_to_start_a_fresh_window_for_the_next_round_after_about_three_
 fn tells_the_chief_it_may_change_the_project_itself_when_the_human_says_so_and_why_no_work_goes_to_another_window(
 ) {
     let text = instructions("chief", &[zeus()]);
+    // The rule and its exception are said once, in What you do (T-1480 took What you never
+    // do's second saying of them out).
+    assert_says(
+        section(&text, "What you do"),
+        "the chief's What you do",
+        &[
+            "You do not change the project yourself: no file edits, no commits or pushes, no builds, releases or deploys.",
+            "The one exception: the human tells you to do a change yourself.",
+        ],
+    );
     assert_says(
         section(&text, "What you never do"),
         "the chief's What you never do",
-        &[
-            "Change the project yourself: edit a file, commit, push, build or deploy. That is a worker's task, unless the human told you to do it yourself.",
-            "Send work to another window: the board is the only channel, and only the human gives you work, here in your terminal.",
-        ],
+        &["Send work to another window: the board is the only channel, and only the human gives you work, here in your terminal; never read another agent's session files."],
     );
 }
 
