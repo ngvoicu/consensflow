@@ -440,3 +440,13 @@ runs = ["nr-evals-card"]
 file = "crates/cf-evals/src/run/card.rs"
 find = '''is_work_role(card["pool"].as_str().or(*lane)))'''
 replace = '''is_work_role(card["pool"].as_str()))'''
+
+[[plant]]
+name = "new roles: a lane's role is read beside its participant, where board.get says none"
+meant = "t_1_s_result_is_in_once_the_first_worker_task_is_done_or_accepted"
+runs = ["nr-evals-card"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/card.rs"
+find = '''(card, lane["participant"]["role"].as_str())'''
+replace = '''(card, lane["role"].as_str())'''

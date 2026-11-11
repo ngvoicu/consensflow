@@ -302,8 +302,9 @@ pub(crate) fn tasks_of(board: &Value) -> Vec<&Value> {
 
 /// The cards of `board` that are work ([`crate::measure::is_work_role`]: a worker's or a
 /// frontend designer's), each by the role it is for as the measure reads it: its pool, else
-/// the role of the lane that has it, a window's being the one it began for (T-1453). An open
-/// card with no pool says no role, and is work.
+/// the role of the lane that has it, which `board.get` says as its participant's, the window's
+/// own row, whose role is the one it began for (T-1453). An open card with no pool says no
+/// role, and is work.
 pub(crate) fn work_of(board: &Value) -> Vec<&Value> {
     let in_lanes = board["lanes"]
         .as_array()
@@ -314,7 +315,7 @@ pub(crate) fn work_of(board: &Value) -> Vec<&Value> {
                 .as_array()
                 .into_iter()
                 .flatten()
-                .map(move |card| (card, lane["role"].as_str()))
+                .map(move |card| (card, lane["participant"]["role"].as_str()))
         });
     let open = board["open"]
         .as_array()

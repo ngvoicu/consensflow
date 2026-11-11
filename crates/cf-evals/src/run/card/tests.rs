@@ -96,14 +96,15 @@ fn t_1_s_result_is_in_once_the_first_worker_task_is_done_or_accepted() {
             "{pool}"
         );
     }
-    // A follow-up has no pool, and is the role of the window that has it: an architect's done
-    // before the worker's T-2 is no worker's result (T-1453), a worker's window's is.
+    // A follow-up has no pool, and is the role of the window that has it, as `board.get` says
+    // a lane's: its participant's (the session's own row). An architect's done before the
+    // worker's T-2 is no worker's result (T-1453); a worker's window's is.
     let lanes = |role: &str| {
         json!({
             "lanes": [
-                { "handle": "daedalus-wren", "role": role,
+                { "participant": { "handle": "daedalus-wren", "role": role },
                   "tasks": [{ "number": 1, "pool": null, "state": "done" }] },
-                { "handle": "zeus-otter", "role": "worker",
+                { "participant": { "handle": "zeus-otter", "role": "worker" },
                   "tasks": [{ "number": 2, "pool": "worker", "state": "working" }] },
             ],
             "open": [],

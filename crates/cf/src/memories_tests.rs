@@ -92,9 +92,7 @@ const WRITES: [&[&str]; 14] = [
         "standard",
         "Consolidate the memories",
     ],
-    &[
-        "task", "add", "--self", "--needs", "T-3", "--tier", "standard", "Mine",
-    ],
+    &["task", "add", "--self", "--needs", "T-3", "Mine"],
     &["task", "accept", "T-3"],
     &["task", "done", "T-3", "the result"],
     &["task", "finish", "T-3", "the result"],
