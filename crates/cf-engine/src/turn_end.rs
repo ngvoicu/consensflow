@@ -224,11 +224,26 @@ impl Rests {
 /// monitors, their notices and what a look found are not told again (T-1181: T-298 sent its
 /// chief 12 notes in 1 h 46 as its jobs began and ended, and kluris' T-104 and T-105 about ten
 /// while they waited for Windows runs, each a turn of the chief's with nothing to do).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// A hold that can end by itself asks a chief nothing: its note is shown, not typed (RS-25),
+/// once for the hold as before, and `aside` is that note. A turn of the worker's own that
+/// leaves it held again (`turn`, the last item of the turn that left it held, is another)
+/// writes no note: the task's line says what runs now, and the hour of the reminder
+/// ([`STILL_WORKING_REMINDED_AFTER_MS`]) counts from then (`Ledger::renew_aside`). A Monitor
+/// that wakes its worker at each event (poker-lab's T-442) would write a note a tick.
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Told {
     task: i64,
     stuck: bool,
+    turn: Option<Arc<str>>,
+    aside: Option<i64>,
 }
+
+/// How long a task is held in the background, by a hold that can end by itself, with no
+/// turn of its worker's own, before its chief is sent one note (typed, not only shown) that
+/// says how long and what runs (RS-25): after that long a chief may want to finish or stop
+/// it, and a task held by a job that never ends would otherwise sit unseen on its line.
+pub(crate) const STILL_WORKING_REMINDED_AFTER_MS: i64 = 60 * 60_000;
 
 /// How long the engine waits, at most, between two looks at a window's commands that end
 /// nothing (Calliope on 472b1d96: a window that runs a dev server, or whose host cannot
@@ -392,32 +407,57 @@ impl Dispatcher {
             };
             let monitors = observed.monitors();
             let stuck = cannot_end_by_itself(pending, &monitors, seen);
-            // Told once for the hold, and again only where it turns into one that cannot end
-            // by itself, which nothing but the requester ends (T-1181).
-            let to_tell = {
+            let turn = answers.last.map(|last| Arc::clone(&last.id));
+            // Typed once for the hold, and again only where it turns into one that cannot end
+            // by itself, which nothing but the requester ends (T-1181). A hold that can end by
+            // itself is shown, not typed, and again after a turn of the worker's own (RS-25).
+            let (to_tell, told) = {
                 let mut held = record.held.borrow_mut();
                 held.holding = Some(hold);
-                match held.told {
-                    Some(told) if told.task == hold.task => stuck && !told.stuck,
-                    _ => true,
-                }
+                let told = held.told.clone().filter(|told| told.task == hold.task);
+                let to_tell = match &told {
+                    None => true,
+                    Some(told) if stuck => !told.stuck,
+                    Some(told) => told.aside.is_none(),
+                };
+                (to_tell, told)
+            };
+            let said = Held {
+                pending,
+                monitors,
+                commands: observed.commands(),
+                stuck,
             };
             // Where a look decides, the requester is told once it was made (Calliope on
             // 472b1d96).
             if to_tell && watching != Watching::Waiting {
-                let said = Held {
-                    pending,
-                    monitors,
-                    commands: observed.commands(),
-                    stuck,
-                };
-                self.tell_it_goes_on(project, &thread, &said, &words)?;
+                let aside = self.tell_it_goes_on(project, &thread, &said, &words)?;
                 let mut held = record.held.borrow_mut();
                 held.told = Some(Told {
                     task: hold.task,
                     stuck,
+                    turn,
+                    aside,
                 });
                 held.lost_said = held.lost_said.or(lost);
+            } else if let Some(told) = told.filter(|_| !to_tell && !stuck) {
+                let aside = told.aside.expect("a hold shown, not typed");
+                if told.turn != turn {
+                    // A turn of its own left it held again: its line says what runs now, and
+                    // the hour counts from now. Nothing is written where the task moved on.
+                    let said_now =
+                        format!("in the background: {}", running_said(&said, self.now()));
+                    self.seams
+                        .ledger
+                        .borrow_mut()
+                        .renew_aside(project.id, aside, &said_now)?;
+                    self.changed();
+                    if let Some(told) = record.held.borrow_mut().told.as_mut() {
+                        told.turn = turn;
+                    }
+                } else {
+                    self.remind_held(project, &thread, &said, aside)?;
+                }
             }
             return Ok(Turn::Held);
         }
@@ -847,7 +887,7 @@ impl Dispatcher {
         thread: &TaskThread,
         held: &Held,
         words: &str,
-    ) -> Result<(), EngineError> {
+    ) -> Result<Option<i64>, EngineError> {
         let number = thread.task.number;
         let finish = finish_with(thread);
         let running = running_said(held, self.now());
@@ -865,8 +905,78 @@ impl Dispatcher {
                 "T-{number} is still working in the background ({running}); its result comes when {ends}. {finish} takes what it said last now.\n\nWhat it said:\n\n{words}"
             )
         };
-        self.seams.ledger.borrow_mut().note(
+        let note = NewNote {
+            from: None,
+            to: thread.task.requester.clone(),
+            task: Some(number),
+            body,
+        };
+        // One that cannot end by itself asks for the requester's Finish: typed. Any other
+        // asks nothing: shown on the task's line, not typed, to a chief (RS-25).
+        let aside = if held.stuck {
+            self.seams.ledger.borrow_mut().note(project.id, &note)?;
+            None
+        } else {
+            let shown = self.seams.ledger.borrow_mut().show(
+                project.id,
+                &note,
+                &format!("in the background: {running}"),
+            )?;
+            Some(shown.id)
+        };
+        self.changed();
+        Ok(aside)
+    }
+
+    /// The one note typed of a hold shown on its task's line ([`Told`]'s `aside`) that has
+    /// gone on [`STILL_WORKING_REMINDED_AFTER_MS`] with no turn of the worker's own: how long
+    /// and what runs. Counted from the shown note's own time, and sent once, as the ledger
+    /// remembers on it; nothing where `aside` was typed (to anyone but a chief).
+    fn remind_held(
+        &self,
+        project: &ProjectView,
+        thread: &TaskThread,
+        held: &Held,
+        aside: i64,
+    ) -> Result<(), EngineError> {
+        let Some(shown) = self.seams.ledger.borrow().message(aside)? else {
+            return Ok(());
+        };
+        let shown_aside = shown
+            .receipt
+            .get(cf_ledger::SHOWN)
+            .is_some_and(|said| said.is_string());
+        if !shown_aside || shown.receipt.get("reminded").is_some() {
+            return Ok(());
+        }
+        // From when its line was last said anew, else from when it was shown.
+        let since = shown
+            .receipt
+            .get("since")
+            .and_then(Value::as_str)
+            .unwrap_or(&shown.created_at);
+        let Some(since) = time::parse(since) else {
+            return Ok(());
+        };
+        let now = self.now();
+        if now - since < STILL_WORKING_REMINDED_AFTER_MS {
+            return Ok(());
+        }
+        let number = thread.task.number;
+        let minutes = (now - since) / 60_000;
+        let long = if minutes < 120 {
+            format!("{minutes} minutes")
+        } else {
+            format!("{} h {} min", minutes / 60, minutes % 60)
+        };
+        let running = running_said(held, now);
+        let finish = finish_with(thread);
+        let body = format!(
+            "T-{number} has been working in the background for {long} with no turn of its own ({running}). Its result comes when that ends; {finish} takes what it said last now."
+        );
+        let sent = self.seams.ledger.borrow_mut().remind_of_aside(
             project.id,
+            aside,
             &NewNote {
                 from: None,
                 to: thread.task.requester.clone(),
@@ -874,7 +984,9 @@ impl Dispatcher {
                 body,
             },
         )?;
-        self.changed();
+        if sent.is_some() {
+            self.changed();
+        }
         Ok(())
     }
 

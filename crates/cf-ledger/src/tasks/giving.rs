@@ -624,6 +624,7 @@ pub(crate) fn release_inside(
                 task.id
             ],
         )?;
+        crate::tasks::end_asides(store, task.id, &at)?;
         store.log(
             project_id,
             "task.released",

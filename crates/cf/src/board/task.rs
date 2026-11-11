@@ -520,8 +520,10 @@ fn moved(
         Some(dropped) => went_with_it(answer.list(Some(dropped), "dropped")?),
         None => String::new(),
     };
-    // What the window was counted running when the task was finished, which the accept's close ends.
+    // What the window was counted running when the task was finished, which the accept's close
+    // ends; or when it was paused, which the pause does not end.
     let running = match answer.value().get("running") {
+        Some(running) if action == "pause" => runs_on(number, running, &board.cf().to_string()),
         Some(running) => still_running(number, running),
         None => String::new(),
     };
@@ -532,7 +534,7 @@ fn moved(
     });
     let said = match action {
         "pause" => format!(
-            "T-{number} is paused: its window stops and its work waits. Resume it with: {} task resume T-{number} \"what to do now\"",
+            "T-{number} is paused: its window stops and its work waits. Resume it with: {} task resume T-{number} \"what to do now\"{running}",
             board.cf()
         ),
         "resume" if task.get("state").and_then(Value::as_str) == Some("open") => format!(
@@ -719,6 +721,19 @@ fn still_running(number: u64, running: &Value) -> String {
     let them = if jobs + agents == 1 { "it" } else { "them" };
     format!(
         "\nT-{number}'s window was running {left} when it was finished; accepting closes the window and ends {them}."
+    )
+}
+
+/// What a pause says of the background work the task's window was counted running then
+/// (`running`: `jobs` and `agents`), which no pause ends: the window stays open while it
+/// runs, and the task's line says what runs on (RS-25: no note is typed of it).
+fn runs_on(number: u64, running: &Value, cf: &str) -> String {
+    let count = |field: &str| running.get(field).and_then(Value::as_u64).unwrap_or(0);
+    let Some(left) = background_work(count("jobs"), count("agents")) else {
+        return String::new();
+    };
+    format!(
+        "\nT-{number}'s window was running {left}, which the pause does not end: the window stays open while it runs, and `{cf} task list` says what runs on."
     )
 }
 
@@ -1254,6 +1269,38 @@ and 2 idle sessions (`cf task list --all`)";
                 "`cf task add {words:?}` does not say the task gets a new window: {line}"
             );
         }
+    }
+
+    #[test]
+    fn a_pause_says_at_once_what_its_window_runs_on_which_the_pause_does_not_end() {
+        let paused = |running: Value| {
+            let mut answer = json!({ "task": card(3, "paused", Some("zeus")) });
+            if !running.is_null() {
+                answer["running"] = running;
+            }
+            let api = scripted(vec![reply(200, answer)]);
+            let words = vec!["pause".to_owned(), "T-3".to_owned()];
+            let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+            command(
+                &words,
+                &given,
+                &Board::new(Some(&api.url), "tok"),
+                &mut "".as_bytes(),
+            )
+            .ok()
+            .map(|said| said.text)
+            .unwrap()
+        };
+        let line = paused(Value::Null);
+        assert!(
+            line.starts_with("T-3 is paused: its window stops and its work waits."),
+            "{line}"
+        );
+        assert!(!line.contains('\n'), "{line}");
+        assert_eq!(
+            paused(json!({ "jobs": 1, "agents": 3 })),
+            format!("{line}\nT-3's window was running 1 background job and 3 background agents or workflows, which the pause does not end: the window stays open while it runs, and `cf task list` says what runs on.")
+        );
     }
 
     #[test]

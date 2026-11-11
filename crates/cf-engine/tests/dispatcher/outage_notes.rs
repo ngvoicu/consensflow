@@ -23,6 +23,7 @@
 
 use cf_engine::testing::Context;
 use cf_ledger::{NewTask, SAME_ERROR_WITHIN_MS};
+use cf_proto::ledger::MessageView;
 use serde_json::json;
 
 use crate::fixtures::Tiers;
@@ -231,7 +232,7 @@ fn the_closes_of_those_windows_are_a_line_each_of_the_note_and_no_note_of_their_
 }
 
 #[test]
-fn a_single_failure_is_told_as_it_always_was_and_its_close_in_a_note_of_its_own() {
+fn a_single_failure_is_told_as_it_always_was_and_its_close_shown_in_a_note_of_its_own() {
     let context = Context::new();
     let tiers = six_at_work(&context);
     context.host.exits_leaving(&[LOCK]);
@@ -244,10 +245,25 @@ fn a_single_failure_is_told_as_it_always_was_and_its_close_in_a_note_of_its_own(
         told.iter().map(|(_, body)| body.as_str()).collect::<Vec<_>>(),
         [
             format!("T-1 failed: @{window}'s harness reported a failure; it said: \"{ENOTFOUND}\". Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\"").as_str(),
-            format!("T-1's window closed with background work running, which its close ended: {LOCK_SAID}").as_str(),
         ],
-        "the failure and the close, two notes"
+        "the failure is typed"
     );
+    // The close asks the chief nothing: a note of its own, shown on T-1's line (RS-25).
+    let closed: Vec<MessageView> = tiers
+        .context
+        .inbox(tiers.id("chief"))
+        .into_iter()
+        .filter(|message| message.body.starts_with("T-1's window closed"))
+        .collect();
+    assert_eq!(closed.len(), 1);
+    assert_eq!(
+        (closed[0].state.as_str(), closed[0].body.as_str()),
+        (
+            "read",
+            format!("T-1's window closed with background work running, which its close ended: {LOCK_SAID}").as_str()
+        )
+    );
+    assert!(tiers.task(1).task.aside.is_some(), "T-1's line says it");
 }
 
 #[test]

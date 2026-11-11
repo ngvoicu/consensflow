@@ -212,15 +212,15 @@ fn the_lane_and_the_board_say_the_model_is_busy_not_out_of_quota() {
 }
 
 #[test]
-fn a_note_withdrawn_before_it_was_given_is_told_again_at_the_next_try() {
-    // The chief is at work, so the note waits in its queue; the resume a minute on withdraws
-    // it, as every note of the wait, and the next refusal tells it again.
+fn a_note_shown_to_the_chief_tells_while_its_hold_holds_and_the_next_try_shows_it_again() {
+    // The note asks the chief nothing: it is shown on T-1's line, not typed (RS-25). The resume
+    // a minute on ends what the line says, and the next refusal shows the same note again.
     let context = Context::new();
     let tiers = working(&context);
     context.adapter.busy("chief");
     refused(&context, "zeus");
     let chief = tiers.id("chief");
-    let queued = |state: &str| {
+    let busy = |state: &str| {
         context
             .ledger
             .borrow()
@@ -230,17 +230,25 @@ fn a_note_withdrawn_before_it_was_given_is_told_again_at_the_next_try() {
             .filter(|message| message.body.contains("its model is busy") && message.state == state)
             .count()
     };
-    assert_eq!(queued("queued"), 1);
+    let aside = || tiers.task(1).task.aside;
+    assert_eq!((busy("queued"), busy("read")), (0, 1), "shown, not typed");
+    assert!(
+        aside().is_some_and(|aside| aside.contains("its model is busy")),
+        "{:?}",
+        aside()
+    );
     context.advance(61_000);
     context.pass().unwrap();
     context.pass().unwrap();
-    assert_eq!(
-        (queued("queued"), queued("cancelled")),
-        (0, 1),
-        "withdrawn by the resume"
-    );
+    assert_eq!(aside(), None, "the resume ends what the line said");
     refused(&context, "zeus");
-    assert_eq!(queued("queued"), 1, "told again: nobody was told");
+    assert_eq!(busy("read"), 1, "one note for the wait, whatever its tries");
+    assert!(
+        aside().is_some_and(|aside| aside.contains("its model is busy")),
+        "{:?}",
+        aside()
+    );
+    assert_eq!(busy("queued"), 0);
 }
 
 #[test]

@@ -841,8 +841,9 @@ fn a_member_brought_back_by_the_chiefs_turn_goes_on_with_its_task_and_its_refusa
 #[test]
 fn what_a_held_task_says_to_a_chief_out_of_quota_and_its_result_wait_and_the_human_hears_it_once() {
     // Turn-end meets the queue of a chief out of quota on another account: the note that
-    // T-1 goes on in the background and then its result wait for the chief, the human is
-    // told once what waits, and both are typed in, the result its final answer, once back.
+    // T-1 goes on in the background asks nothing and is shown, not typed (RS-25), so nothing
+    // waits for the chief until its result does; the human is told once what waits, and the
+    // result, its final answer, is typed in once the chief is back.
     let context = Context::new();
     let (tiers, session) = {
         let tiers = Tiers::new(&context, &["zeus"]);
@@ -873,11 +874,8 @@ fn what_a_held_task_says_to_a_chief_out_of_quota_and_its_result_wait_and_the_hum
                 .body
                 .starts_with("T-1 is still working in the background")
     });
-    let held = held.expect("the chief is to be told T-1 goes on in the background");
-    assert_eq!(
-        held.state, "queued",
-        "nothing goes into a window out of quota"
-    );
+    let held = held.expect("the chief is told T-1 goes on in the background");
+    assert_eq!(held.state, "read", "shown on T-1's line, not typed");
     let told = || -> Vec<String> {
         tiers
             .notes("human")
@@ -885,11 +883,10 @@ fn what_a_held_task_says_to_a_chief_out_of_quota_and_its_result_wait_and_the_hum
             .filter(|note| note.starts_with("@chief is out of quota"))
             .collect()
     };
-    let said = told();
-    assert_eq!(said.len(), 1, "{said:?}");
-    assert!(
-        said[0].contains(&format!("m-{} (a note on T-1) waits", held.id)),
-        "{said:?}"
+    assert_eq!(
+        told(),
+        Vec::<String>::new(),
+        "nothing waits for the chief yet"
     );
 
     context.adapter.wake(&session, ENDED);
@@ -908,7 +905,9 @@ fn what_a_held_task_says_to_a_chief_out_of_quota_and_its_result_wait_and_the_hum
         )],
         "its final answer, waiting for the chief"
     );
-    assert_eq!(told().len(), 1, "told once for the mark");
+    let said = told();
+    assert_eq!(said.len(), 1, "told once for the mark: {said:?}");
+    assert!(said[0].contains("waits"), "{said:?}");
 
     context.back_from_quota(tiers.project.id, "chief").unwrap();
     goes_on(&context.adapter, "chief", &now(&context));

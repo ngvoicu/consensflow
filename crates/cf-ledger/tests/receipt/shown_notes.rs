@@ -101,34 +101,10 @@ fn a_note_shown_to_anyone_but_a_chief_is_queued_as_any_note() {
 }
 
 #[test]
-fn the_newest_aside_holds_until_the_task_moves_or_it_is_said_over() {
+fn the_newest_aside_holds_until_the_task_moves_and_is_said_anew_in_place() {
     let mut w = world();
     let (task, _) = with_zeus(&mut w);
-    shown(
-        &mut w,
-        "chief",
-        task,
-        "T-1 is still working: 1 command.",
-        "in the background: 1 command",
-    );
-    shown(
-        &mut w,
-        "chief",
-        task,
-        "T-1 is still working: 2 commands.",
-        "in the background: 2 commands",
-    );
-    assert_eq!(
-        aside(&w, task).as_deref(),
-        Some("in the background: 2 commands")
-    );
-    w.ledger.end_aside(w.project, task).expect("over");
-    assert_eq!(
-        aside(&w, task),
-        None,
-        "the engine said it is over, with no move"
-    );
-    shown(
+    let first = shown(
         &mut w,
         "chief",
         task,
@@ -139,6 +115,86 @@ fn the_newest_aside_holds_until_the_task_moves_or_it_is_said_over() {
         aside(&w, task).as_deref(),
         Some("in the background: 1 command")
     );
+    // Said anew: the line, not the note, and no row more.
+    assert!(w
+        .ledger
+        .renew_aside(w.project, first.id, "in the background: 2 commands")
+        .expect("renewed"));
+    assert_eq!(
+        aside(&w, task).as_deref(),
+        Some("in the background: 2 commands")
+    );
+    assert_eq!(w.message(first.id).body, "T-1 is still working: 1 command.");
+    let note = |_: &World| NewNote {
+        from: None,
+        to: "chief".into(),
+        body: "T-1 has been working in the background for 60 minutes.".into(),
+        task: Some(task),
+    };
+    // One reminder, until the note is said anew.
+    let sent = w
+        .ledger
+        .remind_of_aside(w.project, first.id, &note(&w))
+        .expect("a write");
+    assert_eq!(
+        sent.as_ref().map(|sent| sent.state.as_str()),
+        Some("queued")
+    );
+    assert_eq!(
+        w.ledger
+            .remind_of_aside(w.project, first.id, &note(&w))
+            .expect("a write"),
+        None
+    );
+    assert!(w
+        .ledger
+        .renew_aside(w.project, first.id, "in the background: 1 command")
+        .expect("renewed"));
+    assert!(w
+        .ledger
+        .remind_of_aside(w.project, first.id, &note(&w))
+        .expect("a write")
+        .is_some());
+    // A move ends it, and it is neither said anew nor reminded of after.
     w.pause(task);
     assert_eq!(aside(&w, task), None, "a pause is a move");
+    assert!(!w
+        .ledger
+        .renew_aside(w.project, first.id, "in the background")
+        .expect("a write"));
+    assert_eq!(aside(&w, task), None);
+    w.ledger
+        .renew_aside(w.project, first.id, "x")
+        .expect("a write");
+    assert!(w
+        .ledger
+        .remind_of_aside(w.project, first.id, &note(&w))
+        .expect("a write")
+        .is_none());
+}
+
+#[test]
+fn a_note_whose_line_ended_with_a_move_is_shown_again_with_no_row_more() {
+    // A busy model's wait: one note for the whole wait, each try a move of its own.
+    let mut w = world();
+    let (task, _) = with_zeus(&mut w);
+    w.hold(task);
+    let note = shown(
+        &mut w,
+        "chief",
+        task,
+        "T-1 waits with @zeus: its model is busy.",
+        "waits with @zeus: its model is busy",
+    );
+    w.resume(task, "Go on.");
+    assert_eq!(aside(&w, task), None, "the try is a move");
+    w.hold(task);
+    assert!(w.ledger.show_again(w.project, note.id).expect("a write"));
+    assert_eq!(
+        aside(&w, task).as_deref(),
+        Some("waits with @zeus: its model is busy")
+    );
+    assert_eq!(w.message(note.id).state, "read", "still never typed");
+    // Once shown, it is shown; and no note of anyone else's is.
+    assert!(!w.ledger.show_again(w.project, note.id).expect("a write"));
 }

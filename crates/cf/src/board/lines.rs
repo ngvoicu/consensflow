@@ -78,7 +78,7 @@ fn state_with_aside(task: &Value) -> String {
         Some(aside) if !aside.is_empty() => {
             format!("{} · {aside}", js::text(task.get("state")))
         }
-        _ => js::text(task.get("state")),
+        _ => js::text(task.get("state")).into_owned(),
     }
 }
 
@@ -144,7 +144,7 @@ fn state_said(message: &Value) -> String {
     if shown {
         "not typed".to_owned()
     } else {
-        js::text(message.get("state"))
+        js::text(message.get("state")).into_owned()
     }
 }
 
@@ -191,6 +191,34 @@ pub fn list(value: Option<&Value>) -> &[Value] {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_task_line_says_what_consensflow_shows_of_it_instead_of_telling_its_chief() {
+        let held = json!({ "number": 3, "state": "working", "assignee": "zeus",
+            "requester": "chief", "title": "Parser", "blockedBy": [], "pool": "worker",
+            "tier": "standard", "aside": "in the background: 1 command, running since 08:24 UTC, 3 agents" });
+        assert_eq!(
+            task_line(&held),
+            "T-3 [working · in the background: 1 command, running since 08:24 UTC, 3 agents] @zeus ← @chief: Parser"
+        );
+    }
+
+    #[test]
+    fn a_note_shown_and_not_typed_reads_so_in_the_inbox() {
+        let shown = json!({ "id": 9, "state": "read", "kind": "note", "task": 3, "sender": null,
+            "preview": "T-3 is still working in the background", "shown": true });
+        assert_eq!(
+            message_line(&shown),
+            "m-9 [not typed] note T-3 from ConsensFlow: T-3 is still working in the background"
+        );
+        let typed = json!({ "id": 10, "state": "read", "kind": "note", "task": 3, "sender": null,
+            "preview": "T-3 failed" });
+        assert!(
+            message_line(&typed).starts_with("m-10 [read] "),
+            "{}",
+            message_line(&typed)
+        );
+    }
 
     #[test]
     fn a_task_reads_as_whose_it_is_or_who_it_waits_for() {

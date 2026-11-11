@@ -1046,7 +1046,16 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .hold_task(project.id, task.number, until, BUSY_HOLD)?;
-        if !self.told_busy(project, task)? {
+        if let Some((note, over)) = self.told_busy(project, task)? {
+            // One note for the wait, whatever its tries: a try is a move, which ended what the
+            // task's line said of it, and the hold says it again (RS-25).
+            if over {
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .show_again(project.id, note)?;
+            }
+        } else {
             self.seams.ledger.borrow_mut().note_hold_busy(
                 project.id,
                 &task.requester,
@@ -1086,15 +1095,21 @@ impl Dispatcher {
             .any(|member| member.member.id != owner.id && self.why_not_free(member).is_none()))
     }
 
-    /// Whether `task`'s requester was given, or is to be given, the note that its window's
-    /// model is busy: a note withdrawn before it was given told nobody.
-    fn told_busy(&self, project: &ProjectView, task: &TaskCard) -> Result<bool, EngineError> {
+    /// The note that `task`'s window's model is busy, where its requester was given it, or is
+    /// to be given it, and whether it was shown on the task's line, not typed (RS-25), and a
+    /// move of the task ended what the line said. A note withdrawn before it was given told
+    /// nobody.
+    fn told_busy(
+        &self,
+        project: &ProjectView,
+        task: &TaskCard,
+    ) -> Result<Option<(i64, bool)>, EngineError> {
         let Some(requester) = project
             .participants
             .iter()
             .find(|participant| participant.handle == task.requester)
         else {
-            return Ok(false);
+            return Ok(None);
         };
         Ok(self
             .seams
@@ -1102,11 +1117,16 @@ impl Dispatcher {
             .borrow()
             .inbox(requester.id, i64::MAX)?
             .iter()
-            .any(|message| {
+            .find(|message| {
                 message.kind == "note"
                     && message.task_number == Some(task.number)
                     && message.state != "cancelled"
                     && cf_ledger::is_busy_note(task.number, &message.body)
+            })
+            .map(|message| {
+                let over = message.receipt.get(cf_ledger::SHOWN).is_some()
+                    && message.receipt.get("over").is_some();
+                (message.id, over)
             }))
     }
 

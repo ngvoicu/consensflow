@@ -177,17 +177,17 @@ const CHIEF_FIRST_TAKEN: &str = "the human closes the project as the chief's han
 
 /// What the engine says in a hold note, where Node's said the task goes on at
 /// the reset.
-const HOLD_WORDS: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself (`, or sooner if its account has quota again; it goes on by itself.`), where Node's says it goes on at the reset (`; it goes on by itself then.`)";
+const HOLD_WORDS: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself (`, or sooner if its account has quota again; it goes on by itself.`), where Node's says it goes on at the reset (`; it goes on by itself then.`) The hold note asks the chief nothing: it is shown, not typed (RS-25), read at once with `shown` in its receipt and never pasted, where Node's is queued and pasted.";
 
 /// The same, and what the engine does once a task whose requester was given
 /// the hold note goes on.
-const HOLD_THEN_GOES_ON: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself, where Node's says it goes on at the reset; and the chief, who was given that note, is told `T-1 goes on: its account has quota again.` once a turn of the window gets through after the words that resumed T-1 (T-96), which these tests do not reach, so it is told nothing as the daemon resumes T-1, where Node tells it nothing either";
+const HOLD_THEN_GOES_ON: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself, where Node's says it goes on at the reset; and the chief, who was given that note, is told `T-1 goes on: its account has quota again.` once a turn of the window gets through after the words that resumed T-1 (T-96), which these tests do not reach, so it is told nothing as the daemon resumes T-1, where Node tells it nothing either The hold note asks the chief nothing: it is shown, not typed (RS-25), read at once with `shown` in its receipt and never pasted, where Node's is queued and pasted.";
 
 /// What the engine does with the task of a member that runs out of quota while
 /// another of its tier is free (dip-agentos, 2026-10-19): it waits with its
 /// window, where its work is; and what it says when the words that resumed the
 /// task at the reset are refused again (the review of the quota wait, T-88).
-const QUOTA_REFUSED_AGAIN: &str = "zeus runs out of quota mid-task with diana free and its reset an hour away: T-1 is held with zeus's window until the reset, where Node took it back to the board for diana; and when the words that resumed it at the reset are refused again, T-1 is held again and the human is told once that zeus's account may need them, where the requester would be told again that T-1 waits";
+const QUOTA_REFUSED_AGAIN: &str = "zeus runs out of quota mid-task with diana free and its reset an hour away: T-1 is held with zeus's window until the reset, where Node took it back to the board for diana; and when the words that resumed it at the reset are refused again, T-1 is held again and the human is told once that zeus's account may need them, where the requester would be told again that T-1 waits The hold note asks the chief nothing: it is shown, not typed (RS-25), read at once with `shown` in its receipt and never pasted, where Node's is queued and pasted.";
 
 /// What the engine does when the human resumes a project whose Close paused its
 /// work (Gabriel, 2026-10-16: "on resume tasks should resume").

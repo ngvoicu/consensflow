@@ -67,6 +67,11 @@ impl Default for Closing {
 /// counted ([`Finished`]), or with why it is refused.
 pub type Finishing = dyn Fn(i64, i64, String) -> Work<'static, Result<Finished, Refusal>>;
 
+/// What the API asks of the engine of a participant's window: the task it holds in the
+/// background, and the jobs and agents its turn left running (`held(participant)`), while
+/// it holds one; none for any other, and before the engine exists.
+pub type Holding = dyn Fn(i64) -> Option<(i64, usize, usize)>;
+
 /// What every handler of the agents' API is given.
 pub struct Context {
     /// The board's record: `borrow()` to read, `borrow_mut()` to write, for
@@ -80,6 +85,8 @@ pub struct Context {
     pub kick: Rc<dyn Fn()>,
     /// What the engine makes of a task the chief asks to finish ([`Finishing`]).
     pub finish: Rc<Finishing>,
+    /// What the engine holds a window's task in the background for ([`Holding`]).
+    pub held: Rc<Holding>,
     pub closing: Closing,
     pub log: Rc<Log>,
     pub trace: Rc<Trace>,

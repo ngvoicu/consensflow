@@ -36,6 +36,16 @@ pub(super) fn of(engine: &Rc<OnceCell<Rc<Dispatcher>>>, spawn: &Rc<DaemonSpawn>)
     })
 }
 
+/// What the engine `engine` holds, once it does, holds a window's task in the background
+/// for ([`crate::api::context::Holding`]).
+pub(super) fn held(engine: &Rc<OnceCell<Rc<Dispatcher>>>) -> Rc<crate::api::context::Holding> {
+    let engine = Rc::clone(engine);
+    Rc::new(move |participant| {
+        let hold = engine.get()?.held_for(participant)?;
+        Some((hold.task, hold.jobs, hold.agents))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

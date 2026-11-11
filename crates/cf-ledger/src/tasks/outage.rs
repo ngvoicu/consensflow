@@ -276,25 +276,30 @@ fn put(
     Ok(Some(sent))
 }
 
-/// The close notes of the windows of `members` that wait to be given to `to`: their task's
-/// number, their message and their words.
+/// The close notes of the windows of `members` that wait to be given to `to`, or that were
+/// shown to it, not typed, and still hold (RS-25): their task's number, their message, their
+/// words and whether it waits. One that waits is withdrawn as the note of failures takes its
+/// line; one shown stays as it was given.
 fn queued_closes(
     store: &Store,
     project_id: i64,
     to: &str,
     members: &[Member],
-) -> Result<Vec<(i64, i64, String)>, LedgerError> {
+) -> Result<Vec<(i64, i64, String, bool)>, LedgerError> {
     let recipient = store.participant_by_handle(project_id, to)?.id;
     let mut found = Vec::new();
     for member in members {
         let task = store.task_row(project_id, member.task)?;
         let opening = window_closed(member.task);
-        let rows: Vec<(i64, String)> = store
+        let rows: Vec<(i64, String, bool)> = store
             .db
             .prepare(&format!(
-                "SELECT id, body FROM message
+                "SELECT id, body, {PENDING} FROM message
                  WHERE project_id = ?1 AND recipient_id = ?2 AND task_id = ?3 AND kind = 'note'
-                   AND sender_id IS NULL AND {PENDING} AND substr(body, 1, ?4) = ?5
+                   AND sender_id IS NULL AND substr(body, 1, ?4) = ?5
+                   AND ({PENDING} OR (state = 'read' AND json_valid(receipt)
+                        AND json_extract(receipt, '$.shown') IS NOT NULL
+                        AND json_extract(receipt, '$.over') IS NULL))
                  ORDER BY id"
             ))?
             .query_map(
@@ -305,10 +310,13 @@ fn queued_closes(
                     i64::try_from(opening.chars().count()).unwrap_or(i64::MAX),
                     opening
                 ],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )?
             .collect::<rusqlite::Result<_>>()?;
-        found.extend(rows.into_iter().map(|(id, body)| (member.task, id, body)));
+        found.extend(
+            rows.into_iter()
+                .map(|(id, body, waits)| (member.task, id, body, waits)),
+        );
     }
     Ok(found)
 }
@@ -360,13 +368,15 @@ pub(super) fn tell_failure(
     members.sort_by_key(|member| member.at);
     let mut replaces: Vec<i64> = earlier.iter().map(|note| note.message).collect();
     if members.len() > 1 {
-        for (number, message, line) in queued_closes(store, project_id, to, &members)? {
+        for (number, message, line, waits) in queued_closes(store, project_id, to, &members)? {
             if let Some(member) = members.iter_mut().find(|member| member.task == number) {
                 if !member.closed.contains(&line) {
                     member.closed.push(line);
                 }
             }
-            replaces.push(message);
+            if waits {
+                replaces.push(message);
+            }
         }
     }
     put(

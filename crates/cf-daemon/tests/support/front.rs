@@ -57,6 +57,7 @@ impl Front {
                     ))
                 })
             }),
+            held: Rc::new(|_| None),
             closing: Closing::new(),
             log,
             trace,

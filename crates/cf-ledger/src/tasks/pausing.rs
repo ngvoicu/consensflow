@@ -542,6 +542,8 @@ pub(crate) fn clear_hold(
             "UPDATE task SET held_until = NULL, updated_at = ? WHERE id = ?",
             params![at, task.id],
         )?;
+        // What its line said of the hold no longer holds.
+        crate::tasks::end_asides(store, task.id, &at)?;
         store.log(
             project_id,
             "task.hold-cleared",
@@ -1065,6 +1067,7 @@ pub(crate) fn resume_task(
                     task.id
                 ],
             )?;
+            crate::tasks::end_asides(store, task.id, &at)?;
             store.log(
                 project_id,
                 "task.state",
