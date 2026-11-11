@@ -31,6 +31,7 @@ chief-notes-engine-outage = ["cargo", "test", "--offline", "-p", "cf-engine", "-
 chief-notes-engine-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::"]
 chief-notes-engine-paused-left = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_left::"]
 chief-notes-engine-waiting = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "waiting_notes::"]
+chief-notes-engine-holds = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts::", "moved_models::"]
 
 [[plant]]
 name = "chief-notes: a shown note is queued and typed as any note"
@@ -275,7 +276,7 @@ replace = '''
 [[plant]]
 name = "chief-notes: the first note of a hold is shown, not typed"
 meant = "shown_notes::the_first_note_of_a_hold_is_typed_to_the_chief_and_the_same_hold_said_again_is_shown"
-runs = ["chief-notes-ledger", "chief-notes-engine-chains"]
+runs = ["chief-notes-ledger", "chief-notes-engine-chains", "chief-notes-engine-holds"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/holds.rs"
@@ -289,7 +290,7 @@ replace = '''
 [[plant]]
 name = "chief-notes: the same hold said again is typed again"
 meant = "shown_notes::the_first_note_of_a_hold_is_typed_to_the_chief_and_the_same_hold_said_again_is_shown"
-runs = ["chief-notes-ledger"]
+runs = ["chief-notes-ledger", "chief-notes-engine-holds"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/holds.rs"
