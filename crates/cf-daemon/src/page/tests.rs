@@ -431,6 +431,7 @@ mod meeting;
 mod members;
 mod models;
 mod opening;
+mod prompt_suggestion;
 mod reading;
 mod roles;
 mod scripted;

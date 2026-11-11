@@ -99,6 +99,11 @@ pub enum PageOperation {
     /// (Project settings, "Advisor tool"): every member's Claude Code window is launched with
     /// it switched off or on from its next start; the chief's never is switched.
     ProjectAdvisorTool,
+    /// Whether the human leaves Claude Code's prompt suggestion on in a project's windows
+    /// (Project settings, "Prompt suggestion"): every Claude Code window of the project, the
+    /// chief's and each member's, is launched with it switched off or left to the owner's own
+    /// setting from its next start.
+    ProjectPromptSuggestion,
     /// The models a harness lists and the efforts each takes, as the home keeps them: read
     /// from the harness at the first ask of the daemon's life, and again at the human's
     /// Refresh (CHF-03). For the chief's picker and the staff chains' editor.
@@ -111,7 +116,7 @@ pub enum PageOperation {
 impl PageOperation {
     /// Every operation, in the order Node's page listed them, then those this
     /// build added, in the order it added them.
-    pub const ALL: [PageOperation; 50] = [
+    pub const ALL: [PageOperation; 51] = [
         Self::ProjectsList,
         Self::ProjectOpen,
         Self::ProjectResume,
@@ -160,6 +165,7 @@ impl PageOperation {
         Self::ProjectRules,
         Self::ProjectCompaction,
         Self::ProjectAdvisorTool,
+        Self::ProjectPromptSuggestion,
         Self::ModelsGet,
         Self::MemberEdit,
     ];
@@ -215,6 +221,7 @@ impl PageOperation {
             Self::ProjectRules => "project.rules",
             Self::ProjectCompaction => "project.compaction",
             Self::ProjectAdvisorTool => "project.advisor_tool",
+            Self::ProjectPromptSuggestion => "project.prompt_suggestion",
             Self::ModelsGet => "models.get",
             Self::MemberEdit => "member.edit",
         }
@@ -280,7 +287,7 @@ mod tests {
             .unwrap();
         let mut forwarded: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         let mut named: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(named.len(), 50);
+        assert_eq!(named.len(), 51);
         forwarded.sort_unstable();
         named.sort_unstable();
         assert_eq!(named, forwarded);
@@ -336,7 +343,7 @@ mod tests {
             "message.approve",
             "message.decline",
         ];
-        const ADDED: [&str; 22] = [
+        const ADDED: [&str; 23] = [
             "wakeup.get",
             "wakeup.set",
             "project.specs",
@@ -357,6 +364,7 @@ mod tests {
             "project.rules",
             "project.compaction",
             "project.advisor_tool",
+            "project.prompt_suggestion",
             "models.get",
             "member.edit",
         ];

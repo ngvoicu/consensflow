@@ -1,0 +1,11 @@
+-- Whether the human leaves Claude Code's prompt suggestion on in the project's windows, in
+-- Project settings ("Prompt suggestion"; T-1444, Gabriel 2026-11-11: "add option in project
+-- settings defaulting to off for both workers and chief"): 0, which every project has until the
+-- human ticks it and which every project that exists now is given by this migration, is Claude
+-- Code windows, the chief's and every member's, launched with the suggestion switched off
+-- (`CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` as `false` in the launch's own settings); 1 is the
+-- owner's own setting and Claude Code's own default, which ConsensFlow writes nothing about.
+-- Every change of it is in the log (`project.prompt_suggestion`). The number is 0036: the next
+-- one free on main after 0035. The column is one line, as 0035's is: the test players read it to
+-- know what Node's schema never had.
+  ALTER TABLE project ADD COLUMN prompt_suggestion INTEGER NOT NULL DEFAULT 0;

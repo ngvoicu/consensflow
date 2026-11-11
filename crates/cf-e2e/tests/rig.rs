@@ -142,6 +142,8 @@ mod pacing;
 mod pending_agents;
 #[path = "rig/printed_output.rs"]
 mod printed_output;
+#[path = "rig/prompt_suggestion_off.rs"]
+mod prompt_suggestion_off;
 #[path = "rig/reports.rs"]
 mod reports;
 #[path = "rig/scripted_reviewer.rs"]

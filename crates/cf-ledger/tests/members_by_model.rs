@@ -54,6 +54,7 @@ fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
             staff_rules: None,
             compaction: None,
             advisor_tool: false,
+            prompt_suggestion: false,
         })
         .expect("a project")
 }
@@ -604,6 +605,7 @@ fn a_member_with_no_tier_is_refused_at_a_project_s_start_and_at_an_add() {
             staff_rules: None,
             compaction: None,
             advisor_tool: false,
+            prompt_suggestion: false,
         })
         .expect_err("refused");
     assert_eq!(refused.code(), Some("invalid-tier"));

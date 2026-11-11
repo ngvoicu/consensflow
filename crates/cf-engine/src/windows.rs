@@ -1315,6 +1315,12 @@ impl Dispatcher {
             // such a tool); the chief's launch never is, and keeps its harness's own setting
             // (2026-11-10).
             advisor_off: !project.advisor_tool && participant.role != "chief",
+            // The project leaves Claude Code's prompt suggestion off until the human ticks it in
+            // Project settings, and it is every window's, the chief's as a member's: each launch
+            // is told to switch it off, at launch and on resume alike, and each adapter acts on
+            // it by its own harness (only Claude Code makes such a call). It is true on every
+            // default launch, so a test sees it only where it is (2026-11-11).
+            suggestion_off: !project.prompt_suggestion,
             first_message_ms: self.seams.limits.launch_ms,
             starts_given_up: record.window.borrow().starts_given_up,
         };

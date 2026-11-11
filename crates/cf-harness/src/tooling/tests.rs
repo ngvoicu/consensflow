@@ -513,6 +513,41 @@ fn a_claude_window_gets_the_settings_file_of_its_launch() {
     assert!(refused.unwrap_err().contains("not a launch id"));
 }
 
+#[test]
+fn a_claude_windows_settings_file_names_the_suggestion_switch_only_where_the_question_asks_it() {
+    // T-1444: the project's "Prompt suggestion" left off is asked as `suggestionOff`, of the
+    // chief's file as of a member's; a question that does not ask it gets the file it always got.
+    let home = tempfile::tempdir().unwrap();
+    let settings = |board_questions: bool, suggestion_off: Option<bool>| {
+        let mut question = json!({
+            "env": { "CONSENSFLOW_HOME": home.path().to_str().unwrap() },
+            "launch": LAUNCH,
+            "boardQuestions": board_questions,
+            "cf": "/bundle/bin/cf",
+        });
+        if let Some(asked) = suggestion_off {
+            question["suggestionOff"] = json!(asked);
+        }
+        let args = answer(&ask("claude_settings", question)).unwrap();
+        serde_json::from_str::<Value>(&fs::read_to_string(args[1].as_str().unwrap()).unwrap())
+            .unwrap()
+    };
+    let switched = json!({ "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION": "false" });
+    for board_questions in [true, false] {
+        let off = settings(board_questions, Some(true));
+        assert_eq!(off["env"], switched, "{board_questions}");
+        let mut bare = off.clone();
+        bare.as_object_mut().unwrap().remove("env");
+        assert_eq!(bare, settings(board_questions, None), "{board_questions}");
+        assert_eq!(
+            bare,
+            settings(board_questions, Some(false)),
+            "{board_questions}"
+        );
+        assert!(settings(board_questions, None).get("env").is_none());
+    }
+}
+
 /// The argv the window `argv` opens on, as the daemon would open it, with `env`.
 fn program_of(argv: &[&str], env: Value) -> Result<Vec<String>, String> {
     let words = answer(&ask("program", json!({ "argv": argv, "env": env })))?;
