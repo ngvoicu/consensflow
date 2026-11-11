@@ -424,6 +424,12 @@ impl Context {
         self.time.settle_at(self.time.wall_ms() + ms);
     }
 
+    /// Sets the machine's time by `ms`, back where it is negative: the wall clock steps, no
+    /// time passes on the clock that does not (`Time::monotonic_ms`).
+    pub fn step_wall(&self, ms: i64) {
+        self.timers.step_wall(ms);
+    }
+
     /// The ledger's file, changed by `change` while no ledger holds it, as an earlier
     /// build or a start that stopped partway left it, and opened again as a start
     /// opens it.

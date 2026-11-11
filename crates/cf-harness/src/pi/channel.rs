@@ -12,7 +12,7 @@ use cf_base::file::read_file;
 use cf_base::json::from_slice_lossy;
 use cf_base::path;
 
-use crate::contract::{LaunchId, Pane, PaneHost};
+use crate::contract::{CompactionWord, LaunchId, Pane, PaneHost};
 use crate::shared::launch_files::launch_folder;
 
 pub use send::{send, Target};
@@ -112,6 +112,38 @@ impl Channel {
             pane,
             host,
         }
+    }
+
+    /// What the extension says of the compaction it asked Pi for, for the project's size, in
+    /// the conversation `session` (`<launch>.compacting.json` beside the settlement evidence,
+    /// written before the ask and removed when the compaction ends, completed, failed or
+    /// aborted). Absent only where the file is absent (ENOENT) or is another launch's or
+    /// another conversation's; the word's time where it is ours; unreadable where the file is
+    /// there and the system will not read it, or it is no word (a read that met the extension's
+    /// rename on Windows, a half-written file): that is not a compaction that is over.
+    pub(super) fn compaction_asked(&self, session: &str) -> CompactionWord {
+        let file = path::join(&[
+            &self.settled,
+            &format!("{}.compacting.json", self.launch_id),
+        ]);
+        let bytes = match read_file(Path::new(&file)) {
+            Ok(bytes) => bytes,
+            Err(failed) if failed.code() == "ENOENT" => return CompactionWord::Absent,
+            Err(_) => return CompactionWord::Unreadable,
+        };
+        let Ok(word) = from_slice_lossy(&bytes) else {
+            return CompactionWord::Unreadable;
+        };
+        let text = |name: &str| word.get(name).and_then(|value| value.as_str());
+        let (Some(launch), Some(conversation)) = (text("launchId"), text("sessionId")) else {
+            return CompactionWord::Unreadable;
+        };
+        if launch != self.launch_id || conversation != session {
+            return CompactionWord::Absent;
+        }
+        word.get("startedAt")
+            .and_then(|at| at.as_i64())
+            .map_or(CompactionWord::Unreadable, CompactionWord::Asked)
     }
 
     /// The conversation the extension says the window shows (it writes it

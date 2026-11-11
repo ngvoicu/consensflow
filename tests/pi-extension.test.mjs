@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -74,6 +75,7 @@ async function setup(
     watchInbox,
     pollMs,
     compaction,
+    compactionLimitMs,
     usage,
     // Pi's `compact()` awaits `abort()` before it sets its compaction state: Pi reads idle
     // until the test says the compaction has begun (`started()`).
@@ -100,6 +102,7 @@ async function setup(
     ...(watchInbox ? { watchInbox } : {}),
     ...(pollMs ? { pollMs } : {}),
     ...(compaction !== undefined ? { compaction } : {}),
+    ...(compactionLimitMs !== undefined ? { compactionLimitMs } : {}),
   })
   let currentIdle = idle
   // Pi's own compaction state, as Pi 1.4.0 and 1.5.0 keep it: `isIdle()` is false from the
@@ -175,6 +178,12 @@ async function setup(
   ctx.compact = (options) => {
     begin('manual', options, compactionStartsLater)
   }
+  // `ctx.abort()`: Pi aborts what is at work, a compaction too (`abortCompaction()`), which then
+  // ends as cancelled when the test lets it (`aborts`, `cancel`).
+  let aborts = 0
+  ctx.abort = () => {
+    aborts += 1
+  }
   const payload =
     typeof record?.id === 'string' &&
     /^m-[a-f0-9]+$/.test(record.id) &&
@@ -207,6 +216,7 @@ async function setup(
       currentUsage = value
     },
     compactions,
+    aborts: () => aborts,
     /** Pi compacts by itself, at its own point. */
     piCompacts: (reason = 'threshold') => begin(reason),
     ctx,
@@ -641,6 +651,339 @@ describe('compaction at a rest', () => {
     } finally {
       await s.close()
     }
+  })
+
+  // The word the engine holds the close of a done task's window by (T-1475): the extension
+  // says it asked for a compaction before it asks, and takes the word back as that compaction
+  // ends, however it ends; Pi's own compaction and another extension's never have one.
+  describe('its word that it asked for a compaction', () => {
+    const wordOf = (s) => join(s.settled, 'launch-pi-test.compacting.json')
+    // The word goes by an unlink the callbacks do not wait for: the engine reads the file on its
+    // own passes, so a short wait for it to be gone is the same as its look.
+    const gone = async (s, ms = 1_000) => {
+      const deadline = Date.now() + ms
+      while ((await exists(wordOf(s))) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      return !(await exists(wordOf(s)))
+    }
+
+    it('writes it before it asks, with the launch, the conversation and the time', async () => {
+      const s = await setup(null, { compaction: 100_000, usage: past })
+      try {
+        const before = Date.now()
+        let atTheAsk
+        const ask = s.ctx.compact
+        s.ctx.compact = (options) => {
+          atTheAsk = {
+            word: existsSync(wordOf(s)),
+            settlement: existsSync(join(s.settled, 'launch-pi-test.json')),
+          }
+          ask(options)
+        }
+        await settle(s)
+        assert.equal(s.compactions.length, 1)
+        const word = JSON.parse(await readFile(wordOf(s), 'utf8'))
+        assert.deepEqual(Object.keys(word).sort(), ['launchId', 'sessionId', 'startedAt'])
+        assert.equal(word.launchId, 'launch-pi-test')
+        assert.equal(word.sessionId, 'native-pi-session')
+        assert.ok(word.startedAt >= before && word.startedAt <= Date.now())
+        // Both stood by the time Pi was asked: no window is found free without the word.
+        assert.deepEqual(atTheAsk, { word: true, settlement: true })
+      } finally {
+        await s.close()
+      }
+    })
+
+    // The engine takes a task as done by the settlement evidence: it never finds that file
+    // without the word beside it, whatever the order the disk is read in while both are written.
+    it('is in place before the settlement evidence the result is taken by is', async () => {
+      const violations = []
+      for (let round = 0; round < 6; round += 1) {
+        const s = await setup(null, { compaction: 100_000, usage: past })
+        try {
+          let writing = true
+          const watcher = (async () => {
+            while (writing) {
+              if (existsSync(join(s.settled, 'launch-pi-test.json')) && !existsSync(wordOf(s))) {
+                violations.push(round)
+              }
+              await new Promise((resolve) => setImmediate(resolve))
+            }
+          })()
+          await settle(s)
+          writing = false
+          await watcher
+          assert.equal(await exists(wordOf(s)), true)
+        } finally {
+          await s.close()
+        }
+      }
+      assert.deepEqual(violations, [])
+    })
+
+    for (const end of ['complete', 'fail', 'cancel']) {
+      it(`stands while it compacts and is taken back when it ends (${end})`, async () => {
+        const s = await setup(null, { compaction: 100_000, usage: past })
+        try {
+          await settle(s)
+          assert.equal(await exists(wordOf(s)), true, 'the word stands while it compacts')
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          assert.equal(await exists(wordOf(s)), true, 'and goes on standing')
+          await s.compactions[0][end]()
+          assert.equal(await gone(s), true, 'taken back as it ends')
+        } finally {
+          await s.close()
+        }
+      })
+    }
+
+    // Pi tells its extensions the end of a compaction only where it finds the entry it saved, and
+    // always calls the callback of the ask: each alone takes the word back.
+    for (const [name, end] of [
+      ['the compaction was completed', () => ({ ok: ['session_compact'] })],
+      ['the compaction failed', () => ({ ok: ['session_compact_failed'] })],
+    ]) {
+      it(`is taken back by Pi's word that ${name}, before the callback of the ask comes`, async () => {
+        const s = await setup(null, { compaction: 100_000, usage: past })
+        try {
+          await settle(s)
+          assert.equal(await exists(wordOf(s)), true)
+          for (const event of end().ok) await s.pi.handlers.get(event)({ reason: 'manual' }, s.ctx)
+          assert.equal(await gone(s), true)
+        } finally {
+          await s.close()
+        }
+      })
+    }
+
+    for (const [name, call] of [
+      ['complete', (options) => options.onComplete({})],
+      ['fail', (options) => options.onError(new Error('the summary model failed'))],
+    ]) {
+      it(`is taken back by the callback of the ask when Pi tells no event of the end (${name})`, async () => {
+        const s = await setup(null, { compaction: 100_000, usage: past })
+        try {
+          await settle(s)
+          assert.equal(await exists(wordOf(s)), true)
+          call(s.compactions[0].options)
+          assert.equal(await gone(s), true)
+        } finally {
+          await s.close()
+        }
+      })
+    }
+
+    // T-1477: no word, no compaction. A word that cannot be written leaves the engine nothing
+    // to hold the window by, and the ordinary close then cuts the summary: the original fault.
+    it('asks for no compaction at a rest where its word cannot be written, says so once, and asks at a later one', async () => {
+      const s = await setup(null, { compaction: 100_000, usage: past })
+      try {
+        // A folder where the word's file goes: the rename of the word onto it fails.
+        await mkdir(wordOf(s), { recursive: true })
+        await settle(s)
+        await settle(s)
+        assert.equal(s.compactions.length, 0, 'no ask without the word')
+        assert.equal(s.logs.length, 1, 'said once')
+        assert.match(s.logs[0], /compaction at work/)
+        // The settlement evidence is written all the same: the result is the chief's.
+        assert.equal(await exists(join(s.settled, 'launch-pi-test.json')), true)
+        // The folder gone, a later rest asks, with its word.
+        await rm(wordOf(s), { recursive: true })
+        await settle(s)
+        assert.equal(s.compactions.length, 1)
+        assert.equal(await exists(wordOf(s)), true)
+        assert.equal(s.logs.length, 1)
+      } finally {
+        await s.close()
+      }
+    })
+
+    it('asks for no compaction where the word has no conversation to name', async () => {
+      const s = await setup(null, { compaction: 100_000, usage: past })
+      try {
+        s.ctx.sessionManager.getSessionId = () => undefined
+        await settle(s)
+        assert.equal(s.compactions.length, 0)
+        assert.equal(await exists(wordOf(s)), false)
+        s.ctx.sessionManager.getSessionId = () => 'native-pi-session'
+        await settle(s)
+        assert.equal(s.compactions.length, 1)
+      } finally {
+        await s.close()
+      }
+    })
+
+    // A reader that never takes a half-written word for none: the word is written under another
+    // name and moved into place, as the settlement evidence is (a rename replaces a file a reader
+    // has open on Windows too: Rust's reads open it sharing delete).
+    it('is never seen half written by a reader that reads it while it is written', async () => {
+      const s = await setup(null, { compaction: 100_000, usage: past })
+      try {
+        let reading = true
+        const seen = []
+        const reader = (async () => {
+          while (reading) {
+            try {
+              const text = await readFile(wordOf(s), 'utf8')
+              JSON.parse(text)
+              seen.push('whole')
+            } catch (cause) {
+              if (cause?.code !== 'ENOENT') seen.push(`torn: ${cause?.message}`)
+            }
+            await new Promise((resolve) => setImmediate(resolve))
+          }
+        })()
+        for (let round = 0; round < 40; round += 1) {
+          await settle(s)
+          await s.compactions.at(-1).complete()
+          await gone(s)
+        }
+        reading = false
+        await reader
+        assert.deepEqual(
+          seen.filter((one) => one !== 'whole'),
+          [],
+        )
+        assert.equal(s.compactions.length, 40)
+      } finally {
+        await s.close()
+      }
+    })
+
+    // T-1477: a reopen's words wait for the compaction (Busy, no attempt spent) and go in once,
+    // the compaction having ended; and one that never ends is ended at the limit, the word taken
+    // back, Pi told to abort it, so that nothing waits past it.
+    it('ends a compaction that never ends at its limit: aborts it, takes the word back and lets one message in', async () => {
+      const s = await setup(null, { compaction: 100_000, usage: past, compactionLimitMs: 80 })
+      try {
+        await settle(s)
+        assert.equal(await exists(wordOf(s)), true)
+        await arrive(s, 1)
+        await s.extension.consume()
+        assert.equal((await ackOf(s, 1)).reason, 'chief busy')
+        assert.deepEqual(s.pi.sent, [])
+        // Nothing of Pi's ends it: the limit does.
+        assert.equal(await gone(s, 2_000), true, 'the word is taken back at the limit')
+        assert.equal(s.aborts(), 1, 'Pi is told to abort it, once')
+        assert.ok(s.logs.some((line) => /did not end/.test(line)))
+        // Pi's abort ends it, late: the callback finds the ask over, and takes nothing more.
+        await s.compactions[0].cancel()
+        await arrive(s, 2)
+        await s.extension.consume()
+        await sentWithin(s, 1)
+        assert.deepEqual(s.pi.sent, [envelope], 'one message, once')
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        await s.extension.consume()
+        assert.deepEqual(s.pi.sent, [envelope])
+      } finally {
+        await s.close()
+      }
+    })
+
+    it('does not abort a compaction that ended before its limit', async () => {
+      const s = await setup(null, { compaction: 100_000, usage: past, compactionLimitMs: 80 })
+      try {
+        await settle(s)
+        await s.compactions[0].complete()
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        assert.equal(s.aborts(), 0)
+        assert.equal(s.logs.length, 0)
+      } finally {
+        await s.close()
+      }
+    })
+
+    it('does not let the end of an ask past its limit end the next ask', async () => {
+      const s = await setup(null, { compaction: 100_000, usage: past, compactionLimitMs: 200 })
+      try {
+        await settle(s)
+        await gone(s, 2_000)
+        // Pi ends the first one without a word (its state is clear), a rest after the limit asks
+        // again, and the first one's callback, late, is not this one's end.
+        await s.compactions[0].endUntold()
+        await settle(s)
+        assert.equal(s.compactions.length, 2)
+        s.compactions[0].options.onError(new Error('Compaction cancelled'))
+        await new Promise((resolve) => setTimeout(resolve, 30))
+        assert.equal(await exists(wordOf(s)), true, 'the second ask is still at work')
+      } finally {
+        await s.close()
+      }
+    })
+
+    it('is taken back too when Pi refuses the ask at once', async () => {
+      const s = await setup(null, { compaction: 100_000, usage: past })
+      try {
+        s.ctx.compact = () => {
+          throw new Error('no compaction here')
+        }
+        await settle(s)
+        assert.equal(await gone(s), true)
+        assert.equal(s.logs.length, 1)
+      } finally {
+        await s.close()
+      }
+    })
+
+    it('is taken back when the window shuts down under the compaction', async () => {
+      const s = await setup(null, { compaction: 100_000, usage: past })
+      try {
+        await settle(s)
+        assert.equal(await exists(wordOf(s)), true)
+        await s.pi.handlers.get('session_shutdown')()
+        assert.equal(await exists(wordOf(s)), false)
+      } finally {
+        await s.close()
+      }
+    })
+
+    for (const [name, options] of [
+      ['a project that chose no size', { usage: past }],
+      ['a context at the size or under it', { compaction: 150_005, usage: past }],
+    ]) {
+      it(`has none for ${name}`, async () => {
+        const s = await setup(null, options)
+        try {
+          await settle(s)
+          assert.equal(await exists(wordOf(s)), false)
+        } finally {
+          await s.close()
+        }
+      })
+    }
+
+    for (const end of ['complete', 'fail', 'cancel', 'endUntold']) {
+      it(`has none for a compaction Pi began itself (${end})`, async () => {
+        const s = await setup(null, { compaction: 100_000, usage: undefined })
+        try {
+          const compaction = s.piCompacts('threshold')
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          assert.equal(await exists(wordOf(s)), false)
+          await compaction[end]()
+          assert.equal(await exists(wordOf(s)), false)
+        } finally {
+          await s.close()
+        }
+      })
+    }
+
+    it("leaves none for a compaction Pi begins after the extension's own has ended", async () => {
+      const s = await setup(null, { compaction: 100_000, usage: past })
+      try {
+        await settle(s)
+        assert.equal(s.compactions.length, 1)
+        await s.compactions[0].complete()
+        assert.equal(await gone(s), true)
+        // The compaction ended: Pi's own, later, has events and no word.
+        const own = s.piCompacts('threshold')
+        await own.complete()
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        assert.equal(await exists(wordOf(s)), false)
+      } finally {
+        await s.close()
+      }
+    })
   })
 
   it('asks Pi for no second compaction in the moment before the first has begun, when Pi still reads idle', async () => {

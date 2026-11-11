@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use cf_harness::contract::{
-    FirstMessage, Input, Interrupt, Launch, LaunchId, Observed, Pane, Window,
+    CompactionWord, FirstMessage, Input, Interrupt, Launch, LaunchId, Observed, Pane, Window,
 };
 use cf_harness::seams::Time;
 use cf_ledger::{
@@ -86,6 +86,28 @@ const DRAWN_QUIET_MS: f64 = 1_500.0;
 /// longer, and the next task of its session waits no longer for a window of its own
 /// (`ownership`).
 const STILL_BOUND_MS: i64 = 10_000;
+
+/// The longest the window of a task that is done is held open for a compaction that
+/// ConsensFlow's own extension asked its harness for at the window's rest, for the
+/// project's size ([`Window::compaction_asked`], [`Dispatcher::compaction_held`], T-1475):
+/// 300 seconds counted from the engine's first sight of that word for that window, on the clock
+/// that does not step ([`Time::monotonic_ms`]: the engine's other bounds are counted on the wall
+/// clock, which a hold of this kind must not be, a step of it making the hold shorter or
+/// longer). The compactions of a Pi member's real windows took 39 to 80 seconds (a cached
+/// summary of 243,000 to 749,000 tokens); this is about four times the longest. Past it the
+/// window closes as it does without one, the compaction ended by the close as before. The
+/// word's own time is compared with no clock: it only tells one word from another.
+pub(crate) const COMPACTION_HOLD_MS: i64 = 300_000;
+
+/// What the engine made of a word the extension wrote ([`Dispatcher::compaction_held`]): the
+/// time the word says it was written (to tell a new word from the one seen; none where the first
+/// look met a word it could not read), and when the engine first looked on the clock that does
+/// not step.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CompactionSeen {
+    pub(crate) asked: Option<i64>,
+    pub(crate) since: i64,
+}
 
 /// How soon a chief that could not start is tried again; the wait doubles
 /// with each failure, up to the most.
@@ -357,6 +379,12 @@ pub(crate) struct WindowPart {
     /// is in hand (the wait is over, the next time it is done is a wait of its own), and
     /// once the window closes.
     pub(crate) found_free: Option<i64>,
+    /// When the engine first saw its extension's word that it asked the harness to compact
+    /// for the window's rest, while the task the window was given is done: the hold's
+    /// bound is counted from the word's own time, or from this where the word's time is
+    /// ahead of the clock. None while there is no word, and once the window closes
+    /// ([`Dispatcher::compaction_held`]).
+    pub(crate) compaction_seen: Option<CompactionSeen>,
     /// The window of its last launch whose open the host never answered by the open's
     /// deadline: the host may have started its program since, or may yet, and it would
     /// run on the conversation the next window goes on with (a Codex thread one client
@@ -419,6 +447,7 @@ impl Default for WindowPart {
             owner: None,
             told_waiting: None,
             found_free: None,
+            compaction_seen: None,
             abandoned: None,
         }
     }
@@ -573,6 +602,7 @@ impl Dispatcher {
             window.unproven = false;
             window.told_waiting = None;
             window.found_free = None;
+            window.compaction_seen = None;
             window.activity = Activity::of(ActivityState::Closed);
             window.trust = Trusting::Past;
             window.trust_keys = 0;
@@ -1874,6 +1904,11 @@ impl Dispatcher {
         self: &Rc<Self>,
         record: &Rc<Record>,
     ) -> Result<bool, EngineError> {
+        // A compaction its own extension asked for holds the window first, and its screen
+        // is waited for after it (the wait of the screen begins when the compaction's ends).
+        if self.given_task_finished(record)? && self.compaction_held(record) {
+            return Ok(true);
+        }
         if !self.given_task_finished(record)? {
             return Ok(false);
         }
@@ -1897,6 +1932,56 @@ impl Dispatcher {
             .ok()
             .flatten()
             .is_some_and(|quiet| quiet < DRAWN_QUIET_MS))
+    }
+
+    /// Whether the window of `record`, whose task is done, is held open for a compaction its
+    /// harness's own extension said it asked for at the window's rest for the project's size
+    /// ([`Window::compaction_asked`]: Pi's, T-1475): a harness whose conversation the close
+    /// would cut under a summary that takes tens of seconds (a Pi member whose task is one
+    /// turn is at rest as its result is taken, and its summary 39 to 80 seconds long, which
+    /// the 10 seconds of [`STILL_BOUND_MS`] cut, the signal of the close aborting it). Held
+    /// while the word stands, at most [`COMPACTION_HOLD_MS`] from the engine's first sight of
+    /// it, on the clock that does not step, so that no step of the wall clock lengthens or
+    /// shortens it; then the close goes as it does without one. The word's own time is compared
+    /// with no clock. A word that is not the one seen (another time) is a new first sight. Only a
+    /// word that is absent holds nothing and clears the first sight: a word that is there and
+    /// cannot be read this time keeps what the engine knows (a first sight saved stays; with
+    /// none, this look is the first, and the window is held for it), so that a file that stays
+    /// unreadable is bounded by the first look that met it. Only the ordinary close of a done task's window comes here: a pause, a cancel, a
+    /// failure, the human ending the session and the app quitting close at once, and a task in
+    /// hand again (a reopen) keeps its window, which its extension's own limit of the same
+    /// length frees of its compaction.
+    fn compaction_held(&self, record: &Record) -> bool {
+        let word = self
+            .window_of(record)
+            .0
+            .map_or(CompactionWord::Absent, |window| window.compaction_asked());
+        let mono = self.seams.time.monotonic_ms();
+        let mut part = record.window.borrow_mut();
+        let seen = match (word, part.compaction_seen) {
+            (CompactionWord::Absent, _) => {
+                part.compaction_seen = None;
+                return false;
+            }
+            (CompactionWord::Unreadable, Some(seen)) => seen,
+            (CompactionWord::Unreadable, None) => CompactionSeen {
+                asked: None,
+                since: mono,
+            },
+            // The word read after a look that could not: the same first look.
+            (CompactionWord::Asked(at), Some(seen)) if seen.asked.is_none_or(|was| was == at) => {
+                CompactionSeen {
+                    asked: Some(at),
+                    since: seen.since,
+                }
+            }
+            (CompactionWord::Asked(at), _) => CompactionSeen {
+                asked: Some(at),
+                since: mono,
+            },
+        };
+        part.compaction_seen = Some(seen);
+        mono - seen.since < COMPACTION_HOLD_MS
     }
 
     /// Closes a window whose exit is the engine's own (a switch, a Close, a

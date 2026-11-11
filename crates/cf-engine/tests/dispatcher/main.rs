@@ -52,6 +52,7 @@ mod carriers;
 mod chief_models;
 mod chief_not_up;
 mod chiefs;
+mod close_for_compaction;
 mod close_when_drawn;
 mod close_while_delivering;
 mod closed_given_nothing;
