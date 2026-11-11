@@ -23,7 +23,7 @@
 # - each harness's own answer: where Claude's and Codex's file is kept, and that Codex's is named as
 #   Codex names it (a timestamp and the thread, no copy of it), that their record unread tells
 #   nothing, that Pi has its session before any turn, and that Devin's store has a
-#   turn only where it holds a message of the user's.
+#   turn only where it holds a message of the user's or the summary of a conversation Devin compacted.
 #
 # Every name holds `resume unturned`, so `npm run plants:daemon -- "resume unturned"` runs them all.
 
@@ -277,8 +277,28 @@ runs = ["harness-resumable"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''                    Some(record.items.iter().any(|item| item.role == Role::User))'''
-replace = '''                    Some(!record.items.is_empty())'''
+find = '''                        .any(|item| item.role == Role::User || item.kind() == Kind::Compaction),'''
+replace = '''                        .any(|_| true),'''
+
+[[plant]]
+name = "resume unturned harness: a Devin session compacted at rest, whose chain holds no message of the user's, holds nothing"
+meant = "can_go_on_with_a_session_devin_compacted_though_its_chain_holds_no_message_of_the_users"
+runs = ["harness-resumable"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''                        .any(|item| item.role == Role::User || item.kind() == Kind::Compaction),'''
+replace = '''                        .any(|item| item.role == Role::User),'''
+
+[[plant]]
+name = "resume unturned harness: a Devin session is gone on with only where it was compacted"
+meant = "can_go_on_with_a_session_whose_store_holds_a_message_of_the_users_and_not_with_one_it_holds_none_of"
+runs = ["harness-resumable"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''                        .any(|item| item.role == Role::User || item.kind() == Kind::Compaction),'''
+replace = '''                        .any(|item| item.kind() == Kind::Compaction),'''
 
 [[plant]]
 name = "resume unturned harness: a Devin store that cannot be read holds nothing"

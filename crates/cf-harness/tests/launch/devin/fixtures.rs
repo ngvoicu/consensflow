@@ -177,6 +177,24 @@ impl Store {
             .unwrap();
     }
 
+    /// The row `node` of the session holding `message`, below `parent` (the first of a
+    /// chain of its own where there is none): the main chain's head from now.
+    pub(super) fn writes(&self, session: &str, node: &str, parent: Option<&str>, message: &Value) {
+        self.0
+            .execute(
+                "INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at)
+                 VALUES (?, ?, ?, ?, '2026-11-10T20:35:15Z')",
+                (session, node, parent, message.to_string()),
+            )
+            .unwrap();
+        self.0
+            .execute(
+                "UPDATE sessions SET main_chain_id = ? WHERE id = ?",
+                (node, session),
+            )
+            .unwrap();
+    }
+
     /// A message of `role` on the session's main chain, the first of it.
     pub(super) fn says(&self, session: &str, role: &str, text: &str) {
         let node = format!("{session}-node-1");
@@ -199,6 +217,85 @@ impl Store {
                 (&node, session),
             )
             .unwrap();
+    }
+
+    /// The answer `text` that ends the turn of the session's first message, as Devin stores
+    /// one it stopped at (`finish_reason: stop`): the main chain's head.
+    pub(super) fn replies(&self, session: &str, text: &str) {
+        let node = format!("{session}-node-2");
+        let message = json!({
+            "role": "assistant",
+            "content": text,
+            "message_id": format!("{session}-message-2"),
+            "metadata": { "created_at": "2026-10-13T10:00:05Z", "finish_reason": "stop" },
+        });
+        self.0
+            .execute(
+                "INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at)
+                 VALUES (?, ?, ?, ?, '2026-10-13T10:00:05Z')",
+                (session, &node, format!("{session}-node-1"), message.to_string()),
+            )
+            .unwrap();
+        self.0
+            .execute(
+                "UPDATE sessions SET main_chain_id = ? WHERE id = ?",
+                (&node, session),
+            )
+            .unwrap();
+    }
+
+    /// A session Devin compacted once its turn was over, as its store has it (T-1388,
+    /// Devin 3000.12.43, `/compact` through `devin acp`): the main chain is a new one of
+    /// system messages alone, five that open any chain, the listing of the skills it
+    /// loaded, and the summary of the conversation (`devin-rs/summary`). The messages the
+    /// summary sums up are no longer on the chain, and none of them is a message of the
+    /// user's.
+    pub(super) fn is_compacted(&self, session: &str) {
+        let skills =
+            json!({ "agent-ext/skills-loaded": { "skills": [], "is_initial_listing": true } });
+        let summary = json!({
+            "chisel/conversation_history": { "messages": [] },
+            "devin-rs/summary": { "source": "file_compactor", "kept_turns": 0 },
+        });
+        let mut chain: Vec<(&str, Option<Value>)> = (1..=5)
+            .map(|at| {
+                (
+                    "The system's opening.",
+                    (at == 1).then(|| json!({ "barista/cross_session_stable": true })),
+                )
+            })
+            .collect();
+        chain.push(("The skills loaded.", Some(skills)));
+        chain.push(("The conversation so far.", Some(summary)));
+        let mut parent: Option<String> = None;
+        for (at, (text, extensions)) in chain.into_iter().enumerate() {
+            // A chain of its own, whatever the session had before it.
+            let node = format!("{session}-compacted-{}", at + 1);
+            let mut metadata = json!({ "created_at": "2026-11-10T20:35:15Z" });
+            if let Some(extensions) = extensions {
+                metadata["extensions"] = extensions;
+            }
+            let message = json!({
+                "role": "system",
+                "content": text,
+                "message_id": format!("{session}-compacted-message-{}", at + 1),
+                "metadata": metadata,
+            });
+            self.0
+                .execute(
+                    "INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at)
+                     VALUES (?, ?, ?, ?, '2026-11-10T20:35:15Z')",
+                    (session, &node, &parent, message.to_string()),
+                )
+                .unwrap();
+            self.0
+                .execute(
+                    "UPDATE sessions SET main_chain_id = ? WHERE id = ?",
+                    (&node, session),
+                )
+                .unwrap();
+            parent = Some(node);
+        }
     }
 }
 
