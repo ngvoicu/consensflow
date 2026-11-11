@@ -921,10 +921,11 @@ pub mod members {
             fields.insert("id".to_owned(), json!(WORKER));
             fields.insert("workTier".to_owned(), json!("standard"));
         }
-        let roster = json!({
-            "schemaVersion": 1,
-            "agents": [{ "id": "chief", "kind": "claude-code", "model": "fake-chief" }, worker],
-        });
+        let mut agents =
+            vec![json!({ "id": "chief", "kind": "claude-code", "model": "fake-chief" })];
+        // A worker on a model that lists efforts and is given none is refused by the daemon.
+        agents.extend(crate::live::agents::with_efforts(rig, &[worker], |_| {}));
+        let roster = json!({ "schemaVersion": 1, "agents": agents });
         rig.stand_ins(&roster)?;
         let project = Project::open(rig, "chief", json!({}))?;
         let added = project.add_member(WORKER)?;

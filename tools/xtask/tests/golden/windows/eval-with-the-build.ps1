@@ -20,6 +20,7 @@ function Free-Machine {
 }
 function Exit-Run([int]$code) { Free-Machine; Write-Output "`n== exit $code"; exit $code }
 try {
+$env:USERPROFILE,$dir|%{if((gi -Lit $_ -Force -EA 0).Attributes -band 1024){"$_ is a link: nothing was made or unpacked";Exit-Run 1}}
 New-Item -ItemType Directory -Force $dir | Out-Null
 try { $lock = [IO.File]::Open((Join-Path $dir '.windows-run.lock'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {} catch { $why = $_.Exception.Message }
 $holder = Get-Content $running -ErrorAction SilentlyContinue

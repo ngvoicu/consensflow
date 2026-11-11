@@ -18,7 +18,7 @@ use crate::context::Context;
 use crate::windows::tree;
 
 /// A file of the copy `name` (its path from `root`, with `/`), made with its folders.
-fn write(root: &Path, name: &str) {
+pub(super) fn write(root: &Path, name: &str) {
     let path = root.join(name);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, name).unwrap();
@@ -27,7 +27,7 @@ fn write(root: &Path, name: &str) {
 /// The file `name` of `root`, last written `days` ago.
 // The time of day is read in one place of the product; a test says an age against the clock the files are stamped by.
 #[allow(clippy::disallowed_methods)]
-fn aged(root: &Path, name: &str, days: u64) {
+pub(super) fn aged(root: &Path, name: &str, days: u64) {
     write(root, name);
     let file = fs::OpenOptions::new()
         .write(true)
@@ -41,6 +41,35 @@ fn aged(root: &Path, name: &str, days: u64) {
 /// (the files are there, as the unpack leaves them): what it said.
 fn sweep(shell: &str, dir: &Path, listed: &[&str]) -> String {
     let profile = tempfile::tempdir().unwrap();
+    sweep_as(shell, dir, listed, profile.path(), "", "")
+}
+
+/// [`sweep`] for the user whose profile is `profile`, with `before` (PowerShell) run in the same
+/// session ahead of the sweep and `after` once it is done: what the session said. The profile
+/// holds the session's `case.ps1` and its cache.
+pub(super) fn sweep_as(
+    shell: &str,
+    dir: &Path,
+    listed: &[&str],
+    profile: &Path,
+    before: &str,
+    after: &str,
+) -> String {
+    let out = sweep_raw(shell, dir, listed, profile, before, after);
+    assert!(out.contains("FAILED=0"), "the sweep failed: {out}");
+    out
+}
+
+/// [`sweep_as`] for a case that expects the sweep to fail the run: what the session said, whatever
+/// the count of what failed.
+pub(super) fn sweep_raw(
+    shell: &str,
+    dir: &Path,
+    listed: &[&str],
+    profile: &Path,
+    before: &str,
+    after: &str,
+) -> String {
     fs::write(dir.join(SYNCED), listed.join("\n") + "\n").unwrap();
     let context = Context {
         root: dir.to_path_buf(),
@@ -50,17 +79,15 @@ fn sweep(shell: &str, dir: &Path, listed: &[&str]) -> String {
     let hash = tree::content(&context, &names).unwrap();
     fs::write(dir.join(TREE), format!("none {hash}\n")).unwrap();
     fs::write(dir.join(SWEEP), sweep_script()).unwrap();
-    let out = powershell::run(
+    powershell::run(
         shell,
-        profile.path(),
+        profile,
         &format!(
-            "$ProgressPreference = 'SilentlyContinue'\n$ErrorActionPreference = 'Stop'\n$env:USERPROFILE = '{}'\n$dir = '{}'\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nWrite-Output \"FAILED=$($failed.Count)\"\n",
-            profile.path().display(),
+            "$ProgressPreference = 'SilentlyContinue'\n$ErrorActionPreference = 'Stop'\n$env:USERPROFILE = '{}'\n$dir = '{}'\n{before}\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nWrite-Output \"FAILED=$($failed.Count)\"\n{after}\n",
+            profile.display(),
             dir.display()
         ),
-    );
-    assert!(out.contains("FAILED=0"), "the sweep failed: {out}");
-    out
+    )
 }
 
 #[test]

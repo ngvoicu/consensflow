@@ -338,15 +338,17 @@ pub(crate) fn with_images(words: String) -> String {
 /// The result `words` of `task`: for a design task, with the lines of the images it names; any
 /// other task's is its words alone.
 pub(crate) fn for_task(task: &TaskView, words: String) -> String {
-    if task.pool.as_deref() == Some(DESIGNER_POOL) {
+    if task
+        .pool
+        .as_deref()
+        .and_then(cf_ledger::roles::find)
+        .is_some_and(|role| role.image_agent)
+    {
         with_images(words)
     } else {
         words
     }
 }
-
-/// The pool a design task (`cf task add --design`) is asked for.
-const DESIGNER_POOL: &str = "designer";
 
 #[cfg(test)]
 mod tests;

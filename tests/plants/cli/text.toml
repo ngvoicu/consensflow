@@ -29,12 +29,12 @@ meant = "every_command_that_takes_a_text_reads_it_from_standard_input_at_a_dash"
 runs = ["cf-text"]
 
 [[plant.edit]]
-file = "crates/cf/src/board/mod.rs"
+file = "crates/cf/src/board/brief.rs"
 find = '''
     let text = text
         .strip_suffix("\r\n")
         .or_else(|| text.strip_suffix('\n'))
-        .unwrap_or(text);
+        .unwrap_or(&text);
     Ok(text.to_owned())
 '''
 replace = '''
@@ -47,16 +47,16 @@ meant = "every_command_that_takes_a_text_reads_it_from_standard_input_at_a_dash"
 runs = ["cf-text"]
 
 [[plant.edit]]
-file = "crates/cf/src/board/mod.rs"
+file = "crates/cf/src/board/brief.rs"
 find = '''
         .strip_suffix("\r\n")
         .or_else(|| text.strip_suffix('\n'))
-        .unwrap_or(text);
+        .unwrap_or(&text);
     Ok(text.to_owned())
 '''
 replace = '''
         .strip_suffix('\n')
-        .unwrap_or(text);
+        .unwrap_or(&text);
     Ok(text.to_owned())
 '''
 
@@ -189,24 +189,17 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
 '''
 
 # A byte order mark before the words (Windows PowerShell 5.1 pipes one, Notepad saves one) is no
-# part of them (CI run 41767889064; T-1177).
+# part of them (CI run 41767889064; T-1177). Since T-1435 one function decodes a file and standard
+# input alike (`brief::words_of`), so one plant takes the mark out of both.
 
 [[plant]]
-name = "text: a byte order mark piped before the words stays in them"
-meant = "a_byte_order_mark_before_a_brief_on_standard_input_or_in_a_file_is_no_part_of_it"
-runs = ["cf-text-mark"]
-
-[[plant.edit]]
-file = "crates/cf/src/board/mod.rs"
-find = '    let text = without_byte_order_mark(&text);'
-replace = '    let text: &str = &text;'
-
-[[plant]]
-name = "text: a byte order mark at the start of a brief's file stays in it"
+name = "text: a byte order mark before the words, piped or in a file, stays in them"
 meant = "a_byte_order_mark_before_a_brief_on_standard_input_or_in_a_file_is_no_part_of_it"
 runs = ["cf-text-mark"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/brief.rs"
-find = '    let text = without_byte_order_mark(&text);'
-replace = '    let text: &str = &text;'
+find = '''
+        [0xef, 0xbb, 0xbf, rest @ ..] => (utf8(rest, 3)?, false),
+'''
+replace = ''''''

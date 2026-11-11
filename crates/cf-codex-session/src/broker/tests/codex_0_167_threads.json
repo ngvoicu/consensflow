@@ -1,0 +1,112 @@
+{
+  "_": "Codex 0.167.0's own answers, recorded by T-1414 on 2026-11-11 from a real `codex app-server` with no login and no model, over threads kept from T-766's sub-agent probes (Codex 0.164.0): `thread/read` (includeTurns false) of a main thread, of its sub-agent (`spawn_agent`), of a sub-agent spawned with fork_context, and of a user's fork of each; a read of a thread it does not have. Fields kept: those the broker reads, and the status and turns it reads already; path, cwd, git info, preview and times dropped.",
+  "reads": {
+    "forkContextChild": {
+      "id": "01a17a02-806d-7902-a3dc-40aaa3c48400",
+      "sessionId": "01a17a02-806d-7902-a3dc-40aaa3c48400",
+      "forkedFromId": "01a17a02-6a4f-74a0-a98c-39d3d91c56a3",
+      "parentThreadId": "01a17a02-6a4f-74a0-a98c-39d3d91c56a3",
+      "ephemeral": false,
+      "source": {
+        "subAgent": {
+          "thread_spawn": {
+            "parent_thread_id": "01a17a02-6a4f-74a0-a98c-39d3d91c56a3",
+            "depth": 1,
+            "agent_path": null,
+            "agent_nickname": "Mill",
+            "agent_role": null
+          }
+        }
+      },
+      "threadSource": "subagent",
+      "agentNickname": "Mill",
+      "agentRole": null,
+      "cliVersion": "0.164.0",
+      "status": {
+        "type": "notLoaded"
+      },
+      "turns": []
+    },
+    "main": {
+      "id": "01a17a05-6f24-7f01-b73d-6e76c4aa01c5",
+      "sessionId": "01a17a05-6f24-7f01-b73d-6e76c4aa01c5",
+      "forkedFromId": null,
+      "parentThreadId": null,
+      "ephemeral": false,
+      "source": "vscode",
+      "threadSource": "user",
+      "agentNickname": null,
+      "agentRole": null,
+      "cliVersion": "0.164.0",
+      "status": {
+        "type": "notLoaded"
+      },
+      "turns": []
+    },
+    "child": {
+      "id": "01a17a05-84a6-7281-94f1-1b9307d3169a",
+      "sessionId": "01a17a05-84a6-7281-94f1-1b9307d3169a",
+      "forkedFromId": null,
+      "parentThreadId": "01a17a05-6f24-7f01-b73d-6e76c4aa01c5",
+      "ephemeral": false,
+      "source": {
+        "subAgent": {
+          "thread_spawn": {
+            "parent_thread_id": "01a17a05-6f24-7f01-b73d-6e76c4aa01c5",
+            "depth": 1,
+            "agent_path": null,
+            "agent_nickname": "Fermat",
+            "agent_role": null
+          }
+        }
+      },
+      "threadSource": "subagent",
+      "agentNickname": "Fermat",
+      "agentRole": null,
+      "cliVersion": "0.164.0",
+      "status": {
+        "type": "notLoaded"
+      },
+      "turns": []
+    },
+    "forkOfMain": {
+      "id": "01a1c791-953e-7922-a5b8-524d22f04ee3",
+      "sessionId": "01a1c791-953e-7922-a5b8-524d22f04ee3",
+      "forkedFromId": "01a17a05-6f24-7f01-b73d-6e76c4aa01c5",
+      "parentThreadId": null,
+      "ephemeral": false,
+      "source": "vscode",
+      "threadSource": null,
+      "agentNickname": null,
+      "agentRole": null,
+      "cliVersion": "0.167.0",
+      "status": {
+        "type": "idle"
+      },
+      "turns": []
+    },
+    "forkOfChild": {
+      "id": "01a1c791-954f-75b2-94ff-40e9ab9163ce",
+      "sessionId": "01a1c791-954f-75b2-94ff-40e9ab9163ce",
+      "forkedFromId": "01a17a05-84a6-7281-94f1-1b9307d3169a",
+      "parentThreadId": null,
+      "ephemeral": false,
+      "source": "vscode",
+      "threadSource": null,
+      "agentNickname": null,
+      "agentRole": null,
+      "cliVersion": "0.167.0",
+      "status": {
+        "type": "idle"
+      },
+      "turns": []
+    }
+  },
+  "unknown": {
+    "threadId": "01a17a05-0000-7000-8000-000000000000",
+    "error": {
+      "code": -32600,
+      "message": "thread not loaded: 01a17a05-0000-7000-8000-000000000000"
+    }
+  }
+}

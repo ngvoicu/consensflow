@@ -10,10 +10,12 @@
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::expect_used)]
 
+mod advisor_tool;
 mod both;
 mod compaction;
 mod line;
 mod migration;
 mod name;
+mod prompt_suggestion;
 mod rules;
 mod world;

@@ -8,6 +8,29 @@
 # terminal's write, and its count stops with it.
 LC_ALL=C
 export LC_ALL
+# The daemon's read of the models Claude Code lists (`claude -p --input-format stream-json`: no
+# window, no turn) is answered as the smoke's other harness answers it, with the models the page's
+# self-test opens its project with, and ends with the input; it draws nothing and notes no pid of
+# a window. The daemon takes no model its harness does not list (A4-28, T-1329) and waits 30 s for
+# this answer, so a script without it has the project refused before the window opens (T-1362).
+if [ "$1" = "-p" ]; then
+  while IFS= read -r line; do
+    case "$line" in
+      *'"subtype":"initialize"'*)
+        id=${line#*'"request_id":"'}
+        id=${id%%'"'*}
+        printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s","response":{"models":[' "$id"
+        sep=''
+        for model in fake fake-2 fake-chief chief worker claude-fable-5-1 terpsichore; do
+          printf '%s{"value":"%s","displayName":"%s","resolvedModel":"%s","supportsEffort":false}' "$sep" "$model" "$model" "$model"
+          sep=','
+        done
+        printf ']}}}\n'
+        ;;
+    esac
+  done
+  exit 0
+fi
 echo $$ >> "$CFSMOKE_PIDFILE"
 printf 'CFSMOKE-READY %s\n' "$CFSMOKE_TAG"
 # The page shows the window once it has read both lines the smoke's other harness prints.

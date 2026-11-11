@@ -26,6 +26,7 @@ fn project(rig: &Rig, name: &str) -> i64 {
                 harness: "claude-code".into(),
                 model: Some("ares".into()),
                 effort: None,
+                model_name: None,
             },
             staff: Vec::new(),
             gate: false,
@@ -33,6 +34,8 @@ fn project(rig: &Rig, name: &str) -> i64 {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
+            prompt_suggestion: false,
         })
         .unwrap()
         .id;
@@ -147,6 +150,7 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                         model: "maia".into(),
                         effort: None,
                         cut: false,
+                        model_name: None,
                     },
                 )
                 .unwrap();
@@ -374,6 +378,7 @@ async fn the_history_is_one_stream_of_items_oldest_first_across_three_conversati
                         model: "maia".into(),
                         effort: None,
                         cut: false,
+                        model_name: None,
                     },
                 )
                 .unwrap();
@@ -868,6 +873,7 @@ async fn the_last_item_of_a_conversation_that_ended_is_not_still_writing() {
                         model: "maia".into(),
                         effort: None,
                         cut: false,
+                        model_name: None,
                     },
                 )
                 .unwrap();

@@ -21,8 +21,8 @@ runs = ["board-task"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '    switches: &["--self", "--advice", "--review", "--test", "--design"],'
-replace = '    switches: &["--self", "--advice", "--review", "--design"],'
+find = '        .chain(roles::all().iter().filter_map(|role| role.switch))'
+replace = '        .chain(roles::all().iter().filter_map(|role| role.switch).filter(|switch| *switch != "--test"))'
 
 [[plant]]
 name = "tester: cf task add asks for a worker when it is asked for a test"
@@ -31,11 +31,11 @@ runs = ["board-task"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '''
-        if words.on("--test") {
-            body.insert("test".into(), true.into());
-        }'''
-replace = ""
+find = '''            .filter(switched)
+'''
+replace = '''            .filter(switched)
+            .filter(|role| role.id != "tester")
+'''
 
 [[plant]]
 name = "tester: cf help has no line for a test"

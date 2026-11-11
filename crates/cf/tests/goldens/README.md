@@ -153,9 +153,10 @@ alone, and nothing else in them moved.
 ## The usage after `cf task edit` took a tier, needs and before
 
 The entry of `cf task edit` in the usage (the six prints of `board.json` that hold it, `cf
-task --help` among them) is three lines: `cf task edit T-3 "…" [--tier <tier>] [--needs
-T-4,T-5|+T-5|-T-5] [--before …]`, and what it changes, the brief, the tier, the tasks the
-task needs and the tasks that wait for it, of a task no window has yet (T-1108): a list
+task --help` among them) is four lines since T-1435 (three before): `cf task edit T-3 "…"
+[--tier <tier>] [--needs T-4,T-5|+T-5|-T-5] [--before …]`, and what it changes, the brief,
+the tier, the tasks the task needs and the tasks that wait for it, of a task before any
+window has its brief (T-1108; "no window has yet" before T-1435): a list
 replaces, `+T-5` adds, `-T-5` removes. Changed by hand, in those words alone, as
 `crates/cf/src/board/usage.txt` has it.
 
@@ -204,3 +205,19 @@ each `cli.<platform>.json`, their lines out of every usage printed (and the word
 `doctor` for them), and the count of saved agents out of what `setup` and `doctor` print; the two cases of
 `setup` and `doctor` that stopped at a file of agents they could not read went, as neither
 reads one.
+
+## The usage after the read-through of the role texts
+
+Changed by hand on 2026-11-11 (T-1435), in the 6 prints of `board.json` that hold them and
+in `crates/cf/src/board/usage.txt`, in these words alone: `cf task add --advice` and `--review`
+end "no project file changed" (they were "no file changed"), `cf task edit` is "for a
+task before any window has its brief (open, queued, or paused)", on two lines as before, where
+it was "a task no window has yet", and `cf task add --tier` ends "work for a worker of that
+tier (--purpose for critical work)", without "; ConsensFlow picks the member" (the chief's
+command card lost the same words).
+
+The first line of the footer that teaches a text from standard input reads, since T-1435, "Any
+"…" can be - to read the text from standard input, as written (not PowerShell: use
+--file):", where it ended "as written:" (the heredoc is not PowerShell's; the
+footer line about a file, and the commands it names, did not change). Changed by hand in the
+4 prints of `board.json` that hold the footer.

@@ -719,6 +719,7 @@ fn every_field_and_part_a_read_goes_through_is_charged_as_what_it_is() {
                 model: "maia".into(),
                 effort: None,
                 cut: false,
+                model_name: None,
             },
         )
         .expect("switched");

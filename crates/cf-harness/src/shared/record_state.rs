@@ -68,6 +68,7 @@ pub(crate) fn observed_from(reading: Arc<Reading>, live: Option<Arc<Quota>>) -> 
         took_back: false,
         at_prompt: false,
         shared: false,
+        begun: Vec::new(),
     }
 }
 

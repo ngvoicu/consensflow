@@ -1,0 +1,164 @@
+# A Devin turn as the launch's own wire log says it, on Devin 3000.11's log and on 3000.12.43's,
+# which says no word of its own on a turn (T-1423, alpha-5 A5-18 and A5-19, from T-1417's
+# reading of three live runs and T-1423's two). The rules are decided by what the log holds:
+#
+# - a message said back live (its event type `user_message`, its client id, no event id) opens
+#   the turn, as `working` did; a replay's, or 3000.11's with no event type, opens nothing;
+# - 3000.11's message said back (no event type, no event id) is the turn's where a turn is open
+#   at it or opens before the next turn end or `turnClientMessageId`; a replay's never is;
+# - a permission dialog's line clears the turn's work, as `blocked` did, and that call's next
+#   update sets it again; the turn stays open;
+# - any `cause` ends the turn, a name this reader does not know too;
+# - the window reads the log no earlier than the record (the review T-1411 of T-1403);
+# - the window tells the engine which deliveries its open turn said back, and the engine's
+#   never-began watch leaves those, and only those, be.
+#
+# The reader's cases are in `crates/cf-harness/src/devin/record/tests/unsaid.rs`; the window's
+# in `crates/cf-harness/tests/launch/devin/resumed.rs` and `own_turn.rs`; the engine's in
+# `crates/cf-engine/tests/dispatcher/brief_never_began.rs`.
+
+[run]
+harness-lib-devin-unsaid = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record::tests::unsaid::"]
+harness-devin-resumed = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "devin::resumed::"]
+harness-devin-own-turn = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "devin::own_turn::"]
+engine-never-began = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "brief_never_began::"]
+
+[[plant]]
+name = "devin turn: a message said back live opens no turn"
+meant = "a_devin_3000_12_turn_is_at_work_from_the_message_it_says_back_before_its_first_streamed_word"
+runs = ["harness-lib-devin-unsaid", "harness-devin-own-turn"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "            self.busy = true;\n            self.said_back.push(text.to_owned());"
+replace = "            self.said_back.push(text.to_owned());"
+
+[[plant]]
+name = "devin turn: a replayed message, with its event id, opens a turn"
+meant = "the_turn_a_reopened_devin_3000_12_window_replays_is_no_work"
+runs = ["harness-lib-devin-unsaid"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "            .is_some_and(|id| !id.is_empty())\n        && meta.get(\"cognition.ai/eventId\").is_none();"
+replace = "            .is_some_and(|id| !id.is_empty());"
+
+[[plant]]
+name = "devin turn: Devin 3000.11's message said back, with no event type, opens a turn"
+meant = "a_message_devin_3000_11_says_back_opens_no_turn_live_or_replayed"
+runs = ["harness-lib-devin-unsaid"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "    let live = meta.get(\"cognition.ai/eventType\").and_then(Value::as_str) == Some(\"user_message\")\n        && meta"
+replace = "    let live = meta"
+
+[[plant]]
+name = "devin turn: a permission dialog leaves the turn at work"
+meant = "a_devin_3000_12_turn_that_asks_its_user_to_allow_a_call_is_no_work_while_it_waits"
+runs = ["harness-lib-devin-unsaid"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "            self.busy = false;\n            self.asking = Some(call.to_owned());"
+replace = "            self.asking = Some(call.to_owned());"
+
+[[plant]]
+name = "devin turn: an answered dialog leaves the turn waiting"
+meant = "a_devin_3000_12_turn_that_asks_its_user_to_allow_a_call_is_no_work_while_it_waits"
+runs = ["harness-lib-devin-unsaid"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "            self.busy = true;\n            self.asking = None;"
+replace = "            self.asking = None;"
+
+[[plant]]
+name = "devin turn: a cause of a name the reader does not know ends nothing"
+meant = "a_devin_turn_ends_at_a_cause_this_reader_has_no_name_for"
+runs = ["harness-lib-devin-unsaid"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "            Some(_) => None,\n            None => return Ok(()),"
+replace = "            Some(_) | None => return Ok(()),"
+
+[[plant]]
+name = "devin turn: a turn's end keeps the deliveries it said back"
+meant = "the_deliveries_a_devin_turn_took_in_are_its_own_and_none_once_it_ended"
+runs = ["harness-lib-devin-unsaid"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "        self.open = false;\n        self.said_back.clear();"
+replace = "        self.open = false;"
+
+[[plant]]
+name = "devin turn: the window reads its log as the look begins, before the record is back"
+meant = "a_look_whose_record_comes_back_late_reads_the_wire_as_it_is_when_the_record_is_back"
+runs = ["harness-devin-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''            let reading = self
+                .records
+                .look(Harness::Devin, &session, &Options::default())
+                .await;
+            let wire = self.wire.read(self.time.wall_ms())?;'''
+replace = '''            let (reading, wire) = futures_util::future::join(
+                self.records
+                    .look(Harness::Devin, &session, &Options::default()),
+                async { self.wire.read(self.time.wall_ms()) },
+            )
+            .await;
+            let wire = wire?;'''
+
+[[plant]]
+name = "devin turn: the window tells the engine of no message said back"
+meant = "a_message_said_back_into_the_windows_own_turn_has_begun_until_that_turn_ends"
+runs = ["harness-devin-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "            observed.begun = self.wire.said_back(&session);"
+replace = ""
+
+[[plant]]
+name = "devin turn: the never-began watch presses into a turn that said its message back"
+meant = "a_brief_its_window_said_back_into_an_open_turn_is_neither_pressed_nor_paused"
+runs = ["engine-never-began"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/never_began.rs"
+find = "        if message.is_some_and(|message| observed.begun.contains(&message)) {"
+replace = "        if false && message.is_some_and(|message| observed.begun.contains(&message)) {"
+
+[[plant]]
+name = "devin turn: any message said back leaves the watch off"
+meant = "a_brief_whose_window_said_back_only_another_message_is_still_pressed_and_paused"
+runs = ["engine-never-began"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/never_began.rs"
+find = "        if message.is_some_and(|message| observed.begun.contains(&message)) {"
+replace = "        if !observed.begun.is_empty() {"
+
+[[plant]]
+name = "devin turn: an older Devin's message said back is never its turn's"
+meant = "a_message_an_older_devin_says_back_is_its_turns_where_a_turn_opens_around_it_and_a_replays_is_none"
+runs = ["harness-lib-devin-unsaid", "harness-devin-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "        if self.open {\n            self.said_back.append(&mut self.unclaimed);\n        }\n"
+replace = ""
+
+[[plant]]
+name = "devin turn: a replay's message said back is kept for the next turn"
+meant = "a_message_an_older_devin_says_back_is_its_turns_where_a_turn_opens_around_it_and_a_replays_is_none"
+runs = ["harness-lib-devin-unsaid", "harness-devin-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "        if event.get(\"turnClientMessageId\").is_some() {\n            self.unclaimed.clear();\n        }\n"
+replace = ""

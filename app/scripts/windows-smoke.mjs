@@ -1,19 +1,22 @@
 #!/usr/bin/env node
 /**
  * The Windows UI smoke: the built app, on a real desktop, does what a human
- * does first. It opens Agents and then Harnesses from Settings, and each
+ * does first. It opens Harnesses from Settings (the one screen Settings has), and the
  * dialog shows its screen, the daemon's page framed in it; and no window of
  * the app's own processes is a console. Both once failed on Windows while
- * every test passed: the agents screens came up white and hung, and the
+ * every test passed: the screens of the daemon's pages came up white and hung, and the
  * daemon opened a console window of its own.
  *
  *   node app/scripts/windows-smoke.mjs <path to ConsensFlow.exe>
  *
- * Then a project is opened, and a meeting with its chief is started and stopped from the
- * button on the chief's card, whose head stays inside the card at every width. The app runs
- * with a home of its own and no folder of the user's on its PATH: no harness of the user's
- * is found, so the chief never starts on the user's login, and its card, which has no window
- * then, still has its head.
+ * Then a project is opened, as New project opens one (the chief's harness and model), and a
+ * meeting with its chief is started and stopped from the button on the chief's card, whose
+ * head stays inside the card at every width. The app runs with a home of its own and no folder
+ * of the user's on its PATH: no harness of the user's is found, so the chief never starts on
+ * the user's login. The one harness it finds is the stand-in `claude` the smoke draws in a
+ * folder of its own (FAKE_CLAUDE): it lists the chief's model, as the daemon requires of a
+ * pick, and its window only waits. Each part below reports for itself, so one run says every
+ * part that has gone stale and not only the first.
  *
  * The update check is made as the page makes it at the app's start, and answers up to date or an
  * update, with nothing in the app's error log and no warning of the app's own on the desktop: on
@@ -31,7 +34,7 @@
  * runs it from a scheduled task on the user's desktop.
  */
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from '@playwright/test'
@@ -48,6 +51,43 @@ if (refused) {
   process.exit(2)
 }
 const PORT = 9333
+// The chief the smoke's project is opened on: a harness the daemon can read the models of, and a
+// model that harness lists (project.open takes both, and checks the pick against the list).
+const SMOKE_HARNESS = 'claude-code'
+const SMOKE_MODEL = 'claude-fable-5-1'
+/**
+ * The stand-in `claude` of the smoke (node runs it, behind a `claude.cmd` in the shape npm writes,
+ * the only shape the daemon opens a window on): the read of the models (`claude -p`, no turn)
+ * answers with the one model the smoke's chief runs on, `--version` answers, and a window only
+ * waits to be ended.
+ */
+const FAKE_CLAUDE = `
+import { createInterface } from 'node:readline'
+const args = process.argv.slice(2)
+if (args.includes('--version')) {
+  console.log('2.1.277 (Claude Code)')
+} else if (args[0] === '-p') {
+  const model = ${JSON.stringify(SMOKE_MODEL)}
+  createInterface({ input: process.stdin })
+    .on('line', (line) => {
+      let asked
+      try {
+        asked = JSON.parse(line)
+      } catch {
+        return
+      }
+      if (asked?.request?.subtype !== 'initialize') return
+      const row = { value: model, displayName: model, resolvedModel: model, supportsEffort: false }
+      const response = { type: 'control_response', response: { subtype: 'success', request_id: asked.request_id, response: { models: [row] } } }
+      process.stdout.write(JSON.stringify(response) + '\\n')
+    })
+    .on('close', () => process.exit(0))
+} else {
+  process.stdout.write('CFSMOKE-READY\\r\\n')
+  process.stdin.resume()
+  setInterval(() => {}, 1 << 30)
+}
+`
 const root = mkdtempSync(join(tmpdir(), 'cf-windows-smoke-'))
 // The user's own folders, which hold their harnesses and their logins, kept off the app's PATH.
 const profile = join(root, 'profile')
@@ -56,10 +96,20 @@ const own = [process.env.USERPROFILE, process.env.APPDATA, process.env.LOCALAPPD
   .filter(Boolean)
   .map((folder) => folder.toLowerCase())
 const pathKey = Object.keys(process.env).find((key) => key.toUpperCase() === 'PATH') ?? 'Path'
-const path = (process.env[pathKey] ?? '')
-  .split(';')
-  .filter((folder) => !own.some((mine) => folder.toLowerCase().startsWith(mine)))
-  .join(';')
+// The smoke's own harness: the one program of a harness on the PATH the app is given.
+const bin = join(root, 'bin')
+mkdirSync(bin)
+writeFileSync(join(bin, 'fake-claude.mjs'), FAKE_CLAUDE)
+writeFileSync(
+  join(bin, 'claude.cmd'),
+  `@echo off\r\n"${process.execPath}" "${join(bin, 'fake-claude.mjs')}" %*\r\n`,
+)
+const path = [
+  bin,
+  ...(process.env[pathKey] ?? '')
+    .split(';')
+    .filter((folder) => !own.some((mine) => folder.toLowerCase().startsWith(mine))),
+].join(';')
 const app = spawn(exe, [], {
   env: {
     ...process.env,
@@ -81,6 +131,14 @@ const check = (ok, what) => {
   if (!ok) failures.push(what)
 }
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+/** One part of the smoke: what it throws is its own failure, and the parts after it still run. */
+async function part(name, run) {
+  try {
+    await run()
+  } catch (cause) {
+    check(false, `${name}: ${cause.message}`)
+  }
+}
 /** What the app has written in its log (its errors and its panics), whole. */
 const appLog = () => {
   try {
@@ -169,66 +227,80 @@ try {
 
   // The update check: the command the page runs at the start (updates.js), asked again while one is
   // going. The app has no archive to install here and reads the feed itself (update_page.rs).
-  const answered = await until(
-    'the update check answered',
-    async () => {
-      const status = await main.evaluate(() => window.__TAURI__.core.invoke('update_check'))
-      return status?.phase === 'checking' ? null : status
-    },
-    60_000,
-  ).catch(() => null)
-  console.log(
-    `the update check: ${answered?.phase ?? 'no answer'}, last checked ${answered?.lastChecked ?? 'never'}, ` +
-      `available ${answered?.available?.version ?? 'none'}, error ${answered?.error ?? 'none'}`,
-  )
-  check(
-    (answered?.phase === 'idle' || answered?.phase === 'available') && !answered?.error,
-    'the update check answers up to date or an update',
-  )
-  const logged = appLog()
-  console.log(`the app's log after the update check, ${logged.length} bytes:`)
-  console.log(logged.slice(0, 3000).trimEnd() || '(empty)')
-  check(!/panicked/.test(logged), "the app's error log holds no panic after the update check")
-  // "ConsensFlow kept running" is the app's warning that it stopped an error of its own
-  // (panics.rs): a dialog of the system's class, put up a moment after the error. Nothing
-  // this smoke does warrants one.
-  await sleep(2000)
-  check(
-    !windowClasses(app.pid).includes('#32770'),
-    'no dialog of the app tells the person it kept running after the update check',
-  )
-
-  for (const screen of ['Agents', 'Harnesses']) {
-    await main.locator('#settings-button').click()
-    await main.locator('[data-agents-page]', { hasText: new RegExp(`^${screen}$`) }).click()
-    const dialog = main.getByRole('dialog', { name: screen })
-    // What the app said meanwhile: a refusal shows in the status line for a few seconds.
-    const said = new Set()
-    const shown = await until(
-      `${screen} in its dialog`,
+  await part('the update check', async () => {
+    const answered = await until(
+      'the update check answered',
       async () => {
-        const status = await main.locator('#status').innerText({ timeout: 1000 }).catch(() => '')
-        if (status.trim()) said.add(status.trim())
-        const text = await dialog.frameLocator('iframe').locator('h1').innerText({ timeout: 1000 })
-        return text.trim().startsWith(screen)
+        const status = await main.evaluate(() => window.__TAURI__.core.invoke('update_check'))
+        return status?.phase === 'checking' ? null : status
       },
-      20_000,
-    ).catch(() => false)
-    check(shown, `${screen} opens in its dialog and shows its page`)
-    if (!shown) console.log(`the app said meanwhile: ${JSON.stringify([...said])}`)
-    await main.keyboard.press('Escape')
-  }
+      60_000,
+    ).catch(() => null)
+    console.log(
+      `the update check: ${answered?.phase ?? 'no answer'}, last checked ${answered?.lastChecked ?? 'never'}, ` +
+        `available ${answered?.available?.version ?? 'none'}, error ${answered?.error ?? 'none'}`,
+    )
+    check(
+      (answered?.phase === 'idle' || answered?.phase === 'available') && !answered?.error,
+      'the update check answers up to date or an update',
+    )
+    const logged = appLog()
+    console.log(`the app's log after the update check, ${logged.length} bytes:`)
+    console.log(logged.slice(0, 3000).trimEnd() || '(empty)')
+    check(!/panicked/.test(logged), "the app's error log holds no panic after the update check")
+    // "ConsensFlow kept running" is the app's warning that it stopped an error of its own
+    // (panics.rs): a dialog of the system's class, put up a moment after the error. Nothing
+    // this smoke does warrants one.
+    await sleep(2000)
+    check(
+      !windowClasses(app.pid).includes('#32770'),
+      'no dialog of the app tells the person it kept running after the update check',
+    )
+  })
+
+  // The screens Settings has (app/ui/index.html): tests/windows-smoke-page.test.mjs holds the
+  // list to the page's, which lost the Agents screen with the saved agents (T-1187).
+  await part('Settings', async () => {
+    for (const screen of ['Harnesses']) {
+      await main.locator('#settings-button').click()
+      await main.locator('[data-agents-page]', { hasText: new RegExp(`^${screen}$`) }).click()
+      const dialog = main.getByRole('dialog', { name: screen })
+      // What the app said meanwhile: a refusal shows in the status line for a few seconds.
+      const said = new Set()
+      const shown = await until(
+        `${screen} in its dialog`,
+        async () => {
+          const status = await main.locator('#status').innerText({ timeout: 1000 }).catch(() => '')
+          if (status.trim()) said.add(status.trim())
+          const text = await dialog.frameLocator('iframe').locator('h1').innerText({ timeout: 1000 })
+          return text.trim().startsWith(screen)
+        },
+        20_000,
+      ).catch(() => false)
+      check(shown, `${screen} opens in its dialog and shows its page`)
+      if (!shown) console.log(`the app said meanwhile: ${JSON.stringify([...said])}`)
+      await main.keyboard.press('Escape')
+    }
+  })
 
   // A meeting with the chief, from the button on its card, as a human starts and stops one.
-  const directory = join(root, 'meeting')
-  mkdirSync(directory)
-  const daemon = (operation, body) =>
-    main.evaluate(
-      ([operation, body]) => window.__TAURI__.core.invoke('daemon_request', { operation, body }),
-      [operation, body],
-    )
-  const opened = await daemon('project.open', { directory, agent: 'terpsichore', staff: [] })
+  await part('the meeting', async () => {
+    const directory = join(root, 'meeting')
+    mkdirSync(directory)
+    const daemon = (operation, body) =>
+      main.evaluate(
+        ([operation, body]) => window.__TAURI__.core.invoke('daemon_request', { operation, body }),
+        [operation, body],
+      )
+    const opened = await daemon('project.open', {
+      directory,
+      harness: SMOKE_HARNESS,
+      model: SMOKE_MODEL,
+      staff: [],
+  })
   check(opened?.ok === true, `a project opens (${opened?.error ?? 'ok'})`)
+  // Nothing after it has a chief's card to look at.
+  if (opened?.ok !== true) return
   const project = opened?.project?.id
   await main.locator('.project-select', { hasText: 'meeting' }).click()
   const card = main.locator('.terminal-card[data-role="chief"]')
@@ -286,13 +358,16 @@ try {
       ),
     'the button reads Start meeting again',
   )
+  })
 
-  const classes = windowClasses(app.pid)
-  console.log(`the app's visible windows: ${classes.join(', ') || 'none'}`)
-  check(
-    !classes.some((name) => /^(ConsoleWindowClass|CASCADIA_HOSTING_WINDOW_CLASS|PseudoConsoleWindow)$/.test(name)),
-    'no window of the app is a console',
-  )
+  await part('the windows of the app', async () => {
+    const classes = windowClasses(app.pid)
+    console.log(`the app's visible windows: ${classes.join(', ') || 'none'}`)
+    check(
+      !classes.some((name) => /^(ConsoleWindowClass|CASCADIA_HOSTING_WINDOW_CLASS|PseudoConsoleWindow)$/.test(name)),
+      'no window of the app is a console',
+    )
+  })
 
   // A page whose process failed is loaded again (app/src-tauri/src/page_crash.rs): a page
   // that is gone acknowledges no window's output, and the pane host stops reading a window

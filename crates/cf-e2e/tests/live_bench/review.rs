@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use cf_e2e::live::members::{find, Members};
 use cf_e2e::live::Harness;
+use cf_e2e::rig::member_body;
 use cf_e2e::Result;
 use serde_json::{json, Value};
 
@@ -63,12 +64,16 @@ pub fn review(bench: &mut Bench, reviewer: Harness) -> Result<()> {
         .max()
         .unwrap_or(0)
         .max(0);
-    let added = bench.members.page(
-        "member.add",
-        json!({ "agent": REVIEWER, "roles": ["reviewer"] }),
-    )?;
+    // Added as Add member adds one: its harness, model, effort and tier, as its row says them.
+    let body = member_body(bench.members.rig(), REVIEWER, Some(json!(["reviewer"])))?;
+    let added = bench.members.page("member.add", body)?;
     let setup = added["ok"] == true;
     let tier = added["member"]["tier"].as_str();
+    // A member is named by its model, not by the agent it was added from.
+    let handle = added["member"]["handle"]
+        .as_str()
+        .unwrap_or(REVIEWER)
+        .to_owned();
     bench.record(
         "review-setup",
         setup,
@@ -92,7 +97,7 @@ pub fn review(bench: &mut Bench, reviewer: Harness) -> Result<()> {
     };
     let mut more = json!({
         "reviewer": review.as_ref().map_or_else(
-            || bench.members.lane(REVIEWER).map_or(Value::Null, |lane| lane["activity"].clone()),
+            || bench.members.lane(&handle).map_or(Value::Null, |lane| lane["activity"].clone()),
             |review| review["assignee"].clone()
         ),
     });

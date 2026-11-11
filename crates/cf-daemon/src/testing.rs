@@ -235,6 +235,7 @@ pub fn scene() -> Scene {
                 harness: "claude-code".to_owned(),
                 model: Some("mybuilder".to_owned()),
                 effort: None,
+                model_name: None,
             },
             staff: Vec::new(),
             gate: false,
@@ -242,6 +243,8 @@ pub fn scene() -> Scene {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
+            prompt_suggestion: false,
         })
         .unwrap();
     ledger

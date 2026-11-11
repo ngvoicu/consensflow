@@ -418,6 +418,7 @@ async fn an_operation_is_begun_where_its_frame_is_read_and_its_turns_end_before_
         .await;
 }
 
+mod advisor_tool;
 mod app_specs;
 mod busy;
 mod compaction;
@@ -431,7 +432,9 @@ mod meeting;
 mod members;
 mod models;
 mod opening;
+mod prompt_suggestion;
 mod reading;
+mod roles;
 mod scripted;
 mod specs;
 mod staff_rules;

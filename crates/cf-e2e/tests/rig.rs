@@ -70,6 +70,8 @@
 
 // The cases are in `tests/rig/`: cargo looks for the modules of a test's root
 // file beside it, where each would be a suite of its own.
+#[path = "rig/advisor_off.rs"]
+mod advisor_off;
 #[path = "rig/approval.rs"]
 mod approval;
 #[path = "rig/background_close.rs"]
@@ -114,6 +116,8 @@ mod homes;
 #[path = "rig/kept_config.rs"]
 #[cfg(unix)]
 mod kept_config;
+#[path = "rig/kit_efforts.rs"]
+mod kit_efforts;
 #[path = "rig/last_exits.rs"]
 mod last_exits;
 #[path = "rig/live_base.rs"]
@@ -138,6 +142,8 @@ mod pacing;
 mod pending_agents;
 #[path = "rig/printed_output.rs"]
 mod printed_output;
+#[path = "rig/prompt_suggestion_off.rs"]
+mod prompt_suggestion_off;
 #[path = "rig/reports.rs"]
 mod reports;
 #[path = "rig/scripted_reviewer.rs"]

@@ -596,6 +596,7 @@ impl Window for CodexWindow {
                     took_back: false,
                     at_prompt: false,
                     shared: false,
+                    begun: Vec::new(),
                 });
             };
             // The broker's word first, then the record, which is then never

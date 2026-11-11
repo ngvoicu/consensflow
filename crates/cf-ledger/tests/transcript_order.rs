@@ -27,6 +27,7 @@ fn project(ledger: &mut Ledger) -> ProjectView {
                 harness: "claude-code".into(),
                 model: Some("apollo".into()),
                 effort: None,
+                model_name: None,
             },
             staff: vec![NewMember {
                 model: None,
@@ -42,6 +43,8 @@ fn project(ledger: &mut Ledger) -> ProjectView {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
+            prompt_suggestion: false,
         })
         .expect("a project")
 }

@@ -40,6 +40,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod adapters_failing_at_once;
+mod advisor_off;
 mod approval;
 mod assigning;
 mod background;
@@ -79,6 +80,7 @@ mod interrupts;
 mod lanes;
 mod launch_stops;
 mod launch_wait;
+mod launched_harness;
 mod looks;
 mod looks_finished;
 mod lost_lines;
@@ -101,6 +103,7 @@ mod paused_answers;
 mod paused_left;
 mod pending_agents;
 mod privacy_prompts;
+mod prompt_suggestion_off;
 mod questions_not_results;
 mod queued_tells;
 mod quota;
@@ -128,6 +131,7 @@ mod session_windows;
 mod sessions;
 mod several_roles;
 mod shared;
+mod sixth_role;
 mod slow_records;
 mod specs;
 mod stale_box;

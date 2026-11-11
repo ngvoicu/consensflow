@@ -149,6 +149,8 @@ fn a_ledger_from_before_migration_0032_opens_and_its_items_read_as_they_did() {
     drop(ledger);
     {
         let db = rusqlite::Connection::open(dir.path().join("consensflow.db")).expect("the file");
+        cf_ledger::testing::undo_migration_0036(&db).expect("undone");
+        cf_ledger::testing::undo_migration_0035(&db).expect("undone");
         cf_ledger::testing::undo_migration_0034(&db).expect("undone");
         cf_ledger::testing::undo_migration_0033(&db).expect("undone");
         cf_ledger::testing::undo_migration_0032(&db).expect("undone");
@@ -334,6 +336,7 @@ fn a_tasks_transcript_says_what_each_call_was_and_shows_nothing_only_the_history
                 harness: "claude-code".into(),
                 model: Some("apollo".into()),
                 effort: None,
+                model_name: None,
             },
             staff: vec![NewMember {
                 model: None,
@@ -349,6 +352,8 @@ fn a_tasks_transcript_says_what_each_call_was_and_shows_nothing_only_the_history
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
+            prompt_suggestion: false,
         })
         .expect("a project");
     ledger

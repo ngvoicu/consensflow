@@ -95,6 +95,7 @@ impl Root {
                     harness: "claude-code".to_owned(),
                     model: Some("mybuilder".to_owned()),
                     effort: None,
+                    model_name: None,
                 },
                 staff: vec![NewMember {
                     model: None,
@@ -110,6 +111,8 @@ impl Root {
                 specs: None,
                 staff_rules: None,
                 compaction: None,
+                advisor_tool: false,
+                prompt_suggestion: false,
             })
             .expect("a project");
         let question = ledger

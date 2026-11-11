@@ -35,6 +35,7 @@ fn world() -> (tempfile::TempDir, Ledger, i64) {
                 harness: "claude-code".into(),
                 model: Some("apollo".into()),
                 effort: None,
+                model_name: None,
             },
             staff: vec![member("zeus", "critical"), member("diana", "standard")],
             gate: false,
@@ -42,6 +43,8 @@ fn world() -> (tempfile::TempDir, Ledger, i64) {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
+            prompt_suggestion: false,
         })
         .unwrap();
     (dir, ledger, project.id)
@@ -99,10 +102,10 @@ fn brief_of(ledger: &Ledger, project: i64, number: i64) -> String {
 }
 
 /// A critical task's lead, in the role texts' own words: the work changes no
-/// file — true of every project, specs or none, where the old words forbade
+/// project file — true of every project, specs or none, where the old words forbade
 /// specifications outright — and its findings go to the chief.
 #[test]
-fn a_critical_task_s_lead_says_the_task_changes_no_file_and_answers_to_the_chief() {
+fn a_critical_task_s_lead_says_the_task_changes_no_project_file_and_answers_to_the_chief() {
     let (_dir, mut ledger, project) = world();
     let task = add_task(
         &mut ledger,
@@ -115,7 +118,7 @@ fn a_critical_task_s_lead_says_the_task_changes_no_file_and_answers_to_the_chief
     let assigned = ledger.assign_task(project, task, zeus).unwrap();
     assert_eq!(
         assigned.message.unwrap().body,
-        "Critical work: hard-problem. It changes no file: return analysis, evidence and recommendations to the chief.\n\nWhy is it slow?"
+        "Critical work: hard-problem. It changes no project file: return analysis, evidence and recommendations to the chief.\n\nWhy is it slow?"
     );
 }
 

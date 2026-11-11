@@ -21,9 +21,11 @@
 //! that is none, cannot be made, and the pane, the thread and the claim are
 //! the cases left.
 
+mod advisor_off;
 mod channel;
 mod compaction;
 mod dialogs;
+mod prompt_suggestion_off;
 mod resumed;
 mod roles;
 mod specs;
@@ -115,6 +117,10 @@ struct Request {
     folder: &'static str,
     /// The size its project's members compact at, where the project chose one.
     compaction: Option<u32>,
+    /// Whether the project has its members run without Claude Code's own advisor tool.
+    advisor_off: bool,
+    /// Whether the project has Claude Code's prompt suggestion off for its windows.
+    suggestion_off: bool,
 }
 
 impl Default for Request {
@@ -130,6 +136,8 @@ impl Default for Request {
             specs: None,
             folder: ".specs",
             compaction: None,
+            advisor_off: false,
+            suggestion_off: false,
         }
     }
 }
@@ -179,6 +187,8 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
                 skill,
             }),
         compaction: request.compaction,
+        advisor_off: request.advisor_off,
+        suggestion_off: request.suggestion_off,
         first_message_ms: request.first_message_ms,
         starts_given_up: request.starts_given_up,
     };

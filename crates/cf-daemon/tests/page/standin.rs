@@ -316,6 +316,7 @@ impl Engine for Standin {
             model: to.model,
             effort: None,
             cut: false,
+            model_name: None,
         };
         let answered = seam
             .call("switchChief", |ledger| {

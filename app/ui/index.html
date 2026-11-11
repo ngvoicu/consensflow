@@ -339,7 +339,7 @@
          of the project is given after its role; written here only. -->
     <fieldset class="project-section staff-rules">
       <legend>Rules for the staff</legend>
-      <p class="dialog-help">Every member of the staff is given these rules after its role, and the chief sees them as what every member already has, so a brief need not repeat them. Plain text. No secrets: no passwords, tokens or keys, since every window of the project is given the rules. <span data-live>A change reaches the chief as soon as it is at rest, and each other window when it next starts: a new task's window, or after Resume.</span></p>
+      <p class="dialog-help">Every member of the staff is given these rules after its role, and the chief is told every window opens with them, so a brief need not repeat them. Plain text. No secrets: no passwords, tokens or keys, since every window of the project is given the rules. <span data-live>A change reaches the chief as soon as it is at rest, and each other window when it next starts: a new task's window, or after Resume.</span></p>
       <label>The rules<textarea name="staff-rules" rows="8" spellcheck="false"></textarea></label>
       <p class="staff-rules-count" aria-live="polite"></p>
       <p class="staff-hint staff-rules-hint" role="alert" hidden></p>
@@ -352,9 +352,29 @@
       <p class="dialog-help">From its next start, each member's harness compacts its conversation at about this size, by its own rule; a size above a model's own window leaves the harness's own point. The chief is not affected.</p>
       <label class="check"><input type="radio" name="members-compaction-choice" value="own" checked>The harness's own point</label>
       <label class="check"><input type="radio" name="members-compaction-choice" value="size">A size</label>
-      <label>Size in tokens, 100,000 to 1,000,000<input type="text" name="members-compaction-size" inputmode="numeric" autocomplete="off" spellcheck="false" disabled></label>
+      <label>Size in tokens, 250,000 to 1,000,000<input type="text" name="members-compaction-size" inputmode="numeric" autocomplete="off" spellcheck="false" disabled></label>
       <p class="staff-hint members-compaction-hint" role="alert" hidden></p>
+      <p class="staff-hint members-compaction-held" hidden></p>
       <div class="dialog-actions" data-live><button class="primary-button" type="button" name="members-compaction-save">Save compaction</button></div>
+    </fieldset>
+    <!-- Advisor tool (core/advisor-tool.js): whether the project's members run with Claude Code's
+         own advisor tool, off until it is ticked; the chief never; chosen here only. -->
+    <fieldset class="project-section members-advisor-tool">
+      <legend>Advisor tool</legend>
+      <p class="dialog-help">Claude Code's own advisor tool lets a window consult a second model. Off, each Claude Code member runs without it from its next start; on, it has the tool as your own Claude Code setting gives it. The chief is not affected and keeps its harness's own setting. Codex, Pi, Devin and Muse Code have no advisor tool, so this changes nothing for their members. A window already open keeps what it began with.</p>
+      <label class="check"><input type="checkbox" name="members-advisor-tool">Members use Claude Code's own advisor tool</label>
+      <p class="staff-hint members-advisor-tool-hint" role="alert" hidden></p>
+      <div class="dialog-actions" data-live><button class="primary-button" type="button" name="members-advisor-tool-save">Save advisor tool</button></div>
+    </fieldset>
+    <!-- Prompt suggestion (core/prompt-suggestion.js): whether the project's Claude Code windows, the
+         chief's too, make Claude Code's grey guess at the next prompt; off until it is ticked;
+         chosen here only. -->
+    <fieldset class="project-section prompt-suggestion">
+      <legend>Prompt suggestion</legend>
+      <p class="dialog-help">After each turn, Claude Code can guess your next prompt and show it in grey in the input box. It makes that guess with one more model call, which reads the whole conversation again and costs tokens. Off, no Claude Code window of this project, the chief's or a member's, makes it from its next start; on, your own Claude Code settings decide. Only Claude Code has it, so Codex, Pi, Devin and Muse Code are not affected. A window already open keeps what it began with.</p>
+      <label class="check"><input type="checkbox" name="prompt-suggestion">Claude Code windows guess the next prompt</label>
+      <p class="staff-hint prompt-suggestion-hint" role="alert" hidden></p>
+      <div class="dialog-actions" data-live><button class="primary-button" type="button" name="prompt-suggestion-save">Save prompt suggestion</button></div>
     </fieldset>
     <fieldset class="project-section">
       <legend>Human approval</legend>

@@ -26,7 +26,7 @@ use super::bundle::Refusal;
 use super::case::{Case, Inputs};
 use super::evidence::{assert_only_probes_refused, daemon_log};
 use super::feed::{signed_update, SignedUpdate};
-use super::ledger::{read_ledger, Ledger};
+use super::ledger::{read_ledger, read_live_ledger, Ledger};
 use super::processes::{alive, gone};
 use super::say::Say;
 use super::{Error, Result};
@@ -221,6 +221,16 @@ fn quit(kase: &Case, daemons: &[u32]) -> Result<super::app::Exit> {
 /// The ledger of the case's home, read once no daemon holds it.
 fn ledger_of(kase: &Case) -> Result<Ledger> {
     read_ledger(&kase.sandbox.state.join("consensflow.db"))
+}
+
+/// The ledger of the case's home while its daemon runs and is idle: the page has had its answers.
+fn live_ledger_of(kase: &Case) -> Result<Ledger> {
+    let scratch = tempfile::tempdir().map_err(|cause| {
+        Error::new(format!(
+            "could not make a folder for a copy of the ledger: {cause}"
+        ))
+    })?;
+    read_live_ledger(&kase.sandbox.state.join("consensflow.db"), scratch.path())
 }
 
 /// The two folders the page opens its projects in.

@@ -11,9 +11,12 @@
 //! word; here each is a uuid, as the engine mints one. Where Node injected
 //! what its record said, a stand-in record says it here.
 
+mod advisor_off;
 mod compaction;
 mod dialogs;
 mod fixtures;
 mod launches;
+mod own_turn;
+mod prompt_suggestion_off;
 mod resumed;
 mod windows;

@@ -473,11 +473,11 @@ fn moved(
     Ok(Answer::ok(Value::Object(answer)))
 }
 
-/// `edit`: the brief, the tier, or both of a task no window has yet, in one step. A
-/// tier is read as `cf task add` reads one, and a task whose tier nobody holds goes to
-/// the nearest, which is said (`asked`, and `heldBy`, the members of the tier it went
-/// to). Whatever is no text is no words and no tier: the ledger refuses it in its own
-/// words.
+/// `edit`: the brief, the tier, or both of a task before any window has its brief
+/// (open, queued, or paused), in one step. A tier is read as `cf task add` reads one,
+/// and a task whose tier nobody holds goes to the nearest, which is said (`asked`, and
+/// `heldBy`, the members of the tier it went to). Whatever is no text is no words and
+/// no tier: the ledger refuses it in its own words.
 fn edit(
     context: &Context,
     caller: &Caller,

@@ -2,7 +2,11 @@
 # may publish, what a hand run is told and not failed by, what holds the write
 # token, how the publisher is built and checked before it runs, and the steps
 # that call it. The tests that read the workflow and run its steps as written
-# must catch each.
+# must catch each. The plants named "CI's packaged job" are in that job of CI (.github/workflows/ci.yml,
+# T-904) and the setup it starts from (.github/actions/setup/action.yml): the app built
+# ad hoc and of the smoke's identity, smoked after it, and the lines that keep that job
+# from holding a key, asking for the signed bundle, going without a limit, or losing the
+# machines of a smoke that failed.
 
 [run]
 # The rule over every workflow: a downloaded binary runs only where the job that built it ran.
@@ -947,3 +951,435 @@ find = '''            } | LC_ALL=C awk '
 '''
 replace = '''            } > "$out/notes.txt"
 '''
+
+[[plant]]
+name = "workflow: CI's packaged job builds the DMG too"
+meant = "builds_the_app_ad_hoc_and_of_the_smokes_identity_not_the_release_s"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = 'npm --prefix app run build -- --bundles app --config'
+replace = 'npm --prefix app run build -- --config'
+
+[[plant]]
+name = "workflow: CI's packaged job builds the app of the live app's identity"
+meant = "builds_the_app_ad_hoc_and_of_the_smokes_identity_not_the_release_s"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '"identifier":"dev.ngvoicu.consensflow.smoke"'
+replace = '"identifier":"dev.ngvoicu.consensflow"'
+
+[[plant]]
+name = "workflow: CI's packaged job smokes the app before it builds it"
+meant = "smokes_the_app_it_built_after_building_it"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+      - name: Build the app, ad hoc, of the smoke's identity
+        run: npm --prefix app run build -- --bundles app --config '{"identifier":"dev.ngvoicu.consensflow.smoke"}'
+        timeout-minutes: 15
+      - name: The built app passes the packaged smoke
+        run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
+        env:
+          CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden
+        timeout-minutes: 10
+'''
+replace = '''
+      - name: The built app passes the packaged smoke
+        run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
+        env:
+          CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden
+        timeout-minutes: 10
+      - name: Build the app, ad hoc, of the smoke's identity
+        run: npm --prefix app run build -- --bundles app --config '{"identifier":"dev.ngvoicu.consensflow.smoke"}'
+        timeout-minutes: 15
+'''
+
+[[plant]]
+name = "workflow: CI's packaged job smokes the bundle the smoke finds and not the one built"
+meant = "smokes_the_app_it_built_after_building_it"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = 'cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app'
+replace = 'cargo xtask smoke'
+
+[[plant]]
+name = "workflow: CI's packaged job runs a step after the smoke"
+meant = "smokes_the_app_it_built_after_building_it"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+      - name: The built app passes the packaged smoke
+        run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
+        env:
+          CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden
+        timeout-minutes: 10
+'''
+replace = '''
+      - name: The built app passes the packaged smoke
+        run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
+        env:
+          CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden
+        timeout-minutes: 10
+      - run: echo done
+'''
+
+[[plant]]
+name = "workflow: CI's packaged job asks for the bundle as it ships"
+meant = "does_not_ask_for_the_bundle_as_it_ships_which_the_release_run_alone_does"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+      - name: The built app passes the packaged smoke
+'''
+replace = '''
+      - name: The built app passes the packaged smoke
+        env:
+          CONSENSFLOW_SMOKE_SHIPPED: "1"
+'''
+
+[[plant]]
+name = "workflow: CI's packaged job holds a key"
+meant = "holds_no_key_and_no_environment_that_does"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+      - name: The built app passes the packaged smoke
+'''
+replace = '''
+      - name: The built app passes the packaged smoke
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+'''
+
+[[plant]]
+name = "workflow: CI's packaged job is in the release environment"
+meant = "holds_no_key_and_no_environment_that_does"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+    runs-on: macos-latest
+    timeout-minutes: 25
+'''
+replace = '''
+    runs-on: macos-latest
+    timeout-minutes: 25
+    environment: release
+'''
+
+[[plant]]
+name = "workflow: CI's packaged job runs on Windows"
+meant = "runs_on_the_mac_alone_in_a_job_of_its_own"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+    runs-on: macos-latest
+    timeout-minutes: 25
+'''
+replace = '''
+    runs-on: windows-latest
+    timeout-minutes: 25
+'''
+
+[[plant]]
+name = "workflow: CI's packaged job is a matrix of one"
+meant = "runs_on_the_mac_alone_in_a_job_of_its_own"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+    runs-on: macos-latest
+    timeout-minutes: 25
+'''
+replace = '''
+    strategy:
+      matrix:
+        os: [macos-latest]
+    runs-on: macos-latest
+    timeout-minutes: 25
+'''
+
+[[plant]]
+name = "workflow: CI's packaged job has no limit of its own"
+meant = "gives_a_limit_to_the_job_and_to_each_step_that_takes_minutes"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+    runs-on: macos-latest
+    timeout-minutes: 25
+'''
+replace = '''
+    runs-on: macos-latest
+'''
+
+[[plant]]
+name = "workflow: CI's packaged job is given less time than its build"
+meant = "gives_a_limit_to_the_job_and_to_each_step_that_takes_minutes"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+    runs-on: macos-latest
+    timeout-minutes: 25
+'''
+replace = '''
+    runs-on: macos-latest
+    timeout-minutes: 10
+'''
+
+[[plant]]
+name = "workflow: CI's packaged job builds with no limit"
+meant = "gives_a_limit_to_the_job_and_to_each_step_that_takes_minutes"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+      - name: Build the app, ad hoc, of the smoke's identity
+        run: npm --prefix app run build -- --bundles app --config '{"identifier":"dev.ngvoicu.consensflow.smoke"}'
+        timeout-minutes: 15
+'''
+replace = '''
+      - name: Build the app, ad hoc, of the smoke's identity
+        run: npm --prefix app run build -- --bundles app --config '{"identifier":"dev.ngvoicu.consensflow.smoke"}'
+'''
+
+[[plant]]
+name = "workflow: CI's packaged job smokes with no limit"
+meant = "gives_a_limit_to_the_job_and_to_each_step_that_takes_minutes"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+      - name: The built app passes the packaged smoke
+        run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
+        env:
+          CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden
+        timeout-minutes: 10
+'''
+replace = '''
+      - name: The built app passes the packaged smoke
+        run: cargo xtask smoke --app app/src-tauri/target/release/bundle/macos/ConsensFlow.app
+        env:
+          CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden
+'''
+
+[[plant]]
+name = "workflow: CI's packaged job starts without the setup"
+meant = "starts_from_the_setup_of_the_other_jobs_so_that_its_build_is_cached_as_theirs_are"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+      - uses: ./.github/actions/setup
+        with:
+          cache-on-failure: true
+'''
+replace = ""
+
+[[plant]]
+name = "workflow: CI's packaged job loses its cache when the smoke fails"
+meant = "starts_from_the_setup_of_the_other_jobs_so_that_its_build_is_cached_as_theirs_are"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+        with:
+          cache-on-failure: true
+'''
+replace = ""
+
+[[plant]]
+name = "workflow: CI's packaged job keeps the machines of a smoke that passed too"
+meant = "keeps_the_machines_of_a_failed_smoke_which_go_with_the_runner"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-machines
+'''
+replace = '''
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-machines
+'''
+
+[[plant]]
+name = "workflow: CI's packaged job keeps what the smoke did not call its machines"
+meant = "keeps_the_machines_of_a_failed_smoke_which_go_with_the_runner"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = 'path: ${{ env.SMOKE_TEMP }}/cf-smoke-*'
+replace = 'path: ${{ env.SMOKE_TEMP }}/smoke-*'
+
+[[plant]]
+name = "workflow: CI's packaged job is told no machine was kept as an error"
+meant = "keeps_the_machines_of_a_failed_smoke_which_go_with_the_runner"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+          name: smoke-machines
+          path: ${{ env.SMOKE_TEMP }}/cf-smoke-*
+          if-no-files-found: ignore
+'''
+replace = '''
+          name: smoke-machines
+          path: ${{ env.SMOKE_TEMP }}/cf-smoke-*
+          if-no-files-found: error
+'''
+
+[[plant]]
+name = "workflow: CI's packaged job uploads with an action that is not pinned"
+meant = "keeps_the_machines_of_a_failed_smoke_which_go_with_the_runner"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: smoke-machines
+'''
+replace = '''
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-machines
+'''
+
+[[plant]]
+name = "workflow: CI's packaged job looks for the machines in the wrong folder"
+meant = "keeps_the_machines_of_a_failed_smoke_which_go_with_the_runner"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "SMOKE_TEMP=$(node -p \"require('os').tmpdir()\")"
+replace = "SMOKE_TEMP=$(node -p \"require('os').homedir()\")"
+
+[[plant]]
+name = "workflow: CI's packaged job names the folder for a pass too"
+meant = "keeps_the_machines_of_a_failed_smoke_which_go_with_the_runner"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+      - name: Where the smoke keeps the machines of its failed cases
+        if: failure()
+        run: echo "SMOKE_TEMP=$(node -p "require('os').tmpdir()")" >> "$GITHUB_ENV"
+'''
+replace = '''
+      - name: Where the smoke keeps the machines of its failed cases
+        run: echo "SMOKE_TEMP=$(node -p "require('os').tmpdir()")" >> "$GITHUB_ENV"
+'''
+
+[[plant]]
+name = "workflow: the setup saves the cache of every failed job"
+meant = "saves_the_build_of_a_failed_job_only_where_the_job_asks_for_it"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/actions/setup/action.yml"
+find = "    default: 'false'"
+replace = "    default: 'true'"
+
+[[plant]]
+name = "workflow: the setup does not hand the cache what the job asks"
+meant = "saves_the_build_of_a_failed_job_only_where_the_job_asks_for_it"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/actions/setup/action.yml"
+find = '''
+        cache-on-failure: ${{ inputs.cache-on-failure }}
+'''
+replace = ""
+
+# The case the job leaves out (T-1362): the hidden window's, until alpha.5's host-display core.
+[[plant]]
+name = "workflow: CI's packaged job runs the hidden window's case"
+meant = "leaves_out_the_hidden_windows_case_and_no_other_until_the_host_stops_waiting_on_its_page"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+        env:
+          CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden
+'''
+replace = "\n"
+
+[[plant]]
+name = "workflow: CI's packaged job leaves out a case that is not the smoke's"
+meant = "leaves_out_the_hidden_windows_case_and_no_other_until_the_host_stops_waiting_on_its_page"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden"
+replace = "CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_shown"
+
+[[plant]]
+name = "workflow: CI's packaged job leaves out every case"
+meant = "leaves_out_the_hidden_windows_case_and_no_other_until_the_host_stops_waiting_on_its_page"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden"
+replace = "CONSENSFLOW_SMOKE_SKIP: the_built_app_"
+
+[[plant]]
+name = "workflow: CI's packaged job leaves out the pane case with the hidden one"
+meant = "leaves_out_the_hidden_windows_case_and_no_other_until_the_host_stops_waiting_on_its_page"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden"
+replace = "CONSENSFLOW_SMOKE_SKIP: the_built_app_reads_its_windows_while_it_is_hidden,the_built_app_opens_a_pane_renders_a_real_child_takes_input_and_exits_clean"
+
+[[plant]]
+name = "workflow: CI's packaged job leaves the case out and does not say what it waits for"
+meant = "leaves_out_the_hidden_windows_case_and_no_other_until_the_host_stops_waiting_on_its_page"
+runs = ["workflow"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "  # core (A5-04); then the line goes, and the case is in CI."
+replace = "  # core; then the line goes, and the case is in CI."

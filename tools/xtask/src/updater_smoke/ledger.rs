@@ -13,13 +13,54 @@
 //! and when it was last touched.
 
 use std::collections::BTreeMap;
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 
 use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
+use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use super::{Error, Result};
+use super::{files, Error, Result};
+
+/// Where, in a checkout, the list of what its migrations take out on purpose is: it sits with
+/// them, and the ledger's own tests hold it to what they drop (cf-ledger's `schema.rs`).
+pub const DROPPED: &str = "crates/cf-ledger/migrations/dropped.json";
+
+/// A column (or a whole table) a migration takes out of the ledger on purpose: the state of a
+/// ledger the daemon of the update opens is its migrations', and a column that is gone because
+/// one of them says so is no loss.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Dropped {
+    /// The number of the migration, as `PRAGMA user_version` counts them.
+    pub migration: i64,
+    pub table: String,
+    /// None where the whole table goes.
+    #[serde(default)]
+    pub column: Option<String>,
+    /// The column this one was renamed to, where its values are kept under another name.
+    #[serde(default)]
+    pub renamed_to: Option<String>,
+    pub why: String,
+}
+
+/// The list as `text` says it.
+pub fn read_dropped(text: &str) -> Result<Vec<Dropped>> {
+    serde_json::from_str(text).map_err(|cause| {
+        Error::new(format!(
+            "the list of what the migrations drop is not what it should be ({DROPPED}): {cause}"
+        ))
+    })
+}
+
+/// The list of the checkout `root`.
+pub fn dropped_in(root: &Path) -> Result<Vec<Dropped>> {
+    let file = root.join(DROPPED);
+    read_dropped(&fs::read_to_string(&file).map_err(files("read", &file))?)
+}
 
 /// The columns a daemon rewrites when it starts, or a window when it ends.
 const REWRITTEN: [&str; 11] = [
@@ -35,6 +76,13 @@ const REWRITTEN: [&str; 11] = [
     "delivered_at",
     "held_until",
 ];
+
+/// What closing a window writes on the rows of the ledger besides the columns a restart rewrites
+/// by design ([`REWRITTEN`]), as (table, column): the live update case closes the two windows it
+/// opened before it installs, between the look at the ledger and the end of it, which the cases of
+/// an app replaced by hand don't (the app is quit before the ledger is read). Named one by one: a
+/// column that is not here is held to its value.
+pub const WINDOWS_CLOSED: [(&str, &str); 1] = [("conversation", "program_gone")];
 
 /// What a column of a row holds.
 #[derive(Debug, Clone, PartialEq)]
@@ -120,8 +168,84 @@ fn sqlite(file: &Path) -> impl Fn(rusqlite::Error) -> Error + '_ {
 
 /// Every table of the ledger with its rows, the schema's version and what SQLite says of the file.
 pub fn read_ledger(file: &Path) -> Result<Ledger> {
+    let db = Connection::open_with_flags(file, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(sqlite(file))?;
+    read_from(&db, file)
+}
+
+/// The ledger of a home whose daemon runs, as it is at this moment: the daemon holds the file in
+/// SQLite's exclusive locking mode, so no other connection can open it, and its commits sit in
+/// the write-ahead log. The file and its log are copied into `scratch` (a clone is what the
+/// board's own backup takes, `backup-live-ledger.sh`), checked to have held still while they
+/// were, and the copy is opened, which recovers the log. Written to nothing but `scratch`. The
+/// smoke asks it where the daemon is idle: the page has had its answers.
+pub fn read_live_ledger(file: &Path, scratch: &Path) -> Result<Ledger> {
+    let clone = copy_when_still(file, scratch, |_| {})?;
+    // Read and write, for the copy's log is recovered into a shared-memory file of its own, which
+    // only a connection that may write can make.
+    let db = Connection::open_with_flags(&clone, OpenFlags::SQLITE_OPEN_READ_WRITE)
+        .map_err(sqlite(file))?;
+    read_from(&db, file)
+}
+
+/// How many times the copy of a live ledger is made before it is said to have never held still.
+const COPIES: usize = 5;
+
+/// The write-ahead log of the ledger `file`.
+fn log_of(file: &Path) -> PathBuf {
+    let mut name = file.as_os_str().to_owned();
+    name.push("-wal");
+    PathBuf::from(name)
+}
+
+/// What a ledger file looks like from outside: its size and when it was written; none where it
+/// is not there.
+fn stamp(file: &Path) -> Option<(u64, Option<std::time::SystemTime>)> {
+    let seen = fs::metadata(file).ok()?;
+    Some((seen.len(), seen.modified().ok()))
+}
+
+/// Copies the ledger `file` and its log into `scratch` as one whose stamps are the same before and
+/// after the copy, and answers where the copy is; `between` is told the number of each try once
+/// its copy is made (a test writes to the ledger there). A ledger written to all the while is
+/// said so.
+fn copy_when_still(file: &Path, scratch: &Path, mut between: impl FnMut(usize)) -> Result<PathBuf> {
+    let log = log_of(file);
+    let clone = scratch.join("live.db");
+    let clone_log = log_of(&clone);
+    for attempt in 1..=COPIES {
+        let before = (stamp(file), stamp(&log));
+        let _ = fs::remove_file(&clone);
+        let _ = fs::remove_file(&clone_log);
+        fs::copy(file, &clone).map_err(files("copy", file))?;
+        if before.1.is_some() {
+            // A log that is gone by now was checkpointed into the file: the stamps say so.
+            match fs::copy(&log, &clone_log) {
+                Ok(_) => {}
+                Err(cause) if cause.kind() == io::ErrorKind::NotFound => {}
+                Err(cause) => {
+                    return Err(Error::new(format!(
+                        "could not copy {}: {cause}",
+                        log.display()
+                    )))
+                }
+            }
+        }
+        between(attempt);
+        if (stamp(file), stamp(&log)) == before {
+            return Ok(clone);
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+    Err(Error::new(format!(
+        "the ledger {} never held still for a copy ({COPIES} tries)",
+        file.display()
+    )))
+}
+
+/// Every table of the open ledger `db`, which is the file `file`.
+fn read_from(db: &Connection, file: &Path) -> Result<Ledger> {
     let told = sqlite(file);
-    let db = Connection::open_with_flags(file, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(&told)?;
     let names: Vec<String> = db
         .prepare(
             "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
@@ -240,11 +364,30 @@ pub fn assert_projects(ledger: &Ledger, directories: &[PathBuf]) -> Result {
 /// Nothing the ledger held is gone or changed: each row `before` had is there
 /// after, by its `id`, with each column it had, bar the ones a restart rewrites; and
 /// the schema has not gone back. A table with no `id` (a link between two others)
-/// has its rows by what they hold.
-pub fn assert_kept(before: &Ledger, after: &Ledger) -> Result {
+/// has its rows by what they hold. A column is not looked for where a migration that
+/// ran between the two versions takes it out (`dropped`); one renamed has its values
+/// under the new name. Whatever else is gone is lost.
+pub fn assert_kept(
+    before: &Ledger,
+    after: &Ledger,
+    dropped: &[Dropped],
+    rewritten: &[(&str, &str)],
+) -> Result {
     assert_sound(after, before.version)?;
+    // What the migrations that ran between the two ledgers took out.
+    let taken_out = |table: &str, column: Option<&str>| {
+        dropped.iter().find(|each| {
+            each.table == table
+                && each.column.as_deref() == column
+                && before.version < each.migration
+                && each.migration <= after.version
+        })
+    };
     for (table, rows) in &before.tables {
         let Some(now) = after.tables.get(table) else {
+            if taken_out(table, None).is_some() {
+                continue;
+            }
             return Err(Error::new(format!("the ledger lost its {table} table")));
         };
         for row in rows {
@@ -260,16 +403,27 @@ pub fn assert_kept(before: &Ledger, after: &Ledger) -> Result {
                 )));
             };
             for (column, value) in &row.0 {
-                if REWRITTEN.contains(&column.as_str()) {
+                if REWRITTEN.contains(&column.as_str())
+                    || rewritten.contains(&(table.as_str(), column.as_str()))
+                {
                     continue;
                 }
+                let held = match (kept.get(column), taken_out(table, Some(column))) {
+                    (Some(held), _) => Some(held),
+                    // A column a migration took out is not there, and is no loss: its values
+                    // are under another name where it was renamed.
+                    (None, Some(dropped)) => match &dropped.renamed_to {
+                        None => continue,
+                        Some(new) => kept.get(new),
+                    },
+                    (None, None) => None,
+                };
                 ensure!(
-                    kept.get(column) == Some(value),
+                    held == Some(value),
                     "{table} {}: {column} was {} and is {}",
                     row.id(),
                     value.json(),
-                    kept.get(column)
-                        .map_or_else(|| "undefined".to_string(), |cell| cell.json().to_string())
+                    held.map_or_else(|| "undefined".to_string(), |cell| cell.json().to_string())
                 );
             }
         }

@@ -94,6 +94,7 @@ fn takes_a_handoff_titled_for_the_lead_as_a_ledger_from_before_2026_10_03_holds_
                 model: "gpt-6-astra".to_owned(),
                 effort: None,
                 cut: false,
+                model_name: None,
             },
         )
         .unwrap();

@@ -16,6 +16,8 @@ mod questions;
 mod role;
 mod switching;
 mod terminals;
+/// The table of threads that are given the window's role at a resume or a fork (T-1414).
+mod top_level;
 mod transport;
 
 pub(crate) use hold::{Held, Hold};

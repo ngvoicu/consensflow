@@ -19,7 +19,7 @@ const WORKER_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermission
 const WORKER_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"{cf} hook claude","timeout":3600}]}],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
 
 /// [`WORKER_SETTINGS`] as `home`'s adapter writes it: its bundle's `cf`, quoted.
-fn worker_settings(home: &Home) -> String {
+pub(super) fn worker_settings(home: &Home) -> String {
     let cf = format!(
         "{}/bundle/bin/cf{}",
         home.root.replace('\\', "/"),
@@ -30,9 +30,9 @@ fn worker_settings(home: &Home) -> String {
 
 /// The chief's: the same, with Claude's own question dialog in place of the board's.
 #[cfg(not(windows))]
-const CHIEF_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions","deny":["Read(~/Music)","Read(~/Music/**)","Read(~/Pictures/*.photoslibrary)","Read(~/Pictures/*.photoslibrary/**)"]},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
+pub(super) const CHIEF_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions","deny":["Read(~/Music)","Read(~/Music/**)","Read(~/Pictures/*.photoslibrary)","Read(~/Pictures/*.photoslibrary/**)"]},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
 #[cfg(windows)]
-const CHIEF_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
+pub(super) const CHIEF_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
 
 /// The settings file the prepared launch gave the window, as written.
 pub(super) fn settings_text(plan: &Prepared) -> String {
@@ -157,7 +157,7 @@ fn the_size_is_written_in_the_launch_s_own_file_and_in_no_file_of_the_owner_s() 
 
 /// A command line without the id of the conversation it names (`--session-id`), which a
 /// fresh launch draws anew.
-fn without_session(argv: &[String]) -> Vec<&str> {
+pub(super) fn without_session(argv: &[String]) -> Vec<&str> {
     let mut words: Vec<&str> = argv.iter().map(String::as_str).collect();
     let at = words
         .iter()
@@ -168,7 +168,7 @@ fn without_session(argv: &[String]) -> Vec<&str> {
 }
 
 /// `request` again, for a field of it to change: the request has no `Clone`.
-fn plain_copy(request: &Request) -> Request {
+pub(super) fn plain_copy(request: &Request) -> Request {
     Request {
         role: request.role,
         handle: request.handle,
@@ -179,6 +179,8 @@ fn plain_copy(request: &Request) -> Request {
         agent: request.agent,
         specs: request.specs,
         compaction: request.compaction,
+        advisor_off: request.advisor_off,
+        suggestion_off: request.suggestion_off,
         folder: request.folder,
         directory: request.directory.clone(),
     }

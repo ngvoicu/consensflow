@@ -42,6 +42,7 @@ fn world() -> World {
                 harness: "claude-code".into(),
                 model: None,
                 effort: None,
+                model_name: None,
             },
             staff,
             gate: false,
@@ -49,6 +50,8 @@ fn world() -> World {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
+            prompt_suggestion: false,
         })
         .expect("a project")
         .id;

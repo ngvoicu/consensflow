@@ -10,6 +10,8 @@ use cf_proto::agents::Harness;
 use serde_json::{json, Value};
 
 use super::*;
+use crate::admin::tests::npm_windows::{canonical, lay_npm, lay_npm_cmd, windows_env};
+use crate::admin::tests::standalone::{lay_down, Layout};
 use crate::admin::tests::{says, Fixture};
 use crate::admin::Row;
 use crate::testing::{finished, Driver, Response};
@@ -73,6 +75,132 @@ fn updates_a_harness_with_its_own_tool_looks_again_and_says_what_happened() {
             timeout: Duration::from_secs(600),
             max_buffer: 1_000_000
         }
+    );
+}
+
+/// A Codex that Codex's standalone installer laid down (a release, a `current` that leads to it,
+/// and the folder on the PATH that leads to `current`): what the Admin page's Update runs is
+/// Codex's own `codex update`, by the link the person runs, and the look that follows is of the
+/// same link, which leads to the new release once Codex's installer has moved `current`.
+#[test]
+fn updates_codex_s_standalone_install_by_its_own_update_through_the_link_the_person_runs() {
+    for layout in [Layout::Package, Layout::Legacy] {
+        let fixture = Fixture::new();
+        let visible = fixture.root.path().join("bin");
+        let program = lay_down(&fixture.root.path().join("home"), &visible, layout)
+            .to_string_lossy()
+            .into_owned();
+        fixture.capture.answer(
+            "codex --version",
+            [says("codex-cli 0.166.0\n"), says("codex-cli 0.167.0\n")],
+        );
+        fixture.latest.says(Harness::Codex, "0.167.0");
+        fixture.latest.says(Harness::Codex, "0.167.0");
+        fixture.capture.answer(
+            "codex update",
+            [Response::Now(Ok(Captured {
+                stdout: "Updating Codex via `powershell -ExecutionPolicy Bypass -c ...`...\n"
+                    .to_owned(),
+                stderr: String::new(),
+            }))],
+        );
+        let done = said(&update(&fixture, "codex").unwrap());
+        assert_eq!(done["state"], "updated", "{layout:?}: {done}");
+        assert_eq!(done["before"], "0.166.0", "{layout:?}");
+        assert_eq!(done["after"], "0.167.0", "{layout:?}");
+        assert_eq!(done["command"], format!("{program} update"), "{layout:?}");
+        assert_eq!(
+            done["harness"]["distribution"], "Codex's installer",
+            "{layout:?}"
+        );
+        let ran = fixture.capture.take_ran();
+        let updating: Vec<_> = ran
+            .iter()
+            .filter(|(program, _)| program.args == ["update"])
+            .collect();
+        let [(started, _)] = &updating[..] else {
+            panic!("{layout:?}: one update: {ran:?}")
+        };
+        assert_eq!(started.executable.to_string_lossy(), program, "{layout:?}");
+    }
+}
+
+/// A Codex installed with npm as Windows lays it out (the shims in the prefix beside `node_modules`,
+/// the Node installer's npm in another folder): the Admin page's Update runs that npm, told the
+/// prefix with a space in its path as one argument, and looks again through the same shim.
+#[test]
+fn updates_an_npm_install_laid_out_as_windows_does_by_the_npm_found_told_its_prefix() {
+    let fixture = Fixture::in_env(|root| {
+        let root = canonical(root);
+        windows_env(
+            &[
+                &root
+                    .join("Users")
+                    .join("A B")
+                    .join("AppData")
+                    .join("Roaming")
+                    .join("npm"),
+                &root.join("Program Files").join("nodejs"),
+            ],
+            &root.join("home"),
+        )
+    });
+    let root = canonical(fixture.root.path());
+    let prefix = root
+        .join("Users")
+        .join("A B")
+        .join("AppData")
+        .join("Roaming")
+        .join("npm");
+    let shim = lay_npm(&prefix, Harness::Codex);
+    let npm = lay_npm_cmd(&root.join("Program Files").join("nodejs"));
+    std::fs::create_dir_all(root.join("home")).unwrap();
+    fixture.capture.answer(
+        "codex --version",
+        [says("codex-cli 0.166.0\n"), says("codex-cli 0.167.0\n")],
+    );
+    fixture.latest.says(Harness::Codex, "0.167.0");
+    fixture.latest.says(Harness::Codex, "0.167.0");
+    let install = format!(
+        "npm install -g --prefix {} @openai/codex@latest",
+        prefix.display()
+    );
+    fixture.capture.answer(
+        &install,
+        [Response::Now(Ok(Captured {
+            stdout: "added 1 package\n".to_owned(),
+            stderr: String::new(),
+        }))],
+    );
+    let done = said(&update(&fixture, "codex").unwrap());
+    assert_eq!(done["state"], "updated", "{done}");
+    assert_eq!(done["before"], "0.166.0");
+    assert_eq!(done["after"], "0.167.0");
+    assert_eq!(
+        done["command"],
+        format!("{} {}", npm.display(), install.trim_start_matches("npm "))
+    );
+    assert_eq!(done["harness"]["distribution"], "npm");
+    assert_eq!(done["harness"]["path"], shim.to_string_lossy().as_ref());
+    let ran = fixture.capture.take_ran();
+    let installing: Vec<_> = ran
+        .iter()
+        .filter(|(program, _)| program.args.first().is_some_and(|first| first == "install"))
+        .collect();
+    let [(program, _)] = &installing[..] else {
+        panic!("one install: {ran:?}")
+    };
+    assert_eq!(program.executable, npm);
+    assert_eq!(
+        program.args,
+        [
+            "install".to_owned(),
+            "-g".to_owned(),
+            "--prefix".to_owned(),
+            prefix.to_string_lossy().into_owned(),
+            "@openai/codex@latest".to_owned()
+        ],
+        "the prefix is one argument"
     );
 }
 

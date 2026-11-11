@@ -22,6 +22,7 @@ fn staffed(rig: &Rig) -> (i64, i64) {
                 harness: "claude-code".to_owned(),
                 model: Some("apollo".to_owned()),
                 effort: None,
+                model_name: None,
             },
             staff: vec![NewMember {
                 model: None,
@@ -37,6 +38,8 @@ fn staffed(rig: &Rig) -> (i64, i64) {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
+            prompt_suggestion: false,
         })
         .unwrap();
     let zeus = project

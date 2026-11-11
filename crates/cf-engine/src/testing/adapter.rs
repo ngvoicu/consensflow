@@ -126,6 +126,9 @@ pub struct FakeAgent {
     /// Another program than the window's has shown its conversation since it opened
     /// ([`Observed::shared`]): a Claude Code the human started outside ConsensFlow.
     pub shared: bool,
+    /// The deliveries its harness said back as taken into a turn of the window's own that has
+    /// not ended ([`Observed::begun`]): Devin 3000.12's message said back.
+    pub begun: Vec<i64>,
     /// Whether its record says its turn is over though its status kept the look
     /// from reading it settled (`Observed::over`): Claude's busy while a background
     /// agent runs, after a turn an interrupt or a refusal ended.
@@ -1182,7 +1185,20 @@ impl Asked {
                 Err(reason)
             });
         }
-        fake.prepared.borrow_mut().push(asked);
+        // What a test sees of a launch holds the advisor switch where it is on, which is every
+        // member's of a project that has not ticked "Advisor tool"; the call written down above
+        // does not, so no recorded trace moves for a key Node's never had.
+        let mut seen = asked;
+        if launch.advisor_off {
+            seen["advisorOff"] = json!(true);
+        }
+        // The prompt suggestion is off in every window of a project that has not ticked it, the
+        // chief's too (2026-11-11), so it is on every launch a test sees of such a project; the
+        // call written down above does not hold it, so no recorded trace moves.
+        if launch.suggestion_off {
+            seen["suggestionOff"] = json!(true);
+        }
+        fake.prepared.borrow_mut().push(seen);
         fake.first_message_ms
             .borrow_mut()
             .push(launch.first_message_ms);
@@ -1249,6 +1265,7 @@ impl Asked {
             at_work_after_recheck: None,
             rechecked: 0,
             shared: false,
+            begun: Vec::new(),
             over: Over::No,
             busy_when_interrupted: false,
             cannot_tell_a_cut: false,

@@ -538,6 +538,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             took_back: false,
             at_prompt: false,
             shared: false,
+            begun: Vec::new(),
         };
     }
     let waiting = match &agent.unnamed {
@@ -558,6 +559,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
         took_back: agent.took_back,
         at_prompt: agent.at_prompt,
         shared: agent.shared,
+        begun: agent.begun.clone(),
     }
 }
 

@@ -463,7 +463,10 @@ export class TerminalsView {
         this.#showing.add(showingKey(board.project.id, lane.participant.handle))
       }
       entry.handle = lane.participant.handle
-      entry.harness = lane.participant.harness
+      // The harness the window was launched with, which the daemon says with its pane: a member
+      // edited to another harness runs it from its next window, and this one goes on as it was
+      // (T-1336). What a file dropped on it may carry is that harness's.
+      entry.harness = pane.harness ?? lane.participant.harness
       entry.project = board.project.id
       entry.session = lane.participant.member !== null
     }

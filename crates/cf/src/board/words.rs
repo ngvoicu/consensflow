@@ -12,15 +12,16 @@ use super::Failure;
 const HELP: [&str; 2] = ["--help", "-h"];
 
 /// What a command takes: the flags it knows, and how many words come first
-/// that are not its text (the task or message number it works on).
+/// that are not its text (the task or message number it works on). Its switches
+/// may be a list made as it runs (`cf task add`'s, one a role).
 #[derive(Debug, Clone, Copy)]
-pub struct Shape {
-    pub switches: &'static [&'static str],
+pub struct Shape<'a> {
+    pub switches: &'a [&'static str],
     pub valued: &'static [&'static str],
     pub leading: usize,
 }
 
-impl Shape {
+impl Shape<'static> {
     /// A command whose words are all its text.
     pub const TEXT: Self = Self {
         switches: &[],
@@ -159,7 +160,7 @@ impl Split {
 /// a flag in the text is words — but the first one to stand in front of the
 /// text is kept in `stray` as well ([`Split::stray_flag`]), for the command
 /// to refuse rather than store.
-pub fn split(words: &[String], shape: Shape) -> Split {
+pub fn split(words: &[String], shape: Shape<'_>) -> Split {
     let mut split = Split {
         leading: shape.leading,
         ..Split::default()

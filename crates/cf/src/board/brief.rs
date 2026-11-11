@@ -27,7 +27,7 @@ use std::path::Path;
 use cf_daemon::api::body::MAX_JSON_BYTES;
 
 use super::words::{quoted, Split};
-use super::{text_of, without_byte_order_mark, Failure};
+use super::{text_of, Failure};
 
 /// The flag that names a file to read the words from.
 pub const FILE: &str = "--file";
@@ -44,8 +44,8 @@ const MOST_SHOWN: usize = 80;
 /// that grows as it is read cannot fill the memory.
 const MOST_READ: usize = MAX_JSON_BYTES;
 
-/// The words `words` give: the file `--file` names, read whole as UTF-8 (what
-/// is no UTF-8 replaced) with one final line ending dropped, the file's and not
+/// The words `words` give: the file `--file` names, read whole and decoded as
+/// [`words_of`] says, with one final line ending dropped, the file's and not
 /// the text's; or the words written out, standard input for `-` (`text_of`).
 /// The file's name is the word of `given` that `words` read as it: `given` is
 /// the command's words as the system gave them, of which those `words` split
@@ -87,13 +87,79 @@ pub fn brief_of(
     }
     let bytes =
         read_brief(path).map_err(|why| Failure::Failed(format!("cannot read {shown}{why}")))?;
-    let text = String::from_utf8_lossy(&bytes);
-    let text = without_byte_order_mark(&text);
+    words_of(&bytes).map_err(|why| Failure::Failed(format!("cannot read {shown}: {why}")))
+}
+
+/// The words in `bytes`, a file's or standard input's, with one final line ending dropped, the
+/// input's and not the text's; or why they are not words, as the end of `cannot read <where>: `.
+///
+/// The encoding is told by the bytes, never guessed, and a text is never posted garbled (the review
+/// T-1447 of T-1435: Windows PowerShell 5.1 writes what `>` and `Out-File` send to a file as UTF-16
+/// with a byte order mark, which read as UTF-8 became `��W\0r\0i\0…`). UTF-8, with or without its
+/// mark, is the text. UTF-16 with a mark, in either byte order, is decoded. Anything else that is
+/// not valid UTF-8 is refused: UTF-16 without a mark, a NUL byte, an invalid sequence, and the
+/// Windows code page that `-Encoding Default` writes.
+///
+/// The limit: bytes that are valid UTF-8 are read as UTF-8, so a UTF-16 text without a mark is
+/// refused only where it holds a NUL byte or an invalid sequence (any ASCII character gives a NUL;
+/// no rule over bytes can tell the rest apart, and no real writer produces it).
+pub(super) fn words_of(bytes: &[u8]) -> Result<String, String> {
+    let (text, marked) = match bytes {
+        [0xff, 0xfe, rest @ ..] => (utf16(rest, u16::from_le_bytes)?, true),
+        [0xfe, 0xff, rest @ ..] => (utf16(rest, u16::from_be_bytes)?, true),
+        [0xef, 0xbb, 0xbf, rest @ ..] => (utf8(rest, 3)?, false),
+        _ => (utf8(bytes, 0)?, false),
+    };
+    // Decoded UTF-16 that holds a NUL is UTF-32, or not text at all.
+    if marked && text.contains('\0') {
+        return Err(refused(
+            "it begins with a UTF-16 byte order mark but holds a NUL character (UTF-32, or no text)",
+        ));
+    }
     let text = text
         .strip_suffix("\r\n")
         .or_else(|| text.strip_suffix('\n'))
-        .unwrap_or(text);
+        .unwrap_or(&text);
     Ok(text.to_owned())
+}
+
+/// What a refusal adds to what was found: what to do, and that nothing went.
+fn refused(found: &str) -> String {
+    format!(
+        "{found}. Write it as UTF-8 (your file tool does), or give the words as the argument. Nothing was sent."
+    )
+}
+
+/// `bytes` as UTF-8, which begin at `from` in the input; a NUL byte is refused with the rest of
+/// what is not text.
+fn utf8(bytes: &[u8], from: usize) -> Result<String, String> {
+    if let Some(at) = bytes.iter().position(|byte| *byte == 0) {
+        return Err(refused(&format!(
+            "it holds a NUL byte (at offset {}): UTF-16 without a byte order mark, or no text",
+            from + at
+        )));
+    }
+    String::from_utf8(bytes.to_vec()).map_err(|cause| {
+        refused(&format!(
+            "it is not UTF-8: the byte at offset {} is not valid (a Windows code page, as \
+             PowerShell's -Encoding Default writes, is not)",
+            from + cause.utf8_error().valid_up_to()
+        ))
+    })
+}
+
+/// `bytes`, after a UTF-16 byte order mark, as the text of units of two bytes read by `unit`.
+fn utf16(bytes: &[u8], unit: fn([u8; 2]) -> u16) -> Result<String, String> {
+    let damaged = || {
+        refused("it begins with a UTF-16 byte order mark but is cut or damaged (an odd byte or half a surrogate pair)")
+    };
+    let (pairs, odd) = bytes.as_chunks::<2>();
+    if !odd.is_empty() {
+        return Err(damaged());
+    }
+    char::decode_utf16(pairs.iter().map(|&pair| unit(pair)))
+        .map(|each| each.map_err(|_| damaged()))
+        .collect()
 }
 
 /// The bytes of the file at `path`, read as [`brief_of`] reads one, or why

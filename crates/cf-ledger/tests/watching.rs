@@ -20,6 +20,7 @@ fn project() -> NewProject {
             harness: "claude-code".into(),
             model: None,
             effort: None,
+            model_name: None,
         },
         staff: Vec::new(),
         gate: false,
@@ -27,6 +28,8 @@ fn project() -> NewProject {
         specs: None,
         staff_rules: None,
         compaction: None,
+        advisor_tool: false,
+        prompt_suggestion: false,
     }
 }
 

@@ -186,10 +186,10 @@ mod on_unix {
     }
 }
 
-/// The apps an update starts are the programs of the installed bundle's `Contents/MacOS/`,
-/// under either name of its folder: not its `cf`, nor another bundle's app.
+/// The apps an update starts are the installed bundle's executable, under either name of its
+/// folder: not its `cf`, nor another bundle's app.
 #[test]
-fn the_programs_of_a_bundle_are_found_under_either_name_of_its_folder() {
+fn the_app_of_a_bundle_is_found_under_either_name_of_its_folder() {
     let table = parse_table(concat!(
         "  11     1 S    /var/x/Applications/ConsensFlow.app/Contents/MacOS/app\n",
         "  12     1 S    /private/var/x/Applications/ConsensFlow.app/Contents/MacOS/app --flag\n",
@@ -197,9 +197,127 @@ fn the_programs_of_a_bundle_are_found_under_either_name_of_its_folder() {
         "  14     1 S    /Applications/ConsensFlow.app/Contents/MacOS/app\n",
         "  15     1 S    /var/x/Applications/ConsensFlow.app/Contents/MacOSX/app\n",
     ));
-    let folders = [
-        "/var/x/Applications/ConsensFlow.app/Contents/MacOS/".to_string(),
-        "/private/var/x/Applications/ConsensFlow.app/Contents/MacOS/".to_string(),
+    let programs = [
+        "/var/x/Applications/ConsensFlow.app/Contents/MacOS/app".to_string(),
+        "/private/var/x/Applications/ConsensFlow.app/Contents/MacOS/app".to_string(),
     ];
-    assert_eq!(started_from(&table, &folders), [11, 12]);
+    assert_eq!(started_from(&table, &programs), [11, 12]);
+}
+
+/// A bridge release's bundle holds the Node its daemon runs on in `Contents/MacOS/`, beside the
+/// app. That daemon is running when the update is installed, and is no start of the update's app
+/// (T-1338: the bridge leg of the smoke read it as a second start).
+#[test]
+fn a_program_the_bundle_ships_beside_its_app_is_no_start_of_the_app() {
+    let bundle = "/var/x/Applications/ConsensFlow.app";
+    let table = parse_table(&format!(
+        concat!(
+            "  21     1 S    {0}/Contents/MacOS/app\n",
+            "  22    21 S    {0}/Contents/MacOS/node {0}/Contents/Resources/cli/cf.mjs ui --json --no-open\n",
+            "  23     1 S    {0}/Contents/MacOS/app-helper\n",
+            "  24     1 S    {0}/Contents/MacOS/application\n",
+        ),
+        bundle
+    ));
+    let app = programs_of(Path::new(&format!("{bundle}/Contents/MacOS/app")));
+    assert_eq!(started_from(&table, &app), [21]);
+}
+
+/// Where the bundle's folder is a link (a temporary folder's `/var`), the process table may show
+/// the program under the path the system resolves it to, and the app is found under both.
+#[cfg(unix)]
+#[test]
+fn a_program_is_known_under_the_path_the_system_resolves_it_to() {
+    let folder = tempfile::tempdir().unwrap();
+    let real = folder.path().join("real");
+    std::fs::create_dir(&real).unwrap();
+    let binary = real.join("app");
+    std::fs::write(&binary, "").unwrap();
+    let link = folder.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let names = programs_of(&link.join("app"));
+    let resolved = std::fs::canonicalize(&binary).unwrap();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert!(names.contains(&link.join("app").display().to_string()));
+    assert!(names.contains(&resolved.display().to_string()));
+    // A program that is not there is known under the one name it was given.
+    assert_eq!(
+        programs_of(&folder.path().join("nothing")),
+        [folder.path().join("nothing").display().to_string()]
+    );
+}
+
+fn app_row(pid: u32, ppid: u32, command: &str) -> Row {
+    Row {
+        pid,
+        ppid,
+        state: "S".into(),
+        command: command.into(),
+    }
+}
+
+const APP: &str = "/var/x/Applications/ConsensFlow.app/Contents/MacOS/app";
+const CF: &str =
+    "/var/x/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf ui --json --no-open";
+
+/// T-1338: an app that starts a program forks first, and until the child execs the process table
+/// shows it with the app's own command. The daemon of the update was counted as a second start of
+/// the app, at the one look of 50 ms that happened to see it.
+#[test]
+fn the_fork_of_a_watched_program_before_it_execs_is_no_start_of_it() {
+    let programs = vec![APP.to_string()];
+    let mut starts = Starts::default();
+    // The app, and its daemon in the milliseconds before it is the daemon.
+    starts.look(
+        &[app_row(30879, 1, APP), app_row(30886, 30879, APP)],
+        &programs,
+    );
+    // The next look: the child has exec'd.
+    starts.look(
+        &[app_row(30879, 1, APP), app_row(30886, 30879, CF)],
+        &programs,
+    );
+    starts.look(
+        &[app_row(30879, 1, APP), app_row(30886, 30879, CF)],
+        &programs,
+    );
+    assert_eq!(starts.pids().into_iter().collect::<Vec<_>>(), [30879]);
+}
+
+/// The fork is seen for as long as the system takes to exec it, which a loaded machine makes
+/// long; one that is seen twice is still a fork, and one that lasts is a start.
+#[test]
+fn a_child_of_a_watched_program_is_a_start_once_it_lasts() {
+    let programs = vec![APP.to_string()];
+    let mut starts = Starts::default();
+    for looked in 1..=3 {
+        starts.look(&[app_row(10, 1, APP), app_row(11, 10, APP)], &programs);
+        let counted = starts.pids().contains(&11);
+        assert_eq!(counted, looked >= CONFIRMED_IN, "after {looked} looks");
+    }
+}
+
+/// An app that a launcher starts (launchd, for the app Tauri restarts) is a start at the first
+/// look: it may quit at once, and is not seen twice.
+#[test]
+fn a_program_started_by_another_is_a_start_at_the_first_look() {
+    let programs = vec![APP.to_string()];
+    let mut starts = Starts::default();
+    starts.look(&[app_row(10, 1, APP)], &programs);
+    starts.look(&[app_row(20, 1, APP)], &programs);
+    starts.look(&[], &programs);
+    assert_eq!(starts.pids().into_iter().collect::<Vec<_>>(), [10, 20]);
+}
+
+/// The app that the old app starts is its child until the old app has gone (the old one exits
+/// once it has started it), and is a start all the same.
+#[test]
+fn the_app_the_installed_app_started_is_a_start_though_the_installed_app_is_its_parent() {
+    let programs = vec![APP.to_string()];
+    let mut starts = Starts::default();
+    for _ in 0..3 {
+        starts.look(&[app_row(10, 1, APP), app_row(11, 10, APP)], &programs);
+    }
+    starts.look(&[app_row(11, 1, APP)], &programs);
+    assert_eq!(starts.pids().into_iter().collect::<Vec<_>>(), [10, 11]);
 }

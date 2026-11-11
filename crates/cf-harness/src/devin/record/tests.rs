@@ -5,12 +5,14 @@
 mod cells;
 mod compaction;
 mod drawn;
+mod kept_wires;
 mod last_call;
 mod logs;
 mod messages;
 mod rows;
 mod stamped;
 mod turns;
+mod unsaid;
 
 use std::fs;
 use std::path::PathBuf;

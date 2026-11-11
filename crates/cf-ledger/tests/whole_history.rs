@@ -95,6 +95,7 @@ fn project(ledger: &mut Ledger) -> ProjectView {
                 harness: "claude-code".into(),
                 model: Some("ares".into()),
                 effort: None,
+                model_name: None,
             },
             staff: Vec::new(),
             gate: false,
@@ -102,6 +103,8 @@ fn project(ledger: &mut Ledger) -> ProjectView {
             specs: None,
             staff_rules: None,
             compaction: None,
+            advisor_tool: false,
+            prompt_suggestion: false,
         })
         .expect("a project")
 }
@@ -184,6 +187,7 @@ fn reads_every_conversation_of_the_chief_across_a_clear_a_resume_a_compaction_a_
                 model: "maia".into(),
                 effort: None,
                 cut: false,
+                model_name: None,
             },
         )
         .expect("switched");
@@ -269,6 +273,7 @@ fn a_member_s_conversations_with_nothing_copied_show_nothing_and_an_unknown_hand
                 model: "maia".into(),
                 effort: None,
                 cut: false,
+                model_name: None,
             },
         )
         .expect("switched");

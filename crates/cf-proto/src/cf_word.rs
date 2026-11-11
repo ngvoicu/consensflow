@@ -26,9 +26,13 @@ pub enum Shell {
 }
 
 /// The first word of a command that runs a window's own `cf`: its path as the window's shell
-/// takes it as one word, or `cf` where there is no path to give.
+/// takes it as one word, or `cf` where there is no path to give; and that shell, which the
+/// texts typed into the window are written for ([`CfWord::shell`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CfWord(String);
+pub struct CfWord {
+    word: String,
+    shell: Shell,
+}
 
 /// The commands of `cf` ConsensFlow's own words name in a text it types into a window
 /// ([`CfWord::in_text`]): the board's, as `cf --help` lists them.
@@ -37,42 +41,61 @@ const COMMANDS: [&str; 8] = [
 ];
 
 impl CfWord {
-    /// No path: the word `cf`, as a shell finds it. What a text says where nobody knows where
-    /// the window's `cf` is.
+    /// No path: the word `cf`, as a shell finds it, for a bash-like shell. What a text says
+    /// where nobody knows where the window's `cf` is, or in what shell.
     pub fn bare() -> Self {
-        Self("cf".to_owned())
+        Self {
+            word: "cf".to_owned(),
+            shell: Shell::Posix,
+        }
     }
 
     /// `path`, the window's own `cf`, for `shell`: the path as it is where every shell takes it
     /// as one word (letters, digits and `/ . _ - : + ~`), else quoted for the shell. An empty
-    /// path is none.
+    /// path is none: the word `cf`, still for `shell`.
     pub fn new(path: &str, shell: Shell) -> Self {
-        if path.is_empty() {
-            return Self::bare();
-        }
         let plain = path
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || b"/._-:+~".contains(&byte));
-        if plain {
-            return Self(path.to_owned());
-        }
-        Self(match shell {
-            Shell::Posix => format!("'{}'", path.replace('\'', r"'\''")),
-            Shell::PowerShell => format!("& '{}'", path.replace('\'', "''")),
-        })
+        let word = if path.is_empty() {
+            "cf".to_owned()
+        } else if plain {
+            path.to_owned()
+        } else {
+            match shell {
+                Shell::Posix => format!("'{}'", path.replace('\'', r"'\''")),
+                Shell::PowerShell => format!("& '{}'", path.replace('\'', "''")),
+            }
+        };
+        Self { word, shell }
     }
 
     /// A word a window was given as it starts a command (the value of [`ENV`]), taken as it is:
     /// none for an empty one, one over a line or one with a control character, which no shell
-    /// takes as the start of a command.
+    /// takes as the start of a command. A word that starts with `& ` is PowerShell's call of a
+    /// path; any other is taken for a bash-like shell's (a path every shell takes as one word
+    /// is the same in both, and what a hint says of the shell is no more than a hint).
     pub fn of_word(word: &str) -> Option<Self> {
         let fits = !word.is_empty() && word.len() <= 1_024 && !word.chars().any(char::is_control);
-        fits.then(|| Self(word.to_owned()))
+        fits.then(|| Self {
+            word: word.to_owned(),
+            shell: if word.starts_with("& ") {
+                Shell::PowerShell
+            } else {
+                Shell::Posix
+            },
+        })
     }
 
     /// The word, as it starts a command.
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.word
+    }
+
+    /// The shell the window's commands are typed in, which a text written for the window
+    /// has its input and its removals in the way of.
+    pub fn shell(&self) -> Shell {
+        self.shell
     }
 
     /// `text`, a text ConsensFlow wrote to be typed into the window, with each command it names
@@ -80,7 +103,7 @@ impl CfWord {
     /// or after a space) started by this word instead. A path already written (`…/cf task get`),
     /// and any other use of the letters, stay as they are.
     pub fn in_text<'a>(&self, text: &'a str) -> Cow<'a, str> {
-        if self.0 == "cf" {
+        if self.word == "cf" {
             return Cow::Borrowed(text);
         }
         let mut out = String::new();
@@ -90,7 +113,7 @@ impl CfWord {
                 continue;
             }
             out.push_str(&text[copied..at]);
-            out.push_str(&self.0);
+            out.push_str(&self.word);
             copied = at + 2;
         }
         if copied == 0 {
@@ -103,7 +126,7 @@ impl CfWord {
 
 impl fmt::Display for CfWord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.word)
     }
 }
 
@@ -172,9 +195,14 @@ mod tests {
             powershell(hostile).as_str(),
             "& '/Users/me/My Apps/cf `x` $HOME ''q'''"
         );
+        // No path is the word `cf`, and the shell it is for is the one given.
+        assert_eq!(CfWord::bare().as_str(), "cf");
+        assert_eq!(CfWord::bare().shell(), Shell::Posix);
+        assert_eq!(CfWord::new("", Shell::Posix), CfWord::bare());
+        let none = CfWord::new("", Shell::PowerShell);
+        assert_eq!((none.as_str(), none.shell()), ("cf", Shell::PowerShell));
         for shell in [Shell::Posix, Shell::PowerShell] {
-            assert_eq!(CfWord::new("", shell), CfWord::bare());
-            assert_eq!(CfWord::bare().as_str(), "cf");
+            assert_eq!(CfWord::new(spaced, shell).shell(), shell);
         }
     }
 
@@ -215,6 +243,15 @@ mod tests {
     fn a_word_a_window_was_given_is_taken_as_it_is_unless_no_shell_could_take_it() {
         for word in [MAC, "& 'C:/Program Files/c/cf.exe'", "'/a b/cf'", "cf"] {
             assert_eq!(CfWord::of_word(word).unwrap().as_str(), word);
+        }
+        // The shell it was made for is told by how the word starts: an `&` call is PowerShell's.
+        for (word, shell) in [
+            (MAC, Shell::Posix),
+            ("'/a b/cf'", Shell::Posix),
+            ("cf", Shell::Posix),
+            ("& 'C:/Program Files/c/cf.exe'", Shell::PowerShell),
+        ] {
+            assert_eq!(CfWord::of_word(word).unwrap().shell(), shell, "{word}");
         }
         let long = "x".repeat(1_025);
         for none in ["", "a\nb", "a\u{7}b", long.as_str()] {

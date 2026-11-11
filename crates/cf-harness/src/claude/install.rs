@@ -37,11 +37,34 @@ const QUESTION_HOOK_SECONDS: u32 = 3600;
 /// outranks the owner's saved setting and `/autocompact` typed in the window
 /// (T-1016, 2.1.316 on macOS, 2.1.312 on Windows), and nothing is written to the
 /// owner's files. With none the file is as it always was.
+///
+/// A member of a project whose Project settings leave Claude Code's own advisor tool off
+/// (`advisor_off`, every project's until the human ticks it) is given `env` with
+/// [`ADVISOR_KILL_SWITCH`] in the same file (A5-20): Claude Code reads that variable as the
+/// tool's kill switch for the window, at launch and on resume alike (its `advisorModel` setting
+/// is not enough: a resumed conversation takes its advisor back from its own record), the
+/// file's `env` outranks the owner's own `env`, the rest of the owner's `env` is kept, and
+/// nothing is written to the owner's files (2.1.322, run against a stub of the API). With the
+/// tool left on the file is as it always was.
+///
+/// A launch of a project whose Project settings leave Claude Code's prompt suggestion off
+/// (`suggestion_off`, every project's until the human ticks it; the chief's launch as much as a
+/// member's) has [`PROMPT_SUGGESTION_SWITCH`] as `false` in the same `env` block (RS-29, T-1434):
+/// after each turn Claude Code makes a call of its own, a fork of the whole conversation read
+/// from the cache, to guess the person's next prompt. Claude Code reads that variable before its
+/// `promptSuggestionEnabled` setting, the file's `env` outranks the owner's own `env`, and with
+/// it no suggestion request follows a turn's end, launched or resumed (2.1.322, run against a
+/// stub of the API). With the suggestion left on the key is absent and the owner's own settings
+/// and Claude Code's own default decide: ConsensFlow never writes `true`. Nothing is written to
+/// the owner's files.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn settings(
     env: &Env,
     launch: &LaunchId,
     board_questions: bool,
     compaction: Option<u32>,
+    advisor_off: bool,
+    suggestion_off: bool,
     pane_cf: &str,
     directory: Option<&str>,
 ) -> Result<Vec<String>, String> {
@@ -77,6 +100,18 @@ pub(crate) fn settings(
     if let Some(window) = compaction {
         file["autoCompactWindow"] = json!(window);
     }
+    // The advisor's switch is written before the suggestion's, so that the file reads the same
+    // on every run.
+    let mut variables = serde_json::Map::new();
+    if advisor_off {
+        variables.insert(ADVISOR_KILL_SWITCH.to_owned(), json!("1"));
+    }
+    if suggestion_off {
+        variables.insert(PROMPT_SUGGESTION_SWITCH.to_owned(), json!("false"));
+    }
+    if !variables.is_empty() {
+        file["env"] = serde_json::Value::Object(variables);
+    }
     // On a Mac, the two libraries that no coding task needs and that macOS asks about in the
     // app's name (T-1194). Nothing on Windows, where the file is as it always was.
     let reads = directory.map_or_else(Vec::new, |directory| private_reads(env, directory));
@@ -87,6 +122,16 @@ pub(crate) fn settings(
     write_file(Path::new(&settings), text.as_bytes(), 0o600).map_err(said)?;
     Ok(vec!["--settings".to_owned(), settings])
 }
+
+/// The variable Claude Code reads as the switch that takes its advisor tool away from the
+/// window: no advisor model resolves, so no request declares the tool and a resumed
+/// conversation's advisor calls are left out of its history.
+pub(crate) const ADVISOR_KILL_SWITCH: &str = "CLAUDE_CODE_DISABLE_ADVISOR_TOOL";
+
+/// The variable Claude Code reads, before its `promptSuggestionEnabled` setting, as whether the
+/// window predicts the person's next prompt after a turn; `false` is the documented way off (from
+/// 2.1.238), and `0` is read the same.
+pub(crate) const PROMPT_SUGGESTION_SWITCH: &str = "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION";
 
 /// The reads Claude's tools are denied in a window's settings file on a Mac (T-1194): the Apple
 /// Music library and the Photos libraries. Touching either raises a macOS dialog in the app's

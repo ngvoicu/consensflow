@@ -6,8 +6,16 @@
 //! with is written down, and the daemon's log says which windows a pass went on
 //! without, and how long their steps took (at most once in [`LEFT_TOLD_MS`]): a host
 //! that stalls leaves a trace, never what a window shows.
+//!
+//! A window a pass went on without is slow, and the passes after it do not wait for it
+//! again: its next step goes on apart from the start, and it is slow until one of its steps
+//! ends within the wait. A pane host that answers one window's looks in half a minute, again
+//! and again, would otherwise make every pass that begins its step wait the whole of
+//! [`STEP_WAIT`], and the windows that answer at once are stepped once in five seconds
+//! instead of once in one (a board's log on 2026-11-09: two windows, a quarter of an hour).
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::HashSet;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
@@ -44,6 +52,9 @@ pub(crate) struct StepsState {
     told: Cell<Option<i64>>,
     /// The passes that went on without some steps since then, unsaid.
     unsaid: Cell<u32>,
+    /// The participants a pass went on without, which no pass waits for until a step of
+    /// theirs ends within [`STEP_WAIT`].
+    slow: RefCell<HashSet<i64>>,
 }
 
 /// A step's answer, with whose it is.
@@ -68,6 +79,10 @@ impl Dispatcher {
         let mut named = Vec::with_capacity(steps.len());
         let mut waiting: Waiting = FuturesUnordered::new();
         for step in steps {
+            if self.steps.slow.borrow().contains(&step.record.id) {
+                self.go_on_slow(step, began);
+                continue;
+            }
             let ended = Rc::new(Cell::new(false));
             named.push((step.handle.clone(), step.record, Rc::clone(&ended)));
             let (handle, begun) = (step.handle, step.begun);
@@ -103,6 +118,10 @@ impl Dispatcher {
                         .filter(|(_, _, ended)| !ended.get())
                         .map(|(handle, record, _)| (handle.clone(), Rc::clone(record)))
                         .collect();
+                    self.steps
+                        .slow
+                        .borrow_mut()
+                        .extend(left.iter().map(|(_, record)| record.id));
                     self.go_on_without(waiting, &left, began);
                     return Ok(());
                 }
@@ -113,6 +132,46 @@ impl Dispatcher {
                 }
             }
         }
+    }
+
+    /// A step of a slow participant (a window the last pass went on without) goes on apart
+    /// from its start, and nothing waits for it: a failure is written down, and the
+    /// participant is slow no more once its step ends within [`STEP_WAIT`] of its start.
+    fn go_on_slow(self: &Rc<Self>, step: Step, began: i64) {
+        let this = Rc::clone(self);
+        self.seams.spawn.spawn(Box::pin(async move {
+            let Step {
+                handle,
+                record,
+                begun,
+            } = step;
+            if let Err(cause) = begun.await {
+                this.seams.log.error("a step failed", &cause.to_string());
+            }
+            let wait = i64::try_from(STEP_WAIT.as_millis()).unwrap_or(i64::MAX);
+            let took = this.now() - began;
+            if took < wait {
+                this.steps.slow.borrow_mut().remove(&record.id);
+            } else {
+                this.tell_slow(&handle, took / 1000);
+            }
+        }));
+    }
+
+    /// Says a step no pass waits for ended, still slow, in the log's one line in
+    /// [`LEFT_TOLD_MS`] (the line of [`Dispatcher::tell_left`] is the pass that went on
+    /// without it; this is the same window's next steps, which no pass names).
+    fn tell_slow(&self, handle: &str, took: i64) {
+        let now = self.now();
+        let state = &self.steps;
+        let last = state.told.get();
+        if last.is_some_and(|at| now - at < LEFT_TOLD_MS) {
+            return;
+        }
+        state.told.set(Some(now));
+        self.seams.log.warn(&format!(
+            "the step of @{handle}, which no pass waits for since one went on without it, ended {took} s after its pass began"
+        ));
     }
 
     /// The steps still `waiting` go on apart, and what each ends with is written

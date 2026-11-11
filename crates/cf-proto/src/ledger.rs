@@ -103,7 +103,7 @@ pub struct ProjectView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meeting: Option<String>,
     /// The rules the human wrote for the project's staff, which every member's
-    /// window is given after its role, and the chief's as what every member has:
+    /// window is given after its role, and the chief's as what every window opens with:
     /// said only when there are some, so a project that has none reads as it
     /// always did.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -115,6 +115,19 @@ pub struct ProjectView {
     /// given it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compaction: Option<u32>,
+    /// Whether the human has the project's members run with Claude Code's own advisor tool
+    /// (Project settings, "Advisor tool"): said only when on, so a project with it off, which
+    /// every project is until the human ticks it, reads as it always did. The chief's window is
+    /// never given the switch, whatever this says.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub advisor_tool: bool,
+    /// Whether the human leaves Claude Code's prompt suggestion on in the project's windows,
+    /// the chief's and the members' (Project settings, "Prompt suggestion"): said only when on,
+    /// so a project with it off, which every project is until the human ticks it, reads as it
+    /// always did. Off, every Claude Code window of the project is launched with it switched
+    /// off; on, ConsensFlow writes nothing about it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub prompt_suggestion: bool,
 }
 
 impl ProjectView {

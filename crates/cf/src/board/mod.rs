@@ -575,7 +575,8 @@ fn whoami(rest: &[String], board: &Board) -> Result<Said, Failure> {
 /// the board as written, where the shell would run the backticks and `$( )`
 /// of a double-quoted one. The final line ending is the heredoc's, not the text's: a `\n`,
 /// or the `\r\n` that PowerShell and `type` end what they pipe with.
-/// The commands that give a window work take a file as well (`brief`).
+/// The commands that give a window work take a file as well (`brief`). The bytes are decoded as
+/// `brief::words_of` says, for a file and for standard input alike.
 fn text_of(text: String, input: &mut dyn Read) -> Result<String, Failure> {
     if text != "-" {
         return Ok(text);
@@ -584,20 +585,8 @@ fn text_of(text: String, input: &mut dyn Read) -> Result<String, Failure> {
     input
         .read_to_end(&mut bytes)
         .map_err(|cause| Failure::Failed(format!("cannot read standard input ({cause})")))?;
-    let text = String::from_utf8_lossy(&bytes);
-    let text = without_byte_order_mark(&text);
-    let text = text
-        .strip_suffix("\r\n")
-        .or_else(|| text.strip_suffix('\n'))
-        .unwrap_or(text);
-    Ok(text.to_owned())
-}
-
-/// `text` without the byte order mark it may begin with, which is no part of the words: Windows
-/// PowerShell 5.1 puts one before what it pipes to a program, and Notepad at the start of a file
-/// it saves as UTF-8.
-pub(super) fn without_byte_order_mark(text: &str) -> &str {
-    text.strip_prefix('\u{feff}').unwrap_or(text)
+    brief::words_of(&bytes)
+        .map_err(|why| Failure::Failed(format!("cannot read standard input: {why}")))
 }
 
 /// `{ body }`, the request most commands send.
