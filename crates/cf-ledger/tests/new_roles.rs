@@ -1,12 +1,13 @@
-//! The four roles of spec new-roles in the ledger (FD-04): migration 0036 widens the role
-//! check of `participant` and the pool check of `task` to the nine roles of the table, every
-//! row of a ledger an older build left kept; a member of each new role is held and a task of
-//! each new pool is taken by it alone; and a build of 0035 that meets the migrated ledger
-//! refuses it as one a newer build wrote.
+//! The four roles of spec new-roles in the ledger (FD-04): their migration (0036 as written)
+//! widens the role check of `participant` and the pool check of `task` to the nine roles of the
+//! table, every row of a ledger an older build left kept; a member of each new role is held and
+//! a task of each new pool is taken by it alone; a build of the migration before it that meets
+//! the migrated ledger refuses it as one a newer build wrote; and a follow-up that asks for a
+//! role goes only to a window of that role (T-1453).
 
 #![allow(clippy::expect_used)]
 
-use cf_ledger::testing::undo_migration_0036;
+use cf_ledger::testing::{new_roles_version, undo_new_roles_migration};
 use cf_ledger::{
     migrate, open_ledger, Ledger, NewChief, NewMember, NewProject, NewTask, Options, ProjectView,
     MIGRATIONS, SCHEMA_VERSION,
@@ -121,7 +122,7 @@ fn version(db: &Connection) -> i64 {
 }
 
 #[test]
-fn a_ledger_a_build_of_0035_left_with_members_and_tasks_of_the_five_roles_keeps_every_row_through_0036(
+fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five_roles_keeps_every_row_through_their_migration(
 ) {
     let dir = tempfile::tempdir().expect("a home");
     let file = dir.path().join("consensflow.db");
@@ -156,10 +157,15 @@ fn a_ledger_a_build_of_0035_left_with_members_and_tasks_of_the_five_roles_keeps_
         .expect("hebe leaves the staff");
     ledger.close().expect("closed");
 
-    // As a build of 0035 left it: its checks name the five roles, its version is 35.
+    // As a build of the migration before it left it: its checks name the five roles, its
+    // version is that migration's.
     let raw = Connection::open(&file).unwrap();
-    undo_migration_0036(&raw).expect("0036 undone");
-    raw.execute_batch("PRAGMA user_version = 35").unwrap();
+    undo_new_roles_migration(&raw).expect("the new roles' migration undone");
+    raw.execute_batch(&format!(
+        "PRAGMA user_version = {}",
+        new_roles_version() - 1
+    ))
+    .unwrap();
     let before = kept(&raw);
     let narrow = schema(&raw);
     assert!(
@@ -174,7 +180,6 @@ fn a_ledger_a_build_of_0035_left_with_members_and_tasks_of_the_five_roles_keeps_
     ledger.close().expect("closed");
     let raw = Connection::open(&file).unwrap();
     assert_eq!(version(&raw), SCHEMA_VERSION as i64);
-    assert_eq!(SCHEMA_VERSION, 36);
     assert_eq!(kept(&raw), before, "every row of the two tables kept");
     let wide = schema(&raw);
     let narrowed: Vec<(String, String)> = wide
@@ -195,20 +200,24 @@ fn a_ledger_a_build_of_0035_left_with_members_and_tasks_of_the_five_roles_keeps_
 }
 
 #[test]
-fn a_build_of_0035_refuses_the_ledger_once_0036_has_run_as_one_a_newer_build_wrote() {
+fn a_build_before_the_new_roles_refuses_the_ledger_once_their_migration_has_run_as_one_a_newer_build_wrote(
+) {
     let db = Connection::open_in_memory().unwrap();
-    migrate(&db, &MIGRATIONS).expect("this build's ledger");
-    let older = &MIGRATIONS[..35];
+    let theirs = new_roles_version();
+    migrate(&db, &MIGRATIONS[..theirs]).expect("a ledger with the new roles");
+    let older = &MIGRATIONS[..theirs - 1];
     let refused = migrate(&db, older).expect_err("an older build refuses it");
     assert_eq!(
         (refused.code(), refused.to_string()),
         (
             Some("ledger-newer"),
-            "this home was written by a newer ConsensFlow (schema 36; this build knows 35)"
-                .to_owned()
+            format!(
+                "this home was written by a newer ConsensFlow (schema {theirs}; this build knows {})",
+                theirs - 1
+            )
         )
     );
-    assert_eq!(version(&db), 36, "and leaves it as it is");
+    assert_eq!(version(&db), theirs as i64, "and leaves it as it is");
 }
 
 #[test]
@@ -284,8 +293,9 @@ fn a_member_of_each_new_role_is_held_and_takes_its_pools_tasks_alone() {
             "only a member of the {role}'s role may take it"
         );
     }
-    // A tier given with a task of a role with none is not kept, as the image designer's is
-    // not: its task has none.
+    // A tier the ledger is handed with a task of a role with none is not kept, as the image
+    // designer's is not (Node's traces hand it one: ledger-tiered-004). `POST /api/tasks`
+    // refuses one asked there, in the role's name (T-1453).
     let given = ledger
         .create_task(project.id, &task("integrator", Some("standard"), "Land it"))
         .expect("an integrator's task");
@@ -293,10 +303,10 @@ fn a_member_of_each_new_role_is_held_and_takes_its_pools_tasks_alone() {
 }
 
 #[test]
-fn a_build_of_0035_could_hold_no_member_of_a_new_role() {
+fn a_build_before_the_new_roles_could_hold_no_member_of_one() {
     // The narrow checks are what an older build has: a row of a new role is no row there.
     let db = Connection::open_in_memory().unwrap();
-    migrate(&db, &MIGRATIONS[..35]).unwrap();
+    migrate(&db, &MIGRATIONS[..new_roles_version() - 1]).unwrap();
     db.execute_batch(
         "INSERT INTO project (id, name, directory, created_at, updated_at) VALUES (1, 'app', '/work/app', 'now', 'now')",
     )
@@ -395,4 +405,110 @@ fn a_member_with_no_chosen_tier_gains_a_role_with_tiers_only_with_a_tier_and_one
     assert_eq!(refused.code(), Some("invalid-tier"));
     let after = ledger.project(project.id).unwrap().unwrap();
     assert_eq!(tier_of(&after, "janus").as_deref(), Some("complex"));
+}
+
+fn member_id(project: &ProjectView, handle: &str) -> i64 {
+    project
+        .participants
+        .iter()
+        .find(|participant| participant.handle == handle)
+        .map(|participant| participant.id)
+        .expect("the member")
+}
+
+/// A follow-up that asks for a role (the review of T-1441, T-1453): the ledger gave it to the
+/// window of the task it follows whatever that window's role was, so that `--research --after`
+/// a task of an architect's went to the architect, with nobody on the staff a researcher. It is
+/// taken when the window is of the role asked and its member still holds it, and refused
+/// otherwise in words that name both roles; a follow-up that asks for none continues the window
+/// as before. The window's role is the one it began for (`participant.role` of the session),
+/// which a member's change of roles leaves as it was.
+#[test]
+fn a_follow_up_for_a_role_goes_only_to_a_window_of_that_role_whose_member_still_holds_it() {
+    let dir = tempfile::tempdir().expect("a home");
+    let mut ledger =
+        open_ledger(&dir.path().join("consensflow.db"), Options::default()).expect("a ledger");
+    let project = project(
+        &mut ledger,
+        vec![
+            member("zeus", &["worker"], "standard"),
+            member("daedalus", &["architect"], "light"),
+        ],
+    );
+    ledger
+        .create_task(project.id, &task("architect", None, "The frame"))
+        .expect("an architect's task");
+    ledger
+        .assign_task(project.id, 1, member_id(&project, "daedalus"))
+        .expect("given to a window of the architect");
+    let follow = |pool: &str| NewTask {
+        from: "chief".into(),
+        after: Some(1),
+        pool: Some(pool.into()),
+        body: format!("Next, for the {pool}"),
+        ..NewTask::default()
+    };
+    for (pool, asked) in [
+        ("researcher", "a researcher's"),
+        ("frontend", "a frontend designer's"),
+        ("worker", "a worker's"),
+        ("advisor", "an advisor's"),
+    ] {
+        let refused = ledger
+            .create_task(project.id, &follow(pool))
+            .expect_err("a window of another role");
+        assert_eq!(
+            (refused.code(), refused.to_string()),
+            (
+                Some("follow-up-of-another-role"),
+                format!(
+                    "T-1 is an architect's task; {asked} task starts in a new window: leave out --after"
+                )
+            ),
+            "{pool}"
+        );
+    }
+    let taken = ledger
+        .create_task(project.id, &follow("architect"))
+        .expect("the architect's window takes the architect's next step");
+    let window = taken.task.assignee.clone().expect("the window of T-1");
+    assert!(window.starts_with("daedalus-"), "{window}");
+    assert_eq!(taken.task.pool, None, "a follow-up is stored as before");
+    // The member gives the role up: its window, begun an architect's, stays one, and is no
+    // architect's to continue for the architect's work.
+    ledger
+        .set_roles(project.id, "daedalus", &["researcher"], None)
+        .expect("the member's roles changed");
+    let session_role = |ledger: &Ledger| {
+        ledger
+            .project(project.id)
+            .expect("the project")
+            .expect("the project")
+            .participants
+            .into_iter()
+            .find(|participant| participant.handle == window)
+            .map(|participant| participant.role)
+    };
+    assert_eq!(session_role(&ledger).as_deref(), Some("architect"));
+    let refused = ledger
+        .create_task(project.id, &follow("architect"))
+        .expect_err("its member holds the role no more");
+    assert_eq!(
+        (refused.code(), refused.to_string()),
+        (
+            Some("follow-up-of-another-role"),
+            "T-1 is an architect's task, and @daedalus is no architect now: an architect's task starts in a new window: leave out --after".to_owned()
+        )
+    );
+    // And a follow-up that asks for no role continues the window, as it did.
+    ledger
+        .create_task(
+            project.id,
+            &NewTask {
+                pool: None,
+                ..follow("architect")
+            },
+        )
+        .expect("the window's own next step");
+    assert_eq!(session_role(&ledger).as_deref(), Some("architect"));
 }

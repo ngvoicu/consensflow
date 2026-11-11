@@ -230,7 +230,7 @@ fn conduct(
             &mut scene.read,
             &mut scene.read_at_result,
             &step,
-            &tasks,
+            &work_of(&current),
             workspace,
         )?;
         match step {
@@ -300,18 +300,43 @@ pub(crate) fn tasks_of(board: &Value) -> Vec<&Value> {
         .collect()
 }
 
-/// Whether the first worker task of a board, the lowest number that is work
-/// ([`crate::measure::is_work_pool`]: a worker's or a frontend designer's), has its
-/// result in: done, or accepted already.
-fn first_result_in(tasks: &[&Value]) -> bool {
-    tasks
-        .iter()
-        .filter(|task| crate::measure::is_work_pool(task["pool"].as_str()))
+/// The cards of `board` that are work ([`crate::measure::is_work_role`]: a worker's or a
+/// frontend designer's), each by the role it is for as the measure reads it: its pool, else
+/// the role of the lane that has it, a window's being the one it began for (T-1453). An open
+/// card with no pool says no role, and is work.
+pub(crate) fn work_of(board: &Value) -> Vec<&Value> {
+    let in_lanes = board["lanes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|lane| {
+            lane["tasks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(move |card| (card, lane["role"].as_str()))
+        });
+    let open = board["open"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|card| (card, None));
+    in_lanes
+        .chain(open)
+        .filter(|(card, lane)| crate::measure::is_work_role(card["pool"].as_str().or(*lane)))
+        .map(|(card, _)| card)
+        .collect()
+}
+
+/// Whether the first worker task of a board, the lowest number of its `work`
+/// ([`work_of`]), has its result in: done, or accepted already.
+fn first_result_in(work: &[&Value]) -> bool {
+    work.iter()
         .min_by_key(|task| task["number"].as_i64().unwrap_or(i64::MAX))
         .is_some_and(|task| matches!(task["state"].as_str(), Some("done" | "accepted")))
 }
 
-/// At a look at the board, whose tasks are `tasks`, where the owner's next step is
+/// At a look at the board, whose work is `work` ([`work_of`]), where the owner's next step is
 /// `step`: the files the scenario reads, as they are in `workspace`, kept in `read` as
 /// the first worker task's result left them; once, and `kept` says it was. They are
 /// read as the owner is about to say the next thing, which is the scenario's next step
@@ -322,10 +347,10 @@ fn keep_at_result(
     read: &mut BTreeMap<String, FileRead>,
     kept: &mut bool,
     step: &Step,
-    tasks: &[&Value],
+    work: &[&Value],
     workspace: &Path,
 ) -> Result {
-    if *kept || !matches!(step, Step::Next(FollowUp::Say(_))) || !first_result_in(tasks) {
+    if *kept || !matches!(step, Step::Next(FollowUp::Say(_))) || !first_result_in(work) {
         return Ok(());
     }
     for (file, seen) in read.iter_mut() {

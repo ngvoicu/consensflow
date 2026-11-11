@@ -75,9 +75,11 @@ runs = ["rest-engine-text-goldens-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''Your result is the final message of your turn: ConsensFlow collects it when
+find = '''<!-- worker: result -->
+Your result is the final message of your turn: ConsensFlow collects it when
 you finish and delivers it to whoever asked.'''
-replace = '''Your result is a one-line summary of your turn: ConsensFlow collects it when
+replace = '''<!-- worker: result -->
+Your result is a one-line summary of your turn: ConsensFlow collects it when
 you finish and delivers it to whoever asked.'''
 
 [[plant]]
@@ -87,8 +89,10 @@ runs = ["rest-engine-text-goldens-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = "Your answer is the final message of your turn: ConsensFlow collects it when you"
-replace = "Your answer is a one-line summary of your turn: ConsensFlow collects it when you"
+find = """<!-- advisor: result -->
+Your answer is the final message of your turn: ConsensFlow collects it when you"""
+replace = """<!-- advisor: result -->
+Your answer is a one-line summary of your turn: ConsensFlow collects it when you"""
 
 [[plant]]
 name = "held-rest: the reviewer's card says its findings are a one-line summary of its turn"

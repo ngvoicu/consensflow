@@ -1,8 +1,10 @@
 # The four roles of spec new-roles (FD-04, T-1441): the frontend designer, the architect, the
 # researcher and the integrator, each a row of `crates/cf-ledger/src/roles.rs` with no tier,
-# held by migration 0036's checks. Each plant breaks one role's pool, its pick, the tier rule
+# held by their migration's checks. Each plant breaks one role's pool, its pick, the tier rule
 # a member of roles with no tier is held to, or makes one role's text another's, and the test
-# written for it fails.
+# written for it fails. Since the review T-1453: what a task asks of the staff is refused, not
+# dropped, by the ledger and sent whole by the CLI; a follow-up for a role goes only to a window
+# of it; and the evals class a task by the role it is for, its window's where it has no pool.
 #
 # Every name holds `new roles`, so `npm run plants:daemon -- "new roles"` runs them all.
 
@@ -16,6 +18,8 @@ nr-engine-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test
 nr-engine-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles::"]
 nr-engine-skill = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "skill::"]
 nr-evals-measure = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "measure", "rounds::"]
+nr-evals-review-loops = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "review_loops"]
+nr-evals-card = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "run::card::"]
 
 # Pools.
 
@@ -262,8 +266,8 @@ runs = ["nr-evals-measure"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/measure/metrics.rs"
-find = '''    matches!(pool, None | Some("worker" | "frontend"))'''
-replace = '''    matches!(pool, None | Some("worker" | "frontend" | "architect"))'''
+find = '''    matches!(role, None | Some("worker" | "frontend"))'''
+replace = '''    matches!(role, None | Some("worker" | "frontend" | "architect"))'''
 
 [[plant]]
 name = "new roles: a frontend designer's task is not counted as work"
@@ -272,5 +276,167 @@ runs = ["nr-evals-measure"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/measure/metrics.rs"
-find = '''    matches!(pool, None | Some("worker" | "frontend"))'''
-replace = '''    matches!(pool, None | Some("worker"))'''
+find = '''    matches!(role, None | Some("worker" | "frontend"))'''
+replace = '''    matches!(role, None | Some("worker"))'''
+
+# What a task asks of the staff (the review T-1453).
+
+[[plant]]
+name = "new roles: a task that asks for two roles is taken as the first of them"
+meant = "a_task_that_asks_for_two_roles_is_refused_naming_each_and_one_alone_is_its_roles"
+runs = ["nr-daemon-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''    if let [_, _, ..] = asked.as_slice() {'''
+replace = '''    if let [_, _, _, _, _, _, _, _, _, _, ..] = asked.as_slice() {'''
+
+[[plant]]
+name = "new roles: a --self task that says --after is taken for one of them"
+meant = "a_follow_up_checks_its_words_and_its_lists_before_it_looks_for_the_task_and_never_its_tier"
+runs = ["nr-daemon-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''    if mine && after {'''
+replace = '''    if mine && after && request.is_empty() {'''
+
+[[plant]]
+name = "new roles: a --self task drops the role it asks for"
+meant = "a_role_or_a_tier_asked_beside_self_or_a_follow_up_or_a_tier_for_a_role_with_none_is_refused_in_its_words"
+runs = ["nr-daemon-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''        if let Some(switch) = role.and_then(|role| role.switch) {'''
+replace = '''        if let Some(switch) = role.and_then(|role| role.switch).filter(|_| request.is_empty()) {'''
+
+[[plant]]
+name = "new roles: a --self task drops its tier"
+meant = "a_role_or_a_tier_asked_beside_self_or_a_follow_up_or_a_tier_for_a_role_with_none_is_refused_in_its_words"
+runs = ["nr-daemon-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''        if let Some(switch) = tier_or_purpose {'''
+replace = '''        if let Some(switch) = tier_or_purpose.filter(|_| request.is_empty()) {'''
+
+[[plant]]
+name = "new roles: a tier for a new role with none is dropped"
+meant = "each_new_role_is_asked_for_by_its_field_and_refused_by_its_name_until_one_is_on_the_staff"
+runs = ["nr-daemon-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''    if let Some(role) = role.filter(|role| !role.tiered) {'''
+replace = '''    if let Some(role) = role.filter(|role| !role.tiered && role.id == "designer") {'''
+
+[[plant]]
+name = "new roles: a follow-up drops the tier said for it"
+meant = "a_role_or_a_tier_asked_beside_self_or_a_follow_up_or_a_tier_for_a_role_with_none_is_refused_in_its_words"
+runs = ["nr-daemon-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''    if let (true, Some(switch)) = (after, tier_or_purpose) {'''
+replace = '''    if let (true, Some(switch)) = (after && request.is_empty(), tier_or_purpose) {'''
+
+[[plant]]
+name = "new roles: a research follow-up goes to an architect's window"
+meant = "a_follow_up_for_a_role_goes_only_to_a_window_of_that_role_whose_member_still_holds_it"
+runs = ["nr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''    if window.role != asked.id {'''
+replace = '''    if window.role != asked.id && window.role == "worker" {'''
+
+[[plant]]
+name = "new roles: a follow-up for a role goes to a window whose member holds it no more"
+meant = "a_follow_up_for_a_role_goes_only_to_a_window_of_that_role_whose_member_still_holds_it"
+runs = ["nr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''    if !held.iter().any(|role| role == asked.id) {'''
+replace = '''    if held.is_empty() {'''
+
+[[plant]]
+name = "new roles: the task route sends a follow-up without the role it asks for"
+meant = "a_follow_up_for_a_role_is_taken_by_a_window_of_that_role_alone_and_refused_naming_both"
+runs = ["nr-daemon-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = '''                task.insert("pool".to_owned(), json!(role.id));'''
+replace = '''                let _ = role;'''
+
+[[plant]]
+name = "new roles: cf task add drops the tier said beside a role with none"
+meant = "every_switch_asked_goes_to_the_board_and_none_is_dropped_for_another"
+runs = ["nr-cf-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''    if let Some(tier) = tier {'''
+replace = '''    if let Some(tier) = tier.filter(|_| !untiered) {'''
+
+[[plant]]
+name = "new roles: cf task add sends the first role of two"
+meant = "every_switch_asked_goes_to_the_board_and_none_is_dropped_for_another"
+runs = ["nr-cf-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''    for field in switched.iter().filter_map(|role| role.field()) {'''
+replace = '''    for field in switched.iter().take(1).filter_map(|role| role.field()) {'''
+
+[[plant]]
+name = "new roles: cf task add says a --self task with a role is one the chief is already at"
+meant = "every_switch_asked_goes_to_the_board_and_none_is_dropped_for_another"
+runs = ["nr-cf-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''    let alone = switched.is_empty() && tier.is_none() && purpose.is_none() && after.is_none();'''
+replace = '''    let alone = after.is_none();'''
+
+[[plant]]
+name = "new roles: the evals read a task with no pool as no role"
+meant = "a_task_with_no_pool_is_the_role_its_window_began_for_in_the_rounds_and_the_tasks"
+runs = ["nr-evals-measure"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure/board.rs"
+find = '''pub(super) const ROLE_OF_TASK: &str = "COALESCE(t.pool, a.role)";'''
+replace = '''pub(super) const ROLE_OF_TASK: &str = "t.pool";'''
+
+[[plant]]
+name = "new roles: a researcher's long result is the worker's longest"
+meant = "the_longest_result_of_a_worker_is_of_work_alone"
+runs = ["nr-evals-measure"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure.rs"
+find = '''            worker: longest_result(&mine, |row| row.task.is_work()),'''
+replace = '''            worker: longest_result(&mine, |row| !row.pool_is("advisor") && !row.pool_is("reviewer")),'''
+
+[[plant]]
+name = "new roles: an architect's follow-up after two blocking reviews is a change of the work"
+meant = "a_follow_up_for_a_window_of_another_role_after_the_second_blocking_review_is_no_change_of_the_work"
+runs = ["nr-evals-review-loops"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure/metrics.rs"
+find = '''        is_work_role(self.pool.as_deref().or(self.role.as_deref()))'''
+replace = '''        is_work_role(self.pool.as_deref())'''
+
+[[plant]]
+name = "new roles: a card in an architect's lane is taken for T-1's result"
+meant = "t_1_s_result_is_in_once_the_first_worker_task_is_done_or_accepted"
+runs = ["nr-evals-card"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/card.rs"
+find = '''is_work_role(card["pool"].as_str().or(*lane)))'''
+replace = '''is_work_role(card["pool"].as_str()))'''

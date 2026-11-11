@@ -13,7 +13,7 @@ use crate::model::{
     self, title_of, LedgerError, ACTIVE_TASK_STATES, COORDINATOR_ROLES, MAX_BODY, PURPOSES,
 };
 use crate::queue::{queue, send, Queued, Sent};
-use crate::roles::{self, a_pool, pool_name};
+use crate::roles::{self, a_pool, pool_name, Role};
 use crate::staff::{
     follow_up_session, has_members_of_tier, holders_of_tier, nearest_tier, require_free,
     require_member_row, start_session, Giving,
@@ -109,6 +109,145 @@ impl NewTask {
     }
 }
 
+/// The one role a request to give a task asks for (`POST /api/tasks`, whose fields are the
+/// switches of `cf task add`), or none (the worker's task, or a follow-up's or the chief's own
+/// that asks for none), checked before anything is looked for. What it asks beside it is
+/// refused in words that name what was asked, never dropped for something else (T-1453): two
+/// roles; `--self` with `--after`, with a role, a tier or a purpose; a tier or a purpose for a
+/// role with no tier; a tier or a purpose for a follow-up, which goes to a window whose member
+/// keeps its own. A role asked for a follow-up is held to the window's in [`create_task`].
+pub fn asked_role(request: &Map<String, Value>) -> Result<Option<&'static Role>, LedgerError> {
+    let on = |field: &str| request.get(field) == Some(&Value::Bool(true));
+    let given = |field: &str| request.get(field).is_some_and(|value| !value.is_null());
+    let refused =
+        |code: &'static str, words: String| Err(LedgerError::refused_with(code, words, 400));
+    let asked = roles::asked(on);
+    if let [_, _, ..] = asked.as_slice() {
+        let names: Vec<String> = asked.iter().map(|role| role.a_name()).collect();
+        return refused(
+            "two-roles",
+            format!(
+                "a task is for one role, and this one asks for {}: add a task for each",
+                said_together(&names)
+            ),
+        );
+    }
+    let role = asked.first().copied();
+    // The switch of what is asked beside the rest, as the chief typed it.
+    let tier_or_purpose = if given("tier") {
+        Some("--tier")
+    } else if given("purpose") {
+        Some("--purpose")
+    } else {
+        None
+    };
+    let mine = on("self");
+    let after = request.contains_key("after");
+    if mine && after {
+        return refused(
+            "self-and-after",
+            "a --self task is your own step, and --after gives the next step to another task's window: leave out one of them".to_owned(),
+        );
+    }
+    if mine {
+        if let Some(switch) = role.and_then(|role| role.switch) {
+            return refused(
+                "self-takes-no-role",
+                format!("a --self task is your own step: leave out {switch}"),
+            );
+        }
+        if let Some(switch) = tier_or_purpose {
+            return refused(
+                "self-takes-no-tier",
+                format!("a --self task is your own step: leave out {switch}"),
+            );
+        }
+    }
+    if let Some(role) = role.filter(|role| !role.tiered) {
+        if given("tier") {
+            return refused(
+                "no-tier-for-role",
+                format!("{} task has no tier: leave out --tier", role.a_names()),
+            );
+        }
+        if given("purpose") {
+            return refused(
+                "no-tier-for-role",
+                format!(
+                    "{} task has no tier, and so no purpose: leave out --purpose",
+                    role.a_names()
+                ),
+            );
+        }
+    }
+    if let (true, Some(switch)) = (after, tier_or_purpose) {
+        return refused(
+            "follow-up-takes-no-tier",
+            format!("a follow-up goes to the window of the task it follows, whose member keeps its own tier: leave out {switch}"),
+        );
+    }
+    Ok(role)
+}
+
+/// `a`, `a and b`, `a, b and c`.
+fn said_together(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => one.clone(),
+        [first @ .., last] => format!("{} and {last}", first.join(", ")),
+    }
+}
+
+/// A follow-up that asks for role `asked` goes to the window of T-`after` only where that
+/// window began for `asked` and its member still holds it (T-1453): a window's role is the one
+/// its session began for (`participant.role` of the session, which nothing changes after), and
+/// every follow-up it takes is the next step of that work. A T-`after` with no window, or one of
+/// no session, is left to [`follow_up_session`], which refuses it in its words.
+fn require_window_of(
+    store: &Store,
+    project_id: i64,
+    after: i64,
+    asked: &Role,
+) -> Result<(), LedgerError> {
+    let previous = store.task_row(project_id, after)?;
+    let Some(window) = previous
+        .assignee_id
+        .map(|id| store.participant_row(id))
+        .transpose()?
+    else {
+        return Ok(());
+    };
+    let Some(member_id) = window.member_id else {
+        return Ok(());
+    };
+    let whose =
+        roles::find(&window.role).map_or_else(|| format!("a {}'s", window.role), Role::a_names);
+    let refused = |words: String| {
+        Err(LedgerError::refused_with(
+            "follow-up-of-another-role",
+            words,
+            409,
+        ))
+    };
+    if window.role != asked.id {
+        return refused(format!(
+            "T-{after} is {whose} task; {} task starts in a new window: leave out --after",
+            asked.a_names()
+        ));
+    }
+    let member = store.participant_row(member_id)?;
+    let held: Vec<String> = serde_json::from_str(&member.roles)?;
+    if !held.iter().any(|role| role == asked.id) {
+        return refused(format!(
+            "T-{after} is {whose} task, and @{} is no {} now: {} task starts in a new window: leave out --after",
+            member.handle,
+            asked.name,
+            asked.a_names()
+        ));
+    }
+    Ok(())
+}
+
 fn invalid_pool(pool: &str) -> LedgerError {
     LedgerError::refused(
         "invalid-pool",
@@ -189,6 +328,10 @@ pub(crate) fn create_task(
         let mut behind = Vec::new();
         let assignee = match (request.after, &request.to) {
             (Some(after), _) => {
+                // A role asked for it is the window's own, or the follow-up starts nowhere.
+                if let Some(asked) = request.pool.as_deref().and_then(roles::find) {
+                    require_window_of(store, project_id, after, asked)?;
+                }
                 let follow_up = follow_up_session(store, project_id, after)?;
                 behind = follow_up.behind;
                 Some(follow_up.session)

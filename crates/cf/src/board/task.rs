@@ -150,14 +150,15 @@ fn add(
     if words.asks_for_help() {
         return Ok(help_of(&["task", "add"]));
     }
-    // The role asked for by its switch, a role with no tier first (`--design`): its task
-    // takes no tier, no purpose and no other role.
-    let switched = |role: &&Role| role.switch.is_some_and(|switch| words.on(switch));
-    let untiered = roles::all()
+    // Every role asked for by its switch. The board takes the task or refuses it in words that
+    // name what was asked: `cf` drops none of it for another (two roles, a role or a tier
+    // beside --self or --after, a tier for a role with none; T-1453).
+    let switched: Vec<&Role> = roles::all()
         .iter()
-        .filter(|role| !role.tiered)
-        .find(switched);
+        .filter(|role| role.switch.is_some_and(|switch| words.on(switch)))
+        .collect();
     let tier = words.value("--tier")?;
+    let purpose = words.value("--purpose")?;
     let after = words
         .value("--after")?
         .map(|after| task_number(Some(after)))
@@ -167,13 +168,16 @@ fn add(
     let mine = words.on("--self");
     // Your own work needs no board while you are at it; on the board it is a
     // wake-up: the brief comes back to this window when what it waits for is accepted.
-    if mine && needs.is_none() && before.is_none() {
+    // A role, a tier or a follow-up asked beside it is the board's to refuse in its words.
+    let alone = switched.is_empty() && tier.is_none() && purpose.is_none() && after.is_none();
+    if mine && alone && needs.is_none() && before.is_none() {
         return Err(Failure::Usage(
             "you are already at it: do it now, or give it --needs T-3 to be woken when T-3 is accepted"
                 .into(),
         ));
     }
-    if tier.is_none() && after.is_none() && !mine && untiered.is_none() {
+    let untiered = switched.iter().any(|role| !role.tiered);
+    if tier.is_none() && after.is_none() && !mine && !untiered {
         return Err(Failure::Usage(ADD_USAGE.into()));
     }
     let brief = require_text(brief::brief_of(&words, given, input)?, ADD_USAGE)?;
@@ -181,26 +185,18 @@ fn add(
     let mut body = Map::new();
     if mine {
         body.insert("self".into(), true.into());
-    } else if let Some(after) = after {
+    }
+    if let Some(after) = after {
         body.insert("after".into(), after.into());
-    } else if let Some(field) = untiered.and_then(Role::field) {
+    }
+    if let Some(tier) = tier {
+        body.insert("tier".into(), tier.into());
+    }
+    for field in switched.iter().filter_map(|role| role.field()) {
         body.insert(field.into(), true.into());
-    } else {
-        if let Some(tier) = tier {
-            body.insert("tier".into(), tier.into());
-        }
-        // Each role with tiers asked for: the board ranks them.
-        for field in roles::all()
-            .iter()
-            .filter(|role| role.tiered)
-            .filter(switched)
-            .filter_map(Role::field)
-        {
-            body.insert(field.into(), true.into());
-        }
-        if let Some(purpose) = words.value("--purpose")? {
-            body.insert("purpose".into(), purpose.into());
-        }
+    }
+    if let Some(purpose) = purpose {
+        body.insert("purpose".into(), purpose.into());
     }
     if let Some(needs) = &needs {
         body.insert("needs".into(), json!(needs));
@@ -1184,9 +1180,12 @@ and 2 idle sessions (`cf task list --all`)";
                 said,
                 "T-3 is on the board for a field scout; it starts in a new window of one, and its result arrives in your inbox.\nT-3: sent 11 characters, ending \"Look around\"."
             );
-            // A tier said beside it is not sent, as with --design.
+            // A tier said beside it is sent, for the board to refuse in its name (T-1453).
             let (posted, _) = added(&["--scout", "--tier", "light", "Look"], &answer);
-            assert_eq!(posted, Some(json!({ "scout": true, "body": "Look" })));
+            assert_eq!(
+                posted,
+                Some(json!({ "scout": true, "tier": "light", "body": "Look" }))
+            );
         });
     }
 
@@ -1215,13 +1214,100 @@ and 2 idle sessions (`cf task list --all`)";
                 said,
                 format!("T-3 is on the board for {named}; it starts in a new window of one, and its result arrives in your inbox.\nT-3: sent 5 characters, ending \"Do it\".")
             );
+            // A tier given with it goes to the board, which refuses it in the role's name: `cf`
+            // drops nothing it was asked.
             let (posted, _) = added(&[switch, "--tier", "light", "Do"], &answer);
             assert_eq!(
                 posted,
-                Some(json!({ field: true, "body": "Do" })),
-                "{switch} takes no tier"
+                Some(json!({ field: true, "tier": "light", "body": "Do" })),
+                "{switch} with a tier"
             );
         }
+    }
+
+    /// The review of T-1441 (T-1453): `cf task add` sent `--self` or `--after` before any role,
+    /// took one role with no tier and let the rest go, and dropped a tier and a purpose given
+    /// beside a role with none; the chief was told of a task it had not asked for. Every switch
+    /// asked goes to the board as it was asked, and the board takes the task or refuses it in
+    /// words that name what it was asked: the old five roles' switches as the four new ones.
+    #[test]
+    fn every_switch_asked_goes_to_the_board_and_none_is_dropped_for_another() {
+        let answer = json!({
+            "task": { "number": 9, "state": "queued", "assignee": "daedalus-wren",
+                "requester": "chief", "title": "Do it", "blockedBy": [], "pool": null, "tier": null },
+            "message": 4, "gated": false,
+        });
+        let mut dropped = Vec::new();
+        for (words, sent) in [
+            (
+                &["--research", "--after", "T-3", "Do it"][..],
+                json!({ "research": true, "after": 3, "body": "Do it" }),
+            ),
+            (
+                &["--advice", "--after", "T-3", "Do it"],
+                json!({ "advice": true, "after": 3, "body": "Do it" }),
+            ),
+            (
+                &["--research", "--self", "--needs", "T-3", "Do it"],
+                json!({ "research": true, "self": true, "needs": [3], "body": "Do it" }),
+            ),
+            (
+                &["--review", "--self", "--needs", "T-3", "Do it"],
+                json!({ "review": true, "self": true, "needs": [3], "body": "Do it" }),
+            ),
+            (
+                &["--frontend", "--architect", "Do it"],
+                json!({ "frontend": true, "architect": true, "body": "Do it" }),
+            ),
+            (
+                &["--advice", "--review", "--tier", "standard", "Do it"],
+                json!({ "advice": true, "review": true, "tier": "standard", "body": "Do it" }),
+            ),
+            (
+                &[
+                    "--frontend",
+                    "--tier",
+                    "critical",
+                    "--purpose",
+                    "design",
+                    "Do it",
+                ],
+                json!({ "frontend": true, "tier": "critical", "purpose": "design", "body": "Do it" }),
+            ),
+            (
+                &["--design", "--tier", "standard", "Do it"],
+                json!({ "design": true, "tier": "standard", "body": "Do it" }),
+            ),
+            (
+                &["--self", "--after", "T-3", "Do it"],
+                json!({ "self": true, "after": 3, "body": "Do it" }),
+            ),
+            (
+                &["--tier", "complex", "--after", "T-3", "Do it"],
+                json!({ "tier": "complex", "after": 3, "body": "Do it" }),
+            ),
+            // A role with --self and nothing to wait for is the board's to refuse in the role's
+            // name, not "you are already at it".
+            (
+                &["--research", "--self", "Do it"],
+                json!({ "research": true, "self": true, "body": "Do it" }),
+            ),
+        ] {
+            let api = scripted(vec![reply(201, answer.clone())]);
+            let given: Vec<OsString> = words.iter().map(OsString::from).collect();
+            let typed: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
+            let said = add(
+                &typed,
+                &given,
+                &Board::new(Some(&api.url), "tok"),
+                &mut std::io::empty(),
+            );
+            let posted = api.received().into_iter().next().and_then(|got| got.json());
+            if posted.as_ref() != Some(&sent) {
+                dropped.push(format!("{words:?} sent {posted:?}, said {:?}", said.err()));
+            }
+        }
+        assert_eq!(dropped, Vec::<String>::new());
     }
 
     /// A chief that read of a free member after every task it added took a member

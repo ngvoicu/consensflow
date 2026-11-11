@@ -48,6 +48,11 @@ impl Role {
         format!("{} {}", self.article, self.name)
     }
 
+    /// Whose a task of it is: `an architect's`, `a worker's`.
+    pub fn a_names(&self) -> String {
+        format!("{}'s", self.a_name())
+    }
+
     /// The name as a label begins it: `Image designer`.
     pub fn label(&self) -> String {
         let mut letters = self.name.chars();
@@ -221,20 +226,21 @@ pub fn needs_an_image_agent<S: AsRef<str>>(roles: &[S]) -> bool {
         .any(|role| find(role.as_ref()).is_some_and(|role| role.image_agent))
 }
 
-/// The role a task asks for by the fields that are `on`: a role with no tier before one
-/// with tiers (`--design` stands alone, whatever else is asked), then the table's order;
-/// the role with no switch, the worker, where none is on.
-pub fn asked(on: impl Fn(&str) -> bool) -> &'static Role {
-    let table = all();
-    let flagged = |tiered: bool| {
-        table
-            .iter()
-            .filter(move |role| role.tiered == tiered)
-            .find(|role| role.field().is_some_and(&on))
-    };
-    flagged(false)
-        .or_else(|| flagged(true))
-        .or_else(|| table.iter().find(|role| role.switch.is_none()))
+/// The roles a task asks for by the fields that are `on`, in the table's order: none where
+/// none is on, which is the worker's task; more than one is a task the ledger refuses
+/// (`tasks::asked_role`), never one of them taken for the others.
+pub fn asked(on: impl Fn(&str) -> bool) -> Vec<&'static Role> {
+    all()
+        .iter()
+        .filter(|role| role.field().is_some_and(&on))
+        .collect()
+}
+
+/// The role a task is for where it asks for none: the one with no switch, the worker.
+pub fn unasked() -> &'static Role {
+    all()
+        .iter()
+        .find(|role| role.switch.is_none())
         .unwrap_or(&WORKER)
 }
 
@@ -458,23 +464,32 @@ mod tests {
     }
 
     #[test]
-    fn a_task_asks_for_the_image_designer_before_anything_else_then_advice_review_and_test() {
-        let asked_by = |fields: &[&str]| asked(|field| fields.contains(&field)).id;
-        assert_eq!(asked_by(&[]), "worker");
-        assert_eq!(asked_by(&["tier", "purpose"]), "worker");
+    fn a_task_asks_for_every_role_whose_field_is_on_in_the_tables_order_and_the_worker_for_none() {
+        let asked_by = |fields: &[&str]| -> Vec<&str> {
+            asked(|field| fields.contains(&field))
+                .into_iter()
+                .map(|role| role.id)
+                .collect()
+        };
+        assert_eq!(asked_by(&[]), Vec::<&str>::new());
+        assert_eq!(
+            asked_by(&["tier", "purpose", "self", "after"]),
+            Vec::<&str>::new()
+        );
+        assert_eq!(unasked().id, "worker");
         assert_eq!(
             asked_by(&["test", "review", "advice", "design"]),
-            "designer"
+            ["advisor", "reviewer", "tester", "designer"]
         );
-        assert_eq!(asked_by(&["test", "review", "advice"]), "advisor");
-        assert_eq!(asked_by(&["test", "review"]), "reviewer");
-        assert_eq!(asked_by(&["test"]), "tester");
-        // Each of the four untiered roles is asked for by its own field, before any with tiers.
-        assert_eq!(asked_by(&["frontend"]), "frontend");
-        assert_eq!(asked_by(&["architect", "advice"]), "architect");
-        assert_eq!(asked_by(&["research", "review"]), "researcher");
-        assert_eq!(asked_by(&["integrate", "test"]), "integrator");
-        assert_eq!(asked_by(&["integrate"]), "integrator");
+        assert_eq!(asked_by(&["test"]), ["tester"]);
+        assert_eq!(asked_by(&["frontend"]), ["frontend"]);
+        assert_eq!(asked_by(&["architect", "advice"]), ["architect", "advisor"]);
+        assert_eq!(
+            asked_by(&["integrate", "research"]),
+            ["researcher", "integrator"]
+        );
+        assert_eq!(ARCHITECT.a_names(), "an architect's");
+        assert_eq!(WORKER.a_names(), "a worker's");
     }
 
     #[test]
@@ -512,7 +527,7 @@ mod tests {
         ];
         seam::with_table(&SIX, || {
             assert_eq!(ids(), ["worker", "sixth"]);
-            assert_eq!(asked(|field| field == "sixth").id, "sixth");
+            assert_eq!(asked(|field| field == "sixth")[0].id, "sixth");
             assert!(!is_role("designer"));
             assert!(std::thread::spawn(|| is_role("designer")).join().unwrap());
         });

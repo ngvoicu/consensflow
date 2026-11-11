@@ -1,22 +1,32 @@
-//! What migration 0036 widened (spec new-roles, FD-04): the four roles it added to the role
-//! check of `participant` and the pool check of `task`, which Node's checks never named. The
-//! players take them out of the schema's text before 0012's tester, so what is left is the
-//! text Node's ledger had.
+//! What the new roles' migration widened (spec new-roles, FD-04; 0036 as written): the four
+//! roles it added to the role check of `participant` and the pool check of `task`, which Node's
+//! checks never named. The players take them out of the schema's text before 0012's tester, so
+//! what is left is the text Node's ledger had.
 
-/// The four roles as migration 0036 wrote them into both checks, after the image designer,
+/// The four roles as the new roles' migration wrote them into both checks, after the image designer,
 /// and the nothing Node's checks had in their place.
 pub(super) const IN_THE_CHECKS: (&str, &str) =
     (", 'frontend', 'architect', 'researcher', 'integrator'", "");
 
-/// The tables migration 0036 rebuilt.
+/// The tables the new roles' migration rebuilt.
 const REBUILT: [&str; 2] = ["participant", "task"];
 
-/// What migration 0036 made undone in the ledger `db` holds: the two tables rebuilt with the
+/// The version the new roles' migration brings: its number in the list, read from the list,
+/// so that a migration landed before it (and its file renamed after) moves no test that reads
+/// it. 0 where no migration adds the four roles.
+pub fn new_roles_version() -> usize {
+    crate::schema::MIGRATIONS
+        .iter()
+        .position(|sql| sql.contains(IN_THE_CHECKS.0))
+        .map_or(0, |at| at + 1)
+}
+
+/// What the new roles' migration made undone in the ledger `db` holds: the two tables rebuilt with the
 /// checks of five roles, every row, index and sequence as it was, so that a test can take a
-/// ledger this build wrote for one a build of migration 0035 left, whose version it sets, and
+/// ledger this build wrote for one a build of the migration before it left, whose version it sets, and
 /// which migrates to this build's again. A row of one of the four roles makes it fail, as the
 /// older build's check would.
-pub fn undo_migration_0036(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+pub fn undo_new_roles_migration(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     // Dropping a table others refer to would cascade through them with foreign keys on, as
     // the ledger's migrations turn them off for the same reason.
     let keys: i64 = db.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
@@ -69,11 +79,10 @@ mod tests {
     use super::super::hold_apart_what_node_never_had_in_its_schema;
     use crate::schema::{migrate, MIGRATIONS};
 
-    /// Where migration 0036 is in the list.
+    /// Where the new roles' migration is in the list.
     fn at() -> usize {
-        MIGRATIONS
-            .iter()
-            .position(|sql| sql.contains(super::IN_THE_CHECKS.0))
+        super::new_roles_version()
+            .checked_sub(1)
             .expect("the migration that adds the four roles")
     }
 
@@ -87,8 +96,8 @@ mod tests {
     }
 
     #[test]
-    fn migration_0036_widens_the_two_checks_and_nothing_else_of_the_schema() {
-        assert_eq!(at(), 35, "migration 0036");
+    fn the_new_roles_migration_widens_the_two_checks_and_nothing_else_of_the_schema() {
+        assert!(at() >= 35, "after 0035, the last before it");
         assert_eq!(
             MIGRATIONS[at()].matches(super::IN_THE_CHECKS.0).count(),
             2,
@@ -107,15 +116,16 @@ mod tests {
     }
 
     #[test]
-    fn undoing_migration_0036_leaves_the_schema_0035_left_and_the_ledger_migrates_again() {
+    fn undoing_the_new_roles_migration_leaves_the_schema_before_it_and_the_ledger_migrates_again() {
         let before = rusqlite::Connection::open_in_memory().unwrap();
         migrate(&before, &MIGRATIONS[..at()]).unwrap();
         let db = rusqlite::Connection::open_in_memory().unwrap();
         migrate(&db, &MIGRATIONS[..=at()]).unwrap();
         let migrated = schema(&db);
-        super::undo_migration_0036(&db).unwrap();
+        super::undo_new_roles_migration(&db).unwrap();
         assert_eq!(schema(&db), schema(&before));
-        db.execute_batch("PRAGMA user_version = 35").unwrap();
+        db.execute_batch(&format!("PRAGMA user_version = {}", at()))
+            .unwrap();
         migrate(&db, &MIGRATIONS[..=at()]).unwrap();
         assert_eq!(schema(&db), migrated);
     }
@@ -141,7 +151,7 @@ mod tests {
                 "{ours}"
             );
             let mut dump = json!({
-                "userVersion": 36,
+                "userVersion": super::new_roles_version(),
                 "schema": [{ "name": table, "sql": ours }],
                 "tables": {},
             });

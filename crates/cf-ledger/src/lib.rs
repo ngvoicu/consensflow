@@ -76,6 +76,8 @@ pub use projects::{
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
 pub use specs::SpecsChange;
 pub use staff::MemberEdit;
-pub use tasks::{reopen_or_accept, window_closed, NewTask, RESUME_WORDS, SAME_ERROR_WITHIN_MS};
+pub use tasks::{
+    asked_role, reopen_or_accept, window_closed, NewTask, RESUME_WORDS, SAME_ERROR_WITHIN_MS,
+};
 pub use tasks::{resumed_in_vain, NEVER_BEGAN};
 pub use wake_ups::{NewWakeUp, WakeUpSetting, WakeUpUnit, DEFAULT_WAKE_UP_TEXT, WAKE_UP_FLOOR_MS};

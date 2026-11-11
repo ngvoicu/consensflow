@@ -27,7 +27,7 @@ pub(crate) use finishing::{
     left_running, note_stranded_waits, record_finished, record_result, release_ready, reopen_task,
     tell_stranded_waiters, tell_waiting_for_failed, waiting_for_it_of, Ending,
 };
-pub use giving::NewTask;
+pub use giving::{asked_role, NewTask};
 pub(crate) use giving::{
     assign_task, check_release, create_task, release_inside, release_task, retier_open_task,
 };

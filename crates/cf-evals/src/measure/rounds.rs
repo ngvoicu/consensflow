@@ -9,16 +9,18 @@
 
 use rusqlite::Connection;
 
+use super::board::ROLE_OF_TASK;
 use super::metrics::{Reopen, Rounds};
 use crate::Result;
 
 /// The rounds of every task the participant `chief` of `project` asked for, by number.
 pub(super) fn rounds(db: &Connection, project: i64, chief: &str) -> Result<Vec<Rounds>> {
-    let mut tasks = db.prepare(
-        "SELECT t.id, t.number, t.pool, t.state, t.created_at, t.body
+    let mut tasks = db.prepare(&format!(
+        "SELECT t.id, t.number, t.pool, t.state, t.created_at, t.body, {ROLE_OF_TASK} AS role
          FROM task t JOIN participant q ON q.id = t.requester_id
-         WHERE t.project_id = ?1 AND q.handle = ?2 ORDER BY t.number",
-    )?;
+         LEFT JOIN participant a ON a.id = t.assignee_id
+         WHERE t.project_id = ?1 AND q.handle = ?2 ORDER BY t.number"
+    ))?;
     let mut results = db.prepare(
         "SELECT created_at FROM message
          WHERE task_id = ?1 AND kind = 'result' AND state != 'cancelled' ORDER BY id",
@@ -45,6 +47,7 @@ pub(super) fn rounds(db: &Connection, project: i64, chief: &str) -> Result<Vec<R
                 Rounds {
                     number: row.get(1)?,
                     pool: row.get(2)?,
+                    role: row.get(6)?,
                     state: row.get(3)?,
                     created_at: row.get(4)?,
                     brief: row.get(5)?,
