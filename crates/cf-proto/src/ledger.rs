@@ -103,7 +103,7 @@ pub struct ProjectView {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub meeting: Option<String>,
     /// The rules the human wrote for the project's staff, which every member's
-    /// window is given after its role, and the chief's as what every member has:
+    /// window is given after its role, and the chief's as what every window opens with:
     /// said only when there are some, so a project that has none reads as it
     /// always did.
     #[serde(skip_serializing_if = "Option::is_none")]

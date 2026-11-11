@@ -1,6 +1,6 @@
 //! The rules the human writes for a project's staff, in Project settings: plain
 //! text every member window of the project is given after its role text, and the
-//! chief's after its own, as what every member already has (the engine's
+//! chief's after its own, as what every window opens with (the engine's
 //! `roles::staff_rules`). They are kept on the project's row and logged when they
 //! change (`project.staff_rules`, with what they were and what they became). Only
 //! the page writes them: no route of the agents' API reaches them, so no `cf`

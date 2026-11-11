@@ -151,7 +151,7 @@ pub use cf_harness::contract::STAFF_RULES_HEADING;
 const STAFF_RULES_FOR_A_MEMBER: &str = "Every member of this project's staff is given these rules after its role, as you are. Follow them in every task, as you follow your role.";
 
 /// What the chief's text says before the same rules.
-const STAFF_RULES_FOR_THE_CHIEF: &str = "Every member of your staff already has these rules in its instructions, after its role. They are the human's, written in Project settings: to change one, propose it to the human here.";
+const STAFF_RULES_FOR_THE_CHIEF: &str = "Every window of your staff opens with these rules in its instructions, after its role. They are the human's, written in Project settings: to change one, propose it to the human here.";
 
 /// `instructions`, the text a window of `role` starts with, with the project's
 /// rules for its staff after it, under their own heading, where the human wrote

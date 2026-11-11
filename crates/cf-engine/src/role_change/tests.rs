@@ -272,8 +272,8 @@ fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
     );
     assert_eq!(
         rows_while(true, &read),
-        151,
-        "docs: read to 151 rows with specs on"
+        152,
+        "docs: read to 152 rows with specs on"
     );
     assert_eq!(
         rows_while(false, &read),
@@ -301,8 +301,8 @@ fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
     );
     assert_eq!(
         rows_with_the_most(false),
-        38,
-        "docs: read to 38 rows without specs and the most rules"
+        39,
+        "docs: read to 39 rows without specs and the most rules"
     );
 }
 

@@ -2,7 +2,7 @@ use serde_json::json;
 
 use super::*;
 
-const SECTION_TEXT: &str = "\n## This project's specs\n\nSpecs are on in this project. Plan work that is big enough for phases as a spec, with the Specmint skill `specmint-tdd`: its SKILL.md is at /home/me/.consensflow/integrations/specmint/claude/tdd-0123abcd/.claude/skills/specmint-tdd/SKILL.md, and the files it names are beside it; read it before you plan. Your specs and their registry are in `plans/specs`: use this copy of the skill and no other; its paths name it.\n";
+const SECTION_TEXT: &str = "\n## This project's specs\n\nSpecs are on in this project. Plan specs with the Specmint skill `specmint-tdd`: its SKILL.md is at /home/me/.consensflow/integrations/specmint/claude/tdd-0123abcd/.claude/skills/specmint-tdd/SKILL.md, and the files it names are beside it; read it before you plan. Your specs and their registry are in `plans/specs`: use this copy of the skill and no other; its paths name it.\n";
 
 #[test]
 fn a_text_with_specs_off_says_nothing_of_them_and_one_that_says_a_word_of_them_is_refused() {

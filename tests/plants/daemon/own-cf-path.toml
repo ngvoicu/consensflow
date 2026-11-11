@@ -66,8 +66,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '    {{cf}} ask "…"                    a question to the chief; then end your turn'
-replace = '    cf ask "…"                    a question to the chief; then end your turn'
+find = '    {{cf}} ask "…"                    a question to the chief'
+replace = '    cf ask "…"                    a question to the chief'
 
 [[plant]]
 name = "own cf path: a worker's closing line asks with the word cf"

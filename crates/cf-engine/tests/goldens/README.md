@@ -220,3 +220,32 @@ play it, not by hand.
 - **The image designer's tier** is none (a design task has none): in the 2 `staffOf` rows
   that hold one, `osiris` reads without the tier its participant holds, and a chief's table
   says `none` for it, from a staff row that has no tier and the one role of a designer.
+
+The role texts moved on 2026-11-11 for the read-through of them (T-1435, after T-1418 and
+T-1419), in the words of `skill/core/chief.md`, `skill/core/staff.md` and the specs
+section, by exact replacement in the 12 chief rows and the 27 member rows (7 advisor rows),
+and the shell-dependent paragraphs by shell below. By hand, in those words alone:
+- **The chief's** command card: `cf task add --advice` and `--review` say "no project file
+  changed" (an advisor and a reviewer may put a long log in a file outside the project);
+  `cf task edit` is for "a task before any window has its brief (open, queued, or paused)",
+  the words the code uses; `cf tell` says "(queued or open: kept for its window; no answer,
+  nothing to resume)"; "(never to pick one)" and "; ConsensFlow picks the member" are out.
+  Item 3 of "What you do" says "Every window opens with the project's rules for the staff",
+  not that every member already has them (a window already open keeps its own); the
+  sentence "here in your terminal and end your turn" of "Choose the tier" and "What goes out
+  goes on the board." of "What you never do" are out.
+- **The members'** shared text: "A new window starts from nothing; one the chief continues
+  has its earlier conversation. Either way, finish with a result that stands on its own."
+  in place of "Nothing from an earlier task is here, and nothing from this one carries
+  over"; `cf ask` is "a question to the chief" alone. The advisor's description and intro
+  say "change(s) no project file" and its intro ends there.
+- **The specs section** (the chief's rows that hold it are not in this folder; its words are
+  pinned in `roles/specs/tests.rs`): "Plan specs with the Specmint skill", and what Specmint
+  calls "research beyond searching and reading, or implementation" goes on the board as
+  tasks for the staff.
+- **The chief's section on the project's rules** says "Every window of your staff opens with
+  these rules", and the two notes to a running chief of a change of them say "Windows that
+  open from now on are given them (none); one already open keeps its rules".
+The role-change budgets moved with the shorter text: read whole to 152 rows with specs on
+(174 without), and to 15 and 39 with the most rules for the staff, 51 bytes and 57 lines to
+spare for the 15.
