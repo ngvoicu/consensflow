@@ -189,12 +189,12 @@ replace = "            if !starts_a_word(text, at) {"
 
 [[plant]]
 name = "own cf path: every shell is taken for a bash-like one"
-meant = "only_codex_on_windows_runs_its_commands_in_powershell"
+meant = "only_codex_and_muse_on_windows_run_their_commands_in_powershell"
 runs = ["proto-lib-agents"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/agents.rs"
-find = "        if windows && self == Harness::Codex {"
+find = "        if windows && matches!(self, Harness::Codex | Harness::Muse) {"
 replace = "        if false {"
 
 [[plant]]
