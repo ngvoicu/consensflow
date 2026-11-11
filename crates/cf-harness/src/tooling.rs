@@ -15,7 +15,7 @@
 //! | `start` | `agent` (`kind`, `model`, `effort`, `thinking`), `session`, `seed`: the harness's own window on a new conversation, or with `resume` true on the one `session` names | `{command, args, prompt?, env, dropEnv}`, or null for a kind with no window of its own |
 //! | `window_text` | `text`: as a window can take it | the text |
 //! | `console_text` | `text`: as Windows' console carries it to a window | the text |
-//! | `claude_settings` | `env`, `launch`, `boardQuestions` (true for a member: the board answers its questions and its prompt suggestion is off; false for the chief, whose file has neither), `cf`, and `compaction` (tokens) where the window is a member's of a project that chose a size: the settings file of a Claude window, its hooks run by the `cf` at that path | `["--settings", file]`, the file written |
+//! | `claude_settings` | `env`, `launch`, `boardQuestions`, `cf`, `compaction` (tokens) where the window is a member's of a project that chose a size, and `advisorOff` and `suggestionOff` (flags, off when absent) where the launch is told to switch Claude Code's advisor tool and prompt suggestion off: the settings file of a Claude window, its hooks run by the `cf` at that path | `["--settings", file]`, the file written |
 //! | `interrupt` | `kind`: the keys that interrupt a turn in the harness's window | `{presses, closeAfterMs}`: Escape that many times in a row and, where `closeAfterMs` is not null, once more that long after |
 //! | `input` | `kind`: how the harness's windows take what they are handed | `{pasted, clear}`: whether it is pasted into the window's input box, and the keys that empty the box (null for a harness whose windows take it over a channel) |
 //! | `program` | `argv`, `env`: a program and its arguments to open a window on (the program's absolute path first) | the argv the pane host is asked to open: an npm shim (a `.cmd` on Windows) as the node and the script it runs, anything else as it is; an error for a script of another shape, or a shim that has no node |
@@ -295,7 +295,7 @@ fn start(question: &Value) -> Result<Value, String> {
 fn claude_settings(question: &Value) -> Result<Value, String> {
     let launch = LaunchId::new(text(question, "launch")?)
         .ok_or("the question's launch is not a launch id (a lowercase uuid)")?;
-    let member = question
+    let board_questions = question
         .get("boardQuestions")
         .and_then(Value::as_bool)
         .unwrap_or(true);
@@ -308,13 +308,18 @@ fn claude_settings(question: &Value) -> Result<Value, String> {
         .get("advisorOff")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let suggestion_off = question
+        .get("suggestionOff")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let cf = launch::bundle_of(Path::new(text(question, "cf")?)).pane_cf;
     Ok(json!(install::settings(
         &env(question)?,
         &launch,
-        member,
+        board_questions,
         compaction,
         advisor_off,
+        suggestion_off,
         &cf,
         // A question that names no folder gets the file Node wrote: no folder is denied.
         question.get("directory").and_then(Value::as_str),

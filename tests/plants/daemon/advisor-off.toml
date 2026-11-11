@@ -257,8 +257,8 @@ runs = ["ao-proto-page"]
 [[plant.edit]]
 file = "app/src-tauri/src/commands.rs"
 find = '''    "project.advisor_tool",
-    "models.get",'''
-replace = '''    "models.get",'''
+'''
+replace = ''''''
 
 [[plant]]
 name = "advisor off: the rig's launch is never told to switch it off"

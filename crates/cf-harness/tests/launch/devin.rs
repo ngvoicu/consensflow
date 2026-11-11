@@ -16,5 +16,6 @@ mod compaction;
 mod dialogs;
 mod fixtures;
 mod launches;
+mod prompt_suggestion_off;
 mod resumed;
 mod windows;

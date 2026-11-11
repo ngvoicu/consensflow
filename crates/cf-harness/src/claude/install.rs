@@ -28,7 +28,7 @@ const QUESTION_HOOK_SECONDS: u32 = 3600;
 /// seen, holds it back while swarm tasks or detached tool calls run, so the
 /// summary is then the only end record. Without the hook those answers never
 /// counted as done. A member's question tool is
-/// answered from the board (`member`); the chief's shows Claude's
+/// answered from the board (`board_questions`); the chief's shows Claude's
 /// own dialog, where the human answers it.
 ///
 /// A member of a project that chose a size for its Claude windows to compact at
@@ -47,20 +47,24 @@ const QUESTION_HOOK_SECONDS: u32 = 3600;
 /// nothing is written to the owner's files (2.1.322, run against a stub of the API). With the
 /// tool left on the file is as it always was.
 ///
-/// A member's file also switches Claude Code's prompt suggestion off (RS-29, T-1434): after each
-/// turn Claude Code makes a call of its own, a fork of the whole conversation read from the cache,
-/// to guess the person's next prompt, and in a member's window nobody reads it, since the next
-/// message is typed by ConsensFlow. [`PROMPT_SUGGESTION_SWITCH`] is `false` in the same `env`
-/// block, with no project setting: Claude Code reads it before its `promptSuggestionEnabled`
-/// setting, the file's `env` outranks the owner's own `env`, and with it no suggestion request
-/// follows a turn's end, launched or resumed (2.1.322, run against a stub of the API). The
-/// chief's window is the human's, and its file is as it always was.
+/// A launch of a project whose Project settings leave Claude Code's prompt suggestion off
+/// (`suggestion_off`, every project's until the human ticks it; the chief's launch as much as a
+/// member's) has [`PROMPT_SUGGESTION_SWITCH`] as `false` in the same `env` block (RS-29, T-1434):
+/// after each turn Claude Code makes a call of its own, a fork of the whole conversation read
+/// from the cache, to guess the person's next prompt. Claude Code reads that variable before its
+/// `promptSuggestionEnabled` setting, the file's `env` outranks the owner's own `env`, and with
+/// it no suggestion request follows a turn's end, launched or resumed (2.1.322, run against a
+/// stub of the API). With the suggestion left on the key is absent and the owner's own settings
+/// and Claude Code's own default decide: ConsensFlow never writes `true`. Nothing is written to
+/// the owner's files.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn settings(
     env: &Env,
     launch: &LaunchId,
-    member: bool,
+    board_questions: bool,
     compaction: Option<u32>,
     advisor_off: bool,
+    suggestion_off: bool,
     pane_cf: &str,
     directory: Option<&str>,
 ) -> Result<Vec<String>, String> {
@@ -89,7 +93,7 @@ pub(crate) fn settings(
         // which has none.
         "tui": "default",
         "hooks": {
-            "PreToolUse": if member { vec![question] } else { Vec::new() },
+            "PreToolUse": if board_questions { vec![question] } else { Vec::new() },
             "Stop": [turn_end],
         },
     });
@@ -102,7 +106,7 @@ pub(crate) fn settings(
     if advisor_off {
         variables.insert(ADVISOR_KILL_SWITCH.to_owned(), json!("1"));
     }
-    if member {
+    if suggestion_off {
         variables.insert(PROMPT_SUGGESTION_SWITCH.to_owned(), json!("false"));
     }
     if !variables.is_empty() {

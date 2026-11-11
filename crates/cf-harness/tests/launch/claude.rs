@@ -153,6 +153,8 @@ struct Request {
     compaction: Option<u32>,
     /// Whether the project has its members run without Claude Code's own advisor tool.
     advisor_off: bool,
+    /// Whether the project has Claude Code's prompt suggestion off for its windows.
+    suggestion_off: bool,
     /// The folder its project keeps its specs in, relative to the project.
     folder: &'static str,
     /// The project's folder, where the window opens.
@@ -177,6 +179,7 @@ impl Default for Request {
             specs: None,
             compaction: None,
             advisor_off: false,
+            suggestion_off: false,
             folder: ".specs",
             directory: "/work/app".to_owned(),
         }
@@ -231,6 +234,7 @@ fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, Strin
             }),
         compaction: request.compaction,
         advisor_off: request.advisor_off,
+        suggestion_off: request.suggestion_off,
         first_message_ms: FIRST_MESSAGE_MS,
         starts_given_up: 0,
     };

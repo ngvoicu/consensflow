@@ -121,6 +121,13 @@ pub struct ProjectView {
     /// never given the switch, whatever this says.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub advisor_tool: bool,
+    /// Whether the human leaves Claude Code's prompt suggestion on in the project's windows,
+    /// the chief's and the members' (Project settings, "Prompt suggestion"): said only when on,
+    /// so a project with it off, which every project is until the human ticks it, reads as it
+    /// always did. Off, every Claude Code window of the project is launched with it switched
+    /// off; on, ConsensFlow writes nothing about it.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub prompt_suggestion: bool,
 }
 
 impl ProjectView {

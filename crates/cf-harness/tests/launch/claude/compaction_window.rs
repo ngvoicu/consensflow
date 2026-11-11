@@ -14,9 +14,9 @@ use super::*;
 /// (`{cf}`, T-1049): a login shell can find another `cf` first. On a Mac it holds the reads
 /// Claude is denied besides (T-1194, `private_folders`).
 #[cfg(not(windows))]
-const WORKER_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions","deny":["Read(~/Music)","Read(~/Music/**)","Read(~/Pictures/*.photoslibrary)","Read(~/Pictures/*.photoslibrary/**)"]},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"{cf} hook claude","timeout":3600}]}],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]},"env":{"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION":"false"}}"#;
+const WORKER_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions","deny":["Read(~/Music)","Read(~/Music/**)","Read(~/Pictures/*.photoslibrary)","Read(~/Pictures/*.photoslibrary/**)"]},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"{cf} hook claude","timeout":3600}]}],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
 #[cfg(windows)]
-const WORKER_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"{cf} hook claude","timeout":3600}]}],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]},"env":{"CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION":"false"}}"#;
+const WORKER_SETTINGS: &str = r#"{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true,"tui":"default","hooks":{"PreToolUse":[{"matcher":"AskUserQuestion","hooks":[{"type":"command","command":"{cf} hook claude","timeout":3600}]}],"Stop":[{"hooks":[{"type":"command","command":"exit 0"}]}]}}"#;
 
 /// [`WORKER_SETTINGS`] as `home`'s adapter writes it: its bundle's `cf`, quoted.
 pub(super) fn worker_settings(home: &Home) -> String {
@@ -180,6 +180,7 @@ pub(super) fn plain_copy(request: &Request) -> Request {
         specs: request.specs,
         compaction: request.compaction,
         advisor_off: request.advisor_off,
+        suggestion_off: request.suggestion_off,
         folder: request.folder,
         directory: request.directory.clone(),
     }

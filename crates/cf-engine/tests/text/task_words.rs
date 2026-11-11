@@ -44,6 +44,7 @@ fn world() -> (tempfile::TempDir, Ledger, i64) {
             staff_rules: None,
             compaction: None,
             advisor_tool: false,
+            prompt_suggestion: false,
         })
         .unwrap();
     (dir, ledger, project.id)

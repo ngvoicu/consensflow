@@ -14,6 +14,7 @@
 
 mod advisor_off;
 mod dialogs;
+mod prompt_suggestion_off;
 mod specs;
 
 use std::cell::RefCell;
@@ -124,6 +125,8 @@ struct Request {
     compaction: Option<u32>,
     /// Whether the project has its members run without Claude Code's own advisor tool.
     advisor_off: bool,
+    /// Whether the project has Claude Code's prompt suggestion off for its windows.
+    suggestion_off: bool,
 }
 
 impl Default for Request {
@@ -138,6 +141,7 @@ impl Default for Request {
             directory: "/work/app".to_owned(),
             compaction: None,
             advisor_off: false,
+            suggestion_off: false,
         }
     }
 }
@@ -173,6 +177,7 @@ fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
             }),
         compaction: request.compaction,
         advisor_off: request.advisor_off,
+        suggestion_off: request.suggestion_off,
         first_message_ms: FIRST_MESSAGE_MS,
         starts_given_up: 0,
     };
