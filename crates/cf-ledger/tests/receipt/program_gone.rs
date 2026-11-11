@@ -78,6 +78,7 @@ fn a_ledger_from_before_the_column_proves_no_program_gone() {
     let mut w = world();
     let first = conversation_of_zeus(&mut w);
     w.edit(|db| {
+        cf_ledger::testing::undo_migration_0036(db).expect("undone");
         cf_ledger::testing::undo_migration_0035(db).expect("undone");
         cf_ledger::testing::undo_migration_0034(db).expect("undone");
         cf_ledger::testing::undo_migration_0033(db).expect("undone");

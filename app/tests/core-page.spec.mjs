@@ -612,6 +612,19 @@ async function open(page, given = model()) {
         }
         return answer({ project: shownProject(project)[0] })
       },
+      // Whether the project's Claude Code windows, the chief's too, make Claude Code's prompt
+      // suggestion, as the daemon keeps it: on (true) or off (false, the default), refused in its
+      // words otherwise. A board says it only where it is on.
+      'project.prompt_suggestion': ({ project, promptSuggestion }) => {
+        if (typeof promptSuggestion !== 'boolean') {
+          return { ok: false, error: 'the prompt suggestion is on (true) or off (false)' }
+        }
+        for (const shown of shownProject(project)) {
+          if (promptSuggestion) shown.promptSuggestion = true
+          else delete shown.promptSuggestion
+        }
+        return answer({ project: shownProject(project)[0] })
+      },
       'wakeup.get': ({ project }) => answer({ wakeUp: wakeUpOf(project) }),
       'wakeup.set': ({ project, on, every, unit, text }) => {
         if (!(unit in UNIT_MS) || !Number.isInteger(every) || every < 1) {
@@ -740,6 +753,7 @@ async function open(page, given = model()) {
           if (body.rules !== undefined) project.staffRules = body.rules
           if (body.compaction !== undefined) project.compaction = body.compaction
           if (body.advisorTool === true) project.advisorTool = true
+          if (body.promptSuggestion === true) project.promptSuggestion = true
           data.projects.push(project)
           data.boards[3] = {
             project,
@@ -5594,10 +5608,18 @@ async function newProject(page) {
       hint: section('Advisor tool').locator('.members-advisor-tool-hint'),
       save: section('Advisor tool').getByRole('button', { name: 'Save advisor tool' }),
     },
+    promptSuggestion: {
+      group: section('Prompt suggestion'),
+      suggestion: section('Prompt suggestion').getByRole('checkbox'),
+      hint: section('Prompt suggestion').locator('.prompt-suggestion-hint'),
+      save: section('Prompt suggestion').getByRole('button', { name: 'Save prompt suggestion' }),
+    },
     computerUse: section('Computer use'),
   }
 }
 
+// The list below holds the Prompt suggestion section too; the title is left as it was, for the
+// plants that name it by this title find no other (a retitled page test strands them).
 test('New project has Staff, the rules for the staff, compaction, the advisor tool, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has', async ({
   page,
 }) => {
@@ -5624,6 +5646,7 @@ test('New project has Staff, the rules for the staff, compaction, the advisor to
     'Rules for the staff',
     'Compaction',
     'Advisor tool',
+    'Prompt suggestion',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -5698,7 +5721,7 @@ test('New project has Staff, the rules for the staff, compaction, the advisor to
     await markup('new-project-dialog'),
     await markup('project-settings-dialog'),
   ]
-  expect(here).toHaveLength(7)
+  expect(here).toHaveLength(8)
   expect(here).toEqual(there)
   // Left as it opened, the start says nothing of what a project has anyway: the request is the one it was.
   await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
@@ -5982,6 +6005,7 @@ test('Enter in any field of New project starts no project, and is a new line in 
     'project.rules',
     'project.compaction',
     'project.advisor_tool',
+    'project.prompt_suggestion',
   ]) {
     expect(await calls(page, operation), operation).toEqual([])
   }
@@ -6031,6 +6055,7 @@ test('Enter in a field of a section of Project settings adds nobody to the staff
     'project.rules',
     'project.compaction',
     'project.advisor_tool',
+    'project.prompt_suggestion',
   ]
   const tally = async () =>
     Object.fromEntries(
@@ -6183,7 +6208,7 @@ test('New project holds every section Project settings holds, in its order, but 
     expect(reason.length, `${legend} has no reason`).toBeGreaterThan(20)
   }
   expect(made).toEqual(settings.filter((legend) => !(legend in NEW_PROJECT_LACKS)))
-  expect(made).toHaveLength(8)
+  expect(made).toHaveLength(9)
 })
 
 test('New project: the rules for the staff and the compaction are written as they are in Project settings, counted and checked as typed, and start with the project', async ({
@@ -6218,7 +6243,12 @@ test('New project: the rules for the staff and the compaction are written as the
     ])
   await expect(made.dialog).toBeHidden()
   // They start with the project, in the one write that makes it: nothing is saved afterwards.
-  for (const operation of ['project.rules', 'project.compaction', 'project.advisor_tool']) {
+  for (const operation of [
+    'project.rules',
+    'project.compaction',
+    'project.advisor_tool',
+    'project.prompt_suggestion',
+  ]) {
     expect(await calls(page, operation), operation).toEqual([])
   }
 })
@@ -6545,6 +6575,8 @@ test('shows and sets human approval from Project settings, which has no review p
   await expect(gate).toBeChecked()
 })
 
+// The list below holds the Prompt suggestion section too; the title is left as it was, for the
+// plants that name it by this title find no other (a retitled page test strands them).
 test("names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Advisor tool, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
   page,
 }) => {
@@ -6562,6 +6594,7 @@ test("names the board's button and its dialog Project settings, with Staff, Rule
     'Rules for the staff',
     'Compaction',
     'Advisor tool',
+    'Prompt suggestion',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -6572,6 +6605,7 @@ test("names the board's button and its dialog Project settings, with Staff, Rule
     'Rules for the staff',
     'Compaction',
     'Advisor tool',
+    'Prompt suggestion',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -7462,6 +7496,156 @@ test('New project with the advisor tool ticked starts the project with it, in th
     ])
   await expect(made.dialog).toBeHidden()
   expect(await calls(page, 'project.advisor_tool')).toEqual([])
+})
+
+/** Project settings open on project 1, and its Prompt suggestion section. */
+async function promptSuggestionGroup(page) {
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const group = dialog.getByRole('group', { name: 'Prompt suggestion', exact: true })
+  return {
+    dialog,
+    group,
+    suggestion: group.getByRole('checkbox'),
+    hint: group.locator('.prompt-suggestion-hint'),
+    save: group.getByRole('button', { name: 'Save prompt suggestion' }),
+  }
+}
+
+test("Project settings has Claude Code's prompt suggestion off for the project's Claude Code windows until the human ticks it, and says in plain words what it is", async ({
+  page,
+}) => {
+  await open(page)
+  const section = await promptSuggestionGroup(page)
+  await expect(section.suggestion).not.toBeChecked()
+  await expect(section.save).toBeEnabled()
+  await expect(section.hint).toBeHidden()
+  // Plain words for someone who never heard the name: the grey guess at the next prompt in the
+  // input box, the model call after every turn that reads the conversation again, the chief's
+  // window and the members', and only Claude Code's.
+  await expect(section.group.locator('.dialog-help')).toHaveText([
+    "After each turn, Claude Code can guess your next prompt and show it in grey in the input box. It makes that guess with one more model call, which reads the whole conversation again and costs tokens. Off, no Claude Code window of this project, the chief's or a member's, makes it from its next start; on, your own Claude Code settings decide. Only Claude Code has it, so Codex, Pi, Devin and Muse Code are not affected. A window already open keeps what it began with.",
+  ])
+  // Opening sends nothing.
+  expect(await calls(page, 'project.prompt_suggestion')).toEqual([])
+})
+
+test('Project settings shows the prompt suggestion as the board has it for the project', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].project.promptSuggestion = true
+  await open(page, data)
+  const section = await promptSuggestionGroup(page)
+  await expect(section.suggestion).toBeChecked()
+  expect(await calls(page, 'project.prompt_suggestion')).toEqual([])
+})
+
+test('saves the prompt suggestion by its own Save, shows what the daemon kept, and saves it off again', async ({
+  page,
+}) => {
+  await open(page)
+  const section = await promptSuggestionGroup(page)
+  await section.suggestion.check()
+  // Ticking sends nothing: the section has its own Save.
+  expect(await calls(page, 'project.prompt_suggestion')).toEqual([])
+  await section.save.click()
+  await expect
+    .poll(() => calls(page, 'project.prompt_suggestion'))
+    .toEqual([{ project: 1, promptSuggestion: true }])
+  await expect(section.suggestion).toBeChecked()
+  await expect(page.locator('#status')).toHaveText(
+    "The project's Claude Code windows, the chief's too, follow your own Claude Code setting for the prompt suggestion: each window is given that when it next starts.",
+  )
+  // No other section saved with it.
+  for (const operation of [
+    'project.rules',
+    'project.compaction',
+    'project.advisor_tool',
+    'wakeup.set',
+    'project.specs',
+    'project.gate',
+  ]) {
+    expect(await calls(page, operation)).toEqual([])
+  }
+  await section.dialog.getByRole('button', { name: 'Close' }).click()
+  const again = await promptSuggestionGroup(page)
+  await expect(again.suggestion).toBeChecked()
+  await again.suggestion.uncheck()
+  await again.save.click()
+  await expect.poll(() => calls(page, 'project.prompt_suggestion')).toHaveLength(2)
+  expect((await calls(page, 'project.prompt_suggestion'))[1]).toEqual({
+    project: 1,
+    promptSuggestion: false,
+  })
+  await expect(again.suggestion).not.toBeChecked()
+  await expect(page.locator('#status')).toHaveText(
+    "The project's Claude Code windows, the chief's too, make no prompt suggestion: windows that start from now on are launched without it.",
+  )
+})
+
+test('says a refusal of the prompt suggestion in its section and keeps what was chosen', async ({
+  page,
+}) => {
+  await open(page)
+  const section = await promptSuggestionGroup(page)
+  await section.suggestion.check()
+  await page.evaluate(() => {
+    window.__down = 'the daemon stopped'
+  })
+  await section.save.click()
+  await expect(section.hint).toBeVisible()
+  await expect(section.hint).toContainText('the daemon stopped')
+  await expect(section.suggestion).toBeChecked()
+})
+
+test('New project has the prompt suggestion off, and sends it only when the human ticks it, to start with the project', async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await expect(made.promptSuggestion.suggestion).not.toBeChecked()
+  // Its own Save is for a saved project: New project does not show it.
+  await expect(made.promptSuggestion.save).toBeHidden()
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+      },
+    ])
+  await expect(made.dialog).toBeHidden()
+  expect(await calls(page, 'project.prompt_suggestion')).toEqual([])
+})
+
+test('New project with the prompt suggestion ticked starts the project with it, in the one write that makes it', async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await made.promptSuggestion.suggestion.check()
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+        promptSuggestion: true,
+      },
+    ])
+  await expect(made.dialog).toBeHidden()
+  expect(await calls(page, 'project.prompt_suggestion')).toEqual([])
 })
 
 const DEFAULT_WAKE_UP_WORDS =
@@ -9188,6 +9372,7 @@ test('project menu: Project settings… opens the dialog of the board’s Projec
     'Rules for the staff',
     'Compaction',
     'Advisor tool',
+    'Prompt suggestion',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -10062,6 +10247,7 @@ test('Project settings: the sections are the same distance apart and spaced alik
     'Rules for the staff',
     'Compaction',
     'Advisor tool',
+    'Prompt suggestion',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -10077,6 +10263,10 @@ test('Project settings: the sections are the same distance apart and spaced alik
     ['Rules for the staff', { text: 'Save rules', primary: true, inActions: true, fromEdge: 0 }],
     ['Compaction', { text: 'Save compaction', primary: true, inActions: true, fromEdge: 0 }],
     ['Advisor tool', { text: 'Save advisor tool', primary: true, inActions: true, fromEdge: 0 }],
+    [
+      'Prompt suggestion',
+      { text: 'Save prompt suggestion', primary: true, inActions: true, fromEdge: 0 },
+    ],
     ['Wake-up calls', { text: 'Save wake-up calls', primary: true, inActions: true, fromEdge: 0 }],
     ['Specs', { text: 'Save specs', primary: true, inActions: true, fromEdge: 0 }],
   ])
