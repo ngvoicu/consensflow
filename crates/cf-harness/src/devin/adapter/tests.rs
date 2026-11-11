@@ -208,6 +208,7 @@ fn a_window_that_has_named_no_conversation_says_nothing_of_one_to_look_at() {
             took_back: false,
             at_prompt: false,
             shared: false,
+            begun: Vec::new(),
         }
     );
 }

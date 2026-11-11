@@ -35,6 +35,7 @@ use jiff::tz::TimeZone;
 use regex::Regex;
 use serde_json::Value;
 
+use super::record::Turns;
 use super::wire::{mode_in, shown_in};
 use crate::shared::pattern::compile;
 use crate::shared::quota::{exhausted_quota, Quota};
@@ -89,6 +90,8 @@ struct State {
     shown: Option<String>,
     mode: Option<String>,
     quota: Option<Arc<Quota>>,
+    /// The turns the log says of each session.
+    turns: Turns,
 }
 
 /// One launch's wire log, and what a look at it has read.
@@ -133,6 +136,7 @@ impl WireLog {
             state.read = DefaultHasher::default();
             state.carry.clear();
             state.mode = None;
+            state.turns.read_anew();
         }
         if state.written != written {
             state.since_ms = at_ms;
@@ -153,6 +157,18 @@ impl WireLog {
             }
         }
         Ok(state.said())
+    }
+
+    /// Whether the log said, as far as the last look read it, that a turn on `session` is
+    /// open: begun, and its end not said.
+    pub(super) fn turn_open(&self, session: &str) -> bool {
+        self.state.borrow().turns.open(session)
+    }
+
+    /// The deliveries, by their headers, that the log said back as the turn open on
+    /// `session` took them in, as far as the last look read it (`Turns::said_back`).
+    pub(super) fn said_back(&self, session: &str) -> Vec<i64> {
+        self.state.borrow().turns.said_back(session)
     }
 }
 
@@ -231,6 +247,7 @@ impl State {
         let Ok(event) = from_slice_lossy(line.as_bytes()) else {
             return Ok(());
         };
+        self.turns.follow(&event);
         if let Some(shown) = shown_in(&event).map_err(|_| UNREADABLE.to_owned())? {
             // The conversation it shows now is in the mode its own configuration says.
             if self.shown.as_deref() != Some(shown) {

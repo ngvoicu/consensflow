@@ -126,6 +126,9 @@ pub struct FakeAgent {
     /// Another program than the window's has shown its conversation since it opened
     /// ([`Observed::shared`]): a Claude Code the human started outside ConsensFlow.
     pub shared: bool,
+    /// The deliveries its harness said back as taken into a turn of the window's own that has
+    /// not ended ([`Observed::begun`]): Devin 3000.12's message said back.
+    pub begun: Vec<i64>,
     /// Whether its record says its turn is over though its status kept the look
     /// from reading it settled (`Observed::over`): Claude's busy while a background
     /// agent runs, after a turn an interrupt or a refusal ended.
@@ -1251,6 +1254,7 @@ impl Asked {
             at_work_after_recheck: None,
             rechecked: 0,
             shared: false,
+            begun: Vec::new(),
             over: Over::No,
             busy_when_interrupted: false,
             cannot_tell_a_cut: false,
