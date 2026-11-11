@@ -50,25 +50,36 @@
 //! of its `result_ready` and its lifecycle's `completed` or `terminal` (live, T-1458: five
 //! children, each `result_ready` then `completed` then `terminal`, none a `subagent_result`,
 //! and every status `running`; the reader held the five for good, 25 minutes, until the
-//! owner's hand ended the task). The end of the workflow's task ends no child (nothing recorded says
-//! Muse stops one still running; its strings say a workflow `completed while owner children
-//! were still running` is an error, and `workflow run cancelled before a terminal child
-//! outcome was recorded`): each is told ended by its own records. A later attempt of a child
-//! that ended (`attempt` above 1, `scheduled` or `started` again, or another
-//! `attempt_admitted`) counts again (made from the binary's strings: no live record has one).
+//! owner's hand ended the task). A child that ended stays ended: no record shows a second
+//! attempt of one (the binary's strings name retries: `workflow_lifecycle_retries`, an
+//! `attempt_ref`; the issue `muse-unknown-endings-close-outcome` keeps the gap), and the
+//! workflow's own task holds the turn while it is open.
 //!
-//! **A workflow that ended is pending until its notice is taken in.** Its task ends
-//! (`completed`, `failed`, `cancelled`, `timed_out`) and Muse queues the notice for the agent
-//! a record after (live, T-1458: `task completed` 1314, `inbox_item_queued` 1315, a run
-//! started 1318, `inbox_item_drained` 1338), so between the two a member that answered early
-//! (a background task is answered before it ends, `live/README.md`) would read as having
-//! nothing pending, its answer taken as the turn's result and the notice's run never read.
-//! The notice is owed from the task's end ([`Owed`]) and the debt ends at the first of: the
-//! `background_task_terminal` item drained (into a run started or not: it counts as an item
-//! from then on); the end of the last run that was in flight when the task ended, whose agent
-//! was awake and told some other way; the segment's end, which retires it. No record shows
-//! a workflow's end with none of these. A command's or a monitor's task is not owed one: a
-//! monitor's end queues none (live), and a command's is queued before its task ends.
+//! **A workflow that ended is pending for one bounded wait** ([`NOTICE_WAIT_MS`]). Its task
+//! ends (`completed`, `failed`, `cancelled`, `timed_out`) and Muse queues the notice for the
+//! agent a record after (live, T-1458: `task completed` 1314, `inbox_item_queued` 1315, a run
+//! started 1318, `inbox_item_drained` 1338; the made record: 10 ms, 50 ms, 160 ms), so
+//! between the two a member that answered early (a background task is answered before it ends,
+//! `live/README.md`) would read as having nothing pending, its answer taken as the turn's
+//! result and the notice's run never read. Nothing recorded says in which order Muse ends the
+//! run that is awake, queues the notice and starts the run it wakes, and every attempt to
+//! follow those events one by one traded one unseen order for another. So from the task's end
+//! the workflow is pending ([`Owed`]) until the first of: the notice
+//! (`background_task_terminal`) drained into a run (that run, once started, holds the turn
+//! itself until it ends); or [`NOTICE_WAIT_MS`] with no such notice queued, by the look's
+//! time and the record's ([`Owed::over`]: from the first look that saw the task end, as well
+//! as from the record's time, and from the look after a step back of the clock). A notice
+//! queued and not yet drained holds as any queued item does, without that limit. The
+//! segment's end retires what is owed.
+//!
+//! **A workflow owns its children.** At `completed` every child of it is ended (Muse's strings
+//! call a workflow that completes with a child running an error; the made record shows each
+//! ended before it). At `failed`, `cancelled` or `timed_out` a child with no end of its own
+//! (the binary's strings say `workflow run cancelled before a terminal child outcome was
+//! recorded`) is ended when the wait ends, drained or passed, and the daemon's log says so
+//! once for the workflow (its task id and the number). A command's or a monitor's task is not
+//! owed a notice: a monitor's end queues none (live), and a command's is queued before its
+//! task ends.
 //!
 //! A reminder child (`memory_reminder_child_session_linked`) leaves
 //! no `subagent.control` record and is no agent here.
@@ -117,7 +128,7 @@ use serde_json::Value;
 
 use super::field;
 use crate::shared::record::reading::Pending;
-use crate::shared::record::torn::unread;
+use crate::shared::record::torn::{children_ended_with_the_wait, unread};
 
 /// The ends of a task. `timed_out` is the binary's (`TaskTerminalKind`: a monitor whose
 /// `timeout_ms` passed); no live log holds one: provisional.
@@ -190,13 +201,38 @@ struct Item {
     ends: bool,
 }
 
-/// The notice of a workflow's end that Muse owes its agent, from the workflow's task's
-/// end until the notice is drained into a run that has started.
+/// How long a workflow's end notice is waited for after its task ends, with none queued.
+/// In the made record the notice is queued 10 ms after the task's end and drained 160 ms
+/// after it, in T-1458's real one the next record: this is a wide margin over what Muse
+/// does between two records, and short for a member's turn to be held for no notice.
+pub(super) const NOTICE_WAIT_MS: i64 = 10_000;
+
+/// A workflow whose task ended, and whose end notice Muse owes its agent: pending until the
+/// notice is drained into a run, or [`NOTICE_WAIT_MS`] has passed with none queued.
 struct Owed {
-    /// The runs in flight when the task ended, whose agent was awake to be told another
-    /// way: the notice is owed no more when the last of them ends, queued or not (a
-    /// queued one counts by itself). Empty where the agent was at rest.
-    awake: HashSet<Arc<str>>,
+    /// The workflow's run id, whose children end with the wait: none where they ended
+    /// already (its task completed).
+    children_of: Option<Arc<str>>,
+    /// When the task's end was written (the record's time, ms), where it says.
+    written_ms: Option<i64>,
+    /// The look that first saw the task ended, or the first after the clock stepped back.
+    since_ms: Option<i64>,
+}
+
+impl Owed {
+    /// Whether the wait is over at a look at `now_ms`: [`NOTICE_WAIT_MS`] since the look
+    /// that first saw the task end and since the record's time. A record dated after
+    /// the look (a clock that stepped back, a writer's clock ahead) says nothing: the look
+    /// alone counts, and a clock that steps forward cannot be told from time that passed.
+    fn over(&self, now_ms: i64) -> bool {
+        let looks = self
+            .since_ms
+            .is_some_and(|since| now_ms.saturating_sub(since) >= NOTICE_WAIT_MS);
+        let record = self.written_ms.is_none_or(|written| {
+            written > now_ms || now_ms.saturating_sub(written) >= NOTICE_WAIT_MS
+        });
+        looks && record
+    }
 }
 
 /// A run's task that has not ended.
@@ -213,17 +249,14 @@ pub(super) struct Work {
     /// The workflow each child of a workflow belongs to (its run id), as the records
     /// that name it say.
     workflow_of: HashMap<Arc<str>, Arc<str>>,
-    /// The children that ended by their own record and may be told of again (a later
-    /// attempt, a follow-up).
-    finished: HashSet<Arc<str>>,
-    /// The tasks of the workflows launched and not ended.
-    workflows: HashSet<Arc<str>>,
+    /// The tasks of the workflows launched and not ended, each with its run id.
+    workflows: HashMap<Arc<str>, Option<Arc<str>>>,
     /// The workflows whose task ended and whose end notice is not yet taken in, by task.
     owed: HashMap<Arc<str>, Owed>,
+    /// The time of the last look, which a step back of the clock shows.
+    last_look_ms: Option<i64>,
     /// The tasks whose end notice was drained: nothing is owed for them.
     told: HashSet<Arc<str>>,
-    /// The runs that have started and not ended.
-    open_runs: HashSet<Arc<str>>,
     /// Items queued and not drained, by the id their drain names.
     queued: HashMap<Arc<str>, Item>,
     /// Items drained into a run that has not started yet, by that run.
@@ -239,7 +272,7 @@ pub(super) struct Work {
 
 impl Work {
     /// A task's event (`payload.kind: task`).
-    pub(super) fn task(&mut self, payload: Option<&Value>) {
+    pub(super) fn task(&mut self, payload: Option<&Value>, written_ms: Option<i64>) {
         let event = field(payload, "event");
         let (Some(task), Some(run)) = (
             text(field(payload, "task_id")),
@@ -270,19 +303,28 @@ impl Work {
                 // A resume's word that a dead process's task ended (live:
                 // `resume_reconcile:orphaned_by_process_loss`): it is retired no more.
                 self.retired.remove(&task);
-                // A workflow's task ends however it ends (completed, failed, cancelled,
-                // timed out): Muse owes its agent the notice of it, queued a record
-                // after (live: `task completed`, then `inbox_item_queued`), so the
-                // workflow is pending until that is taken in. Its children are not
-                // ended by it: nothing recorded says Muse stops them, and each is told
-                // ended by its own records (`terminal`, `result_ready`).
-                if self.workflows.remove(&task) && !self.told.contains(&task) {
-                    self.owed.insert(
-                        task,
-                        Owed {
-                            awake: self.open_runs.clone(),
-                        },
-                    );
+                // A workflow's task ends however it ends: its children end with it
+                // where it completed, and Muse owes its agent the notice of it, queued a
+                // record after (live: `task completed`, then `inbox_item_queued`), so the
+                // workflow is pending for the wait ([`Owed`]).
+                if let Some(run) = self.workflows.remove(&task) {
+                    let completed = kind == "completed";
+                    if completed {
+                        self.end_children_of(run.as_deref());
+                    }
+                    let children_of = run.filter(|_| !completed);
+                    if self.told.contains(&task) {
+                        self.end_children_with(&task, children_of.as_deref());
+                    } else {
+                        self.owed.insert(
+                            task,
+                            Owed {
+                                children_of,
+                                written_ms,
+                                since_ms: None,
+                            },
+                        );
+                    }
                 }
             }
             Some(kind) if TASK_ON_ITS_WAY.contains(&kind) => {}
@@ -295,14 +337,59 @@ impl Work {
     fn child_ended(&mut self, child: &Arc<str>) {
         self.children.remove(child);
         self.retired.remove(child);
-        self.finished.insert(Arc::clone(child));
     }
 
-    /// A child told of again after it ended (a later attempt): it runs.
-    fn child_again(&mut self, child: &Arc<str>) {
-        if self.finished.remove(child) {
-            self.children.insert(Arc::clone(child));
+    /// The children of the workflow `run` that have not ended, ended: how many.
+    fn end_children_of(&mut self, run: Option<&str>) -> usize {
+        let Some(run) = run else { return 0 };
+        let left: Vec<Arc<str>> = self
+            .children
+            .iter()
+            .filter(|child| self.workflow_of.get(*child).is_some_and(|of| &**of == run))
+            .cloned()
+            .collect();
+        for child in &left {
+            self.child_ended(child);
         }
+        left.len()
+    }
+
+    /// The wait of the workflow `task` is over: its children that no record of their own
+    /// ended are ended, and the log says so.
+    fn end_children_with(&mut self, task: &str, run: Option<&str>) {
+        let ended = self.end_children_of(run);
+        if ended > 0 {
+            children_ended_with_the_wait(task, ended);
+        }
+    }
+
+    /// A look at `now_ms` that read all it will: the waits begin, and end by the time. True
+    /// where one ended, which changes what the record says with no record come.
+    pub(super) fn looked(&mut self, now_ms: i64) -> bool {
+        let stepped_back = self.last_look_ms.is_some_and(|last| now_ms < last);
+        self.last_look_ms = Some(now_ms);
+        let told: HashSet<Arc<str>> = self
+            .queued
+            .values()
+            .filter(|item| item.ends)
+            .filter_map(|item| item.owner.clone())
+            .collect();
+        let mut over = Vec::new();
+        for (task, owed) in &mut self.owed {
+            if stepped_back || owed.since_ms.is_none() {
+                owed.since_ms = Some(now_ms);
+            }
+            // A notice queued holds by itself, until it is drained.
+            if !told.contains(task) && owed.over(now_ms) {
+                over.push(Arc::clone(task));
+            }
+        }
+        for task in &over {
+            if let Some(owed) = self.owed.remove(task) {
+                self.end_children_with(task, owed.children_of.as_deref());
+            }
+        }
+        !over.is_empty()
     }
 
     /// The binary's word that a task runs in the background (`task_backgrounded`), which
@@ -316,16 +403,11 @@ impl Work {
     /// A run started: what was drained into it is its agent's now.
     pub(super) fn run_started(&mut self, run: &Arc<str>) {
         self.started.insert(Arc::clone(run));
-        self.open_runs.insert(Arc::clone(run));
         self.draining.remove(run);
     }
 
     /// A run ended: what it left open is background work.
     pub(super) fn run_ended(&mut self, run: &str) {
-        self.open_runs.remove(run);
-        // The agent that was awake when a workflow ended has been told by now.
-        self.owed
-            .retain(|_, owed| !(owed.awake.remove(run) && owed.awake.is_empty()));
         for task in self.tasks.values_mut().filter(|task| &*task.run == run) {
             task.background = true;
         }
@@ -357,7 +439,6 @@ impl Work {
                 // The child's result: it is pending as this item now, until taken in.
                 if let Some(owner) = &owner {
                     self.children.remove(owner);
-                    self.finished.insert(Arc::clone(owner));
                 }
                 (Family::Agent, owner)
             }
@@ -382,7 +463,9 @@ impl Work {
         // The notice of a workflow's end, taken in: nothing is owed for it any more (and
         // none will be, if it came before the task's own end).
         if let (true, Some(owner)) = (item.ends, &item.owner) {
-            self.owed.remove(owner);
+            if let Some(owed) = self.owed.remove(owner) {
+                self.end_children_with(owner, owed.children_of.as_deref());
+            }
             self.told.insert(Arc::clone(owner));
         }
         let target = text(field(field(event, "drain_target_run_stream"), "id"));
@@ -407,9 +490,6 @@ impl Work {
             Some("spawn_accepted") => {
                 self.children.insert(child);
             }
-            // A later attempt of a child that ended (from the binary's strings only: no
-            // record has one): it runs again.
-            Some("attempt_admitted") => self.child_again(&child),
             Some("resume_context_recorded") => {
                 // Its owner says it is a workflow's.
                 let owner = field(field(record, "child_completion_contract"), "owner");
@@ -440,7 +520,8 @@ impl Work {
     /// A workflow launched (`workflow_run_launched`): the task whose end is its end.
     pub(super) fn workflow_launched(&mut self, event: Option<&Value>) {
         if let Some(task) = text(field(event, "workflow_task_id")) {
-            self.workflows.insert(task);
+            let run = text(field(event, "workflow_run_id"));
+            self.workflows.insert(task, run);
         }
     }
 
@@ -459,12 +540,6 @@ impl Work {
         }
         if let Some(status) = status.filter(|status| !LIFECYCLE_ON_ITS_WAY.contains(status)) {
             unread("workflow child status", status);
-        }
-        // A later attempt is scheduled or started again (from the binary's strings
-        // only: every lifecycle record of a live log says `attempt: 1`).
-        let later = field(event, "attempt").and_then(Value::as_u64) > Some(1);
-        if later && matches!(status, Some("scheduled" | "started")) {
-            self.child_again(&child);
         }
         self.workflow_of.insert(child, workflow);
     }
@@ -517,10 +592,8 @@ impl Work {
         self.children.clear();
         self.workflow_of.clear();
         self.workflows.clear();
-        self.finished.clear();
         self.owed.clear();
         self.told.clear();
-        self.open_runs.clear();
         self.queued.clear();
         self.draining.clear();
     }

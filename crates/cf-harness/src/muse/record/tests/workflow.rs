@@ -180,33 +180,7 @@ fn a_workflow_ended_before_its_notice_is_queued_is_pending_until_the_notice_is_t
 }
 
 #[test]
-fn a_notice_owed_and_never_queued_ends_with_the_turn_that_was_awake_or_the_session() {
-    // The agent was awake when the workflow ended (its turn open): Muse tells it another
-    // way, and the notice is owed no more when that turn ends.
-    let mut lines: Vec<String> = MADE
-        .lines()
-        .filter(|line| !line.contains("\"run_id\":\"run-1\",\"event\":{\"kind\":\"terminal\""))
-        .take_while(|line| !line.contains("\"kind\":\"inbox_item_queued\""))
-        .map(str::to_owned)
-        .collect();
-    let awake = lines_through(&lines, TASK_ENDS);
-    assert_eq!(awake.settlement, Settlement::InFlight);
-    assert_eq!(awake.pending, pending(1, 0, 0));
-    lines.push(run_line(
-        9001,
-        json!({ "kind": "terminal", "terminal": "completed" }),
-    ));
-    let over = known(&fresh_reading(
-        &session_of(MADE),
-        &(lines.join("\n") + "\n"),
-    ))
-    .clone();
-    assert_eq!(over.settlement, Settlement::Settled);
-    assert_eq!(
-        over.pending,
-        Pending::default(),
-        "no notice came, none is waited for"
-    );
+fn a_notice_owed_and_never_queued_is_retired_where_the_session_ends_inside_the_wait() {
     // The agent at rest, and the session ends with the notice never queued: it is retired.
     let mut at_rest: Vec<String> = answered_early()
         .into_iter()
@@ -223,95 +197,6 @@ fn a_notice_owed_and_never_queued_ends_with_the_turn_that_was_awake_or_the_sessi
         pending(0, 0, 1),
         "retired, no word of its end coming"
     );
-}
-
-#[test]
-fn a_workflow_task_that_fails_is_cancelled_or_times_out_owes_its_notice_and_ends_no_child() {
-    // Nothing recorded says what Muse does with a child still running when its workflow's
-    // task ends otherwise than completed (its strings say `workflow run cancelled before a
-    // terminal child outcome was recorded`, a `generated_child_cancelled`): the child stays
-    // counted until its own records end it. Here child-d's end records are gone.
-    for end in ["failed", "cancelled", "timed_out"] {
-        let lines: Vec<String> = MADE
-            .lines()
-            .filter(|line| {
-                !(line.contains("\"subagent_id\":\"child-d\"") && line.contains("\"result_ready\"")
-                    || line.contains("\"child_id\":\"child-d\"")
-                        && (line.contains("\"status\":\"completed\"")
-                            || line.contains("\"status\":\"terminal\"")))
-            })
-            .map(|line| {
-                line.replace(
-                    TASK_ENDS,
-                    &format!("\"task_id\":\"task-workflow\",\"event\":{{\"kind\":\"{end}\""),
-                )
-            })
-            .collect();
-        let ended = lines_through(&lines, &format!("\"event\":{{\"kind\":\"{end}\""));
-        assert_eq!(
-            ended.pending,
-            pending(1, 1, 0),
-            "{end}: child-d still counted, notice owed"
-        );
-    }
-}
-
-#[test]
-fn a_child_with_no_end_in_the_record_stays_counted_when_its_workflow_s_task_ends() {
-    let lines: Vec<String> = MADE
-        .lines()
-        .filter(|line| {
-            !(line.contains("\"subagent_id\":\"child-d\"") && line.contains("\"result_ready\"")
-                || line.contains("\"child_id\":\"child-d\"")
-                    && (line.contains("\"status\":\"completed\"")
-                        || line.contains("\"status\":\"terminal\"")))
-        })
-        .map(str::to_owned)
-        .collect();
-    assert_eq!(lines_through(&lines, TASK_ENDS).pending.agents, 1);
-}
-
-#[test]
-fn a_later_attempt_of_a_child_that_ended_counts_again_made_from_the_binary_s_strings() {
-    // No live record has a second attempt: the lifecycle's `attempt` is 1 in every one. The
-    // binary names `workflow_lifecycle_retries` and an `attempt_ref`; this is made on the
-    // reading that a retry says `scheduled` and `started` again with a higher `attempt`.
-    let mut lines: Vec<String> = MADE.lines().map(str::to_owned).collect();
-    let at = lines
-        .iter()
-        .position(|line| {
-            line.contains("\"child_id\":\"child-b\"") && line.contains("\"status\":\"terminal\"")
-        })
-        .unwrap();
-    let again = |sequence: u64, status: &str| {
-        run_line(
-            sequence,
-            json!({ "kind": "workflow_child_lifecycle", "workflow_run_id": "wf-1",
-            "child_id": "child-b", "attempt": 2, "status": status, "task_id": "task-child-b" }),
-        )
-    };
-    lines.insert(at + 1, again(9001, "scheduled"));
-    lines.insert(at + 2, again(9002, "started"));
-    assert_eq!(
-        lines_through(&lines, "\"status\":\"terminal\"")
-            .pending
-            .agents,
-        4,
-        "b ended"
-    );
-    assert_eq!(
-        lines_through(&lines, "\"attempt\":2,\"status\":\"started\"")
-            .pending
-            .agents,
-        5,
-        "b again"
-    );
-    // The retry reports and ends again; the rest of the record is as it was.
-    lines.insert(at + 3, again(9003, "terminal"));
-    let ended = lines_through(&lines, "\"attempt\":2,\"status\":\"terminal\"");
-    assert_eq!(ended.pending.agents, 4, "b ended again");
-    let whole = lines_through(&lines, "\"payload_type\":\"session.end\"");
-    assert_eq!(whole.pending, Pending::default());
 }
 
 #[test]
@@ -420,4 +305,260 @@ fn a_monitor_whose_time_passed_is_over() {
         Pending::default(),
         "its time passed"
     );
+}
+
+// ---- One bounded wait after a workflow's task ends (T-1481, A5-26) ----
+
+/// The awake-run ordering, made for the test (`tests/fixtures/muse/made/`, its frame says
+/// so): the task ends while the agent's run is open, that run ends, and only after
+/// that is the notice queued. No Muse wrote this order; nothing rules it out.
+const AWAKE: &str =
+    include_str!("../../../../tests/fixtures/muse/made/workflow-awake-notice-late.jsonl");
+
+/// When the workflow's task ends in the made records (record 74's `recorded_at`), in ms.
+const END_MS: i64 = 1_793_094_244_000;
+/// A look inside the wait, and one after it (the wait is 10 s: the made record's notice
+/// follows the task's end by 10 ms and its drain by 160 ms).
+const INSIDE_MS: i64 = 9_000;
+const AFTER_MS: i64 = 11_000;
+
+/// One reader on a log that grows, looked at when the test says.
+struct Walk {
+    stage: Stage,
+    reader: Box<dyn Look + Send>,
+    lines: Vec<String>,
+    next: usize,
+}
+
+impl Walk {
+    fn new(lines: Vec<String>) -> Self {
+        let stage = Stage::new(&session_of(MADE));
+        let reader = stage.reader();
+        Self {
+            stage,
+            reader,
+            lines,
+            next: 0,
+        }
+    }
+
+    /// The log grows to the first line that holds `last`, which is in.
+    fn through(&mut self, last: &str) -> &mut Self {
+        while let Some(line) = self.lines.get(self.next) {
+            self.stage.append(line);
+            self.next += 1;
+            if line.contains(last) {
+                return self;
+            }
+        }
+        panic!("no line holds {last}");
+    }
+
+    /// A look at `now_ms`, with nothing more read than the log holds.
+    fn at(&mut self, now_ms: i64) -> Record {
+        known(&self.reader.look(&Options::default(), now_ms)).clone()
+    }
+}
+
+fn lines_of(log: &str) -> Vec<String> {
+    log.lines().map(str::to_owned).collect()
+}
+
+#[test]
+fn a_workflow_ended_and_told_nothing_is_pending_for_a_set_time_and_not_after() {
+    let mut walk = Walk::new(answered_early());
+    walk.through(TASK_ENDS);
+    let first = walk.at(END_MS + 20);
+    assert_eq!(first.settlement, Settlement::Settled, "the early answer");
+    assert_eq!(first.pending, pending(1, 0, 0));
+    assert_eq!(walk.at(END_MS + INSIDE_MS).pending, pending(1, 0, 0));
+    // No record came, and the look says time passed.
+    assert_eq!(walk.at(END_MS + AFTER_MS).pending, Pending::default());
+}
+
+#[test]
+fn a_notice_queued_inside_the_wait_and_not_drained_holds_without_a_limit_of_time() {
+    let mut walk = Walk::new(answered_early());
+    walk.through("\"kind\":\"inbox_item_queued\"");
+    assert_eq!(walk.at(END_MS + 20).pending, pending(1, 0, 0));
+    assert_eq!(walk.at(END_MS + 60_000).pending, pending(1, 0, 0));
+    assert_eq!(walk.at(END_MS + 3_600_000).pending, pending(1, 0, 0));
+    walk.through("\"kind\":\"inbox_item_drained\"");
+    assert_eq!(walk.at(END_MS + 3_600_100).pending, Pending::default());
+}
+
+#[test]
+fn the_awake_run_ending_before_the_notice_is_queued_reads_pending_throughout() {
+    // T-1479's finding 1: task end, the awake run answers and ends, then the notice.
+    let mut walk = Walk::new(lines_of(AWAKE));
+    walk.through(TASK_ENDS);
+    let end = walk.at(END_MS + 20);
+    assert_eq!(end.settlement, Settlement::InFlight, "run-1 is awake");
+    assert_eq!(end.pending, pending(1, 0, 0));
+    walk.through("\"event\":{\"kind\":\"terminal\"");
+    let ended = walk.at(END_MS + 250);
+    assert_eq!(ended.settlement, Settlement::Settled, "the awake run ended");
+    assert_eq!(ended.pending, pending(1, 0, 0), "no zero before the notice");
+    assert_eq!(walk.at(END_MS + 2_900).pending, pending(1, 0, 0));
+    walk.through("\"kind\":\"inbox_item_queued\"");
+    assert_eq!(walk.at(END_MS + 3_020).pending, pending(1, 0, 0));
+    walk.through("\"run_id\":\"run-2\",\"event\":{\"kind\":\"started\"");
+    let woken = walk.at(END_MS + 3_100);
+    assert_eq!(
+        woken.settlement,
+        Settlement::InFlight,
+        "the wake-up run holds"
+    );
+    assert_eq!(woken.pending, pending(1, 0, 0));
+    walk.through("\"kind\":\"inbox_item_drained\"");
+    assert_eq!(walk.at(END_MS + 3_200).pending, Pending::default());
+    walk.through("\"payload_type\":\"session.end\"");
+    let whole = walk.at(END_MS + 3_700_000);
+    assert_eq!(whole.settlement, Settlement::Settled);
+    assert_eq!(whole.pending, Pending::default());
+}
+
+#[test]
+fn a_clock_that_steps_back_neither_ends_the_wait_early_nor_stretches_it() {
+    let mut walk = Walk::new(answered_early());
+    walk.through(TASK_ENDS);
+    assert_eq!(walk.at(END_MS + 20).pending, pending(1, 0, 0));
+    // An hour back: the wait runs from this look, as well as by the record's time.
+    let back = END_MS - 3_600_000;
+    assert_eq!(walk.at(back).pending, pending(1, 0, 0));
+    assert_eq!(walk.at(back + INSIDE_MS).pending, pending(1, 0, 0));
+    assert_eq!(walk.at(back + AFTER_MS).pending, Pending::default());
+}
+
+#[test]
+fn a_task_ended_long_before_the_first_look_is_waited_on_from_that_look() {
+    let mut walk = Walk::new(answered_early());
+    walk.through(TASK_ENDS);
+    let late = END_MS + 3_600_000;
+    assert_eq!(walk.at(late).pending, pending(1, 0, 0));
+    assert_eq!(walk.at(late + INSIDE_MS).pending, pending(1, 0, 0));
+    assert_eq!(walk.at(late + AFTER_MS).pending, Pending::default());
+}
+
+/// The made record without child-d's own end.
+fn without_child_d_s_end() -> Vec<String> {
+    MADE.lines()
+        .filter(|line| {
+            !(line.contains("\"subagent_id\":\"child-d\"") && line.contains("\"result_ready\"")
+                || line.contains("\"child_id\":\"child-d\"")
+                    && (line.contains("\"status\":\"completed\"")
+                        || line.contains("\"status\":\"terminal\"")))
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn every_child_of_a_workflow_that_completed_is_ended_at_its_task_s_end() {
+    let mut walk = Walk::new(without_child_d_s_end());
+    walk.through("\"child-e\",\"attempt\":1,\"status\":\"terminal\"");
+    assert_eq!(walk.at(END_MS - 1_000).pending.agents, 1, "child-d runs");
+    walk.through(TASK_ENDS);
+    let ended = walk.at(END_MS + 20);
+    assert_eq!(ended.pending, pending(1, 0, 0), "the notice is owed");
+}
+
+#[test]
+fn a_child_of_a_workflow_that_failed_was_cancelled_or_timed_out_is_ended_with_the_wait_and_said() {
+    for end in ["failed", "cancelled", "timed_out"] {
+        let lines: Vec<String> = without_child_d_s_end()
+            .into_iter()
+            .map(|line| {
+                line.replace(
+                    TASK_ENDS,
+                    &format!("\"task_id\":\"task-workflow\",\"event\":{{\"kind\":\"{end}\""),
+                )
+            })
+            .collect();
+        let said = said_while(|| {
+            let mut walk = Walk::new(lines.clone());
+            walk.through(&format!("\"event\":{{\"kind\":\"{end}\""));
+            let record = walk.at(END_MS + 20);
+            assert_eq!(record.pending, pending(1, 1, 0), "{end}: held in the wait");
+            assert_eq!(walk.at(END_MS + INSIDE_MS).pending, pending(1, 1, 0));
+            assert_eq!(
+                walk.at(END_MS + AFTER_MS).pending,
+                Pending::default(),
+                "{end}: the wait is over, and the child with it"
+            );
+            // Looked at again, and the log read again from its start by a fresh reader.
+            assert_eq!(walk.at(END_MS + 20_000).pending, Pending::default());
+            let mut again = Walk::new(lines.clone());
+            again.through(&format!("\"event\":{{\"kind\":\"{end}\""));
+            again.at(END_MS + 30_000);
+            assert_eq!(
+                again.at(END_MS + 30_000 + AFTER_MS).pending,
+                Pending::default()
+            );
+        });
+        assert_eq!(
+            said,
+            ["workflow task task-workflow ended: children with no end of their own, now counted ended: 1"],
+            "{end}"
+        );
+    }
+}
+
+#[test]
+fn a_child_of_a_workflow_that_failed_is_ended_when_its_notice_is_drained() {
+    let lines: Vec<String> = without_child_d_s_end()
+        .into_iter()
+        .map(|line| {
+            line.replace(
+                TASK_ENDS,
+                "\"task_id\":\"task-workflow\",\"event\":{\"kind\":\"failed\"",
+            )
+        })
+        .collect();
+    let mut walk = Walk::new(lines);
+    walk.through("\"kind\":\"inbox_item_queued\"");
+    assert_eq!(walk.at(END_MS + 20).pending, pending(1, 1, 0));
+    assert_eq!(
+        walk.at(END_MS + 60_000).pending,
+        pending(1, 1, 0),
+        "queued, not drained"
+    );
+    walk.through("\"kind\":\"inbox_item_drained\"");
+    assert_eq!(walk.at(END_MS + 60_100).pending, Pending::default());
+    // The wake-up run answers and ends: the child is not counted for good.
+    walk.through("\"run_id\":\"run-2\",\"event\":{\"kind\":\"terminal\"");
+    let done = walk.at(END_MS + 61_000);
+    assert_eq!(done.settlement, Settlement::Settled);
+    assert_eq!(done.pending, Pending::default());
+}
+
+#[test]
+fn an_ended_child_stays_ended_whatever_comes_after_it() {
+    let mut lines: Vec<String> = MADE.lines().map(str::to_owned).collect();
+    let at = lines
+        .iter()
+        .position(|line| {
+            line.contains("\"child_id\":\"child-b\"") && line.contains("\"status\":\"terminal\"")
+        })
+        .unwrap();
+    let lifecycle = |sequence: u64, status: &str| {
+        run_line(
+            sequence,
+            json!({ "kind": "workflow_child_lifecycle", "workflow_run_id": "wf-1",
+            "child_id": "child-b", "attempt": 2, "status": status, "task_id": "task-child-b" }),
+        )
+    };
+    lines.insert(at + 1, lifecycle(9001, "scheduled"));
+    lines.insert(at + 2, lifecycle(9002, "started"));
+    lines.insert(
+        at + 3,
+        child_record(9003, "attempt_admitted", "child-b", json!({})).to_string(),
+    );
+    let mut walk = Walk::new(lines);
+    walk.through("\"attempt\":2,\"status\":\"started\"");
+    assert_eq!(walk.at(END_MS - 1).pending.agents, 4, "b ended");
+    walk.through("\"kind\":\"attempt_admitted\",\"subagent_id\":\"child-b\"");
+    assert_eq!(walk.at(END_MS - 1).pending.agents, 4, "b stays ended");
+    walk.through("\"payload_type\":\"session.end\"");
+    assert_eq!(walk.at(END_MS + 1).pending, Pending::default());
 }

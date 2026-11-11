@@ -217,7 +217,7 @@ impl Log {
             Some("runtime.session") => match field(payload, "kind").and_then(Value::as_str) {
                 Some("run") => self.run_event(record, payload, at, seq),
                 Some("task") => {
-                    self.work.task(payload);
+                    self.work.task(payload, recorded_ms(record));
                     Ok(())
                 }
                 Some("approval") => {
@@ -684,6 +684,14 @@ fn messages_text(messages: Option<&Value>) -> String {
         .join("\n")
 }
 
+/// When a record was written, in milliseconds since the epoch, where it says.
+fn recorded_ms(record: &Value) -> Option<i64> {
+    record
+        .get("recorded_at")
+        .and_then(Value::as_i64)
+        .map(|micros| micros / 1000)
+}
+
 /// When a record was written, as the readings say a time: `recorded_at`'s
 /// microseconds as the instant's ISO text, else the record's place.
 fn recorded_at(record: &Value, seq: &Value) -> Value {
@@ -695,6 +703,10 @@ fn recorded_at(record: &Value, seq: &Value) -> Value {
 }
 
 impl Parser for Log {
+    fn looked(&mut self, now_ms: i64) -> bool {
+        self.work.looked(now_ms)
+    }
+
     fn visit(&mut self, record: Value, index: usize) -> Result<(), Stop> {
         if record.is_null() {
             return Err(Stop::Failed(null_record(index)));

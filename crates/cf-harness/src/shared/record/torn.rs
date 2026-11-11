@@ -70,8 +70,16 @@ pub(crate) fn unfinished(file: &Path, index: usize, at: u64) {
 /// `.`, `-`): the work it is of stays as it was, and a record of a kind the reader
 /// does not know may be what ends it.
 pub(crate) fn unread(what: &str, kind: &str) {
-    let kind: String = kind
-        .chars()
+    let kind = plain(kind);
+    said_once(what, &kind, || {
+        format!("a {what} of kind {kind} is not read: the work it is of is held as it was")
+    });
+}
+
+/// `name` as ids and kinds are said: cut at 48 characters, and only of letters, digits and
+/// `_`, `.`, `-`.
+fn plain(name: &str) -> String {
+    name.chars()
         .take(48)
         .map(|c| {
             if c.is_ascii_alphanumeric() || "_.-".contains(c) {
@@ -80,13 +88,25 @@ pub(crate) fn unread(what: &str, kind: &str) {
                 '?'
             }
         })
-        .collect();
+        .collect()
+}
+
+/// A workflow's task `task` ended and its wait for its end notice is over, and `children`
+/// of its children, which no record of their own ended, are counted ended with it: said
+/// once a workflow, by its task's id and the number alone.
+pub(crate) fn children_ended_with_the_wait(task: &str, children: usize) {
+    let task = plain(task);
+    said_once("workflow", &task, || {
+        format!("workflow task {task} ended: children with no end of their own, now counted ended: {children}")
+    });
+}
+
+/// Says `line` the first time a reader on this thread says one of `what` named `name`.
+fn said_once(what: &str, name: &str, line: impl FnOnce() -> String) {
     SAYING.with(|saying| {
         if let Some(saying) = saying.borrow_mut().as_mut() {
-            if saying.unread.insert((what.to_owned(), kind.clone())) {
-                (saying.say)(&format!(
-                    "a {what} of kind {kind} is not read: the work it is of is held as it was"
-                ));
+            if saying.unread.insert((what.to_owned(), name.to_owned())) {
+                (saying.say)(&line());
             }
         }
     });
