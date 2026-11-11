@@ -12,6 +12,7 @@ use crate::records::{Quota, Reading, Record, Settlement};
 use crate::testing::{finished, Driver, Fakes, EPOCH_MS};
 
 mod bypass;
+mod unannounced;
 
 const MINUTE_MS: i64 = 60_000;
 
@@ -52,6 +53,8 @@ fn devin_window(
         read_empty: Cell::default(),
         input: RefCell::default(),
         left_open: RefCell::new(None),
+        unannounced_since: Cell::default(),
+        typed_into: Cell::default(),
     })
 }
 

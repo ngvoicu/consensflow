@@ -100,6 +100,11 @@ const TAKEN_IN_MS: i64 = 30_000;
 /// What a window that has not said yet which conversation it shows is held for.
 const HOLD: &str = "Devin has not said yet which conversation its window shows";
 
+/// How long a window whose log names the conversation it is known to be on, on every line that
+/// names one, and has configured none, is held as one that has said nothing, from the first look
+/// that found its log so: then its deliveries go behind `/bypass` (`Shows::Unannounced`).
+pub(crate) const UNANNOUNCED_MS: i64 = 10_000;
+
 /// Devin's own command that switches a window to full permission ("Switch to
 /// Bypass Permissions mode, or run a prompt under it", `/bypass [prompt]`).
 pub(crate) const BYPASS: &str = "/bypass";
@@ -515,6 +520,27 @@ struct DevinWindow {
     /// turn the quit cut after a step whose call has no result, a message of the user's
     /// the cut left unanswered (T-722).
     left_open: RefCell<Option<LeftOpen>>,
+    /// When the first look was that found its log naming the conversation it is known to be
+    /// on, and configuring none (`shows`).
+    unannounced_since: Cell<Option<i64>>,
+    /// Whether a readiness's look read the pane host's count of the human's keys above 0: a key
+    /// of theirs reached the window since it opened (`shows`).
+    typed_into: Cell<bool>,
+}
+
+/// Which conversation a window's log says it shows, as `DevinWindow::shows` tells it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Shows {
+    /// The one it is known to be on, by its configuration.
+    Known,
+    /// Another, by its configuration.
+    Another(String),
+    /// None yet: what the window is held for ([`HOLD`]).
+    Unsaid,
+    /// The one it is known to be on, by every line that names one, and none by a
+    /// configuration for [`UNANNOUNCED_MS`]: a window opened again silent, whose
+    /// deliveries go behind `/bypass`.
+    Unannounced,
 }
 
 impl DevinWindow {
@@ -542,6 +568,8 @@ impl DevinWindow {
             read_empty: Cell::default(),
             input: RefCell::default(),
             left_open: RefCell::new(left_open),
+            unannounced_since: Cell::default(),
+            typed_into: Cell::default(),
         }
     }
 
@@ -623,6 +651,7 @@ impl DevinWindow {
                     pane,
                     self.wire.path(),
                     session.as_deref(),
+                    channel::Guard::Configured,
                     BYPASS,
                     self.read_empty.get(),
                 )
@@ -637,14 +666,59 @@ impl DevinWindow {
         Readiness::Held(Held::Because(SWITCHING.to_owned()))
     }
 
+    /// Which conversation the window shows, as its wire says `said`: the one place that
+    /// says it, for the window's readiness, its deliveries and its looks.
+    ///
+    /// A configuration says it, as Devin writes one at load. A window Devin 3000.12.43 opens
+    /// again with no message on a session whose last turn a quit cut, and that it left in full
+    /// permission, writes none until it is typed to (T-1432: five windows, 20 to 65 s silent),
+    /// while every line of its replay names its session. Such a log says the window is on
+    /// the conversation it is known to be on once it has said so, and nothing else, for
+    /// [`UNANNOUNCED_MS`] from the first look that found it so: a Devin that announces does
+    /// within 2.3 s (T-1417 and T-1432, nine windows). Its lines carry no times, so the
+    /// while is the window's own looks'. Any other conversation named, a second, or a
+    /// configuration, ends it.
+    ///
+    /// Nothing tells a `/new` that writes no line from the window still on its conversation
+    /// (T-1466's review: not the log, the process, the launch's arguments or the store), and
+    /// ConsensFlow types no command into a window: only a person could have switched it. So a
+    /// window the pane host's count says a key of the human's reached since it opened is held as
+    /// one that has said nothing, until its log configures. The count is read at each readiness,
+    /// so the hold is decided before a delivery is admitted, and the engine holds the message as
+    /// for any window not ready, spending no attempt. Not seen: a key that comes between that
+    /// look and the paste, a switch made with the mouse alone (mouse reports are no key), and
+    /// keys still on their way from the page.
+    fn shows(&self, said: &Said) -> Shows {
+        let unannounced = said
+            .unannounced
+            .as_deref()
+            .filter(|named| said.shown.is_none() && self.known(named));
+        let Some(_) = unannounced else {
+            self.unannounced_since.set(None);
+            return match &said.shown {
+                None => Shows::Unsaid,
+                Some(shown) if !self.known(shown) => Shows::Another(shown.clone()),
+                Some(_) => Shows::Known,
+            };
+        };
+        let now = self.time.wall_ms();
+        let since = *self.unannounced_since.get().get_or_insert(now);
+        self.unannounced_since.set(Some(since));
+        if now - since >= UNANNOUNCED_MS && !self.typed_into.get() {
+            Shows::Unannounced
+        } else {
+            Shows::Unsaid
+        }
+    }
+
     /// What holds a window whose wire says `said` before anything else is looked at:
     /// a conversation it has not named yet, or one it shows that is not the one it is
     /// known to be on.
     fn shows_another(&self, said: &Said) -> Option<Held> {
-        match &said.shown {
-            None => Some(Held::Because(HOLD.to_owned())),
-            Some(shown) if !self.known(shown) => Some(Held::ShowsAnother),
-            Some(_) => None,
+        match self.shows(said) {
+            Shows::Unsaid => Some(Held::Because(HOLD.to_owned())),
+            Shows::Another(_) => Some(Held::ShowsAnother),
+            Shows::Known | Shows::Unannounced => None,
         }
     }
 }
@@ -713,7 +787,16 @@ impl Window for DevinWindow {
             let snapshot = pane::snapshot(host, pane)
                 .await
                 .map_err(|failed| failed.message)?;
-            self.input.replace(HumanInput::of(&snapshot));
+            let input = HumanInput::of(&snapshot);
+            // The host's count is of this window's launch, and outlives a daemon's restart.
+            if input
+                .as_ref()
+                .and_then(|input| input.typed)
+                .is_some_and(|typed| typed > 0)
+            {
+                self.typed_into.set(true);
+            }
+            self.input.replace(input);
             if snapshot.get("ok") != Some(&Value::Bool(true))
                 || js::truthy(snapshot.get("pasteInFlight"))
             {
@@ -766,8 +849,23 @@ impl Window for DevinWindow {
             } else {
                 window_text(text)
             };
+            // A window opened again silent is given its message behind `/bypass`, as a resumed
+            // window's first message is (`first_message`): the turn runs in full permission
+            // whatever mode it is in, and writes the configuration as it begins (T-1432 runs 2
+            // and 3, three windows, in either mode: 234 to 345 ms). `/bypass` alone would do
+            // nothing where the window is in full permission already (run A's b2). A log that
+            // cannot be read is the channel's to refuse, as it was.
+            let unannounced = self
+                .wire
+                .read(self.time.wall_ms())
+                .is_ok_and(|said| self.shows(&said) == Shows::Unannounced);
+            let (body, guard) = if unannounced {
+                (format!("{BYPASS} {body}"), channel::Guard::Unannounced)
+            } else {
+                (body, channel::Guard::Configured)
+            };
             // Its store's history row of the whole paste is the TUI's word that it took
-            // it (`took`).
+            // it (`took`): Devin keeps the command in the row (run 2).
             self.history.expect(&body, self.time.wall_ms());
             let session = self.session.borrow().clone();
             let read_empty = self.read_empty.take();
@@ -776,6 +874,7 @@ impl Window for DevinWindow {
                 pane,
                 self.wire.path(),
                 session.as_deref(),
+                guard,
                 &body,
                 read_empty,
             )
@@ -842,7 +941,7 @@ impl Window for DevinWindow {
             let wire = self.wire.read(self.time.wall_ms())?;
             self.looked.set(self.history().map(|seen| seen.prompts));
             // What Devin's wire says of its quota is the live word beside the record's.
-            let mut observed = observed_from(Arc::clone(&reading), wire.quota);
+            let mut observed = observed_from(Arc::clone(&reading), wire.quota.clone());
             observed.waiting = dialog_waiting(observed.reading.as_deref());
             // What the record held when the window was opened with no message is the old
             // process's, whatever it says of the turn: no process is in a turn that was
@@ -876,10 +975,10 @@ impl Window for DevinWindow {
             // What the turn took in, by the messages it said back, has begun (T-1423): the
             // engine's watch for a message no turn began on leaves those be (`never_began`).
             observed.begun = self.wire.said_back(&session);
-            Ok(match wire.shown {
-                None => unnamed(observed, HOLD),
-                Some(shown) if !self.known(&shown) => switched_to(observed, shown),
-                Some(_) => observed,
+            Ok(match self.shows(&wire) {
+                Shows::Unsaid => unnamed(observed, HOLD),
+                Shows::Another(shown) => switched_to(observed, shown),
+                Shows::Known | Shows::Unannounced => observed,
             })
         })
     }

@@ -49,6 +49,24 @@
 //!   header are no paste, and a word that a paste is in a turn lasts that turn: the
 //!   result goes again after the human's turn and the daemon's arrival window.
 //!
+//! On the wire log of Devin 3000.12.43, the installed Devin (T-1423), the three cases above
+//! are the same danger by another way in. That Devin says each message back as its turn
+//! takes it in, and the window reads at work from that line to the turn's `cause`: a
+//! result is pasted into a turn only once the turn has ended, and a result held queued
+//! behind a turn it was pasted into while the window read at rest was the old shape's
+//! silence. What is left is the gap before the message is said back, 0.2 to 2.1 s live (the
+//! messages of T-1423's runs 4 and 5): the human types, the daemon's pass finds the window at
+//! rest and a result to paste, and the paste goes in behind the human's message, which the
+//! wire has not said back yet. Devin holds it in its queue and its record shows it only when
+//! the turn before it is run, as in the old shape. The stand-in holds a message's turn in
+//! that gap until the next message comes (`FAKE_DEVIN_GAP`), so that no case waits on a race of
+//! seconds, and each case asserts that the paste came before the message was said back, and
+//! then what it asserted before: the window reads at work from the message said back to its
+//! turn's end, so the paste held in the queue is never taken for lost, whatever the record
+//! says of it. What real Devin does with a message that comes in the gap is not recorded: the
+//! stand-in queues it behind, as the 3000.11.3 run of 2026-10-13 showed (a note pasted a second
+//! after another showed in the record 63 s later).
+//!
 //! What proves it is the daemon's own word for its pastes (`delivery.begun`,
 //! `delivery.retried`): a second copy would be read by the chief after the turns before it,
 //! later than this looks, so the case ends at the paste over the count, the daemon's word being
@@ -64,14 +82,27 @@ use cf_e2e::rig::{Config, Project, Rig};
 use cf_e2e::Error;
 use serde_json::{json, Value};
 
-use crate::devin_notes_twice::{arrival, store_of, work_ms, ARRIVAL_MS, WORK_MS};
-use crate::{config, secs, Outcome, FAKE_DEVIN};
+use crate::devin_notes_twice::{arrival, said_back_at, store_of, work_ms, ARRIVAL_MS, WORK_MS};
+use crate::{devin_config, installed_devin, on_the_installed_devin, secs, Outcome};
 
 /// How long the stand-in's agent takes to its first word, in seconds: silent past the
 /// gap the daemon reads a Devin window busy from its prompt for ([`GAP_SECONDS`]). Its work
 /// after it takes [`WORK_MS`], longer than the arrival window by more than a slow
 /// machine's passes take.
 const FIRST_WORD_SECONDS: u64 = 40;
+
+/// [`FIRST_WORD_SECONDS`], and on the installed Devin the 30 s of the prompt's hold, the
+/// arrival window and 10 s more: the window of that Devin reads at work through the silence,
+/// so that a reader that did not would read it at rest for more than the arrival window and
+/// the daemon would paste the result again. At 40 s it would read at rest for 10 s, which
+/// no rule of the daemon's takes for lost.
+fn first_word_seconds() -> u64 {
+    if installed_devin() {
+        GAP_SECONDS + ARRIVAL_MS as u64 / 1_000 + 10
+    } else {
+        FIRST_WORD_SECONDS
+    }
+}
 
 /// The 30 s the daemon reads a Devin window busy from a prompt of its TUI, which the
 /// stand-in's first word has to outlast (the adapter's `PROMPT_GAP_MS`, which no variable sets).
@@ -94,7 +125,7 @@ const HEADER: &str = "[ConsensFlow m-";
 
 /// How long the stand-in's agent takes to its first word, in milliseconds.
 fn first_word_ms() -> String {
-    (FIRST_WORD_SECONDS * 1_000).to_string()
+    (first_word_seconds() * 1_000).to_string()
 }
 
 /// The roster of the cases: a Devin (the stand-in) is the chief, and two workers of the
@@ -114,9 +145,39 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
 /// A rig whose chief is the stand-in Devin, its agent as quick as `first_word` and
 /// `work` say (in milliseconds), the daemon's arrival window [`ARRIVAL_MS`].
 fn a_rig(first_word: &str, work: &str) -> Config {
-    arrival(config().devin(FAKE_DEVIN))
+    arrival(devin_config())
         .var("FAKE_DEVIN_FIRST_WORD_MS", first_word)
         .var("FAKE_DEVIN_WORK_MS", work)
+}
+
+/// The human's message that the gap of the installed Devin's cases holds: the word that
+/// `FAKE_DEVIN_GAP` meets it by.
+const HELD_IN_THE_GAP: &str = "BUSY";
+
+/// [`a_rig`], and on the installed Devin the gap: the human's message `word` is not said back
+/// until the daemon's paste has come in behind it.
+fn a_rig_in_the_gap(first_word: &str, work: &str, word: &str) -> Config {
+    let rig = a_rig(first_word, work);
+    if installed_devin() {
+        rig.var("FAKE_DEVIN_GAP", word)
+    } else {
+        rig
+    }
+}
+
+/// On the installed Devin: the paste of the result `id` went in before the human's message
+/// `words` was said back, which is what the gap is. The wire is the window's own log; its
+/// said-back is stamped with the time Devin says it.
+fn the_paste_came_in_the_gap(rig: &Rig, id: i64, words: &str) {
+    if !installed_devin() {
+        return;
+    }
+    let said_back = said_back_at(rig, words);
+    let pasted = first_at(&rig.events(), "delivery.begun", id);
+    assert!(
+        matches!((pasted, said_back), (Some(pasted), Some(said_back)) if pasted < said_back),
+        "the paste of m-{id} did not come before the human's message ({words}) was said back, so it is no paste in the gap: pasted {pasted:?}, said back {said_back:?}"
+    );
 }
 
 /// A result of the case: the task it is of, and the words its worker answers with.
@@ -317,14 +378,20 @@ fn each_went_in_once_whole_and_apart(rig: &Rig, ids: [i64; 2], pasted: [usize; 2
 #[test]
 fn two_results_for_a_devin_chief_whose_record_of_the_first_is_late_go_in_once_each_whole_and_apart(
 ) -> Outcome {
-    let rig = Rig::start(a_rig(&first_word_ms(), &work_ms()))?;
+    let rig = Rig::start(a_rig_in_the_gap(
+        &first_word_ms(),
+        &work_ms(),
+        HELD_IN_THE_GAP,
+    ))?;
     let (project, tier) = a_project(&rig)?;
     // The human's turn is in front: the first result, made in it, is pasted in its
-    // silence, and the second waits behind the first.
+    // silence (on the installed Devin, in the gap before the human's message is said back),
+    // and the second waits behind the first.
     the_human_types_to_the_chief(&rig, &project)?;
     give(&rig, &project, &tier, FIRST, 2)?;
     give(&rig, &project, &tier, SECOND, 6)?;
     let ids = until_both_are_in(&rig, &project, [1, 1])?;
+    the_paste_came_in_the_gap(&rig, ids[0], HELD_IN_THE_GAP);
 
     // What the case is about: the record showed the first result later than the daemon's
     // arrival window after its paste. Without it the case would hold nothing.
@@ -341,23 +408,30 @@ fn two_results_for_a_devin_chief_whose_record_of_the_first_is_late_go_in_once_ea
 #[test]
 fn two_results_for_a_devin_chief_at_work_when_the_second_comes_go_in_once_each_whole_and_apart(
 ) -> Outcome {
-    let rig = Rig::start(a_rig(&first_word_ms(), &work_ms()))?;
+    let rig = Rig::start(a_rig_in_the_gap(
+        &first_word_ms(),
+        &work_ms(),
+        HELD_IN_THE_GAP,
+    ))?;
     let (project, tier) = a_project(&rig)?;
     the_human_types_to_the_chief(&rig, &project)?;
     give(&rig, &project, &tier, FIRST, 2)?;
     // The second worker answers once the first result is in the chief's turn, and the
-    // chief at work: half way between the first paste (the gap after the prompt) and the
+    // chief at work: half way between the first paste (the gap after the prompt; on the
+    // installed Devin the paste is in the gap before the turn, so from its start) and the
     // end of the turn (its first word and its work), where a slow runner has the most
     // room on either side.
-    let turn = FIRST_WORD_SECONDS + WORK_MS as u64 / 1_000;
+    let turn = first_word_seconds() + WORK_MS as u64 / 1_000;
+    let from = if installed_devin() { 0 } else { GAP_SECONDS };
     give(
         &rig,
         &project,
         &tier,
         SECOND,
-        (GAP_SECONDS + turn) / 2 - SETUP_SECONDS,
+        (from + turn) / 2 - SETUP_SECONDS,
     )?;
     let ids = until_both_are_in(&rig, &project, [1, 1])?;
+    the_paste_came_in_the_gap(&rig, ids[0], HELD_IN_THE_GAP);
 
     // What the case is about: the second result was made after the first was pasted and
     // before Devin's record showed it, the chief in its turn all the while.
@@ -391,7 +465,7 @@ fn two_results_for_a_devin_chief_at_work_when_the_second_comes_go_in_once_each_w
 #[test]
 fn two_results_for_a_devin_chief_whose_turn_says_nothing_for_minutes_go_in_once_each_whole_and_apart(
 ) -> Outcome {
-    let rig = Rig::start(a_rig("2000", "5000"))?;
+    let rig = Rig::start(a_rig_in_the_gap("2000", "5000", "THINK"))?;
     let (project, tier) = a_project(&rig)?;
     rig.tell_within(
         project.id(),
@@ -401,6 +475,7 @@ fn two_results_for_a_devin_chief_whose_turn_says_nothing_for_minutes_go_in_once_
     give(&rig, &project, &tier, FIRST, 2)?;
     give(&rig, &project, &tier, SECOND, 6)?;
     let ids = until_both_are_in(&rig, &project, [1, 1])?;
+    the_paste_came_in_the_gap(&rig, ids[0], "THINK");
 
     // What the case is about: the window rested more than the daemon's arrival window
     // while Devin held the first result, by half a window and more, as the case was
@@ -535,4 +610,43 @@ fn a_result_whose_paste_devins_tui_dropped_is_not_pasted_over_the_humans_words_t
     );
     rig.close()?;
     Ok(())
+}
+
+// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423): the case as
+// it is, the stand-in's shape chosen here and not by the environment.
+
+#[test]
+fn two_results_for_a_devin_chief_whose_tui_dropped_the_first_paste_go_in_once_each_whole_and_apart_on_devin_3000_12(
+) -> Outcome {
+    crate::on_the_installed_devin(two_results_for_a_devin_chief_whose_tui_dropped_the_first_paste_go_in_once_each_whole_and_apart)
+}
+
+#[test]
+fn a_result_whose_paste_devins_tui_dropped_is_not_pasted_over_the_humans_words_that_quote_its_header_on_devin_3000_12(
+) -> Outcome {
+    crate::on_the_installed_devin(a_result_whose_paste_devins_tui_dropped_is_not_pasted_over_the_humans_words_that_quote_its_header)
+}
+
+#[test]
+fn two_results_for_a_devin_chief_whose_record_of_the_first_is_late_go_in_once_each_whole_and_apart_on_devin_3000_12(
+) -> Outcome {
+    on_the_installed_devin(
+        two_results_for_a_devin_chief_whose_record_of_the_first_is_late_go_in_once_each_whole_and_apart,
+    )
+}
+
+#[test]
+fn two_results_for_a_devin_chief_at_work_when_the_second_comes_go_in_once_each_whole_and_apart_on_devin_3000_12(
+) -> Outcome {
+    on_the_installed_devin(
+        two_results_for_a_devin_chief_at_work_when_the_second_comes_go_in_once_each_whole_and_apart,
+    )
+}
+
+#[test]
+fn two_results_for_a_devin_chief_whose_turn_says_nothing_for_minutes_go_in_once_each_whole_and_apart_on_devin_3000_12(
+) -> Outcome {
+    on_the_installed_devin(
+        two_results_for_a_devin_chief_whose_turn_says_nothing_for_minutes_go_in_once_each_whole_and_apart,
+    )
 }
