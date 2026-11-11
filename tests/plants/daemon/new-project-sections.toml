@@ -728,7 +728,7 @@ replace = 'const DEFAULT_SIZE = 250_000'
 
 [[plant]]
 name = "new project sections: New project opens on the harness's own point"
-meant = "New project has Staff, the rules for the staff, compaction, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has"
+meant = "New project has Staff, the rules for the staff, compaction, the advisor tool, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has"
 runs = ["nps-page"]
 
 [[plant.edit]]
