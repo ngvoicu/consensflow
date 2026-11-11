@@ -96,6 +96,30 @@ pub struct NewNote {
     pub task: Option<i64>,
 }
 
+/// A note of ConsensFlow's own that asks its reader no decision: to a chief it is shown,
+/// not typed (`queue`'s [`crate::queue::SHOWN`]), `aside` its words on the task's line;
+/// to anyone else it is queued as [`note`] queues one.
+pub(crate) fn show(
+    store: &mut Store,
+    project_id: i64,
+    note: &NewNote,
+    aside: &str,
+) -> Result<MessageView, LedgerError> {
+    send(
+        store,
+        project_id,
+        &Sent {
+            from: note.from.as_deref(),
+            to: &note.to,
+            body: &note.body,
+            task: note.task,
+            kind: "note",
+            shown: Some(aside),
+            ..Sent::default()
+        },
+    )
+}
+
 /// A question for a coordinator: who asks it and whom, about which task,
 /// and what it asks, in words or as a harness's question tool asked it, with
 /// options; an urgent one is the chief's `cf tell` to a task's window.

@@ -458,6 +458,11 @@ pub struct TaskView {
     pub deleted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// What ConsensFlow shows of the task instead of telling its chief, which asks no
+    /// decision: the words of its newest note that was shown, not typed, while it holds
+    /// (until the task moves on). None where none does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aside: Option<String>,
 }
 
 /// A message in an inbox.
@@ -650,6 +655,9 @@ pub struct TaskCard {
     pub created_at: String,
     pub updated_at: String,
     pub result: Option<String>,
+    /// What ConsensFlow shows of the task instead of telling its chief ([`TaskView::aside`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aside: Option<String>,
 }
 
 impl TaskCard {
@@ -675,6 +683,7 @@ impl TaskCard {
             created_at: task.created_at,
             updated_at: task.updated_at,
             result,
+            aside: task.aside,
         }
     }
 }

@@ -33,6 +33,39 @@ impl Ledger {
         messages::note(&mut self.store, project_id, note)
     }
 
+    /// A note from ConsensFlow that asks its reader no decision: to a chief it is shown, not
+    /// typed, and `aside` is what its task's line says of it until the task moves on
+    /// ([`crate::TaskView::aside`]); to anyone else it goes as [`Ledger::note`]'s does.
+    pub fn show(
+        &mut self,
+        project_id: i64,
+        note: &NewNote,
+        aside: &str,
+    ) -> Result<MessageView, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("note", None)?;
+        messages::show(&mut self.store, project_id, note, aside)
+    }
+
+    /// The aside of task T-`number`'s newest note that is shown, not typed, ends: what it
+    /// said no longer holds though the task did not move (a hold in the background ended).
+    pub fn end_aside(&mut self, project_id: i64, number: i64) -> Result<(), LedgerError> {
+        crate::tasks::end_asides_of(&mut self.store, project_id, number)
+    }
+
+    /// [`Ledger::tell_closed`], shown and not typed to a chief, `aside` its words on the
+    /// task's line, where it joins no note of failures still queued.
+    pub fn show_closed(
+        &mut self,
+        project_id: i64,
+        note: &NewNote,
+        aside: &str,
+    ) -> Result<MessageView, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("note", None)?;
+        crate::tasks::show_closed(&mut self.store, project_id, note, aside)
+    }
+
     /// The note that a task's window closed, from ConsensFlow to the requester of the task:
     /// a line of the note still queued for the requester that tells of several tasks that
     /// failed alike, where `note.task` is one of them, and a note of its own anywhere else.

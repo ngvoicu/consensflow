@@ -389,6 +389,29 @@ pub(crate) fn tell_closed(
     project_id: i64,
     new: &NewNote,
 ) -> Result<MessageView, LedgerError> {
+    told_closed(store, project_id, new, None)
+}
+
+/// [`tell_closed`], and where it joins no note of failures, shown and not typed to a chief,
+/// `aside` its words on the task's line (`messages::show`): a close that ended background
+/// work, or left processes that may be its window's, asks the chief no decision. A line of a
+/// note of failures goes as that note goes, which is typed.
+pub(crate) fn show_closed(
+    store: &mut Store,
+    project_id: i64,
+    new: &NewNote,
+    aside: &str,
+) -> Result<MessageView, LedgerError> {
+    told_closed(store, project_id, new, Some(aside))
+}
+
+/// [`tell_closed`] and [`show_closed`].
+fn told_closed(
+    store: &mut Store,
+    project_id: i64,
+    new: &NewNote,
+    shown: Option<&str>,
+) -> Result<MessageView, LedgerError> {
     store.write(|store| {
         if let Some(number) = new.task {
             for told in pending(store, project_id)? {
@@ -418,7 +441,10 @@ pub(crate) fn tell_closed(
                 }
             }
         }
-        note(store, project_id, new)
+        match shown {
+            Some(aside) => crate::messages::show(store, project_id, new, aside),
+            None => note(store, project_id, new),
+        }
     })
 }
 

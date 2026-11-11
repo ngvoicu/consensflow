@@ -197,7 +197,8 @@ fn a_task_taken_back_withdraws_the_notes_of_the_wait_it_leaves_and_keeps_its_own
         Some(task),
         &format!("T-1 is paused: @{session}'s window is gone."),
     );
-    assert_eq!(w.states(&[hold.id, stall.id]), ["queued", "queued"]);
+    // The hold note asks the chief nothing: it is shown, not typed (RS-25), and so given.
+    assert_eq!(w.states(&[hold.id, stall.id]), ["read", "queued"]);
 
     // The human gives it to another member while it is held.
     w.ledger
@@ -207,7 +208,7 @@ fn a_task_taken_back_withdraws_the_notes_of_the_wait_it_leaves_and_keeps_its_own
         "cancelled".to_owned(),
         Some("T-1 was taken back".to_owned()),
     );
-    assert_eq!(fate(&w, hold.id), withdrawn);
+    assert_eq!(fate(&w, hold.id), ("read".to_owned(), None), "it was given");
     assert_eq!(fate(&w, stall.id), withdrawn);
     let told = told_chief(&w);
     let release = told.last().expect("the note of the release");
@@ -236,7 +237,8 @@ fn a_requester_given_the_note_that_a_task_is_held_is_told_when_its_resumed_turn_
             "T-1 waits with @{session}: out of quota until {UNTIL}, or sooner if its account has quota again; it goes on by itself."
         )
     );
-    w.deliver(hold.id);
+    // Shown, not typed: the chief has it as it is written (RS-25).
+    assert_eq!(hold.state, "read");
 
     w.daemon_resumes(task);
     assert_eq!(
@@ -255,54 +257,45 @@ fn a_requester_given_the_note_that_a_task_is_held_is_told_when_its_resumed_turn_
             correction.sender.as_deref(),
             correction.recipient.as_str()
         ),
-        ("queued", Some(task), None, "chief")
+        ("read", Some(task), None, "chief"),
+        "the news asks nothing either: shown, not typed"
     );
     assert_eq!(
         fate(&w, hold.id),
-        ("delivered".to_owned(), None),
+        ("read".to_owned(), None),
         "what the chief was given stays"
     );
     assert_eq!(told.len(), 2, "one note more");
 }
 
 #[test]
-fn a_requester_being_given_the_hold_note_is_told_too_but_one_not_given_it_is_told_nothing() {
+fn a_chief_is_given_every_hold_note_as_it_is_written_and_so_told_each_time_its_task_goes_on() {
     let mut w = world();
     let (task, session) = with_zeus(&mut w);
-    let hold = held(&mut w, task, &session);
-    // Being pasted into the chief's window as the daemon resumes the task.
-    w.begin(hold.id);
+    held(&mut w, task, &session);
     w.daemon_resumes(task);
     w.went_on(task);
     assert_eq!(
         told_chief(&w).last().map(|note| note.body.as_str()),
         Some(GOES_ON),
-        "it reaches the chief's window, and the chief is told it goes on"
+        "the chief had the hold note, and is told it goes on"
     );
 
-    // Another hold: the note is still queued when the daemon resumes the task.
-    w.confirm(hold.id);
+    // Another hold: its note is the chief's at once too (shown, not typed), and stays.
     let again = held(&mut w, task, &session);
     let before = told_chief(&w).len();
     w.daemon_resumes(task);
     w.went_on(task);
-    assert_eq!(
-        fate(&w, again.id),
-        ("cancelled".to_owned(), Some("T-1 resumed".to_owned()))
-    );
-    assert_eq!(
-        told_chief(&w).len(),
-        before,
-        "nothing is said of a note nobody read"
-    );
+    assert_eq!(fate(&w, again.id), ("read".to_owned(), None));
+    assert_eq!(told_chief(&w).len(), before + 1, "told it goes on again");
+    assert_eq!(w.next("chief"), None, "and nothing of it is typed");
 }
 
 #[test]
 fn a_resume_of_the_chiefs_own_tells_nothing_more() {
     let mut w = world();
     let (task, session) = with_zeus(&mut w);
-    let hold = held(&mut w, task, &session);
-    w.deliver(hold.id);
+    held(&mut w, task, &session);
     w.resume(task, "Go on");
     assert_eq!(w.state(task), "queued");
     let told = told_chief(&w);
@@ -316,8 +309,7 @@ fn a_resume_of_the_chiefs_own_tells_nothing_more() {
 fn only_the_note_of_the_hold_the_task_is_in_counts() {
     let mut w = world();
     let (task, session) = with_zeus(&mut w);
-    let hold = held(&mut w, task, &session);
-    w.deliver(hold.id);
+    held(&mut w, task, &session);
     w.daemon_resumes(task);
     w.went_on(task);
     assert_eq!(told_chief(&w).len(), 2);
@@ -338,30 +330,24 @@ fn only_the_note_of_the_hold_the_task_is_in_counts() {
 fn the_news_that_a_held_task_went_on_is_not_taken_back_by_a_hold_that_comes_after_it() {
     let mut w = world();
     let (task, session) = with_zeus(&mut w);
-    let hold = held(&mut w, task, &session);
-    w.deliver(hold.id);
+    held(&mut w, task, &session);
     w.daemon_resumes(task);
     w.went_on(task);
     let news = told_chief(&w).last().expect("the chief is told").id;
     assert_eq!(w.message(news).body, GOES_ON);
 
-    // The new account runs into its limit before the chief is given the news:
-    // the note of this hold goes when the daemon resumes the task again, and
-    // the news does not, or the chief would keep the promise it corrects.
+    // The new account runs into its limit: a hold that comes after the news takes nothing
+    // of it back, or the chief would keep the promise it corrects. Both are the chief's as
+    // they are written (shown, not typed): neither is withdrawn.
     let again = held(&mut w, task, &session);
     w.daemon_resumes(task);
     w.went_on(task);
-    assert_eq!(
-        fate(&w, again.id),
-        ("cancelled".to_owned(), Some("T-1 resumed".to_owned()))
-    );
-    assert_eq!(fate(&w, news), ("queued".to_owned(), None));
-
-    // A task called off is no more news for anyone.
+    assert_eq!(fate(&w, again.id), ("read".to_owned(), None));
+    assert_eq!(fate(&w, news), ("read".to_owned(), None));
     w.ledger
         .cancel_task(w.project, task, "chief")
         .expect("called off");
-    assert_eq!(w.message(news).state, "cancelled");
+    assert_eq!(w.message(news).state, "read", "what was given stays");
 }
 
 #[test]
@@ -386,13 +372,8 @@ fn a_hold_note_of_an_older_build_counts_and_one_that_failed_or_is_not_one_does_n
         "a hold an older build told is corrected too"
     );
 
-    // A hold note that never reached the chief, and notes that are none.
+    // A note that is none (a hold note to the chief is always given now: shown, not typed).
     w.hold(task);
-    let failed = held_note(&mut w, task, &session);
-    w.begin(failed.id);
-    w.ledger
-        .fail_delivery(failed.id, "the window went away")
-        .expect("failed");
     let other = consensflow_notes(&mut w, "chief", Some(task), "T-1 is paused: only so.");
     w.deliver(other.id);
     let before = told_chief(&w).len();
@@ -405,8 +386,7 @@ fn a_hold_note_of_an_older_build_counts_and_one_that_failed_or_is_not_one_does_n
 fn a_task_that_goes_back_on_the_board_when_its_hold_ends_is_not_told_to_go_on() {
     let mut w = world();
     let (task, session) = with_zeus(&mut w);
-    let hold = held(&mut w, task, &session);
-    w.deliver(hold.id);
+    held(&mut w, task, &session);
     // The session that held it was deleted meanwhile.
     w.ledger
         .end_session(w.project, &session, "human")

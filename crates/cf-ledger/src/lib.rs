@@ -73,6 +73,7 @@ pub use projects::{
     parse_staff_rules, NewChief, NewMember, NewProject, COMPACTION_MAX, COMPACTION_MIN,
     STAFF_RULES_MAX_BYTES, STAFF_RULES_MAX_LINES,
 };
+pub use queue::SHOWN;
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
 pub use specs::SpecsChange;
 pub use staff::MemberEdit;

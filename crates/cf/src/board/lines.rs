@@ -64,10 +64,22 @@ pub fn task_line(task: &Value) -> String {
     format!(
         "T-{} [{}] {whose} ← @{}: {}",
         js::text(task.get("number")),
-        js::text(task.get("state")),
+        state_with_aside(task),
         js::text(task.get("requester")),
         js::text(task.get("title")),
     )
+}
+
+/// A task's state as its line says it, and what ConsensFlow shows of the task instead of
+/// telling its chief (`aside`, while it holds: a note that asks no decision is not typed into
+/// the chief's window): `paused · its window stays open …`.
+fn state_with_aside(task: &Value) -> String {
+    match task.get("aside").and_then(Value::as_str) {
+        Some(aside) if !aside.is_empty() => {
+            format!("{} · {aside}", js::text(task.get("state")))
+        }
+        _ => js::text(task.get("state")),
+    }
 }
 
 /// What `cf task get` heads a task with: its line, and when the human
@@ -118,9 +130,22 @@ pub fn message_line(message: &Value) -> String {
     format!(
         "m-{} [{}] {}{on_task} from {sender}{preview}",
         js::text(message.get("id")),
-        js::text(message.get("state")),
+        state_said(message),
         js::text(message.get("kind")),
     )
+}
+
+/// The state a message line says: its own, but `not typed` for a note of ConsensFlow's own
+/// that was shown and never typed into the window (it asks no decision; its task's line in
+/// `cf task list` says it), whose state is `read` though nobody read it.
+fn state_said(message: &Value) -> String {
+    let shown = message.get("shown") == Some(&Value::Bool(true))
+        || message.pointer("/receipt/shown").is_some();
+    if shown {
+        "not typed".to_owned()
+    } else {
+        js::text(message.get("state"))
+    }
 }
 
 /// The numbers of the answers among `messages` that still wait in the queue

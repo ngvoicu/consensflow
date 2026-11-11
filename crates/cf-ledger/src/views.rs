@@ -25,7 +25,13 @@ pub(crate) const TASK_SELECT: &str = "
          am.handle AS assignee_member, a.left_at AS assignee_left_at,
          (SELECT json_group_array(json_object('number', d.number, 'state', d.state))
             FROM (SELECT d.number, d.state FROM task_need n JOIN task d ON d.id = n.needs_id
-                  WHERE n.task_id = t.id ORDER BY d.number) d) AS needs
+                  WHERE n.task_id = t.id ORDER BY d.number) d) AS needs,
+         (SELECT json_extract(s.receipt, '$.shown') FROM message s
+           WHERE s.task_id = t.id AND s.state = 'read' AND s.sender_id IS NULL
+             AND s.kind = 'note' AND json_valid(s.receipt)
+             AND json_extract(s.receipt, '$.shown') IS NOT NULL
+             AND json_extract(s.receipt, '$.over') IS NULL
+           ORDER BY s.id DESC LIMIT 1) AS aside
   FROM task t
   JOIN participant q ON q.id = t.requester_id
   LEFT JOIN participant a ON a.id = t.assignee_id
@@ -257,6 +263,7 @@ pub(crate) fn task_view(row: &Row<'_>) -> rusqlite::Result<TaskView> {
         deleted_at: row.get("deleted_at")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
+        aside: row.get("aside")?,
     })
 }
 

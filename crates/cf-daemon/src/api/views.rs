@@ -36,6 +36,10 @@ pub struct TaskSummary {
     pub needs: Vec<Need>,
     pub blocked_by: Vec<i64>,
     pub updated_at: String,
+    /// What ConsensFlow shows of the task instead of telling its chief, while it holds: a
+    /// note that asks no decision is not typed into the chief's window (RS-25).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aside: Option<String>,
 }
 
 impl From<&TaskView> for TaskSummary {
@@ -51,6 +55,7 @@ impl From<&TaskView> for TaskSummary {
             needs: task.needs.clone(),
             blocked_by: task.blocked_by.clone(),
             updated_at: task.updated_at.clone(),
+            aside: task.aside.clone(),
         }
     }
 }
@@ -69,6 +74,7 @@ impl From<&TaskCard> for TaskSummary {
             needs: card.needs.clone(),
             blocked_by: card.blocked_by.clone(),
             updated_at: card.updated_at.clone(),
+            aside: card.aside.clone(),
         }
     }
 }
@@ -88,6 +94,10 @@ pub struct MessageSummary {
     pub questions: Value,
     pub choices: Value,
     pub created_at: String,
+    /// A note of ConsensFlow's own that was shown, not typed into its reader's window: it
+    /// asks no decision, and its task's line says it (RS-25). Said only where it was.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub shown: bool,
 }
 
 impl From<&MessageView> for MessageSummary {
@@ -104,6 +114,7 @@ impl From<&MessageView> for MessageSummary {
             questions: message.questions.clone(),
             choices: message.choices.clone(),
             created_at: message.created_at.clone(),
+            shown: message.receipt.get(cf_ledger::SHOWN).is_some(),
         }
     }
 }
@@ -181,6 +192,7 @@ mod tests {
             deleted_at: None,
             created_at: "2026-10-05T08:00:00.000Z".to_owned(),
             updated_at: "2026-10-05T09:00:00.000Z".to_owned(),
+            aside: None,
         }
     }
 

@@ -31,7 +31,7 @@ pub use giving::NewTask;
 pub(crate) use giving::{
     assign_task, check_release, create_task, release_inside, release_task, retier_open_task,
 };
-pub(crate) use outage::{no_longer_failed, no_longer_waiting, tell_closed};
+pub(crate) use outage::{no_longer_failed, no_longer_waiting, show_closed, tell_closed};
 pub use outage::{window_closed, SAME_ERROR_WITHIN_MS};
 pub(crate) use own_steps::withdrawn_late;
 pub(crate) use pausing::{
@@ -93,6 +93,35 @@ fn m_list(ids: &[i64]) -> String {
         .map(|id| format!("m-{id}"))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// The asides of task `task_id` end, `at`: a note of ConsensFlow's own
+/// that was shown, not typed (`queue`'s `SHOWN`), says what its task's line says only while
+/// it holds, and it holds until the task moves on, or the engine says it is over
+/// ([`end_asides_of`]). The note stays, as it was given; its receipt says since when it is
+/// over.
+pub(crate) fn end_asides(store: &mut Store, task_id: i64, at: &str) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE message SET receipt = json_set(receipt, '$.over', ?1)
+         WHERE task_id = ?2 AND state = 'read' AND sender_id IS NULL AND kind = 'note'
+           AND json_valid(receipt) AND json_extract(receipt, '$.shown') IS NOT NULL
+           AND json_extract(receipt, '$.over') IS NULL",
+        params![at, task_id],
+    )?;
+    Ok(())
+}
+
+/// [`end_asides`] of T-`number`, in a write of its own.
+pub(crate) fn end_asides_of(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+) -> Result<(), LedgerError> {
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        let at = store.at();
+        end_asides(store, task.id, &at)
+    })
 }
 
 /// A task and its whole thread, oldest first; none when there is no such

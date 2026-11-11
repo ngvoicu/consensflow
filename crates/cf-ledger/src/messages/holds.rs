@@ -10,7 +10,9 @@
 //!
 //! Both are `note`s of ConsensFlow's own, told by their words, which are
 //! written here and nowhere else: a kind of its own would be a migration, and
-//! the schema is held byte for byte by Node's.
+//! the schema is held byte for byte by Node's. Neither asks a chief a decision:
+//! the task goes on by itself, or by the human's word, whom ConsensFlow tells. To a
+//! chief they are shown, not typed (`queue`'s `SHOWN`): its task's line says them.
 
 use cf_proto::ledger::MessageView;
 use rusqlite::params;
@@ -124,6 +126,7 @@ pub(crate) fn note_hold(
             body: &render(number, handle, until),
             task: Some(number),
             kind: "note",
+            shown: Some(&format!("waits with @{handle}: out of quota until {until}")),
             ..Sent::default()
         },
     )
@@ -147,6 +150,9 @@ pub(crate) fn note_hold_unavailable(
             body: &render_unavailable(number, handle, because),
             task: Some(number),
             kind: "note",
+            shown: Some(&format!(
+                "waits with @{handle}: its account is unavailable ({because}) until the human says it works"
+            )),
             ..Sent::default()
         },
     )
@@ -170,6 +176,9 @@ pub(crate) fn note_hold_moved(
             body: &render_moved(number, handle, because),
             task: Some(number),
             kind: "note",
+            shown: Some(&format!(
+                "waits with @{handle}: {because}, until the human says it may go on"
+            )),
             ..Sent::default()
         },
     )
@@ -194,6 +203,9 @@ pub(crate) fn note_hold_busy(
             body: &render_busy(number, handle, because, tiered),
             task: Some(number),
             kind: "note",
+            shown: Some(&format!(
+                "waits with @{handle}: its model is busy, and ConsensFlow tries it again"
+            )),
             ..Sent::default()
         },
     )
@@ -244,6 +256,7 @@ pub(crate) fn tell_goes_on(store: &mut Store, task: &TaskRow) -> Result<(), Ledg
             body: &told,
             task: Some(task.number),
             kind: "note",
+            shown: told.strip_prefix(&format!("T-{} ", task.number)),
             ..Sent::default()
         },
     )?;

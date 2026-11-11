@@ -208,6 +208,8 @@ impl Store {
              WHERE id = ?",
             params![to, at, task.id],
         )?;
+        // What its task's line said of it, a note shown and not typed, held until now.
+        crate::tasks::end_asides(self, task.id, &at)?;
         let mut data = json!({ "task": task.number, "from": task.state, "to": to });
         if let (Value::Object(data), Value::Object(detail)) = (&mut data, detail) {
             data.extend(detail);
