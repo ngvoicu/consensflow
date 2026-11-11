@@ -113,9 +113,9 @@ impl NewTask {
 /// switches of `cf task add`), or none (the worker's task, or a follow-up's or the chief's own
 /// that asks for none), checked before anything is looked for. What it asks beside it is
 /// refused in words that name what was asked, never dropped for something else (T-1453): two
-/// roles; `--self` with `--after`, with a role, a tier or a purpose; a tier or a purpose for a
-/// role with no tier; a tier or a purpose for a follow-up, which goes to a window whose member
-/// keeps its own. A role asked for a follow-up is held to the window's in [`create_task`].
+/// roles; `--self` with a role; a tier or a purpose for a role with no tier. A tier or a
+/// purpose with `--after` or `--self`, and `--self` with `--after`, are taken as on main, the
+/// extra ignored. A role asked for a follow-up is held to the window's in [`create_task`].
 pub fn asked_role(request: &Map<String, Value>) -> Result<Option<&'static Role>, LedgerError> {
     let on = |field: &str| request.get(field) == Some(&Value::Bool(true));
     let given = |field: &str| request.get(field).is_some_and(|value| !value.is_null());
@@ -133,58 +133,36 @@ pub fn asked_role(request: &Map<String, Value>) -> Result<Option<&'static Role>,
         );
     }
     let role = asked.first().copied();
-    // The switch of what is asked beside the rest, as the chief typed it.
-    let tier_or_purpose = if given("tier") {
-        Some("--tier")
-    } else if given("purpose") {
-        Some("--purpose")
-    } else {
-        None
-    };
-    let mine = on("self");
-    let after = request.contains_key("after");
-    if mine && after {
-        return refused(
-            "self-and-after",
-            "a --self task is your own step, and --after gives the next step to another task's window: leave out one of them".to_owned(),
-        );
-    }
-    if mine {
+    if on("self") {
         if let Some(switch) = role.and_then(|role| role.switch) {
             return refused(
                 "self-takes-no-role",
                 format!("a --self task is your own step: leave out {switch}"),
             );
         }
-        if let Some(switch) = tier_or_purpose {
-            return refused(
-                "self-takes-no-tier",
-                format!("a --self task is your own step: leave out {switch}"),
-            );
-        }
     }
     if let Some(role) = role.filter(|role| !role.tiered) {
-        if given("tier") {
-            return refused(
-                "no-tier-for-role",
-                format!("{} task has no tier: leave out --tier", role.a_names()),
-            );
-        }
-        if given("purpose") {
+        let switches: Vec<&str> = [("tier", "--tier"), ("purpose", "--purpose")]
+            .into_iter()
+            .filter(|(field, _)| given(field))
+            .map(|(_, switch)| switch)
+            .collect();
+        if !switches.is_empty() {
+            let (extra, leave) = if switches.len() == 2 {
+                ("", switches.join(" and "))
+            } else if switches[0] == "--purpose" {
+                (", and so no purpose", switches[0].to_owned())
+            } else {
+                ("", switches[0].to_owned())
+            };
             return refused(
                 "no-tier-for-role",
                 format!(
-                    "{} task has no tier, and so no purpose: leave out --purpose",
+                    "{} task has no tier{extra}: leave out {leave}",
                     role.a_names()
                 ),
             );
         }
-    }
-    if let (true, Some(switch)) = (after, tier_or_purpose) {
-        return refused(
-            "follow-up-takes-no-tier",
-            format!("a follow-up goes to the window of the task it follows, whose member keeps its own tier: leave out {switch}"),
-        );
     }
     Ok(role)
 }

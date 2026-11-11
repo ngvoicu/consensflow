@@ -151,8 +151,9 @@ fn add(
         return Ok(help_of(&["task", "add"]));
     }
     // Every role asked for by its switch. The board takes the task or refuses it in words that
-    // name what was asked: `cf` drops none of it for another (two roles, a role or a tier
-    // beside --self or --after, a tier for a role with none; T-1453).
+    // name what was asked: `cf` drops no role for another (two roles, a role beside --self, a
+    // tier for a role with none; T-1453). A tier or a purpose beside --self or --after, and
+    // --after beside --self, are not sent, as before: the task is what the rest says.
     let switched: Vec<&Role> = roles::all()
         .iter()
         .filter(|role| role.switch.is_some_and(|switch| words.on(switch)))
@@ -168,34 +169,37 @@ fn add(
     let mine = words.on("--self");
     // Your own work needs no board while you are at it; on the board it is a
     // wake-up: the brief comes back to this window when what it waits for is accepted.
-    // A role, a tier or a follow-up asked beside it is the board's to refuse in its words.
-    let alone = switched.is_empty() && tier.is_none() && purpose.is_none() && after.is_none();
-    if mine && alone && needs.is_none() && before.is_none() {
+    // A role asked beside it is the board's to refuse in its words.
+    if mine && switched.is_empty() && needs.is_none() && before.is_none() {
         return Err(Failure::Usage(
             "you are already at it: do it now, or give it --needs T-3 to be woken when T-3 is accepted"
                 .into(),
         ));
     }
     let untiered = switched.iter().any(|role| !role.tiered);
-    if tier.is_none() && after.is_none() && !mine && !untiered {
+    // Two roles are the board's to refuse, in words that name both.
+    if tier.is_none() && after.is_none() && !mine && !untiered && switched.len() < 2 {
         return Err(Failure::Usage(ADD_USAGE.into()));
     }
     let brief = require_text(brief::brief_of(&words, given, input)?, ADD_USAGE)?;
 
     let mut body = Map::new();
+    // What a --self task or a follow-up goes by is itself: a tier or a purpose beside either,
+    // and --after beside --self, go unsent (a role with no tier hears of its tier, to refuse it).
+    let own = mine || after.is_some();
+    let sends_tier = !own || untiered;
     if mine {
         body.insert("self".into(), true.into());
-    }
-    if let Some(after) = after {
+    } else if let Some(after) = after {
         body.insert("after".into(), after.into());
     }
-    if let Some(tier) = tier {
+    if let Some(tier) = tier.filter(|_| sends_tier) {
         body.insert("tier".into(), tier.into());
     }
     for field in switched.iter().filter_map(|role| role.field()) {
         body.insert(field.into(), true.into());
     }
-    if let Some(purpose) = purpose {
+    if let Some(purpose) = purpose.filter(|_| sends_tier) {
         body.insert("purpose".into(), purpose.into());
     }
     if let Some(needs) = &needs {
@@ -1278,13 +1282,33 @@ and 2 idle sessions (`cf task list --all`)";
                 &["--design", "--tier", "standard", "Do it"],
                 json!({ "design": true, "tier": "standard", "body": "Do it" }),
             ),
-            (
-                &["--self", "--after", "T-3", "Do it"],
-                json!({ "self": true, "after": 3, "body": "Do it" }),
-            ),
+            // A tier beside --after or --self, and --after beside --self, are not sent, as
+            // before: the follow-up goes to its window, the own step is a step.
             (
                 &["--tier", "complex", "--after", "T-3", "Do it"],
-                json!({ "tier": "complex", "after": 3, "body": "Do it" }),
+                json!({ "after": 3, "body": "Do it" }),
+            ),
+            (
+                &["--self", "--after", "T-3", "--needs", "T-2", "Do it"],
+                json!({ "self": true, "needs": [2], "body": "Do it" }),
+            ),
+            (
+                &[
+                    "--self",
+                    "--tier",
+                    "standard",
+                    "--purpose",
+                    "design",
+                    "--needs",
+                    "T-2",
+                    "Do it",
+                ],
+                json!({ "self": true, "needs": [2], "body": "Do it" }),
+            ),
+            // Two roles and no tier reach the board, which names both.
+            (
+                &["--advice", "--review", "Do it"],
+                json!({ "advice": true, "review": true, "body": "Do it" }),
             ),
             // A role with --self and nothing to wait for is the board's to refuse in the role's
             // name, not "you are already at it".

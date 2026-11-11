@@ -292,16 +292,6 @@ find = '''    if let [_, _, ..] = asked.as_slice() {'''
 replace = '''    if let [_, _, _, _, _, _, _, _, _, _, ..] = asked.as_slice() {'''
 
 [[plant]]
-name = "new roles: a --self task that says --after is taken for one of them"
-meant = "a_follow_up_checks_its_words_and_its_lists_before_it_looks_for_the_task_and_never_its_tier"
-runs = ["nr-daemon-tasks"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/giving.rs"
-find = '''    if mine && after {'''
-replace = '''    if mine && after && request.is_empty() {'''
-
-[[plant]]
 name = "new roles: a --self task drops the role it asks for"
 meant = "a_role_or_a_tier_asked_beside_self_or_a_follow_up_or_a_tier_for_a_role_with_none_is_refused_in_its_words"
 runs = ["nr-daemon-tasks"]
@@ -312,16 +302,6 @@ find = '''        if let Some(switch) = role.and_then(|role| role.switch) {'''
 replace = '''        if let Some(switch) = role.and_then(|role| role.switch).filter(|_| request.is_empty()) {'''
 
 [[plant]]
-name = "new roles: a --self task drops its tier"
-meant = "a_role_or_a_tier_asked_beside_self_or_a_follow_up_or_a_tier_for_a_role_with_none_is_refused_in_its_words"
-runs = ["nr-daemon-tasks"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/giving.rs"
-find = '''        if let Some(switch) = tier_or_purpose {'''
-replace = '''        if let Some(switch) = tier_or_purpose.filter(|_| request.is_empty()) {'''
-
-[[plant]]
 name = "new roles: a tier for a new role with none is dropped"
 meant = "each_new_role_is_asked_for_by_its_field_and_refused_by_its_name_until_one_is_on_the_staff"
 runs = ["nr-daemon-tasks"]
@@ -330,16 +310,6 @@ runs = ["nr-daemon-tasks"]
 file = "crates/cf-ledger/src/tasks/giving.rs"
 find = '''    if let Some(role) = role.filter(|role| !role.tiered) {'''
 replace = '''    if let Some(role) = role.filter(|role| !role.tiered && role.id == "designer") {'''
-
-[[plant]]
-name = "new roles: a follow-up drops the tier said for it"
-meant = "a_role_or_a_tier_asked_beside_self_or_a_follow_up_or_a_tier_for_a_role_with_none_is_refused_in_its_words"
-runs = ["nr-daemon-tasks"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/giving.rs"
-find = '''    if let (true, Some(switch)) = (after, tier_or_purpose) {'''
-replace = '''    if let (true, Some(switch)) = (after && request.is_empty(), tier_or_purpose) {'''
 
 [[plant]]
 name = "new roles: a research follow-up goes to an architect's window"
@@ -378,7 +348,7 @@ runs = ["nr-cf-board"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '''    if let Some(tier) = tier {'''
+find = '''    if let Some(tier) = tier.filter(|_| sends_tier) {'''
 replace = '''    if let Some(tier) = tier.filter(|_| !untiered) {'''
 
 [[plant]]
@@ -398,8 +368,29 @@ runs = ["nr-cf-board"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '''    let alone = switched.is_empty() && tier.is_none() && purpose.is_none() && after.is_none();'''
-replace = '''    let alone = after.is_none();'''
+find = '''    if mine && switched.is_empty() && needs.is_none() && before.is_none() {'''
+replace = '''    if mine && needs.is_none() && before.is_none() {'''
+
+[[plant]]
+name = "new roles: cf task add stops two roles with no tier at the usage text"
+meant = "every_switch_asked_goes_to_the_board_and_none_is_dropped_for_another"
+runs = ["nr-cf-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''!mine && !untiered && switched.len() < 2 {'''
+replace = '''!mine && !untiered {'''
+
+[[plant]]
+name = "new roles: a tier and a purpose for a role with none are refused one a try"
+meant = "a_role_or_a_tier_asked_beside_self_or_a_follow_up_or_a_tier_for_a_role_with_none_is_refused_in_its_words"
+runs = ["nr-daemon-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''            .filter(|(field, _)| given(field))'''
+replace = '''            .filter(|(field, _)| given(field))
+            .take(1)'''
 
 [[plant]]
 name = "new roles: the evals read a task with no pool as no role"

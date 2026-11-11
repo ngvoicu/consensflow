@@ -570,24 +570,15 @@ async fn a_follow_up_checks_its_words_and_its_lists_before_it_looks_for_the_task
                 "before is a list of task numbers (T-3, T-4)",
             ),
         ),
-        // A follow-up goes back to a window, whose member keeps its tier: a tier asked with it
-        // is refused before the task it follows is looked for (T-1453).
+        // A follow-up goes back to a window: what it says of a tier is not read.
         (
             r#"{"after":2.5,"body":"x","tier":"huge"}"#,
-            (
-                400,
-                "follow-up-takes-no-tier",
-                "a follow-up goes to the window of the task it follows, whose member keeps its own tier: leave out --tier",
-            ),
+            (404, "unknown-task", "no task T-2.5 in project 1"),
         ),
-        // And it is no task for the chief itself: the two are refused together.
+        // And it is a follow-up before it is a task for the chief itself.
         (
             r#"{"after":7,"self":true,"body":"x"}"#,
-            (
-                400,
-                "self-and-after",
-                "a --self task is your own step, and --after gives the next step to another task's window: leave out one of them",
-            ),
+            (404, "unknown-task", "no task T-7 in project 1"),
         ),
     ] {
         let answered = post(&scene, &scene.chief, body).await;
@@ -597,7 +588,7 @@ async fn a_follow_up_checks_its_words_and_its_lists_before_it_looks_for_the_task
 
 /// What `cf task add` asked beside a role, a tier or `--self` went unsaid (the review of
 /// T-1441, T-1453): `--self` won over a role and a tier, a role with no tier let its tier and
-/// its purpose go, and a follow-up any tier. Each is refused now in words that name what was
+/// its purpose go. Each is refused now in words that name what was
 /// asked, for the old five roles' switches as for the four new ones, before anything is
 /// looked for.
 #[tokio::test]
@@ -622,27 +613,11 @@ async fn a_role_or_a_tier_asked_beside_self_or_a_follow_up_or_a_tier_for_a_role_
             ),
         ),
         (
-            r#"{"self":true,"tier":"standard","needs":[1],"body":"x"}"#,
-            (
-                400,
-                "self-takes-no-tier",
-                "a --self task is your own step: leave out --tier",
-            ),
-        ),
-        (
-            r#"{"self":true,"purpose":"design","needs":[1],"body":"x"}"#,
-            (
-                400,
-                "self-takes-no-tier",
-                "a --self task is your own step: leave out --purpose",
-            ),
-        ),
-        (
             r#"{"frontend":true,"tier":"critical","purpose":"design","body":"x"}"#,
             (
                 400,
                 "no-tier-for-role",
-                "a frontend designer's task has no tier: leave out --tier",
+                "a frontend designer's task has no tier: leave out --tier and --purpose",
             ),
         ),
         (
@@ -659,22 +634,6 @@ async fn a_role_or_a_tier_asked_beside_self_or_a_follow_up_or_a_tier_for_a_role_
                 400,
                 "no-tier-for-role",
                 "an integrator's task has no tier, and so no purpose: leave out --purpose",
-            ),
-        ),
-        (
-            r#"{"after":1,"tier":"complex","body":"x"}"#,
-            (
-                400,
-                "follow-up-takes-no-tier",
-                "a follow-up goes to the window of the task it follows, whose member keeps its own tier: leave out --tier",
-            ),
-        ),
-        (
-            r#"{"after":1,"advice":true,"purpose":"design","tier":"critical","body":"x"}"#,
-            (
-                400,
-                "follow-up-takes-no-tier",
-                "a follow-up goes to the window of the task it follows, whose member keeps its own tier: leave out --tier",
             ),
         ),
     ] {
