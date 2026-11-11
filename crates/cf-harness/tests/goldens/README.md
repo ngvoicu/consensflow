@@ -52,8 +52,9 @@ once, with the reason here and in the commit.
   `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` as `false` into every member's file (`claude/install.rs`,
   `PROMPT_SUGGESTION_SWITCH`), launched or resumed, with no project setting; the chief's file, the
   human's window, is as Node wrote it. Both `launch/scenarios.<platform>.json` moved for it in the
-  42 member settings files each recorded (`tools/move_claude_member_suggestion_goldens.py`, which
-  can be run again after a merge); no chief file, no argv, no environment and no other step moved.
+  42 member settings files each recorded, by hand, once (a one-off script, not kept, that put the
+  one `env` key into each member's settings string); no chief file, no argv, no environment and no
+  other step moved.
 - **A Claude window opened again on a turn the app's quit cut** (2026-10-11, the
   human's report that the daemon seemed not to send responses; found by
   `npm run live:resume-cut` and `npm run live:restart-cut`). The quit ends a
