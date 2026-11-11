@@ -11,7 +11,7 @@ use super::*;
 
 /// What a reading says of the turn: its settlement, whether it is in flight, and whether
 /// its last item is complete.
-fn said(reading: &str) -> (String, bool, bool) {
+pub(super) fn said(reading: &str) -> (String, bool, bool) {
     let reading: Value = serde_json::from_str(reading).unwrap_or_else(|_| panic!("{reading}"));
     let last = reading["items"]
         .as_array()
@@ -27,16 +27,16 @@ fn said(reading: &str) -> (String, bool, bool) {
     )
 }
 
-fn at_work() -> (String, bool, bool) {
+pub(super) fn at_work() -> (String, bool, bool) {
     ("in-flight".to_owned(), true, true)
 }
 
-fn settled() -> (String, bool, bool) {
+pub(super) fn settled() -> (String, bool, bool) {
     ("settled".to_owned(), false, true)
 }
 
 /// A record of the session's, `update` its update.
-fn record(update: Value) -> Value {
+pub(super) fn record(update: Value) -> Value {
     json!({ "sessionId": SESSION, "update": update })
 }
 
@@ -54,7 +54,7 @@ fn status(state: &str) -> Value {
 }
 
 /// A record of work of the kind `kind`, stamped, in the stream `stream` where there is one.
-fn stamped(kind: &str, text: Option<&str>, stream: Option<&str>) -> Value {
+pub(super) fn stamped(kind: &str, text: Option<&str>, stream: Option<&str>) -> Value {
     let mut update = json!({
         "sessionUpdate": kind,
         "_meta": { "cognition.ai/timestamp": "2026-10-26T08:18:30.000000+00:00" },
@@ -69,7 +69,7 @@ fn stamped(kind: &str, text: Option<&str>, stream: Option<&str>) -> Value {
 }
 
 /// What the shell says of the call it runs, with no stamp: no work, whatever its status.
-fn running(status: &str) -> Value {
+pub(super) fn running(status: &str) -> Value {
     record(json!({ "sessionUpdate": "tool_call_update", "status": status }))
 }
 
@@ -94,7 +94,11 @@ fn step() -> Value {
 }
 
 /// A look that read every step before and a fresh one, which read the same: as [`said`].
-fn both(staged: &Staged, reader: &mut Box<dyn Look + Send>, what: &str) -> (String, bool, bool) {
+pub(super) fn both(
+    staged: &Staged,
+    reader: &mut Box<dyn Look + Send>,
+    what: &str,
+) -> (String, bool, bool) {
     let incremental = show(&look(reader));
     assert_eq!(
         incremental,

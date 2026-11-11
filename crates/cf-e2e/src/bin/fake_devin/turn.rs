@@ -391,7 +391,9 @@ impl<W: Write> Window<W> {
             None => plan_of(text, self.pace),
         };
         self.store.user(stored, &client)?;
-        self.wire.prompt(self.turns + 1, text).map_err(said)?;
+        self.wire
+            .prompt(self.turns + 1, text, &client)
+            .map_err(said)?;
         if self.crash.meets(text) {
             crate::leave(1);
         }

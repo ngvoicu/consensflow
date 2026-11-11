@@ -30,9 +30,17 @@ use crate::{config, secs, Outcome};
 /// The stand-in for Devin, built for these tests.
 const FAKE_DEVIN: &str = env!("CARGO_BIN_EXE_fake-devin");
 
-/// A rig whose Devin windows write their wire logs as Devin 3000.11 does.
-fn stamped_rig() -> Config {
-    config().devin(FAKE_DEVIN).var("FAKE_DEVIN_STAMPS", "1")
+/// The stand-in's word for Devin 3000.11's wire log.
+const DEVIN_3000_11: &str = "1";
+
+/// The stand-in's word for Devin 3000.12.43's: stamped as 3000.11's, with no word of
+/// Devin's on a turn, and a window opened again on a turn a quit cut naming no
+/// conversation until it is typed to (T-1417, three live runs of 2026-11-11).
+const DEVIN_3000_12: &str = "3000.12";
+
+/// A rig whose Devin windows write their wire logs as the Devin `shape` names does.
+fn stamped_rig(shape: &str) -> Config {
+    config().devin(FAKE_DEVIN).var("FAKE_DEVIN_STAMPS", shape)
 }
 
 /// The roster of the case: the chief on the stand-in `claude`, and a Devin worker.
@@ -79,7 +87,20 @@ fn when_of(events: &[Value], kind: &str, matching: impl Fn(&Value) -> bool) -> O
 #[test]
 fn a_devin_turn_stamped_as_devin_3000_11_stamps_it_is_at_work_through_a_silent_stretch_and_its_answer_is_the_result(
 ) -> Outcome {
-    let rig = Rig::start(stamped_rig())?;
+    at_work_through_a_silent_stretch(DEVIN_3000_11)
+}
+
+#[test]
+#[ignore = "red on main: Devin 3000.12.43 writes no working/blocked (T-1417)"]
+fn a_devin_3000_12_turn_is_at_work_through_a_silent_stretch_and_its_answer_is_the_result() -> Outcome
+{
+    at_work_through_a_silent_stretch(DEVIN_3000_12)
+}
+
+/// A turn whose agent says nothing for 38 s is at work throughout, and its answer is the
+/// task's result, on the wire log of the Devin `shape` names.
+fn at_work_through_a_silent_stretch(shape: &str) -> Outcome {
+    let rig = Rig::start(stamped_rig(shape))?;
     let project = given(&rig, "THINK 38 SLEEP 10 Reply with exactly: T1_DONE")?;
     let begun = Instant::now();
     // Every look from a few seconds in to a few seconds before the turn's end finds the
@@ -118,7 +139,19 @@ fn a_devin_turn_stamped_as_devin_3000_11_stamps_it_is_at_work_through_a_silent_s
 #[test]
 fn a_pause_stops_a_devin_turn_stamped_as_devin_3000_11_stamps_it_and_the_chiefs_question_goes_in_after(
 ) -> Outcome {
-    let rig = Rig::start(stamped_rig())?;
+    a_pause_stops_the_turn(DEVIN_3000_11)
+}
+
+#[test]
+#[ignore = "red on main: Devin 3000.12.43 writes no working/blocked (T-1417)"]
+fn a_pause_stops_a_devin_3000_12_turn_and_the_chiefs_question_goes_in_after() -> Outcome {
+    a_pause_stops_the_turn(DEVIN_3000_12)
+}
+
+/// A pause stops a turn whose agent says nothing past the adapter's 30 s with Escape, and
+/// the chief's question goes in after, on the wire log of the Devin `shape` names.
+fn a_pause_stops_the_turn(shape: &str) -> Outcome {
+    let rig = Rig::start(stamped_rig(shape))?;
     let project = given(&rig, "THINK 120 Reply with exactly: T1_DONE")?;
     let pane = project.lane("devin-worker")?["pane"]["id"]
         .as_str()
@@ -186,14 +219,28 @@ fn a_pause_stops_a_devin_turn_stamped_as_devin_3000_11_stamps_it_and_the_chiefs_
 #[test]
 fn a_devin_window_opened_again_on_a_turn_it_replays_stamped_is_at_rest_and_takes_the_note_once(
 ) -> Outcome {
-    let rig = Rig::start(stamped_rig())?;
+    opened_again_takes_the_note_once(DEVIN_3000_11)
+}
+
+/// Devin 3000.12.43 opened again on a turn a quit cut says nothing of its mode until it is
+/// typed to (T-1417, run 3): the resume the daemon opens carries its note in the launch,
+/// which Devin answers, so its window is not held.
+#[test]
+fn a_devin_3000_12_window_opened_again_on_a_turn_a_quit_cut_takes_the_note_once() -> Outcome {
+    opened_again_takes_the_note_once(DEVIN_3000_12)
+}
+
+/// A window opened again on its conversation, whose last turn a quit cut, is at rest and
+/// takes the note that its turn was cut once, on the wire log of the Devin `shape` names.
+fn opened_again_takes_the_note_once(shape: &str) -> Outcome {
+    let rig = Rig::start(stamped_rig(shape))?;
     let project = given(&rig, "SLEEP 600 Reply with exactly: T1_DONE")?;
     let id = project.id();
     sleep(secs(3));
     // The app quits with the turn at work, and starts again on the same home; the human
     // resumes the project, and the window opened again replays its last turn.
     let root = rig.close_keeping_the_root()?;
-    let rig = Rig::start(stamped_rig().existing_root(root))?;
+    let rig = Rig::start(stamped_rig(shape).existing_root(root))?;
     let resumed = rig.page("project.resume", json!({ "project": id }))?;
     assert_eq!(resumed["ok"], true, "{resumed}");
     let project = Project::new(&rig, id);
