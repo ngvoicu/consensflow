@@ -15,6 +15,8 @@ cf-daemon.workspace = true
 cf-harness.workspace = true
 # The terminal command `setup` writes and `doctor` reads.
 cf-launcher.workspace = true
+# The staff's roles: the switches of `cf task add` and how a task's role is said.
+cf-ledger.workspace = true
 cf-proto.workspace = true
 form_urlencoded.workspace = true
 serde.workspace = true
@@ -32,7 +34,8 @@ windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 cf-board = { workspace = true, features = ["test-support"] }
 # The daemon as a process: a home of its own with a ledger and a fake `claude`.
 cf-harness = { workspace = true, features = ["test-support"] }
-cf-ledger.workspace = true
+# A ledger of the daemon's for a test, and a role put in the roles' table for one.
+cf-ledger = { workspace = true, features = ["test-support"] }
 # Whether a daemon's process is alive, and what a program a test starts holds.
 cf-process = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true

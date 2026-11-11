@@ -4,6 +4,11 @@ import { expect, test } from '@playwright/test'
 
 import { refusedByPolicy, serveUi } from './serve-ui.mjs'
 
+// The staff's roles as the daemon's table says them (`cf_ledger::roles`, `harnesses.missing`'s
+// `roles`): written from the table by its Rust test (`CF_WRITE_PAGE_ROLES=1`), which fails
+// when they differ.
+const ROLES = JSON.parse(readFileSync(new URL('./fixtures/roles.json', import.meta.url), 'utf8'))
+
 /**
  * The history viewer (core/history-viewer.js) and the History button on every
  * window's head (core/terminals.js), against a stand-in for the app: the
@@ -254,7 +259,8 @@ function model() {
   }
 }
 
-async function open(page, data = model()) {
+async function open(page, given = model()) {
+  const data = { roles: ROLES, ...given }
   await page.addInitScript((data) => {
     window.__calls = []
     window.__model = data
@@ -264,8 +270,8 @@ async function open(page, data = model()) {
     const placeOf = (it) => it && { conversation: it.conversation, row: it.row }
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
-      'harnesses.missing': () => answer({ missing: [] }),
-      'board.get': () => answer({ board: window.__model.board }),
+      'harnesses.missing': () => answer({ missing: [], roles: data.roles }),
+      'board.get': () => answer({ board: window.__model.board, roles: data.roles }),
       'inbox.get': () => answer({ messages: [], total: 0, shown: 0 }),
       // The daemon's pages: the most recent, the one before a place or the one after it,
       // one stream of items across conversations, each with its conversation and row; a

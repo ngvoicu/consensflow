@@ -135,3 +135,60 @@ async fn an_image_designer_is_said_with_no_tier_because_a_design_task_has_none()
         "a worker's tier is said"
     );
 }
+
+#[tokio::test]
+async fn a_member_whose_roles_have_no_tier_is_said_with_none_and_one_with_a_role_with_tiers_with_its_own(
+) {
+    // The scout of the table's seam: a role with no tier that is no image agent. The ledger's
+    // CHECKs name the five roles of today alone, so they are off for its rows.
+    let _scout = cf_ledger::roles::seam::put(&cf_ledger::roles::seam::WITH_A_SCOUT);
+    let scene = scene();
+    scene
+        .context
+        .ledger
+        .borrow()
+        .sqlite()
+        .execute_batch("PRAGMA ignore_check_constraints = ON")
+        .unwrap();
+    for (name, roles, tier) in [
+        ("argus", &["scout"][..], "light"),
+        ("castor", &["worker", "scout"][..], "complex"),
+    ] {
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .add_member(
+                scene.project.id,
+                &cf_ledger::NewMember {
+                    model: None,
+                    effort: None,
+                    model_name: Some(name.to_owned()),
+                    harness: "claude-code".to_owned(),
+                    designer: false,
+                    roles: roles.iter().map(|role| (*role).to_owned()).collect(),
+                    tier: tier.to_owned(),
+                },
+            )
+            .unwrap();
+    }
+    let (_, said) = staff(&scene, &scene.context).await;
+    let tiers: Vec<(serde_json::Value, serde_json::Value)> = said["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|member| {
+            member["roles"]
+                .as_array()
+                .is_some_and(|roles| roles.contains(&json!("scout")))
+        })
+        .map(|member| (member["roles"].clone(), member["tier"].clone()))
+        .collect();
+    assert_eq!(
+        tiers,
+        [
+            (json!(["scout"]), json!(null)),
+            (json!(["worker", "scout"]), json!("complex")),
+        ]
+    );
+}

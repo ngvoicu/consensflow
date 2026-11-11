@@ -85,8 +85,10 @@ fn t_1_s_result_is_in_once_the_first_worker_task_is_done_or_accepted() {
         { "number": 1, "pool": "worker", "state": "working" },
         { "number": 2, "pool": null, "state": "done" },
     ])));
-    // A review, an advice, a test or an image done first is no worker's result.
-    for pool in ["reviewer", "advisor", "tester", "designer"] {
+    // A review, an advice, a test or an image done first is no worker's result, and nor is
+    // the task of a role this crate knows nothing of (one more row of the product's roles'
+    // table): only a worker's task, or one given to a window by name, is work.
+    for pool in ["reviewer", "advisor", "tester", "designer", "scout"] {
         assert!(
             !first_in(json!([
                 { "number": 1, "pool": pool, "state": "done" },

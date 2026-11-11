@@ -1,7 +1,14 @@
+import { readFileSync } from 'node:fs'
+
 import { expect, test } from '@playwright/test'
 
 import { refusedByPolicy, serveUi } from './serve-ui.mjs'
 import { specsOf } from './specs-fixtures.mjs'
+
+// The staff's roles as the daemon's table says them (`cf_ledger::roles`, `harnesses.missing`'s
+// `roles`): written from the table by its Rust test (`CF_WRITE_PAGE_ROLES=1`), which fails
+// when they differ.
+const ROLES = JSON.parse(readFileSync(new URL('./fixtures/roles.json', import.meta.url), 'utf8'))
 
 /**
  * The page's modals, against a stand-in for the app: a modal's `::backdrop` dims everything under
@@ -77,7 +84,8 @@ function model() {
   }
 }
 
-async function open(page, data = model()) {
+async function open(page, given = model()) {
+  const data = { roles: ROLES, ...given }
   // The order the page opens its modals in, which is the order of the top layer: counted as
   // `showModal` is called, whatever the order of the dialogs in the document.
   await page.addInitScript(() => {
@@ -96,8 +104,8 @@ async function open(page, data = model()) {
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
-      'harnesses.missing': () => answer({ missing: [] }),
-      'board.get': ({ project }) => answer({ board: data.boards[project] }),
+      'harnesses.missing': () => answer({ missing: [], roles: data.roles }),
+      'board.get': ({ project }) => answer({ board: data.boards[project], roles: data.roles }),
       'inbox.get': () => answer({ messages: [], total: 0, shown: 0 }),
       'staff.last': () => answer({ staff: [] }),
       'specs.get': () =>

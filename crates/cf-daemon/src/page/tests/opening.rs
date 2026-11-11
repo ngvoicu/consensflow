@@ -273,6 +273,8 @@ async fn a_project_opened_with_rules_and_a_compaction_has_them_and_its_chief_is_
             assert_eq!(board["board"]["project"]["staffRules"], RULES);
             assert_eq!(board["board"]["project"]["compaction"], 250_000);
             assert_eq!(board["board"]["project"]["advisorTool"], true);
+            // The roles its cards name come with it, in the table's order.
+            assert_eq!(board["roles"], cf_ledger::roles::page_view());
         })
         .await;
 }
@@ -445,6 +447,70 @@ async fn a_chief_on_muse_is_its_harness_and_a_model_muse_lists() {
             assert_eq!(
                 taken,
                 json!({ "ok": false, "error": "ConsensFlow cannot open muse windows" })
+            );
+        })
+        .await;
+}
+
+/// New project's staff with a member whose roles have no tier (the seam's scout, no image
+/// agent): it is opened with none given, kept in the lowest, and refused one; a member that holds
+/// it beside a role with tiers is opened in the tier picked for it.
+#[tokio::test]
+async fn a_project_opened_with_a_member_whose_roles_have_no_tier_keeps_it_in_the_lowest() {
+    LocalSet::new()
+        .run_until(async {
+            let held = asked();
+            let _scout = cf_ledger::roles::seam::put(&cf_ledger::roles::seam::WITH_A_SCOUT);
+            held.rig
+                .kit
+                .ledger
+                .borrow()
+                .sqlite()
+                .execute_batch("PRAGMA ignore_check_constraints = ON")
+                .unwrap();
+            let refused = ask(
+                &held.app,
+                "project.open",
+                opening(json!({ "staff": [
+                    { "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high", "tier": "standard", "roles": ["scout"] },
+                ] })),
+            )
+            .await;
+            assert_eq!(
+                refused,
+                json!({ "ok": false, "error": "a field scout takes no tier: its tasks have none" })
+            );
+            let answer = ask(
+                &held.app,
+                "project.open",
+                opening(json!({ "staff": [
+                    { "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high", "roles": ["scout"] },
+                    { "harness": "claude-code", "model": "claude-opus-5-5", "effort": "max", "tier": "complex", "roles": ["scout", "worker"] },
+                ] })),
+            )
+            .await;
+            assert_eq!(answer["ok"], true, "{answer}");
+            let opened = answer["project"]["id"].as_i64().unwrap();
+            let board = ask(&held.app, "board.get", json!({ "project": opened })).await;
+            let tiers: Vec<(Value, Value)> = board["board"]["lanes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|lane| &lane["participant"])
+                .filter(|participant| participant["member"].is_null())
+                .filter(|participant| {
+                    participant["roles"]
+                        .as_array()
+                        .is_some_and(|roles| roles.contains(&json!("scout")))
+                })
+                .map(|participant| (participant["roles"].clone(), participant["tier"].clone()))
+                .collect();
+            assert_eq!(
+                tiers,
+                [
+                    (json!(["scout"]), json!("light")),
+                    (json!(["scout", "worker"]), json!("complex")),
+                ]
             );
         })
         .await;
