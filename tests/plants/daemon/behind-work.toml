@@ -318,7 +318,7 @@ runs = ["cf-help"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/usage.txt"
-find = "  cf task edit T-3 \"…\" [--tier <tier>] [--needs T-4,T-5|+T-5|-T-5] [--before …]\n                                    change the brief, tier, needs or before of a task before\n                                    any window has its brief (open, queued, or paused): a list\n                                    replaces, +T-5 adds, -T-5 removes\n"
+find = "  cf task edit T-3 \"…\" [--tier <tier>] [--needs T-4,T-5|+T-5|-T-5] [--before …]\n                                    change the brief, tier, needs or before of a task before any window\n                                    has its brief (open, queued, or paused): a list replaces, +T-5 adds, -T-5 removes\n"
 replace = ""
 
 [[plant]]

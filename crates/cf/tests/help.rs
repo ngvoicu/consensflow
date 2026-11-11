@@ -70,8 +70,7 @@ const BOARD: [(&[&str], &str); 19] = [
         &["task", "add"],
         concat!(
             "  cf task add --tier <critical|complex|standard|light> \"…\"\n",
-            "                                    work for a worker of that tier; ConsensFlow picks\n",
-            "                                    the member (--purpose for critical work)\n",
+            "                                    work for a worker of that tier (--purpose for critical work)\n",
             "  cf task add --advice --tier <tier> \"…\"\n",
             "                                    a question for an advisor of that tier: findings and\n",
             "                                    recommendations back, no project file changed\n",
@@ -133,9 +132,8 @@ const BOARD: [(&[&str], &str); 19] = [
         &["task", "edit"],
         concat!(
             "  cf task edit T-3 \"…\" [--tier <tier>] [--needs T-4,T-5|+T-5|-T-5] [--before …]\n",
-            "                                    change the brief, tier, needs or before of a task before\n",
-            "                                    any window has its brief (open, queued, or paused): a list\n",
-            "                                    replaces, +T-5 adds, -T-5 removes\n",
+            "                                    change the brief, tier, needs or before of a task before any window\n",
+            "                                    has its brief (open, queued, or paused): a list replaces, +T-5 adds, -T-5 removes\n",
             "  cf task edit|reopen|resume T-3 … --title \"…\"\n",
             "                                    a new title, in any state (else the brief's first line); edit takes it alone\n",
         ),
@@ -265,13 +263,13 @@ fn the_word_may_stand_after_the_number_a_command_takes_first_or_beside_its_flags
 }
 
 /// A heredoc is bash's, zsh's and Git Bash's, and PowerShell has none (T-1435): the usage says
-/// which shells take `-` with a heredoc, and that a file is what PowerShell takes.
+/// that `-` with a heredoc is not for PowerShell, and that a file is what it takes.
 #[test]
-fn the_usage_says_a_heredoc_is_for_bash_like_shells_and_powershell_takes_a_file() {
+fn the_usage_says_a_heredoc_is_not_for_powershell_which_takes_a_file() {
     let usage = board_usage();
     assert!(
         usage.contains(concat!(
-            "Any \"…\" can be - to read the text from standard input, as written (bash, zsh, Git Bash; in PowerShell use --file):\n",
+            "Any \"…\" can be - to read the text from standard input, as written (not PowerShell: use --file):\n",
             "  cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)\n",
             "A long one is surest in a file, which no shell cuts (every command that takes words):\n",
             "  cf task add --tier standard --file brief.md\n",

@@ -210,12 +210,14 @@ reads one.
 
 Changed by hand on 2026-11-11 (T-1435), in the 6 prints of `board.json` that hold them and
 in `crates/cf/src/board/usage.txt`, in these words alone: `cf task add --advice` and `--review`
-end "no project file changed" (they were "no file changed"), and `cf task edit` is "for a
-task before any window has its brief (open, queued, or paused)", on three lines, where it
-was "a task no window has yet" on two.
+end "no project file changed" (they were "no file changed"), `cf task edit` is "for a
+task before any window has its brief (open, queued, or paused)", on two lines as before, where
+it was "a task no window has yet", and `cf task add --tier` ends "work for a worker of that
+tier (--purpose for critical work)", without "; ConsensFlow picks the member" (the chief's
+command card lost the same words).
 
 The first line of the footer that teaches a text from standard input reads, since T-1435, "Any
-"…" can be - to read the text from standard input, as written (bash, zsh, Git Bash; in
-PowerShell use --file):", where it ended "as written:" (the heredoc is not PowerShell's; the
+"…" can be - to read the text from standard input, as written (not PowerShell: use
+--file):", where it ended "as written:" (the heredoc is not PowerShell's; the
 footer line about a file, and the commands it names, did not change). Changed by hand in the
 4 prints of `board.json` that hold the footer.
