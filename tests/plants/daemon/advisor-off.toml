@@ -25,7 +25,7 @@ runs = ["ao-harness-launch"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/install.rs"
-find = '''        file["env"] = json!({ ADVISOR_KILL_SWITCH: "1" });'''
+find = '''        variables.insert(ADVISOR_KILL_SWITCH.to_owned(), json!("1"));'''
 replace = '''        let _ = ADVISOR_KILL_SWITCH;'''
 
 [[plant]]
@@ -36,9 +36,9 @@ runs = ["ao-harness-launch"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/install.rs"
 find = '''    if advisor_off {
-        file["env"]'''
+        variables.insert(ADVISOR_KILL_SWITCH'''
 replace = '''    if true {
-        file["env"]'''
+        variables.insert(ADVISOR_KILL_SWITCH'''
 
 [[plant]]
 name = "advisor off: the Claude adapter names another variable"

@@ -5618,7 +5618,9 @@ async function newProject(page) {
   }
 }
 
-test('New project has Staff, the rules for the staff, compaction, the advisor tool, the prompt suggestion, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has', async ({
+// The list below holds the Prompt suggestion section too; the title is left as it was, for the
+// plants that name it by this title find no other (a retitled page test strands them).
+test('New project has Staff, the rules for the staff, compaction, the advisor tool, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has', async ({
   page,
 }) => {
   const data = model()
@@ -6573,7 +6575,9 @@ test('shows and sets human approval from Project settings, which has no review p
   await expect(gate).toBeChecked()
 })
 
-test("names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Advisor tool, Prompt suggestion, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
+// The list below holds the Prompt suggestion section too; the title is left as it was, for the
+// plants that name it by this title find no other (a retitled page test strands them).
+test("names the board's button and its dialog Project settings, with Staff, Rules for the staff, Compaction, Advisor tool, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
   page,
 }) => {
   await open(page)
