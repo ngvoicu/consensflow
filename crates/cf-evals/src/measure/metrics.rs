@@ -69,6 +69,14 @@ pub struct Rounds {
     pub accepted_at: Option<String>,
 }
 
+/// Whether a task of `pool` is work for a worker: the worker's pool, or none (a task given
+/// to a window by name). Said by the worker's own pool, not by a list of the others: a role
+/// this crate knows nothing of yet (another row of the product's roles' table, which an
+/// eval does not read) is no worker's.
+pub fn is_work_pool(pool: Option<&str>) -> bool {
+    matches!(pool, None | Some("worker"))
+}
+
 impl Rounds {
     /// Whether the task went to a reviewer.
     pub fn is_review(&self) -> bool {
@@ -78,7 +86,7 @@ impl Rounds {
     /// Whether the task is work for a worker (a task given to a window by name has no
     /// pool): not a review, advice, a test or an image.
     pub fn is_work(&self) -> bool {
-        matches!(self.pool.as_deref(), None | Some("worker"))
+        is_work_pool(self.pool.as_deref())
     }
 
     /// When the first result that stood came in.

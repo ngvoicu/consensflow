@@ -432,6 +432,7 @@ mod members;
 mod models;
 mod opening;
 mod reading;
+mod roles;
 mod scripted;
 mod specs;
 mod staff_rules;

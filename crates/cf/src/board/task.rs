@@ -5,6 +5,7 @@ use std::io::Read;
 
 use cf_base::js;
 use cf_board::Board;
+use cf_ledger::roles::{self, Role};
 use serde_json::{json, Map, Value};
 
 use super::lines::{
@@ -15,9 +16,10 @@ use super::words::{quoted, require_text, split, task_number, task_numbers, Shape
 use super::{brief, transcript};
 use super::{help_of, Failure, Said};
 
-/// The flags of `cf task add`.
-const ADD: Shape = Shape {
-    switches: &["--self", "--advice", "--review", "--test", "--design"],
+/// The flags of `cf task add`: its own switch, `--self`, and the switch of each role that
+/// has one ([`add_switches`]).
+const ADD: Shape<'static> = Shape {
+    switches: &["--self"],
     valued: &[
         "--tier",
         "--purpose",
@@ -28,6 +30,14 @@ const ADD: Shape = Shape {
     ],
     leading: 0,
 };
+
+/// The switches of `cf task add`: `--self`, then each role's that has one, in the roles'
+/// order (`--advice`, `--review`, `--test`, `--design`).
+fn add_switches() -> Vec<&'static str> {
+    std::iter::once("--self")
+        .chain(roles::all().iter().filter_map(|role| role.switch))
+        .collect()
+}
 
 /// The flag that gives a task a new title: the brief's first line otherwise.
 const TITLE: &str = "--title";
@@ -114,7 +124,7 @@ pub fn command(
 
 /// The flags of the task command `verb`, after its task. Every command that
 /// moves a task takes words, so every one takes a file of them too.
-fn shape_of(verb: &str) -> Shape {
+fn shape_of(verb: &str) -> Shape<'static> {
     match verb {
         "get" => GET,
         "edit" => EDIT,
@@ -129,10 +139,24 @@ fn add(
     board: &Board,
     input: &mut dyn Read,
 ) -> Result<Said, Failure> {
-    let words = split(rest, ADD);
+    let switches = add_switches();
+    let words = split(
+        rest,
+        Shape {
+            switches: &switches,
+            ..ADD
+        },
+    );
     if words.asks_for_help() {
         return Ok(help_of(&["task", "add"]));
     }
+    // The role asked for by its switch, a role with no tier first (`--design`): its task
+    // takes no tier, no purpose and no other role.
+    let switched = |role: &&Role| role.switch.is_some_and(|switch| words.on(switch));
+    let untiered = roles::all()
+        .iter()
+        .filter(|role| !role.tiered)
+        .find(switched);
     let tier = words.value("--tier")?;
     let after = words
         .value("--after")?
@@ -149,7 +173,7 @@ fn add(
                 .into(),
         ));
     }
-    if tier.is_none() && after.is_none() && !mine && !words.on("--design") {
+    if tier.is_none() && after.is_none() && !mine && untiered.is_none() {
         return Err(Failure::Usage(ADD_USAGE.into()));
     }
     let brief = require_text(brief::brief_of(&words, given, input)?, ADD_USAGE)?;
@@ -159,20 +183,20 @@ fn add(
         body.insert("self".into(), true.into());
     } else if let Some(after) = after {
         body.insert("after".into(), after.into());
-    } else if words.on("--design") {
-        body.insert("design".into(), true.into());
+    } else if let Some(field) = untiered.and_then(Role::field) {
+        body.insert(field.into(), true.into());
     } else {
         if let Some(tier) = tier {
             body.insert("tier".into(), tier.into());
         }
-        if words.on("--advice") {
-            body.insert("advice".into(), true.into());
-        }
-        if words.on("--review") {
-            body.insert("review".into(), true.into());
-        }
-        if words.on("--test") {
-            body.insert("test".into(), true.into());
+        // Each role with tiers asked for: the board ranks them.
+        for field in roles::all()
+            .iter()
+            .filter(|role| role.tiered)
+            .filter(switched)
+            .filter_map(Role::field)
+        {
+            body.insert(field.into(), true.into());
         }
         if let Some(purpose) = words.value("--purpose")? {
             body.insert("purpose".into(), purpose.into());
@@ -1138,6 +1162,32 @@ and 2 idle sessions (`cf task list --all`)";
         );
         let (posted, _) = added(&["--tier", "light", "Write it"], &answer);
         assert_eq!(posted, Some(json!({ "tier": "light", "body": "Write it" })));
+    }
+
+    /// A role is one row of the roles' table: a sixth, put in it for this test alone, has its
+    /// switch, which asks for it with no tier where its row has none, and the receipt names
+    /// it as its row does.
+    #[test]
+    fn a_role_in_the_table_alone_is_asked_for_by_its_switch_and_named_by_its_row() {
+        cf_ledger::roles::seam::with_a_scout(|| {
+            let answer = json!({
+                "task": { "number": 3, "state": "open", "assignee": null, "requester": "chief",
+                    "title": "Look around", "blockedBy": [], "pool": "scout", "tier": null },
+                "message": null, "gated": false,
+            });
+            let (posted, said) = added(&["--scout", "Look around"], &answer);
+            assert_eq!(
+                posted,
+                Some(json!({ "scout": true, "body": "Look around" }))
+            );
+            assert_eq!(
+                said,
+                "T-3 is on the board for a field scout; it starts in a new window of one, and its result arrives in your inbox.\nT-3: sent 11 characters, ending \"Look around\"."
+            );
+            // A tier said beside it is not sent, as with --design.
+            let (posted, _) = added(&["--scout", "--tier", "light", "Look"], &answer);
+            assert_eq!(posted, Some(json!({ "scout": true, "body": "Look" })));
+        });
     }
 
     /// A chief that read of a free member after every task it added took a member

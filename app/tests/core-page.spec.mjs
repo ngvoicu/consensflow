@@ -7,6 +7,11 @@ import { tempEnv } from '../../tests/helpers.mjs'
 import { agentsServer } from './agents-server.mjs'
 import { refusedByPolicy, serveUi } from './serve-ui.mjs'
 
+// The staff's roles as the daemon's table says them (`cf_ledger::roles`, `harnesses.missing`'s
+// `roles`): written from the table by its Rust test (`CF_WRITE_PAGE_ROLES=1`), which fails
+// when they differ.
+const ROLES = JSON.parse(readFileSync(new URL('./fixtures/roles.json', import.meta.url), 'utf8'))
+
 /**
  * The board page (TEST-BDC-13), against a stand-in for the app:
  * `daemon_request` answers from an in-page model and records every call, the way
@@ -310,7 +315,8 @@ function model() {
   }
 }
 
-async function open(page, data = model()) {
+async function open(page, given = model()) {
+  const data = { roles: ROLES, ...given }
   await page.addInitScript((data) => {
     window.__calls = []
     window.__model = data
@@ -354,6 +360,8 @@ async function open(page, data = model()) {
     // Why the daemon is down, while a test has it down: the app answers every
     // core request with this, as Rust does with no bridge to the daemon.
     window.__down = null
+    // How many of the first reads of the harnesses the daemon refuses: a test's `missingRefused`.
+    window.__missingRefused = data.missingRefused ?? 0
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
     // A project's wake-up calls as the daemon says them: the interval in the
     // largest unit that holds it whole, the default words where none were written.
@@ -386,7 +394,13 @@ async function open(page, data = model()) {
       })
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
-      'harnesses.missing': () => answer({ missing: data.missing ?? [] }),
+      'harnesses.missing': () => {
+        if (window.__missingRefused > 0) {
+          window.__missingRefused -= 1
+          return { ok: false, error: 'not-available-yet', detail: 'the daemon is starting' }
+        }
+        return answer({ missing: data.missing ?? [], roles: data.roles })
+      },
       // What a harness lists of its models, by its program's name (CHF-07): the fixture's,
       // or a refusal a test names for it (`modelsRefusal`).
       'models.get': ({ harness }) => {
@@ -475,7 +489,7 @@ async function open(page, data = model()) {
         lane.participant.roles = roles
         return answer({ member: lane.participant })
       },
-      'board.get': ({ project }) => answer({ board: data.boards[project] }),
+      'board.get': ({ project }) => answer({ board: data.boards[project], roles: data.roles }),
       // A project's computer use, as the daemon reads it (`computerUse` of the model, on macOS
       // with no grant and Claude Code's off, unless a test says otherwise), and the System
       // Settings panes it opens, by name.
@@ -4647,6 +4661,118 @@ test('adds a member as a tester, or as one more role of a member, in the place a
   await pickMember(dialog, { harness: 'Claude Code', model: 'claude-sonnet-5', tier: 'standard' })
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
   await expect(page.locator('#status')).toHaveText('@zeus is Tester now too.')
+})
+
+test("a role the daemon's table alone names is offered, listed and added in its place among the roles, with no tier where its row has none", async ({
+  page,
+}) => {
+  const data = model()
+  // A sixth role, after the reviewer: the page holds no list of roles, and reads the table's.
+  data.roles = [
+    ...ROLES.slice(0, 3),
+    {
+      id: 'scout',
+      name: 'field scout',
+      label: 'Field scout',
+      article: 'a',
+      tiered: false,
+      imageAgent: false,
+    },
+    ...ROLES.slice(3),
+  ]
+  data.boards[1].lanes.push(
+    {
+      participant: participant(9, 'argus', 'scout', {
+        harness: 'codex',
+        model: 'gpt-6-astra',
+        modelName: 'gpt-6-astra',
+        effort: null,
+        tier: 'light',
+      }),
+      tasks: [],
+      activity: { state: 'idle' },
+      pane: { id: 'p1-argus', generation: 1 },
+    },
+    {
+      // A worker that scouts too keeps its tier, for its work.
+      participant: participant(10, 'castor', 'worker', {
+        harness: 'codex',
+        roles: ['worker', 'scout'],
+        tier: 'complex',
+      }),
+      tasks: [],
+      activity: { state: 'idle' },
+      pane: { id: 'p1-castor', generation: 1 },
+    },
+  )
+  await open(page, data)
+  // The board says no tier in a row of a role with none, and the tier in one of a role with one,
+  // of the same member.
+  const row = (name) => page.getByRole('row', { name })
+  await expect(row(/^@argus scout · Codex/)).toBeVisible()
+  await expect(row(/^@argus scout/).locator('.meta-tier')).toHaveCount(0)
+  await expect(row(/^@castor scout/).locator('.meta-tier')).toHaveCount(0)
+  await expect(row(/^@castor worker/).locator('.meta-tier')).toHaveText('complex')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
+    'Worker',
+    'Advisor',
+    'Reviewer',
+    'Field scout',
+    'Tester',
+    'Image designer',
+  ])
+  const table = dialog.getByRole('table', { name: 'On the staff' })
+  await expect(table.locator('tbody tr').last()).toHaveText(/@argus.*Field scout/)
+  await expect(table.locator('tr[data-handle="argus"][data-role="scout"]')).toHaveCount(1)
+  // No tier in the row of a role with none; the member's tier in the row of one with tiers.
+  await expect(table.locator('tr[data-handle="argus"]')).not.toContainText('light')
+  await expect(table.locator('tr[data-handle="castor"][data-role="scout"]')).not.toContainText(
+    'complex',
+  )
+  await expect(table.locator('tr[data-handle="castor"][data-role="worker"]')).toContainText(
+    '· complex ·',
+  )
+  // A scout is no image agent: any harness installed here may scout, and it is asked no tier.
+  await pickMember(dialog, { role: 'scout', harness: 'Devin', model: 'swe-2' })
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([
+      {
+        project: 1,
+        harness: 'devin',
+        model: 'swe-2',
+        effort: null,
+        roles: ['scout'],
+      },
+    ])
+  await expect(page.locator('#status')).toHaveText('@swe-2 joined the staff as Field scout.')
+  // Back to a role with tiers: the tier is asked for again.
+  await dialog.getByLabel('Role').selectOption('worker')
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
+  // Edit member asks a scout no tier either, and saves it with none.
+  await dialog.getByRole('button', { name: 'Edit @argus', exact: true }).click()
+  await expect(dialog.locator('[name="memberModel"]')).toHaveValue('gpt-6-astra')
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Save member' }).click()
+  await expect
+    .poll(() => calls(page, 'member.edit'))
+    .toEqual([
+      {
+        project: 1,
+        member: 'argus',
+        harness: 'codex',
+        model: 'gpt-6-astra',
+        effort: null,
+        unchanged: true,
+      },
+    ])
+  // A worker that scouts too is asked its tier.
+  await dialog.getByRole('button', { name: 'Edit @castor', exact: true }).first().click()
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
 })
 
 test('an image designer is picked on Codex alone, and Add member says so when Codex is not here', async ({
@@ -10462,6 +10588,21 @@ test('resizes no terminal when the projects fold away and come back: the board t
   expect(await resizes()).toBe(1)
 })
 
+test('names the role a task waits for on every board it shows, though every read of the harnesses is refused', async ({
+  page,
+}) => {
+  const data = model()
+  data.missingRefused = 1000
+  data.boards[1].open.push(
+    task(7, 'Draw the logo', 'open', 'chief', null, 1, { pool: 'designer', tier: null }),
+  )
+  await open(page, data)
+  // The roles come with the board: a board shown is one whose roles are read.
+  await expect(page.locator('button.card[data-task="7"]')).toContainText('for an image designer')
+  // Every read of the harnesses was refused: the page asked, and was told nothing.
+  await expect.poll(() => page.evaluate(() => window.__missingRefused)).toBeLessThan(1000)
+})
+
 test('folds the panels for this page when the browser keeps no storage', async ({ page }) => {
   // A browser that refuses storage (its data blocked, say) throws at every touch.
   await page.addInitScript(() => {
@@ -10573,6 +10714,86 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
             roles: ['advisor'],
           },
           { harness: 'codex', roles: ['designer'] },
+        ],
+      },
+    ])
+})
+
+test('New project asks no tier of a role whose row has none, and a member that holds it beside a role with tiers keeps its tier', async ({
+  page,
+}) => {
+  const data = model()
+  // A sixth role with no tier, which is no image agent: the daemon's table alone names it.
+  data.roles = [
+    ...ROLES.slice(0, 3),
+    {
+      id: 'scout',
+      name: 'field scout',
+      label: 'Field scout',
+      article: 'a',
+      tiered: false,
+      imageAgent: false,
+    },
+    ...ROLES.slice(3),
+  ]
+  data.lastStaff = [
+    lastMember('hera', 'codex', ['scout'], 'light'),
+    lastMember('zeus', 'claude-code', ['scout', 'worker'], 'complex'),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const table = dialog.getByRole('table', { name: 'Members for the staff' })
+  // The last staff's scouts are picked as they were and said with no tier, and the one that
+  // works too keeps its tier for its work.
+  const scouts = table.locator('tbody tr', { hasText: 'Field scout' })
+  await expect(table.locator('tbody tr')).toHaveText([
+    /^claude-sonnet-5.*complex.*Worker/,
+    /^claude-sonnet-5.*Field scout/,
+    /^gpt-6-astra.*Codex · max.*Field scout/,
+  ])
+  await expect(scouts.filter({ hasText: /complex|light/ })).toHaveCount(0)
+  await pickChief(dialog, 'Pi', 'meta/muse-spark')
+  // A worker is asked a tier; a scout on the same model after it is not, and leaves the
+  // member's tier as it was.
+  await pickMember(dialog, {
+    role: 'worker',
+    harness: 'Pi',
+    model: 'meta/muse-spark',
+    tier: 'complex',
+  })
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await pickMember(dialog, { role: 'scout', harness: 'Pi', model: 'meta/muse-spark' })
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(scouts).toHaveCount(3)
+  await expect(scouts.filter({ hasText: /complex|light/ })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'pi',
+        model: 'meta/muse-spark',
+        gate: false,
+        staff: [
+          { harness: 'codex', model: 'gpt-6-astra', effort: 'max', roles: ['scout'] },
+          {
+            harness: 'claude-code',
+            model: 'claude-sonnet-5',
+            effort: 'high',
+            tier: 'complex',
+            roles: ['scout', 'worker'],
+          },
+          {
+            harness: 'pi',
+            model: 'meta/muse-spark',
+            effort: null,
+            tier: 'complex',
+            roles: ['worker', 'scout'],
+          },
         ],
       },
     ])

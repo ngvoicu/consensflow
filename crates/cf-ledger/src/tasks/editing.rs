@@ -20,6 +20,7 @@ use super::{
     task_row_by_id,
 };
 use crate::model::{self, title_of, LedgerError, MAX_BODY, PURPOSES};
+use crate::roles;
 use crate::staff::{has_members_of_tier, holders_of_tier, nearest_tier};
 use crate::store::Store;
 use crate::views::TaskRow;
@@ -328,10 +329,13 @@ fn tier_for(
 ) -> Result<(String, String), LedgerError> {
     let number = task.number;
     let pool = match task.pool.as_deref() {
-        Some("designer") => {
+        Some(pool) if roles::untiered(pool) => {
             return Err(LedgerError::refused_with(
                 "invalid-transition",
-                format!("cannot change the tier of T-{number}: the image designer has no tier"),
+                format!(
+                    "cannot change the tier of T-{number}: the {} has no tier",
+                    roles::name_of(pool)
+                ),
                 409,
             ))
         }
@@ -363,7 +367,10 @@ fn tier_for(
     if !has_members_of_tier(store, project_id, pool, Some(&tier))? {
         return Err(LedgerError::refused_with(
             "no-member-of-tier",
-            format!("no {pool} is on the staff: ask the human for one, in your terminal"),
+            format!(
+                "no {} is on the staff: ask the human for one, in your terminal",
+                roles::name_of(pool)
+            ),
             409,
         ));
     }

@@ -327,15 +327,7 @@ impl Dispatcher {
                     .waiting_noted
                     .borrow_mut()
                     .insert(task.id, project.id);
-                let pool = if task.pool.as_deref() == Some("designer") {
-                    "image designer".to_owned()
-                } else {
-                    format!(
-                        "{} {}",
-                        task.tier.as_deref().unwrap_or("null"),
-                        task.pool.as_deref().unwrap_or("null")
-                    )
-                };
+                let pool = cf_ledger::roles::pool_name(task.pool.as_deref(), task.tier.as_deref());
                 let mut why: Vec<String> = candidates
                     .iter()
                     .filter_map(|member| self.why_not_free(member))
@@ -346,11 +338,9 @@ impl Dispatcher {
                     why.push(match candidates.is_empty() {
                         true => format!(
                             "no {} is on the staff (ask the human for one, in your terminal)",
-                            if task.pool.as_deref() == Some("designer") {
-                                "image designer"
-                            } else {
-                                task.pool.as_deref().unwrap_or("member")
-                            }
+                            task.pool
+                                .as_deref()
+                                .map_or("member", cf_ledger::roles::name_of)
                         ),
                         false => "none of them is free".to_owned(),
                     });

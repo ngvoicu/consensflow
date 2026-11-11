@@ -46,7 +46,11 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
             fields.insert("held".to_owned(), held);
         }
     }
-    one("board", shown)
+    let mut answer = one("board", shown)?;
+    // The roles its cards and lanes name, in the table's order: a board the page draws is one
+    // whose roles it read with it (`cf_ledger::roles`).
+    answer.insert("roles".to_owned(), cf_ledger::roles::page_view());
+    Ok(answer)
 }
 
 /// `inbox.get`: as much as one frame carries, newest first, and how many there

@@ -185,11 +185,9 @@ runs = ["tf-ledger-edit-tier"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/editing.rs"
-find = '''
-        Some("designer") => {
+find = '''        Some(pool) if roles::untiered(pool) => {
 '''
-replace = '''
-        Some("designer") if false => {
+replace = '''        Some(pool) if false && roles::untiered(pool) => {
 '''
 
 [[plant]]

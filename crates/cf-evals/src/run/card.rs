@@ -300,17 +300,13 @@ pub(crate) fn tasks_of(board: &Value) -> Vec<&Value> {
         .collect()
 }
 
-/// Whether the first worker task of a board, the lowest number that is no advice,
-/// review, test or image, has its result in: done, or accepted already.
+/// Whether the first worker task of a board, the lowest number that is work
+/// ([`crate::measure::is_work_pool`]: no advice, review, test or image), has its
+/// result in: done, or accepted already.
 fn first_result_in(tasks: &[&Value]) -> bool {
     tasks
         .iter()
-        .filter(|task| {
-            !matches!(
-                task["pool"].as_str(),
-                Some("advisor" | "reviewer" | "tester" | "designer")
-            )
-        })
+        .filter(|task| crate::measure::is_work_pool(task["pool"].as_str()))
         .min_by_key(|task| task["number"].as_i64().unwrap_or(i64::MAX))
         .is_some_and(|task| matches!(task["state"].as_str(), Some("done" | "accepted")))
 }
