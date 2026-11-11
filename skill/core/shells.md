@@ -21,9 +21,9 @@ Write a long brief to a file with your file tool and pass it with `--file brief.
 Any "…" can be `--file brief.md` instead: the text then comes from that file,
 as written. Write a brief that holds backticks, `$` or quotes to it with your
 file tool, never with `>` (Windows PowerShell 5.1 writes UTF-16) or a pipe into
-`-` (it loses non-ASCII there). In double quotes PowerShell runs `$( )`, `$name`
-and the backtick before ConsensFlow sees them, and 5.1 splits the text at an
-inner `"`; to put a value in, write it out:
+`-` (it loses non-ASCII there). In double quotes PowerShell evaluates `$( )`,
+expands `$name` and treats a backtick as an escape before ConsensFlow sees the
+text, and 5.1 splits it at an inner `"`; to put a value in, write it out:
 
     {{cf}} task add --tier standard --file brief.md
 <!-- posix: member_input -->
@@ -33,7 +33,7 @@ written (in double quotes the shell runs backticks and `$( )`):
 <!-- powershell: member_input -->
 Any "…" can be `--file ask.md` instead, the text in that file, written with your
 file tool and taken as written: `{{cf}} ask --file ask.md`. In double quotes
-PowerShell runs `$( )`, `$name` and the backtick.
+PowerShell evaluates `$( )`, expands `$name`; a backtick escapes.
 <!-- posix: removal -->
 Nobody watches this window, and a harness may stop for a human even with
 every permission granted: Claude Code does on any removal (`rm`, `rm -f`,

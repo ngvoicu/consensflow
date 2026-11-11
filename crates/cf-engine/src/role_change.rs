@@ -107,7 +107,7 @@
 //! by the write that confirms the delivery (`confirm_delivery`), in the conversation
 //! it was made in. `cf` says so of a role up to a
 //! bound of its own (`cf_base::role_read`, 29,000 bytes and 500 lines, measured
-//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 152
+//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 151
 //! rows with specs on, 174 without, two roles to a row and a name of twenty characters, the
 //! model's id and effort, which a member is named by, on the same text (its bytes are the
 //! bound; 133 and 152 with a column of models in the table, 195 and 223 before it,
@@ -118,10 +118,10 @@
 //! every text that says a role, and the ledger bounds them for it (at most 8,000
 //! bytes and 150 lines, `cf_ledger::STAFF_RULES_MAX_BYTES`): a member's real text
 //! with the most rules goes into its window whole, and a chief's with specs on,
-//! the most rules and a staff of up to 15 rows (39 without specs) is read whole,
-//! a staff of 15 with 51 bytes and 57 lines to spare (19 and 39 with the model column, 29
+//! the most rules and a staff of up to 15 rows (38 without specs) is read whole,
+//! a staff of 15 with 41 bytes and 57 lines to spare (19 and 39 with the model column, 29
 //! and 58 before it; a staff of 25 with the most rules is told in part and not read whole,
-//! 549 bytes over: a row of the table is 60 bytes, and the text without a row is 28,050).
+//! 559 bytes over: a row of the table is 60 bytes, and the text without a row is 28,060).
 //! A role read so is said nothing of at the next Resume, unless it changed again.
 //! One the window has not read by its next Resume is said again then, and the
 //! human has a line on the board that says so ([`Dispatcher::not_read`]).

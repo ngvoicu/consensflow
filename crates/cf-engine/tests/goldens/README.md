@@ -31,6 +31,13 @@ your file tool and pass it with `--file brief.md` instead: a shell can cut a lon
 about 8.1k characters (the field report of 2026-10-15, B6). Changed by hand, in those
 words alone, on 2026-10-16.
 
+The same twelve rows end the chief's opening with "you never type into another window or launch
+agents to do the work" (`skill/core/chief.md`), where Node's said "or launch agents": the chief's
+own rule about its harness's subagents allows them for searching and reading, which the opening
+forbade (the review T-1447 of T-1435, finding 3); the sentence before it lost "here" ("the work
+the human gives you is yours to plan"), which "here in your terminal" below it says, to pay for the
+words. Changed by hand, in those words alone.
+
 The members' text (worker, advisor, reviewer and image designer), in each of the 27
 `roleInstructions` rows that hold it, has one sentence Node's did not, the last but one of
 its paragraph about a window that is for one task: "Your answer ends your turn's work:
@@ -246,8 +253,8 @@ and the shell-dependent paragraphs by shell below. By hand, in those words alone
 - **The chief's section on the project's rules** says "Every window of your staff opens with
   these rules", and the two notes to a running chief of a change of them say "Windows that
   open from now on are given them (none); one already open keeps its rules".
-The role-change budgets moved with the shorter text: read whole to 152 rows with specs on
-(174 without), and to 15 and 39 with the most rules for the staff, 51 bytes and 57 lines to
+The role-change budgets moved with the shorter text: read whole to 151 rows with specs on
+(174 without), and to 15 and 38 with the most rules for the staff, 41 bytes and 57 lines to
 spare for the 15.
 
 The paragraphs of a text that depend on the shell of the window's commands (how a text is passed
