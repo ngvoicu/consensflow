@@ -240,7 +240,7 @@ fn a_task_read_from_json_may_be_for_the_testers_and_a_pool_that_is_none_names_th
         (refused.code(), refused.to_string()),
         (
             Some("invalid-pool"),
-            "a pool is worker, advisor, reviewer, tester, designer, not checker".to_owned()
+            "a pool is worker, frontend, architect, researcher, advisor, reviewer, tester, integrator, designer, not checker".to_owned()
         )
     );
 }

@@ -428,7 +428,13 @@ mod tests {
             .collect();
         assert_eq!(
             untiered,
-            ["frontend", "architect", "researcher", "integrator", "designer"]
+            [
+                "frontend",
+                "architect",
+                "researcher",
+                "integrator",
+                "designer"
+            ]
         );
         assert_eq!(
             all()

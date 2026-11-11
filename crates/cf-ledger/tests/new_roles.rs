@@ -1,0 +1,317 @@
+//! The four roles of spec new-roles in the ledger (FD-04): migration 0036 widens the role
+//! check of `participant` and the pool check of `task` to the nine roles of the table, every
+//! row of a ledger an older build left kept; a member of each new role is held and a task of
+//! each new pool is taken by it alone; and a build of 0035 that meets the migrated ledger
+//! refuses it as one a newer build wrote.
+
+#![allow(clippy::expect_used)]
+
+use cf_ledger::testing::undo_migration_0036;
+use cf_ledger::{
+    migrate, open_ledger, Ledger, NewChief, NewMember, NewProject, NewTask, Options, ProjectView,
+    MIGRATIONS, SCHEMA_VERSION,
+};
+use rusqlite::Connection;
+use serde_json::{json, Value};
+
+const NEW: [&str; 4] = ["frontend", "architect", "researcher", "integrator"];
+
+fn member(agent: &str, roles: &[&str], tier: &str) -> NewMember {
+    NewMember {
+        model: None,
+        effort: None,
+        model_name: Some(agent.into()),
+        harness: "claude-code".into(),
+        designer: false,
+        roles: roles.iter().map(|role| (*role).to_owned()).collect(),
+        tier: tier.into(),
+    }
+}
+
+fn image_designer() -> NewMember {
+    NewMember {
+        harness: "codex".into(),
+        designer: true,
+        ..member("codex-default", &["designer"], "light")
+    }
+}
+
+fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
+    ledger
+        .create_project(&NewProject {
+            directory: "/work/app".into(),
+            name: "app".into(),
+            chief: NewChief {
+                harness: "claude-code".into(),
+                model: Some("apollo".into()),
+                effort: None,
+                model_name: None,
+            },
+            staff,
+            gate: false,
+            wake_up: None,
+            specs: None,
+            staff_rules: None,
+            compaction: None,
+            advisor_tool: false,
+        })
+        .expect("a project")
+}
+
+fn task(pool: &str, tier: Option<&str>, body: &str) -> NewTask {
+    NewTask {
+        from: "chief".into(),
+        pool: Some(pool.into()),
+        tier: tier.map(Into::into),
+        body: body.into(),
+        ..NewTask::default()
+    }
+}
+
+/// Every row of `table` in rowid order, each value as SQLite quotes it.
+fn rows(db: &Connection, table: &str) -> Vec<Vec<String>> {
+    let columns: Vec<String> = db
+        .prepare(&format!("PRAGMA table_info(\"{table}\")"))
+        .unwrap()
+        .query_map([], |row| row.get(1))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    let quoted = columns
+        .iter()
+        .map(|column| format!("quote(\"{column}\")"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    db.prepare(&format!("SELECT {quoted} FROM \"{table}\" ORDER BY rowid"))
+        .unwrap()
+        .query_map([], |row| {
+            (0..columns.len())
+                .map(|at| row.get::<_, String>(at))
+                .collect::<rusqlite::Result<Vec<_>>>()
+        })
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+/// What a migration of the two tables must keep: their rows and the sequences.
+fn kept(db: &Connection) -> Value {
+    json!({
+        "participant": rows(db, "participant"),
+        "task": rows(db, "task"),
+        "sequences": rows(db, "sqlite_sequence"),
+        "needs": rows(db, "task_need"),
+        "messages": rows(db, "message"),
+        "conversations": rows(db, "conversation"),
+    })
+}
+
+fn schema(db: &Connection) -> Vec<(String, String)> {
+    db.prepare("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+fn version(db: &Connection) -> i64 {
+    db.query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap()
+}
+
+#[test]
+fn a_ledger_a_build_of_0035_left_with_members_and_tasks_of_the_five_roles_keeps_every_row_through_0036(
+) {
+    let dir = tempfile::tempdir().expect("a home");
+    let file = dir.path().join("consensflow.db");
+    let mut ledger = open_ledger(&file, Options::default()).expect("a ledger");
+    let project = project(
+        &mut ledger,
+        vec![
+            member("zeus", &["worker", "reviewer"], "complex"),
+            member("hera", &["advisor"], "complex"),
+            member("ares", &["tester"], "standard"),
+            member("hebe", &["worker"], "light"),
+            image_designer(),
+        ],
+    );
+    for (pool, tier, body) in [
+        ("worker", Some("complex"), "Build the page"),
+        ("reviewer", Some("complex"), "Review T-1"),
+        ("advisor", Some("complex"), "Which store?"),
+        ("tester", Some("standard"), "Run T-1"),
+        ("designer", None, "Draw the logo"),
+        ("worker", Some("light"), "Fix a typo"),
+    ] {
+        ledger
+            .create_task(project.id, &task(pool, tier, body))
+            .expect("a task");
+    }
+    ledger
+        .cancel_task(project.id, 6, "chief")
+        .expect("T-6 cancelled");
+    ledger
+        .remove_member(project.id, "hebe")
+        .expect("hebe leaves the staff");
+    ledger.close().expect("closed");
+
+    // As a build of 0035 left it: its checks name the five roles, its version is 35.
+    let raw = Connection::open(&file).unwrap();
+    undo_migration_0036(&raw).expect("0036 undone");
+    raw.execute_batch("PRAGMA user_version = 35").unwrap();
+    let before = kept(&raw);
+    let narrow = schema(&raw);
+    assert!(
+        narrow
+            .iter()
+            .all(|(_, sql)| !NEW.iter().any(|role| sql.contains(&format!("'{role}'")))),
+        "{narrow:?}"
+    );
+    drop(raw);
+
+    let ledger = open_ledger(&file, Options::default()).expect("migrated");
+    ledger.close().expect("closed");
+    let raw = Connection::open(&file).unwrap();
+    assert_eq!(version(&raw), SCHEMA_VERSION as i64);
+    assert_eq!(SCHEMA_VERSION, 36);
+    assert_eq!(kept(&raw), before, "every row of the two tables kept");
+    let wide = schema(&raw);
+    let narrowed: Vec<(String, String)> = wide
+        .iter()
+        .map(|(name, sql)| {
+            (
+                name.clone(),
+                sql.replace(", 'frontend', 'architect', 'researcher', 'integrator'", ""),
+            )
+        })
+        .collect();
+    assert_eq!(narrowed, narrow, "only the two lists changed");
+    // Its references still hold, as the migration checked before it committed.
+    let broken: Option<String> = raw
+        .query_row("PRAGMA foreign_key_check", [], |row| row.get(0))
+        .ok();
+    assert_eq!(broken, None);
+}
+
+#[test]
+fn a_build_of_0035_refuses_the_ledger_once_0036_has_run_as_one_a_newer_build_wrote() {
+    let db = Connection::open_in_memory().unwrap();
+    migrate(&db, &MIGRATIONS).expect("this build's ledger");
+    let older = &MIGRATIONS[..35];
+    let refused = migrate(&db, older).expect_err("an older build refuses it");
+    assert_eq!(
+        (refused.code(), refused.to_string()),
+        (
+            Some("ledger-newer"),
+            "this home was written by a newer ConsensFlow (schema 36; this build knows 35)"
+                .to_owned()
+        )
+    );
+    assert_eq!(version(&db), 36, "and leaves it as it is");
+}
+
+#[test]
+fn a_member_of_each_new_role_is_held_and_takes_its_pools_tasks_alone() {
+    let dir = tempfile::tempdir().expect("a home");
+    let mut ledger =
+        open_ledger(&dir.path().join("consensflow.db"), Options::default()).expect("a ledger");
+    let project = project(
+        &mut ledger,
+        vec![
+            member("zeus", &["worker"], "standard"),
+            member("iris", &["frontend"], "light"),
+            member("daedalus", &["architect"], "light"),
+            member("argus", &["researcher"], "light"),
+            member("janus", &["integrator"], "light"),
+        ],
+    );
+    let held: Vec<(String, Vec<String>, Option<String>)> = project
+        .participants
+        .iter()
+        .filter(|participant| participant.member_id.is_none() && participant.role != "chief")
+        .filter(|participant| participant.role != "human")
+        .map(|participant| {
+            (
+                participant.role.clone(),
+                participant.roles.clone(),
+                participant.tier.clone(),
+            )
+        })
+        .collect();
+    for role in NEW {
+        assert!(
+            held.iter().any(|(led, roles, tier)| led == role
+                && roles == &[role.to_owned()]
+                && tier.as_deref() == Some("light")),
+            "{role}: {held:?}"
+        );
+    }
+    for (number, role) in (1..).zip(NEW) {
+        let created = ledger
+            .create_task(
+                project.id,
+                &task(role, None, &format!("Work for the {role}")),
+            )
+            .expect("a task of the pool");
+        assert_eq!(
+            (created.task.pool.as_deref(), created.task.tier.as_deref()),
+            (Some(role), None),
+            "a task of the {role}'s pool has no tier"
+        );
+        let candidates = ledger
+            .candidates(project.id, number)
+            .expect("who may take it");
+        let roles: Vec<&str> = candidates
+            .iter()
+            .map(|candidate| candidate.member.handle.as_str())
+            .map(|handle| {
+                [
+                    ("iris", "frontend"),
+                    ("daedalus", "architect"),
+                    ("argus", "researcher"),
+                    ("janus", "integrator"),
+                    ("zeus", "worker"),
+                ]
+                .into_iter()
+                .find(|(named, _)| *named == handle)
+                .map_or(handle, |(_, role)| role)
+            })
+            .collect();
+        assert_eq!(
+            roles,
+            [role],
+            "only a member of the {role}'s role may take it"
+        );
+    }
+    // A tier given with a task of a role with none is not kept, as the image designer's is
+    // not: its task has none.
+    let given = ledger
+        .create_task(project.id, &task("integrator", Some("standard"), "Land it"))
+        .expect("an integrator's task");
+    assert_eq!(given.task.tier, None);
+}
+
+#[test]
+fn a_build_of_0035_could_hold_no_member_of_a_new_role() {
+    // The narrow checks are what an older build has: a row of a new role is no row there.
+    let db = Connection::open_in_memory().unwrap();
+    migrate(&db, &MIGRATIONS[..35]).unwrap();
+    db.execute_batch(
+        "INSERT INTO project (id, name, directory, created_at, updated_at) VALUES (1, 'app', '/work/app', 'now', 'now')",
+    )
+    .ok();
+    for role in NEW {
+        let refused = db
+            .execute(
+                "INSERT INTO participant (project_id, handle, role, created_at) VALUES (1, ?, ?, 'now')",
+                [role, role],
+            )
+            .expect_err("the narrow check refuses it");
+        assert!(
+            refused.to_string().contains("participant_role_check")
+                || refused.to_string().contains("CHECK constraint failed"),
+            "{refused}"
+        );
+    }
+}

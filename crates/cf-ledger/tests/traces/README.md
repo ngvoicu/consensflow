@@ -51,7 +51,10 @@ own numbers in it (`at_this_schema`), so no migration moves it again. And the fo
 whose refusals list the roles a member may hold or the pools a task may be for
 (`ledger-projects-005`, `-008`, `ledger-staff-001` and `ledger-tiered-003`) list the
 tester too, in the words they quote, as the ledger's refusals now do: changed by
-hand, in those words alone.
+hand, in those words alone. Migration 0036 (spec new-roles: the frontend designer, the
+architect, the researcher and the integrator) moved the same four the same way: their
+refusals list the nine roles of `cf_ledger::roles` in its order, and the replay holds
+the four new names in both checks apart as it holds the tester's.
 
 Migration 0013 (a project has no mark that it comes back by itself: the daemon
 suspends what was open when it starts, and the human resumes it) took away what

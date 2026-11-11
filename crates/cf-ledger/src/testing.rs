@@ -6,7 +6,7 @@
 //! migration 0011's four columns, which Node's ledger never fills, and the
 //! stop a pause counted, which it never says in the event that moved the task.
 //! And what only this one's schema has: migration 0012's tester in the checks
-//! of two tables, and the version it brings (a recording of Node's database
+//! of two tables (and migration 0036's four roles after it), and the version it brings (a recording of Node's database
 //! says 11, and its checks do not name a tester). And migration 0014's three
 //! columns of the `project` table (the wake-up calls), which Node's schema never
 //! had, in its rows and in the text of its schema.
@@ -68,6 +68,7 @@ mod history_indexes;
 mod meeting;
 mod members_compaction;
 mod model_list;
+mod new_roles;
 mod pasted_into;
 mod paused_with_project;
 mod program_gone;
@@ -92,6 +93,7 @@ pub use history_indexes::undo_migration_0029;
 pub use meeting::undo_migration_0025;
 pub use members_compaction::undo_migration_0034;
 pub use model_list::undo_migration_0027;
+pub use new_roles::undo_migration_0036;
 pub use pasted_into::undo_migration_0023;
 pub use paused_with_project::undo_migration_0021;
 pub use program_gone::undo_migration_0024;
@@ -219,7 +221,7 @@ fn take_column_out(tables: &mut Map<String, Value>, table: &str, column: &str) {
 
 /// `dump`, a database as the recorder dumps it (`userVersion`, `schema` and
 /// `tables`), with the schema as Node's ledger had it: no version past the
-/// last Node's ledger had, no tester in the checks of the two tables that
+/// last Node's ledger had, no tester (nor 0036's four roles) in the checks of the two tables that
 /// name the roles and the pools, none of the columns of a project's wake-up
 /// calls, of what it says of specs, of its description or of its staff's rules
 /// in the table of the projects, and not the column of the role text a conversation was last given,
@@ -258,6 +260,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
         match name.as_deref() {
             Some("participant") => {
                 *sql = sql
+                    .replace(new_roles::IN_THE_CHECKS.0, new_roles::IN_THE_CHECKS.1)
                     .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1)
                     .replace(harness_models::COLUMN_LINES, "")
                     .replace(chief_model::COLUMN_LINES, "")
@@ -265,6 +268,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             }
             Some("task") => {
                 *sql = sql
+                    .replace(new_roles::IN_THE_CHECKS.0, new_roles::IN_THE_CHECKS.1)
                     .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1)
                     .replace(paused_with_project::COLUMN_LINES, "");
             }
