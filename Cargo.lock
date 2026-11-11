@@ -348,6 +348,7 @@ dependencies = [
  "cf-board",
  "cf-codex-session",
  "cf-daemon",
+ "cf-engine",
  "cf-harness",
  "cf-launcher",
  "cf-ledger",

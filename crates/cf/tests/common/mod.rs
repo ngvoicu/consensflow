@@ -17,6 +17,13 @@ pub fn cf<S: AsRef<OsStr>>(args: &[S], env: &[(&str, &str)], input: &str) -> Out
     cf_at(Path::new(env!("CARGO_BIN_EXE_cf")), args, env, input)
 }
 
+/// `cf args` with `env` added and `input` on its standard input as bytes, which need be no text
+/// (a file Windows PowerShell 5.1 wrote with `>` is UTF-16).
+#[allow(dead_code)] // Each test file takes what it needs of this.
+pub fn cf_bytes<S: AsRef<OsStr>>(args: &[S], env: &[(&str, &str)], input: &[u8]) -> Output {
+    cf_at_bytes(Path::new(env!("CARGO_BIN_EXE_cf")), args, env, input)
+}
+
 /// The binary under test as the system spells its place, which a program run
 /// by it reads back as its own: a copy of it elsewhere is another `cf`, as a
 /// second install of ConsensFlow is.
@@ -48,6 +55,17 @@ pub fn cf_at<S: AsRef<OsStr>>(
     env: &[(&str, &str)],
     input: &str,
 ) -> Output {
+    cf_at_bytes(program, args, env, input.as_bytes())
+}
+
+/// [`cf_at`] with `input` as bytes.
+#[allow(clippy::disallowed_methods)] // The tests start cf themselves.
+pub fn cf_at_bytes<S: AsRef<OsStr>>(
+    program: &Path,
+    args: &[S],
+    env: &[(&str, &str)],
+    input: &[u8],
+) -> Output {
     let home = tempfile::tempdir().expect("a home");
     let mut command = Command::new(program);
     for (name, _) in std::env::vars_os() {
@@ -73,7 +91,7 @@ pub fn cf_at<S: AsRef<OsStr>>(
         .expect("cf starts");
     let mut stdin = child.stdin.take().expect("its standard input");
     // A command that reads no input may have ended before it is written.
-    let _ = stdin.write_all(input.as_bytes());
+    let _ = stdin.write_all(input);
     drop(stdin);
     child.wait_with_output().expect("cf ends")
 }

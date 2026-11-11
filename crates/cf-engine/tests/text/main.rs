@@ -12,6 +12,7 @@ mod goldens_handoff;
 mod goldens_roles;
 mod handoff;
 mod roles;
+mod shells;
 mod skill;
 mod support;
 mod task_words;
