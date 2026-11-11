@@ -213,11 +213,11 @@ runs = ["engine-text-roles"]
 [[plant.edit]]
 file = "skill/core/chief.md"
 find = '''
-of that tier (`--review`) checks finished work and changes no file; a tester
+of that tier (`--review`) checks finished work and changes no project file; a tester
 of that tier (`--test`) runs the work to check it and changes no product code.
 An image comes from the image designer (`--design`, no tier). Give it a precise'''
 replace = '''
-of that tier (`--review`) checks finished work and changes no file. An image
+of that tier (`--review`) checks finished work and changes no project file. An image
 comes from the image designer (`--design`, no tier). Give it a precise'''
 
 [[plant]]

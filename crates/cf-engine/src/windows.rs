@@ -14,7 +14,8 @@ use cf_harness::contract::{
 };
 use cf_harness::seams::Time;
 use cf_ledger::{
-    Begun, ConversationView, HandOver, MessageView, NewNote, ParticipantView, ProjectView, Stop,
+    launch_size, Begun, ConversationView, HandOver, MessageView, NewNote, ParticipantView,
+    ProjectView, Stop,
 };
 use cf_proto::agents::Harness;
 use cf_proto::bridge::DEADLINE;
@@ -1299,8 +1300,15 @@ impl Dispatcher {
             // The size the project chose for its members' windows to compact at: every
             // member's launch is given it, whatever its harness, at launch and on resume
             // alike, and each adapter gives it its harness by its own route; the chief's
-            // launch never is (2026-10-31).
-            compaction: project.compaction.filter(|_| participant.role != "chief"),
+            // launch never is (2026-10-31). A size the project's row holds under the least
+            // the ledger takes now (an earlier build took less) is given as that least: a
+            // Claude Code window launched under it compacts again as soon as it can and ends
+            // its turns with its own error, so it never reaches a harness. The row is not
+            // changed (T-1439).
+            compaction: project
+                .compaction
+                .filter(|_| participant.role != "chief")
+                .map(launch_size),
             // The project leaves Claude Code's own advisor tool off until the human ticks it in
             // Project settings: every member's launch is told to switch it off, at launch and on
             // resume alike, and each adapter acts on it by its own harness (only Claude Code has

@@ -1,7 +1,7 @@
 /**
  * The "Rules for the staff" section of Project settings: plain text the human
  * writes for the project's staff, which every member's window is given after its
- * role, and the chief's as what every member already has. Only the human writes
+ * role, and the chief's as what every window opens with. Only the human writes
  * it, here: no `cf` command does. The section shows the rules the project's
  * board has when the dialog opens, counts what is written against the ledger's
  * bounds as the human types (in bytes and in lines, as the ledger counts them, on

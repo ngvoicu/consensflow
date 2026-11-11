@@ -318,7 +318,7 @@ runs = ["cf-help"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/usage.txt"
-find = "  cf task edit T-3 \"…\" [--tier <tier>] [--needs T-4,T-5|+T-5|-T-5] [--before …]\n                                    change the brief, tier, needs or before of a task no window has yet\n                                    (open, queued, or paused): a list replaces, +T-5 adds, -T-5 removes\n"
+find = "  cf task edit T-3 \"…\" [--tier <tier>] [--needs T-4,T-5|+T-5|-T-5] [--before …]\n                                    change the brief, tier, needs or before of a task before any window\n                                    has its brief (open, queued, or paused): a list replaces, +T-5 adds, -T-5 removes\n"
 replace = ""
 
 [[plant]]
@@ -328,7 +328,7 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "    {{cf}} task edit T-3 \"…\" [--tier <tier>] [--needs …] [--before …]  change the brief, tier, needs or before of a task no window has yet (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes\n"
+find = "    {{cf}} task edit T-3 \"…\" [--tier <tier>] [--needs …] [--before …]  change the brief, tier, needs or before of a task before any window has its brief (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes\n"
 replace = ""
 
 [[plant]]
@@ -502,8 +502,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "or before of a task no window has yet (open, queued, or paused)"
-replace = "or before of a task no window has yet (open, blocked or queued)"
+find = "or before of a task before any window has its brief (open, queued, or paused)"
+replace = "or before of a task before any window has its brief (open, blocked or queued)"
 
 # Round 3 (T-170): Calliope's check of round 2 (T-159).
 

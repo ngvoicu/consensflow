@@ -503,8 +503,17 @@ fn the_rules_for_the_staff_written_changed_and_taken_away_are_told_to_the_chief_
         first[0]
     );
     assert!(first[0].contains(RULES), "{}", first[0]);
+    // One true thing about the windows: those that open from now on have the rules, one already
+    // open keeps its own; the section that follows does not say every member already has them.
     assert!(
-        first[0].contains("those already open keep the rules they were given"),
+        first[0].contains(
+            "Windows that open from now on are given them; one already open keeps its rules."
+        ),
+        "{}",
+        first[0]
+    );
+    assert!(
+        !first[0].contains("already has these rules"),
         "{}",
         first[0]
     );
@@ -526,6 +535,13 @@ fn the_rules_for_the_staff_written_changed_and_taken_away_are_told_to_the_chief_
     assert_eq!(third.len(), 3);
     assert!(
         third[2].starts_with("The human took away the rules for your staff while you work."),
+        "{}",
+        third[2]
+    );
+    assert!(
+        third[2].contains(
+            "Windows that open from now on are given none; one already open keeps its rules."
+        ),
         "{}",
         third[2]
     );
