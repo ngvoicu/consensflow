@@ -76,10 +76,6 @@ async function setup(
     pollMs,
     compaction,
     compactionLimitMs,
-    compactionGraceMs,
-    endKillMs,
-    // Pi's graceful shutdown at the TERM emits `session_shutdown` (and then waits on the compaction).
-    shutdownAtTerm = false,
     usage,
     // Pi's `compact()` awaits `abort()` before it sets its compaction state: Pi reads idle
     // until the test says the compaction has begun (`started()`).
@@ -95,8 +91,6 @@ async function setup(
   await Promise.all([mkdir(inbox), mkdir(ack), mkdir(quarantine)])
   const pi = fakePi()
   const logs = []
-  // What the extension did to end its process: the signals it sent, in order.
-  const ended = []
   const extension = createDeliveryExtension(pi, {
     inbox,
     ack,
@@ -109,14 +103,6 @@ async function setup(
     ...(pollMs ? { pollMs } : {}),
     ...(compaction !== undefined ? { compaction } : {}),
     ...(compactionLimitMs !== undefined ? { compactionLimitMs } : {}),
-    ...(compactionGraceMs !== undefined ? { compactionGraceMs } : {}),
-    ...(endKillMs !== undefined ? { endKillMs } : {}),
-    endProcess: (signal) => {
-      ended.push(signal)
-      // A signal is handled after the handler that sent it has returned.
-      if (signal === 'SIGTERM' && shutdownAtTerm)
-        setTimeout(() => void pi.handlers.get('session_shutdown')(), 5)
-    },
   })
   let currentIdle = idle
   // Pi's own compaction state, as Pi 1.4.0 and 1.5.0 keep it: `isIdle()` is false from the
@@ -231,7 +217,6 @@ async function setup(
     },
     compactions,
     aborts: () => aborts,
-    ended,
     /** Pi compacts by itself, at its own point. */
     piCompacts: (reason = 'threshold') => begin(reason),
     ctx,
@@ -891,105 +876,6 @@ describe('compaction at a rest', () => {
         await new Promise((resolve) => setTimeout(resolve, 100))
         await s.extension.consume()
         assert.deepEqual(s.pi.sent, [envelope])
-      } finally {
-        await s.close()
-      }
-    })
-
-    // T-1487: Pi clears its Busy state only when the summary work settles, and `abort` only
-    // signals it. A compaction still not settled a grace after the limit has its process ended
-    // as a close ends it (TERM, then a kill), so a reopened task's words need nothing of Pi.
-    it('ends its process a grace after the limit when Pi has still not settled the compaction: TERM, then a kill', async () => {
-      const s = await setup(null, {
-        compaction: 100_000,
-        usage: past,
-        compactionLimitMs: 60,
-        compactionGraceMs: 120,
-        endKillMs: 120,
-        shutdownAtTerm: true,
-      })
-      try {
-        await settle(s)
-        await arrive(s, 1)
-        await s.extension.consume()
-        assert.equal((await ackOf(s, 1)).reason, 'chief busy')
-        assert.equal(await gone(s, 2_000), true, 'the limit takes the word back')
-        assert.equal(s.aborts(), 1)
-        // Inside the grace: nothing is ended, and Pi still answers Busy.
-        await new Promise((resolve) => setTimeout(resolve, 40))
-        assert.deepEqual(s.ended, [])
-        // A grace after the limit, Pi never having settled: the process is ended, said once first.
-        const deadline = Date.now() + 3_000
-        while (s.ended.length === 0 && Date.now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, 5))
-        }
-        assert.deepEqual(s.ended, ['SIGTERM'])
-        const said = s.logs.filter((line) => /ending (its|the) process/.test(line))
-        assert.equal(said.length, 1, 'said once, before it ends')
-        // A Pi whose own shutdown waits on the compaction is killed, as the close kills after its grace.
-        while (s.ended.length < 2 && Date.now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, 5))
-        }
-        assert.deepEqual(s.ended, ['SIGTERM', 'SIGKILL'])
-        assert.equal(s.logs.filter((line) => /ending (its|the) process/.test(line)).length, 1)
-      } finally {
-        await s.close()
-      }
-    })
-
-    it('ends nothing when Pi settles the compaction inside the grace', async () => {
-      const s = await setup(null, {
-        compaction: 100_000,
-        usage: past,
-        compactionLimitMs: 60,
-        compactionGraceMs: 200,
-        endKillMs: 50,
-      })
-      try {
-        await settle(s)
-        assert.equal(await gone(s, 2_000), true)
-        assert.equal(s.aborts(), 1)
-        // Pi's abort takes effect, late but inside the grace.
-        await s.compactions[0].cancel()
-        await new Promise((resolve) => setTimeout(resolve, 450))
-        assert.deepEqual(s.ended, [])
-        assert.equal(s.logs.filter((line) => /ending (its|the) process/.test(line)).length, 0)
-      } finally {
-        await s.close()
-      }
-    })
-
-    it('ends nothing when Pi is idle again by the end of the grace though it told no end', async () => {
-      const s = await setup(null, {
-        compaction: 100_000,
-        usage: past,
-        compactionLimitMs: 60,
-        compactionGraceMs: 200,
-        endKillMs: 50,
-      })
-      try {
-        await settle(s)
-        assert.equal(await gone(s, 2_000), true)
-        await s.compactions[0].endUntold()
-        await new Promise((resolve) => setTimeout(resolve, 450))
-        assert.deepEqual(s.ended, [])
-      } finally {
-        await s.close()
-      }
-    })
-
-    it('ends nothing for a compaction that ended before its limit', async () => {
-      const s = await setup(null, {
-        compaction: 100_000,
-        usage: past,
-        compactionLimitMs: 60,
-        compactionGraceMs: 30,
-      })
-      try {
-        await settle(s)
-        await s.compactions[0].complete()
-        await new Promise((resolve) => setTimeout(resolve, 250))
-        assert.deepEqual(s.ended, [])
       } finally {
         await s.close()
       }

@@ -720,8 +720,7 @@ fn chief_news(context: &Context, project: i64) -> Vec<String> {
     news
 }
 
-/// T-1487 (a): the extension ends a Pi process that did not settle its compaction (T-1487's end of
-/// the process), and the window's task is done with nothing queued: the engine finds the window
+/// T-1487 (a): a Pi process ends by itself under its compaction, and the window's task is done with nothing queued: the engine finds the window
 /// gone and writes nothing to the chief and pauses nothing, as for any window of a done task that
 /// ends by itself (main writes none either: the same exit with no compaction in it is shown).
 #[test]
@@ -773,9 +772,9 @@ fn a_done_tasks_window_whose_pi_ends_under_its_compaction_tells_the_chief_nothin
     );
 }
 
-/// T-1487 (b): after the extension ends a Pi that did not settle, the reopen's new window is on
-/// the conversation as it was left (the same `resume`), a compaction hung again at its own rest is
-/// ended the same way, and nothing is opened but once for each end.
+/// T-1487 (b): after a Pi process ends by itself under its compaction, the reopen's new window is on
+/// the conversation as it was left (the same `resume`), a compaction that ends the process again at its own rest is
+/// handled the same way, and nothing is opened but once for each end.
 #[test]
 fn a_second_compaction_that_hangs_in_the_new_window_ends_it_the_same_way_once_a_rest() {
     let context = Context::new();
@@ -858,7 +857,7 @@ fn a_second_compaction_that_hangs_in_the_new_window_ends_it_the_same_way_once_a_
 }
 
 /// T-1487 (c): the note the chief gets when a window ends under an answer to a question: a pause
-/// note that says what to run, and what ended it (the extension's kill, a signal ConsensFlow did
+/// note that says what to run, and what ended it (a signal ConsensFlow did
 /// not send; or the exit of Pi's own graceful shutdown, which ends with code 0).
 #[test]
 fn the_chief_is_told_what_to_do_when_a_window_ends_under_an_answer_to_a_question() {
