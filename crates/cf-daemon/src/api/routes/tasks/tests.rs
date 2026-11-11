@@ -356,6 +356,62 @@ async fn a_test_opens_on_the_board_for_the_testers_of_its_tier_and_wakes_the_dis
     assert_eq!(refused(&answered).1, "not-a-coordinator");
 }
 
+/// The four roles of spec new-roles (FD-04): each is asked for by its field, with no tier, and a
+/// staff with none of it refuses it by the role's name; once a member of it is on the staff
+/// the task waits on the board for its role's pool, and a tier said beside it is not kept.
+#[tokio::test]
+async fn each_new_role_is_asked_for_by_its_field_and_refused_by_its_name_until_one_is_on_the_staff()
+{
+    let scene = scene();
+    for (field, pool, named) in [
+        ("frontend", "frontend", "frontend designer"),
+        ("architect", "architect", "architect"),
+        ("research", "researcher", "researcher"),
+        ("integrate", "integrator", "integrator"),
+    ] {
+        let body = format!(r#"{{"{field}":true,"body":"x","tier":"standard"}}"#);
+        let answered = post(&scene, &scene.chief, &body).await;
+        assert_eq!(
+            refused(&answered),
+            (
+                409,
+                "no-member-of-tier",
+                format!("no {named} is on the staff: ask the human for one, in your terminal")
+                    .as_str()
+            ),
+            "{body}"
+        );
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .add_member(
+                scene.project.id,
+                &cf_ledger::NewMember {
+                    model: None,
+                    effort: None,
+                    model_name: Some(format!("{pool}-agent")),
+                    harness: "claude-code".to_owned(),
+                    designer: false,
+                    roles: vec![pool.to_owned()],
+                    tier: "light".to_owned(),
+                },
+            )
+            .unwrap();
+        let (status, said) = post(&scene, &scene.chief, &body).await;
+        assert_eq!(status, 201, "{said}");
+        assert_eq!(
+            (
+                said["task"]["pool"].as_str(),
+                said["task"]["tier"].as_str(),
+                said["task"]["state"].as_str(),
+            ),
+            (Some(pool), None, Some("open")),
+            "{body}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn a_tier_nobody_holds_goes_to_the_nearest_and_says_which_was_asked_between_the_message_and_the_gate(
 ) {

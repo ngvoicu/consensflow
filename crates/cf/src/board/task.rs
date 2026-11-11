@@ -1190,6 +1190,40 @@ and 2 idle sessions (`cf task list --all`)";
         });
     }
 
+    /// The four roles of spec new-roles are asked for by their switches, take no tier, and the
+    /// receipt names each by its name.
+    #[test]
+    fn the_four_new_roles_are_asked_for_by_their_switches_and_named_by_their_rows() {
+        for (switch, field, pool, named) in [
+            ("--frontend", "frontend", "frontend", "a frontend designer"),
+            ("--architect", "architect", "architect", "an architect"),
+            ("--research", "research", "researcher", "a researcher"),
+            ("--integrate", "integrate", "integrator", "an integrator"),
+        ] {
+            let answer = json!({
+                "task": { "number": 3, "state": "open", "assignee": null, "requester": "chief",
+                    "title": "Do it", "blockedBy": [], "pool": pool, "tier": null },
+                "message": null, "gated": false,
+            });
+            let (posted, said) = added(&[switch, "Do it"], &answer);
+            assert_eq!(
+                posted,
+                Some(json!({ field: true, "body": "Do it" })),
+                "{switch}"
+            );
+            assert_eq!(
+                said,
+                format!("T-3 is on the board for {named}; it starts in a new window of one, and its result arrives in your inbox.\nT-3: sent 5 characters, ending \"Do it\".")
+            );
+            let (posted, _) = added(&[switch, "--tier", "light", "Do"], &answer);
+            assert_eq!(
+                posted,
+                Some(json!({ field: true, "body": "Do" })),
+                "{switch} takes no tier"
+            );
+        }
+    }
+
     /// A chief that read of a free member after every task it added took a member
     /// for a person who can be busy, and chained its work through one window (T-1129, T-1134):
     /// whatever the task waits for, the receipt says a member of its role and tier takes it in a
