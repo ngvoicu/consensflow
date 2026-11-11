@@ -70,8 +70,7 @@ const BOARD: [(&[&str], &str); 19] = [
         &["task", "add"],
         concat!(
             "  cf task add --tier <critical|complex|standard|light> \"…\"\n",
-            "                                    work for a worker of that tier; ConsensFlow picks\n",
-            "                                    the member (--purpose for critical work)\n",
+            "                                    work for a worker of that tier (--purpose for critical work)\n",
             "  cf task add --frontend \"…\"        work for the frontend designer: screens designed, built\n",
             "                                    and looked at in the project's design language\n",
             "  cf task add --architect \"…\"       a design for the architect: docs, contracts and the code's\n",
@@ -80,10 +79,10 @@ const BOARD: [(&[&str], &str); 19] = [
             "                                    sources; no file changed\n",
             "  cf task add --advice --tier <tier> \"…\"\n",
             "                                    a question for an advisor of that tier: findings and\n",
-            "                                    recommendations back, no file changed\n",
+            "                                    recommendations back, no project file changed\n",
             "  cf task add --review --tier <tier> \"…\"\n",
             "                                    a review for a reviewer of that tier: say what to\n",
-            "                                    review; findings back, no file changed\n",
+            "                                    review; findings back, no project file changed\n",
             "  cf task add --test --tier <tier> \"…\"\n",
             "                                    a test for a tester of that tier: say what to run\n",
             "                                    and check; results back, no product code changed\n",
@@ -141,8 +140,8 @@ const BOARD: [(&[&str], &str); 19] = [
         &["task", "edit"],
         concat!(
             "  cf task edit T-3 \"…\" [--tier <tier>] [--needs T-4,T-5|+T-5|-T-5] [--before …]\n",
-            "                                    change the brief, tier, needs or before of a task no window has yet\n",
-            "                                    (open, queued, or paused): a list replaces, +T-5 adds, -T-5 removes\n",
+            "                                    change the brief, tier, needs or before of a task before any window\n",
+            "                                    has its brief (open, queued, or paused): a list replaces, +T-5 adds, -T-5 removes\n",
             "  cf task edit|reopen|resume T-3 … --title \"…\"\n",
             "                                    a new title, in any state (else the brief's first line); edit takes it alone\n",
         ),
@@ -269,6 +268,22 @@ fn the_word_may_stand_after_the_number_a_command_takes_first_or_beside_its_flags
     let api = api();
     assert_eq!(window(&api, &["inbox", "read", "m-12", "-h"]).0, Some(0));
     assert!(api.received().is_empty());
+}
+
+/// A heredoc is bash's, zsh's and Git Bash's, and PowerShell has none (T-1435): the usage says
+/// that `-` with a heredoc is not for PowerShell, and that a file is what it takes.
+#[test]
+fn the_usage_says_a_heredoc_is_not_for_powershell_which_takes_a_file() {
+    let usage = board_usage();
+    assert!(
+        usage.contains(concat!(
+            "Any \"…\" can be - to read the text from standard input, as written (not PowerShell: use --file):\n",
+            "  cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)\n",
+            "A long one is surest in a file, which no shell cuts (every command that takes words):\n",
+            "  cf task add --tier standard --file brief.md\n",
+        )),
+        "{usage}"
+    );
 }
 
 #[test]

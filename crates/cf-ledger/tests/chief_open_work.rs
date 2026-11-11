@@ -45,6 +45,7 @@ fn project(ledger: &mut Ledger) -> i64 {
             staff_rules: None,
             compaction: None,
             advisor_tool: false,
+            prompt_suggestion: false,
         })
         .expect("a project")
         .id

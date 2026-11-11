@@ -1,4 +1,4 @@
-//! The four roles of spec new-roles in the ledger (FD-04): their migration (0036 as written)
+//! The four roles of spec new-roles in the ledger (FD-04): their migration (0037)
 //! widens the role check of `participant` and the pool check of `task` to the nine roles of the
 //! table, every row of a ledger an older build left kept; a member of each new role is held and
 //! a task of each new pool is taken by it alone; a build of the migration before it that meets
@@ -38,10 +38,19 @@ fn image_designer() -> NewMember {
 }
 
 fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
+    project_in(ledger, "app", staff, false)
+}
+
+fn project_in(
+    ledger: &mut Ledger,
+    name: &str,
+    staff: Vec<NewMember>,
+    prompt_suggestion: bool,
+) -> ProjectView {
     ledger
         .create_project(&NewProject {
-            directory: "/work/app".into(),
-            name: "app".into(),
+            directory: format!("/work/{name}"),
+            name: name.into(),
             chief: NewChief {
                 harness: "claude-code".into(),
                 model: Some("apollo".into()),
@@ -55,6 +64,7 @@ fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
             staff_rules: None,
             compaction: None,
             advisor_tool: false,
+            prompt_suggestion,
         })
         .expect("a project")
 }
@@ -95,9 +105,11 @@ fn rows(db: &Connection, table: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// What a migration of the two tables must keep: their rows and the sequences.
+/// What a migration of the two tables must keep: their rows and the sequences, and the
+/// projects as the migration before it left them (0036's prompt suggestion among their columns).
 fn kept(db: &Connection) -> Value {
     json!({
+        "projects": rows(db, "project"),
         "participant": rows(db, "participant"),
         "task": rows(db, "task"),
         "sequences": rows(db, "sqlite_sequence"),
@@ -149,6 +161,17 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
             .create_task(project.id, &task(pool, tier, body))
             .expect("a task");
     }
+    // A second project with the prompt suggestion left on, and one task, so both of 0036's
+    // values are in the ledger the migration meets.
+    let other = project_in(
+        &mut ledger,
+        "site",
+        vec![member("zeus", &["worker"], "standard")],
+        true,
+    );
+    ledger
+        .create_task(other.id, &task("worker", Some("standard"), "Fix the footer"))
+        .expect("a task");
     ledger
         .cancel_task(project.id, 6, "chief")
         .expect("T-6 cancelled");
@@ -167,6 +190,14 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     ))
     .unwrap();
     let before = kept(&raw);
+    let suggestions: Vec<(String, i64)> = raw
+        .prepare("SELECT name, prompt_suggestion FROM project ORDER BY id")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(suggestions, [("app".into(), 0), ("site".into(), 1)]);
     let narrow = schema(&raw);
     assert!(
         narrow
@@ -180,7 +211,7 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     ledger.close().expect("closed");
     let raw = Connection::open(&file).unwrap();
     assert_eq!(version(&raw), SCHEMA_VERSION as i64);
-    assert_eq!(kept(&raw), before, "every row of the two tables kept");
+    assert_eq!(kept(&raw), before, "every row of the two tables and the projects kept");
     let wide = schema(&raw);
     let narrowed: Vec<(String, String)> = wide
         .iter()

@@ -10,6 +10,7 @@
 mod advisor_tool;
 mod compaction;
 mod describing;
+mod prompt_suggestion;
 mod staff_rules;
 
 use cf_base::json::from_slice_lossy;
@@ -21,9 +22,11 @@ use serde_json::{json, Value};
 pub use advisor_tool::parse_advisor_tool;
 pub(crate) use advisor_tool::set_advisor_tool;
 pub(crate) use compaction::set_compaction;
-pub use compaction::{parse_compaction, COMPACTION_MAX, COMPACTION_MIN};
+pub use compaction::{launch_size, parse_compaction, COMPACTION_MAX, COMPACTION_MIN};
 pub use describing::parse_description;
 pub(crate) use describing::{describe_project, rename_project};
+pub use prompt_suggestion::parse_prompt_suggestion;
+pub(crate) use prompt_suggestion::set_prompt_suggestion;
 pub(crate) use staff_rules::set_staff_rules;
 pub use staff_rules::{parse_staff_rules, STAFF_RULES_MAX_BYTES, STAFF_RULES_MAX_LINES};
 
@@ -75,6 +78,9 @@ pub(crate) struct ProjectRow {
     /// 1 where the human has the members run with Claude Code's own advisor tool; 0 (every
     /// project's until it is ticked) where they run without it.
     pub(crate) advisor_tool: i64,
+    /// 1 where the human leaves Claude Code's prompt suggestion on in the project's windows;
+    /// 0 (every project's until it is ticked) where they are launched with it switched off.
+    pub(crate) prompt_suggestion: i64,
 }
 
 impl ProjectRow {
@@ -95,6 +101,7 @@ impl ProjectRow {
             staff_rules: row.get("staff_rules")?,
             compaction: row.get("compaction")?,
             advisor_tool: row.get("advisor_tool")?,
+            prompt_suggestion: row.get("prompt_suggestion")?,
         })
     }
 
@@ -165,6 +172,9 @@ pub struct NewProject {
     /// Whether its members run with Claude Code's own advisor tool; false (off) is what
     /// every project starts with.
     pub advisor_tool: bool,
+    /// Whether Claude Code's prompt suggestion is left on in its windows, the chief's and the
+    /// members'; false (off) is what every project starts with.
+    pub prompt_suggestion: bool,
 }
 
 impl NewProject {
@@ -218,6 +228,10 @@ impl NewProject {
             advisor_tool: match value.get("advisorTool") {
                 None => false,
                 said => parse_advisor_tool(said)?,
+            },
+            prompt_suggestion: match value.get("promptSuggestion") {
+                None => false,
+                said => parse_prompt_suggestion(said)?,
             },
         })
     }
@@ -417,6 +431,9 @@ pub(crate) fn create_project(
         if request.advisor_tool {
             set_advisor_tool(store, id, true)?;
         }
+        if request.prompt_suggestion {
+            set_prompt_suggestion(store, id, true)?;
+        }
         known_project(store, id)
     })
 }
@@ -455,6 +472,7 @@ pub(crate) fn project(store: &Store, id: i64) -> Result<Option<ProjectView>, Led
         staff_rules: row.staff_rules,
         compaction: row.compaction,
         advisor_tool: row.advisor_tool == 1,
+        prompt_suggestion: row.prompt_suggestion == 1,
     }))
 }
 

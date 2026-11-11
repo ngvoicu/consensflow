@@ -1,4 +1,4 @@
-//! What the new roles' migration widened (spec new-roles, FD-04; 0036 as written): the four
+//! What the new roles' migration widened (spec new-roles, FD-04; 0037): the four
 //! roles it added to the role check of `participant` and the pool check of `task`, which Node's
 //! checks never named. The players take them out of the schema's text before 0012's tester, so
 //! what is left is the text Node's ledger had.

@@ -112,6 +112,7 @@ impl Root {
                 staff_rules: None,
                 compaction: None,
                 advisor_tool: false,
+                prompt_suggestion: false,
             })
             .expect("a project");
         let question = ledger

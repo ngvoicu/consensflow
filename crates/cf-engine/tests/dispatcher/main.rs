@@ -104,6 +104,7 @@ mod paused_answers;
 mod paused_left;
 mod pending_agents;
 mod privacy_prompts;
+mod prompt_suggestion_off;
 mod questions_not_results;
 mod queued_tells;
 mod quota;

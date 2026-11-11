@@ -102,6 +102,16 @@ fn teaches_only_the_boards_commands(role: &str) {
             r"a tester\s+of that tier \(`--test`\) runs the work to check it and changes no product code\.",
             &text
         ));
+        // An advisor and a reviewer change no project file, as their own texts say: each may
+        // put a long log in a file outside the project's tracked files (T-1435).
+        for said in [
+            r#"cf task add --advice --tier <tier> "…"\s+a question for an advisor: findings back, no project file changed"#,
+            r#"what to review and what to check; findings back, no project file changed"#,
+            r"answers\s+a\s+question\s+and\s+changes\s+no\s+project\s+file;\s+a\s+reviewer\s+of\s+that\s+tier\s+\(`--review`\)\s+checks\s+finished\s+work\s+and\s+changes\s+no\s+project\s+file;",
+        ] {
+            assert!(found(said, &text), "{said}");
+        }
+        assert!(!found(r"no file changed|changes no file", &text));
         assert!(found(
             r"accept the review\.\n\nA tester checks work by running it, when the work can be run\.\n\n## The staff",
             &text
@@ -171,6 +181,17 @@ fn teaches_only_the_boards_commands(role: &str) {
         }
         if role == "advisor" {
             assert!(text.contains("You advise this project's chief"));
+            // An advisor may put a long log in a file outside the project, so its text says it
+            // changes no project file, in its description and in its intro (T-1435).
+            assert!(
+                text.contains("with findings and evidence; change no project file.\n"),
+                "{text}"
+            );
+            assert!(
+                found(r"An advice task changes no\s+project file\.", &text),
+                "{text}"
+            );
+            assert!(!found(r"changes? no file", &text));
         }
         if role == "designer" {
             assert!(text.contains("image generation tool"));
@@ -259,6 +280,9 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         "Run each of these in your shell (your Bash or terminal tool).",
         "Do not hand out tasks, launch other agents or type into other windows, and\nnever read another agent's session files: the board is your only channel.",
         "This window is for one task: it opened with the task and closes when the task\nleaves your hands.",
+        // A window the chief continues (`--after`) comes back on its own conversation: the text
+        // does not tell it that nothing from an earlier task is there (T-1435).
+        "A new window starts from nothing; one the chief continues\nhas its earlier conversation. Either way, finish with a result that stands on\nits own.",
         // What the engine does since 0eec91d20 (T-1059's read, 2026-11-01): a
         // turn's end ends no process itself, and a free window's close ends
         // only what the host can tell is the window's — so nothing is left.
@@ -275,6 +299,7 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         for rule in shared {
             assert!(text.contains(rule), "{role} keeps: {rule}");
         }
+        assert!(!text.contains("carries over"), "{role}");
         assert!(found(&format!(r"\n# ConsensFlow {title}\n"), &text));
         assert!(found(
             &format!(
@@ -450,7 +475,12 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
         &text
     ));
     assert!(found(
-        r#"cf task edit T-3 "…" \[--tier <tier>\] \[--needs …\] \[--before …\]\s+change the brief, tier, needs or before of a task no window has yet \(open, queued, or paused\); T-4,T-5 replaces a list, \+T-5 adds, -T-5 removes"#,
+        r#"cf task edit T-3 "…" \[--tier <tier>\] \[--needs …\] \[--before …\]\s+change the brief, tier, needs or before of a task before any window has its brief \(open, queued, or paused\); T-4,T-5 replaces a list, \+T-5 adds, -T-5 removes"#,
+        &text
+    ));
+    // A tell stops a working task and gets an answer; a queued or open task is not stopped (T-1435).
+    assert!(found(
+        r#"cf tell T-3 "…"\s+stop T-3 and put this to its window: its answer arrives as a message; then resume it \(queued or open: kept for its window; no answer, nothing to resume\)"#,
         &text
     ));
     assert!(found(
@@ -605,7 +635,7 @@ fn names_no_agent_to_pick_no_preset_no_nickname_and_no_cf_agent_or_catalog_in_an
         );
     }
     // The files themselves, with their slots unfilled, not only the text a window gets.
-    for file in ["chief.md", "staff.md"] {
+    for file in ["chief.md", "staff.md", "shells.md"] {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../skill/core")
             .join(file);
@@ -1037,7 +1067,7 @@ fn tells_the_chief_every_member_has_the_projects_rules_so_a_brief_does_not_repea
     assert_says(
         section(&text, "What you do"),
         "the chief's What you do",
-        &["Every member already has the project's rules for the staff (at the end of this text, when the project has any): a brief doesn't repeat them, and says only what its task needs."],
+        &["Every window opens with the project's rules for the staff (at the end of this text, when the project has any): a brief doesn't repeat them, and says only what its task needs."],
     );
 }
 
@@ -1076,7 +1106,7 @@ fn shows_the_chief_the_same_rules_marked_as_what_every_member_already_has() {
         rules,
         "the chief's rules for the staff",
         &[
-            "Every member of your staff already has these rules in its instructions, after its role.",
+            "Every window of your staff opens with these rules in its instructions, after its role.",
             "They are the human's, written in Project settings: to change one, propose it to the human here.",
         ],
     );

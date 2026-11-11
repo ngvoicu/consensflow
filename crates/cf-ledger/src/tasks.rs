@@ -48,10 +48,12 @@ pub use pausing::{resumed_in_vain, NEVER_BEGAN};
 pub const RESUME_WORDS: &str = "Go on where you stopped.";
 
 /// What a critical task's lead holds it to, in the role texts' own words: it
-/// changes no file — true of every project, where forbidding specifications
-/// presumed one — and its findings go to the chief, whom the role texts name.
+/// changes no project file — true of every project, where forbidding
+/// specifications presumed one, and the word the advisor's and the reviewer's
+/// texts use, since a critical reviewer puts a long log in a scratch file —
+/// and its findings go to the chief, whom the role texts name.
 const CRITICAL_RULE: &str =
-    "It changes no file: return analysis, evidence and recommendations to the chief.";
+    "It changes no project file: return analysis, evidence and recommendations to the chief.";
 
 /// How a task reads when it is handed over: critical work leads with its purpose.
 fn delivery_body(task: &TaskRow) -> String {

@@ -249,6 +249,7 @@ impl Adapter for ClaudeAdapter {
                 launch.role != "chief",
                 launch.compaction,
                 launch.advisor_off,
+                launch.suggestion_off,
                 &self.pane_cf,
                 Some(launch.directory),
             )?;

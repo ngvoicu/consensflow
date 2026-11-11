@@ -346,6 +346,14 @@ pub struct Launch<'a> {
     /// `CLAUDE_CODE_DISABLE_ADVISOR_TOOL`): the other four harnesses have no advisor tool,
     /// and their launches are the same whatever it says.
     pub advisor_off: bool,
+    /// The project has Claude Code's prompt suggestion off for its windows (its Project settings'
+    /// "Prompt suggestion" left off, which every project is until the human ticks it): the chief's
+    /// launch is given it as a member's is, and with it false the launch is as it always was, and
+    /// ConsensFlow writes nothing about the suggestion, whatever the owner's own settings say.
+    /// Only Claude's adapter reads it, by the launch's own settings file (`env`'s
+    /// `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` as `false`): the other four harnesses make no such
+    /// call (T-1434), and their launches are the same whatever it says.
+    pub suggestion_off: bool,
     /// How long the window has to show its first message, in milliseconds: the
     /// engine's limit for a launch (`CONSENSFLOW_LAUNCH_TIMEOUT_MS`). What a
     /// window waits for before that message can show, such as the conversation

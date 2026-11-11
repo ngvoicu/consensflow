@@ -2,7 +2,7 @@
  * The "Compaction" section of Project settings: the size at which the human has every
  * member window of the project compact, whatever its harness, or each harness's own
  * point (the default, which changes nothing). Each member's launch gives it its harness
- * by that harness's own rule (smaller-contexts, SCX-28 to SCX-30), from 100,000 to
+ * by that harness's own rule (smaller-contexts, SCX-28 to SCX-30), from 250,000 to
  * 1,000,000 tokens; a size above a model's own window leaves the harness's own point.
  * The chief is never given it. Only the
  * human chooses it, here: no `cf` command does. The section shows the choice the
@@ -13,7 +13,7 @@
  */
 
 /** The smallest size: the ledger's `COMPACTION_MIN`, which a test of the daemon holds this to. */
-const LEAST = 100_000
+const LEAST = 250_000
 
 /** The largest size: the ledger's `COMPACTION_MAX`. */
 const MOST = 1_000_000
@@ -40,6 +40,7 @@ export class Compaction {
   #size
   #amount
   #hint
+  #held
   #save
   #page
 
@@ -54,6 +55,7 @@ export class Compaction {
     this.#size = group.querySelector('[name="members-compaction-choice"][value="size"]')
     this.#amount = group.querySelector('[name="members-compaction-size"]')
     this.#hint = group.querySelector('.members-compaction-hint')
+    this.#held = group.querySelector('.members-compaction-held')
     this.#save = group.querySelector('[name="members-compaction-save"]')
     this.#page = page
     for (const choice of [this.#own, this.#size]) {
@@ -70,8 +72,22 @@ export class Compaction {
     this.#own.checked = size === undefined
     this.#size.checked = size !== undefined
     this.#amount.value = size === undefined ? '' : String(size)
+    this.#holds(size)
     this.#say('')
     this.#checked()
+  }
+
+  /**
+   * Says what a size the project holds under the least comes to: it is kept as the human
+   * chose it, and the engine gives every window of the project the least until a size is
+   * saved here (T-1439). It goes with the size, once one in the range or none is saved.
+   */
+  #holds(size) {
+    const low = typeof size === 'number' && size < LEAST
+    this.#held.textContent = low
+      ? `This project holds ${said(size)}, under the least size of ${said(LEAST)}: its members' windows run at ${said(LEAST)} until the size is changed here.`
+      : ''
+    this.#held.hidden = !low
   }
 
   #say(words) {

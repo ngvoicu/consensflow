@@ -51,6 +51,7 @@ fn project(name: &str, harness: &str) -> NewProject {
         staff_rules: None,
         compaction: None,
         advisor_tool: false,
+        prompt_suggestion: false,
     }
 }
 

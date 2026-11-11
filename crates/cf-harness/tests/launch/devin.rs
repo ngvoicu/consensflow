@@ -17,5 +17,6 @@ mod dialogs;
 mod fixtures;
 mod launches;
 mod own_turn;
+mod prompt_suggestion_off;
 mod resumed;
 mod windows;

@@ -64,6 +64,7 @@ fn launch<'a>(id: &'a LaunchId, resume: Option<&'a str>) -> Launch<'a> {
         specs: None,
         compaction: None,
         advisor_off: false,
+        suggestion_off: false,
         first_message_ms: 1,
         starts_given_up: 0,
     }
@@ -512,6 +513,43 @@ fn a_muse_members_launch_is_the_same_whether_the_advisor_tool_is_switched_off_or
                 let launch = Launch {
                     role,
                     advisor_off,
+                    ..launch(&id, resume)
+                };
+                finished(adapter(&env).prepare(&launch)).unwrap()
+            };
+            let (plain, off) = (prepare(false), prepare(true));
+            assert_eq!(
+                off.argv, plain.argv,
+                "{role} {resume:?}: the same command line"
+            );
+            assert_eq!(
+                off.env, plain.env,
+                "{role} {resume:?}: the same environment"
+            );
+            assert_eq!(off.drop_env, plain.drop_env, "{role} {resume:?}");
+            assert_eq!(
+                off.native_session, plain.native_session,
+                "{role} {resume:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_muse_windows_launch_is_the_same_whether_the_prompt_suggestion_is_switched_off_or_not() {
+    // Muse Code 1.4.15 makes no such call (T-1434): the chief's launch as a member's, fresh or
+    // resumed, is the launch it always was whatever the engine tells every harness.
+    let home = tempfile::tempdir().unwrap();
+    let env = installed(home.path(), Some("1.4.14-R7309.1"));
+    let id = LaunchId::new(LAUNCH).unwrap();
+    for role in [
+        "chief", "worker", "advisor", "reviewer", "tester", "designer",
+    ] {
+        for resume in [None, Some("0f8fad5b-d9cb-469f-a165-70867728950e")] {
+            let prepare = |suggestion_off: bool| {
+                let launch = Launch {
+                    role,
+                    suggestion_off,
                     ..launch(&id, resume)
                 };
                 finished(adapter(&env).prepare(&launch)).unwrap()

@@ -31,6 +31,13 @@ your file tool and pass it with `--file brief.md` instead: a shell can cut a lon
 about 8.1k characters (the field report of 2026-10-15, B6). Changed by hand, in those
 words alone, on 2026-10-16.
 
+The same twelve rows end the chief's opening with "you never type into another window or launch
+agents to do the work" (`skill/core/chief.md`), where Node's said "or launch agents": the chief's
+own rule about its harness's subagents allows them for searching and reading, which the opening
+forbade (the review T-1447 of T-1435, finding 3); the sentence before it lost "here" ("the work
+the human gives you is yours to plan"), which "here in your terminal" below it says, to pay for the
+words. Changed by hand, in those words alone.
+
 The members' text (worker, advisor, reviewer and image designer), in each of the 27
 `roleInstructions` rows that hold it, has one sentence Node's did not, the last but one of
 its paragraph about a window that is for one task: "Your answer ends your turn's work:
@@ -220,6 +227,45 @@ play it, not by hand.
 - **The image designer's tier** is none (a design task has none): in the 2 `staffOf` rows
   that hold one, `osiris` reads without the tier its participant holds, and a chief's table
   says `none` for it, from a staff row that has no tier and the one role of a designer.
+
+The role texts moved on 2026-11-11 for the read-through of them (T-1435, after T-1418 and
+T-1419), in the words of `skill/core/chief.md`, `skill/core/staff.md` and the specs
+section, by exact replacement in the 12 chief rows and the 27 member rows (7 advisor rows),
+and the shell-dependent paragraphs by shell below. By hand, in those words alone:
+- **The chief's** command card: `cf task add --advice` and `--review` say "no project file
+  changed" (an advisor and a reviewer may put a long log in a file outside the project);
+  `cf task edit` is for "a task before any window has its brief (open, queued, or paused)",
+  the words the code uses; `cf tell` says "(queued or open: kept for its window; no answer,
+  nothing to resume)"; "(never to pick one)" and "; ConsensFlow picks the member" are out.
+  Item 3 of "What you do" says "Every window opens with the project's rules for the staff",
+  not that every member already has them (a window already open keeps its own); the
+  sentence "here in your terminal and end your turn" of "Choose the tier" and "What goes out
+  goes on the board." of "What you never do" are out.
+- **The members'** shared text: "A new window starts from nothing; one the chief continues
+  has its earlier conversation. Either way, finish with a result that stands on its own."
+  in place of "Nothing from an earlier task is here, and nothing from this one carries
+  over"; `cf ask` is "a question to the chief" alone. The advisor's description and intro
+  say "change(s) no project file" and its intro ends there.
+- **The specs section** (the chief's rows that hold it are not in this folder; its words are
+  pinned in `roles/specs/tests.rs`): "Plan specs with the Specmint skill", and what Specmint
+  calls "research beyond searching and reading, or implementation" goes on the board as
+  tasks for the staff.
+- **The chief's section on the project's rules** says "Every window of your staff opens with
+  these rules", and the two notes to a running chief of a change of them say "Windows that
+  open from now on are given them (none); one already open keeps its rules".
+The role-change budgets moved with the shorter text: read whole to 151 rows with specs on
+(174 without), and to 15 and 38 with the most rules for the staff, 41 bytes and 57 lines to
+spare for the 15.
+
+The paragraphs of a text that depend on the shell of the window's commands (how a text is passed
+to `cf`, and how a removal whose path a variable makes is written: the chief's input, a member's
+input and its removal) are in `skill/core/shells.md`, a part for each shell, and `chief.md` and
+`staff.md` name them as slots. The goldens here are played for `Shell::Posix`, the shell of
+bash, zsh and Git Bash (every harness off Windows, and Claude Code, Pi and Devin on it), whose
+parts are the words these paragraphs always had, so no row moved. The PowerShell parts (Codex's
+and Muse's on Windows) are pinned in `tests/text/shells.rs`: their words, that a PowerShell
+text holds no heredoc and no bash removal, that it is no longer than the bash text with the same
+word for `cf`, and which lines differ.
 
 The staff table (the `table` row of `teamTable` and the two chief's texts whose staff holds
 an image designer) says "image designer" where Node's said `designer`: since spec new-roles
