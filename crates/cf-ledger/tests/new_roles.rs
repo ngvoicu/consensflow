@@ -72,9 +72,9 @@ fn task(pool: &str, tier: Option<&str>, body: &str) -> NewTask {
 fn rows(db: &Connection, table: &str) -> Vec<Vec<String>> {
     let columns: Vec<String> = db
         .prepare(&format!("PRAGMA table_info(\"{table}\")"))
-        .unwrap()
+        .expect("the SQL of a test reads the ledger")
         .query_map([], |row| row.get(1))
-        .unwrap()
+        .expect("the SQL of a test reads the ledger")
         .map(Result::unwrap)
         .collect();
     let quoted = columns
@@ -83,13 +83,13 @@ fn rows(db: &Connection, table: &str) -> Vec<Vec<String>> {
         .collect::<Vec<_>>()
         .join(", ");
     db.prepare(&format!("SELECT {quoted} FROM \"{table}\" ORDER BY rowid"))
-        .unwrap()
+        .expect("the SQL of a test reads the ledger")
         .query_map([], |row| {
             (0..columns.len())
                 .map(|at| row.get::<_, String>(at))
                 .collect::<rusqlite::Result<Vec<_>>>()
         })
-        .unwrap()
+        .expect("the SQL of a test reads the ledger")
         .map(Result::unwrap)
         .collect()
 }
@@ -108,16 +108,16 @@ fn kept(db: &Connection) -> Value {
 
 fn schema(db: &Connection) -> Vec<(String, String)> {
     db.prepare("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name")
-        .unwrap()
+        .expect("the SQL of a test reads the ledger")
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap()
+        .expect("the SQL of a test reads the ledger")
         .map(Result::unwrap)
         .collect()
 }
 
 fn version(db: &Connection) -> i64 {
     db.query_row("PRAGMA user_version", [], |row| row.get(0))
-        .unwrap()
+        .expect("the SQL of a test reads the ledger")
 }
 
 #[test]
