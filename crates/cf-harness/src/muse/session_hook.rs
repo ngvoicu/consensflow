@@ -160,7 +160,11 @@ fn frame_most() -> usize {
 /// is outside a fence, else at the last line start of it, and in the middle of a line (never
 /// of a character) only where a line is longer than a part. So a part does not end between
 /// a heading or a line and the paragraph, list, table or example it introduces, and the next
-/// begins with a sentence or a heading. No role is no part.
+/// begins with a sentence or a heading, **except** where no paragraph or heading sits in the
+/// part's second half: a list longer than half a frame cannot be kept whole, and the part ends
+/// at a line start inside it (the project's rules for its staff, 8,000 bytes at the most, can be
+/// 79 list items of escaped JSON; a real project's are not, and the 16 cuts of the texts measured
+/// for T-1435 are all at a paragraph or a heading). No role is no part.
 pub fn parts(role: &str) -> Vec<&str> {
     if role.is_empty() {
         return Vec::new();

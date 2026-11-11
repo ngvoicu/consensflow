@@ -30,8 +30,11 @@
 //! brief with backticks, `$( )`, quotes and non-ASCII in a file written as UTF-8, with and without
 //! a byte order mark, in Windows PowerShell 5.1 and PowerShell 7. A PowerShell window is not taught
 //! a heredoc, which it has none of, nor to pipe or redirect a brief: 5.1 pipes only what the ANSI
-//! code page holds and its `>` writes UTF-16, which cases below show (what `cf --file` makes of
-//! UTF-16 is not covered: it reads UTF-8 and a file written otherwise is the writer's to mend).
+//! code page holds and its `>` writes UTF-16, which cases below show. A member that redirects
+//! anyway still sends the text: `cf --file` decodes UTF-16 with a byte order mark and refuses what
+//! is no UTF-8 (a file written `-Encoding Default`, UTF-16 without a mark), saying so (the review
+//! T-1447 of T-1435, finding 1). And a `cf.exe` in a folder with an apostrophe in its name is run
+//! as the text teaches it, the apostrophe doubled inside the quotes.
 #![cfg(windows)]
 // The tests' own helpers: a failure in one is the test's, and they look for the shells where
 // the machine has them.
@@ -497,12 +500,23 @@ fn the_text_the_cases_run_on_is_many_lines_and_has_what_a_shell_has_a_meaning_fo
 /// A copy of the `cf.exe` under test in a folder with a space in its name (the default install
 /// of Windows has one), and the word a PowerShell window is told it by: `& '…/cf.exe'`.
 fn spaced_cf(case: &Case) -> (PathBuf, CfWord) {
-    let folder = case.at("Program Files").join("ConsensFlow").join("bin");
+    cf_in(case, &["Program Files", "ConsensFlow", "bin"])
+}
+
+/// A copy of the `cf.exe` under test in the folders `names` of the case's, and the word a
+/// PowerShell window is told it by.
+fn cf_in(case: &Case, names: &[&str]) -> (PathBuf, CfWord) {
+    let mut folder = case.folder.path().to_path_buf();
+    for name in names {
+        folder.push(name);
+    }
     fs::create_dir_all(&folder).expect("the folder");
     let exe = folder.join("cf.exe");
     fs::copy(own_cf(), &exe).expect("a copy of cf.exe");
     let word = CfWord::new(&exe.to_string_lossy().replace('\\', "/"), Shell::PowerShell);
-    assert!(word.as_str().starts_with("& '") && word.as_str().contains("Program Files"));
+    assert!(
+        word.as_str().starts_with("& '") && word.as_str().contains(&names[0].replace('\'', "''"))
+    );
     (exe, word)
 }
 
@@ -639,4 +653,134 @@ fn windows_powershell_5_1_redirects_to_a_file_as_utf_16_and_powershell_7_as_utf_
             "{shell}: {bytes:?}"
         );
     }
+}
+
+/// The script of a PowerShell window that writes the question the way its shell does and then
+/// runs the taught line on it: in the folder of the case, with the text read from the UTF-8 file
+/// the case wrote (`$t`).
+fn written_then_asked(write: &str, line: &str) -> String {
+    format!(
+        "Set-Location -LiteralPath (Split-Path -Parent $env:TEXT_FILE); \
+         $t = [IO.File]::ReadAllText($env:TEXT_FILE, (New-Object Text.UTF8Encoding $false)); \
+         {write}; {line}"
+    )
+}
+
+/// A member that ignores the text's "never `>`" and writes the question with its shell's own
+/// redirect or `Out-File` still sends the text, byte for byte: Windows PowerShell 5.1 writes UTF-16
+/// with a byte order mark (`>`, `Out-File`, `-Encoding Unicode` or `BigEndianUnicode`) or UTF-8 with
+/// one (`-Encoding utf8`), PowerShell 7 UTF-8 without, and `cf --file` reads each as the text.
+fn a_file_powershell_wrote_arrives_whole_in(shell: &str, program: &Path) {
+    for write in [
+        "$t > ask.md",
+        "$t | Out-File ask.md",
+        "$t | Out-File -Encoding utf8 ask.md",
+        "$t | Out-File -Encoding unicode ask.md",
+        "$t | Out-File -Encoding bigendianunicode ask.md",
+    ] {
+        let case = Case::new(TEXT);
+        let (_exe, word) = spaced_cf(&case);
+        let line = taught("worker", &word, "ask --file ");
+        let script = written_then_asked(write, &line);
+        let (code, said, body) = case.run(
+            program,
+            &[POWERSHELL[0], POWERSHELL[1], POWERSHELL[2], &script],
+        );
+        assert_eq!(
+            (code, body.as_deref()),
+            (Some(0), Some(TEXT)),
+            "{shell}, `{write}` then `{line}` said {said}"
+        );
+    }
+}
+
+#[test]
+fn windows_powershell_5_1_s_own_redirect_and_out_file_are_read_as_the_text() {
+    a_file_powershell_wrote_arrives_whole_in("Windows PowerShell 5.1", &powershell_5());
+}
+
+#[test]
+fn powershell_7_s_own_redirect_and_out_file_are_read_as_the_text() {
+    a_file_powershell_wrote_arrives_whole_in("PowerShell 7", &powershell_7());
+}
+
+/// A file written in the system's code page (`-Encoding Default` in Windows PowerShell 5.1) with
+/// a letter outside ASCII, and UTF-16 written without a byte order mark, are refused: `cf` says
+/// what it found and what to do, and the board is sent nothing.
+#[test]
+fn what_windows_powershell_5_1_writes_in_a_code_page_or_in_utf_16_with_no_mark_is_refused() {
+    let utf_16_no_mark = "[IO.File]::WriteAllText((Join-Path (Get-Location) 'ask.md'), $t, \
+                          (New-Object Text.UnicodeEncoding $false, $false))";
+    for (shell, program, write, found) in [
+        (
+            "Windows PowerShell 5.1",
+            powershell_5(),
+            "$t | Out-File -Encoding Default ask.md",
+            "it is not UTF-8: the byte at offset 0 is not valid",
+        ),
+        (
+            "Windows PowerShell 5.1",
+            powershell_5(),
+            utf_16_no_mark,
+            "it holds a NUL byte",
+        ),
+        (
+            "PowerShell 7",
+            powershell_7(),
+            utf_16_no_mark,
+            "it holds a NUL byte",
+        ),
+    ] {
+        let case = Case::new(TEXT);
+        let (_exe, word) = spaced_cf(&case);
+        let line = taught("worker", &word, "ask --file ");
+        let script = written_then_asked(write, &line);
+        let (code, said, body) = case.run(
+            &program,
+            &[POWERSHELL[0], POWERSHELL[1], POWERSHELL[2], &script],
+        );
+        assert_eq!(
+            (code, body.as_deref()),
+            (Some(1), None),
+            "{shell}, `{write}` then `{line}` said {said}"
+        );
+        assert!(
+            said.contains("cannot read ask.md: ")
+                && said.contains(found)
+                && said.contains("Write it as UTF-8")
+                && said.contains("Nothing was sent."),
+            "{shell}, `{write}`: {said}"
+        );
+    }
+}
+
+/// A `cf.exe` in a folder with an apostrophe in its name (a user called O'Brien) is run by the line
+/// the text teaches: the word doubles the apostrophe inside its quotes, `& 'C:/Dan''s Files/…'`.
+fn an_apostrophe_in_the_path_arrives_whole_in(shell: &str, program: &Path) {
+    let case = Case::new("unused");
+    let (_exe, word) = cf_in(&case, &["Dan's Files", "ConsensFlow", "bin"]);
+    assert!(word.as_str().contains("Dan''s Files"), "{}", word.as_str());
+    brief_file(&case, "ask.md", false, "\n");
+    let line = taught("worker", &word, "ask --file ");
+    assert!(line.ends_with("ask --file ask.md"), "{line}");
+    let script = in_the_brief_s_folder(&line);
+    let (code, said, body) = case.run(
+        program,
+        &[POWERSHELL[0], POWERSHELL[1], POWERSHELL[2], &script],
+    );
+    assert_eq!(
+        (code, body.as_deref()),
+        (Some(0), Some(TEXT)),
+        "{shell}: `{line}` said {said}"
+    );
+}
+
+#[test]
+fn windows_powershell_5_1_runs_the_taught_line_for_a_cf_exe_in_a_folder_with_an_apostrophe() {
+    an_apostrophe_in_the_path_arrives_whole_in("Windows PowerShell 5.1", &powershell_5());
+}
+
+#[test]
+fn powershell_7_runs_the_taught_line_for_a_cf_exe_in_a_folder_with_an_apostrophe() {
+    an_apostrophe_in_the_path_arrives_whole_in("PowerShell 7", &powershell_7());
 }
