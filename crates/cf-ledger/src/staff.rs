@@ -13,9 +13,10 @@ use serde_json::json;
 
 use crate::conversations::current_conversation;
 use crate::messages::{kept_through_leaving, Dropped};
-use crate::model::{self, sql_list, LedgerError, MEMBER_ROLES};
+use crate::model::{self, sql_list, LedgerError};
 use crate::projects::NewMember;
 use crate::queue::{drop_queued, send, Sent};
+use crate::roles;
 use crate::store::Store;
 use crate::tasks::tell_stranded_waiters;
 use crate::views::{participant_view, ParticipantRow, TaskRow, PARTICIPANT_SELECT};
@@ -465,7 +466,7 @@ pub(crate) fn last_staff(store: &Store) -> Result<Vec<StaffMember>, LedgerError>
     let member = format!(
         "role IN ({})
     AND left_at IS NULL AND member_id IS NULL",
-        sql_list(&MEMBER_ROLES)
+        sql_list(&roles::ids())
     );
     let rows = store
         .db
@@ -524,7 +525,7 @@ pub(crate) fn require_member_row(
 
 /// One of the staff's roles, not the project's human or chief.
 fn require_staff_role(handle: &str, member: &ParticipantRow) -> Result<(), LedgerError> {
-    if MEMBER_ROLES.contains(&member.role.as_str()) {
+    if roles::is_role(member.role.as_str()) {
         return Ok(());
     }
     Err(LedgerError::refused_with(

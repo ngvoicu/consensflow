@@ -306,13 +306,20 @@ fn modelled(name: &str, step: &Value) -> Value {
 }
 
 /// A reply as both sides are compared: what a participant runs on held apart
-/// (`cf_ledger::testing::hold_apart_what_members_run_on`), and the marks of a lane whose
-/// saved agent was gone, which Node's board said and this one's has none of.
+/// (`cf_ledger::testing::hold_apart_what_members_run_on`), the marks of a lane whose
+/// saved agent was gone, which Node's board said and this one's has none of, and the roles
+/// `board.get` answers beside its board, which Node's had no table of (`cf_ledger::roles`;
+/// the daemon's own test `page::tests::roles` holds them).
 fn projected(reply: &[u8]) -> String {
     let Ok(mut value) = serde_json::from_slice::<Value>(reply) else {
         return String::from_utf8_lossy(reply).into_owned();
     };
     cf_ledger::testing::hold_apart_what_members_run_on(&mut value);
+    if let Some(fields) = value.as_object_mut() {
+        if fields.contains_key("board") {
+            fields.shift_remove("roles");
+        }
+    }
     if let Some(Value::Array(lanes)) = value
         .get_mut("board")
         .and_then(|board| board.get_mut("lanes"))

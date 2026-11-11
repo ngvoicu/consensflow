@@ -14,15 +14,13 @@ use cf_base::text::{utf16_len, utf16_prefix};
 use cf_proto::agents::Harness;
 use serde_json::Value;
 
+use crate::roles;
 use crate::views::ParticipantRow;
 
-pub const MEMBER_ROLES: [&str; 5] = ["worker", "advisor", "reviewer", "tester", "designer"];
 /// Who hands out work and hears when the staff changes: the human and the chief.
 pub const COORDINATOR_HANDLES: [&str; 2] = ["human", "chief"];
 pub const COORDINATOR_ROLES: [&str; 2] = ["human", "chief"];
 pub const TIERS: [&str; 4] = ["critical", "complex", "standard", "light"];
-/// Who takes a task on the board: a worker, an advisor (advice), a reviewer, a tester, or an image designer (no tier).
-pub const POOLS: [&str; 5] = ["worker", "advisor", "reviewer", "tester", "designer"];
 pub const PURPOSES: [&str; 4] = [
     "critical-review",
     "architecture",
@@ -219,19 +217,15 @@ pub fn parse_meeting(value: Option<&Value>) -> Result<bool, LedgerError> {
     })
 }
 
-/// A member's roles: one or more of worker, advisor, reviewer, tester and
-/// designer, distinct, the first one leading; `offender` is how the
-/// refusal prints what was given.
+/// A member's roles: one or more of the roles' table ([`roles`]), distinct, the first one
+/// leading; `offender` is how the refusal prints what was given.
 pub fn require_roles<S: AsRef<str>>(
     roles: &[S],
     offender: impl FnOnce() -> String,
 ) -> Result<Vec<&'static str>, LedgerError> {
     let mut known = Vec::new();
     for role in roles {
-        match MEMBER_ROLES
-            .into_iter()
-            .find(|member| *member == role.as_ref())
-        {
+        match roles::find(role.as_ref()).map(|role| role.id) {
             Some(role) if !known.contains(&role) => known.push(role),
             Some(_) => {}
             None => return Err(roles_refused(&offender())),
@@ -258,7 +252,7 @@ fn roles_refused(offender: &str) -> LedgerError {
         "invalid-role",
         format!(
             "a member is one or more of {}, not {offender}",
-            MEMBER_ROLES.join(", ")
+            roles::ids().join(", ")
         ),
     )
 }
@@ -350,11 +344,11 @@ fn is_model_id(model: &str) -> bool {
         })
 }
 
-/// Whether a role fits an agent, by its designer flag: an image designer is
-/// an image agent (a Codex agent that designs), and an image agent is nothing
-/// else, the chief included.
+/// Whether a role fits an agent, by its designer flag: a role only an image agent holds (the
+/// image designer) is an image agent's (a Codex agent that designs), and an image agent is
+/// nothing else, the chief included.
 pub fn fits_role(designer: bool, role: &str) -> bool {
-    (role == "designer") == designer
+    roles::find(role).is_some_and(|role| role.image_agent) == designer
 }
 
 /// Refuses roles that do not fit the member named `agent`, a designer or not, saying
@@ -370,9 +364,15 @@ pub fn require_fitting_roles(
     Err(LedgerError::refused(
         "invalid-role",
         if designer {
-            format!("{agent} is an image agent, which can only be an image designer")
+            format!(
+                "{agent} is an image agent, which can only be {}",
+                roles::IMAGE_DESIGNER.a_name()
+            )
         } else {
-            format!("only an image agent can be an image designer, and {agent} is not one")
+            format!(
+                "only an image agent can be {}, and {agent} is not one",
+                roles::IMAGE_DESIGNER.a_name()
+            )
         },
     ))
 }
@@ -514,11 +514,11 @@ mod tests {
 
     #[test]
     fn a_tester_is_a_role_a_member_holds_and_a_pool_a_task_is_for_next_to_the_reviewer() {
-        for roles in [&MEMBER_ROLES[..], &POOLS[..]] {
-            let at = |word: &str| roles.iter().position(|role| *role == word).unwrap();
-            assert_eq!(at("tester"), at("reviewer") + 1, "{roles:?}");
-            assert_eq!(roles.last(), Some(&"designer"), "{roles:?}");
-        }
+        // A member's roles and the pools a task is for are the one table's.
+        let roles = roles::ids();
+        let at = |word: &str| roles.iter().position(|role| *role == word).unwrap();
+        assert_eq!(at("tester"), at("reviewer") + 1, "{roles:?}");
+        assert_eq!(roles.last(), Some(&"designer"), "{roles:?}");
         assert_eq!(require_roles(&["tester"], String::new).unwrap(), ["tester"]);
         // Any agent may test but an image agent, which is nothing but a designer.
         assert!(require_fitting_roles("hera", false, &["tester"]).is_ok());

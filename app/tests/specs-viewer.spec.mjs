@@ -1,9 +1,15 @@
+import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 
 import { expect, test } from '@playwright/test'
 
 import { refusedByPolicy, serveUi } from './serve-ui.mjs'
 import { answerFor, specsOf, withFile } from './specs-fixtures.mjs'
+
+// The staff's roles as the daemon's table says them (`cf_ledger::roles`, `harnesses.missing`'s
+// `roles`): written from the table by its Rust test (`CF_WRITE_PAGE_ROLES=1`), which fails
+// when they differ.
+const ROLES = JSON.parse(readFileSync(new URL('./fixtures/roles.json', import.meta.url), 'utf8'))
 
 /**
  * The specs viewer (core/specs-viewer.js), against a stand-in for the app: the
@@ -125,7 +131,8 @@ function model() {
   }
 }
 
-async function open(page, data = model()) {
+async function open(page, given = model()) {
+  const data = { roles: ROLES, ...given }
   await page.addInitScript((data) => {
     window.__calls = []
     window.__model = data
@@ -158,8 +165,8 @@ async function open(page, data = model()) {
       })
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
-      'harnesses.missing': () => answer({ missing: [] }),
-      'board.get': ({ project }) => answer({ board: data.boards[project] }),
+      'harnesses.missing': () => answer({ missing: [], roles: data.roles }),
+      'board.get': ({ project }) => answer({ board: data.boards[project], roles: data.roles }),
       'inbox.get': () => answer({ messages: [], total: 0, shown: 0 }),
       // What a project says of specs: kept as it was said, each part left out when it says
       // none, and the daemon's own refusal where a test has it refuse.

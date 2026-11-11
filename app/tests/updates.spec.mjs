@@ -1,6 +1,13 @@
+import { readFileSync } from 'node:fs'
+
 import { expect, test } from '@playwright/test'
 
 import { refusedByPolicy, serveUi } from './serve-ui.mjs'
+
+// The staff's roles as the daemon's table says them (`cf_ledger::roles`, `harnesses.missing`'s
+// `roles`): written from the table by its Rust test (`CF_WRITE_PAGE_ROLES=1`), which fails
+// when they differ.
+const ROLES = JSON.parse(readFileSync(new URL('./fixtures/roles.json', import.meta.url), 'utf8'))
 
 let ui
 /** What the app's policy refused in the test running: nothing the page does is refused. */
@@ -81,7 +88,7 @@ async function installTauriShim(
   { snapshot = updateSnapshot(), state = coreState(), lateDaemon = false } = {},
 ) {
   await page.addInitScript(
-    ({ initialSnapshot, initialState, late }) => {
+    ({ initialSnapshot, initialState, late, roles }) => {
       const copy = (value) => JSON.parse(JSON.stringify(value))
       const eventListeners = new Map()
       const timers = []
@@ -128,7 +135,7 @@ async function installTauriShim(
             return copy({ ok: true, board: initialState.boards[body.project] })
           }
           if (operation === 'inbox.get') return { ok: true, messages: [], total: 0, shown: 0 }
-          if (operation === 'harnesses.missing') return { ok: true, missing: [] }
+          if (operation === 'harnesses.missing') return { ok: true, missing: [], roles }
           return { ok: true }
         }
         if (command === 'update_status' || command === 'update_check') {
@@ -184,7 +191,7 @@ async function installTauriShim(
         },
       }
     },
-    { initialSnapshot: snapshot, initialState: state, late: lateDaemon },
+    { initialSnapshot: snapshot, initialState: state, late: lateDaemon, roles: ROLES },
   )
 }
 

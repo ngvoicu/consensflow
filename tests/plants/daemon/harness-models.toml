@@ -284,11 +284,9 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''
-      const key = `${harness} ${model} ${effort ?? ''} ${role === 'designer'}`
+find = '''      const key = `${harness} ${model} ${effort ?? ''} ${isImageAgentRole(role)}`
 '''
-replace = '''
-      const key = `${harness} ${model} ${effort ?? ''} ${role}`
+replace = '''      const key = `${harness} ${model} ${effort ?? ''} ${role}`
 '''
 
 [[plant]]

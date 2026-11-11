@@ -46,10 +46,14 @@ runs = ["mm-daemon"]
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/staff.rs"
 find = '''
-    let tier = tier_of(body.get("tier"))?;
+    if !cf_ledger::roles::takes_no_tier(roles) {
+        return tier_of(body.get("tier"));
+    }
 '''
 replace = '''
-    let tier = tier_of(body.get("tier")).unwrap_or(WorkTier::Light);
+    if !cf_ledger::roles::takes_no_tier(roles) {
+        return Ok(tier_of(body.get("tier")).unwrap_or(WorkTier::Light));
+    }
 '''
 
 [[plant]]
@@ -127,8 +131,8 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = "    if (this.#tier.value === '') {"
-replace = "    if (this.#tier.value === 'never') {"
+find = "    if (tiered && this.#tier.value === '') {"
+replace = "    if (tiered && this.#tier.value === 'never') {"
 
 [[plant]]
 name = "member models: the tier select starts on a tier the human did not pick"
