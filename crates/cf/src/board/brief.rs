@@ -99,6 +99,10 @@ pub fn brief_of(
 /// mark, is the text. UTF-16 with a mark, in either byte order, is decoded. Anything else that is
 /// not valid UTF-8 is refused: UTF-16 without a mark, a NUL byte, an invalid sequence, and the
 /// Windows code page that `-Encoding Default` writes.
+///
+/// The limit: bytes that are valid UTF-8 are read as UTF-8, so a UTF-16 text without a mark is
+/// refused only where it holds a NUL byte or an invalid sequence (any ASCII character gives a NUL;
+/// no rule over bytes can tell the rest apart, and no real writer produces it).
 pub(super) fn words_of(bytes: &[u8]) -> Result<String, String> {
     let (text, marked) = match bytes {
         [0xff, 0xfe, rest @ ..] => (utf16(rest, u16::from_le_bytes)?, true),
