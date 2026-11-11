@@ -57,6 +57,28 @@ replace = '''    switch: Some("--research"),
     image_agent: false,
     changes_files: true,'''
 
+[[plant]]
+name = "new roles: the architect's row names a pool the checks do not hold"
+meant = "a_member_of_each_new_role_is_held_and_takes_its_pools_tasks_alone"
+runs = ["nr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''    id: "architect",'''
+replace = '''    id: "architects",'''
+
+[[plant]]
+name = "new roles: the integrator's row has tiers"
+meant = "a_member_of_each_new_role_is_held_and_takes_its_pools_tasks_alone"
+runs = ["nr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''    switch: Some("--integrate"),
+    tiered: false,'''
+replace = '''    switch: Some("--integrate"),
+    tiered: true,'''
+
 # Picks: who takes a task of the pool, and the switch that asks for it.
 
 [[plant]]
@@ -84,6 +106,20 @@ find = '''         AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value 
        ORDER BY p.id"
         ))?'''
 replace = '''         AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value = replace(?, 'integrator', 'worker'))
+       ORDER BY p.id"
+        ))?'''
+
+[[plant]]
+name = "new roles: a frontend designer's task goes to a worker"
+meant = "a_member_of_each_new_role_is_held_and_takes_its_pools_tasks_alone"
+runs = ["nr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/pools.rs"
+find = '''         AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value = ?)
+       ORDER BY p.id"
+        ))?'''
+replace = '''         AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value = replace(?, 'frontend', 'worker'))
        ORDER BY p.id"
         ))?'''
 
