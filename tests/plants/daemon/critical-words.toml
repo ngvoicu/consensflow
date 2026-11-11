@@ -2,7 +2,7 @@
 # crates/cf-ledger/src/tasks.rs; T-1060): it sent the task's findings to "your
 # coordinator" — a word the member role texts ban — and forbade work on
 # specifications, which a project may not have. The lead now says the work
-# changes no file and answers to the chief, and the member texts' bans
+# changes no project file and answers to the chief, and the member texts' bans
 # (`MEMBER_BANS`, crates/cf-engine/tests/text/support.rs) read every word
 # ConsensFlow sets in and before a task's own, so no banned word comes back in
 # a lead the role tests never read. The one recording of Node's that holds the
@@ -24,8 +24,8 @@ runs = ["engine-text-task-words"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks.rs"
-find = '"It changes no file: return analysis, evidence and recommendations to the chief."'
-replace = '"It changes no file: return analysis, evidence and recommendations to your coordinator."'
+find = '"It changes no project file: return analysis, evidence and recommendations to the chief."'
+replace = '"It changes no project file: return analysis, evidence and recommendations to your coordinator."'
 
 [[plant]]
 name = "critical words: a lead past the critical one may call the chief a coordinator"

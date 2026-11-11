@@ -213,7 +213,7 @@ runs = ["engine-text-rules"]
 [[plant.edit]]
 file = "skill/core/chief.md"
 find = '''
-   Every member already has the project's rules for the staff (at the end of
+   Every window opens with the project's rules for the staff (at the end of
    this text, when the project has any): a brief doesn't repeat them, and
    says only what its task needs.'''
 replace = ""

@@ -205,7 +205,7 @@ meant = "every_role_is_given_the_text_node_gave_it_or_refused_as_node_refused_it
 runs = ["engine-chief-text"]
 
 [[plant.edit]]
-file = "skill/core/chief.md"
+file = "skill/core/shells.md"
 find = '''
 
 Write a long brief to a file with your file tool and pass it with `--file brief.md` instead: a shell can cut a long heredoc.'''
