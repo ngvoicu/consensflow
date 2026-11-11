@@ -3,7 +3,7 @@
 
 use serde_json::{json, Value};
 
-use cf_proto::panes::{BOTTOM_LINES, UNTYPED};
+use cf_proto::panes::BOTTOM_LINES;
 
 use crate::contract::{HostError, Pane, PaneHost, NOT_ADMITTED};
 use crate::shared::admission::Sent;
@@ -30,29 +30,6 @@ pub(crate) async fn write_paste(
     body: &str,
     read_empty: Option<u64>,
 ) -> Sent {
-    paste(host, pane, body, read_empty, false).await
-}
-
-/// Pastes `body` as [`write_paste`] does, only into a window none of the human's keys has
-/// reached since it opened: the host checks it as the paste is made, after every key its
-/// worker took before it, and refuses the paste unwritten where one has
-/// ([`cf_proto::panes::UNTYPED`], answered [`cf_proto::panes::TYPED_INTO`]).
-pub(crate) async fn write_paste_untyped(
-    host: &dyn PaneHost,
-    pane: &Pane,
-    body: &str,
-    read_empty: Option<u64>,
-) -> Sent {
-    paste(host, pane, body, read_empty, true).await
-}
-
-async fn paste(
-    host: &dyn PaneHost,
-    pane: &Pane,
-    body: &str,
-    read_empty: Option<u64>,
-    untyped: bool,
-) -> Sent {
     if !host.admits() {
         return not_admitted();
     }
@@ -60,9 +37,6 @@ async fn paste(
     request["body"] = json!(body);
     if let Some(typed) = read_empty {
         request["readEmpty"] = json!(typed);
-    }
-    if untyped {
-        request[UNTYPED] = json!(true);
     }
     match host.request("pane.write_paste", request).await {
         Ok(answer) => Sent::from_reply(&answer),

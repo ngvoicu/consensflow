@@ -56,7 +56,7 @@ use cf_base::js;
 use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
 use cf_proto::models::ModelListing;
-use cf_proto::panes::{HumanInput, SilentPaste, SCREEN_QUIET_MS, TYPED_INTO};
+use cf_proto::panes::{HumanInput, SilentPaste, SCREEN_QUIET_MS};
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
@@ -518,8 +518,8 @@ struct DevinWindow {
     /// When the first look was that found its log naming the conversation it is known to be
     /// on, and configuring none (`shows`).
     unannounced_since: Cell<Option<i64>>,
-    /// Whether the pane host has said that a key of the human's reached the window since it
-    /// opened, at a readiness's look or by refusing a paste for it (`shows`).
+    /// Whether a readiness's look read the pane host's count of the human's keys above 0: a key
+    /// of theirs reached the window since it opened (`shows`).
     typed_into: Cell<bool>,
 }
 
@@ -677,9 +677,12 @@ impl DevinWindow {
     /// Nothing tells a `/new` that writes no line from the window still on its conversation
     /// (T-1466's review: not the log, the process, the launch's arguments or the store), and
     /// ConsensFlow types no command into a window: only a person could have switched it. So a
-    /// window the pane host has said a key of the human's reached since it opened is held as one
-    /// that has said nothing, until its log configures; and the paste itself asks the host to
-    /// go in only while none has (`channel::send`).
+    /// window the pane host's count says a key of the human's reached since it opened is held as
+    /// one that has said nothing, until its log configures. The count is read at each readiness,
+    /// so the hold is decided before a delivery is admitted, and the engine holds the message as
+    /// for any window not ready, spending no attempt. Not seen: a key that comes between that
+    /// look and the paste, a switch made with the mouse alone (mouse reports are no key), and
+    /// keys still on their way from the page.
     fn shows(&self, said: &Said) -> Shows {
         let unannounced = said
             .unannounced
@@ -871,10 +874,6 @@ impl Window for DevinWindow {
                 read_empty,
             )
             .await;
-            // A key of the human's came between the readiness's look and the paste.
-            if sent.refused && sent.error.as_deref() == Some(TYPED_INTO) {
-                self.typed_into.set(true);
-            }
             Ok(admission(&sent, "Devin refused the paste", false))
         })
     }

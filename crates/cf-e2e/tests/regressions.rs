@@ -122,6 +122,8 @@ mod a_result_that_starts_with_an_image_path_was_pasted_three_times;
 mod a_resumed_codex_window_lost_its_role_at_its_next_compaction;
 #[path = "regressions/a_resumed_devin_worker_skipped_every_call.rs"]
 mod a_resumed_devin_worker_skipped_every_call;
+#[path = "regressions/a_silent_devin_window_the_human_typed_into_kept_its_delivery_queued.rs"]
+mod a_silent_devin_window_the_human_typed_into_kept_its_delivery_queued;
 #[path = "regressions/a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task.rs"]
 mod a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task;
 #[path = "regressions/a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed.rs"]

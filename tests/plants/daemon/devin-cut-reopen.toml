@@ -15,23 +15,19 @@
 # - a prompt the log lists new among the steps, after its first `steps` line, is a message the
 #   turn took in: `/bypass <message>` is said back by no line;
 # - the fallback is only for a window no key of the human's has reached since it opened (T-1474):
-#   a window the pane host says was typed into is held as one that has said nothing until its log
-#   configures, and the paste behind `/bypass` asks the host to go in only while none has
-#   (`untyped` on `pane.write_paste`), which the host checks under its pane's lock as it pastes,
-#   after every key its worker took before the paste. The daemon's own keys, the terminal's
-#   replies and its reports on the human's path are no key.
+#   a window whose pane host's count (`pane.snapshot`'s `typed`), read at a readiness, says one has
+#   is held as one that has said nothing until its log configures, decided before a delivery is
+#   admitted, so the engine keeps the message queued and spends no attempt on it.
 #
 # The cases are in `crates/cf-harness/src/devin/adapter/tests/unannounced.rs`, `channel/tests.rs`,
-# `session_hook.rs` and `record/tests/unsaid.rs`; the host's in `crates/cf-panes/src/arbiter.rs`,
-# `input_queue.rs` and `pane_handlers.rs`; the whole way, the rig's pane host and the stand-in on
-# 3000.12's shape, in `crates/cf-e2e/tests/rig/live_member.rs`.
+# `session_hook.rs` and `record/tests/unsaid.rs`; the whole way, through the daemon's engine on the
+# rig with the stand-in on 3000.12's shape, in
+# `crates/cf-e2e/tests/regressions/a_silent_devin_window_the_human_typed_into_kept_its_delivery_queued.rs`.
 
 [run]
 harness-lib-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::"]
-# The pane host's input: its arbiter, its queue and the requests it reads.
-panes-lib-untyped = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "--", "arbiter::", "input_queue::", "pane_handlers::"]
-# The window the human typed into, on the rig's pane host (the case sets 3000.12's shape itself).
-rig-live-member-typed-into = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_member::a_window_cut_in_its_first_turn_that_the_human"]
+# The window the human typed into, through the daemon's engine (the case sets 3000.12's shape).
+regs-silent-typed-into = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_silent_devin_window_the_human_typed_into_keeps"]
 
 [[plant]]
 name = "devin cut reopen: a silent window is held for good"
@@ -100,8 +96,8 @@ runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/channel.rs"
-find = "    } else if guard == Guard::Unannounced && naming.unannounced() == Some(session) {"
-replace = "    } else if naming.unannounced() == Some(session) {"
+find = "            || (guard == Guard::Unannounced && naming.unannounced() == Some(session))"
+replace = "            || naming.unannounced() == Some(session)"
 
 [[plant]]
 name = "devin cut reopen: the start hook of a silent window gives no role text"
@@ -147,8 +143,8 @@ replace = "        if now - since >= UNANNOUNCED_MS {"
 
 [[plant]]
 name = "devin cut reopen: the readiness keeps nothing of the host's count of the human's keys"
-meant = "a_silent_window_the_human_typed_into_is_held_as_before_until_its_log_configures"
-runs = ["harness-lib-devin"]
+meant = "a_silent_devin_window_the_human_typed_into_keeps_what_it_is_told_queued_with_no_attempt_spent_until_its_log_configures"
+runs = ["regs-silent-typed-into"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
@@ -156,81 +152,11 @@ find = "            {\n                self.typed_into.set(true);\n            }
 replace = "            {}\n            self.input.replace(input);"
 
 [[plant]]
-name = "devin cut reopen: a paste the host refused for the human's key leaves the window as it was"
-meant = "a_silent_window_nobody_typed_into_asks_the_host_for_that_as_it_pastes_and_a_key_that_came_first_holds_it"
+name = "devin cut reopen: a key that comes after the first look holds nothing"
+meant = "a_silent_window_nobody_typed_into_is_given_its_delivery_behind_bypass_and_a_key_that_comes_later_holds_it"
 runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = "            if sent.refused && sent.error.as_deref() == Some(TYPED_INTO) {"
-replace = "            if false {"
-
-[[plant]]
-name = "devin cut reopen: the channel pastes behind /bypass without asking for a window nobody typed into"
-meant = "a_paste_into_a_window_that_configured_none_goes_in_only_while_the_human_has_not_typed_into_it"
-runs = ["harness-lib-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/channel.rs"
-find = "        write_paste_untyped(host, pane, text, read_empty).await"
-replace = "        write_paste(host, pane, text, read_empty).await"
-
-[[plant]]
-name = "devin cut reopen: a paste that asks for a window nobody typed into says nothing of it to the host"
-meant = "a_paste_into_a_window_that_configured_none_goes_in_only_while_the_human_has_not_typed_into_it"
-runs = ["harness-lib-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/shared/pane.rs"
-find = "    if untyped {\n        request[UNTYPED] = json!(true);\n    }\n"
-replace = ""
-
-[[plant]]
-name = "devin cut reopen: the host pastes into a window the human typed into"
-meant = "a_paste_for_a_window_nobody_typed_into_is_refused_unwritten_once_a_key_of_the_humans_came"
-runs = ["panes-lib-untyped"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
-find = "            if untyped && state.typed > 0 {"
-replace = "            if false {"
-
-[[plant]]
-name = "devin cut reopen: the host refuses a paste for the human's key in another's words"
-meant = "a_refused_paste_says_nothing_went_in_and_a_failed_one_is_uncertain"
-runs = ["panes-lib-untyped"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/input_queue.rs"
-find = "            ArbiterError::TypedInto => cf_proto::panes::TYPED_INTO,"
-replace = "            ArbiterError::TypedInto => \"unsent-text\","
-
-[[plant]]
-name = "devin cut reopen: the host reads no request's ask for a window nobody typed into"
-meant = "a_paste_asks_for_a_window_nobody_typed_into_only_where_it_says_so"
-runs = ["panes-lib-untyped"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/pane_handlers.rs"
-find = "    #[serde(default)]\n    untyped: bool,"
-replace = "    #[serde(default, skip_deserializing)]\n    untyped: bool,"
-
-[[plant]]
-name = "devin cut reopen: the host's bridge drops a paste's ask for a window nobody typed into"
-meant = "a_window_cut_in_its_first_turn_that_the_human_typed_into_before_it_said_its_mode_is_held_with_nothing_given"
-runs = ["rig-live-member-typed-into"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/pane_handlers.rs"
-find = "                request.read_empty,\n                request.untyped,"
-replace = "                request.read_empty,\n                false,"
-
-[[plant]]
-name = "devin cut reopen: the host's worker drops a paste's ask for a window nobody typed into"
-meant = "a_window_cut_in_its_first_turn_that_the_human_typed_into_before_it_said_its_mode_is_held_with_nothing_given"
-runs = ["rig-live-member-typed-into"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/input_queue.rs"
-find = "            } => arbiter.write_paste(&panes, &key, &body, read_empty, untyped),"
-replace = "            } => arbiter.write_paste(&panes, &key, &body, read_empty, false),"
+find = "                .is_some_and(|typed| typed > 0)\n            {"
+replace = "                .is_some_and(|typed| typed > 0)\n                && self.unannounced_since.get().is_none()\n            {"

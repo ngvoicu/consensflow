@@ -421,9 +421,9 @@ fn silent_on_3000_12(
 /// line would leave it naming the conversation the window left, T-1466's review), and the
 /// daemon's readiness holds it as it did before T-1432, with nothing given, until its log
 /// configures (T-1474). The pane host is the rig's: the Escape comes by the human's door
-/// (`pane.typed`), the daemon's keys and pastes by its own, and a paste that asks for a window
-/// nobody typed into is refused by the host itself. The case is 3000.12's shape whatever the run
-/// says: on the default shape the window says its mode, and nothing waits on the human's keys.
+/// (`pane.typed`), the daemon's keys and pastes by its own. The case is 3000.12's shape whatever
+/// the run says: on the default shape the window says its mode, and nothing waits on the human's
+/// keys.
 #[test]
 fn a_window_cut_in_its_first_turn_that_the_human_typed_into_before_it_said_its_mode_is_held_with_nothing_given(
 ) -> Outcome {
@@ -474,19 +474,6 @@ fn a_window_cut_in_its_first_turn_that_the_human_typed_into_before_it_said_its_m
         (snapshot["typed"].as_u64(), snapshot["unsent"].as_bool()),
         (Some(1), Some(false)),
         "{snapshot}"
-    );
-    // The paste the product makes behind `/bypass`, asked of the host as the daemon asks it, after
-    // the human's key: refused, and nothing of it written.
-    let pane = again.pane();
-    let asked = rig.host(
-        "pane.write_paste",
-        json!({ "id": pane["id"], "generation": pane["generation"],
-            "body": "/bypass never", "untyped": true }),
-    )?;
-    assert_eq!(
-        (&asked["admitted"], &asked["bytesWritten"], &asked["error"]),
-        (&json!(false), &json!(0), &json!("typed-into")),
-        "{asked}"
     );
     drop((first, again));
     rig.close()?;

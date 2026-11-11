@@ -42,8 +42,6 @@ pub enum InputWork {
     Paste {
         body: Vec<u8>,
         read_empty: Option<u64>,
-        /// Only into a window the human has not typed into ([`cf_proto::panes::UNTYPED`]).
-        untyped: bool,
     },
     Claim,
 }
@@ -117,7 +115,6 @@ impl From<ArbiterError> for InputError {
             ArbiterError::Busy => "paste-in-flight",
             ArbiterError::InputFailed => "input-failed",
             ArbiterError::Unsent => "unsent-text",
-            ArbiterError::TypedInto => cf_proto::panes::TYPED_INTO,
             ArbiterError::InvalidBody(_) => INVALID_BODY,
             ArbiterError::LockPoisoned => LOCK_POISONED,
         };
@@ -278,16 +275,8 @@ impl InputQueue {
         key: PaneKey,
         body: Vec<u8>,
         read_empty: Option<u64>,
-        untyped: bool,
     ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
-        self.submit(
-            key,
-            InputWork::Paste {
-                body,
-                read_empty,
-                untyped,
-            },
-        )
+        self.submit(key, InputWork::Paste { body, read_empty })
     }
 
     /// Admit a native-channel send: the pane is current and its input works,
@@ -448,11 +437,9 @@ fn input_worker(
             InputWork::Write(bytes) | InputWork::Reply(bytes) => {
                 arbiter.write(&panes, &key, &bytes)
             }
-            InputWork::Paste {
-                body,
-                read_empty,
-                untyped,
-            } => arbiter.write_paste(&panes, &key, &body, read_empty, untyped),
+            InputWork::Paste { body, read_empty } => {
+                arbiter.write_paste(&panes, &key, &body, read_empty)
+            }
             InputWork::Claim => arbiter.claim(&key),
         }
         .map_err(InputError::from);
@@ -759,7 +746,6 @@ mod tests {
             (ArbiterError::Busy, "paste-in-flight"),
             (ArbiterError::InputFailed, "input-failed"),
             (ArbiterError::Unsent, "unsent-text"),
-            (ArbiterError::TypedInto, "typed-into"),
             (
                 ArbiterError::InvalidBody(SanitizeError::ControlByte(7)),
                 "invalid-body",
