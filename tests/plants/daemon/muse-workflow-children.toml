@@ -44,14 +44,65 @@ find = '''        if status.is_some_and(|status| LIFECYCLE_ENDED.contains(&statu
 replace = '''        if status.is_some_and(|status| LIFECYCLE_ENDED.contains(&status) && false) {'''
 
 [[plant]]
-name = "muse workflow children: the end of a workflow's task ends no child"
-meant = "a_child_with_no_end_in_the_record_ends_with_its_workflow_s_task"
+name = "muse workflow children: a workflow's task end owes no notice"
+meant = "a_workflow_ended_before_its_notice_is_queued_is_pending_until_the_notice_is_taken_in"
 runs = ["muse-workflow"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/record/work.rs"
-find = '''            self.workflows.insert(workflow, task);'''
-replace = '''            let _ = (workflow, task);'''
+find = '''                if self.workflows.remove(&task) && !self.told.contains(&task) {'''
+replace = '''                if self.workflows.remove(&task) && !self.told.contains(&task) && false {'''
+
+[[plant]]
+name = "muse workflow children: a drained notice does not end the debt"
+meant = "a_workflow_ended_before_its_notice_is_queued_is_pending_until_the_notice_is_taken_in"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            self.owed.remove(owner);'''
+replace = '''            let _ = owner;'''
+
+[[plant]]
+name = "muse workflow children: the turn that was awake ends the debt no more"
+meant = "a_notice_owed_and_never_queued_ends_with_the_turn_that_was_awake_or_the_session"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            .retain(|_, owed| !(owed.awake.remove(run) && owed.awake.is_empty()));'''
+replace = '''            .retain(|_, owed| !(owed.awake.remove(run) && owed.awake.is_empty() && false));'''
+
+[[plant]]
+name = "muse workflow children: a debt at the session's end is not retired"
+meant = "a_notice_owed_and_never_queued_ends_with_the_turn_that_was_awake_or_the_session"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            .chain(self.owed.keys().cloned());'''
+replace = '''            .chain(std::iter::empty());'''
+
+[[plant]]
+name = "muse workflow children: the end of a workflow's task ends its children"
+meant = "a_child_with_no_end_in_the_record_stays_counted_when_its_workflow_s_task_ends"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''                if self.workflows.remove(&task) && !self.told.contains(&task) {'''
+replace = '''                self.children.clear();
+                if self.workflows.remove(&task) && !self.told.contains(&task) {'''
+
+[[plant]]
+name = "muse workflow children: a later attempt of a child is not counted"
+meant = "a_later_attempt_of_a_child_that_ended_counts_again_made_from_the_binary_s_strings"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''        if later && matches!(status, Some("scheduled" | "started")) {'''
+replace = '''        if later && matches!(status, Some("scheduled" | "started")) && false {'''
 
 [[plant]]
 name = "muse workflow children: a task that timed out is still running"
