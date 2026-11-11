@@ -1,6 +1,7 @@
 import { button, element, icon, iconButton, redraw } from '../dom.js'
 import { notePanes } from './computer-use.js'
 import { preview, render } from './markdown.js'
+import { aPool, takesNoTier } from './roles.js'
 
 /**
  * The board: a kanban of the project's tasks. One row per participant, one
@@ -303,10 +304,6 @@ function sessionsNote(lane, board) {
 /** "T-3, T-4": task numbers in a sentence. */
 const taskNumbers = (numbers) => numbers.map((number) => `T-${number}`).join(', ')
 
-/** Whom a task given by tier waits for: "a light worker", "an image designer". */
-const aPool = (task) =>
-  task.pool === 'designer' ? 'an image designer' : `a ${task.tier} ${task.pool}`
-
 /** Where a task is going or came from, on its card; what it waits for first. */
 function route(task) {
   if (task.assignee === null) {
@@ -401,8 +398,9 @@ const identityParts = (participant) => {
         ]
       : [
           part('role', participant.roles.join('+')),
-          // An image designer has no tier: a design task has none (designer P2).
-          part('tier', participant.designer ? null : participant.tier),
+          // A member whose roles have no tier has none (an image designer's: a design task
+          // has none, designer P2).
+          part('tier', takesNoTier(participant.roles) ? null : participant.tier),
           part('harness', harnessLabel(participant)),
           ...runs,
         ]

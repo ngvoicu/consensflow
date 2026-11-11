@@ -28,8 +28,9 @@ use super::carrying::{adopt, carried_into};
 use super::continuations::continuation_tasks;
 use super::pauses::tell_kept;
 use super::{known_message, message_task, messages};
-use crate::model::{self, LedgerError, HELD_TASK_STATES, MAX_BODY, MEMBER_ROLES};
+use crate::model::{self, LedgerError, HELD_TASK_STATES, MAX_BODY};
 use crate::queue::{send, Sent};
+use crate::roles;
 use crate::store::Store;
 use crate::tasks::{release_ready, require_task_state};
 use crate::views::{TaskRow, MESSAGE_SELECT};
@@ -92,7 +93,7 @@ pub(crate) fn tell_queued(
             require_task_state(&task, &["queued"], "keep words for the window of")?;
         }
         let window = store.participant_of(task.assignee_id)?;
-        if !MEMBER_ROLES.contains(&window.role.as_str()) {
+        if !roles::is_role(window.role.as_str()) {
             return Err(LedgerError::refused_with(
                 "own-work",
                 format!("T-{number} is the chief's own: finish or cancel it"),

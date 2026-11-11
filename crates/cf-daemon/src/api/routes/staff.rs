@@ -30,8 +30,13 @@ pub(super) async fn handle(
                 "handle": member.handle,
                 "role": member.role,
                 "roles": member.roles,
-                // A design task has no tier, so an image designer is said to have none.
-                "tier": if member.designer { None } else { member.tier.as_deref() },
+                // A member whose roles have no tier is said to have none (an image designer:
+                // a design task has none).
+                "tier": if cf_ledger::roles::takes_no_tier(&member.roles) {
+                    None
+                } else {
+                    member.tier.as_deref()
+                },
                 "harness": member.harness,
                 "harnessName": cf_ledger::handles::harness_label(member.harness.as_deref()),
                 "model": said(member.model.as_deref()),

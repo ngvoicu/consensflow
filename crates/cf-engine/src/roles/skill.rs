@@ -22,10 +22,11 @@ pub fn team_table(members: &[StaffRow]) -> Result<String, RoleError> {
         // member. A member is named by its model, which the name says; where it does not
         // (a member on its harness's default, one that needs an edit) the model stands
         // beside it.
-        // An image designer has no tier (`--design`, no tier), and the table says none.
+        // A member of roles with no tier (the image designer: `--design`, no tier) has none,
+        // and the table says so.
         let tier = match member.work_tier {
             Some(tier) => work_tier_info(tier).label,
-            None if member.roles == ["designer"] => "none",
+            None if cf_ledger::roles::takes_no_tier(&member.roles) => "none",
             None => {
                 return Err(RoleError::NoWorkTier {
                     member: member.name.clone(),

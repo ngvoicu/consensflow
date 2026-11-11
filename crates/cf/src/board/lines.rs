@@ -24,11 +24,22 @@ pub fn numbers(list: &[Value]) -> impl Iterator<Item = Cow<'_, str>> {
     list.iter().map(|number| js::text(Some(number)))
 }
 
-/// "a standard worker", "an image designer": who an open task waits for.
+/// "a standard worker", "an image designer": who an open task waits for, as the roles'
+/// table says it ([`cf_ledger::roles::a_pool`]); a pool or a tier that is no text printed as
+/// JavaScript printed it.
 pub fn a_pool(pool: Option<&Value>, tier: Option<&Value>) -> String {
     match pool {
-        Some(Value::String(pool)) if pool == "designer" => "an image designer".to_string(),
-        pool => format!("a {} {}", js::text(tier), js::text(pool)),
+        Some(Value::String(pool)) if cf_ledger::roles::untiered(pool) => {
+            cf_ledger::roles::a_pool(Some(pool), None)
+        }
+        pool => format!(
+            "a {} {}",
+            js::text(tier),
+            match pool {
+                Some(Value::String(pool)) => cf_ledger::roles::name_of(pool).into(),
+                pool => js::text(pool),
+            }
+        ),
     }
 }
 
