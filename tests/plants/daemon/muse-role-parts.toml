@@ -15,6 +15,7 @@ mrp-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::
 mrp-adapter = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::adapter::"]
 mrp-cf = ["cargo", "test", "--offline", "-p", "cf", "--test", "dispatch", "muses_session_hook"]
 mrp-pins = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_change::tests::the_largest_roles_are_given"]
+mrp-chief-parts = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_change::tests::the_parts_of_a_muse_chiefs_role"]
 # The rig's cases on the machine's Muse (none where it has none: they pass, saying why, so
 # their plants say `harnesses = ["muse"]` and are not run there).
 mrp-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "muse_role::a_muse_chief_with_the_largest_role"]
@@ -133,7 +134,8 @@ file = "crates/cf-harness/src/muse/session_hook.rs"
 find = '''    Sha256::digest(role.as_bytes())[..4]'''
 replace = '''    Sha256::digest(b"role")[..4]'''
 
-# Where a part is cut: at a line start outside a fence where one fits.
+# Where a part is cut: where a paragraph or a heading begins (T-1435), else at a line start
+# outside a fence where one fits.
 [[plant]]
 name = "muse role parts: a part is cut inside a fence where a cut outside one fits"
 meant = "a_part_ends_at_a_line_start_outside_a_fence_where_one_fits_and_inside_one_where_none_does"
@@ -143,8 +145,14 @@ runs = ["mrp-hook"]
 file = "crates/cf-harness/src/muse/session_hook.rs"
 find = '''                if fence.is_none() {
                     outside = Some(at);
+                    if blank_before && !introduces && begins_a_block(line) {
+                        block = Some((at, used));
+                    }
                 }'''
-replace = '''                outside = Some(at);'''
+replace = '''                outside = Some(at);
+                if fence.is_none() && blank_before && !introduces && begins_a_block(line) {
+                    block = Some((at, used));
+                }'''
 
 [[plant]]
 name = "muse role parts: a fence is never seen opening"
@@ -163,7 +171,7 @@ runs = ["mrp-hook"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/muse/session_hook.rs"
-find = '''            let end = outside.or(any).unwrap_or(at);'''
+find = '''            let end = whole.or(outside).or(any).unwrap_or(at);'''
 replace = '''            let end = at;'''
 
 # Which block a hook says, and what only the first writes.
@@ -612,3 +620,139 @@ xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 '''
+
+# Where a part ends when a paragraph or a heading begins in the room (T-1435): after a blank
+# line, at a line that goes on with nothing before it, not after a line that introduces what
+# follows, outside a fence, and leaving the part half its room at least.
+[[plant]]
+name = "muse role parts: a part ends before the list it is introduced to, where a paragraph began in the room"
+meant = "a_line_does_not_end_a_part_before_the_list_it_introduces_where_a_block_begins_in_the_room"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''                    if blank_before && !introduces && begins_a_block(line) {'''
+replace = '''                    if false {'''
+
+[[plant]]
+name = "muse role parts: no part of a role of blocks is made to end before a paragraph or a heading"
+meant = "every_part_of_a_role_of_blocks_ends_before_a_paragraph_or_a_heading"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''                    if blank_before && !introduces && begins_a_block(line) {'''
+replace = '''                    if false {'''
+
+[[plant]]
+name = "muse role parts: the chief's role in a Muse window is cut where its last line start in the room is"
+meant = "the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_in_a_list"
+runs = ["mrp-chief-parts"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''                    if blank_before && !introduces && begins_a_block(line) {'''
+replace = '''                    if false {'''
+
+[[plant]]
+name = "muse role parts: a line that ends in a colon is left from its paragraph or list by a cut"
+meant = "a_line_does_not_end_a_part_before_the_list_it_introduces_where_a_block_begins_in_the_room"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''                    if blank_before && !introduces && begins_a_block(line) {'''
+replace = '''                    if blank_before && begins_a_block(line) {'''
+
+[[plant]]
+name = "muse role parts: a part ends where a line follows a line of text with no blank line between"
+meant = "every_part_of_a_role_of_blocks_ends_before_a_paragraph_or_a_heading"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''                    if blank_before && !introduces && begins_a_block(line) {'''
+replace = '''                    if !introduces && begins_a_block(line) {'''
+
+[[plant]]
+name = "muse role parts: a paragraph inside a fence, after a blank line of it, begins a part"
+meant = "a_line_does_not_end_a_part_before_the_list_it_introduces_where_a_block_begins_in_the_room"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''                if fence.is_none() {
+                    outside = Some(at);
+                    if blank_before && !introduces && begins_a_block(line) {
+                        block = Some((at, used));
+                    }
+                }'''
+replace = '''                if fence.is_none() {
+                    outside = Some(at);
+                }
+                if blank_before && !introduces && begins_a_block(line) {
+                    block = Some((at, used));
+                }'''
+
+[[plant]]
+name = "muse role parts: a part is made shorter than half its room to end at a paragraph"
+meant = "a_line_does_not_end_a_part_before_the_list_it_introduces_where_a_block_begins_in_the_room"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''                .filter(|&(_, before)| before >= room / 2)'''
+replace = '''                .filter(|&(_, before)| before >= 0)'''
+
+[[plant]]
+name = "muse role parts: an indented line begins a block"
+meant = "the_lines_that_go_on_with_what_is_before_them_do_not_begin_a_block"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''    if first.is_whitespace() || matches!(first, '|' | '>') || fenced(None, line).is_some() {'''
+replace = '''    if matches!(first, '|' | '>') || fenced(None, line).is_some() {'''
+
+[[plant]]
+name = "muse role parts: a table row, a quotation or a fence's opening begins a block"
+meant = "every_part_of_a_role_of_blocks_ends_before_a_paragraph_or_a_heading"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''    if first.is_whitespace() || matches!(first, '|' | '>') || fenced(None, line).is_some() {'''
+replace = '''    if first.is_whitespace() {'''
+
+[[plant]]
+name = "muse role parts: a list item begins a block"
+meant = "every_part_of_a_role_of_blocks_ends_before_a_paragraph_or_a_heading"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''    !item
+}'''
+replace = '''    let _ = item;
+    true
+}'''
+
+[[plant]]
+name = "muse role parts: a numbered item begins a block"
+meant = "the_lines_that_go_on_with_what_is_before_them_do_not_begin_a_block"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''        || (digits > 0 && marker(line[digits..].strip_prefix(['.', ')'])));'''
+replace = '''        || (digits > 99 && marker(line[digits..].strip_prefix(['.', ')'])));'''
+
+[[plant]]
+name = "muse role parts: a heading is left at the end of a part from the paragraph under it"
+meant = "a_heading_is_not_left_at_the_end_of_a_part_from_the_paragraph_under_it"
+runs = ["mrp-hook"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/session_hook.rs"
+find = '''                introduces = text.ends_with(':') || text.starts_with('#');'''
+replace = '''                introduces = text.ends_with(':');'''

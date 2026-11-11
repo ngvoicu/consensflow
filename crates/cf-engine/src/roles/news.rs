@@ -91,11 +91,11 @@ fn specs_said(was: Option<&SpecsSetting>, now: Option<&ProjectSpecs<'_>>) -> Str
 fn rules_said(was: Option<&str>, now: Option<&str>) -> String {
     match now {
         Some(now) => format!(
-            "The human {} the rules for your staff while you work. The windows of the staff that open from now on are given them, and those already open keep the rules they were given. This replaces the section of your instructions on them:\n{}",
+            "The human {} the rules for your staff while you work. Windows that open from now on are given them; one already open keeps its rules. This replaces the section of your instructions on them:\n{}",
             if was.is_some() { "changed" } else { "wrote" },
             with_staff_rules(String::new(), "chief", Some(now))
         ),
-        None => "The human took away the rules for your staff while you work. The windows of the staff that open from now on are given none, and those already open keep the rules they were given. The section of your instructions on them no longer applies.\n".to_owned(),
+        None => "The human took away the rules for your staff while you work. Windows that open from now on are given none; one already open keeps its rules. The section of your instructions on them no longer applies.\n".to_owned(),
     }
 }
 

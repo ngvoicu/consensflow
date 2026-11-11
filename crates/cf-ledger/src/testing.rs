@@ -71,6 +71,7 @@ mod model_list;
 mod pasted_into;
 mod paused_with_project;
 mod program_gone;
+mod prompt_suggestion;
 mod role_note;
 mod role_text;
 mod specs;
@@ -95,6 +96,7 @@ pub use model_list::undo_migration_0027;
 pub use pasted_into::undo_migration_0023;
 pub use paused_with_project::undo_migration_0021;
 pub use program_gone::undo_migration_0024;
+pub use prompt_suggestion::undo_migration_0036;
 pub use staff_rules::undo_migration_0026;
 
 /// The last schema version Node's ledger had.
@@ -125,11 +127,11 @@ const NODE_NEVER_WRITES: [(&str, &str); 4] = [
     ("message", "door_closed_at"),
 ];
 
-/// The columns migrations 0014, 0017, 0025, 0026 and 0035 added to the `project` table,
+/// The columns migrations 0014, 0017, 0025, 0026, 0035 and 0036 added to the `project` table,
 /// each as the migration says it (`wake_up_on INTEGER NOT NULL DEFAULT 0 CONSTRAINT …`,
 /// `description TEXT`, `meeting_at TEXT`, `staff_rules TEXT`, `advisor_tool INTEGER NOT NULL
-/// DEFAULT 0`, one to a line there), and 0026's compaction as migration 0034 renamed it: what
-/// Node's schema never had.
+/// DEFAULT 0` and `prompt_suggestion INTEGER NOT NULL DEFAULT 0`, one to a line there), and
+/// 0026's compaction as migration 0034 renamed it: what Node's schema never had.
 fn added_columns() -> impl Iterator<Item = &'static str> {
     [
         include_str!("../migrations/0014.sql"),
@@ -137,6 +139,7 @@ fn added_columns() -> impl Iterator<Item = &'static str> {
         include_str!("../migrations/0025.sql"),
         include_str!("../migrations/0026.sql"),
         include_str!("../migrations/0035.sql"),
+        include_str!("../migrations/0036.sql"),
     ]
     .into_iter()
     .flat_map(str::lines)

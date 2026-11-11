@@ -41,8 +41,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = "                observed.settled = false;"
-replace = ""
+find = "            } else if self.begun_on_the_store(&observed) {\n                observed.settled = false;"
+replace = "            } else if self.begun_on_the_store(&observed) {"
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
@@ -143,8 +143,8 @@ runs = ["harness-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = "                observed.settled = false;"
-replace = ""
+find = "            } else if self.begun_on_the_store(&observed) {\n                observed.settled = false;"
+replace = "            } else if self.begun_on_the_store(&observed) {"
 
 [[plant]]
 name = "notes twice: the window is never told the message about to be pasted, so its store is never said to have it"

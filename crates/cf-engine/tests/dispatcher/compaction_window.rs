@@ -36,6 +36,20 @@ fn choose(context: &Context, project: i64, size: Option<u32>) {
         .unwrap();
 }
 
+/// The size the project's row holds, as an earlier build left it (3.0.7-alpha.4 took any
+/// size from 100,000): the ledger itself refuses today a size under its least, so the file
+/// is written while no ledger holds it.
+fn hold(context: &Context, project: i64, size: u32) {
+    context.edit_ledger(|file| {
+        let db = rusqlite::Connection::open(file).unwrap();
+        db.execute(
+            "UPDATE project SET compaction = ?1 WHERE id = ?2",
+            rusqlite::params![size, project],
+        )
+        .unwrap();
+    });
+}
+
 /// The request for a project on `harness`, its chief and one member of each role in
 /// [`MEMBERS`], that says nothing of the compaction.
 fn request_on(harness: &str) -> Value {
@@ -282,5 +296,101 @@ fn a_member_opened_again_on_its_conversation_is_given_the_size_as_the_project_ha
             "T-{follow_up}: the size as the project has it now"
         );
     }
+    context.close();
+}
+
+/// What a stored size is given to a launch as: a size under the least the ledger takes is
+/// given as the least, one in the range as it is, and none as none.
+const AT_LAUNCH: [(Option<u32>, Option<u32>); 8] = [
+    (Some(100_000), Some(250_000)),
+    (Some(150_000), Some(250_000)),
+    (Some(249_999), Some(250_000)),
+    (Some(250_000), Some(250_000)),
+    (Some(300_000), Some(300_000)),
+    (Some(400_000), Some(400_000)),
+    (Some(1_000_000), Some(1_000_000)),
+    (None, None),
+];
+
+#[test]
+fn a_size_the_project_holds_under_the_least_is_given_to_every_harness_as_the_least_and_none_to_the_chief(
+) {
+    for harness in HARNESSES {
+        for (stored, given) in AT_LAUNCH {
+            let context = Context::made(Made {
+                harnesses: HARNESSES.to_vec(),
+                ..Made::default()
+            });
+            let project = staffed_on(&context, harness);
+            if let Some(size) = stored {
+                hold(&context, project, size);
+            }
+            for (role, _) in MEMBERS {
+                context.pool_task(project, role, &format!("A task for the {role}"));
+            }
+            context.pass().unwrap();
+            context.pass().unwrap();
+            for (role, _) in MEMBERS {
+                assert_eq!(
+                    member_launch(&context, role).get("compaction"),
+                    given.map(|size| json!(size)).as_ref(),
+                    "{harness}: {role} of a project holding {stored:?}"
+                );
+            }
+            relaunch(&context, project);
+            let chief = chief_launches(&context);
+            assert_eq!(
+                chief.last().unwrap().get("compaction"),
+                None,
+                "{harness}: the chief of a project holding {stored:?}"
+            );
+            context.close();
+        }
+    }
+}
+
+#[test]
+fn a_member_opened_again_on_its_conversation_by_a_project_holding_a_size_under_the_least_is_given_the_least_and_the_row_is_left_as_it_was(
+) {
+    let context = Context::new();
+    context.host.exits_showing(Some(0), None, None);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    hold(&context, project, 150_000);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    assert_eq!(
+        launches_of(&context, &session)[0]["compaction"],
+        json!(250_000),
+        "at its first launch"
+    );
+    context.adapter.answer(&session, "Done");
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .accept_task(project, 1, "chief")
+        .unwrap();
+    context.create_task(
+        project,
+        NewTask {
+            from: "chief".to_owned(),
+            after: Some(1),
+            body: "Follow-up 2".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    let launches = launches_of(&context, &session);
+    let launch = launches.last().unwrap();
+    assert!(launch["resume"].is_string(), "resumed");
+    assert_eq!(launch["compaction"], json!(250_000), "on resume");
+    // The row is what the human chose and is not rewritten: the page still says so.
+    let view = context.ledger.borrow().project(project).unwrap().unwrap();
+    assert_eq!(view.compaction, Some(150_000), "the stored size is kept");
     context.close();
 }

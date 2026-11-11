@@ -95,6 +95,9 @@ find = '''        if let Some(specs) = &request.specs {
         if request.advisor_tool {
             set_advisor_tool(store, id, true)?;
         }
+        if request.prompt_suggestion {
+            set_prompt_suggestion(store, id, true)?;
+        }
         known_project(store, id)
     })
 }'''
@@ -108,6 +111,9 @@ replace = '''        // The setting's own writes, which join this one, so each i
         }
         if request.advisor_tool {
             set_advisor_tool(store, id, true)?;
+        }
+        if request.prompt_suggestion {
+            set_prompt_suggestion(store, id, true)?;
         }
         known_project(store, id)
     })
@@ -153,6 +159,9 @@ find = '''        if let Some(wake_up) = wake_up {
         if request.advisor_tool {
             set_advisor_tool(store, id, true)?;
         }
+        if request.prompt_suggestion {
+            set_prompt_suggestion(store, id, true)?;
+        }
         known_project(store, id)
     })
 }'''
@@ -169,6 +178,9 @@ replace = '''        if let Some(specs) = &request.specs {
         }
         if request.advisor_tool {
             set_advisor_tool(store, id, true)?;
+        }
+        if request.prompt_suggestion {
+            set_prompt_suggestion(store, id, true)?;
         }
         known_project(store, id)
     })
@@ -289,8 +301,9 @@ find = '''    for key in [
         "rules",
         "compaction",
         "advisorTool",
+        "promptSuggestion",
     ] {'''
-replace = '    for key in ["gate", "wakeUp", "rules", "compaction", "advisorTool"] {'
+replace = '    for key in ["gate", "wakeUp", "rules", "compaction", "advisorTool", "promptSuggestion"] {'
 
 # --- the page's `project.open` ---
 
@@ -318,8 +331,9 @@ find = '''    for key in [
         "rules",
         "compaction",
         "advisorTool",
+        "promptSuggestion",
     ] {'''
-replace = '    for key in ["gate", "specs", "rules", "compaction", "advisorTool"] {'
+replace = '    for key in ["gate", "specs", "rules", "compaction", "advisorTool", "promptSuggestion"] {'
 
 [[plant]]
 name = "project settings: New project starts the calls with other words than the ledger's default"

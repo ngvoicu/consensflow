@@ -12,7 +12,7 @@ use super::reading::home_with;
 use super::*;
 use crate::testing::{request, said, scene};
 
-const WORDS: &str = "the compaction size is a whole number of tokens from 100000 to 1000000, or none for each harness's own point";
+const WORDS: &str = "the compaction size is a whole number of tokens from 250000 to 1000000, or none for each harness's own point";
 
 /// The page over a project with a worker, on a bridge.
 struct Asked {
@@ -112,6 +112,9 @@ async fn a_size_outside_the_range_or_no_number_is_refused_and_changes_nothing() 
             for size in [
                 json!(0),
                 json!(99_999),
+                json!(100_000),
+                json!(200_000),
+                json!(249_999),
                 json!(1_000_001),
                 json!(-1),
                 json!(400_000.5),
@@ -154,7 +157,7 @@ async fn a_size_outside_the_range_or_no_number_is_refused_and_changes_nothing() 
 async fn a_windows_token_reaches_no_route_that_writes_the_size_so_only_the_human_can() {
     let scene = scene();
     let screens = crate::screens::testing::inert();
-    let body = r#"{"project":1,"compaction":100000}"#;
+    let body = r#"{"project":1,"compaction":400000}"#;
     for token in [&scene.zeus, &scene.chief] {
         let ask_with = |method: Method, target: &str| {
             let request = request(method, target, Some(token), body);

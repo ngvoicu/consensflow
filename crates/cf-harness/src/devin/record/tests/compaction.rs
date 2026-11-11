@@ -14,6 +14,8 @@
 //! same as a fresh one.
 
 use super::*;
+use crate::shared::record::drawn::Kind;
+use crate::shared::record::reading::Role;
 
 /// The model's request the answer is of.
 const ANSWERED: &str = "model-2";
@@ -472,4 +474,167 @@ fn a_compacted_turn_devin_stamps_is_at_work_by_its_wire_alone_until_its_end_and_
         staged.wire("launch-1", &then);
     });
     assert_eq!(said(&ended), settled());
+}
+
+#[test]
+fn a_chain_compacted_at_rest_is_a_conversation_at_rest_and_the_turn_after_it_reads_as_any() {
+    // T-1388 (Devin 3000.12.43, `/compact` through `devin acp` on a finished session): the
+    // main chain is a new one, the system messages Devin opens a chain with and the
+    // summary (`kept_turns` 0), and no message of the user's: what it summed up is off the
+    // chain, with no copy of a step to lead back to it.
+    let record_of = |staged: &Staged| match &*look(&mut staged.reader()) {
+        Reading::Known(record) => record.clone(),
+        other => panic!("{other:?}"),
+    };
+    let staged = Staged::new();
+    let system =
+        |id: &str| json!({ "message_id": id, "role": "system", "content": "Devin's own." });
+    staged.chain(&[system("p-1"), system("p-2"), summary("s-1")]);
+    let at_rest = record_of(&staged);
+    assert_eq!(
+        at_rest
+            .items
+            .iter()
+            .map(|item| (item.role, item.kind()))
+            .collect::<Vec<_>>(),
+        [
+            (Role::Custom, Kind::Notice),
+            (Role::Custom, Kind::Notice),
+            (Role::Custom, Kind::Compaction),
+        ],
+        "all the harness's own, the last a compaction, none a message of the user's"
+    );
+    assert!(
+        !at_rest.in_flight && !at_rest.failed && !at_rest.asking,
+        "a conversation summed up is not one at work"
+    );
+    assert_eq!(
+        at_rest.settlement,
+        Settlement::Settled,
+        "no turn is open on a chain of Devin's own words and a summary, whatever the chain before it"
+    );
+
+    // The same words with no summary among them are a chain no turn was begun on, and say
+    // nothing of one.
+    let bare = Staged::new();
+    bare.chain(&[system("p-1"), system("p-2")]);
+    assert_eq!(record_of(&bare).settlement, Settlement::Unknown);
+
+    // A turn a window opened on it begins: the user's message and its answer, below the summary.
+    staged.node(
+        Some("n-4"),
+        Some("n-3"),
+        &user("u-2", Some(json!("request-2"))),
+    );
+    staged.node(Some("n-5"), Some("n-4"), &stopped("a-2", "Done."));
+    staged.head("n-5");
+    let then = record_of(&staged);
+    assert_eq!(then.settlement, Settlement::Settled);
+    assert!(!then.in_flight);
+    assert_eq!(
+        then.items
+            .iter()
+            .map(|item| (&*item.id, item.role, item.complete))
+            .collect::<Vec<_>>()[3..],
+        [("u-2", Role::User, true), ("a-2", Role::Assistant, true)],
+        "the turn after the compaction is read as one after any chain, the summary in no way its own"
+    );
+}
+
+#[test]
+fn a_summary_with_a_turn_open_on_the_wire_is_no_conversation_at_rest_until_the_turn_ends() {
+    // A compaction in the middle of a turn that kept no step: the chain is Devin's own words
+    // and the summary, no message of the user's and no step, as it is at rest. Only the wire
+    // tells which. Devin says `blocked` before the turn's end, and where it waits for its
+    // user, and works again after: a turn is over only where its end is said (T-1395, the
+    // review of its first head: a Stop owed was paid as if the window rested, and was never
+    // owed again).
+    let status = |state: &str| {
+        json!({
+            "sessionId": SESSION,
+            "update": {
+                "sessionUpdate": "session_info_update",
+                "_meta": {
+                    "cognition.ai/timestamp": 1_792_976_967_738_i64,
+                    "cognition.ai/eventType": "status_update",
+                    "cognition.ai/statusEnum": state,
+                },
+            },
+        })
+    };
+    let thought = json!({
+        "sessionId": SESSION,
+        "update": {
+            "sessionUpdate": "agent_thought_chunk",
+            "content": { "type": "text", "text": "Reading the next file." },
+            "_meta": {
+                "cognition.ai/timestamp": "2026-11-10T20:35:15.000000+00:00",
+                "cognition.ai/streamingMessageId": "stream-1",
+            },
+        },
+    });
+    let staged = Staged::new();
+    let system =
+        |id: &str| json!({ "message_id": id, "role": "system", "content": "Devin's own." });
+    staged.chain(&[system("p-1"), system("p-2"), summary("s-1")]);
+    let mut reader = staged.reader();
+    // What a look that read each step before and a fresh one, which read the same, say.
+    let both = |staged: &Staged, reader: &mut Box<dyn Look + Send>, what: &str| {
+        let incremental = look(reader);
+        assert_eq!(
+            show(&incremental),
+            read_once(staged),
+            "{what}: a fresh look reads the same"
+        );
+        match &*incremental {
+            Reading::Known(record) => (record.settlement, record.in_flight),
+            other => panic!("{other:?}"),
+        }
+    };
+
+    let mut wire = vec![status("working"), thought.clone()];
+    staged.wire("launch-1", &wire);
+    assert_eq!(
+        both(&staged, &mut reader, "at work"),
+        (Settlement::InFlight, true),
+        "Devin says it works"
+    );
+
+    // It waits, or is about to end its turn: not at work by its word, and no end said.
+    wire.push(status("blocked"));
+    staged.wire("launch-1", &wire);
+    assert_eq!(
+        both(&staged, &mut reader, "blocked"),
+        (Settlement::Unknown, false),
+        "a turn that began and did not end is no conversation at rest, whatever Devin says of its work"
+    );
+
+    // The turn's end is said: nothing is open on the chain, as at rest.
+    wire.extend([
+        json!({ "sessionId": SESSION, "turnClientMessageId": "request-1" }),
+        json!({ "sessionId": SESSION, "cause": "complete", "stats": {} }),
+    ]);
+    staged.wire("launch-1", &wire);
+    assert_eq!(
+        both(&staged, &mut reader, "ended"),
+        (Settlement::Settled, false)
+    );
+
+    // And a turn begun after it, by the same word, is open again.
+    wire.extend([status("working"), status("blocked")]);
+    staged.wire("launch-1", &wire);
+    assert_eq!(
+        both(&staged, &mut reader, "begun again"),
+        (Settlement::Unknown, false)
+    );
+
+    // A turn whose work was said with no word of Devin's that it works is open as well.
+    let bare = Staged::new();
+    bare.chain(&[system("p-1"), system("p-2"), summary("s-1")]);
+    let mut reader = bare.reader();
+    bare.wire("launch-1", &[thought, status("blocked")]);
+    assert_eq!(
+        both(&bare, &mut reader, "work alone"),
+        (Settlement::Unknown, false)
+    );
 }

@@ -356,8 +356,9 @@ find = '''    for key in [
         "rules",
         "compaction",
         "advisorTool",
+        "promptSuggestion",
     ] {'''
-replace = '    for key in ["gate", "wakeUp", "specs", "compaction", "advisorTool"] {'
+replace = '    for key in ["gate", "wakeUp", "specs", "compaction", "advisorTool", "promptSuggestion"] {'
 
 [[plant]]
 name = "new project sections: the page leaves the compaction out of the request it makes to the ledger"
@@ -373,8 +374,9 @@ find = '''    for key in [
         "rules",
         "compaction",
         "advisorTool",
+        "promptSuggestion",
     ] {'''
-replace = '    for key in ["gate", "wakeUp", "specs", "rules", "advisorTool"] {'
+replace = '    for key in ["gate", "wakeUp", "specs", "rules", "advisorTool", "promptSuggestion"] {'
 
 [[plant]]
 name = "new project sections: rules the page sends the daemon cannot read are let through"
@@ -570,6 +572,9 @@ find = '''
         if request.advisor_tool {
             set_advisor_tool(store, id, true)?;
         }
+        if request.prompt_suggestion {
+            set_prompt_suggestion(store, id, true)?;
+        }
         known_project(store, id)
     })
 }'''
@@ -579,6 +584,9 @@ replace = '''
         }
         if request.advisor_tool {
             set_advisor_tool(store, id, true)?;
+        }
+        if request.prompt_suggestion {
+            set_prompt_suggestion(store, id, true)?;
         }
         known_project(store, id)
     })
@@ -604,12 +612,18 @@ find = '''
         if request.advisor_tool {
             set_advisor_tool(store, id, true)?;
         }
+        if request.prompt_suggestion {
+            set_prompt_suggestion(store, id, true)?;
+        }
         known_project(store, id)
     })
 }'''
 replace = '''
         if request.advisor_tool {
             set_advisor_tool(store, id, true)?;
+        }
+        if request.prompt_suggestion {
+            set_prompt_suggestion(store, id, true)?;
         }
         known_project(store, id)
     })
@@ -638,12 +652,18 @@ find = '''
         if request.advisor_tool {
             set_advisor_tool(store, id, true)?;
         }
+        if request.prompt_suggestion {
+            set_prompt_suggestion(store, id, true)?;
+        }
         known_project(store, id)
     })
 }'''
 replace = '''
         if request.advisor_tool {
             set_advisor_tool(store, id, true)?;
+        }
+        if request.prompt_suggestion {
+            set_prompt_suggestion(store, id, true)?;
         }
         known_project(store, id)
     })

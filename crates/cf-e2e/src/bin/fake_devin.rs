@@ -34,7 +34,9 @@
 //!
 //! Where `FAKE_DEVIN_STAMPS` is set, its wire log is written as Devin 3000.11 writes one
 //! (`wire`): its work stamped with its time, its turns begun and ended by its word on them,
-//! no request of its TUI's, and a window opened again replaying its last turn.
+//! no request of its TUI's, and a window opened again replaying its last turn. Where it
+//! names 3000.12, as Devin 3000.12.43 writes one: stamped the same, with no word of Devin's
+//! on a turn (`wire::Shape::Unsaid`), and it says it is that Devin to `--version`.
 //!
 //! A window can do wrong once, as Devin has (`faults`): drop a paste, as a TUI that
 //! never took it (`FAKE_DEVIN_DROP`), or end as its agent takes a message, once the
@@ -108,7 +110,7 @@ use stop::Stop;
 use store::Store;
 use terminal::{Event, Keys};
 use turn::{Pace, Window};
-use wire::Wire;
+use wire::{Shape, Wire};
 
 /// The command that opens a new conversation.
 const NEW: &str = "/new";
@@ -121,14 +123,18 @@ enum Given {
     New(String),
 }
 
-/// What makes the window write its wire log as Devin 3000.11 does (`Wire::stamped`): its
+/// What makes the window write its wire log as Devin 3000.11 does (`Shape::Stamped`): its
 /// work stamped, its turns begun and ended by its word on them, a window opened again
-/// replaying its last turn. Nothing in a person's environment sets it.
+/// replaying its last turn; or, where it names 3000.12, as Devin 3000.12.43 does
+/// (`Shape::Unsaid`). Nothing in a person's environment sets it.
 const STAMPS_VARIABLE: &str = "FAKE_DEVIN_STAMPS";
 
-/// What Devin says to `--version`: the Devin whose store and TUI it plays, which writes a
-/// prompt's history row at its Enter (`store::submitted`).
-const VERSION: &str = "devin 3000.11.92 (stand-in)";
+/// The shape of the window's wire log, and so the Devin it says it is to `--version`: one
+/// that writes a prompt's history row at its Enter (`store::submitted`), as 3000.11.92 and
+/// 3000.12.43 both do.
+fn shape() -> Shape {
+    Shape::named(own_var(STAMPS_VARIABLE).as_deref())
+}
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -137,7 +143,7 @@ fn main() -> ExitCode {
     let signals = signals::block();
     let own = std::env::current_exe().ok();
     match args::parse(&args, own.as_deref()) {
-        Asked::Version => say(&format!("{VERSION}\n"))
+        Asked::Version => say(&format!("{}\n", shape().version()))
             .map_or_else(|failed| fail(&failed.to_string()), |()| ExitCode::SUCCESS),
         // The models the rig's stand-ins list, as the daemon reads them as a dialog opens.
         Asked::Models => {
@@ -202,12 +208,19 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
     let asked_full = launch.permission_mode.as_deref() == Some("dangerous");
     let cut_in_its_first_turn = launch.resume.is_some() && !store.finished_a_turn();
     let permission = Arc::new(Permission::new(asked_full && !cut_in_its_first_turn));
-    let stamped = own_var(STAMPS_VARIABLE).is_some_and(|stamps| !stamps.is_empty());
     let mut wire = Wire::open(Path::new(&wire_log), &session)
         .map_err(said)?
-        .stamped(stamped);
+        .shape(shape());
     let mut opened = 0;
-    wire.announce(permission.mode()).map_err(said)?;
+    // Devin 3000.12.43 opened again with no message on a conversation whose first turn a
+    // quit cut says nothing of its mode, or of the conversation it shows, until it is
+    // typed to (T-1417, run 3: 20 s at rest, then `/code`); 3000.11.234 said it at once.
+    // One window showed it; "cut" is the stand-in's own, a store with no turn's end.
+    let mut unannounced =
+        shape() == Shape::Unsaid && cut_in_its_first_turn && launch.prompt_file.is_none();
+    if !unannounced {
+        wire.announce(permission.mode()).map_err(said)?;
+    }
     if launch.resume.is_some() {
         let (user, answer) = store.last_turn()?;
         wire.replayed(user.as_deref(), answer.as_deref())
@@ -231,6 +244,7 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
             .as_deref()
             .filter(|_| launch.resume.is_none()),
     );
+    let unbegun = Fault::of(own_var(faults::UNBEGUN_VARIABLE).as_deref());
     let folder = std::env::current_dir().map_err(said)?;
     let stores_commands =
         own_var(turn::STORES_COMMANDS_VARIABLE).is_some_and(|stores| !stores.is_empty());
@@ -241,6 +255,7 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
             let mut window = Window::new(store, wire, stop, io::stdout(), pace)
                 .in_mode(permission, folder)
                 .crashing_on(crash)
+                .beginning_nothing_on(unbegun)
                 .storing_commands(stores_commands);
             if let Some(folder) = jobs {
                 window = window.leaving_jobs_in(folder, std::process::id(), command::THINKING);
@@ -278,6 +293,11 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
                 Event::Submit(text) if dropping.meets(&text) => {}
                 // Enter at a dialog takes its first option; anywhere else it submits.
                 Event::Submit(text) => {
+                    if std::mem::take(&mut unannounced) {
+                        Wire::open(Path::new(&wire_log), &session)
+                            .and_then(|mut shown| shown.announce(permission.mode()))
+                            .map_err(said)?;
+                    }
                     if permission.answer(Answer::Approved) {
                     } else if text.trim() == NEW {
                         opened += 1;

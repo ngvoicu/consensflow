@@ -21,6 +21,15 @@ fn settings_env(frame: &Value) -> Option<Value> {
     Some(file.get("env").cloned().unwrap_or(Value::Null))
 }
 
+/// The advisor's switch in the `env` block of the window's settings file: none where the file
+/// has no `env`, or none of it. (The block may hold the prompt suggestion's switch besides, which
+/// every project has until it is ticked: `prompt_suggestion_off`.)
+fn advisor_switch(frame: &Value) -> Option<Value> {
+    settings_env(frame)?
+        .get("CLAUDE_CODE_DISABLE_ADVISOR_TOOL")
+        .cloned()
+}
+
 fn write_roster(rig: &Rig) -> cf_e2e::Result {
     rig.stand_ins(&json!({
         "schemaVersion": 1,
@@ -58,16 +67,9 @@ fn a_project_that_never_ticked_the_advisor_tool_launches_its_claude_members_with
     rig.tell(id, "DISPATCH --tier light Reply with exactly: CLAUDE_DONE")?;
     let chief = rig.open_frame(&format!("p{id}-chief"), OPEN)?;
     let worker = worker_window(&rig, &chief)?;
-    assert_eq!(
-        settings_env(&worker),
-        Some(json!({ "CLAUDE_CODE_DISABLE_ADVISOR_TOOL": "1" })),
-        "{worker}"
-    );
+    assert_eq!(advisor_switch(&worker), Some(json!("1")), "{worker}");
     // The chief's window is as it was: no kill switch in its settings file, if it has one.
-    assert!(
-        matches!(settings_env(&chief), None | Some(Value::Null)),
-        "{chief}"
-    );
+    assert_eq!(advisor_switch(&chief), None, "{chief}");
     rig.wait_for("the task to be done", secs(120), || {
         Ok(project.task(1).is_ok_and(|task| task["state"] == "done"))
     })?;
@@ -91,7 +93,8 @@ fn a_project_that_ticked_the_advisor_tool_launches_its_claude_members_as_it_alwa
     rig.tell(id, "DISPATCH --tier light Reply with exactly: CLAUDE_DONE")?;
     let chief = rig.open_frame(&format!("p{id}-chief"), OPEN)?;
     let worker = worker_window(&rig, &chief)?;
-    assert_eq!(settings_env(&worker), Some(Value::Null), "{worker}");
+    assert_eq!(advisor_switch(&worker), None, "{worker}");
+    assert!(settings_env(&worker).is_some(), "{worker}: it has a file");
     rig.wait_for("the task to be done", secs(120), || {
         Ok(project.task(1).is_ok_and(|task| task["state"] == "done"))
     })?;

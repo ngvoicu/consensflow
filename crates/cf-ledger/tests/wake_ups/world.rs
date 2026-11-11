@@ -82,6 +82,7 @@ fn world_with(gate: bool) -> World {
             staff_rules: None,
             compaction: None,
             advisor_tool: false,
+            prompt_suggestion: false,
         })
         .expect("a project");
     World {

@@ -1035,7 +1035,8 @@ export class NewProjectDialog {
     }
     this.#starting = true
     const form = this.#form
-    const { gate, wakeUp, specs, rules, compaction, advisorTool } = this.#sections.values()
+    const { gate, wakeUp, specs, rules, compaction, advisorTool, promptSuggestion } =
+      this.#sections.values()
     const body = {
       directory: form.elements.directory.value,
       ...this.#chief.values(),
@@ -1048,6 +1049,7 @@ export class NewProjectDialog {
     // Always said, null for the harness's own point: a request that says nothing starts on the default.
     body.compaction = compaction
     if (advisorTool) body.advisorTool = true
+    if (promptSuggestion) body.promptSuggestion = true
     this.#say('')
     let refused = null
     try {
@@ -1224,10 +1226,12 @@ export class SwitchChiefDialog {
  * from the project's board, and drawn again in place while open, so it stays
  * current), the rules for the staff (`StaffRules`), the size its members' windows
  * compact at, whatever their harness (`Compaction`), whether its Claude Code members run
- * with Claude Code's own advisor tool (`AdvisorTool`), and the sections New project has too
+ * with Claude Code's own advisor tool (`AdvisorTool`), whether its Claude Code windows make
+ * Claude Code's prompt suggestion (`PromptSuggestion`), and the sections New project has too
  * (`ProjectSections`): human approval, wake-up calls and specs. Each saves as it
  * always did: the staff as it is added to or removed from, the approval as it is
- * ticked, the rules, the compaction, the advisor tool, the calls and the specs by their own Save.
+ * ticked, the rules, the compaction, the advisor tool, the prompt suggestion, the calls and the
+ * specs by their own Save.
  *
  * The dialog is for one project, the one it is asked for, from then until it
  * closes. Everything it shows is that project's and every change it makes goes
@@ -1249,6 +1253,7 @@ export class ProjectSettingsDialog {
   /** The size the members' windows compact at, whatever their harness, shown as the board has it. */
   #compaction
   #advisorTool
+  #promptSuggestion
   /** Computer use: a part for each of the project's harnesses that has one. */
   #computerUse
   /** The project the dialog was last opened for, by id: the one it is for until it closes. */
@@ -1309,6 +1314,7 @@ export class ProjectSettingsDialog {
     this.#rules = sections.rules
     this.#compaction = sections.compaction
     this.#advisorTool = sections.advisorTool
+    this.#promptSuggestion = sections.promptSuggestion
     this.#computerUse = sections.computerUse
     // What the dialog changes is its project's, whichever board the page shows now.
     this.#gate.addEventListener('change', () => {
@@ -1419,6 +1425,7 @@ export class ProjectSettingsDialog {
     this.#rules.show(board.project)
     this.#compaction.show(board.project)
     this.#advisorTool.show(board.project)
+    this.#promptSuggestion.show(board.project)
     this.#computerUse.show(computerUse)
     this.#draw()
     this.#specs.draw(board.project, true)

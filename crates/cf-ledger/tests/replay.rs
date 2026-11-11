@@ -322,9 +322,9 @@ const ANSWERED_AS_IT_WAITED: &str =
 const WINDOW_ENDED: &str =
     "a release withdraws what the old window still held for the human with the reason `withdrawn: @x's window ended first`; Node gave none";
 /// A critical task's lead was reworded in the role texts' own terms (T-1060):
-/// it changes no file and answers to the chief.
+/// it changes no project file and answers to the chief.
 const CRITICAL_WORDS: &str =
-    "a critical task's lead says the work changes no file and its findings go to the chief, where Node's forbade specifications and sent them to `your coordinator`";
+    "a critical task's lead says the work changes no project file and its findings go to the chief, where Node's forbade specifications and sent them to `your coordinator`";
 
 /// What Node's ledger drew in each call (the clock's readings, session
 /// names), answered here in the same order; drawing past them is noted.

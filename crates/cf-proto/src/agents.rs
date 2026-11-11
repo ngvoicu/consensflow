@@ -69,10 +69,12 @@ impl Harness {
     }
 
     /// The shell its window runs a command in, as far as how it runs a program by its path:
-    /// Codex's on Windows is PowerShell (T-972, zeewin2), every other is bash-like (Git Bash
-    /// on Windows: Claude Code, Pi and Devin). `windows` is where the window runs.
+    /// Codex's and Muse's on Windows are PowerShell (T-972, zeewin2; Muse runs each command
+    /// in a `powershell.exe -NoLogo -NoProfile -Command`, seen live on zeewin2 with Muse
+    /// 1.4.13 and 1.4.14, T-1126), every other is bash-like (Git Bash on Windows: Claude
+    /// Code, Pi and Devin). `windows` is where the window runs.
     pub fn shell(self, windows: bool) -> Shell {
-        if windows && self == Harness::Codex {
+        if windows && matches!(self, Harness::Codex | Harness::Muse) {
             Shell::PowerShell
         } else {
             Shell::Posix
@@ -362,14 +364,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_codex_on_windows_runs_its_commands_in_powershell() {
+    fn only_codex_and_muse_on_windows_run_their_commands_in_powershell() {
         for harness in Harness::ALL {
             assert_eq!(
                 harness.shell(false),
                 Shell::Posix,
                 "{harness:?} off Windows"
             );
-            let on_windows = if harness == Harness::Codex {
+            let on_windows = if matches!(harness, Harness::Codex | Harness::Muse) {
                 Shell::PowerShell
             } else {
                 Shell::Posix

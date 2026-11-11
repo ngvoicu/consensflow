@@ -13,7 +13,9 @@
 //! It is the size as the human chose it: the ledger does no sum with any harness's own
 //! margin. The engine gives every member's launch the size at launch and on resume, and a
 //! chief's launch never; each harness's adapter gives it its harness by that harness's own
-//! rule, and a size above a model's own window leaves the harness's own point.
+//! rule, and a size above a model's own window leaves the harness's own point. A size the row
+//! holds under [`COMPACTION_MIN`] (an earlier build took less) stays as it is in the row and
+//! is given to a launch as [`COMPACTION_MIN`] ([`launch_size`]).
 
 use cf_proto::ledger::ProjectView;
 use rusqlite::params;
@@ -23,8 +25,13 @@ use super::known_project;
 use crate::model::LedgerError;
 use crate::store::Store;
 
-/// The smallest size: the least Claude Code takes for its compaction window.
-pub const COMPACTION_MIN: u32 = 100_000;
+/// The smallest size: under it a window that has just compacted can already be over its
+/// harness's own firing point (Claude Code fires at the size less 33,000, and a fresh
+/// worker's first call is a median 71,000 and the next call after a compaction was up to 161,000),
+/// so it compacts again within a few calls, and three times in a row ends the turn with Claude
+/// Code's own error. Claude Code itself takes 100,000 for its compaction window; the floor is
+/// above that for this reason (T-1439, `tests.rs` holds the arithmetic).
+pub const COMPACTION_MIN: u32 = 250_000;
 
 /// The largest size: the most Claude Code takes for its compaction window.
 pub const COMPACTION_MAX: u32 = 1_000_000;
@@ -35,6 +42,16 @@ pub const COMPACTION_MAX: u32 = 1_000_000;
 /// only; the page's New project opens on it too (`app/ui/core/compaction.js`, held to this
 /// by a test of the daemon).
 pub const COMPACTION_DEFAULT: u32 = 300_000;
+
+/// The size a member's launch is given for the one the project's row holds: the row's own
+/// size, and [`COMPACTION_MIN`] where the row holds less. 3.0.7-alpha.4 took any size from
+/// 100,000, and a project that chose one there keeps it (nothing rewrites the row, and the
+/// page says it holds one under the least), but a window launched with it is the dead one
+/// [`COMPACTION_MIN`] is there to prevent, on every launch, until the human changes the
+/// size (T-1439). The engine's launch is the one place a size goes to a harness.
+pub fn launch_size(stored: u32) -> u32 {
+    stored.max(COMPACTION_MIN)
+}
 
 fn refused() -> LedgerError {
     LedgerError::refused(
