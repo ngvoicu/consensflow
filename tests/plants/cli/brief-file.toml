@@ -94,8 +94,8 @@ runs = ["encodings"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/brief.rs"
-find = '''    if !pairs.remainder().is_empty() {'''
-replace = '''    if false && !pairs.remainder().is_empty() {'''
+find = '''    if !odd.is_empty() {'''
+replace = '''    if false && !odd.is_empty() {'''
 
 [[plant]]
 name = "a brief's encoding: half a surrogate pair becomes a replacement character"
