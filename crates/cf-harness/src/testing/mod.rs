@@ -258,6 +258,12 @@ impl ManualTime {
     pub fn settle_at(&self, until: i64) {
         self.now.set(until.max(self.now.get()));
     }
+
+    /// Sets the clock to `to`, back too: the machine's time being set, which the clock
+    /// that does not step ([`Time::monotonic_ms`]) does not see. A test's.
+    pub fn set_wall(&self, to: i64) {
+        self.now.set(to);
+    }
 }
 
 impl Time for ManualTime {

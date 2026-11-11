@@ -647,7 +647,7 @@ runs = ["mc-pi-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = '''    if (!(compaction < usage.contextWindow)) return
+find = '''    if (!(compaction < usage.contextWindow)) return false
 '''
 replace = '''
 '''
@@ -659,7 +659,7 @@ runs = ["mc-pi-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = '''    if (event?.aborted === true) return
+find = '''    if (event?.aborted === true) return false
 '''
 replace = '''
 '''

@@ -22,6 +22,9 @@ pub struct TestTime {
     /// test's does not.
     timers: ManualTime,
     recorder: Recorder,
+    /// How far the wall clock has been stepped (set forward or back) since the start, which the
+    /// clock that does not step does not see ([`TestTime::step_wall`]).
+    stepped: std::cell::Cell<i64>,
 }
 
 impl TestTime {
@@ -30,7 +33,15 @@ impl TestTime {
             clock,
             timers: ManualTime::new(0),
             recorder,
+            stepped: std::cell::Cell::new(0),
         }
+    }
+
+    /// The machine's time is set by `ms` (back where it is negative): the wall clock moves, and
+    /// the clock that does not step ([`Time::monotonic_ms`]) does not.
+    pub fn step_wall(&self, ms: i64) {
+        self.clock.set_wall(self.clock.wall_ms() + ms);
+        self.stepped.set(self.stepped.get() + ms);
     }
 
     /// Ends the sleep due first: whether there was one.
@@ -42,6 +53,10 @@ impl TestTime {
 impl Time for TestTime {
     fn wall_ms(&self) -> i64 {
         self.clock.wall_ms()
+    }
+
+    fn monotonic_ms(&self) -> i64 {
+        self.clock.wall_ms() - self.stepped.get()
     }
 
     fn sleep(&self, duration: Duration) -> Work<'_, ()> {

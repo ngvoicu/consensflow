@@ -101,6 +101,12 @@ pub struct FakeAgent {
     pub lost_records: HashMap<String, Vec<usize>>,
     /// Why the window has not said which conversation it shows yet.
     pub unnamed: Option<String>,
+    /// When its extension said it asked its harness to compact the conversation for the
+    /// project's size, and has not said it over (`Window::compaction_asked`, Pi's).
+    pub compaction_asked: Option<i64>,
+    /// Its word is there and cannot be read this time (`CompactionWord::Unreadable`): it
+    /// says so whatever `compaction_asked` is.
+    pub compaction_unreadable: bool,
     /// How often the engine told the window it pressed the interrupt keys.
     pub interrupted: u32,
     /// The window stops where it is when it is interrupted, writing nothing:
@@ -1024,6 +1030,14 @@ impl FakeAdapter {
                     reason: "refused by the test".to_owned(),
                 };
             }
+            // Pi's extension sends nothing into a window while the compaction it asked for is at
+            // work, whatever the word (its own `compacting` flag): refused busy, no attempt spent.
+            if agent.compaction_asked.is_some() || agent.compaction_unreadable {
+                return Admission::Busy {
+                    reason: "Pi is at work: its extension sends nothing until it is idle"
+                        .to_owned(),
+                };
+            }
             if agent.arrive {
                 let (recorded, sources) =
                     self.recorded_text(text, agent.items.iter().map(|item| &*item.text));
@@ -1251,6 +1265,8 @@ impl Asked {
             records_unreadable: Vec::new(),
             lost_records: HashMap::new(),
             unnamed: None,
+            compaction_asked: None,
+            compaction_unreadable: false,
             interrupted: 0,
             stops_when_interrupted: false,
             takes_back: false,

@@ -30,8 +30,8 @@ use super::install::prepare_extension;
 use super::paths;
 use super::record::evidence::working;
 use crate::contract::{
-    Adapter, Admission, FirstMessage, Held, Launch, LaunchId, NoDefault, Observed, Pane, PaneHost,
-    Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
+    Adapter, Admission, CompactionWord, FirstMessage, Held, Launch, LaunchId, NoDefault, Observed,
+    Pane, PaneHost, Prepared, Readiness, Records, Skill, Specs, Used, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, PiSettlement};
@@ -293,6 +293,10 @@ impl Window for PiWindow {
     /// before it records the prompt that set it off: its status line says it.
     fn compacting(&self, screen: &[String]) -> bool {
         compacting::drawn(screen, &compacting::PI)
+    }
+
+    fn compaction_asked(&self) -> CompactionWord {
+        self.channel.compaction_asked(&self.session.borrow())
     }
 
     fn follow(&self, session: &str) {

@@ -338,8 +338,11 @@ jobs:
       # The page, and the native cf for the page's Playwright suite, built into bin/.
       - run: npm --prefix app run bundle:ui
       - run: npm --prefix app run prepare-sidecar
+      # No --with-deps: it runs apt-get, and apt on the runner failed for hours on
+      # 2026-11-11; the runner's image has Chromium's libraries. If a later image drops one,
+      # the suite fails at browser launch naming it: install that library, not all of --with-deps.
       - working-directory: app
-        run: npx playwright install --with-deps chromium && npm run test:ui
+        run: npx playwright install chromium && npm run test:ui
       # The engine's kit again, with the gate's pacing on in every case (the
       # plain kit is the workspace job's): what a case that asks for no settle
       # would hide (T-842's P1). cf-engine holds no code of one system's (T-1132's

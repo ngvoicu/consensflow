@@ -1,0 +1,240 @@
+# A Muse member's task was held "working in the background (5 agents)" for 25 minutes after its
+# five `workflow-agent` children had ended and the member had answered whole (T-1458, found by
+# T-1467, mended by T-1471; spec alpha-5, item A5-26): the reader waited for a `subagent_result`
+# or an ended `status_updated`, and a workflow's child gets neither, only `result_ready` and its
+# lifecycle's `completed` and `terminal`, and a workflow's end notice is waited for, one
+# bounded wait, after its task ends (`crates/cf-harness/src/muse/record/work.rs`, the
+# cases on made records in `muse/record/tests/workflow.rs`; T-1481). A wrong reading is silent: the
+# plants take each part of the rule out, and the case named in `meant` fails.
+#
+# Every name holds `muse workflow children`:
+# `npm run plants:daemon -- "muse workflow children"` runs them all.
+
+[run]
+muse-workflow = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::workflow::"]
+muse-shapes = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::shapes::"]
+
+[[plant]]
+name = "muse workflow children: a workflow child's result_ready is not its end"
+meant = "five_workflow_children_that_end_with_result_ready_are_five_agents_until_each_ends"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            Some("result_ready") if self.workflow_of.contains_key(&child) => {'''
+replace = '''            Some("result_ready") if self.workflow_of.contains_key(&child) && false => {'''
+
+[[plant]]
+name = "muse workflow children: a plain child's result_ready is its end before its result is taken in"
+meant = "a_child_its_parent_did_not_wait_on_is_an_agent_pending_until_its_result_is_taken_in"
+runs = ["muse-shapes"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            Some("result_ready") if self.workflow_of.contains_key(&child) => {'''
+replace = '''            Some("result_ready") => {'''
+
+[[plant]]
+name = "muse workflow children: a workflow child's lifecycle says nothing of its end"
+meant = "a_workflow_child_is_told_ended_by_its_lifecycle_alone"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''        if status.is_some_and(|status| LIFECYCLE_ENDED.contains(&status)) {'''
+replace = '''        if status.is_some_and(|status| LIFECYCLE_ENDED.contains(&status) && false) {'''
+
+[[plant]]
+name = "muse workflow children: a workflow's task end owes no notice"
+meant = "a_workflow_ended_and_told_nothing_is_pending_for_a_set_time_and_not_after"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''                    if self.told.contains(&task) {'''
+replace = '''                    if true {'''
+
+[[plant]]
+name = "muse workflow children: a drained notice does not end the wait"
+meant = "a_workflow_ended_before_its_notice_is_queued_is_pending_until_the_notice_is_taken_in"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            if let Some(owed) = self.owed.remove(owner) {'''
+replace = '''            if let Some(owed) = None::<Owed> {'''
+
+[[plant]]
+name = "muse workflow children: the wait never ends by the time"
+meant = "a_workflow_ended_and_told_nothing_is_pending_for_a_set_time_and_not_after"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            if !told.contains(task) && owed.over(now_ms) {'''
+replace = '''            if !told.contains(task) && owed.over(now_ms) && false {'''
+
+[[plant]]
+name = "muse workflow children: a queued notice does not keep a failed workflow's children past the wait"
+meant = "a_child_of_a_workflow_that_failed_is_ended_when_its_notice_is_drained"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            if !told.contains(task) && owed.over(now_ms) {'''
+replace = '''            if owed.over(now_ms) {'''
+
+[[plant]]
+name = "muse workflow children: the wait is shorter than the made record's drain and more"
+meant = "a_workflow_ended_and_told_nothing_is_pending_for_a_set_time_and_not_after"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''pub(super) const NOTICE_WAIT_MS: i64 = 10_000;'''
+replace = '''pub(super) const NOTICE_WAIT_MS: i64 = 1_000;'''
+
+[[plant]]
+name = "muse workflow children: the wait is a minute or more"
+meant = "a_workflow_ended_and_told_nothing_is_pending_for_a_set_time_and_not_after"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''pub(super) const NOTICE_WAIT_MS: i64 = 10_000;'''
+replace = '''pub(super) const NOTICE_WAIT_MS: i64 = 60_000;'''
+
+[[plant]]
+name = "muse workflow children: the run that was awake ending ends the wait"
+meant = "the_awake_run_ending_before_the_notice_is_queued_reads_pending_throughout"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''    pub(super) fn run_ended(&mut self, run: &str) {'''
+replace = '''    pub(super) fn run_ended(&mut self, run: &str) {
+        self.owed.clear();'''
+
+[[plant]]
+name = "muse workflow children: a clock that steps back stretches the wait"
+meant = "a_clock_that_steps_back_neither_ends_the_wait_early_nor_stretches_it"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            if stepped_back || owed.since_ms.is_none() {'''
+replace = '''            if owed.since_ms.is_none() {'''
+
+[[plant]]
+name = "muse workflow children: a record dated after the look holds the wait"
+meant = "a_clock_that_steps_back_neither_ends_the_wait_early_nor_stretches_it"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            written > now_ms || now_ms.saturating_sub(written) >= NOTICE_WAIT_MS'''
+replace = '''            now_ms.saturating_sub(written) >= NOTICE_WAIT_MS'''
+
+[[plant]]
+name = "muse workflow children: the record's time alone ends the wait at the first look"
+meant = "a_task_ended_long_before_the_first_look_is_waited_on_from_that_look"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''        looks && record'''
+replace = '''        record'''
+
+[[plant]]
+name = "muse workflow children: a completed workflow leaves a child counted"
+meant = "every_child_of_a_workflow_that_completed_is_ended_at_its_task_s_end"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''                    if completed {'''
+replace = '''                    if completed && false {'''
+
+[[plant]]
+name = "muse workflow children: the wait's end leaves a child of a failed workflow counted"
+meant = "a_child_of_a_workflow_that_failed_was_cancelled_or_timed_out_is_ended_with_the_wait_and_said"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''        let ended = self.end_children_of(run);'''
+replace = '''        let ended = run.map_or(0, |_| 0);'''
+
+[[plant]]
+name = "muse workflow children: a drained notice leaves a child of a failed workflow counted"
+meant = "a_child_of_a_workflow_that_failed_is_ended_when_its_notice_is_drained"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''                self.end_children_with(owner, owed.children_of.as_deref());
+            }
+            self.told'''
+replace = '''                let _ = owed;
+            }
+            self.told'''
+
+[[plant]]
+name = "muse workflow children: the children ended with the wait are not said"
+meant = "a_child_of_a_workflow_that_failed_was_cancelled_or_timed_out_is_ended_with_the_wait_and_said"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            children_ended_with_the_wait(task, ended);'''
+replace = '''            let _ = (task, ended);'''
+
+[[plant]]
+name = "muse workflow children: a debt at the session's end is not retired"
+meant = "a_notice_owed_and_never_queued_is_retired_where_the_session_ends_inside_the_wait"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            .chain(self.owed.keys().cloned());'''
+replace = '''            .chain(std::iter::empty());'''
+
+[[plant]]
+name = "muse workflow children: a task that timed out is still running"
+meant = "a_monitor_whose_time_passed_is_over"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            Some(kind) if ENDED.contains(&kind) => {'''
+replace = '''            Some(kind) if ENDED.contains(&kind) && kind != "timed_out" => {'''
+
+[[plant]]
+name = "muse workflow children: a kind of child record the reader does not know is never said"
+meant = "a_kind_of_child_record_the_reader_does_not_know_is_said_once_a_kind_not_once_a_look"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            unread("child record", kind);'''
+replace = '''            let _ = kind;'''
+
+[[plant]]
+name = "muse workflow children: a kind not known, or a workflow's children, is said at every look"
+meant = "a_kind_of_child_record_the_reader_does_not_know_is_said_once_a_kind_not_once_a_look"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/torn.rs"
+find = '''            if saying.unread.insert((what.to_owned(), name.to_owned())) {'''
+replace = '''            if saying.unread.insert((what.to_owned(), name.to_owned())) || true {'''
+
+[[plant]]
+name = "muse workflow children: a look with no record come answers what the last did"
+meant = "a_workflow_ended_and_told_nothing_is_pending_for_a_set_time_and_not_after"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/followed.rs"
+find = '''                    let changed = timed || matches!(looked, Looked::Read(_));'''
+replace = '''                    let changed = matches!(looked, Looked::Read(_)) || (timed && false);'''

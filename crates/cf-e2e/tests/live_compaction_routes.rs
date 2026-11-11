@@ -19,6 +19,14 @@
 //!   0.75 and 0.9 by default, and `provider_context_limit_tokens`, which replaces the model
 //!   catalog's context limit the fractions are of).
 //!
+//! - **Pi** ConsensFlow's own extension (`CF_COMPACTION_TOKENS`): it asks Pi to compact at a
+//!   rest, past the size, and keeps the word of it (`settled/<launch>.compacting.json`) until
+//!   the compaction ends, so that the engine does not close the done task's window under the
+//!   summary (T-1475: the close, ten seconds after the result, aborted every one). The case
+//!   runs a Pi member of a project of the least size, 250,000, through a task of two dozen
+//!   reads of 12,000 tokens each, and asks that the member's window is open when Pi's own
+//!   session writes a `compaction` entry, which no run has seen yet.
+//!
 //! Each case runs the harness on a home of the run's own (the kit's [`Isolation`] for Codex
 //! and Devin; for Muse a copy of `auth.json` and the model catalog, the login being the
 //! keychain's, as `live muse-reads` does) with the knob set low, so that a short turn crosses
@@ -37,6 +45,7 @@
 //! cargo xtask live compaction-routes -- codex
 //! cargo xtask live compaction-routes -- devin
 //! cargo xtask live compaction-routes -- muse
+//! cargo xtask live compaction-routes -- pi
 //! ```
 //!
 //! **Measured (T-1265, 2026-11-06, the Mac).** Codex 0.166.0 (gpt-5.6-luna) at 2000: 2
@@ -55,10 +64,14 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cf_e2e::live::guard::{copy_muse_into, login_in_keychain, Scratch};
+use cf_e2e::live::members::{self, find, is_over, Members, Plan};
 use cf_e2e::live::{agents, ask, codex, machine, Harness, Log};
 use cf_e2e::process::{own_var, Run};
 use cf_e2e::{files, rollout, Error, Result};
-use serde_json::Value;
+use serde_json::{json, Value};
+
+/// The stand-in for the Pi member's chief.
+const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
 /// How long one headless turn may take.
 const TURN: Duration = Duration::from_secs(300);
@@ -576,5 +589,142 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
         "the run changed a file of the owner's ~/.config/muse"
     );
     assert!(failed.is_empty(), "{}", failed.join("; "));
+    Ok(())
+}
+
+/// The size the Pi case gives the project: the least the setting takes (`COMPACTION_MIN`).
+const PI_SIZE: i64 = 250_000;
+
+/// How many files of some 12,000 tokens the Pi member reads (Pi's tools cut a result at 50 KB):
+/// together more than the size, each read after the one before.
+const PI_PARTS: usize = 24;
+
+/// How long the Pi member has to finish its task, and then its window to be kept for the
+/// compaction (the engine's bound is 300 s), and to close once it is over.
+const PI_TASK: Duration = Duration::from_secs(1_800);
+const PI_COMPACTION: Duration = Duration::from_secs(330);
+const PI_CLOSE: Duration = Duration::from_secs(60);
+
+/// The `tokensBefore` of every `compaction` entry in the sessions Pi kept in `agent_dir`.
+fn pi_compactions(agent_dir: &Path) -> Vec<i64> {
+    let mut found = Vec::new();
+    let mut folders = vec![agent_dir.join("sessions")];
+    while let Some(folder) = folders.pop() {
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            match entry.file_type() {
+                Ok(kind) if kind.is_dir() => folders.push(path),
+                Ok(kind) if kind.is_file() => {
+                    let text = std::fs::read_to_string(&path).unwrap_or_default();
+                    found.extend(text.lines().filter_map(|line| {
+                        let entry: Value = serde_json::from_str(line).ok()?;
+                        (entry["type"] == "compaction")
+                            .then(|| entry["tokensBefore"].as_i64())
+                            .flatten()
+                    }));
+                }
+                _ => {}
+            }
+        }
+    }
+    found
+}
+
+/// The project at the least size, one task of two dozen reads given to the Pi member, and what
+/// came of its window: whether it was open when Pi wrote its `compaction` entry, whether it
+/// closed after, and the entries' `tokensBefore`.
+fn pi_steps(members: &mut Members, log: &Log) -> Result<(bool, bool, Vec<i64>)> {
+    let chosen = members.page(
+        "project.compaction",
+        json!({ "project": members.project_id(), "compaction": PI_SIZE }),
+    )?;
+    assert_eq!(chosen["project"]["compaction"], json!(PI_SIZE), "{chosen}");
+    let agent = agents::id(Harness::Pi);
+    members.add(&agent, &[])?;
+    let files: Vec<String> = (1..=PI_PARTS)
+        .map(|part| format!("`cat part-{part:02}.txt`"))
+        .collect();
+    let number = members.give(
+        &agent,
+        &format!(
+            "Run these shell commands one at a time, each only after the one before has finished, never two in one call: {}. Then answer with the single word done.",
+            files.join(", ")
+        ),
+    )?;
+    let agent_dir = members
+        .var("PI_CODING_AGENT_DIR")
+        .map(PathBuf::from)
+        .ok_or_else(|| Error::Daemon("the kit gave Pi no PI_CODING_AGENT_DIR".to_owned()))?;
+    find(
+        log,
+        "the task to be done",
+        PI_TASK,
+        Duration::from_secs(2),
+        || Ok(is_over(&members.task(number)?).then_some(())),
+    )?
+    .ok_or_else(|| Error::Daemon(format!("T-{number} never ended")))?;
+    // Past the size at its rest, its extension has asked: the window is open while the summary
+    // is written, and Pi's session says it was.
+    let mut open_at_entry = false;
+    let entries = find(
+        log,
+        "Pi's `compaction` entry",
+        PI_COMPACTION,
+        Duration::from_secs(1),
+        || {
+            let entries = pi_compactions(&agent_dir);
+            if !entries.is_empty() {
+                open_at_entry = members.window_of(&agent)?.is_some();
+            }
+            Ok((!entries.is_empty()).then_some(entries))
+        },
+    )?
+    .unwrap_or_default();
+    let closed = find(
+        log,
+        "its window to close",
+        PI_CLOSE,
+        Duration::from_secs(1),
+        || Ok(members.window_of(&agent)?.is_none().then_some(())),
+    )?
+    .is_some();
+    log.say(format!(
+        "compaction entries (tokensBefore): {entries:?}; the window was open when the first came: {open_at_entry}; it closed after: {closed}"
+    ));
+    Ok((open_at_entry, closed, entries))
+}
+
+#[test]
+#[ignore = "opt-in: spends the machine's quota on one task of two dozen calls on Pi's cheap model, and its summary; cargo xtask live compaction-routes -- pi"]
+fn pi_member_whose_task_ends_past_the_size_has_its_window_kept_open_for_the_compaction_its_extension_asks_for(
+) -> Result {
+    let log = Log::begin("live compaction-routes pi")?;
+    let line = "These are the notes of the compaction check, a line of filler words to read.\n";
+    let mut plan = Plan::new("compaction-routes-pi", members::stand_in_chief())
+        .with(members::member(Harness::Pi));
+    for part in 1..=PI_PARTS {
+        plan = plan.with_file(&format!("part-{part:02}.txt"), line.repeat(600));
+    }
+    let mut members = Members::open(&plan, Path::new(FAKE_AGENT), &log)?;
+    let ran = pi_steps(&mut members, &log);
+    let ended = members.close();
+    let (open_at_entry, closed, entries) = ran?;
+    ended?;
+    assert!(
+        !entries.is_empty(),
+        "Pi never wrote a compaction entry: its window was closed under the compaction, or the extension never asked"
+    );
+    assert!(
+        entries.iter().any(|before| *before >= PI_SIZE),
+        "no compaction began at the size or past it: {entries:?}"
+    );
+    assert!(
+        open_at_entry,
+        "the window was closed before Pi wrote the compaction"
+    );
+    assert!(closed, "the window was kept past the compaction");
     Ok(())
 }

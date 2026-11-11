@@ -217,7 +217,7 @@ impl Log {
             Some("runtime.session") => match field(payload, "kind").and_then(Value::as_str) {
                 Some("run") => self.run_event(record, payload, at, seq),
                 Some("task") => {
-                    self.work.task(payload);
+                    self.work.task(payload, recorded_ms(record));
                     Ok(())
                 }
                 Some("approval") => {
@@ -228,7 +228,7 @@ impl Log {
                 }
                 _ => Ok(()),
             },
-            Some("subagent.control.spawn_accepted" | "subagent.control.status_updated") => {
+            Some(kind) if kind.starts_with("subagent.control.") => {
                 self.work.child(field(payload, "record"));
                 Ok(())
             }
@@ -371,6 +371,8 @@ impl Log {
                 }
             }
             Some("goal_run_binding") => self.work.goal_bound(field(event, "record")),
+            Some("workflow_run_launched") => self.work.workflow_launched(event),
+            Some("workflow_child_lifecycle") => self.work.workflow_child(event),
             Some("inbox_item_drained") => self.work.drained(event),
             // The model's thinking, as Muse commits what of it is readable: the history's alone.
             Some("reasoning_committed") => {
@@ -682,6 +684,14 @@ fn messages_text(messages: Option<&Value>) -> String {
         .join("\n")
 }
 
+/// When a record was written, in milliseconds since the epoch, where it says.
+fn recorded_ms(record: &Value) -> Option<i64> {
+    record
+        .get("recorded_at")
+        .and_then(Value::as_i64)
+        .map(|micros| micros / 1000)
+}
+
 /// When a record was written, as the readings say a time: `recorded_at`'s
 /// microseconds as the instant's ISO text, else the record's place.
 fn recorded_at(record: &Value, seq: &Value) -> Value {
@@ -693,6 +703,10 @@ fn recorded_at(record: &Value, seq: &Value) -> Value {
 }
 
 impl Parser for Log {
+    fn looked(&mut self, now_ms: i64) -> bool {
+        self.work.looked(now_ms)
+    }
+
     fn visit(&mut self, record: Value, index: usize) -> Result<(), Stop> {
         if record.is_null() {
             return Err(Stop::Failed(null_record(index)));
