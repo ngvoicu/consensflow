@@ -2,7 +2,7 @@
  * The "Compaction" section of Project settings: the size at which the human has every
  * member window of the project compact, whatever its harness, or each harness's own
  * point (the default, which changes nothing). Each member's launch gives it its harness
- * by that harness's own rule (smaller-contexts, SCX-28 to SCX-30), from 100,000 to
+ * by that harness's own rule (smaller-contexts, SCX-28 to SCX-30), from 200,000 to
  * 1,000,000 tokens; a size above a model's own window leaves the harness's own point.
  * The chief is never given it. Only the
  * human chooses it, here: no `cf` command does. The section shows the choice the
@@ -13,7 +13,7 @@
  */
 
 /** The smallest size: the ledger's `COMPACTION_MIN`, which a test of the daemon holds this to. */
-const LEAST = 100_000
+const LEAST = 200_000
 
 /** The largest size: the ledger's `COMPACTION_MAX`. */
 const MOST = 1_000_000

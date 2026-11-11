@@ -20,8 +20,13 @@ use super::known_project;
 use crate::model::LedgerError;
 use crate::store::Store;
 
-/// The smallest size: the least Claude Code takes for its compaction window.
-pub const COMPACTION_MIN: u32 = 100_000;
+/// The smallest size: under it a window that has just compacted can already be over its
+/// harness's own firing point (Claude Code fires at the size less 33,000, and a fresh
+/// worker's first call is a median 71,000 and a compaction leaves up to 120,000 or more), so
+/// it compacts again at once, three times and then ends the turn with Claude Code's own error.
+/// Claude Code takes 100,000 for its compaction window; the floor is above it for that
+/// reason (T-1439, tests.rs holds the arithmetic).
+pub const COMPACTION_MIN: u32 = 200_000;
 
 /// The largest size: the most Claude Code takes for its compaction window.
 pub const COMPACTION_MAX: u32 = 1_000_000;

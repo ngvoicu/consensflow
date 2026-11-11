@@ -1,5 +1,5 @@
 //! The size the human chooses for the project's member windows to compact at,
-//! whatever their harness: set, changed and taken away, from 100,000 to 1,000,000 tokens, what each
+//! whatever their harness: set, changed and taken away, from 200,000 to 1,000,000 tokens, what each
 //! change logs and tells the trace, that a refused one and one for a project that
 //! is not there change nothing, that the view has it only while there is one, and
 //! that a ledger at the version before gains none in every project with every row
@@ -102,12 +102,12 @@ fn a_size_outside_the_range_is_refused_and_changes_nothing() {
         .set_compaction(app.id, Some(400_000))
         .expect("set");
     let logged = home.told.borrow().len();
-    for tokens in [0, 99_999, 1_000_001, u32::MAX] {
+    for tokens in [0, 99_999, 100_000, 199_999, 1_000_001, u32::MAX] {
         assert_eq!(
             refusal(home.ledger.set_compaction(app.id, Some(tokens))),
             (
                 Some("invalid-compaction"),
-                "the compaction size is a whole number of tokens from 100000 to 1000000, or none for each harness's own point".to_owned()
+                "the compaction size is a whole number of tokens from 200000 to 1000000, or none for each harness's own point".to_owned()
             ),
             "{tokens}"
         );
