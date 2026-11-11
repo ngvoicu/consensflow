@@ -20,7 +20,7 @@ use cf_e2e::live::{ask, calls, until, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
 use serde_json::{json, Value};
 
-use crate::{config, secs, Outcome};
+use crate::{devin_config, on_the_installed_devin, secs, Outcome};
 
 /// The stand-in Devin, which the rig's windows find as `devin`, and the stand-in for
 /// the `cf` of a member's window.
@@ -66,7 +66,7 @@ fn a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversati
     ask::prepare()?;
     let stand_in = tempfile::tempdir()?;
     calls::install(stand_in.path(), Path::new(FAKE_CF))?;
-    let rig = Rig::start(config().devin(FAKE_DEVIN).first_on_path(stand_in.path()))?;
+    let rig = Rig::start(devin_config(FAKE_DEVIN).first_on_path(stand_in.path()))?;
     let home = rig.var("HOME").unwrap_or_default().to_owned();
     let install = Installed::at(Harness::Devin, FAKE_DEVIN, &home);
     let agent = json!({ "kind": "devin", "model": "fake" });
@@ -217,7 +217,7 @@ fn a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversati
 fn a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_readiness_switches_it(
 ) -> Outcome {
     ask::prepare()?;
-    let rig = Rig::start(config().devin(FAKE_DEVIN))?;
+    let rig = Rig::start(devin_config(FAKE_DEVIN))?;
     let home = rig.var("HOME").unwrap_or_default().to_owned();
     let install = Installed::at(Harness::Devin, FAKE_DEVIN, &home);
     let agent = json!({ "kind": "devin", "model": "fake" });
@@ -310,7 +310,7 @@ fn the_check_ends_the_command_its_window_runs_and_nothing_outside_the_window_tha
     use cf_e2e::process::Run;
 
     ask::prepare()?;
-    let rig = Rig::start(config().devin(FAKE_DEVIN))?;
+    let rig = Rig::start(devin_config(FAKE_DEVIN))?;
     let home = rig.var("HOME").unwrap_or_default().to_owned();
     let install = Installed::at(Harness::Devin, FAKE_DEVIN, &home);
     // What the window's command and the process outside it both say: the stand-in's command
@@ -393,7 +393,7 @@ fn config_folder(rig: &Rig, home: &str) -> PathBuf {
 fn a_member_launch_without_the_owners_hooks_keeps_the_ones_consensflow_adds_and_nothing_else(
 ) -> Outcome {
     ask::prepare()?;
-    let rig = Rig::start(config().devin(FAKE_DEVIN))?;
+    let rig = Rig::start(devin_config(FAKE_DEVIN))?;
     let home = rig.var("HOME").unwrap_or_default().to_owned();
     // The owner's own config of Devin, in the rig's home: a hook of theirs on an event of
     // its own, and one on an event ConsensFlow adds its own to.
@@ -492,4 +492,16 @@ fn the_launch_of_a_member_is_prepared_for_devin_and_pi_alone() -> Outcome {
     );
     rig.close()?;
     Ok(())
+}
+
+/// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423). The case of a
+/// window cut in its first turn stays on the stand-in's default shape: on 3000.12.43's a window
+/// opened again on a turn a quit cut says no mode until it is typed to (T-1417, run 3), which
+/// another task takes.
+#[test]
+fn a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversation_with_the_note_in_its_launch_on_devin_3000_12(
+) -> Outcome {
+    on_the_installed_devin(
+        a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversation_with_the_note_in_its_launch,
+    )
 }

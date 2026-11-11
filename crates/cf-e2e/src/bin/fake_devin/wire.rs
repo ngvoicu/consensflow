@@ -185,6 +185,14 @@ impl Wire {
     /// One record of the conversation, whole in one write: a record of the turn's work
     /// stamped with its time where the log is [`Wire::stamped`].
     fn record(&mut self, mut record: Value) -> io::Result<()> {
+        // Devin 3000.12.43 names a turn on a line of its own at its end (`ended`); no line of
+        // its work carries the turn's client message at the top: none of the 5 recorded logs
+        // of T-1417 and T-1423 has one (the review T-1429).
+        if self.shape == Shape::Unsaid && record.get("update").is_some() {
+            if let Some(line) = record.as_object_mut() {
+                line.remove("turnClientMessageId");
+            }
+        }
         record["sessionId"] = json!(self.session);
         let kind = record["update"]["sessionUpdate"]
             .as_str()
@@ -579,6 +587,10 @@ mod tests {
             meta(1, "cognition.ai/streamingMessageId"),
             "client-1-thought"
         );
+        // No line of the work names its turn at the top: none of the recorded logs has one.
+        assert!(records[..4]
+            .iter()
+            .all(|record| record.get("turnClientMessageId").is_none()));
         // A call is stamped and in no stream, as a replay is.
         assert_eq!(kind(2), "tool_call");
         assert!(meta(2, "cognition.ai/streamingMessageId").is_null());

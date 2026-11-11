@@ -15,14 +15,14 @@
 use cf_e2e::rig::{Config, Project, Rig};
 use serde_json::{json, Value};
 
-use crate::{config, secs, Outcome};
+use crate::{devin_config, on_the_installed_devin, secs, Outcome};
 
 /// The stand-in for Devin, built for these tests.
 const FAKE_DEVIN: &str = env!("CARGO_BIN_EXE_fake-devin");
 
 /// A rig whose Devin windows are the stand-in's.
 fn devin_rig() -> Config {
-    config().devin(FAKE_DEVIN)
+    devin_config(FAKE_DEVIN)
 }
 
 /// The roster of the case: the chief on the stand-in `claude`, and a Devin worker.
@@ -210,4 +210,37 @@ fn done_after(task: &str) -> Outcome {
     );
     rig.close()?;
     Ok(())
+}
+
+// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423).
+#[test]
+fn a_devin_workers_answer_goes_in_once_into_the_same_window_after_devin_compacted_the_turn_that_asked_on_devin_3000_12(
+) -> Outcome {
+    on_the_installed_devin(
+        a_devin_workers_answer_goes_in_once_into_the_same_window_after_devin_compacted_the_turn_that_asked,
+    )
+}
+
+#[test]
+fn a_devin_workers_answer_goes_in_once_into_the_same_window_after_a_turn_that_asked_on_devin_3000_12(
+) -> Outcome {
+    on_the_installed_devin(
+        a_devin_workers_answer_goes_in_once_into_the_same_window_after_a_turn_that_asked,
+    )
+}
+
+#[test]
+fn a_devin_workers_result_is_taken_after_devin_compacted_the_turn_that_gives_it_on_devin_3000_12(
+) -> Outcome {
+    on_the_installed_devin(
+        a_devin_workers_result_is_taken_after_devin_compacted_the_turn_that_gives_it,
+    )
+}
+
+#[test]
+fn a_devin_workers_brief_is_proved_arrived_though_devin_compacted_its_turn_before_the_daemon_looked_on_devin_3000_12(
+) -> Outcome {
+    on_the_installed_devin(
+        a_devin_workers_brief_is_proved_arrived_though_devin_compacted_its_turn_before_the_daemon_looked,
+    )
 }

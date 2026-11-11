@@ -42,7 +42,7 @@ use cf_e2e::Error;
 use serde_json::{json, Value};
 
 use crate::devin_pause::write_roster;
-use crate::{config, secs, Outcome, FAKE_DEVIN};
+use crate::{devin_config, secs, Outcome};
 
 /// The tier the worker was given, as a word the chief's brief names.
 fn tier(added: &Value) -> &str {
@@ -73,7 +73,7 @@ fn close_note(project: &Project) -> cf_e2e::Result<Option<Value>> {
 #[test]
 fn a_devin_worker_that_leaves_a_command_that_goes_on_reporting_has_its_task_done_and_the_command_ended(
 ) -> Outcome {
-    let rig = Rig::start(config().devin(FAKE_DEVIN))?;
+    let rig = Rig::start(devin_config())?;
     write_roster(&rig)?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("devin-worker")?;
@@ -142,4 +142,13 @@ fn a_devin_worker_that_leaves_a_command_that_goes_on_reporting_has_its_task_done
     })?;
     rig.close()?;
     Ok(())
+}
+
+// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423): the case as
+// it is, the stand-in's shape chosen here and not by the environment.
+
+#[test]
+fn a_devin_worker_that_leaves_a_command_that_goes_on_reporting_has_its_task_done_and_the_command_ended_on_devin_3000_12(
+) -> Outcome {
+    crate::on_the_installed_devin(a_devin_worker_that_leaves_a_command_that_goes_on_reporting_has_its_task_done_and_the_command_ended)
 }

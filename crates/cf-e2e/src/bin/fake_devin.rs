@@ -40,7 +40,10 @@
 //!
 //! A window can do wrong once, as Devin has (`faults`): drop a paste, as a TUI that
 //! never took it (`FAKE_DEVIN_DROP`), or end as its agent takes a message, once the
-//! message is recorded (`FAKE_DEVIN_CRASH`).
+//! message is recorded (`FAKE_DEVIN_CRASH`). Or it can say a message back late
+//! (`FAKE_DEVIN_GAP`): Devin 3000.12.43 says one back 0.2 to 2.1 s after its Enter, and a
+//! paste that comes in that gap goes in behind it; the stand-in holds the turn in the gap
+//! until the next message comes.
 //!
 //! `/new` opens a new conversation: the window shows it at once (its wire says so, and
 //! its store has the session), and the turns after the ones queued go into it. The turn
@@ -94,6 +97,7 @@ use std::convert::Infallible;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
@@ -163,6 +167,11 @@ fn main() -> ExitCode {
 }
 
 /// Says why the window could not run, on its error output.
+/// Counts a message handed to the window, before it is on its way.
+fn handed_one(handed: &AtomicU64) {
+    handed.fetch_add(1, Ordering::SeqCst);
+}
+
 fn fail(failed: &str) -> ExitCode {
     let _ = writeln!(io::stderr(), "fake-devin: {failed}");
     ExitCode::FAILURE
@@ -245,17 +254,21 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
             .filter(|_| launch.resume.is_none()),
     );
     let unbegun = Fault::of(own_var(faults::UNBEGUN_VARIABLE).as_deref());
+    let gap = Fault::of(own_var(faults::GAP_VARIABLE).as_deref());
+    let handed = Arc::new(AtomicU64::new(0));
     let folder = std::env::current_dir().map_err(said)?;
     let stores_commands =
         own_var(turn::STORES_COMMANDS_VARIABLE).is_some_and(|stores| !stores.is_empty());
     {
         let (stop, permission) = (Arc::clone(&stop), Arc::clone(&permission));
+        let handed = Arc::clone(&handed);
         let file = file.clone();
         thread::spawn(move || {
             let mut window = Window::new(store, wire, stop, io::stdout(), pace)
                 .in_mode(permission, folder)
                 .crashing_on(crash)
                 .beginning_nothing_on(unbegun)
+                .beginning_late_on(gap, handed)
                 .storing_commands(stores_commands);
             if let Some(folder) = jobs {
                 window = window.leaving_jobs_in(folder, std::process::id(), command::THINKING);
@@ -277,6 +290,7 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
     }
     if let Some(file) = &launch.prompt_file {
         let first = std::fs::read_to_string(file).map_err(|failed| format!("{file}: {failed}"))?;
+        handed_one(&handed);
         let _ = turns.send(Given::Message(first, true));
     }
 
@@ -311,6 +325,7 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
                         if let Err(failed) = store::submitted(Path::new(&file), &session, &text) {
                             let _ = writeln!(io::stderr(), "fake-devin: {failed}");
                         }
+                        handed_one(&handed);
                         let _ = turns.send(Given::Message(text, false));
                     }
                 }

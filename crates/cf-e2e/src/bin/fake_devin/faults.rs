@@ -13,6 +13,12 @@
 //! - `FAKE_DEVIN_UNBEGUN`: the window's store takes the message, and its agent never
 //!   begins a turn on it: nothing said back, no work and no end on the wire, nothing drawn
 //!   (the field's T-1130: a brief its window's record showed, and no turn began).
+//! - `FAKE_DEVIN_GAP`: the message's turn begins late: Devin 3000.12.43 says a message
+//!   back 0.2 to 2.1 s after its Enter (T-1423), and a paste that comes in that gap goes
+//!   in behind it. The window writes nothing of the turn (not the message said back, not
+//!   its store row; the history row is the Enter's) until another message has been handed
+//!   to it, and a case that wants the paste in the gap holds it so for as long as it
+//!   takes the paste to come (at most two minutes).
 //!
 //! Nothing in a person's environment sets the variables, and a window with none does
 //! nothing wrong.
@@ -20,6 +26,7 @@
 pub const DROP_VARIABLE: &str = "FAKE_DEVIN_DROP";
 pub const CRASH_VARIABLE: &str = "FAKE_DEVIN_CRASH";
 pub const UNBEGUN_VARIABLE: &str = "FAKE_DEVIN_UNBEGUN";
+pub const GAP_VARIABLE: &str = "FAKE_DEVIN_GAP";
 
 /// The word the fault meets a message by, until it has met one.
 #[derive(Debug, Default)]

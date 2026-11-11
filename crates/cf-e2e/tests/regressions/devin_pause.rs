@@ -34,7 +34,7 @@ use cf_e2e::live::trace::at_ms;
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
 
-use crate::{config, secs, Outcome, FAKE_DEVIN};
+use crate::{devin_config, secs, Outcome};
 
 /// The roster of the case: the stand-in Claude is the chief, and a Devin (its
 /// stand-in) the worker.
@@ -75,7 +75,7 @@ fn delivered(events: &[Value]) -> Option<i64> {
 #[test]
 fn a_pause_stops_a_devin_window_that_takes_escape_twice_within_the_rounds_and_the_chiefs_question_goes_in(
 ) -> Outcome {
-    let rig = Rig::start(config().devin(FAKE_DEVIN))?;
+    let rig = Rig::start(devin_config())?;
     write_roster(&rig)?;
     let project = Project::open(&rig, "chief", json!({}))?;
     project.add_member("devin-worker")?;
@@ -209,4 +209,14 @@ fn a_pause_stops_a_devin_window_that_takes_escape_twice_within_the_rounds_and_th
     assert_eq!(project.task(1)?["state"], "paused", "{what}");
     rig.close()?;
     Ok(())
+}
+
+// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423): the case as
+// it is, the stand-in's shape chosen here and not by the environment.
+
+#[test]
+#[ignore = "T-1431 finding, not a stand-in fault: a Stop over a 3000.12.43 turn's thoughts leaves its store with the user's message and no answer (T-1423 runs 4 and 5), which the adapter's `begun_on_the_store` reads as a turn begun for 30 s from that message, so the question goes in 31 s after the pause, not within 15 s"]
+fn a_pause_stops_a_devin_window_that_takes_escape_twice_within_the_rounds_and_the_chiefs_question_goes_in_on_devin_3000_12(
+) -> Outcome {
+    crate::on_the_installed_devin(a_pause_stops_a_devin_window_that_takes_escape_twice_within_the_rounds_and_the_chiefs_question_goes_in)
 }
