@@ -1106,6 +1106,7 @@ fn a_project_with_no_rules_for_its_staff_leaves_every_text_as_it_was_to_the_byte
 #[test]
 fn every_role_of_the_table_has_its_own_text_under_its_name() {
     let mut intros = Vec::new();
+    let mut descriptions = Vec::new();
     for role in cf_ledger::roles::all() {
         let text = role_instructions(&Env::default(), role.id, &[zeus()], &CfWord::bare(), None)
             .unwrap_or_else(|refused| panic!("{}: {refused}", role.id));
@@ -1136,6 +1137,18 @@ fn every_role_of_the_table_has_its_own_text_under_its_name() {
             role.id
         );
         intros.push(intro);
+        // The description its harness's skill lists it by is its own too.
+        let description = text
+            .lines()
+            .find_map(|line| line.strip_prefix("description: "))
+            .unwrap_or_default()
+            .to_owned();
+        assert!(
+            !description.is_empty() && !descriptions.contains(&description),
+            "{}: no description of its own: {description:?}",
+            role.id
+        );
+        descriptions.push(description);
     }
 }
 

@@ -1,0 +1,240 @@
+# The four roles of spec new-roles (FD-04, T-1441): the frontend designer, the architect, the
+# researcher and the integrator, each a row of `crates/cf-ledger/src/roles.rs` with no tier,
+# held by migration 0036's checks. Each plant breaks one role's pool, its pick, the tier rule
+# a member of roles with no tier is held to, or makes one role's text another's, and the test
+# written for it fails.
+#
+# Every name holds `new roles`, so `npm run plants:daemon -- "new roles"` runs them all.
+
+[run]
+nr-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "new_roles"]
+nr-ledger-roles = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "roles::"]
+nr-daemon-members = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::members"]
+nr-daemon-tasks = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::tasks"]
+nr-cf-board = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::"]
+nr-engine-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "new_roles::"]
+nr-engine-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles::"]
+nr-engine-skill = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "skill::"]
+nr-evals-measure = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "measure", "rounds::"]
+
+# Pools.
+
+[[plant]]
+name = "new roles: the researcher's row names a pool the checks do not hold"
+meant = "a_member_of_each_new_role_is_held_and_takes_its_pools_tasks_alone"
+runs = ["nr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''    id: "researcher",'''
+replace = '''    id: "research",'''
+
+[[plant]]
+name = "new roles: the frontend designer's row has tiers"
+meant = "a_member_of_each_new_role_is_held_and_takes_its_pools_tasks_alone"
+runs = ["nr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''    switch: Some("--frontend"),
+    tiered: false,'''
+replace = '''    switch: Some("--frontend"),
+    tiered: true,'''
+
+[[plant]]
+name = "new roles: the researcher's row changes files"
+meant = "the_roles_are_the_nine_in_the_staff_pages_order"
+runs = ["nr-ledger-roles"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''    switch: Some("--research"),
+    tiered: false,
+    image_agent: false,
+    changes_files: false,'''
+replace = '''    switch: Some("--research"),
+    tiered: false,
+    image_agent: false,
+    changes_files: true,'''
+
+# Picks: who takes a task of the pool, and the switch that asks for it.
+
+[[plant]]
+name = "new roles: a researcher's task finds no researcher"
+meant = "a_member_of_each_new_role_is_held_and_takes_its_pools_tasks_alone"
+runs = ["nr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/pools.rs"
+find = '''         AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value = ?)
+       ORDER BY p.id"
+        ))?'''
+replace = '''         AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value = ? AND r.value <> 'researcher')
+       ORDER BY p.id"
+        ))?'''
+
+[[plant]]
+name = "new roles: an integrator's task goes to a worker"
+meant = "a_member_of_each_new_role_is_held_and_takes_its_pools_tasks_alone"
+runs = ["nr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/pools.rs"
+find = '''         AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value = ?)
+       ORDER BY p.id"
+        ))?'''
+replace = '''         AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value = replace(?, 'integrator', 'worker'))
+       ORDER BY p.id"
+        ))?'''
+
+[[plant]]
+name = "new roles: the architect's task is dispatched to the frontend designer"
+meant = "a_task_of_each_new_role_goes_to_its_member_in_a_window_of_its_role_and_its_result_to_the_chief"
+runs = ["nr-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/pools.rs"
+find = '''         AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value = ?)
+       ORDER BY p.id"
+        ))?'''
+replace = '''         AND EXISTS (SELECT 1 FROM json_each(p.roles) r WHERE r.value = replace(?, 'architect', 'frontend'))
+       ORDER BY p.id"
+        ))?'''
+
+[[plant]]
+name = "new roles: --integrate is no switch of cf task add"
+meant = "the_four_new_roles_are_asked_for_by_their_switches_and_named_by_their_rows"
+runs = ["nr-cf-board"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''    switch: Some("--integrate"),'''
+replace = '''    switch: Some("--integrator"),'''
+
+[[plant]]
+name = "new roles: the daemon's task route reads the architect's field as the frontend's"
+meant = "each_new_role_is_asked_for_by_its_field_and_refused_by_its_name_until_one_is_on_the_staff"
+runs = ["nr-daemon-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''    switch: Some("--architect"),'''
+replace = '''    switch: Some("--frontend"),'''
+
+# The tier rule of a member of roles with no tier.
+
+[[plant]]
+name = "new roles: a member that drops its roles with tiers keeps its tier"
+meant = "a_member_with_no_chosen_tier_gains_a_role_with_tiers_only_with_a_tier_and_one_that_drops_them_is_kept_in_the_lowest"
+runs = ["nr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''    if roles::takes_no_tier(roles) {
+        return Ok(Some(roles::NO_TIER.to_owned()));
+    }'''
+replace = '''    if roles::takes_no_tier(roles) {
+        return Ok(had.map(str::to_owned));
+    }'''
+
+[[plant]]
+name = "new roles: a member of roles with no tier gains a worker's with none"
+meant = "a_member_with_no_chosen_tier_gains_a_role_with_tiers_only_with_a_tier_and_one_that_drops_them_is_kept_in_the_lowest"
+runs = ["nr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''    if !roles::takes_no_tier(held) {
+        return Ok(had.map(str::to_owned));
+    }'''
+replace = '''    if true {
+        return Ok(had.map(str::to_owned));
+    }'''
+
+[[plant]]
+name = "new roles: the tier given with a role with tiers is not written"
+meant = "a_member_with_no_chosen_tier_gains_a_role_with_tiers_only_with_a_tier_and_one_that_drops_them_is_kept_in_the_lowest"
+runs = ["nr-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''    if let Some(given) = given {
+        return Ok(Some(given.to_owned()));
+    }'''
+replace = '''    if let Some(given) = given.filter(|_| false) {
+        return Ok(Some(given.to_owned()));
+    }'''
+
+[[plant]]
+name = "new roles: Add member gives no tier when an integrator gains a worker's role"
+meant = "an_integrator_gains_a_workers_role_only_with_the_tier_the_human_chose"
+runs = ["nr-daemon-members"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''    let tier = (!cf_ledger::roles::takes_no_tier(&member.roles)).then_some(member.tier.as_str());'''
+replace = '''    let tier = (cf_ledger::roles::takes_no_tier(&member.roles)).then_some(member.tier.as_str());'''
+
+# Names and texts: a role's text is its own, and a role is said by its name.
+
+[[plant]]
+name = "new roles: the architect's description is the frontend designer's"
+meant = "every_role_of_the_table_has_its_own_text_under_its_name"
+runs = ["nr-engine-text"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = '''<!-- architect: description -->
+Design a ConsensFlow project's software before it is built, as design documents, contracts and the code's frame, and finish each task with a complete result.'''
+replace = '''<!-- architect: description -->
+Design and build how a ConsensFlow project's product looks, feels and moves, in its own design language, and finish each task with a complete result.'''
+
+[[plant]]
+name = "new roles: the integrator's intro is under another name"
+meant = "every_role_of_the_table_has_its_own_text_under_its_name"
+runs = ["nr-engine-text"]
+
+[[plant.edit]]
+file = "skill/core/staff.md"
+find = '''<!-- integrator: intro -->'''
+replace = '''<!-- integrate: intro -->'''
+
+[[plant]]
+name = "new roles: cf staff says a role by its id"
+meant = "the_staff_says_each_role_by_its_name"
+runs = ["nr-cf-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''                        cf_ledger::roles::name_of(&id).to_owned()'''
+replace = '''                        id'''
+
+[[plant]]
+name = "new roles: the chief's staff table says a role by its id"
+meant = "says_each_role_by_its_name_and_none_for_a_member_of_roles_with_no_tier"
+runs = ["nr-engine-skill"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/skill.rs"
+find = '''            .map(|role| cf_ledger::roles::name_of(role))'''
+replace = '''            .map(String::as_str)'''
+
+[[plant]]
+name = "new roles: an architect's task is counted as work"
+meant = "work_is_a_workers_or_a_frontend_designers_and_no_other_roles"
+runs = ["nr-evals-measure"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure/metrics.rs"
+find = '''    matches!(pool, None | Some("worker" | "frontend"))'''
+replace = '''    matches!(pool, None | Some("worker" | "frontend" | "architect"))'''
+
+[[plant]]
+name = "new roles: a frontend designer's task is not counted as work"
+meant = "work_is_a_workers_or_a_frontend_designers_and_no_other_roles"
+runs = ["nr-evals-measure"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure/metrics.rs"
+find = '''    matches!(pool, None | Some("worker" | "frontend"))'''
+replace = '''    matches!(pool, None | Some("worker"))'''
