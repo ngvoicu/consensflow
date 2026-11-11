@@ -41,6 +41,24 @@
 //! the agent (`subagent_result`, by the same id), and it is pending until that is taken
 //! in as above. No status says it completed (live: a child its parent did not wait on);
 //! a status that says it ended (`CHILD_ENDED`) ends it too, provisionally.
+//!
+//! **A workflow's child** (`workflow-agent`, started by a script a `workflow_run_launched`
+//! names, with its `workflow_task_id`) is told of in the same `subagent.control` records
+//! and in `workflow_child_lifecycle` (`scheduled`, `started`, `usage`, `completed`,
+//! `terminal`), and its result is never queued for the agent: the workflow's own task
+//! ends, and the agent is told of that (`background_task_terminal`). So it ends at the first
+//! of its `result_ready`, its lifecycle's `completed` or `terminal`, and the end of its
+//! workflow's task, which is the end of the workflow (live, T-1458: five children, each
+//! `result_ready` then `completed` then `terminal`, none a `subagent_result`, and every
+//! status `running`; the reader held the five for good, 25 minutes, until the owner's
+//! hand ended the task). A reminder child (`memory_reminder_child_session_linked`) leaves
+//! no `subagent.control` record and is no agent here.
+//!
+//! **A kind of child record the reader does not read is said once** in the daemon's log
+//! ([`unread`]): the record kinds, statuses and lifecycle statuses below are the ones read
+//! (seen live) or ignored on purpose; any other (the binary names `close_outcome`,
+//! `cancel_outcome`, `spawn_rejected`, `wait_parked`, `recovery_*`, none in a live log)
+//! leaves its child as it was, and the log says which kind did.
 //! It is counted among the agents, where a turn's own children (its reminders) never
 //! are. Where Muse differs from Codex: Codex keeps a turn in flight while a subagent it
 //! started runs; Muse ends the turn first, as Claude Code does, and the agent pending is
@@ -80,9 +98,51 @@ use serde_json::Value;
 
 use super::field;
 use crate::shared::record::reading::Pending;
+use crate::shared::record::torn::unread;
 
-/// The ends of a task.
-const ENDED: [&str; 4] = ["completed", "failed", "cancelled", "rejected"];
+/// The ends of a task. `timed_out` is the binary's (`TaskTerminalKind`: a monitor whose
+/// `timeout_ms` passed); no live log holds one: provisional.
+const ENDED: [&str; 5] = ["completed", "failed", "cancelled", "rejected", "timed_out"];
+
+/// The task events that end nothing: what a task says on its way (live).
+const TASK_ON_ITS_WAY: [&str; 6] = [
+    "proposed",
+    "accepted",
+    "scheduled",
+    "side_effect_intent",
+    "status",
+    "tool_output_ref",
+];
+
+/// The child records read, or left alone on purpose (live, T-705, T-801, T-1458).
+const CHILD_RECORDS: [&str; 8] = [
+    "spawn_accepted",
+    "status_updated",
+    "result_ready",
+    "resume_context_recorded",
+    "attempt_admitted",
+    "child_session_bound",
+    "start_attested",
+    "runtime_observed",
+];
+
+/// The statuses of a child that end nothing (`SubagentControlStatus`, the binary's:
+/// `closed` ends one, in [`CHILD_ENDED`]; `result_ready` is a record of its own).
+const CHILD_ON_ITS_WAY: [&str; 7] = [
+    "accepted",
+    "starting",
+    "running",
+    "result_ready",
+    "closing",
+    "recovery_pending",
+    "manual_reconciliation",
+];
+
+/// The statuses of a workflow's child that end nothing (`WorkflowChildLifecycleStatus`).
+const LIFECYCLE_ON_ITS_WAY: [&str; 3] = ["scheduled", "started", "usage"];
+
+/// The statuses of a workflow's child that end it (live).
+const LIFECYCLE_ENDED: [&str; 2] = ["completed", "terminal"];
 
 /// The kind a child's status says it ended in: provisional (the binary's strings; no
 /// live child ended so), where `result_ready` is the live end.
@@ -120,6 +180,11 @@ struct Task {
 pub(super) struct Work {
     tasks: HashMap<Arc<str>, Task>,
     children: HashSet<Arc<str>>,
+    /// The workflow each child of a workflow belongs to (its run id), as the records
+    /// that name it say.
+    workflow_of: HashMap<Arc<str>, Arc<str>>,
+    /// The task of each workflow launched and not ended, by its run id.
+    workflows: HashMap<Arc<str>, Arc<str>>,
     /// Items queued and not drained, by the id their drain names.
     queued: HashMap<Arc<str>, Item>,
     /// Items drained into a run that has not started yet, by that run.
@@ -166,9 +231,36 @@ impl Work {
                 // A resume's word that a dead process's task ended (live:
                 // `resume_reconcile:orphaned_by_process_loss`): it is retired no more.
                 self.retired.remove(&task);
+                // The end of a workflow's task is the end of the workflow, and of every
+                // child of it that was not told ended.
+                if let Some(workflow) = self
+                    .workflows
+                    .iter()
+                    .find_map(|(workflow, own)| (*own == task).then(|| Arc::clone(workflow)))
+                {
+                    self.workflows.remove(&workflow);
+                    let ended: Vec<Arc<str>> = self
+                        .workflow_of
+                        .iter()
+                        .filter(|(_, own)| **own == workflow)
+                        .map(|(child, _)| Arc::clone(child))
+                        .collect();
+                    for child in ended {
+                        self.child_ended(&child);
+                    }
+                }
             }
-            _ => {}
+            Some(kind) if TASK_ON_ITS_WAY.contains(&kind) => {}
+            Some(kind) => unread("task", kind),
+            None => {}
         }
+    }
+
+    /// A child that ended: it runs no more, and is retired no more.
+    fn child_ended(&mut self, child: &Arc<str>) {
+        self.children.remove(child);
+        self.retired.remove(child);
+        self.workflow_of.remove(child);
     }
 
     /// The binary's word that a task runs in the background (`task_backgrounded`), which
@@ -241,22 +333,71 @@ impl Work {
 
     /// A child agent's control record.
     pub(super) fn child(&mut self, record: Option<&Value>) {
+        let kind = field(record, "kind").and_then(Value::as_str);
+        if let Some(kind) = kind.filter(|kind| !CHILD_RECORDS.contains(kind)) {
+            unread("child record", kind);
+        }
         let Some(child) = text(field(record, "subagent_id")) else {
             return;
         };
-        match field(record, "kind").and_then(Value::as_str) {
+        match kind {
             Some("spawn_accepted") => {
                 self.children.insert(child);
+            }
+            Some("resume_context_recorded") => {
+                // Its owner says it is a workflow's.
+                let owner = field(field(record, "child_completion_contract"), "owner");
+                if field(owner, "kind").and_then(Value::as_str) == Some("workflow") {
+                    if let Some(workflow) = text(field(owner, "workflow_run_id")) {
+                        self.workflow_of.insert(child, workflow);
+                    }
+                }
             }
             Some("status_updated") => {
                 let status = field(record, "control_status").and_then(Value::as_str);
                 if status.is_some_and(|status| CHILD_ENDED.contains(&status)) {
-                    self.children.remove(&child);
-                    self.retired.remove(&child);
+                    self.child_ended(&child);
+                } else if let Some(status) = status.filter(|s| !CHILD_ON_ITS_WAY.contains(s)) {
+                    unread("child status", status);
                 }
+            }
+            // A workflow's child gets no result queued for the agent: this is its last
+            // word. A plain child's result is queued a record later (`subagent_result`),
+            // and is pending as that item until taken in.
+            Some("result_ready") if self.workflow_of.contains_key(&child) => {
+                self.child_ended(&child);
             }
             _ => {}
         }
+    }
+
+    /// A workflow launched (`workflow_run_launched`): the task whose end is its end.
+    pub(super) fn workflow_launched(&mut self, event: Option<&Value>) {
+        if let (Some(workflow), Some(task)) = (
+            text(field(event, "workflow_run_id")),
+            text(field(event, "workflow_task_id")),
+        ) {
+            self.workflows.insert(workflow, task);
+        }
+    }
+
+    /// A workflow's child told of by its lifecycle (`workflow_child_lifecycle`).
+    pub(super) fn workflow_child(&mut self, event: Option<&Value>) {
+        let (Some(child), Some(workflow)) = (
+            text(field(event, "child_id")),
+            text(field(event, "workflow_run_id")),
+        ) else {
+            return;
+        };
+        let status = field(event, "status").and_then(Value::as_str);
+        if status.is_some_and(|status| LIFECYCLE_ENDED.contains(&status)) {
+            self.child_ended(&child);
+            return;
+        }
+        if let Some(status) = status.filter(|status| !LIFECYCLE_ON_ITS_WAY.contains(status)) {
+            unread("workflow child status", status);
+        }
+        self.workflow_of.insert(child, workflow);
     }
 
     /// A goal bound to its run (`goal_run_binding`): it is work while it is open.
@@ -304,6 +445,8 @@ impl Work {
         self.retired.extend(left);
         self.tasks.clear();
         self.children.clear();
+        self.workflow_of.clear();
+        self.workflows.clear();
         self.queued.clear();
         self.draining.clear();
     }

@@ -1,0 +1,84 @@
+# A Muse member's task was held "working in the background (5 agents)" for 25 minutes after its
+# five `workflow-agent` children had ended and the member had answered whole (T-1458, found by
+# T-1467, mended by T-1471; spec alpha-5, item A5-26): the reader waited for a `subagent_result`
+# or an ended `status_updated`, and a workflow's child gets neither, only `result_ready` and its
+# lifecycle's `completed` and `terminal` (`crates/cf-harness/src/muse/record/work.rs`, the
+# cases on a made record in `muse/record/tests/workflow.rs`). A wrong reading is silent: the
+# plants take each part of the rule out, and the case named in `meant` fails.
+#
+# Every name holds `muse workflow children`:
+# `npm run plants:daemon -- "muse workflow children"` runs them all.
+
+[run]
+muse-workflow = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::workflow::"]
+muse-shapes = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::record::tests::shapes::"]
+
+[[plant]]
+name = "muse workflow children: a workflow child's result_ready is not its end"
+meant = "five_workflow_children_that_end_with_result_ready_are_five_agents_until_each_ends"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            Some("result_ready") if self.workflow_of.contains_key(&child) => {'''
+replace = '''            Some("result_ready") if self.workflow_of.contains_key(&child) && false => {'''
+
+[[plant]]
+name = "muse workflow children: a plain child's result_ready is its end before its result is taken in"
+meant = "a_child_its_parent_did_not_wait_on_is_an_agent_pending_until_its_result_is_taken_in"
+runs = ["muse-shapes"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            Some("result_ready") if self.workflow_of.contains_key(&child) => {'''
+replace = '''            Some("result_ready") => {'''
+
+[[plant]]
+name = "muse workflow children: a workflow child's lifecycle says nothing of its end"
+meant = "a_workflow_child_is_told_ended_by_its_lifecycle_alone"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''        if status.is_some_and(|status| LIFECYCLE_ENDED.contains(&status)) {'''
+replace = '''        if status.is_some_and(|status| LIFECYCLE_ENDED.contains(&status) && false) {'''
+
+[[plant]]
+name = "muse workflow children: the end of a workflow's task ends no child"
+meant = "a_child_with_no_end_in_the_record_ends_with_its_workflow_s_task"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            self.workflows.insert(workflow, task);'''
+replace = '''            let _ = (workflow, task);'''
+
+[[plant]]
+name = "muse workflow children: a task that timed out is still running"
+meant = "a_monitor_whose_time_passed_is_over"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            Some(kind) if ENDED.contains(&kind) => {'''
+replace = '''            Some(kind) if ENDED.contains(&kind) && kind != "timed_out" => {'''
+
+[[plant]]
+name = "muse workflow children: a kind of child record the reader does not know is never said"
+meant = "a_kind_of_child_record_the_reader_does_not_know_is_said_once_a_kind_not_once_a_look"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/muse/record/work.rs"
+find = '''            unread("child record", kind);'''
+replace = '''            let _ = kind;'''
+
+[[plant]]
+name = "muse workflow children: a kind not known is said at every look"
+meant = "a_kind_of_child_record_the_reader_does_not_know_is_said_once_a_kind_not_once_a_look"
+runs = ["muse-workflow"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/torn.rs"
+find = '''            if saying.unread.insert((what.to_owned(), kind.clone())) {'''
+replace = '''            if saying.unread.insert((what.to_owned(), kind.clone())) || true {'''

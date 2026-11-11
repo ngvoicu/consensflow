@@ -21,6 +21,8 @@ pub type Say = Box<dyn Fn(&str) + Send>;
 struct Saying {
     say: Say,
     said: HashSet<(PathBuf, u64, bool)>,
+    /// The kinds of record said not to be read, by what they are of and their name.
+    unread: HashSet<(String, String)>,
 }
 
 thread_local! {
@@ -33,6 +35,7 @@ pub(crate) fn say_with(say: Say) {
         *saying.borrow_mut() = Some(Saying {
             say,
             said: HashSet::new(),
+            unread: HashSet::new(),
         });
     });
 }
@@ -58,6 +61,34 @@ pub(crate) fn unfinished(file: &Path, index: usize, at: u64) {
             "a line of {} is not finished at record {index}",
             file.display()
         )
+    });
+}
+
+/// A kind of record (`what`: a child's record, a status, a task's event) that the reader
+/// does not read was met: said once a kind, whichever session it is of and however often
+/// it comes, by its name alone (cut at 48 characters, and only of letters, digits and `_`,
+/// `.`, `-`): the work it is of stays as it was, and a record of a kind the reader
+/// does not know may be what ends it.
+pub(crate) fn unread(what: &str, kind: &str) {
+    let kind: String = kind
+        .chars()
+        .take(48)
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "_.-".contains(c) {
+                c
+            } else {
+                '?'
+            }
+        })
+        .collect();
+    SAYING.with(|saying| {
+        if let Some(saying) = saying.borrow_mut().as_mut() {
+            if saying.unread.insert((what.to_owned(), kind.clone())) {
+                (saying.say)(&format!(
+                    "a {what} of kind {kind} is not read: the work it is of is held as it was"
+                ));
+            }
+        }
     });
 }
 

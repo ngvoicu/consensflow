@@ -228,7 +228,7 @@ impl Log {
                 }
                 _ => Ok(()),
             },
-            Some("subagent.control.spawn_accepted" | "subagent.control.status_updated") => {
+            Some(kind) if kind.starts_with("subagent.control.") => {
                 self.work.child(field(payload, "record"));
                 Ok(())
             }
@@ -371,6 +371,8 @@ impl Log {
                 }
             }
             Some("goal_run_binding") => self.work.goal_bound(field(event, "record")),
+            Some("workflow_run_launched") => self.work.workflow_launched(event),
+            Some("workflow_child_lifecycle") => self.work.workflow_child(event),
             Some("inbox_item_drained") => self.work.drained(event),
             // The model's thinking, as Muse commits what of it is readable: the history's alone.
             Some("reasoning_committed") => {
