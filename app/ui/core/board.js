@@ -1,7 +1,7 @@
 import { button, element, icon, iconButton, redraw } from '../dom.js'
 import { notePanes } from './computer-use.js'
 import { preview, render } from './markdown.js'
-import { aPool } from './roles.js'
+import { aPool, takesNoTier } from './roles.js'
 
 /**
  * The board: a kanban of the project's tasks. One row per participant, one
@@ -398,8 +398,9 @@ const identityParts = (participant) => {
         ]
       : [
           part('role', participant.roles.join('+')),
-          // An image designer has no tier: a design task has none (designer P2).
-          part('tier', participant.designer ? null : participant.tier),
+          // A member whose roles have no tier has none (an image designer's: a design task
+          // has none, designer P2).
+          part('tier', takesNoTier(participant.roles) ? null : participant.tier),
           part('harness', harnessLabel(participant)),
           ...runs,
         ]

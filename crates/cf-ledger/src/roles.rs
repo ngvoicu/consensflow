@@ -145,6 +145,16 @@ pub fn untiered(pool: &str) -> bool {
     find(pool).is_some_and(|role| !role.tiered)
 }
 
+/// Whether a member that holds `roles` takes no tier: it holds a role, and none of its roles
+/// has tiers. One that holds a role with tiers beside them keeps its tier, for that role's work.
+pub fn takes_no_tier<S: AsRef<str>>(roles: &[S]) -> bool {
+    !roles.is_empty() && roles.iter().all(|role| untiered(role.as_ref()))
+}
+
+/// The tier the ledger keeps a member in that takes none: the lowest, which decides nothing,
+/// since none of its tasks has a tier (the image designer's since designer P2).
+pub const NO_TIER: &str = "light";
+
 /// Whether one of `roles` is a role only an image agent holds.
 pub fn needs_an_image_agent<S: AsRef<str>>(roles: &[S]) -> bool {
     roles

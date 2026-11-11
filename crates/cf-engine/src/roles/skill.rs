@@ -26,14 +26,7 @@ pub fn team_table(members: &[StaffRow]) -> Result<String, RoleError> {
         // and the table says so.
         let tier = match member.work_tier {
             Some(tier) => work_tier_info(tier).label,
-            None if !member.roles.is_empty()
-                && member
-                    .roles
-                    .iter()
-                    .all(|role| cf_ledger::roles::untiered(role)) =>
-            {
-                "none"
-            }
+            None if cf_ledger::roles::takes_no_tier(&member.roles) => "none",
             None => {
                 return Err(RoleError::NoWorkTier {
                     member: member.name.clone(),

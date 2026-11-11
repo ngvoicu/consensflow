@@ -251,7 +251,13 @@ impl NewMember {
         let shown =
             crate::handles::model_shown(model_name.as_deref(), model.as_deref(), Some(harness));
         model::require_fitting_roles(&shown, designer, &roles)?;
-        let tier = model::parse_tier(value.get("tier"))?;
+        // A member whose roles have no tier is given none, and kept in the lowest.
+        let tier = match value.get("tier") {
+            None | Some(Value::Null) if crate::roles::takes_no_tier(&roles) => {
+                crate::roles::NO_TIER
+            }
+            given => model::parse_tier(given)?,
+        };
         Ok(Self {
             harness: harness.to_string(),
             model,

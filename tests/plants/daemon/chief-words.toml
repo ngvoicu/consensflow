@@ -68,7 +68,7 @@ runs = ["cw-text"]
 [[plant.edit]]
 file = "crates/cf-engine/src/roles.rs"
 find = '''                .and_then(work_tier)
-                .filter(|_| !member.designer),'''
+                .filter(|_| !cf_ledger::roles::takes_no_tier(&member.roles)),'''
 replace = '''                .and_then(work_tier),'''
 
 [[plant]]
@@ -78,11 +78,7 @@ runs = ["cw-text"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles/skill.rs"
-find = '''            None if !member.roles.is_empty()
-                && member
-                    .roles
-                    .iter()
-                    .all(|role| cf_ledger::roles::untiered(role)) =>'''
+find = '''            None if cf_ledger::roles::takes_no_tier(&member.roles) =>'''
 replace = '            None if true =>'
 
 [[plant]]
@@ -356,8 +352,8 @@ runs = ["cw-daemon"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/page/staff.rs"
-find = '''const DESIGNER_TIER: WorkTier = WorkTier::Light;'''
-replace = '''const DESIGNER_TIER: WorkTier = WorkTier::Critical;'''
+find = '''const NO_TIER: WorkTier = WorkTier::Light;'''
+replace = '''const NO_TIER: WorkTier = WorkTier::Critical;'''
 
 [[plant]]
 name = "chief-words: a designer is picked a model"
@@ -380,7 +376,11 @@ runs = ["cw-staff-route"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/staff.rs"
-find = '''                "tier": if member.designer { None } else { member.tier.as_deref() },'''
+find = '''                "tier": if cf_ledger::roles::takes_no_tier(&member.roles) {
+                    None
+                } else {
+                    member.tier.as_deref()
+                },'''
 replace = '''                "tier": member.tier,'''
 
 [[plant]]
@@ -464,7 +464,7 @@ runs = ["cw-page-card"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''  const tier = isDesigner(member) ? null : member.tier'''
+find = '''  const tier = takesNoTier(member.roles ?? [member.role]) ? null : member.tier'''
 replace = '''  const tier = member.tier'''
 
 [[plant]]
@@ -474,7 +474,7 @@ runs = ["cw-page-card"]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = '''part('tier', participant.designer ? null : participant.tier)'''
+find = '''part('tier', takesNoTier(participant.roles) ? null : participant.tier)'''
 replace = '''part('tier', participant.tier)'''
 
 [[plant]]

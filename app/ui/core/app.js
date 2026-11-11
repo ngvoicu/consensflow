@@ -7,7 +7,7 @@ import { listenForFileDrops } from './file-drop.js'
 import { HistoryViewer } from './history-viewer.js'
 import { Layout } from './layout.js'
 import { ProjectMenu } from './project-menu.js'
-import { poolName, readRoles, roleIds } from './roles.js'
+import { poolName, readRoles } from './roles.js'
 import { SpecsSettings } from './specs-settings.js'
 import { SpecsViewer } from './specs-viewer.js'
 import { TerminalsView } from './terminals.js'
@@ -460,6 +460,17 @@ async function rereadTask() {
 
 let refreshing = null
 let again = false
+
+/**
+ * The board of a `board.get` answer, whose roles are kept first: a card and a lane name the role
+ * a task waits for and a member holds by the daemon's table, which comes with every board, so a
+ * board is never drawn without the roles it names (`cf_ledger::roles`).
+ */
+function boardOf(read) {
+  readRoles(read.roles)
+  return read.board
+}
+
 async function refresh() {
   if (refreshing !== null) {
     again = true
@@ -467,9 +478,6 @@ async function refresh() {
   }
   refreshing = (async () => {
     try {
-      // A page whose first read of the roles was refused reads them with the board: a card
-      // says the role a task waits for by its name, which only the daemon's table holds.
-      if (roleIds().length === 0) await readMissing().catch(() => {})
       const { projects } = await daemon('projects.list')
       state.projects = projects
       if (!projects.some((project) => project.id === state.selected)) {
@@ -483,16 +491,9 @@ async function refresh() {
       // boards say when those end. One that cannot be read says nothing yet.
       const elsewhere = open
         .filter((project) => project.id !== selected && terminals.holds(project.id))
-        .map((project) =>
-          daemon('board.get', { project: project.id }).then(
-            (read) => read.board,
-            () => null,
-          ),
-        )
+        .map((project) => daemon('board.get', { project: project.id }).then(boardOf, () => null))
       const [board, inbox, ...others] = await Promise.all([
-        selected === null
-          ? null
-          : daemon('board.get', { project: selected }).then((read) => read.board),
+        selected === null ? null : daemon('board.get', { project: selected }).then(boardOf),
         selected === null
           ? NO_NOTES
           : daemon('inbox.get', { project: selected, participant: 'human', unread: true }),

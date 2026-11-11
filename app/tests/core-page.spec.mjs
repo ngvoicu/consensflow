@@ -489,7 +489,7 @@ async function open(page, given = model()) {
         lane.participant.roles = roles
         return answer({ member: lane.participant })
       },
-      'board.get': ({ project }) => answer({ board: data.boards[project] }),
+      'board.get': ({ project }) => answer({ board: data.boards[project], roles: data.roles }),
       // A project's computer use, as the daemon reads it (`computerUse` of the model, on macOS
       // with no grant and Claude Code's off, unless a test says otherwise), and the System
       // Settings panes it opens, by name.
@@ -4700,11 +4700,13 @@ test("a role the daemon's table alone names is offered, listed and added in its 
     },
   )
   await open(page, data)
-  // The board says no tier for a member whose roles have none, and its tier for one with both.
-  const identityOf = (roles) => page.locator(`span:has(> .meta-role:text-is("${roles}"))`).first()
-  await expect(identityOf('scout')).toBeVisible()
-  await expect(identityOf('scout').locator('.meta-tier')).toHaveCount(0)
-  await expect(identityOf('worker+scout').locator('.meta-tier')).toHaveText('complex')
+  // The board says no tier in a row of a role with none, and the tier in one of a role with one,
+  // of the same member.
+  const row = (name) => page.getByRole('row', { name })
+  await expect(row(/^@argus scout · Codex/)).toBeVisible()
+  await expect(row(/^@argus scout/).locator('.meta-tier')).toHaveCount(0)
+  await expect(row(/^@castor scout/).locator('.meta-tier')).toHaveCount(0)
+  await expect(row(/^@castor worker/).locator('.meta-tier')).toHaveText('complex')
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
@@ -4718,9 +4720,13 @@ test("a role the daemon's table alone names is offered, listed and added in its 
   const table = dialog.getByRole('table', { name: 'On the staff' })
   await expect(table.locator('tbody tr').last()).toHaveText(/@argus.*Field scout/)
   await expect(table.locator('tr[data-handle="argus"][data-role="scout"]')).toHaveCount(1)
-  await expect(table.locator('tr[data-handle="argus"]')).not.toContainText('Light work')
+  // No tier in the row of a role with none; the member's tier in the row of one with tiers.
+  await expect(table.locator('tr[data-handle="argus"]')).not.toContainText('light')
+  await expect(table.locator('tr[data-handle="castor"][data-role="scout"]')).not.toContainText(
+    'complex',
+  )
   await expect(table.locator('tr[data-handle="castor"][data-role="worker"]')).toContainText(
-    'Complex work',
+    '· complex ·',
   )
   // A scout is no image agent: any harness installed here may scout, and it is asked no tier.
   await pickMember(dialog, { role: 'scout', harness: 'Devin', model: 'swe-2' })
@@ -10567,8 +10573,8 @@ test('names the role a task waits for on every board it shows, though every read
   await open(page, data)
   // The roles come with the board: a board shown is one whose roles are read.
   await expect(page.locator('button.card[data-task="7"]')).toContainText('for an image designer')
-  await expect.poll(() => calls(page, 'harnesses.missing')).not.toEqual([])
-  expect(await page.evaluate(() => window.__answered.includes('harnesses.missing'))).toBe(false)
+  // Every read of the harnesses was refused: the page asked, and was told nothing.
+  await expect.poll(() => page.evaluate(() => window.__missingRefused)).toBeLessThan(1000)
 })
 
 test('folds the panels for this page when the browser keeps no storage', async ({ page }) => {
@@ -10682,6 +10688,85 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
             roles: ['advisor'],
           },
           { harness: 'codex', roles: ['designer'] },
+        ],
+      },
+    ])
+})
+
+test('New project asks no tier of a role whose row has none, and a member that holds it beside a role with tiers keeps its tier', async ({
+  page,
+}) => {
+  const data = model()
+  // A sixth role with no tier, which is no image agent: the daemon's table alone names it.
+  data.roles = [
+    ...ROLES.slice(0, 3),
+    {
+      id: 'scout',
+      name: 'field scout',
+      label: 'Field scout',
+      article: 'a',
+      tiered: false,
+      imageAgent: false,
+    },
+    ...ROLES.slice(3),
+  ]
+  data.lastStaff = [
+    lastMember('hera', 'codex', ['scout'], 'light'),
+    lastMember('zeus', 'claude-code', ['scout', 'worker'], 'complex'),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const table = dialog.getByRole('table', { name: 'Members for the staff' })
+  // The last staff's scouts are picked as they were and said with no tier, and the one that
+  // works too keeps its tier for its work.
+  const scouts = table.locator('tbody tr', { hasText: 'Field scout' })
+  await expect(table.locator('tbody tr')).toHaveText([
+    /^claude-sonnet-5.*complex.*Worker/,
+    /^claude-sonnet-5.*Field scout/,
+    /^gpt-6-astra.*Codex · max.*Field scout/,
+  ])
+  await expect(scouts.filter({ hasText: /complex|light/ })).toHaveCount(0)
+  await pickChief(dialog, 'Pi', 'meta/muse-spark')
+  // A scout is asked no tier; a worker on the same model is, and the member holds both.
+  await pickMember(dialog, { role: 'scout', harness: 'Pi', model: 'meta/muse-spark' })
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await pickMember(dialog, {
+    role: 'worker',
+    harness: 'Pi',
+    model: 'meta/muse-spark',
+    tier: 'complex',
+  })
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(scouts).toHaveCount(3)
+  await expect(scouts.filter({ hasText: /complex|light/ })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'pi',
+        model: 'meta/muse-spark',
+        gate: false,
+        staff: [
+          { harness: 'codex', model: 'gpt-6-astra', effort: 'max', roles: ['scout'] },
+          {
+            harness: 'claude-code',
+            model: 'claude-sonnet-5',
+            effort: 'high',
+            tier: 'complex',
+            roles: ['scout', 'worker'],
+          },
+          {
+            harness: 'pi',
+            model: 'meta/muse-spark',
+            effort: null,
+            tier: 'complex',
+            roles: ['scout', 'worker'],
+          },
         ],
       },
     ])

@@ -88,12 +88,13 @@ pub fn staff_of(project: &ProjectView) -> Vec<StaffRow> {
                 .name_apart
                 .then(|| cf_ledger::handles::runs_on(member)),
             roles: member.roles.clone(),
-            // An image designer has no tier: a design task has none (`--design`, no tier).
+            // A member whose roles have no tier is said to have none: none of its tasks has one
+            // (an image designer's: `--design`, no tier).
             work_tier: member
                 .tier
                 .as_deref()
                 .and_then(work_tier)
-                .filter(|_| !member.designer),
+                .filter(|_| !cf_ledger::roles::takes_no_tier(&member.roles)),
         })
         .collect()
 }

@@ -272,7 +272,10 @@ fn a_member_whose_roles_have_no_tier_is_given_none_and_kept_in_the_lowest() {
             json!({ "tier": "complex" }),
         ))
         .expect("a scout and a worker");
-        assert_eq!((both.roles.as_slice(), both.tier.as_str()), (&["scout".to_owned(), "worker".to_owned()][..], "complex"));
+        assert_eq!(
+            (both.roles.as_slice(), both.tier.as_str()),
+            (&["scout".to_owned(), "worker".to_owned()][..], "complex")
+        );
     });
 }
 

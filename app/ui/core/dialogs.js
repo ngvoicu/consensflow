@@ -2,7 +2,7 @@ import { button, element, redraw } from '../dom.js'
 import { HARNESS_NAMES, harnessLabel, isMember, modelShown, nameApart } from './board.js'
 import { harnessesOf } from './computer-use.js'
 import { holdEnter, ProjectSections } from './project-sections.js'
-import { isImageAgentRole, readRoles, roleIds, roleLabel } from './roles.js'
+import { isImageAgentRole, readRoles, roleIds, roleLabel, takesNoTier, untiered } from './roles.js'
 
 /**
  * The dialogs that say who works on a project and how: New project (its
@@ -36,8 +36,9 @@ const byRoleAndTier = (a, b) =>
  * project has no name made yet, and says its harness, its effort and its tier.
  */
 const runsLabel = (member, named = true) => {
-  // An image designer has no tier: a design task has none (designer P2).
-  const tier = isDesigner(member) ? null : member.tier
+  // A member whose roles have no tier is said to have none (an image designer's: a design task
+  // has none, designer P2); a staff row has its roles, a pick of New project its role.
+  const tier = takesNoTier(member.roles ?? [member.role]) ? null : member.tier
   return (
     named
       ? [
@@ -50,9 +51,6 @@ const runsLabel = (member, named = true) => {
     .filter(Boolean)
     .join(' · ')
 }
-
-/** Whether a staff row, or a pick of New project, is an image designer. */
-const isDesigner = (member) => member.designer === true || isImageAgentRole(member.role)
 
 /** One row of a staff table: the member, one of its roles, a Remove for that role, and an Edit of the member where it has one. */
 function staffRow(who, role, remove, edit = null) {
@@ -639,6 +637,17 @@ class MemberPicker {
     return isImageAgentRole(this.#role.value) && this.editing === null
   }
 
+  /** The roles of the member being edited: none while the form adds one. */
+  #editedRoles = null
+
+  /**
+   * Whether the member the form adds, in the role picked, or edits, in the roles it holds, takes
+   * no tier: none of its roles has tiers (`takesNoTier`). It is asked none, and sends none.
+   */
+  get #untiered() {
+    return takesNoTier(this.#editedRoles ?? [this.#role.value])
+  }
+
   constructor(form, lists, refreshed) {
     this.#fieldset = form.querySelector('.staff-add')
     this.#legend = this.#fieldset.querySelector('legend')
@@ -694,6 +703,7 @@ class MemberPicker {
     this.#fillRoles()
     this.#missing = missing
     this.editing = null
+    this.#editedRoles = null
     this.#legend.textContent = 'Add a member'
     this.#role.disabled = false
     this.#submit.textContent = this.#adds
@@ -712,6 +722,7 @@ class MemberPicker {
   async edit(member) {
     this.#fillRoles()
     this.editing = member.handle
+    this.#editedRoles = member.roles
     this.#current = member.model ? { model: member.model, effort: member.effort ?? null } : null
     this.#origin = null
     this.#legend.textContent = `Edit @${member.handle}`
@@ -777,7 +788,8 @@ class MemberPicker {
     if (model.efforts.length > 0 && this.#effort.value === '') {
       return say(`Pick the effort ${HARNESS_NAMES[kind]} runs ${modelOf(model)} at.`)
     }
-    if (this.#tier.value === '') {
+    const tiered = !this.#untiered
+    if (tiered && this.#tier.value === '') {
       return say("Pick the member's tier: the work the chief gives it, from critical to light.")
     }
     this.say('')
@@ -785,7 +797,8 @@ class MemberPicker {
       harness: kind,
       model: modelOf(model),
       effort: this.#effort.value === '' ? null : this.#effort.value,
-      tier: this.#tier.value,
+      // A member whose roles have no tier is given none: the daemon keeps it in the lowest.
+      ...(tiered ? { tier: this.#tier.value } : {}),
       modelName: modelOf(model),
     }
     // The read the model was picked from: the daemon checks the pick against that list.
@@ -848,6 +861,8 @@ class MemberPicker {
   #fillHarnesses(only = isImageAgentRole(this.#role.value) ? ['codex'] : null) {
     const designer = this.#designer
     for (const control of this.#modelControls) control.hidden = designer
+    // A member whose roles have no tier is asked none.
+    this.#tier.closest('label').hidden = designer || this.#untiered
     this.#picker.reads = !designer
     try {
       this.#picker.fill(this.#missing, only)
@@ -949,8 +964,11 @@ export class NewProjectDialog {
         this.#member.say(`${modelShown(picked)} is on the staff as ${roleLabel(role)} already.`)
         return
       }
-      // One member holds each of its roles in one tier: the tier picked now is the member's.
-      for (const pick of this.#picked) if (same(pick)) pick.tier = picked.tier
+      // One member holds each of its roles in one tier: the tier picked now is the member's. A
+      // role with no tier is picked with none, and leaves the member's as it is.
+      if (picked.tier !== undefined) {
+        for (const pick of this.#picked) if (same(pick)) pick.tier = picked.tier
+      }
       this.#picked.push({ ...picked, role })
       this.#member.reset(this.#missing)
       this.#draw()
@@ -1074,7 +1092,8 @@ export class NewProjectDialog {
                 // a pick. Devin's `model` is the launch id for the effort, which no list holds.
                 model: member.modelName || member.model,
                 effort: member.effort,
-                tier: member.tier,
+                // A role with no tier is picked with none: the member's tier is its work's.
+                ...(untiered(role) ? {} : { tier: member.tier }),
                 modelName: member.modelName,
                 role,
               },
@@ -1125,6 +1144,8 @@ export class NewProjectDialog {
       if (!staff.has(key)) staff.set(key, { harness, model, effort, tier, roles: [] })
       const member = staff.get(key)
       member.roles.push(role)
+      // A member that holds a role with no tier first has the tier of the one it holds with one.
+      if (member.tier === undefined && tier !== undefined) member.tier = tier
       // The read the pick was made from (a pick copied from the last staff was made from none:
       // it is checked against the read the dialog shows of its harness, else the daemon reads).
       const named = read ?? (model ? this.#lists.readOf(harnessOf(harness)) : null)
@@ -1497,17 +1518,19 @@ export class ProjectSettingsDialog {
   #memberRows(member) {
     const page = this.#page
     const name = `@${member.handle}`
-    // What the member runs on, its own (harness-models), and its tier.
-    const runs = runsLabel(member)
     // A model its harness no longer lists is marked, and said (T-1143); ending its shift
     // and its replacement are the staff chains' (CHN-11).
     const gone = this.#modelGone(member)
-    const who = () =>
-      member.needsEdit
+    // What the member runs on, its own (harness-models), and its tier, in a row of `roles`:
+    // none in the row of a role with no tier.
+    const who = (roles = member.roles) => {
+      const runs = runsLabel({ ...member, roles })
+      return member.needsEdit
         ? needsEditCell(name, runs, member.agent)
         : gone
           ? goneCell(name, modelShown(member), runs, HARNESS_NAMES[member.harness])
           : whoCell(name, runs)
+    }
     if (this.#removing === member.handle) {
       const row = element('tr')
       row.dataset.handle = member.handle
@@ -1565,7 +1588,7 @@ export class ProjectSettingsDialog {
             () => void this.#member.edit(this.#memberNow(member)),
             `Edit ${name}`,
           )
-      const row = staffRow(who(), role, remove, edit)
+      const row = staffRow(who([role]), role, remove, edit)
       row.dataset.handle = member.handle
       if (gone) row.dataset.modelGone = member.model
       return { role, row }

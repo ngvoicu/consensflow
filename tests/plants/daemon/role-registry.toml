@@ -17,6 +17,10 @@ rr-engine-sixth = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "d
 rr-daemon-members = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::members"]
 rr-daemon-roles = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::roles"]
 rr-cf-task = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::task"]
+rr-daemon-opening = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::opening"]
+rr-page-scout = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "with no tier where its row has none"]
+rr-page-new = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "New project asks no tier"]
+rr-page-board = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "every read of the harnesses is refused"]
 
 [[plant]]
 name = "role registry: a lookup answers for another role"
@@ -111,3 +115,187 @@ runs = ["rr-daemon-roles"]
 file = "crates/cf-daemon/src/page/staff.rs"
 find = '''    fields.insert("roles".to_owned(), cf_ledger::roles::page_view());'''
 replace = '''    let _ = cf_ledger::roles::page_view;'''
+
+[[plant]]
+name = "role registry: a member whose roles have no tier is refused for having none"
+meant = "a_member_whose_roles_have_no_tier_is_given_none_and_kept_in_the_lowest"
+runs = ["rr-ledger-sixth"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''            None | Some(Value::Null) if crate::roles::takes_no_tier(&roles) => {'''
+replace = '''            None | Some(Value::Null) if false => {'''
+
+[[plant]]
+name = "role registry: a member of a role with tiers is taken with none"
+meant = "a_member_whose_roles_have_no_tier_is_given_none_and_kept_in_the_lowest"
+runs = ["rr-ledger-sixth"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''            None | Some(Value::Null) if crate::roles::takes_no_tier(&roles) => {'''
+replace = '''            None | Some(Value::Null) if !roles.is_empty() => {'''
+
+[[plant]]
+name = "role registry: a member holding a role with tiers beside one without takes none"
+meant = "a_member_whose_roles_have_no_tier_is_given_none_and_kept_in_the_lowest"
+runs = ["rr-ledger-sixth"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''    !roles.is_empty() && roles.iter().all(|role| untiered(role.as_ref()))'''
+replace = '''    !roles.is_empty() && roles.iter().any(|role| untiered(role.as_ref()))'''
+
+[[plant]]
+name = "role registry: a member that takes no tier is kept in another"
+meant = "a_member_whose_roles_have_no_tier_is_given_none_and_kept_in_the_lowest"
+runs = ["rr-ledger-sixth"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/roles.rs"
+find = '''pub const NO_TIER: &str = "light";'''
+replace = '''pub const NO_TIER: &str = "critical";'''
+
+[[plant]]
+name = "role registry: the chief's staff table says a scout's tier"
+meant = "the_chiefs_staff_table_says_no_tier_for_a_member_whose_roles_have_none"
+runs = ["rr-engine-sixth"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = '''                .filter(|_| !cf_ledger::roles::takes_no_tier(&member.roles)),'''
+replace = '''                .filter(|_| !member.designer),'''
+
+[[plant]]
+name = "role registry: the staff page asks a scout for a tier"
+meant = "a_member_whose_roles_have_no_tier_is_added_and_edited_with_none"
+runs = ["rr-daemon-members"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''    let tier = tier_for(roles, body)?;'''
+replace = '''    let tier = tier_of(body.get("tier"))?;'''
+
+[[plant]]
+name = "role registry: the staff page takes a tier asked for a scout"
+meant = "a_member_whose_roles_have_no_tier_is_added_and_edited_with_none"
+runs = ["rr-daemon-members"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''    if matches!(body.get("tier"), None | Some(Value::Null)) {
+        return Ok(NO_TIER);'''
+replace = '''    if true {
+        return Ok(NO_TIER);'''
+
+[[plant]]
+name = "role registry: Edit member asks a scout for a tier"
+meant = "a_member_whose_roles_have_no_tier_is_added_and_edited_with_none"
+runs = ["rr-daemon-members"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''        tier: tier_for(&found.roles, body)?,'''
+replace = '''        tier: tier_of(body.get("tier"))?,'''
+
+[[plant]]
+name = "role registry: a scout's role added to a worker drops its tier"
+meant = "a_member_holding_a_role_with_tiers_and_one_without_keeps_its_tier"
+runs = ["rr-daemon-members"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''    if cf_ledger::roles::takes_no_tier(&member.roles) {
+        edit.tier = existing.tier'''
+replace = '''    if false {
+        edit.tier = existing.tier'''
+
+[[plant]]
+name = "role registry: board.get answers no roles"
+meant = "a_project_opened_with_rules_and_a_compaction_has_them_and_its_chief_is_given_the_rules_at_its_first_launch"
+runs = ["rr-daemon-opening"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/board.rs"
+find = '''    answer.insert("roles".to_owned(), cf_ledger::roles::page_view());'''
+replace = '''    let _ = cf_ledger::roles::page_view;'''
+
+[[plant]]
+name = "role registry: the page draws a board without its roles"
+meant = "names the role a task waits for on every board it shows, though every read of the harnesses is refused"
+runs = ["rr-page-board"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = '''  readRoles(read.roles)
+'''
+replace = '''  void read.roles
+'''
+
+[[plant]]
+name = "role registry: Add member asks a scout for a tier"
+meant = "a role the daemon's table alone names is offered, listed and added in its place among the roles, with no tier where its row has none"
+runs = ["rr-page-scout"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    this.#tier.closest('label').hidden = designer || this.#untiered'''
+replace = '''    this.#tier.closest('label').hidden = designer'''
+
+[[plant]]
+name = "role registry: Add member sends a scout's empty tier"
+meant = "a role the daemon's table alone names is offered, listed and added in its place among the roles, with no tier where its row has none"
+runs = ["rr-page-scout"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''      ...(tiered ? { tier: this.#tier.value } : {}),'''
+replace = '''      tier: this.#tier.value,'''
+
+[[plant]]
+name = "role registry: a staff row of a scout says the member's tier"
+meant = "a role the daemon's table alone names is offered, listed and added in its place among the roles, with no tier where its row has none"
+runs = ["rr-page-scout"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''      const row = staffRow(who([role]), role, remove, edit)'''
+replace = '''      const row = staffRow(who(), role, remove, edit)'''
+
+[[plant]]
+name = "role registry: a scout's card says its tier"
+meant = "a role the daemon's table alone names is offered, listed and added in its place among the roles, with no tier where its row has none"
+runs = ["rr-page-scout"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''part('tier', takesNoTier(participant.roles) ? null : participant.tier)'''
+replace = '''part('tier', participant.designer ? null : participant.tier)'''
+
+[[plant]]
+name = "role registry: New project picks the last scout with its tier"
+meant = "New project asks no tier of a role whose row has none, and a member that holds it beside a role with tiers keeps its tier"
+runs = ["rr-page-new"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''                ...(untiered(role) ? {} : { tier: member.tier }),'''
+replace = '''                tier: member.tier,'''
+
+[[plant]]
+name = "role registry: New project starts a scout and worker with no tier"
+meant = "New project asks no tier of a role whose row has none, and a member that holds it beside a role with tiers keeps its tier"
+runs = ["rr-page-new"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''      if (member.tier === undefined && tier !== undefined) member.tier = tier
+'''
+replace = ''''''

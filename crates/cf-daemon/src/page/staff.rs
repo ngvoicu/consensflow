@@ -81,9 +81,14 @@ pub(super) async fn add(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
             .cloned(),
     );
     ledger.set_roles(project, &existing.handle, &held)?;
+    // Roles with no tier leave the member in the tier it has, for its work with one.
+    let mut edit = edit_of(&member);
+    if cf_ledger::roles::takes_no_tier(&member.roles) {
+        edit.tier = existing.tier.clone().unwrap_or(edit.tier);
+    }
     one(
         "member",
-        ledger.edit_member(project, &existing.handle, &edit_of(&member))?,
+        ledger.edit_member(project, &existing.handle, &edit)?,
     )
 }
 
@@ -108,7 +113,7 @@ pub(super) async fn edit(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let picked = if body.get("unchanged") == Some(&Value::Bool(true)) {
         kept_choice(body, &found)?
     } else {
-        picked(page, body, designer, true).await?
+        picked(page, body, &found.roles, true).await?
     };
     let edited = page
         .ledger
@@ -133,7 +138,7 @@ fn kept_choice(body: Body<'_>, found: &ParticipantView) -> Result<Picked, Said> 
         model: found.model.clone(),
         effort: found.effort.clone(),
         model_name: found.model_name.clone(),
-        tier: tier_of(body.get("tier"))?,
+        tier: tier_for(&found.roles, body)?,
     })
 }
 
@@ -180,7 +185,7 @@ pub(super) async fn picked_member(
             .unwrap_or(&json!([cf_ledger::roles::WORKER.id])),
     ))?;
     let designer = cf_ledger::roles::needs_an_image_agent(&roles);
-    let picked = picked(page, body, designer, adapter).await?;
+    let picked = picked(page, body, &roles, adapter).await?;
     Ok(NewMember {
         harness: picked.harness.kind().to_owned(),
         model: picked.model,
@@ -237,12 +242,13 @@ pub(super) fn tier_of(value: Option<&Value>) -> Result<WorkTier, Said> {
 /// chief's model is), named as the listing names it; and a tier, which the human must
 /// pick. Devin's effort is part of the id it lists for it (`model_uid`): the member's model
 /// is that id, never the model and the effort joined, and its effort is said beside it.
-async fn picked(
+async fn picked<S: AsRef<str>>(
     page: &Page,
     body: Body<'_>,
-    designer: bool,
+    roles: &[S],
     adapter: bool,
 ) -> Result<Picked, Said> {
+    let designer = cf_ledger::roles::needs_an_image_agent(roles);
     let kind = body.text("harness").into_owned();
     let harness = Harness::from_kind(&kind)
         .ok_or_else(|| Said(format!("{kind} is no harness ConsensFlow runs")))?;
@@ -260,7 +266,7 @@ async fn picked(
         _ => return Err(Said::from("pick the member's model: one its harness lists")),
     };
     let effort = effort_of(body)?;
-    let tier = tier_of(body.get("tier"))?;
+    let tier = tier_for(roles, body)?;
     let resolved = resolve(page, harness, &kind, model, effort, read_of(body)?).await?;
     Ok(Picked {
         harness,
@@ -288,12 +294,29 @@ fn designer_picked(body: Body<'_>) -> Result<Picked, Said> {
         model: None,
         effort: None,
         model_name: None,
-        tier: DESIGNER_TIER,
+        tier: NO_TIER,
     })
 }
 
-/// The tier an image designer is kept in.
-const DESIGNER_TIER: WorkTier = WorkTier::Light;
+/// The tier a member that takes none is kept in: the lowest, the ledger's own
+/// (`cf_ledger::roles::NO_TIER`), which decides nothing.
+const NO_TIER: WorkTier = WorkTier::Light;
+
+/// The tier a member of `roles` is in: the one `body` names, which the human must pick; none for
+/// a member whose roles have no tier, which is kept in the lowest, and is refused one.
+fn tier_for<S: AsRef<str>>(roles: &[S], body: Body<'_>) -> Result<WorkTier, Said> {
+    if !cf_ledger::roles::takes_no_tier(roles) {
+        return tier_of(body.get("tier"));
+    }
+    if matches!(body.get("tier"), None | Some(Value::Null)) {
+        return Ok(NO_TIER);
+    }
+    let named = roles
+        .first()
+        .and_then(|role| cf_ledger::roles::find(role.as_ref()))
+        .map_or_else(String::new, |role| role.a_name());
+    Err(Said(format!("{named} takes no tier: its tasks have none")))
+}
 
 /// The effort `body` names: none where it names none, else a word its harness lists.
 pub(super) fn effort_of<'b>(body: Body<'b>) -> Result<Option<&'b str>, Said> {

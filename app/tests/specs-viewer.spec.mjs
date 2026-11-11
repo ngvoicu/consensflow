@@ -166,7 +166,7 @@ async function open(page, given = model()) {
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
       'harnesses.missing': () => answer({ missing: [], roles: data.roles }),
-      'board.get': ({ project }) => answer({ board: data.boards[project] }),
+      'board.get': ({ project }) => answer({ board: data.boards[project], roles: data.roles }),
       'inbox.get': () => answer({ messages: [], total: 0, shown: 0 }),
       // What a project says of specs: kept as it was said, each part left out when it says
       // none, and the daemon's own refusal where a test has it refuse.

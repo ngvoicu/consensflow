@@ -1279,6 +1279,20 @@ async fn a_member_whose_roles_have_no_tier_is_added_and_edited_with_none() {
             assert_eq!(edited["ok"], true, "{edited}");
             assert_eq!(edited["member"]["handle"], "gpt-6-astra-max");
             assert_eq!(staffing.member("gpt-6-astra-max").tier.as_deref(), Some("light"));
+            // An edit that keeps its model and effort is asked no tier either.
+            let kept = ask(
+                &staffing.app,
+                "member.edit",
+                json!({
+                    "project": staffing.project,
+                    "member": "gpt-6-astra-max",
+                    "harness": "codex",
+                    "unchanged": true,
+                }),
+            )
+            .await;
+            assert_eq!(kept["ok"], true, "{kept}");
+            assert_eq!(staffing.member("gpt-6-astra-max").tier.as_deref(), Some("light"));
         })
         .await;
 }

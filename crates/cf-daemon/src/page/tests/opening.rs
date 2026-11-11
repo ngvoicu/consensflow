@@ -273,6 +273,8 @@ async fn a_project_opened_with_rules_and_a_compaction_has_them_and_its_chief_is_
             assert_eq!(board["board"]["project"]["staffRules"], RULES);
             assert_eq!(board["board"]["project"]["compaction"], 250_000);
             assert_eq!(board["board"]["project"]["advisorTool"], true);
+            // The roles its cards name come with it, in the table's order.
+            assert_eq!(board["roles"], cf_ledger::roles::page_view());
         })
         .await;
 }

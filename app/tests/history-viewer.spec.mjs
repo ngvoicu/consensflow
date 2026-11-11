@@ -271,7 +271,7 @@ async function open(page, given = model()) {
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
       'harnesses.missing': () => answer({ missing: [], roles: data.roles }),
-      'board.get': () => answer({ board: window.__model.board }),
+      'board.get': () => answer({ board: window.__model.board, roles: data.roles }),
       'inbox.get': () => answer({ messages: [], total: 0, shown: 0 }),
       // The daemon's pages: the most recent, the one before a place or the one after it,
       // one stream of items across conversations, each with its conversation and row; a
