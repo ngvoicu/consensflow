@@ -10,12 +10,16 @@
 //!   window ends in the middle of its task (B2 of the field reports of 2026-10-15,
 //!   windows that closed mid-task on the owner's Windows machine). Only a window opened
 //!   afresh does so: the one resumed on its session after it goes on.
+//! - `FAKE_DEVIN_UNBEGUN`: the window's store takes the message, and its agent never
+//!   begins a turn on it: nothing said back, no work and no end on the wire, nothing drawn
+//!   (the field's T-1130: a brief its window's record showed, and no turn began).
 //!
 //! Nothing in a person's environment sets the variables, and a window with none does
 //! nothing wrong.
 
 pub const DROP_VARIABLE: &str = "FAKE_DEVIN_DROP";
 pub const CRASH_VARIABLE: &str = "FAKE_DEVIN_CRASH";
+pub const UNBEGUN_VARIABLE: &str = "FAKE_DEVIN_UNBEGUN";
 
 /// The word the fault meets a message by, until it has met one.
 #[derive(Debug, Default)]

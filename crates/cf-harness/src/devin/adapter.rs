@@ -58,7 +58,6 @@ use cf_proto::agents::Harness;
 use cf_proto::models::ModelListing;
 use cf_proto::panes::{HumanInput, SilentPaste, SCREEN_QUIET_MS};
 use cf_proto::specs::Variant;
-use futures_util::future::join;
 use serde_json::Value;
 
 use super::channel;
@@ -74,7 +73,7 @@ use crate::contract::{
     STAFF_RULES_HEADING,
 };
 use crate::detect::executable;
-use crate::records::{Options, Reading, Role};
+use crate::records::{Kind, Options, Reading, Role};
 use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::input_box::{self, Unsent};
@@ -392,10 +391,14 @@ impl Adapter for DevinAdapter {
     /// open as with one: a session with a message of the user's in it had a turn
     /// and is gone on with, and one the store holds with none, or holds no row of
     /// (Devin writes the row with the first message), has nothing to go on with. A
-    /// store that cannot be read tells nothing, and the engine goes on with the
-    /// session as it did before it asked. Devin resumed on a session it has no
-    /// row of opens idle and drops what is typed to it (live, 3000.11.3,
-    /// 2026-10-14).
+    /// session Devin compacted holds none of the user's on its main chain, which is
+    /// a new one of its own: the system messages it opens with, the skills it loaded
+    /// and the summary of the conversation (T-655; T-1388: `/compact` through
+    /// `devin acp` on a finished session). That summary is the conversation, so
+    /// a session whose chain holds one is gone on with as well. A store that
+    /// cannot be read tells nothing, and the engine goes on with the session as it
+    /// did before it asked. Devin resumed on a session it has no row of opens idle
+    /// and drops what is typed to it (live, 3000.11.3, 2026-10-14).
     fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
         Box::pin(async move {
             let looked = self
@@ -404,9 +407,12 @@ impl Adapter for DevinAdapter {
                 .look(Harness::Devin, session, &Options::default())
                 .await;
             match &*looked {
-                Reading::Known(record) => {
-                    Some(record.items.iter().any(|item| item.role == Role::User))
-                }
+                Reading::Known(record) => Some(
+                    record
+                        .items
+                        .iter()
+                        .any(|item| item.role == Role::User || item.kind() == Kind::Compaction),
+                ),
                 Reading::Missing(_) => Some(false),
                 Reading::Unknown(_) => None,
             }
@@ -811,19 +817,24 @@ impl Window for DevinWindow {
                     took_back: false,
                     at_prompt: false,
                     shared: false,
+                    begun: Vec::new(),
                 });
             };
-            // The record and the wire log are read together: the log as it is
-            // when the look begins, the record when its reading is released. A turn is
-            // read from the record: a message of the user's its agent has not answered
-            // is one at work, from the moment the store has it (`record_state`).
-            let (reading, wire) = join(
-                self.records
-                    .look(Harness::Devin, &session, &Options::default()),
-                async { self.wire.read(self.time.wall_ms()) },
-            )
-            .await;
-            let wire = wire?;
+            // The record first, and the launch's wire log once its reading is back: the log
+            // is read no earlier than the record, so whatever the record shows of a turn of
+            // this window's, the log as read holds the turn's opening, which Devin writes as
+            // the turn takes its message in and before anything of the turn reaches its store
+            // (26 of 26 live messages, T-1417 and T-1423: the store changed 0.5 to 27 s after
+            // the message was said back). Read the other way round, or together, a look could
+            // pair the log from before the turn with a record that still read as at the open,
+            // and read at rest (the review T-1411 of T-1403). A turn is read from the record
+            // too: a message of the user's its agent has not answered is one at work, from the
+            // moment the store has it (`record_state`).
+            let reading = self
+                .records
+                .look(Harness::Devin, &session, &Options::default())
+                .await;
+            let wire = self.wire.read(self.time.wall_ms())?;
             self.looked.set(self.history().map(|seen| seen.prompts));
             // What Devin's wire says of its quota is the live word beside the record's.
             let mut observed = observed_from(Arc::clone(&reading), wire.quota);
@@ -843,6 +854,23 @@ impl Window for DevinWindow {
             } else if self.begun_on_the_store(&observed) {
                 observed.settled = false;
             }
+            // A turn the window's own launch began on the conversation and has not ended is
+            // the window's own, and its log is written by no other process: nothing the
+            // record holds reads the window at rest before the log says that turn ended. Not
+            // what the record held at the open (a compaction that kept none of the turn gives
+            // back the chain of the open, T-1401), not a chain Devin's compactor left holding
+            // nothing of the turn, nor a step whose answer Devin has not stored when it says
+            // it waits (`blocked` comes before the end). The log is read on from where the
+            // last look stopped, so a turn begun between two looks is seen at the next,
+            // whatever the record showed between them. Once the turn ended, the record and
+            // what it held at the open speak again: the old process's turn the snapshot
+            // speaks of is still no turn of this window's (T-1403).
+            if self.wire.turn_open(&session) {
+                observed.settled = false;
+            }
+            // What the turn took in, by the messages it said back, has begun (T-1423): the
+            // engine's watch for a message no turn began on leaves those be (`never_began`).
+            observed.begun = self.wire.said_back(&session);
             Ok(match wire.shown {
                 None => unnamed(observed, HOLD),
                 Some(shown) if !self.known(&shown) => switched_to(observed, shown),

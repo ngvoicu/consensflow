@@ -162,6 +162,32 @@ fn can_go_on_with_a_session_whose_store_holds_a_message_of_the_users_and_not_wit
     assert_eq!(finished(devin.resumable("brisk-ember")), Some(true));
 }
 
+/// T-1388 (Devin 3000.12.43, the Mac, 2026-11-10): `/compact` on a finished session leaves
+/// its main chain a new one of system messages and the summary, with the messages it sums up
+/// off the chain, and a session read for a message of the user's on it was taken for one
+/// Devin holds nothing of: a follow-up for it was paused ("the conversation it follows
+/// cannot be gone on in"), and any other task for its window began a new conversation.
+#[test]
+fn can_go_on_with_a_session_devin_compacted_though_its_chain_holds_no_message_of_the_users() {
+    let home = Home::new();
+    let devin = home.adapter();
+    let store = home.store();
+    store.begins("calm-river");
+    store.says("calm-river", "system", "You are Devin.");
+    store.begins("tall-pine");
+    store.is_compacted("tall-pine");
+    assert_eq!(
+        finished(devin.resumable("tall-pine")),
+        Some(true),
+        "its summary is the conversation, which a window opened on it goes on in"
+    );
+    assert_eq!(
+        finished(devin.resumable("calm-river")),
+        Some(false),
+        "what Devin writes of itself, and no summary of a conversation, is still no turn"
+    );
+}
+
 #[test]
 fn tells_devin_on_windows_to_name_files_the_way_its_file_tools_write_them_and_nowhere_else() {
     let role = "# ConsensFlow worker\n\nRole text for the test.";

@@ -49,7 +49,7 @@ pub(crate) fn row(session: &str, env: &Env) -> Result<Option<Row>, String> {
 
 /// Whether a window can be opened again on the session whose log `reading` read, its
 /// index row `row`: the log decides where it was read (yes where it holds a message
-/// of the user's, as Devin's store does), and no where there is none, which a session
+/// of the user's), and no where there is none, which a session
 /// pruned by Muse's retention (`session_retention_days`) is, whatever a row left behind
 /// says. Only a log that is there and unreadable asks the index: a row that counts a
 /// prompt is a yes, and anything else (no row, none counted, the index unreadable)
