@@ -1061,3 +1061,79 @@ fn the_largest_roles_are_given_to_a_muse_window_in_the_parts_its_hooks_say_and_e
         }
     }
 }
+
+/// T-1435: where the parts of the largest chief's role begin in a Muse window. Muse is given a
+/// role in parts, a hook each, and a part ends where a paragraph or a heading begins, not
+/// between a line and the list it introduces (`cf_harness::muse::parts`). These are the first
+/// lines of the parts after the first, per case: a change to the chief's text that moves them
+/// fails here, so that where the role is cut is looked at. A worker's role is one part.
+#[test]
+fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_in_a_list() {
+    use cf_harness::muse::parts;
+    let (utf8, escaped) = (the_most_rules(), the_most_escaped_rules());
+    // The first lines of the first `checked` parts after the first (the rules a project gives
+    // its staff are cut where the room ends, in their lines, which have no blank line).
+    let begin = |role: &str, checked: usize| -> Vec<String> {
+        let cut = parts(role);
+        assert_eq!(cut.concat(), role);
+        let mut before = String::new();
+        let mut starts = Vec::new();
+        for part in &cut {
+            if !before.is_empty() && starts.len() < checked {
+                let last = before.trim_end().lines().last().unwrap_or("");
+                assert!(before.ends_with("\n\n"), "a part ends at a blank line");
+                assert!(
+                    !last.ends_with(':') && !last.starts_with('#'),
+                    "{last:?} introduces what is cut off"
+                );
+                let first = part.lines().next().unwrap_or("");
+                assert!(
+                    !first.starts_with(|c: char| c.is_whitespace() || "-*+|>`".contains(c)),
+                    "{first:?} goes on with what is before it"
+                );
+                starts.push(first.chars().take(60).collect());
+            }
+            before += part;
+        }
+        starts
+    };
+    // A case: its name, the window's `cf`, the staff's rows, specs on or off, the rules, and the
+    // lines the part after the first begins with.
+    type Case<'a> = (&'a str, CfWord, usize, bool, Option<&'a str>, &'a [&'a str]);
+    let cases: [Case; 4] = [
+        ("a Mac, no staff", a_mac(), 0, false, None, &["The tiers:"]),
+        (
+            "a Mac, the largest chief",
+            a_mac(),
+            25,
+            true,
+            Some(&utf8),
+            &["The tiers:"],
+        ),
+        (
+            "Windows, the largest chief",
+            a_windows(),
+            25,
+            true,
+            Some(&utf8),
+            &["## Choose the tier, not the member"],
+        ),
+        (
+            "a Mac, the most escaped rules",
+            a_mac(),
+            25,
+            true,
+            Some(&escaped),
+            &["The tiers:"],
+        ),
+    ];
+    for (name, cf, rows, specs, rules, expected) in cases {
+        let role = a_chiefs_role_for(&cf, rows, specs, rules);
+        assert_eq!(begin(&role, 1), expected, "{name}");
+    }
+    let worker = role_instructions(&Env::default(), "worker", &[], &a_mac(), None).unwrap();
+    assert_eq!(
+        parts(&with_staff_rules(worker, "worker", Some(&utf8))).len(),
+        1
+    );
+}
