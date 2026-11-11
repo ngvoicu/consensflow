@@ -69,8 +69,8 @@ enum Outcome {
 /// the 22 that name `RESULT_ACCEPTED`, `RESULT_SENT_BACK` or
 /// `DECIDED_BEFORE_PASTED`, which the withdrawal of a decided task's result
 /// moved: Node leaves it queued, and its dispatcher pastes it after the
-/// decision it asked for; and the 5 that name `TAKEN_BEFORE_GIVEN`,
-/// `LEFT_THE_PAUSE` or `WAIT_NOTE_TAKEN`, which the notes of a task's wait
+/// decision it asked for; and the 5 that name `WAIT_NOTE_TAKEN` or say, after
+/// the release, that a note of a task's wait is withdrawn, which the notes of a task's wait
 /// moved: Node leaves one queued when another member takes the task or it is
 /// taken back (a hold's end tells the requester nothing here either, as Node's
 /// did: it is told the task goes on once a turn of its window gets through,
@@ -101,6 +101,11 @@ const RECORDED_OFF_WINDOWS: &[&str] = &["home-copies-004"];
 /// chief that named no model on that agent's model (harness-models).
 const NAMED_BY_MODEL: &str = "the ledger Node left is migrated by 0031: each member of a ready-made agent is named and run by its model (`@zeus` is `@opus-max`; a member of an agent it cannot resolve keeps its name and needs an edit), and a chief that named no model runs on its agent's";
 
+/// Why a trace departs at a release with nothing bound to the window: the note of it asks the
+/// chief nothing, and is shown, not typed (RS-25). Ten depart there: four name it, and six
+/// say it before a later departure of their own.
+const RELEASE_SHOWN: &str = "a task taken back from its member, with no follow-up bound to that window and nothing taken back with it, tells its requester in a note that asks no decision: to the chief it is shown on the task's line, not typed (RS-25), `read` with its receipt `shown`, where Node leaves it `queued` to be pasted";
+
 const DEPARTED: &[(&str, usize, &str)] = &[
     ("evals-measure-002", 0, NAMED_BY_MODEL),
     ("evals-measure-004", 0, NAMED_BY_MODEL),
@@ -130,12 +135,15 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-dispatcher-028", 90, COPY_AFTER_THE_KEPT),
     ("core-dispatcher-029", 47, TELL_TAKES_A_WINDOW_LOSS_PAUSE),
     ("core-dispatcher-042", 72, "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, so the chief has no message waiting (`withWork`), where Node's has the note"),
-    ("core-dispatcher-055", 71, TAKEN_BEFORE_GIVEN),
+    ("core-dispatcher-055", 64, "a task taken back from its member, with no follow-up bound to that window and nothing taken back with it, tells its requester in a note that asks no decision: to the chief it is shown on the task's line, not typed (RS-25), `read` with its receipt `shown`, where Node leaves it `queued` to be pasted; the trace's later departure: the daemon gives T-1 to a member while the note that T-1 was taken back is queued, and the note is withdrawn: the chief has no message waiting (`withWork`), where Node's has the note, which its dispatcher pastes after the task was taken"),
     ("core-dispatcher-056", 103, DECIDED_BEFORE_PASTED),
-    ("core-dispatcher-057", 75, LEFT_THE_PAUSE),
-    ("core-dispatcher-058", 78, LEFT_THE_PAUSE),
+    ("core-dispatcher-057", 74, "a task taken back from its member, with no follow-up bound to that window and nothing taken back with it, tells its requester in a note that asks no decision: to the chief it is shown on the task's line, not typed (RS-25), `read` with its receipt `shown`, where Node leaves it `queued` to be pasted; the trace's later departure: the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`cancelled`, with the reason `T-1 was taken back`), where Node leaves it `queued`"),
+    ("core-dispatcher-058", 77, "a task taken back from its member, with no follow-up bound to that window and nothing taken back with it, tells its requester in a note that asks no decision: to the chief it is shown on the task's line, not typed (RS-25), `read` with its receipt `shown`, where Node leaves it `queued` to be pasted; the trace's later departure: the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`cancelled`, with the reason `T-1 was taken back`), where Node leaves it `queued`"),
     ("core-dispatcher-060", 236, WAIT_NOTE_TAKEN),
+    ("core-dispatcher-063", 86, RELEASE_SHOWN),
+    ("core-dispatcher-064", 86, RELEASE_SHOWN),
     ("core-dispatcher-065", 147, KEPT_IN_BRIEF),
+    ("core-dispatcher-066", 304, RELEASE_SHOWN),
     ("core-dispatcher-074", 91, "the chief queues a follow-up (`--after T-n`) while T-n's result is in and not accepted: it is taken, open and waiting for T-n to be accepted, where Node queued it for the window at once; the trace's later departure (the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn, where Node leaves it queued) is no longer reached"),
     ("core-dispatcher-080", 225, COPY_AFTER_THE_KEPT),
     ("core-dispatcher-082", 87, FOLLOW_UP_BEHIND_RESULT),
@@ -146,8 +154,9 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-dispatcher-090", 93, DECIDED_BEFORE_PASTED),
     ("core-dispatcher-091", 87, FOLLOW_UP_BEHIND_RESULT),
     ("core-dispatcher-107", 122, KEPT_IN_BRIEF),
+    ("core-dispatcher-113", 85, RELEASE_SHOWN),
     ("core-dispatcher-158", 87, FOLLOW_UP_BEHIND_RESULT),
-    ("core-page-014", 9, REASON_RELEASE),
+    ("core-page-014", 6, "a task taken back from its member, with no follow-up bound to that window and nothing taken back with it, tells its requester in a note that asks no decision: to the chief it is shown on the task's line, not typed (RS-25), `read` with its receipt `shown`, where Node leaves it `queued` to be pasted; the trace's later departure: a release cancels the old window's kept rows with the reason `carried into T-n's brief for its next window`; Node gave none"),
     ("core-page-023", 8, WAITED_FOR),
     ("core-page-025", 8, UNREACHED),
     ("core-page-026", 14, UNREACHED),
@@ -158,7 +167,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-conversations-008", 20, RESULT_ACCEPTED),
     ("ledger-conversations-013", 22, RESULT_SENT_BACK),
     ("ledger-conversations-014", 12, FOLLOW_UP_BEHIND_RESULT),
-    ("ledger-conversations-015", 19, WAIT_NOTE_TAKEN),
+    ("ledger-conversations-015", 11, "a task taken back from its member, with no follow-up bound to that window and nothing taken back with it, tells its requester in a note that asks no decision: to the chief it is shown on the task's line, not typed (RS-25), `read` with its receipt `shown`, where Node leaves it `queued` to be pasted; the trace's later departure: the daemon gives the task to a member while the note that it was taken back or waits for a free member, which the chief had not been given, is queued: the note is withdrawn (`cancelled`, with the reason `T-n was taken by @member`), where Node leaves it `queued` to be pasted after the task was taken"),
     ("ledger-conversations-016", 7, "a task whose brief reached no window says so (`reached: false`) beside its empty transcript; Node said nothing of it"),
     ("ledger-conversations-019", 12, FOLLOW_UP_BEHIND_RESULT),
     ("ledger-gate-004", 17, RESULT_ACCEPTED),
@@ -220,7 +229,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-tasks-027", 6, WAITED_FOR),
     ("ledger-tiered-012", 9, CRITICAL_WORDS),
     ("ledger-tiered-013", 13, KEPT_IN_BRIEF),
-    ("ledger-tiered-014", 22, WINDOW_ENDED),
+    ("ledger-tiered-014", 12, "a task taken back from its member, with no follow-up bound to that window and nothing taken back with it, tells its requester in a note that asks no decision: to the chief it is shown on the task's line, not typed (RS-25), `read` with its receipt `shown`, where Node leaves it `queued` to be pasted; the trace's later departure: a release withdraws what the old window still held for the human with the reason `withdrawn: @x's window ended first`; Node gave none"),
 ];
 
 /// A member's removal cancels the open task given to its lane or a session of it
@@ -276,12 +285,6 @@ const DECIDED_BEFORE_PASTED: &str =
 /// takes the task before the requester is given it.
 const WAIT_NOTE_TAKEN: &str =
     "the daemon gives the task to a member while the note that it was taken back or waits for a free member, which the chief had not been given, is queued: the note is withdrawn (`cancelled`, with the reason `T-n was taken by @member`), where Node leaves it `queued` to be pasted after the task was taken";
-/// What the dispatcher asks of the ledger after such a take-over.
-const TAKEN_BEFORE_GIVEN: &str =
-    "the daemon gives T-1 to a member while the note that T-1 was taken back is queued, and the note is withdrawn: the chief has no message waiting (`withWork`), where Node's has the note, which its dispatcher pastes after the task was taken";
-/// A release leaves the wait a task was in: what its requester was told of it goes.
-const LEFT_THE_PAUSE: &str =
-    "the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`cancelled`, with the reason `T-1 was taken back`), where Node leaves it `queued`";
 /// The door's poll is a write now, `claim_answer`; `answerTo`, its read, went.
 const DOOR_READ: &str =
     "the door's read `answerTo` is gone: a poll claims the answer with `claim_answer`";
@@ -298,9 +301,6 @@ const NO_MARK_TO_FORGET: &str =
 /// What a window kept goes to the next window in the brief, not with the old one.
 const KEPT_IN_BRIEF: &str =
     "a release carries what the old window kept into the task's brief, once (\"Kept from before\"); Node let it go with the window";
-/// The reason a release gives the rows it carried.
-const REASON_RELEASE: &str =
-    "a release cancels the old window's kept rows with the reason `carried into T-n's brief for its next window`; Node gave none";
 /// The reason a pause gives what the chief wrote and takes back.
 const REASON_PAUSE: &str =
     "a chief's pause withdraws what the chief wrote for the window with the reason `withdrawn by @chief's pause`; Node gave none";
@@ -319,8 +319,6 @@ const UNREACHED: &str =
 /// never typed in after (T-260).
 const ANSWERED_AS_IT_WAITED: &str =
     "the chief answers a question still queued for it: the question is `read`, its receipt naming the answer and its time the answer's, so it is never typed in after, where Node leaves it `queued` to be pasted";
-const WINDOW_ENDED: &str =
-    "a release withdraws what the old window still held for the human with the reason `withdrawn: @x's window ended first`; Node gave none";
 /// A critical task's lead was reworded in the role texts' own terms (T-1060):
 /// it changes no project file and answers to the chief.
 const CRITICAL_WORDS: &str =
