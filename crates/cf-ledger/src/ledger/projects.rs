@@ -79,7 +79,7 @@ impl Ledger {
     }
 
     /// Chooses the size, in tokens, at which the project's member windows compact,
-    /// whatever their harness (200,000 to 1,000,000), or takes the choice away: none is
+    /// whatever their harness (250,000 to 1,000,000), or takes the choice away: none is
     /// each harness's own point. It reaches each window when it next starts.
     pub fn set_compaction(
         &mut self,

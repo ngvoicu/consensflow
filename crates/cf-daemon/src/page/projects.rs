@@ -214,7 +214,7 @@ pub(super) async fn rules(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
 }
 
 /// `project.compaction`: the size, in tokens, at which the human has the project's
-/// member windows compact, whatever their harness, from 200,000 to 1,000,000, checked
+/// member windows compact, whatever their harness, from 250,000 to 1,000,000, checked
 /// before the project is looked for. `compaction` that is left out or `null` takes the
 /// choice away: each harness's own point. Only the page chooses it: no route of the
 /// agents' API does, so no `cf` command, the chief's or a member's, changes it.

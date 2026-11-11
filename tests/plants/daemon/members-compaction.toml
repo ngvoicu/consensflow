@@ -42,13 +42,23 @@ replace = '''    (0..=COMPACTION_MAX)'''
 
 [[plant]]
 name = "members compaction: the ledger's floor is the old hundred thousand"
-meant = "the_range_is_two_hundred_thousand_to_a_million"
+meant = "the_range_is_a_quarter_of_a_million_to_a_million"
 runs = ["mc-ledger-lib"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/projects/compaction.rs"
-find = '''pub const COMPACTION_MIN: u32 = 200_000;'''
+find = '''pub const COMPACTION_MIN: u32 = 250_000;'''
 replace = '''pub const COMPACTION_MIN: u32 = 100_000;'''
+
+[[plant]]
+name = "members compaction: the ledger's floor is the two hundred thousand a window that left the most compacts every few calls at"
+meant = "the_floor_leaves_a_claude_window_twenty_calls_above_the_largest_context_a_compaction_left"
+runs = ["mc-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '''pub const COMPACTION_MIN: u32 = 250_000;'''
+replace = '''pub const COMPACTION_MIN: u32 = 200_000;'''
 
 [[plant]]
 name = "members compaction: the ledger takes the size just under the floor"
@@ -223,7 +233,7 @@ runs = ["mc-daemon-page"]
 
 [[plant.edit]]
 file = "app/ui/core/compaction.js"
-find = '''const LEAST = 200_000
+find = '''const LEAST = 250_000
 '''
 replace = '''const LEAST = 10_000
 '''

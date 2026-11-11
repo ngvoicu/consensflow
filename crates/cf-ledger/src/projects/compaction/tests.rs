@@ -6,11 +6,11 @@ fn window(value: serde_json::Value) -> Result<Option<u32>, String> {
     parse_compaction(Some(&value)).map_err(|refused| refused.to_string())
 }
 
-const WORDS: &str = "the compaction size is a whole number of tokens from 200000 to 1000000, or none for each harness's own point";
+const WORDS: &str = "the compaction size is a whole number of tokens from 250000 to 1000000, or none for each harness's own point";
 
 #[test]
-fn a_size_from_two_hundred_thousand_to_a_million_tokens_is_kept_as_it_is() {
-    for tokens in [200_000, 200_001, 400_000, 999_999, 1_000_000] {
+fn a_size_from_a_quarter_of_a_million_to_a_million_tokens_is_kept_as_it_is() {
+    for tokens in [250_000, 250_001, 400_000, 999_999, 1_000_000] {
         assert_eq!(window(json!(tokens)), Ok(Some(tokens)), "{tokens}");
     }
 }
@@ -31,7 +31,8 @@ fn a_size_below_or_above_what_claude_takes_is_refused_in_the_words_that_say_the_
         json!(99_999),
         json!(100_000),
         json!(150_000),
-        json!(199_999),
+        json!(200_000),
+        json!(249_999),
         json!(1_000_001),
         json!(u64::MAX),
     ] {
@@ -56,8 +57,8 @@ fn only_a_whole_number_is_a_size() {
 }
 
 #[test]
-fn the_range_is_two_hundred_thousand_to_a_million() {
-    assert_eq!(COMPACTION_MIN, 200_000);
+fn the_range_is_a_quarter_of_a_million_to_a_million() {
+    assert_eq!(COMPACTION_MIN, 250_000);
     assert_eq!(COMPACTION_MAX, 1_000_000);
 }
 
@@ -65,21 +66,26 @@ fn the_range_is_two_hundred_thousand_to_a_million() {
 /// (20,000 of room for its answer and a 13,000 buffer) and, when a window refills to that
 /// point within three turns of a compaction three times in a row, ends the turn with an error
 /// instead (`autocompact_thrashing`). The largest context the next call had after a compaction
-/// that fired under 300,000 was 120,000 (50 of T-1436's, all roles); after the ones that fired
-/// at 967,000 it reached 161,000, a kept part of 82,000 that the smaller windows did not show.
-/// A call adds about 2,500: the firing point must lie above the context after a compaction and
-/// three calls on, or a window compacts at once and then stops doing work. The other harnesses
-/// leave far less after a compaction (Codex 39,000, Devin 75,000, Pi 102,000 seen), so
-/// Claude's is the line that binds. It makes thrashing unlikely, not impossible: the context a
-/// compaction leaves grows with the owner's MCP servers, skills and rules.
+/// was 161,268 (T-1436's 60 real worker compactions; at most 120,000 after the ones that fired
+/// under 300,000, 161,268 after one that fired at 967,000: what a compaction leaves at a smaller
+/// firing point was not measured below 267,000). A call adds about 2,500. On the real Claude
+/// Code 2.1.322 against a stub, a window that left 161,268 compacted 3 times in 15 calls at
+/// 200,000, once at 225,000 and not at all at 250,000. So the firing point must lie at least
+/// twenty calls above the largest context left, or a window compacts every few calls and the
+/// compaction costs more than it saves (T-1436's replay with about 104,000 left after a
+/// compaction, which is 13,000 of room at 150,000 and 63,000 at 200,000: 150,000 cost 9.4% more
+/// than no setting, 200,000 saved 32.5%). The other harnesses leave far
+/// less after a compaction (Codex 39,000, Devin 75,000 where it took effect, Pi 102,000 seen),
+/// so Claude's is the line that binds. It makes thrashing unlikely, not impossible: the context
+/// a compaction leaves grows with the owner's MCP servers, skills and rules.
 #[test]
-fn the_floor_leaves_a_claude_window_room_above_the_largest_context_a_compaction_left() {
+fn the_floor_leaves_a_claude_window_twenty_calls_above_the_largest_context_a_compaction_left() {
     const CLAUDES_MARGIN: u32 = 33_000;
-    const LARGEST_AFTER_A_COMPACTION: u32 = 120_000;
-    const THREE_CALLS: u32 = 3 * 2_500;
+    const LARGEST_AFTER_A_COMPACTION: u32 = 161_268;
+    const TWENTY_CALLS: u32 = 20 * 2_500;
     assert!(
-        COMPACTION_MIN - CLAUDES_MARGIN >= LARGEST_AFTER_A_COMPACTION + THREE_CALLS,
-        "{COMPACTION_MIN} fires Claude Code at {} and a window refills past that at once",
+        COMPACTION_MIN - CLAUDES_MARGIN >= LARGEST_AFTER_A_COMPACTION + TWENTY_CALLS,
+        "{COMPACTION_MIN} fires Claude Code at {} and a window that left {LARGEST_AFTER_A_COMPACTION} compacts every few calls",
         COMPACTION_MIN - CLAUDES_MARGIN
     );
 }

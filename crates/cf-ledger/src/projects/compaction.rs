@@ -22,11 +22,11 @@ use crate::store::Store;
 
 /// The smallest size: under it a window that has just compacted can already be over its
 /// harness's own firing point (Claude Code fires at the size less 33,000, and a fresh
-/// worker's first call is a median 71,000 and a compaction leaves up to 120,000 or more), so
-/// it compacts again at once, three times and then ends the turn with Claude Code's own error.
-/// Claude Code takes 100,000 for its compaction window; the floor is above it for that
-/// reason (T-1439, tests.rs holds the arithmetic).
-pub const COMPACTION_MIN: u32 = 200_000;
+/// worker's first call is a median 71,000 and the next call after a compaction was up to 161,000),
+/// so it compacts again within a few calls, and three times in a row ends the turn with Claude
+/// Code's own error. Claude Code itself takes 100,000 for its compaction window; the floor is
+/// above that for this reason (T-1439, `tests.rs` holds the arithmetic).
+pub const COMPACTION_MIN: u32 = 250_000;
 
 /// The largest size: the most Claude Code takes for its compaction window.
 pub const COMPACTION_MAX: u32 = 1_000_000;

@@ -12,7 +12,7 @@ use super::reading::home_with;
 use super::*;
 use crate::testing::{request, said, scene};
 
-const WORDS: &str = "the compaction size is a whole number of tokens from 200000 to 1000000, or none for each harness's own point";
+const WORDS: &str = "the compaction size is a whole number of tokens from 250000 to 1000000, or none for each harness's own point";
 
 /// The page over a project with a worker, on a bridge.
 struct Asked {
@@ -113,7 +113,8 @@ async fn a_size_outside_the_range_or_no_number_is_refused_and_changes_nothing() 
                 json!(0),
                 json!(99_999),
                 json!(100_000),
-                json!(199_999),
+                json!(200_000),
+                json!(249_999),
                 json!(1_000_001),
                 json!(-1),
                 json!(400_000.5),

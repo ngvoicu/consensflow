@@ -1,11 +1,11 @@
 //! The size the human chooses for the project's member windows to compact at,
-//! whatever their harness: set, changed and taken away, from 200,000 to 1,000,000 tokens, what each
+//! whatever their harness: set, changed and taken away, from 250,000 to 1,000,000 tokens, what each
 //! change logs and tells the trace, that a refused one and one for a project that
 //! is not there change nothing, that the view has it only while there is one, and
 //! that a ledger at the version before gains none in every project with every row
 //! kept.
 
-use cf_ledger::{migrate, ProjectView, MIGRATIONS};
+use cf_ledger::{migrate, open_ledger, Options, ProjectView, MIGRATIONS};
 use rusqlite::Connection;
 use serde_json::json;
 
@@ -102,12 +102,12 @@ fn a_size_outside_the_range_is_refused_and_changes_nothing() {
         .set_compaction(app.id, Some(400_000))
         .expect("set");
     let logged = home.told.borrow().len();
-    for tokens in [0, 99_999, 100_000, 199_999, 1_000_001, u32::MAX] {
+    for tokens in [0, 99_999, 100_000, 200_000, 249_999, 1_000_001, u32::MAX] {
         assert_eq!(
             refusal(home.ledger.set_compaction(app.id, Some(tokens))),
             (
                 Some("invalid-compaction"),
-                "the compaction size is a whole number of tokens from 200000 to 1000000, or none for each harness's own point".to_owned()
+                "the compaction size is a whole number of tokens from 250000 to 1000000, or none for each harness's own point".to_owned()
             ),
             "{tokens}"
         );
@@ -115,6 +115,54 @@ fn a_size_outside_the_range_is_refused_and_changes_nothing() {
     let still = home.ledger.project(app.id).expect("read").expect("there");
     assert_eq!(still.compaction, Some(400_000));
     assert_eq!(home.told.borrow().len(), logged, "a refusal logs nothing");
+}
+
+/// A project that chose a size before the floor was raised (T-1439) keeps it: the ledger
+/// reads it as it is, refuses it when it is saved again and lets the human take it away.
+/// Nothing rewrites it behind the human's back, and what reaches a launch is this row's value.
+#[test]
+fn a_size_stored_under_the_floor_is_kept_as_it_is_refused_when_saved_again_and_taken_away_by_none()
+{
+    let dir = tempfile::tempdir().expect("a home");
+    let file = dir.path().join("consensflow.db");
+    let id = {
+        let mut ledger = open_ledger(&file, Options::default()).expect("a ledger");
+        let app = project(&mut ledger, "app");
+        ledger.set_compaction(app.id, Some(400_000)).expect("set");
+        app.id
+    };
+    // As an older ledger left it, with the ledger closed: under the floor the ledger now takes.
+    Connection::open(&file)
+        .expect("the ledger's file")
+        .execute("UPDATE project SET compaction = 150000 WHERE id = ?", [id])
+        .expect("an older size");
+    let mut ledger = open_ledger(&file, Options::default()).expect("the ledger again");
+    let read = |ledger: &cf_ledger::Ledger| ledger.project(id).expect("read").expect("there");
+    assert_eq!(
+        read(&ledger).compaction,
+        Some(150_000),
+        "read as it is, not as the floor"
+    );
+    let logged = events_of(&ledger, id, "project.compaction").len();
+    assert_eq!(
+        refusal(ledger.set_compaction(id, Some(150_000))),
+        (
+            Some("invalid-compaction"),
+            "the compaction size is a whole number of tokens from 250000 to 1000000, or none for each harness's own point".to_owned()
+        )
+    );
+    assert_eq!(
+        read(&ledger).compaction,
+        Some(150_000),
+        "a refusal changes nothing"
+    );
+    assert_eq!(events_of(&ledger, id, "project.compaction").len(), logged);
+    let gone = ledger.set_compaction(id, None).expect("away");
+    assert_eq!(gone.compaction, None);
+    assert_eq!(
+        events_of(&ledger, id, "project.compaction").last(),
+        Some(&json!({ "from": 150_000, "to": null }))
+    );
 }
 
 #[test]

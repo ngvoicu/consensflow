@@ -582,15 +582,15 @@ async function open(page, given = model()) {
         return answer({ project: shownProject(project)[0] })
       },
       // The size the members' windows compact at, whatever their harness, as the daemon keeps
-      // it: a whole number of tokens from 200,000 to 1,000,000, or none (null or left out) for
+      // it: a whole number of tokens from 250,000 to 1,000,000, or none (null or left out) for
       // each harness's own point, refused in its words otherwise.
       'project.compaction': ({ project, compaction }) => {
         const size = compaction ?? null
-        if (size !== null && !(Number.isInteger(size) && size >= 200000 && size <= 1000000)) {
+        if (size !== null && !(Number.isInteger(size) && size >= 250000 && size <= 1000000)) {
           return {
             ok: false,
             error:
-              "the compaction size is a whole number of tokens from 200000 to 1000000, or none for each harness's own point",
+              "the compaction size is a whole number of tokens from 250000 to 1000000, or none for each harness's own point",
           }
         }
         for (const shown of shownProject(project)) {
@@ -5582,7 +5582,7 @@ async function newProject(page) {
         name: "The harness's own point",
       }),
       size: section('Compaction').getByRole('radio', { name: 'A size' }),
-      tokens: section('Compaction').getByLabel('Size in tokens, 200,000 to 1,000,000'),
+      tokens: section('Compaction').getByLabel('Size in tokens, 250,000 to 1,000,000'),
       hint: section('Compaction').locator('.members-compaction-hint'),
       save: section('Compaction').getByRole('button', {
         name: 'Save compaction',
@@ -6240,14 +6240,14 @@ test('New project: rules over a bound, or a size that is no whole number in the 
   await made.compaction.size.check()
   await made.compaction.tokens.fill('99999')
   await expect(made.compaction.hint).toHaveText(
-    'A size is a whole number from 200,000 to 1,000,000.',
+    'A size is a whole number from 250,000 to 1,000,000.',
   )
   await expect(made.compaction.tokens).toHaveAttribute('aria-invalid', 'true')
   await made.start.click()
-  await expect(made.refusal).toContainText('A size is a whole number from 200,000 to 1,000,000.')
+  await expect(made.refusal).toContainText('A size is a whole number from 250,000 to 1,000,000.')
   expect(await calls(page, 'project.open')).toEqual([])
   // Put right, it starts, with both.
-  await made.compaction.tokens.fill('200000')
+  await made.compaction.tokens.fill('250000')
   await made.start.click()
   await expect
     .poll(() => calls(page, 'project.open'))
@@ -6259,7 +6259,7 @@ test('New project: rules over a bound, or a size that is no whole number in the 
         gate: false,
         staff: [],
         rules: 'Short.',
-        compaction: 200000,
+        compaction: 250000,
       },
     ])
 })
@@ -6289,7 +6289,7 @@ test('New project: a project made with rules, a compaction size and computer use
   await expect(section('Rules for the staff').getByLabel('The rules')).toHaveValue(STAFF_RULES)
   await expect(section('Compaction').getByRole('radio', { name: 'A size' })).toBeChecked()
   await expect(
-    section('Compaction').getByLabel('Size in tokens, 200,000 to 1,000,000'),
+    section('Compaction').getByLabel('Size in tokens, 250,000 to 1,000,000'),
   ).toHaveValue('300000')
   expect(await computerUse(dialog)).toEqual(said)
   expect(said.map(({ block }) => block)).toEqual(['claude-code', 'permissions'])
@@ -7101,7 +7101,7 @@ async function compactionGroup(page) {
     group,
     own: group.getByRole('radio', { name: "The harness's own point" }),
     size: group.getByRole('radio', { name: 'A size' }),
-    amount: group.getByLabel('Size in tokens, 200,000 to 1,000,000'),
+    amount: group.getByLabel('Size in tokens, 250,000 to 1,000,000'),
     hint: group.locator('.members-compaction-hint'),
     save: group.getByRole('button', { name: 'Save compaction' }),
   }
@@ -7156,11 +7156,11 @@ test("Project settings shows a size the board has under the least a size can now
   await expect(section.size).toBeChecked()
   await expect(section.amount).toHaveValue('150000')
   await expect(section.amount).toHaveAttribute('aria-invalid', 'true')
-  await expect(section.hint).toHaveText('A size is a whole number from 200,000 to 1,000,000.')
+  await expect(section.hint).toHaveText('A size is a whole number from 250,000 to 1,000,000.')
   await expect(section.save).toBeDisabled()
   expect(await calls(page, 'project.compaction')).toEqual([])
   // Put right, it saves; or the harness's own point is chosen, which is saved whatever the field holds.
-  await section.amount.fill('200000')
+  await section.amount.fill('250000')
   await expect(section.save).toBeEnabled()
   await expect(section.hint).toBeHidden()
   await section.amount.fill('150000')
@@ -7223,8 +7223,9 @@ test('holds the size to the range the ledger takes, and Save back while it is no
     ['1000000', true],
     ['400000', true],
     ['  400000 ', true],
-    ['200000', true],
-    ['199999', false],
+    ['250000', true],
+    ['249999', false],
+    ['200000', false],
     ['100000', false],
     ['99999', false],
     ['1000001', false],
@@ -7243,7 +7244,7 @@ test('holds the size to the range the ledger takes, and Save back while it is no
     } else {
       await expect(section.save, text).toBeDisabled()
       await expect(section.hint, text).toHaveText(
-        'A size is a whole number from 200,000 to 1,000,000.',
+        'A size is a whole number from 250,000 to 1,000,000.',
       )
       await expect(section.amount, text).toHaveAttribute('aria-invalid', 'true')
     }
