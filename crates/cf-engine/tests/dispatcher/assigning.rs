@@ -355,7 +355,7 @@ fn tells_the_requester_once_when_nobody_of_the_tier_is_free_and_assigns_when_one
     assert_eq!(
         tiers.notes("chief"),
         [format!(
-            "T-3 waits for a free standard worker: @zeus is out of quota until {until}; @diana is out of quota until {until}."
+            "T-3 waits for a free standard worker: @zeus is out of quota until {until}; @diana is out of quota until {until}. If the quota was renewed early, the human presses Try again now on @zeus or @diana."
         )]
     );
     context.pass().unwrap();

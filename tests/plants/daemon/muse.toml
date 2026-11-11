@@ -1954,10 +1954,12 @@ runs = ["muse-moved"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-            return Some(if moved_hold(until) {
+        if moved_hold(until) {
+            Held::Moved
 '''
 replace = '''
-            return Some(if false && moved_hold(until) {
+        if false && moved_hold(until) {
+            Held::Moved
 '''
 
 
@@ -2131,7 +2133,7 @@ runs = ["muse-page-held"]
 [[plant.edit]]
 file = "app/ui/core/board.js"
 find = '''
-          ? 'unavailable until you say it works again'
+          ? 'unavailable until you say its login or billing works again: Try its member again now'
 '''
 replace = '''
           ? 'out of quota until you say it works again'
@@ -2163,10 +2165,10 @@ runs = ["muse-page-why"]
 [[plant.edit]]
 file = "app/ui/core/board.js"
 find = '''
-      activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
+    activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
 '''
 replace = '''
-      null
+    null
 '''
 
 

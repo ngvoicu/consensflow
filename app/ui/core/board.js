@@ -304,8 +304,13 @@ function sessionsNote(lane, board) {
 /** "T-3, T-4": task numbers in a sentence. */
 const taskNumbers = (numbers) => numbers.map((number) => `T-${number}`).join(', ')
 
-/** Where a task is going or came from, on its card; what it waits for first. */
-function route(task) {
+/**
+ * Where a task is going or came from, on its card; what it waits for first. A task held until
+ * a time is held for a quota, an account or a busy model, which look alike by their time and
+ * are three things (T-1357): `busy` is until when the lane's member is out for its busy model,
+ * where it is.
+ */
+function route(task, busy = null) {
   if (task.assignee === null) {
     const waitsFor = `for ${aPool(task)}`
     return task.blockedBy.length === 0
@@ -313,12 +318,15 @@ function route(task) {
       : `blocked by ${taskNumbers(task.blockedBy)} · ${waitsFor}`
   }
   if (task.state === 'paused' && task.heldUntil) {
+    const busyHold = busy !== null && Date.parse(task.heldUntil) <= Date.parse(busy)
     const until =
       task.heldUntil === MODEL_MOVED
         ? 'held until you say its model may go on'
         : task.heldUntil.startsWith('9999-')
-          ? 'unavailable until you say it works again'
-          : `out of quota until ${backAt(task.heldUntil)}`
+          ? 'unavailable until you say its login or billing works again: Try its member again now'
+          : busyHold
+            ? `model busy, tried again at ${backAt(task.heldUntil)}`
+            : `out of quota until ${backAt(task.heldUntil)}; renewed early? Try its member again now`
     return `${until} · from ${who(task.requester)}`
   }
   return task.blockedBy.length === 0
@@ -429,6 +437,31 @@ function identityLine(participant, className) {
 }
 
 /**
+ * What a participant out of quota is waiting for, or null when it is not out: why, in the
+ * engine's own words (its account refused, its model moved on its own), where it said them;
+ * its model busy for a moment, which the lane says (`busy`), with no hope of a press; else what
+ * the time it marked the member out until says of it, and that the human may have renewed the
+ * quota early (T-1357). Said on its row, the chief's card and the staff list.
+ */
+export function outWords({ participant, activity, busy }, now) {
+  if (!outOfQuota(participant, now)) return null
+  // Its model is busy for a moment: tried again after a back-off of ConsensFlow's own, which
+  // no press shortens, so no renewal is hoped for and no button is offered (T-1357).
+  if (typeof busy === 'string') {
+    return `Its model is busy: ConsensFlow tries it again at ${backAt(busy, now)}`
+  }
+  const said = (prefix) =>
+    activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
+  if (modelMoved(participant)) {
+    return `Held: ${said('moved: ') ?? 'its model moved on its own'}. Press Try again now once it is on the model you chose`
+  }
+  if (unavailable(participant)) {
+    return `Unavailable: ${said('unavailable: ') ?? 'its account was refused for billing or login'}. Logged in again, or paid? Press Try again now`
+  }
+  return `Out of quota until ${backAt(participant.outUntil, now)}; renewed early? Try again now`
+}
+
+/**
  * What a row, or the chief's card in the dock, says its participant is
  * doing, and the state that colours it: a chief being switched or a member out of
  * quota say so before anything its window does. A member with no terminal open says nothing (null): its row has no
@@ -473,21 +506,8 @@ export function laneStatus(lane, board, now) {
       'Needs an edit: the update could not tell what it ran on. Edit it under Project settings, or remove it',
     ]
   }
-  if (outOfQuota(participant, now)) {
-    // Why, in the engine's own words (its account refused, its model moved on its own), where
-    // it said them; else what the time it marked the member out until says of it.
-    const said = (prefix) =>
-      activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
-    let out
-    if (modelMoved(participant)) {
-      out = `Held: ${said('moved: ') ?? 'its model moved on its own'}. Press Try again now once it is on the model you chose`
-    } else if (unavailable(participant)) {
-      out = `Unavailable: ${said('unavailable: ') ?? 'its account was refused for billing or login'}. Press Try again now once it works`
-    } else {
-      out = `Out of quota until ${backAt(participant.outUntil, now)}`
-    }
-    return ['out', lane.holding ? `${out}. ${holding}` : out]
-  }
+  const out = outWords(lane, now)
+  if (out !== null) return ['out', lane.holding ? `${out}. ${holding}` : out]
   if (lane.holding) return ['holding', holding]
   const state = activity?.state ?? 'closed'
   if (state === 'waiting' && activity.reason) return [state, `Waiting: ${activity.reason}`]
@@ -926,7 +946,7 @@ export class BoardView {
         cell.append(this.#stackTile(held.length, state, label, participant))
       } else if (held.length > 0) {
         const list = element('ol', 'cards')
-        list.append(...held.map((task) => this.#card(task)))
+        list.append(...held.map((task) => this.#card(task, lane.busy ?? null)))
         cell.append(list)
       }
       row.append(cell)
@@ -952,7 +972,7 @@ export class BoardView {
       const status = element('span', 'row-status', text)
       status.dataset.state = state
       head.append(status)
-      if (state === 'out' && acts(board)) {
+      if (state === 'out' && !lane.busy && acts(board)) {
         head.append(tryAgain(participant, this.#onLane(this.#actions.onTryAgain, participant)))
       }
     }
@@ -1082,11 +1102,11 @@ export class BoardView {
     this.#stackTitle.textContent = `${label} tasks of ${laneName(row.participant)}`
     redraw(
       this.#stackCards,
-      held.map((task) => this.#card(task)),
+      held.map((task) => this.#card(task, row.busy ?? null)),
     )
   }
 
-  #card(task) {
+  #card(task, busy = null) {
     const item = element('li', 'card-item')
     const card = button('', 'card', () => this.#actions.onOpenTask(task.number))
     card.dataset.task = String(task.number)
@@ -1097,7 +1117,7 @@ export class BoardView {
       'aria-label',
       `T-${task.number}, ${task.title}, ${stateLabel(task)}, from ${who(task.requester)}`,
     )
-    const where = element('span', 'card-route', route(task))
+    const where = element('span', 'card-route', route(task, busy))
     // What it waits on is said on the card itself: the window's lamp says it rests.
     if (task.held) {
       where.append(' · ', element('span', 'card-held', `waiting on ${heldWords(task.held)}`))

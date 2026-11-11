@@ -446,6 +446,11 @@ impl Engine for Standin {
         None
     }
 
+    /// No recording has a member out for a busy model.
+    fn model_busy_until(&self, _member: &ParticipantView) -> Option<String> {
+        None
+    }
+
     fn finish_task(&self, project: i64, number: i64) -> Work<'_, Result<Finished, EngineError>> {
         let refusal = refused(format!(
             "no recording finishes T-{number} of project {project}"

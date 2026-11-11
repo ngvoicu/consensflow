@@ -96,6 +96,10 @@ impl Engine for Scripted {
         None
     }
 
+    fn model_busy_until(&self, _: &ParticipantView) -> Option<String> {
+        None
+    }
+
     fn open_project(&self, _: NewProject) -> Work<'_, Result<Option<ProjectView>, EngineError>> {
         unreachable!("{UNUSED}")
     }
