@@ -334,6 +334,11 @@ mod tests {
     /// taken out again, where it was added, before the file is hashed.
     const T1444_SUGGESTION_OFF: &str = "                launch.suggestion_off,\n";
 
+    /// What T-1423 added to `muse/window.rs`: the look a window gives before its session is
+    /// known says no delivery began (`Observed::begun`, a field the contract gained). Nothing
+    /// the corpus borrows reads it; the line is taken out again before the file is hashed.
+    const T1423_BEGUN: &str = "                    begun: Vec::new(),\n";
+
     /// What T-1328 changed in `claude/adapter.rs`: `default_model` answers `NoDefault` where it
     /// answered a `String`, and the import of it. Nothing the corpus borrows reads either; each is
     /// taken back to the release head's text before the file is hashed.
@@ -367,6 +372,8 @@ mod tests {
                 .replace(T1328_DEFAULT.0, T1328_DEFAULT.1)
                 .replace(T1399_ADVISOR_OFF, "")
                 .replace(T1444_SUGGESTION_OFF, "")
+        } else if file == "muse/window.rs" {
+            text.replacen(T1423_BEGUN, "", 1)
         } else {
             text.to_owned()
         }

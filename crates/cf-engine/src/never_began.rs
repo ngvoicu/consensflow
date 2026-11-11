@@ -11,7 +11,12 @@
 //!
 //! So the latest message of a working task's that went into a window
 //! ([`Dispatcher::latest_message_at`]) is watched until something follows it in the record
-//! (an answer, a call, a word of anyone's) or the harness counts work of its own. One that
+//! (an answer, a call, a word of anyone's) or the harness counts work of its own, and is not
+//! watched while its window says a turn of its own took it in and has not ended
+//! ([`Observed::begun`]: Devin says the message back as its turn takes it, 3000.12 live and
+//! 3000.11 just after its word that the turn works, and its model may then think minutes
+//! with nothing in the record and its prompt box idle, T-1396, T-1417, T-1423). A message no
+//! turn said back is watched as ever. One that
 //! has stood alone for a whole arrival window, the window's screen quiet ([`QUIET_MS`]: a
 //! harness at work draws, its spinner if nothing else), and no dialog open, is noticed:
 //! - **Once**, Enter is pressed into a window that takes pastes. The record has the words:
@@ -242,8 +247,9 @@ impl Dispatcher {
     /// The item of the latest message of `participant`'s working task that its record
     /// shows with nothing after it, and the message by its header: none where something
     /// follows it (an answer, a call, a word of anyone's), the harness counts work of its
-    /// own, a dialog waits, the turn failed, another program shares the record, or the
-    /// look could not read it. A message still on its way is the delivery's.
+    /// own, its window says a turn of its own took the message in and is open, a dialog
+    /// waits, the turn failed, another program shares the record, or the look could not
+    /// read it. A message still on its way is the delivery's.
     fn standing_alone(
         &self,
         participant: &ParticipantView,
@@ -282,7 +288,17 @@ impl Dispatcher {
             return Ok(None);
         }
         let item = &items[at];
-        Ok(Some((Arc::clone(&item.id), header_id(&item.text))))
+        let message = header_id(&item.text);
+        // A message its harness said back as a turn of the window's own took it in has begun,
+        // for as long as that turn is open, however quiet its record and its screen (Devin
+        // 3000.12, whose model may think minutes with its prompt box idle, T-1396, and says no
+        // word of its own on a turn, T-1417). Tied to the message itself, by its header on the
+        // window's own launch's log: not to a time, nor to a word an older launch left. One
+        // the window never said back is watched as ever.
+        if message.is_some_and(|message| observed.begun.contains(&message)) {
+            return Ok(None);
+        }
+        Ok(Some((Arc::clone(&item.id), message)))
     }
 
     /// The once of `item`, standing alone, spent at `at` on what it came to.

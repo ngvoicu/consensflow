@@ -999,6 +999,14 @@ pub struct Observed {
     /// too, written as the window's are, and nothing in it tells them apart. False
     /// from a harness that cannot tell.
     pub shared: bool,
+    /// The deliveries, by the header that begins each, that the window's harness said back
+    /// as taken into a turn of the window's own that has not ended (Devin's wire log of the
+    /// window's launch, which no other process writes: 3000.12 says a message back live as
+    /// its turn takes it, 3000.11 just after its word that the turn works): each has begun,
+    /// whatever the
+    /// record shows after it, until that turn's end. Empty from a harness that says no such
+    /// thing, for a message with no header of ConsensFlow's, and once the turn ended.
+    pub begun: Vec<i64>,
 }
 
 impl Observed {
@@ -1200,7 +1208,7 @@ const PASTED: &str = "pasted_content";
 /// Code attached and the line that opens its wrapper of a paste (`<pasted_content id="b118">`):
 /// the same reading as `cf-engine`'s `is_paste_of`, which a test of that crate holds this to.
 /// None for any other text, a header quoted after words included: it names no delivery.
-fn delivery_of(text: &str) -> Option<i64> {
+pub(crate) fn delivery_of(text: &str) -> Option<i64> {
     let mut rest = text.trim_start();
     // The placeholders: each `[Image #N]`, one space between them.
     while let Some(after) = rest.strip_prefix(IMAGE) {

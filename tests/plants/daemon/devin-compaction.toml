@@ -17,7 +17,21 @@
 # - no user's message is read back, a step's newest row off the chain is taken for its
 #   original, a row on the walk to the message is not read as its original (a step written
 #   between two compactions, Calliope's P2-1 on T-655), or a message the chain holds is
-#   read back as well.
+#   read back as well;
+# - a chain of Devin's own words and a compaction's summary, no message of the user's on it
+#   (a conversation compacted at rest, T-1388), reads as a turn not known to have ended, or
+#   any chain of Devin's own words reads as one at rest, or a chain with a turn on it after the
+#   summary reads so;
+# - a compaction in the middle of a turn that kept no step leaves the same chain, and the wire
+#   alone says the turn is open (it began and its end was not said: `blocked` is no end), so
+#   that chain reads at rest where a turn is open, or a turn's work, Devin's word that it
+#   works, or its end, is not read for it (T-1395, from the review of its first head);
+# - a Devin window whose own launch's log has a turn open reads at rest by what its record
+#   holds (the snapshot of the open, a chain the compactor left holding nothing of the turn,
+#   a step not stored at `blocked`), or the log is not followed for its turns, or a log read
+#   again keeps what it said before, or a turn open on another conversation counts (T-1403,
+#   from the review T-1401: `crates/cf-harness/tests/launch/devin/own_turn.rs` and
+#   `devin/wire_log/tests.rs`).
 #
 # And a turn Devin 3000.11 stamps (T-660, from T-656's reading of the live suites): every
 # record of its work stamped with its time, as a replay is, and Devin's own word on the turn
@@ -35,6 +49,8 @@ harness-lib-devin-compaction = ["cargo", "test", "--offline", "-p", "cf-harness"
 rig-devin-compaction = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "devin_compaction::"]
 harness-lib-devin-stamped = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record::tests::stamped::"]
 rig-devin-stamped = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "devin_stamped::"]
+harness-launch-devin-own-turn = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "devin::own_turn::"]
+harness-lib-devin-wire-log = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::wire_log::"]
 
 [[plant]]
 name = "devin compaction: the wire's end is not kept by its model request"
@@ -221,3 +237,127 @@ runs = ["harness-lib-devin-compaction"]
 file = "crates/cf-harness/src/devin/record/chain.rs"
 find = "            at = original;"
 replace = "            let _ = original;"
+
+[[plant]]
+name = "devin compaction: a chain compacted at rest has a turn open"
+meant = "a_chain_compacted_at_rest_is_a_conversation_at_rest_and_the_turn_after_it_reads_as_any"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = "    } else if last_complete || cancelled || failed || compacted_at_rest {"
+replace = "    } else if last_complete || cancelled || failed {"
+
+[[plant]]
+name = "devin compaction: any chain of Devin's own words is a conversation compacted at rest"
+meant = "a_chain_compacted_at_rest_is_a_conversation_at_rest_and_the_turn_after_it_reads_as_any"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = "            .any(|entry| entry.item.kind() == Kind::Compaction)\n"
+replace = "            .any(|_| true)\n"
+
+[[plant]]
+name = "devin compaction: a chain with a turn on it after the summary is a conversation compacted at rest"
+meant = "the_end_of_a_compacted_turn_that_names_no_model_request_or_two_proves_nothing"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = "    let compacted_at_rest = last.is_none()\n        && chain"
+replace = "    let compacted_at_rest = chain"
+
+[[plant]]
+name = "devin compaction: a chain compacted at rest is at rest whatever the wire says of a turn"
+meant = "a_summary_with_a_turn_open_on_the_wire_is_no_conversation_at_rest_until_the_turn_ends"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = "\n        && !wires.turn_open();"
+replace = ";"
+
+[[plant]]
+name = "devin compaction: a turn that waits is no turn open"
+meant = "a_summary_with_a_turn_open_on_the_wire_is_no_conversation_at_rest_until_the_turn_ends"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = '''                Some("blocked") => self.busy = false,'''
+replace = '''                Some("blocked") => {
+                    self.busy = false;
+                    self.open = false;
+                }'''
+
+[[plant]]
+name = "devin compaction: a turn's end does not close it"
+meant = "a_summary_with_a_turn_open_on_the_wire_is_no_conversation_at_rest_until_the_turn_ends"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "        self.busy = false;\n        self.open = false;\n        self.said_back.clear();"
+replace = "        self.busy = false;\n        self.said_back.clear();"
+
+[[plant]]
+name = "devin compaction: a turn's work, and Devin's word that it works, open no turn"
+meant = "a_summary_with_a_turn_open_on_the_wire_is_no_conversation_at_rest_until_the_turn_ends"
+runs = ["harness-lib-devin-compaction"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "        self.open |= self.busy;\n"
+replace = ""
+
+[[plant]]
+name = "devin compaction: a turn of the window's own open is read at rest by its record"
+meant = "a_window_that_began_a_turn_of_its_own_is_never_at_rest_before_that_turn_ends"
+runs = ["harness-launch-devin-own-turn"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "            if self.wire.turn_open(&session) {"
+replace = "            if self.wire.turn_open(&session) && false {"
+
+[[plant]]
+name = "devin compaction: the review's case reads at rest"
+meant = "the_case_the_review_found_is_a_row_of_the_table"
+runs = ["harness-launch-devin-own-turn"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "            if self.wire.turn_open(&session) {"
+replace = "            if self.wire.turn_open(&session) && false {"
+
+[[plant]]
+name = "devin compaction: the window's own log is not followed for its turns"
+meant = "a_turn_ended_for_its_quota_is_a_turn_ended_and_one_that_works_is_open"
+runs = ["harness-lib-devin-wire-log"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = "        self.turns.follow(&event);\n"
+replace = ""
+
+[[plant]]
+name = "devin compaction: a window log read again keeps the turn it said was open"
+meant = "a_turn_ended_for_its_quota_is_a_turn_ended_and_one_that_works_is_open"
+runs = ["harness-lib-devin-wire-log"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = "            state.turns.read_anew();\n"
+replace = ""
+
+[[plant]]
+name = "devin compaction: a turn open on another conversation of the window's log counts"
+meant = "a_turn_ended_for_its_quota_is_a_turn_ended_and_one_that_works_is_open"
+runs = ["harness-lib-devin-wire-log"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "        self.said.get(session).is_some_and(|said| said.open)"
+replace = "        self.said.values().any(|said| said.open)"
+
