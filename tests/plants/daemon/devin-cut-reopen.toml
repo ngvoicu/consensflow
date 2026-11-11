@@ -1,0 +1,122 @@
+# A Devin window opened again with no message on a session whose last turn a quit cut, which
+# Devin 3000.12.43 leaves silent: no configuration, so no conversation named by one and no mode,
+# until it is typed to, in either mode (T-1432, alpha-5 A5-23, from T-1417's run 3 and T-1432's
+# runs A, 2 and 3: five windows, 20 to 65 s). Its log names its session on every line all the
+# same. The rules:
+#
+# - a log that configured none and names one conversation alone, on every line that names one,
+#   names it (`wire::Naming::unannounced`); two named, or none, name nothing;
+# - the window is on that conversation where it is the one the window is known to be on, from
+#   `UNANNOUNCED_MS` after the first look that found the log so (`DevinWindow::shows`, the one
+#   place it is decided); before, it is held as a window that has said nothing;
+# - such a window's delivery goes behind `/bypass`, and the channel takes a paste into a log
+#   that configured none only where the adapter says so (`channel::Guard`);
+# - the start hook gives its role text where the log names its session so, with no while;
+# - a prompt the log lists new among the steps, after its first `steps` line, is a message the
+#   turn took in: `/bypass <message>` is said back by no line.
+#
+# The cases are in `crates/cf-harness/src/devin/adapter/tests/unannounced.rs`, `channel/tests.rs`,
+# `session_hook.rs` and `record/tests/unsaid.rs`.
+
+[run]
+harness-lib-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::"]
+
+[[plant]]
+name = "devin cut reopen: a silent window is held for good"
+meant = "a_window_reopened_silent_on_its_conversation_is_held_a_while_then_given_its_delivery_behind_bypass"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "        if now - since >= UNANNOUNCED_MS {\n            Shows::Unannounced\n        } else {"
+replace = "        if false {\n            Shows::Unannounced\n        } else {"
+
+[[plant]]
+name = "devin cut reopen: a silent log naming another conversation is taken for the known one"
+meant = "a_silent_log_that_names_another_conversation_two_or_none_holds_the_window_as_before"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "            .filter(|named| said.shown.is_none() && self.known(named));"
+replace = "            .filter(|_| said.shown.is_none());"
+
+[[plant]]
+name = "devin cut reopen: a log naming two conversations names the first"
+meant = "a_silent_window_the_human_takes_to_another_conversation_is_held_again"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire.rs"
+find = "                Named::One(one) if one == of => Named::One(one),"
+replace = "                Named::One(one) => Named::One(one),"
+
+[[plant]]
+name = "devin cut reopen: the silent window's delivery goes in without /bypass"
+meant = "a_window_reopened_silent_on_its_conversation_is_held_a_while_then_given_its_delivery_behind_bypass"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "                (format!(\"{BYPASS} {body}\"), channel::Guard::Unannounced)"
+replace = "                (body, channel::Guard::Unannounced)"
+
+[[plant]]
+name = "devin cut reopen: no while before a silent window is taken as on its conversation"
+meant = "a_window_that_announces_within_the_while_never_has_a_delivery_put_behind_bypass"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "pub(crate) const UNANNOUNCED_MS: i64 = 10_000;"
+replace = "pub(crate) const UNANNOUNCED_MS: i64 = 0;"
+
+[[plant]]
+name = "devin cut reopen: a silent window past its while still reads unnamed"
+meant = "a_window_reopened_silent_on_its_conversation_is_held_a_while_then_given_its_delivery_behind_bypass"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "                Shows::Known | Shows::Unannounced => observed,"
+replace = "                Shows::Unannounced => unnamed(observed, HOLD),\n                Shows::Known => observed,"
+
+[[plant]]
+name = "devin cut reopen: the channel pastes into any silent log whatever the adapter said"
+meant = "a_log_that_configured_none_takes_a_paste_only_where_the_adapter_says_the_window_is_unannounced_on_its_conversation"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/channel.rs"
+find = "            || (guard == Guard::Unannounced && naming.unannounced() == Some(session))"
+replace = "            || naming.unannounced() == Some(session)"
+
+[[plant]]
+name = "devin cut reopen: the start hook of a silent window gives no role text"
+meant = "a_window_reopened_silent_on_its_conversation_gives_its_start_its_role_text_at_once"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/session_hook.rs"
+find = "        if naming.shown().or(naming.unannounced()) == Some(session) {"
+replace = "        if naming.shown() == Some(session) {"
+
+[[plant]]
+name = "devin cut reopen: a prompt listed new among the steps opens no turn"
+meant = "a_message_given_behind_bypass_to_a_silent_reopened_devin_3000_12_window_opens_its_turn_at_the_step_devin_lists_for_it"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "            self.busy |= !prompts.is_empty();\n"
+replace = ""
+
+[[plant]]
+name = "devin cut reopen: the first steps line's prompts are taken as new"
+meant = "a_message_given_behind_bypass_to_a_silent_reopened_devin_3000_12_window_opens_its_turn_at_the_step_devin_lists_for_it"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "            self.steps = Some(prompts.map(|(message, _)| message.to_owned()).collect());\n            return None;"
+replace = "            self.steps = Some(HashSet::new());\n            return Some(prompts.filter_map(|(_, summary)| summary.map(str::to_owned)).collect());"

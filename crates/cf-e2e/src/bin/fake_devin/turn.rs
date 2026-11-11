@@ -252,6 +252,10 @@ pub struct Window<W: Write> {
     /// Its store keeps a message that ran under `/bypass` as it was given, the command
     /// with the prompt, where it keeps the prompt alone otherwise.
     stores_commands: bool,
+    /// It was opened again silent (`unannounced`) and has written no configuration since.
+    unannounced: bool,
+    /// The next turn's message is listed among the steps and not said back.
+    listed: bool,
 }
 
 /// What a window that stores a message as it was given is told by: how Devin stores a
@@ -283,7 +287,22 @@ impl<W: Write> Window<W> {
             folder: std::env::current_dir().unwrap_or_default(),
             calls: 0,
             stores_commands: false,
+            unannounced: false,
+            listed: false,
         }
+    }
+
+    /// The window was opened again silent, as Devin 3000.12.43 opens one with no message on
+    /// a session whose last turn a quit cut (T-1417 run 3, T-1432 runs A, 2 and 3): it says
+    /// nothing of its mode until it is typed to. `/bypass` alone writes nothing where it is in
+    /// full permission already, and its configuration where it switches (run A, b1 and b2);
+    /// `/bypass <message>` writes its configuration as the turn begins, and lists the message
+    /// among the steps without saying it back (runs 2 and 3); a message alone is said back and
+    /// then configured (run A).
+    #[must_use]
+    pub fn unannounced(mut self, unannounced: bool) -> Self {
+        self.unannounced = unannounced;
+        self
     }
 
     /// The window's store keeps a message that ran under `/bypass` as it was given,
@@ -366,11 +385,16 @@ impl<W: Write> Window<W> {
         let Some(prompt) = permission::command(text) else {
             return self.turn(text, text, prompt_file);
         };
-        if self.permission.to_bypass() {
+        let silent = std::mem::take(&mut self.unannounced);
+        if self.permission.to_bypass() || (silent && !prompt.is_empty()) {
             self.wire
                 .mode_changed(self.permission.mode())
                 .map_err(said)?;
+        } else {
+            // Nothing changed, and nothing is written: a silent window stays silent.
+            self.unannounced = silent;
         }
+        self.listed = silent && !prompt.is_empty();
         self.say(&format!("{BYPASS}\n{SWITCHED}\n")).map_err(said)?;
         if prompt.is_empty() {
             return Ok(());
@@ -406,10 +430,16 @@ impl<W: Write> Window<W> {
         }
         // Devin 3000.12.43 says the message back as its turn takes it in, and stores it 0.5
         // to 27 s after (T-1423); 3000.11 stored it first.
-        if self.wire.shape_of() == Shape::Unsaid {
+        if std::mem::take(&mut self.listed) {
+            self.wire.listed(text).map_err(said)?;
+            self.store.user(stored, &client)?;
+        } else if self.wire.shape_of() == Shape::Unsaid {
             self.wire
                 .prompt(self.turns + 1, text, &client)
                 .map_err(said)?;
+            if std::mem::take(&mut self.unannounced) {
+                self.wire.announce(self.permission.mode()).map_err(said)?;
+            }
             self.store.user(stored, &client)?;
         } else {
             self.store.user(stored, &client)?;

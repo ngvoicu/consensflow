@@ -254,6 +254,14 @@ fn a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_
         .resume(&session)
         .open(&Log::new("live member"))?;
     let wire = file_of(again.argv(), "--config")?.with_file_name("wire.jsonl");
+    if cf_e2e::process::own_var("FAKE_DEVIN_STAMPS")
+        .is_some_and(|shape| shape.starts_with("3000.12"))
+    {
+        silent_on_3000_12(&rig, &again, &wire, &store, &session)?;
+        drop((first, again));
+        rig.close()?;
+        return Ok(());
+    }
     let read = until(secs(30), step, || {
         ask::devin_ready(&wire)
             .ok()
@@ -293,6 +301,78 @@ fn a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_
     );
     drop((first, again));
     rig.close()?;
+    Ok(())
+}
+
+/// The window of the case above on Devin 3000.12.43's shape, which says nothing of its mode
+/// opened again so (T-1417 run 3; T-1432 runs A, 2 and 3): its wire names the conversation on
+/// its lines and configures none. The daemon's readiness holds it while a Devin that announces
+/// would have, then finds it ready with nothing given, and its delivery goes behind `/bypass`,
+/// which runs the turn in full permission and makes the window say its mode. What the window
+/// is given is the product's.
+fn silent_on_3000_12(
+    rig: &Rig,
+    again: &cf_e2e::live::window::Window,
+    wire: &Path,
+    store: &Path,
+    session: &str,
+) -> Outcome {
+    let step = Duration::from_millis(200);
+    until(secs(30), step, || {
+        files::read_string(wire)
+            .ok()
+            .filter(|log| log.contains(&format!("\"sessionId\":\"{session}\"")))
+    })
+    .ok_or("its wire never named its conversation")?;
+    let read = ask::devin_ready(wire)?;
+    assert_eq!((read.shown, read.mode, read.command), (None, None, None));
+    let note = "[ConsensFlow m-2 · T-1 · note from @chief]\nReply with exactly: GONE_ON";
+    let began = std::time::Instant::now();
+    let readiness = ask::devin_readiness_then(rig, again, wire, secs(40), Some(note))?;
+    assert!(readiness.ready, "{readiness:?}");
+    assert!(
+        began.elapsed() >= Duration::from_secs(9),
+        "{:?}",
+        began.elapsed()
+    );
+    assert_eq!(
+        readiness.answers,
+        [
+            "held: Devin has not said yet which conversation its window shows",
+            "ready"
+        ],
+        "{readiness:?}"
+    );
+    assert_eq!(readiness.delivered, Some(true), "{readiness:?}");
+    assert_eq!(
+        readiness.given,
+        [format!("/bypass {note}")],
+        "{readiness:?}"
+    );
+    // The turn says the mode as it begins, and runs: its answer is in the store, and its
+    // message is kept without the command.
+    until(secs(30), step, || {
+        ask::devin_ready(wire)
+            .ok()
+            .filter(|read| read.mode.as_deref() == Some("bypass"))
+    })
+    .ok_or("its wire never said full permission")?;
+    assert_eq!(ask::devin_ready(wire)?.shown.as_deref(), Some(session));
+    let answered = until(secs(30), step, || {
+        devin_store::messages_of(store, session)
+            .ok()
+            .filter(|kept| {
+                kept.iter()
+                    .any(|message| message.role == "assistant" && message.text.contains("GONE_ON"))
+            })
+    })
+    .ok_or("the note's turn never answered")?;
+    assert!(
+        answered
+            .iter()
+            .any(|message| message.role == "user" && message.text.starts_with("[ConsensFlow m-2 ")),
+        "{answered:?}"
+    );
     Ok(())
 }
 

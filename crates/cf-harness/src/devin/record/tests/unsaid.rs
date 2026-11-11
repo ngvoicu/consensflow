@@ -484,3 +484,106 @@ fn a_message_an_older_devin_says_back_is_its_turns_where_a_turn_opens_around_it_
     ];
     assert_eq!(follow(&mut turns, &next), vec![5], "the next turn");
 }
+
+/// The prompts a log lists as its steps (`steps`, a line of its own with no update), each by
+/// the user's message it began with and the summary Devin keeps of it: the message's first
+/// line.
+fn steps(prompts: &[(&str, &str)]) -> Value {
+    let steps: Vec<Value> = prompts
+        .iter()
+        .enumerate()
+        .map(|(at, (message, summary))| {
+            json!({ "stepId": format!("step-{at}"), "stepNumber": at + 1, "kind": "prompt",
+                "userMessageId": message, "revertTargetNodeId": 30, "forkTargetNodeId": 32,
+                "summary": summary })
+        })
+        .collect();
+    json!({ "sessionId": SESSION, "steps": steps })
+}
+
+#[test]
+fn a_message_given_behind_bypass_to_a_silent_reopened_devin_3000_12_window_opens_its_turn_at_the_step_devin_lists_for_it(
+) {
+    // T-1432 run 2, window b1 (the lines' fields recorded, the texts and ids made up): a window
+    // opened again on a session whose last turn a quit cut replays it, lists its step, says no
+    // configuration, and then takes `/bypass <message>`. It writes the configuration, then the
+    // steps with the new prompt's, and no message said back at all; its first streamed word
+    // comes after the model's first call, minutes later on a long one (T-1396). The new step
+    // opens the turn, and its summary names the delivery the turn took in.
+    let mut cut = said_back("[ConsensFlow m-1 · T-1 · task from @chief]\nRun sleep 60");
+    cut["update"]["_meta"]["cognition.ai/eventId"] = json!("3");
+    let replay = [
+        json!({}),
+        cut,
+        steps(&[("user-1", "[ConsensFlow m-1 · T-1 · task from @chief]")]),
+        json!({ "sessionId": SESSION, "turnClientMessageId": "user-1" }),
+        hook(),
+    ];
+    let configured = [
+        json!({ "sessionId": SESSION, "update": { "sessionUpdate": "config_option_update",
+            "configOptions": [{ "id": "mode", "currentValue": "bypass" }] } }),
+        json!({ "sessionId": SESSION, "update": { "sessionUpdate": "current_mode_update",
+            "currentModeId": "bypass" } }),
+    ];
+    let taken = steps(&[
+        ("user-1", "[ConsensFlow m-1 · T-1 · task from @chief]"),
+        ("user-2", "[ConsensFlow m-2 · T-1 · note from @chief]"),
+    ]);
+    let follow = |turns: &mut super::super::wires::Turns, lines: &[Value]| {
+        for line in lines {
+            turns.follow(line);
+        }
+        turns.said_back(SESSION)
+    };
+    let mut turns = super::super::wires::Turns::default();
+    assert_eq!(follow(&mut turns, &replay), Vec::<i64>::new(), "the replay");
+    assert!(!turns.open(SESSION), "a replay's step opens no turn");
+    follow(&mut turns, &configured);
+    assert!(!turns.open(SESSION), "the configuration opens no turn");
+    assert_eq!(
+        follow(&mut turns, std::slice::from_ref(&taken)),
+        vec![2],
+        "the new step"
+    );
+    assert!(turns.open(SESSION), "the new step opens the turn");
+    // The steps listed again around the turn's end are no new prompt.
+    follow(&mut turns, std::slice::from_ref(&taken));
+    assert_eq!(follow(&mut turns, &ended("complete")), Vec::<i64>::new());
+    assert!(!turns.open(SESSION));
+    assert_eq!(
+        follow(&mut turns, &[taken]),
+        Vec::<i64>::new(),
+        "listed again"
+    );
+    assert!(!turns.open(SESSION), "a step listed before opens nothing");
+    // Devin 3000.11 keeps the command in the summary of a prompt given behind it (the kit's
+    // `devin-resume-after-note-bypass`): the header behind it names the delivery.
+    let mut turns = super::super::wires::Turns::default();
+    follow(&mut turns, &[steps(&[])]);
+    let bypassed = steps(&[(
+        "user-3",
+        "/bypass [ConsensFlow m-2 · T-1 · note from ConsensFlow]",
+    )]);
+    assert_eq!(follow(&mut turns, &[bypassed]), vec![2], "behind /bypass");
+
+    // The record reads it so too: at work from the step, before any word of the model's.
+    let staged = Staged::new();
+    let mut reader = staged.reader();
+    staged.chain(&[user("u-1", Some(json!("user-1")))]);
+    let mut wire = replay.to_vec();
+    staged.wire("launch-2", &wire);
+    assert_eq!(both(&staged, &mut reader, "replayed"), settled());
+    wire.extend(configured);
+    wire.push(steps(&[
+        ("user-1", "[ConsensFlow m-1 · T-1 · task from @chief]"),
+        ("user-2", "[ConsensFlow m-2 · T-1 · note from @chief]"),
+    ]));
+    staged.wire("launch-2", &wire);
+    staged.node(
+        Some("n-2"),
+        Some("n-1"),
+        &user("u-2", Some(json!("user-2"))),
+    );
+    staged.head("n-2");
+    assert_eq!(both(&staged, &mut reader, "taken in"), at_work());
+}
