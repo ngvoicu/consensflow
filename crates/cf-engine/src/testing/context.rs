@@ -342,7 +342,7 @@ impl Context {
         &self,
         request: Value,
     ) -> Result<Option<ProjectView>, EngineError> {
-        self.opened(request, |asked| as_node_asked(asked))
+        self.opened(request, as_node_asked)
     }
 
     fn opened(
