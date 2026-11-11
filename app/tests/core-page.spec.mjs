@@ -7691,6 +7691,7 @@ test('New project has the prompt suggestion off, and sends it only when the huma
         model: 'claude-sonnet-5',
         gate: false,
         staff: [],
+        compaction: 300000,
       },
     ])
   await expect(made.dialog).toBeHidden()
@@ -7714,6 +7715,7 @@ test('New project with the prompt suggestion ticked starts the project with it, 
         model: 'claude-sonnet-5',
         gate: false,
         staff: [],
+        compaction: 300000,
         promptSuggestion: true,
       },
     ])

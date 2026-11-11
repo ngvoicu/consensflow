@@ -21,7 +21,9 @@ use serde_json::{json, Value};
 
 pub use advisor_tool::parse_advisor_tool;
 pub(crate) use advisor_tool::set_advisor_tool;
-pub use compaction::{launch_size, parse_compaction, COMPACTION_DEFAULT, COMPACTION_MAX, COMPACTION_MIN};
+pub use compaction::{
+    launch_size, parse_compaction, COMPACTION_DEFAULT, COMPACTION_MAX, COMPACTION_MIN,
+};
 pub(crate) use compaction::{parse_new_compaction, set_compaction};
 pub use describing::parse_description;
 pub(crate) use describing::{describe_project, rename_project};
