@@ -209,8 +209,8 @@ jobs:
       # They were two steps of one job, the daemon's and the rig's (30 minutes)
       # and the regressions (35): in the runs of 2026-10-24 and 25, 1,140 to
       # 1,250 s and 1,260 to 2,030 s, 2,400 to 3,200 s together, the macOS ones
-      # the slower. A shard has a third, 800 to 1,070 s, and the build. 30 is the
-      # smaller of the two limits, which no shard comes near; the runs of the
+      # the slower. A shard has a third, 800 to 1,070 s, and the build. 30 was the
+      # smaller of the two limits, which no shard came near then; the runs of the
       # shards set it (`cargo xtask ci-times --step "test:daemons"`).
       # Six since 3.0.6-alpha.3's integration B (T-836): it doubled the cases' time, and
       # in its first run on main (40568487001) each of three shards took about 40 s to
@@ -220,11 +220,16 @@ jobs:
       # limit. Each shard says its time against the limit after each test file, and warns
       # on the run past ci-times' share of it (CF_TEST_SHARD_LIMIT_MINUTES, which is the
       # step's timeout-minutes: suites.rs's test holds them equal).
+      # 40 since 3.0.7-alpha.5's last landing (T-1499): in the last green runs before it
+      # (43087810510 and 43065603181) the step took 17.4 to 25.1 minutes on Windows and
+      # 18.5 to 22.4 on macOS, and that landing's Devin cases on both of Devin's wire
+      # shapes (T-1431, T-1496) add about 5 minutes a Windows shard and 3.5 a macOS one,
+      # which put the slowest at about 30 and 26 against a limit of 30.
       - run: npm run test:daemons
         env:
           CF_TEST_SHARD: ${{ matrix.shard }}
-          CF_TEST_SHARD_LIMIT_MINUTES: 30
-        timeout-minutes: 30
+          CF_TEST_SHARD_LIMIT_MINUTES: 40
+        timeout-minutes: 40
 
       # A rig case that fails keeps a report of what its windows showed beside
       # its home, in the runner's temp folder (cf-e2e's rig/report.rs, `keep`),
