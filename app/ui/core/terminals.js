@@ -33,8 +33,8 @@ function about(lane, board, now, onTryAgain) {
  * for the chief only while a task is on it, so its card says what the chief
  * is doing and runs on, and switches it. While the chief's window is down
  * (starting, being switched) its card is there all the
- * same, with no terminal. A session's terminal (a worker's, an advisor's, a
- * reviewer's, a tester's or an image designer's task) stays out of the dock until the
+ * same, with no terminal. A session's terminal (the task of a member in any role:
+ * a worker's, a reviewer's, an integrator's, an image designer's) stays out of the dock until the
  * human shows it from its lane, and leaves when they hide it, from its lane
  * or its card, which also lets its window go once nothing holds it open.
  * Only live windows: one that ends leaves with its card, and its lane says

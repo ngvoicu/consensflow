@@ -4585,9 +4585,13 @@ test('shows the staff as one row per member and role, and adds a member in a rol
   await expect(table.locator('tbody tr').first().locator('td').nth(1)).toHaveText('Worker')
   await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
     'Worker',
+    'Frontend designer',
+    'Architect',
+    'Researcher',
     'Advisor',
     'Reviewer',
     'Tester',
+    'Integrator',
     'Image designer',
   ])
   // Add member names no saved agent: a harness, then a model it lists (T-1143).
@@ -4630,12 +4634,22 @@ test('adds a member as a tester, or as one more role of a member, in the place a
   await expect(
     dialog.getByRole('group', { name: 'Staff', exact: true }).locator('.dialog-help').first(),
   ).toContainText('a tester checks it by running it when the chief asks')
+  // The four roles of spec new-roles, each by its territory, and that they take no tier.
+  await expect(
+    dialog.getByRole('group', { name: 'Staff', exact: true }).locator('.dialog-help').first(),
+  ).toContainText(
+    'A frontend designer designs and builds how the product looks, an architect designs the software before it is built, a researcher finds what the chief asks for and changes no file, and an integrator brings accepted work together and lands it: these four take no tier.',
+  )
   // The tester has its place among the roles, after the reviewer.
   await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
     'Worker',
+    'Frontend designer',
+    'Architect',
+    'Researcher',
     'Advisor',
     'Reviewer',
     'Tester',
+    'Integrator',
     'Image designer',
   ])
   // Any harness's model may test.
@@ -4668,8 +4682,9 @@ test("a role the daemon's table alone names is offered, listed and added in its 
 }) => {
   const data = model()
   // A sixth role, after the reviewer: the page holds no list of roles, and reads the table's.
+  const afterReviewer = ROLES.findIndex((role) => role.id === 'reviewer') + 1
   data.roles = [
-    ...ROLES.slice(0, 3),
+    ...ROLES.slice(0, afterReviewer),
     {
       id: 'scout',
       name: 'field scout',
@@ -4678,7 +4693,7 @@ test("a role the daemon's table alone names is offered, listed and added in its 
       tiered: false,
       imageAgent: false,
     },
-    ...ROLES.slice(3),
+    ...ROLES.slice(afterReviewer),
   ]
   data.boards[1].lanes.push(
     {
@@ -4717,10 +4732,14 @@ test("a role the daemon's table alone names is offered, listed and added in its 
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.getByLabel('Role').locator('option')).toHaveText([
     'Worker',
+    'Frontend designer',
+    'Architect',
+    'Researcher',
     'Advisor',
     'Reviewer',
     'Field scout',
     'Tester',
+    'Integrator',
     'Image designer',
   ])
   const table = dialog.getByRole('table', { name: 'On the staff' })
@@ -4772,6 +4791,33 @@ test("a role the daemon's table alone names is offered, listed and added in its 
     ])
   // A worker that scouts too is asked its tier.
   await dialog.getByRole('button', { name: 'Edit @castor', exact: true }).first().click()
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
+})
+
+test('the frontend designer, the architect, the researcher and the integrator are added on any harness and asked no tier', async ({
+  page,
+}) => {
+  const data = model()
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const roles = [
+    ['frontend', 'Frontend designer'],
+    ['architect', 'Architect'],
+    ['researcher', 'Researcher'],
+    ['integrator', 'Integrator'],
+  ]
+  const added = []
+  for (const [role, label] of roles) {
+    await pickMember(dialog, { role, harness: 'Devin', model: 'swe-2' })
+    await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
+    await dialog.getByRole('button', { name: 'Add to staff' }).click()
+    added.push({ project: 1, harness: 'devin', model: 'swe-2', effort: null, roles: [role] })
+    await expect.poll(() => calls(page, 'member.add')).toEqual(added)
+    await expect(page.locator('#status')).toHaveText(`@swe-2 joined the staff as ${label}.`)
+  }
+  // A worker is asked its tier again.
+  await dialog.getByLabel('Role').selectOption('worker')
   await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
 })
 
