@@ -118,22 +118,48 @@ fn a_word_that_is_never_taken_back_holds_the_window_for_the_bound_from_the_word_
     context.close();
 }
 
-/// A word the engine reads only when the window is free: its bound is the word's own time, not
-/// the time of the look that found the window free.
+/// The bound is the engine's first sight of the word, on the clock that does not step, not the
+/// word's own time: a word written 100 s before the result is taken is held the whole bound from
+/// the look that found the window free.
 #[test]
-fn the_bound_runs_from_the_words_time_not_from_the_look_that_found_the_window_free() {
+fn the_bound_runs_from_the_engines_first_sight_not_from_the_words_time() {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]);
     let window = at_work(&context, project.id);
-    // The extension asked 100 s ago; the task's result is taken only now.
     word(&context, Some(100_000));
     context.adapter.answer("zeus", "Parser done");
     context.pass().unwrap();
     context.pass().unwrap();
     assert!(open(&context, &window));
-    context.advance(BOUND_MS - 100_000 - 1);
+    context.advance(BOUND_MS - 1);
     context.pass().unwrap();
     assert!(open(&context, &window), "a millisecond before the bound");
+    context.advance(1);
+    context.pass().unwrap();
+    assert_eq!(context.host.killed(), [window]);
+    context.close();
+}
+
+/// A word that is another (the extension asked again, its time another) is a new first sight, its
+/// bound its own.
+#[test]
+fn a_new_word_is_a_new_first_sight_with_a_bound_of_its_own() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let window = at_work(&context, project.id);
+    answers_compacting(&context);
+    context.advance(BOUND_MS - 50_000);
+    context.pass().unwrap();
+    assert!(open(&context, &window));
+    // Another word, written now.
+    word(&context, Some(0));
+    context.pass().unwrap();
+    context.advance(BOUND_MS - 1);
+    context.pass().unwrap();
+    assert!(
+        open(&context, &window),
+        "the first word's bound is over; the new word's is not"
+    );
     context.advance(1);
     context.pass().unwrap();
     assert_eq!(context.host.killed(), [window]);
@@ -158,23 +184,63 @@ fn a_stale_word_holds_nothing() {
     context.close();
 }
 
+/// The reviewer's case (T-1477): a word 120 s ahead of the clock held 420 s, the count switching
+/// to its time once the clock reached it.
 #[test]
-fn a_word_whose_time_is_ahead_of_the_clock_is_held_for_the_bound_from_the_first_look_at_it() {
-    let context = Context::new();
-    let project = context.with_staff(&["zeus"]);
-    let window = at_work(&context, project.id);
-    word(&context, Some(-3_600_000));
-    context.adapter.answer("zeus", "Parser done");
-    context.pass().unwrap();
-    context.pass().unwrap();
-    assert!(open(&context, &window));
-    context.advance(BOUND_MS - 1);
-    context.pass().unwrap();
-    assert!(open(&context, &window), "a millisecond before the bound");
-    context.advance(1);
-    context.pass().unwrap();
-    assert_eq!(context.host.killed(), [window]);
-    context.close();
+fn a_word_ahead_of_the_clock_is_held_the_bound_from_the_first_sight_whenever_the_time_reaches_it() {
+    for ahead in [120_000, 3_600_000] {
+        let context = Context::new();
+        let project = context.with_staff(&["zeus"]);
+        let window = at_work(&context, project.id);
+        word(&context, Some(-ahead));
+        context.adapter.answer("zeus", "Parser done");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        assert!(open(&context, &window), "{ahead}");
+        // Past the moment the word's own time is the clock's.
+        context.advance(ahead.min(BOUND_MS - 100_000) + 10_000);
+        context.pass().unwrap();
+        assert!(open(&context, &window), "{ahead}: inside the bound");
+        context.advance(BOUND_MS - 1 - (ahead.min(BOUND_MS - 100_000) + 10_000));
+        context.pass().unwrap();
+        assert!(
+            open(&context, &window),
+            "{ahead}: a millisecond before the bound"
+        );
+        context.advance(1);
+        context.pass().unwrap();
+        assert_eq!(context.host.killed(), [window], "{ahead}: at the bound");
+        context.close();
+    }
+}
+
+/// The wall clock set back during the hold lengthens nothing; set forward, shortens nothing: the
+/// hold is 300 s on the clock that does not step.
+#[test]
+fn a_step_of_the_wall_clock_in_either_direction_leaves_the_hold_its_bound() {
+    for step in [-3_600_000, -250_000, 250_000, 3_600_000] {
+        let context = Context::new();
+        let project = context.with_staff(&["zeus"]);
+        let window = at_work(&context, project.id);
+        answers_compacting(&context);
+        assert!(open(&context, &window), "{step}");
+        context.advance(100_000);
+        context.pass().unwrap();
+        context.step_wall(step);
+        context.pass().unwrap();
+        context.pass().unwrap();
+        assert!(open(&context, &window), "{step}: the step ended nothing");
+        context.advance(BOUND_MS - 100_000 - 1);
+        context.pass().unwrap();
+        assert!(
+            open(&context, &window),
+            "{step}: a millisecond before the bound"
+        );
+        context.advance(1);
+        context.pass().unwrap();
+        assert_eq!(context.host.killed(), [window], "{step}: at the bound");
+        context.close();
+    }
 }
 
 #[test]
@@ -255,5 +321,96 @@ fn the_next_task_of_the_session_waits_for_the_compaction_and_goes_in_once_after_
     assert_eq!(context.host.opened().len(), opened + 1);
     assert_ne!(context.host.last("zeus").unwrap().pane, window);
     assert_eq!(context.task(project.id, 2).task.state, "working");
+    context.close();
+}
+
+/// How many times the words of the reopen went into the window: the user items that hold them.
+fn pastes(context: &Context, words: &str) -> usize {
+    context
+        .adapter
+        .agent("zeus")
+        .items
+        .iter()
+        .filter(|item| item.text.contains(words))
+        .count()
+}
+
+/// A reopen during the hold keeps the window (a task in hand again keeps its window) and its words
+/// wait for the compaction: Pi's extension answers Busy while it compacts (no attempt spent), and the
+/// words go in once, into the conversation as it is after, when the word is taken back.
+#[test]
+fn a_reopen_during_the_hold_waits_for_the_compaction_and_goes_into_the_window_once_after_it() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let window = at_work(&context, project.id);
+    answers_compacting(&context);
+    context.advance(10_000);
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project.id, 1, "chief", "Fix the tests")
+        .unwrap();
+    for _ in 0..4 {
+        context.pass().unwrap();
+        context.advance(15_000);
+    }
+    assert_eq!(context.task(project.id, 1).task.state, "queued");
+    assert_eq!(
+        pastes(&context, "Fix the tests"),
+        0,
+        "nothing goes in while it compacts"
+    );
+    assert!(open(&context, &window), "a task in hand keeps its window");
+
+    word(&context, None);
+    for _ in 0..4 {
+        context.pass().unwrap();
+        context.advance(15_000);
+    }
+    assert_eq!(pastes(&context, "Fix the tests"), 1, "once, after it");
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    assert!(open(&context, &window));
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(pastes(&context, "Fix the tests"), 1, "and not again");
+    context.close();
+}
+
+/// Past the bound with the word still standing, the engine closes nothing under a task in hand: the
+/// extension's own limit of the same length takes its word back (and aborts a compaction that never
+/// ended), and the words go in once, into the same window, as it does.
+#[test]
+fn a_reopen_past_the_bound_with_the_word_standing_closes_no_window_under_its_task_and_goes_in_once()
+{
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let window = at_work(&context, project.id);
+    answers_compacting(&context);
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project.id, 1, "chief", "Fix the tests")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.advance((BOUND_MS + 60_000) / 3);
+    }
+    assert_eq!(pastes(&context, "Fix the tests"), 0);
+    assert_eq!(context.task(project.id, 1).task.state, "queued");
+    assert!(
+        open(&context, &window),
+        "no window is closed under a task in hand"
+    );
+
+    // The extension's limit ends it.
+    word(&context, None);
+    for _ in 0..4 {
+        context.pass().unwrap();
+        context.advance(15_000);
+    }
+    assert_eq!(pastes(&context, "Fix the tests"), 1);
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    assert!(open(&context, &window));
     context.close();
 }

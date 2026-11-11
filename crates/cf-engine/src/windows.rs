@@ -89,13 +89,26 @@ const STILL_BOUND_MS: i64 = 10_000;
 
 /// The longest the window of a task that is done is held open for a compaction that
 /// ConsensFlow's own extension asked its harness for at the window's rest, for the
-/// project's size, from the word it wrote when it asked ([`Window::compaction_asked`],
-/// [`Dispatcher::compaction_held`], T-1475). The compactions of a Pi member's real windows
-/// took 39 to 80 seconds (a cached summary of 243,000 to 749,000 tokens); this is about
-/// four times the longest. Past it the window closes as it does without one, the
-/// compaction ended by the close as before. A word older than this is a stale one and holds
-/// nothing.
+/// project's size ([`Window::compaction_asked`], [`Dispatcher::compaction_held`], T-1475):
+/// 300 seconds counted from the engine's first sight of that word for that window, on the clock
+/// that does not step ([`Time::monotonic_ms`]: the engine's other bounds are counted on the wall
+/// clock, which a hold of this kind must not be, a step of it making the hold shorter or
+/// longer). The compactions of a Pi member's real windows took 39 to 80 seconds (a cached
+/// summary of 243,000 to 749,000 tokens); this is about four times the longest. Past it the
+/// window closes as it does without one, the compaction ended by the close as before. The
+/// word's own time is used once, at first sight: a word older than this by the wall clock is a
+/// stale one and holds nothing.
 pub(crate) const COMPACTION_HOLD_MS: i64 = 300_000;
+
+/// What the engine made of a word the extension wrote ([`Dispatcher::compaction_held`]): the
+/// time the word says it was written (to tell a new word from the one seen), when the engine
+/// first saw it on the clock that does not step, and whether it was stale then.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CompactionSeen {
+    pub(crate) asked: i64,
+    pub(crate) since: i64,
+    pub(crate) stale: bool,
+}
 
 /// How soon a chief that could not start is tried again; the wait doubles
 /// with each failure, up to the most.
@@ -372,7 +385,7 @@ pub(crate) struct WindowPart {
     /// bound is counted from the word's own time, or from this where the word's time is
     /// ahead of the clock. None while there is no word, and once the window closes
     /// ([`Dispatcher::compaction_held`]).
-    pub(crate) compaction_seen: Option<i64>,
+    pub(crate) compaction_seen: Option<CompactionSeen>,
     /// The window of its last launch whose open the host never answered by the open's
     /// deadline: the host may have started its program since, or may yet, and it would
     /// run on the conversation the next window goes on with (a Codex thread one client
@@ -1922,25 +1935,39 @@ impl Dispatcher {
     /// would cut under a summary that takes tens of seconds (a Pi member whose task is one
     /// turn is at rest as its result is taken, and its summary 39 to 80 seconds long, which
     /// the 10 seconds of [`STILL_BOUND_MS`] cut, the signal of the close aborting it). Held
-    /// while the word stands, at most [`COMPACTION_HOLD_MS`] from the word's time (from the
-    /// engine's first sight of it where that time is ahead of its clock), then the close goes
-    /// as it does without one. No word, or an old one, holds nothing. Only the ordinary close
-    /// of a done task's window comes here: a pause, a cancel, a failure, the human ending the
-    /// session and the app quitting close at once.
+    /// while the word stands, at most [`COMPACTION_HOLD_MS`] from the engine's first sight of
+    /// it, on the clock that does not step, so that no step of the wall clock lengthens or
+    /// shortens it; then the close goes as it does without one. The word's own time is read once, at
+    /// first sight: a word older than the bound by the wall clock is stale and holds nothing. A
+    /// word that is not the one seen (another time) is a new first sight. No word holds
+    /// nothing. Only the ordinary close of a done task's window comes here: a pause, a cancel, a
+    /// failure, the human ending the session and the app quitting close at once, and a task in
+    /// hand again (a reopen) keeps its window, which its extension's own limit of the same
+    /// length frees of its compaction.
     fn compaction_held(&self, record: &Record) -> bool {
         let asked = self
             .window_of(record)
             .0
             .and_then(|window| window.compaction_asked());
-        let now = self.now();
+        let (wall, mono) = (self.now(), self.seams.time.monotonic_ms());
         let mut part = record.window.borrow_mut();
         let Some(asked) = asked else {
             part.compaction_seen = None;
             return false;
         };
-        let seen = *part.compaction_seen.get_or_insert(now);
-        let from = if asked <= now { asked } else { seen };
-        now - from < COMPACTION_HOLD_MS
+        let seen = match part.compaction_seen {
+            Some(seen) if seen.asked == asked => seen,
+            _ => {
+                let seen = CompactionSeen {
+                    asked,
+                    since: mono,
+                    stale: wall - asked >= COMPACTION_HOLD_MS,
+                };
+                part.compaction_seen = Some(seen);
+                seen
+            }
+        };
+        !seen.stale && mono - seen.since < COMPACTION_HOLD_MS
     }
 
     /// Closes a window whose exit is the engine's own (a switch, a Close, a

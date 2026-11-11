@@ -1027,6 +1027,14 @@ impl FakeAdapter {
                     reason: "refused by the test".to_owned(),
                 };
             }
+            // Pi's extension sends nothing into a window while the compaction it asked for is at
+            // work, whatever the word (its own `compacting` flag): refused busy, no attempt spent.
+            if agent.compaction_asked.is_some() {
+                return Admission::Busy {
+                    reason: "Pi is at work: its extension sends nothing until it is idle"
+                        .to_owned(),
+                };
+            }
             if agent.arrive {
                 let (recorded, sources) =
                     self.recorded_text(text, agent.items.iter().map(|item| &*item.text));

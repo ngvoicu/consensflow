@@ -28,8 +28,8 @@ runs = ["pch-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "        now - from < COMPACTION_HOLD_MS"
-replace = "        now - from < 0"
+find = "        !seen.stale && mono - seen.since < COMPACTION_HOLD_MS"
+replace = "        !seen.stale && mono - seen.since < 0"
 
 [[plant]]
 name = "pi compaction hold: the engine holds for as long as the word stands, with no bound"
@@ -38,28 +38,58 @@ runs = ["pch-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "        now - from < COMPACTION_HOLD_MS"
-replace = "        now - from < i64::MAX"
+find = "        !seen.stale && mono - seen.since < COMPACTION_HOLD_MS"
+replace = "        !seen.stale && mono - seen.since < i64::MAX"
 
 [[plant]]
-name = "pi compaction hold: the bound runs from the engine's first sight of the word"
-meant = "the_bound_runs_from_the_words_time_not_from_the_look_that_found_the_window_free"
+name = "pi compaction hold: the bound is counted on the wall clock, which a step of it moves"
+meant = "a_step_of_the_wall_clock_in_either_direction_leaves_the_hold_its_bound"
 runs = ["pch-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "        let from = if asked <= now { asked } else { seen };"
-replace = "        let from = seen;"
+find = "let (wall, mono) = (self.now(), self.seams.time.monotonic_ms());"
+replace = "let (wall, mono) = (self.now(), self.now());"
 
 [[plant]]
-name = "pi compaction hold: a word whose time is ahead of the clock holds for ever"
-meant = "a_word_whose_time_is_ahead_of_the_clock_is_held_for_the_bound_from_the_first_look_at_it"
+name = "pi compaction hold: the bound is counted from the word's own time"
+meant = "the_bound_runs_from_the_engines_first_sight_not_from_the_words_time"
 runs = ["pch-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "        let from = if asked <= now { asked } else { seen };"
-replace = "        let from = asked;"
+find = "                    since: mono,"
+replace = "                    since: mono - (wall - asked).max(0),"
+
+[[plant]]
+name = "pi compaction hold: a word ahead of the clock is counted from its time once the clock reaches it"
+meant = "a_word_ahead_of_the_clock_is_held_the_bound_from_the_first_sight_whenever_the_time_reaches_it"
+runs = ["pch-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "                    since: mono,"
+replace = "                    since: mono + (asked - wall).max(0),"
+
+[[plant]]
+name = "pi compaction hold: a word older than the bound is held"
+meant = "a_stale_word_holds_nothing"
+runs = ["pch-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "                    stale: wall - asked >= COMPACTION_HOLD_MS,"
+replace = "                    stale: false,"
+
+[[plant]]
+name = "pi compaction hold: another word is taken for the one seen"
+meant = "a_new_word_is_a_new_first_sight_with_a_bound_of_its_own"
+runs = ["pch-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            Some(seen) if seen.asked == asked => seen,"
+replace = "            Some(seen) => seen,"
 
 [[plant]]
 name = "pi compaction hold: the engine does not hold the window of the next task of the session"
@@ -120,18 +150,18 @@ runs = ["pch-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    if (asking) await writeCompactionWord()\n"
-replace = ""
+find = "    if (asking && !(await writeCompactionWord())) {"
+replace = "    if (asking && !(await Promise.resolve(true))) {"
 
 [[plant]]
 name = "pi compaction hold: the extension writes its word after the settlement evidence the engine takes the result by"
-meant = "writes it before it asks, with the launch, the conversation and the time"
+meant = "is in place before the settlement evidence the result is taken by is"
 runs = ["pch-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "    if (asking) await writeCompactionWord()\n    await writeSettlement()\n    if (asking) askCompaction(context)"
-replace = "    await writeSettlement()\n    if (asking) askCompaction(context)\n    if (asking) await writeCompactionWord()"
+find = "    if (asking && !(await writeCompactionWord())) {\n      compacting = false\n      asking = false\n    }\n    await writeSettlement()"
+replace = "    await writeSettlement()\n    if (asking && !(await writeCompactionWord())) {\n      compacting = false\n      asking = false\n    }"
 
 [[plant]]
 name = "pi compaction hold: the extension keeps its word when Pi says the compaction ended"
@@ -160,8 +190,8 @@ runs = ["pch-extension"]
 
 [[plant.edit]]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
-find = "      compacting = false\n      void takeCompactionWordBack()\n    }"
-replace = "      compacting = false\n    }"
+find = "      over()\n      return\n"
+replace = "      compacting = false\n      return\n"
 
 [[plant]]
 name = "pi compaction hold: the extension keeps its word at shutdown"
@@ -182,3 +212,53 @@ runs = ["pch-extension"]
 file = "hosts/pi-extension/consensflow-delivery.mjs"
 find = "    piCompacting = true\n  })"
 replace = "    piCompacting = true\n    void writeCompactionWord()\n  })"
+
+[[plant]]
+name = "pi compaction hold: the extension asks for a compaction though its word could not be written"
+meant = "asks for no compaction at a rest where its word cannot be written, says so once, and asks at a later one"
+runs = ["pch-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    if (asking && !(await writeCompactionWord())) {"
+replace = "    if (asking && !(await writeCompactionWord()) && false) {"
+
+[[plant]]
+name = "pi compaction hold: the extension writes a word with no conversation to name"
+meant = "asks for no compaction where the word has no conversation to name"
+runs = ["pch-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "      if (sessionId === null) throw new Error('Pi has no conversation to name')\n"
+replace = ""
+
+[[plant]]
+name = "pi compaction hold: the extension never ends a compaction that does not end"
+meant = "ends a compaction that never ends at its limit: aborts it, takes the word back and lets one message in"
+runs = ["pch-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    }, compactionLimitMs)"
+replace = "    }, 3_600_000)"
+
+[[plant]]
+name = "pi compaction hold: the extension's limit does not tell Pi to abort"
+meant = "ends a compaction that never ends at its limit: aborts it, takes the word back and lets one message in"
+runs = ["pch-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "        ctx.abort?.()\n"
+replace = ""
+
+[[plant]]
+name = "pi compaction hold: the late end of an earlier ask ends the next one"
+meant = "does not let the end of an ask past its limit end the next ask"
+runs = ["pch-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "      if (mine !== asks) return\n"
+replace = ""

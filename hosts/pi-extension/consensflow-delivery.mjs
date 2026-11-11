@@ -119,6 +119,11 @@ export function createDeliveryExtension(
     // The size the project chose for its members to compact at, in tokens, or none:
     // Pi's own point.
     compaction,
+    // The longest a compaction this extension asked for may go on before it is ended: past it
+    // Pi is told to abort it, its word is taken back and the window is free of it. The engine
+    // holds a done task's window by the word for the same length (`COMPACTION_HOLD_MS`), so
+    // nothing, a reopen's words included, waits past it (T-1475).
+    compactionLimitMs = 300_000,
   } = {},
 ) {
   let context
@@ -206,21 +211,42 @@ export function createDeliveryExtension(
     }
   }
 
-  // The word that this extension's own compaction is at work: written before the ask.
+  // The word that this extension's own compaction is at work: written before the ask, and
+  // the ask is made only once it is in place. Says whether it is: where no folder is told (no
+  // engine to read it) there is nothing to write and the ask goes; a word that cannot be written
+  // asks for no compaction at this rest (the engine would find the window free with nothing
+  // to hold it by, and its close would cut the summary), said once in the log. It is written
+  // under another name and moved into place, as the settlement evidence is: a reader never
+  // finds half of it, and a rename replaces a file a reader has open (Rust opens a file
+  // sharing delete) on Windows too, with a few tries where it is refused for a moment.
+  let wordFailure
   const writeCompactionWord = async () => {
-    if (compactingFile === null) return
+    if (compactingFile === null) return true
     const sessionId = sessionIdOf(context)
-    if (sessionId === null) return
     try {
+      if (sessionId === null) throw new Error('Pi has no conversation to name')
       await mkdir(settled, { recursive: true })
       await writeFile(
         `${compactingFile}.tmp`,
         `${JSON.stringify({ launchId, sessionId, startedAt: Date.now() })}\n`,
         'utf8',
       )
-      await rename(`${compactingFile}.tmp`, compactingFile)
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          await rename(`${compactingFile}.tmp`, compactingFile)
+          break
+        } catch (cause) {
+          if (attempt >= 4 || !['EPERM', 'EBUSY', 'EACCES'].includes(cause?.code)) throw cause
+          await new Promise((resolve) => setTimeout(resolve, 25 * attempt))
+        }
+      }
+      wordFailure = undefined
+      return true
     } catch (cause) {
-      logError(`could not record a compaction at work: ${cause?.message ?? String(cause)}`)
+      const said = `could not record a compaction at work, so none is asked for at this rest: ${cause?.message ?? String(cause)}`
+      if (said !== wordFailure) logError(said)
+      wordFailure = said
+      return false
     }
   }
 
@@ -490,8 +516,15 @@ export function createDeliveryExtension(
     return true
   }
 
+  // The ask now at work, counted: the end of an earlier one, late, is not this one's.
+  let asks = 0
+  let limit
   const askCompaction = (ctx) => {
+    asks += 1
+    const mine = asks
     const over = () => {
+      if (mine !== asks) return
+      clearTimeout(limit)
       compacting = false
       void takeCompactionWordBack()
       void consume()
@@ -506,9 +539,24 @@ export function createDeliveryExtension(
       })
     } catch (cause) {
       logError(`compaction at ${compaction} tokens failed: ${cause?.message ?? String(cause)}`)
-      compacting = false
-      void takeCompactionWordBack()
+      over()
+      return
     }
+    // A compaction that does not end is ended: Pi is told to abort it, and the window is free of
+    // it, its word taken back, whether or not Pi ever calls back.
+    limit = setTimeout(() => {
+      if (mine !== asks || !compacting) return
+      logError(
+        `compaction at ${compaction} tokens did not end in ${Math.round(compactionLimitMs / 1000)} s: aborted`,
+      )
+      try {
+        ctx.abort?.()
+      } catch (cause) {
+        logError(`could not abort it: ${cause?.message ?? String(cause)}`)
+      }
+      over()
+    }, compactionLimitMs)
+    limit.unref?.()
   }
 
   pi.on('session_before_compact', (_event, ctx) => {
@@ -530,13 +578,17 @@ export function createDeliveryExtension(
     context = ctx ?? context
     // The word comes before the settlement evidence the engine takes the result by: a window
     // found free is never found free before the word that holds its close.
-    const asking = wantsCompaction(event, context)
-    if (asking) await writeCompactionWord()
+    let asking = wantsCompaction(event, context)
+    if (asking && !(await writeCompactionWord())) {
+      compacting = false
+      asking = false
+    }
     await writeSettlement()
     if (asking) askCompaction(context)
     await consume()
   })
   pi.on('session_shutdown', async () => {
+    clearTimeout(limit)
     await takeCompactionWordBack()
     watcher?.close()
     watcher = undefined
