@@ -18,6 +18,7 @@ rr-daemon-members = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "
 rr-daemon-roles = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::roles"]
 rr-cf-task = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::task"]
 rr-daemon-opening = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::opening"]
+rr-staff-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::staff"]
 rr-page-scout = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "with no tier where its row has none"]
 rr-page-new = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "New project asks no tier"]
 rr-page-board = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "every read of the harnesses is refused"]
@@ -297,5 +298,48 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
 find = '''      if (member.tier === undefined && tier !== undefined) member.tier = tier
+'''
+replace = ''''''
+
+[[plant]]
+name = "role registry: the staff route says a scout's tier"
+meant = "a_member_whose_roles_have_no_tier_is_said_with_none_and_one_with_a_role_with_tiers_with_its_own"
+runs = ["rr-staff-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/staff.rs"
+find = '''                "tier": if cf_ledger::roles::takes_no_tier(&member.roles) {'''
+replace = '''                "tier": if member.designer {'''
+
+[[plant]]
+name = "role registry: New project's staff asks a scout for a tier"
+meant = "a_project_opened_with_a_member_whose_roles_have_no_tier_keeps_it_in_the_lowest"
+runs = ["rr-daemon-opening"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''    let tier = tier_for(roles, body)?;'''
+replace = '''    let tier = tier_of(body.get("tier"))?;'''
+
+[[plant]]
+name = "role registry: New project's scout after a worker takes the worker's tier away"
+meant = "New project asks no tier of a role whose row has none, and a member that holds it beside a role with tiers keeps its tier"
+runs = ["rr-page-new"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''      if (picked.tier !== undefined) {'''
+replace = '''      if (true) {'''
+
+[[plant]]
+name = "role registry: Edit member asks a scout the tier of the role picked"
+meant = "a role the daemon's table alone names is offered, listed and added in its place among the roles, with no tier where its row has none"
+runs = ["rr-page-scout"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    this.#editedRoles = member.roles
 '''
 replace = ''''''

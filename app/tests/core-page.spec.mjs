@@ -4682,7 +4682,13 @@ test("a role the daemon's table alone names is offered, listed and added in its 
   ]
   data.boards[1].lanes.push(
     {
-      participant: participant(9, 'argus', 'scout', { harness: 'codex', tier: 'light' }),
+      participant: participant(9, 'argus', 'scout', {
+        harness: 'codex',
+        model: 'gpt-6-astra',
+        modelName: 'gpt-6-astra',
+        effort: null,
+        tier: 'light',
+      }),
       tasks: [],
       activity: { state: 'idle' },
       pane: { id: 'p1-argus', generation: 1 },
@@ -4746,6 +4752,26 @@ test("a role the daemon's table alone names is offered, listed and added in its 
   await expect(page.locator('#status')).toHaveText('@swe-2 joined the staff as Field scout.')
   // Back to a role with tiers: the tier is asked for again.
   await dialog.getByLabel('Role').selectOption('worker')
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
+  // Edit member asks a scout no tier either, and saves it with none.
+  await dialog.getByRole('button', { name: 'Edit @argus', exact: true }).click()
+  await expect(dialog.locator('[name="memberModel"]')).toHaveValue('gpt-6-astra')
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
+  await dialog.getByRole('button', { name: 'Save member' }).click()
+  await expect
+    .poll(() => calls(page, 'member.edit'))
+    .toEqual([
+      {
+        project: 1,
+        member: 'argus',
+        harness: 'codex',
+        model: 'gpt-6-astra',
+        effort: null,
+        unchanged: true,
+      },
+    ])
+  // A worker that scouts too is asked its tier.
+  await dialog.getByRole('button', { name: 'Edit @castor', exact: true }).first().click()
   await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
 })
 
@@ -10728,10 +10754,8 @@ test('New project asks no tier of a role whose row has none, and a member that h
   ])
   await expect(scouts.filter({ hasText: /complex|light/ })).toHaveCount(0)
   await pickChief(dialog, 'Pi', 'meta/muse-spark')
-  // A scout is asked no tier; a worker on the same model is, and the member holds both.
-  await pickMember(dialog, { role: 'scout', harness: 'Pi', model: 'meta/muse-spark' })
-  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
-  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  // A worker is asked a tier; a scout on the same model after it is not, and leaves the
+  // member's tier as it was.
   await pickMember(dialog, {
     role: 'worker',
     harness: 'Pi',
@@ -10739,6 +10763,9 @@ test('New project asks no tier of a role whose row has none, and a member that h
     tier: 'complex',
   })
   await expect(dialog.locator('label:has([name="memberTier"])')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await pickMember(dialog, { role: 'scout', harness: 'Pi', model: 'meta/muse-spark' })
+  await expect(dialog.locator('label:has([name="memberTier"])')).toBeHidden()
   await dialog.getByRole('button', { name: 'Add', exact: true }).click()
   await expect(scouts).toHaveCount(3)
   await expect(scouts.filter({ hasText: /complex|light/ })).toHaveCount(0)
@@ -10765,7 +10792,7 @@ test('New project asks no tier of a role whose row has none, and a member that h
             model: 'meta/muse-spark',
             effort: null,
             tier: 'complex',
-            roles: ['scout', 'worker'],
+            roles: ['worker', 'scout'],
           },
         ],
       },
