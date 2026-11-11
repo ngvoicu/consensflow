@@ -205,7 +205,8 @@ fn withdraws_the_note_that_says_a_task_waits_for_a_free_member_when_one_takes_it
 }
 
 #[test]
-fn shows_the_note_that_says_a_task_is_held_until_the_account_is_switched_and_types_nothing() {
+fn withdraws_the_note_that_says_a_task_is_held_when_the_account_is_switched_and_says_nothing_after()
+{
     let context = Context::new();
     let tiers = held_by_a_lone_worker(&context);
     context.adapter.busy("chief");
@@ -218,22 +219,30 @@ fn shows_the_note_that_says_a_task_is_held_until_the_account_is_switched_and_typ
     );
     let notes = notes_saying(&context, &tiers, "waits with");
     assert_eq!(notes.len(), 1);
-    // It asks the chief nothing: shown on T-1's line, not typed (RS-25).
-    assert_eq!(notes[0].state, "read");
-    assert!(tiers.task(1).task.aside.is_some());
+    // The first note of a hold is typed (RS-25), and T-1's line says the hold as well.
+    assert_eq!(notes[0].state, "queued");
+    assert_eq!(
+        tiers.task(1).task.aside,
+        Some(format!(
+            "waits with @zeus-amber-pine: out of quota until {resets_at}"
+        ))
+    );
 
     // The human logs the harness into another account; the daemon goes on.
     switches_account(&context, &tiers);
     assert_eq!(tiers.task(1).task.state, "working");
     assert_eq!(
         fate(&context, &notes[0]),
-        ("read".to_owned(), None),
-        "it stays in the ledger as it was"
+        ("cancelled".to_owned(), Some("T-1 resumed".to_owned()))
     );
     assert_eq!(
         tiers.task(1).task.aside,
         None,
         "the resume ends what the line said"
+    );
+    assert!(
+        notes_saying(&context, &tiers, GOES_ON).is_empty(),
+        "nobody was told it waits, so nobody is told it goes on"
     );
 
     context.adapter.answer("chief", "Done.");
@@ -244,7 +253,7 @@ fn shows_the_note_that_says_a_task_is_held_until_the_account_is_switched_and_typ
         given(&context, "chief")
             .iter()
             .all(|text| !text.contains("waits with") && !text.contains(GOES_ON)),
-        "the chief's window is never given that the task waits for five days, nor that it does not"
+        "the chief is never told the task waits for five days, nor that it does not"
     );
 
     // What the note said: the time the harness gave is a time it expects.
@@ -261,13 +270,13 @@ fn tells_a_requester_it_was_told_a_task_waits_that_the_task_goes_on_when_the_acc
     let context = Context::new();
     let tiers = held_by_a_lone_worker(&context);
     runs_out_for(&context, 120);
-    // The chief is idle; the hold note is shown on T-1's line, not typed (RS-25).
+    // The chief is idle: it is given the hold note.
     for _ in 0..3 {
         context.pass().unwrap();
     }
     let notes = notes_saying(&context, &tiers, "waits with");
     assert_eq!(notes.len(), 1);
-    assert_eq!(notes[0].state, "read", "the chief's line says five days");
+    assert_eq!(notes[0].state, "delivered", "the chief believes five days");
     context.adapter.answer("chief", "Noted.");
 
     switches_account(&context, &tiers);
@@ -280,8 +289,8 @@ fn tells_a_requester_it_was_told_a_task_waits_that_the_task_goes_on_when_the_acc
     context.pass().unwrap();
     assert_eq!(
         fate(&context, &notes[0]),
-        ("read".to_owned(), None),
-        "what the chief was shown stays"
+        ("delivered".to_owned(), None),
+        "what the chief was given stays"
     );
     let told = notes_saying(&context, &tiers, GOES_ON);
     assert_eq!(
@@ -293,18 +302,13 @@ fn tells_a_requester_it_was_told_a_task_waits_that_the_task_goes_on_when_the_acc
     );
     assert_eq!(told[0].task_number, Some(1));
 
-    // The correction is shown on T-1's line too, once, and never typed.
+    // The correction asks the chief nothing: it is shown on T-1's line, once, not typed
+    // (RS-25), and the task goes on no more times.
     for _ in 0..3 {
         context.pass().unwrap();
     }
     assert_eq!(context.message(told[0].id).state, "read");
     assert_eq!(notes_saying(&context, &tiers, GOES_ON).len(), 1);
-    assert!(
-        given(&context, "chief")
-            .iter()
-            .all(|text| !text.contains("waits with") && !text.contains(GOES_ON)),
-        "neither is typed into the chief's window"
-    );
 }
 
 #[test]
@@ -317,8 +321,7 @@ fn tells_a_requester_it_was_told_a_task_waits_that_the_task_goes_on_when_the_res
     }
     assert_eq!(
         notes_saying(&context, &tiers, "waits with")[0].state,
-        "read",
-        "shown, not typed"
+        "delivered"
     );
 
     // The reset passes; the window shows the refusal no more.

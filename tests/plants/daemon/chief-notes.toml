@@ -6,12 +6,15 @@
 # `queue::send`), its task's line says those words while the task holds (`aside`), and the
 # chief's inbox lists it as `[not typed]`.
 #
-# The rules: shown are the holds and their ends (`holds.rs`), a window closed leaving work
+# The rules: shown are a hold said again and a held task's going on (`holds.rs`), a window closed leaving work
 # (`background.rs`, `show_closed`), a paused window still open (`background.rs`), a task that
 # goes on in a new conversation (`ownership.rs`), a task still at work in the background unless
 # it cannot end by itself (`turn_end.rs`), a busy model's one note of a wait, shown again on
 # each try (`scheduler.rs`, `show_again`), and a task taken back with nothing bound to its window
-# (`giving.rs`). A task held in the background an hour with no turn of its own is told once,
+# (`giving.rs`). A hold is the exception: its first note to a chief is typed, once a task and
+# hold, and the same hold said again is shown (`holds.rs`, `told_this_hold`, read from the
+# ledger's notes: a withdrawn or shown note told nobody, and a note that the task went on ends
+# the hold). A task held in the background an hour with no turn of its own is told once,
 # typed (`STILL_WORKING_REMINDED_AFTER_MS`). A shown close still joins a typed failure of the
 # same window (`outage.rs`, `queued_closes`). The notes of ConsensFlow's own that wait for a chief
 # together go in the first one's paste, a line each (a chain: `delivery.rs`, `gather_chain`), up
@@ -31,7 +34,7 @@ chief-notes-engine-waiting = ["cargo", "test", "--offline", "-p", "cf-engine", "
 
 [[plant]]
 name = "chief-notes: a shown note is queued and typed as any note"
-meant = "shown_notes::a_hold_note_to_the_chief_is_shown_on_its_task_and_never_typed"
+meant = "shown_notes::the_first_note_of_a_hold_is_typed_to_the_chief_and_the_same_hold_said_again_is_shown"
 runs = ["chief-notes-ledger"]
 
 [[plant.edit]]
@@ -267,4 +270,50 @@ replace = '''
                 body,
             },
         )?;
+'''
+
+[[plant]]
+name = "chief-notes: the first note of a hold is shown, not typed"
+meant = "shown_notes::the_first_note_of_a_hold_is_typed_to_the_chief_and_the_same_hold_said_again_is_shown"
+runs = ["chief-notes-ledger", "chief-notes-engine-chains"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/holds.rs"
+find = '''
+            shown: words.as_deref().filter(|_| again),
+'''
+replace = '''
+            shown: words.as_deref().filter(|_| again || true),
+'''
+
+[[plant]]
+name = "chief-notes: the same hold said again is typed again"
+meant = "shown_notes::the_first_note_of_a_hold_is_typed_to_the_chief_and_the_same_hold_said_again_is_shown"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/holds.rs"
+find = '''
+        if *typed && hold_of(number, said).is_some_and(|told| told == hold) {
+            return Ok(true);
+'''
+replace = '''
+        if *typed && hold_of(number, said).is_some_and(|told| told == hold) {
+            return Ok(false);
+'''
+
+[[plant]]
+name = "chief-notes: a hold after its task went on is the same hold said again"
+meant = "shown_notes::a_hold_after_the_task_went_on_is_typed_again"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/holds.rs"
+find = '''
+        if *said == goes_on(number) || *said == goes_on_moved(number) {
+            return Ok(false);
+'''
+replace = '''
+        if *said == goes_on(number) || *said == goes_on_moved(number) {
+            continue;
 '''

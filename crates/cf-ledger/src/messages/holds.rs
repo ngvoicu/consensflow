@@ -10,9 +10,12 @@
 //!
 //! Both are `note`s of ConsensFlow's own, told by their words, which are
 //! written here and nowhere else: a kind of its own would be a migration, and
-//! the schema is held byte for byte by Node's. Neither asks a chief a decision:
-//! the task goes on by itself, or by the human's word, whom ConsensFlow tells. To a
-//! chief they are shown, not typed (`queue`'s `SHOWN`): its task's line says them.
+//! the schema is held byte for byte by Node's. A chief is typed the first note of a hold
+//! (quota, an unavailable account, a moved model) for each task, once ([`told_this_hold`]):
+//! its turn ends while it waits and nothing else wakes it, only the chief asks the human for
+//! an account or a model, and a weekly limit may make it give the work to another tier. The
+//! same hold said again, and a task's going on, are shown, not typed (`queue`'s `SHOWN`):
+//! the chief's own move or the human's. Its task's line says the hold either way (`said`).
 
 use cf_proto::ledger::MessageView;
 use rusqlite::params;
@@ -107,6 +110,122 @@ fn is_hold_note(number: i64, body: &str) -> bool {
             .any(|tail| body.ends_with(tail))
 }
 
+/// What T-`number`'s line says of the hold whose note is `body` (quota, an unavailable
+/// account, a moved model), as long as it holds: the note without its task and its tail. None
+/// for any other words.
+pub(crate) fn said(number: i64, body: &str) -> Option<String> {
+    let rest = body.strip_prefix(&format!("T-{number} "))?;
+    if !rest.starts_with("waits with @") {
+        return None;
+    }
+    if let Some(quota) = rest
+        .strip_suffix(TAIL)
+        .or_else(|| rest.strip_suffix(OLD_TAIL))
+    {
+        return Some(quota.to_owned());
+    }
+    if let Some(account) = rest.strip_suffix(TAIL_UNAVAILABLE) {
+        return Some(format!("{account} until the human says it works"));
+    }
+    rest.strip_suffix(TAIL_MOVED)
+        .map(|moved| format!("{moved}, until the human says it may go on"))
+}
+
+/// Which hold a note of T-`number` says, `body`: one of quota with its end, one of an
+/// unavailable account, one of a moved model. A hold is the same hold while its kind is, and
+/// a quota's end; who holds it, and the words the harness gave, may differ.
+#[derive(PartialEq)]
+enum Hold<'a> {
+    Quota(&'a str),
+    Unavailable,
+    Moved,
+}
+
+fn hold_of(number: i64, body: &str) -> Option<Hold<'_>> {
+    let rest = body.strip_prefix(&format!("T-{number} waits with @"))?;
+    if let Some(quota) = rest
+        .strip_suffix(TAIL)
+        .or_else(|| rest.strip_suffix(OLD_TAIL))
+    {
+        return quota
+            .split_once(": out of quota until ")
+            .map(|(_, until)| Hold::Quota(until));
+    }
+    if rest.ends_with(TAIL_UNAVAILABLE) {
+        Some(Hold::Unavailable)
+    } else if rest.ends_with(TAIL_MOVED) {
+        Some(Hold::Moved)
+    } else {
+        None
+    }
+}
+
+/// Whether `to` was typed the note of the hold `body` says of T-`number` already, or has it
+/// on its way: a note of the same hold to it, typed or still to be, not withdrawn, with no
+/// note since that the task went on. Read from the notes the ledger holds and nothing else:
+/// a note withdrawn before it was given told nobody, and a hold after the task went on is
+/// another. Then the note now is the same hold said again, which is shown, not typed.
+fn told_this_hold(
+    store: &Store,
+    project_id: i64,
+    to: &str,
+    number: i64,
+    body: &str,
+) -> Result<bool, LedgerError> {
+    let Some(hold) = hold_of(number, body) else {
+        return Ok(false);
+    };
+    let task = store.task_row(project_id, number)?;
+    let reader = store.participant_by_handle(project_id, to)?;
+    let notes = store
+        .db
+        .prepare(
+            "SELECT body, state IN ('queued', 'delivering', 'delivered', 'read')
+                      AND NOT (json_valid(receipt) AND json_extract(receipt, '$.shown') IS NOT NULL)
+               FROM message
+              WHERE task_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'
+              ORDER BY id DESC",
+        )?
+        .query_map(params![task.id, reader.id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (said, typed) in &notes {
+        if *said == goes_on(number) || *said == goes_on_moved(number) {
+            return Ok(false);
+        }
+        if *typed && hold_of(number, said).is_some_and(|told| told == hold) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Sends the note of a hold, `body`, to `to`: typed to a chief the first time, shown the same
+/// hold said again ([`told_this_hold`]); to anyone else queued as any note.
+fn send_hold(
+    store: &mut Store,
+    project_id: i64,
+    to: &str,
+    number: i64,
+    body: &str,
+) -> Result<MessageView, LedgerError> {
+    let again = told_this_hold(store, project_id, to, number, body)?;
+    let words = said(number, body);
+    send(
+        store,
+        project_id,
+        &Sent {
+            to,
+            body,
+            task: Some(number),
+            kind: "note",
+            shown: words.as_deref().filter(|_| again),
+            ..Sent::default()
+        },
+    )
+}
+
 /// Tells `to` that T-`number` is held with `handle` while its quota is out,
 /// until `until`: a note of the task, as ConsensFlow's note of a hold always
 /// was.
@@ -118,17 +237,12 @@ pub(crate) fn note_hold(
     handle: &str,
     until: &str,
 ) -> Result<MessageView, LedgerError> {
-    send(
+    send_hold(
         store,
         project_id,
-        &Sent {
-            to,
-            body: &render(number, handle, until),
-            task: Some(number),
-            kind: "note",
-            shown: Some(&format!("waits with @{handle}: out of quota until {until}")),
-            ..Sent::default()
-        },
+        to,
+        number,
+        &render(number, handle, until),
     )
 }
 
@@ -142,20 +256,8 @@ pub(crate) fn note_hold_unavailable(
     handle: &str,
     because: &str,
 ) -> Result<MessageView, LedgerError> {
-    send(
-        store,
-        project_id,
-        &Sent {
-            to,
-            body: &render_unavailable(number, handle, because),
-            task: Some(number),
-            kind: "note",
-            shown: Some(&format!(
-                "waits with @{handle}: its account is unavailable ({because}) until the human says it works"
-            )),
-            ..Sent::default()
-        },
-    )
+    let body = render_unavailable(number, handle, because);
+    send_hold(store, project_id, to, number, &body)
 }
 
 /// Tells `to` that T-`number` is held with `handle` because its harness moved its window's
@@ -168,19 +270,12 @@ pub(crate) fn note_hold_moved(
     handle: &str,
     because: &str,
 ) -> Result<MessageView, LedgerError> {
-    send(
+    send_hold(
         store,
         project_id,
-        &Sent {
-            to,
-            body: &render_moved(number, handle, because),
-            task: Some(number),
-            kind: "note",
-            shown: Some(&format!(
-                "waits with @{handle}: {because}, until the human says it may go on"
-            )),
-            ..Sent::default()
-        },
+        to,
+        number,
+        &render_moved(number, handle, because),
     )
 }
 

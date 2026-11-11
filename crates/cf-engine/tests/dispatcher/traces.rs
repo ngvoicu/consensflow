@@ -177,17 +177,17 @@ const CHIEF_FIRST_TAKEN: &str = "the human closes the project as the chief's han
 
 /// What the engine says in a hold note, where Node's said the task goes on at
 /// the reset.
-const HOLD_WORDS: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself (`, or sooner if its account has quota again; it goes on by itself.`), where Node's says it goes on at the reset (`; it goes on by itself then.`) The hold note asks the chief nothing: it is shown, not typed (RS-25), read at once with `shown` in its receipt and never pasted, where Node's is queued and pasted.";
+const HOLD_WORDS: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself (`, or sooner if its account has quota again; it goes on by itself.`), where Node's says it goes on at the reset (`; it goes on by itself then.`)";
 
 /// The same, and what the engine does once a task whose requester was given
 /// the hold note goes on.
-const HOLD_THEN_GOES_ON: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself, where Node's says it goes on at the reset; and the chief, who was given that note, is told `T-1 goes on: its account has quota again.` once a turn of the window gets through after the words that resumed T-1 (T-96), which these tests do not reach, so it is told nothing as the daemon resumes T-1, where Node tells it nothing either The hold note asks the chief nothing: it is shown, not typed (RS-25), read at once with `shown` in its receipt and never pasted, where Node's is queued and pasted.";
+const HOLD_THEN_GOES_ON: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself, where Node's says it goes on at the reset; and the chief, who was given that note, is told `T-1 goes on: its account has quota again.` once a turn of the window gets through after the words that resumed T-1 (T-96), which these tests do not reach, so it is told nothing as the daemon resumes T-1, where Node tells it nothing either";
 
 /// What the engine does with the task of a member that runs out of quota while
 /// another of its tier is free (dip-agentos, 2026-10-19): it waits with its
 /// window, where its work is; and what it says when the words that resumed the
 /// task at the reset are refused again (the review of the quota wait, T-88).
-const QUOTA_REFUSED_AGAIN: &str = "zeus runs out of quota mid-task with diana free and its reset an hour away: T-1 is held with zeus's window until the reset, where Node took it back to the board for diana; and when the words that resumed it at the reset are refused again, T-1 is held again and the human is told once that zeus's account may need them, where the requester would be told again that T-1 waits The hold note asks the chief nothing: it is shown, not typed (RS-25), read at once with `shown` in its receipt and never pasted, where Node's is queued and pasted.";
+const QUOTA_REFUSED_AGAIN: &str = "zeus runs out of quota mid-task with diana free and its reset an hour away: T-1 is held with zeus's window until the reset, where Node took it back to the board for diana; and when the words that resumed it at the reset are refused again, T-1 is held again and the human is told once that zeus's account may need them, where the requester would be told again that T-1 waits";
 
 /// What the engine does when the human resumes a project whose Close paused its
 /// work (Gabriel, 2026-10-16: "on resume tasks should resume").
@@ -404,7 +404,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "keeps a held task paused, its hold cleared, when its session was deleted before the hold ended, and tells its requester once while every other task goes on",
-        "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn, where Node leaves it queued; and the hold notes say the member may be back before its reset, where Node's say the task goes on at the reset; and the chief accepts T-1 before it gives the follow-up of T-1 (`--after`), which waits for T-1 to be accepted as a follow-up of a task at work does (T-1118), where Node's went into the window at once; and the window the session opens again resumes a record the copy of it has more of, and the copy puts the record's new items after the ones it kept (`seq`; T-1118), where Node's took the older ones' places and sorted among them",
+        "the notes that T-2 and T-3 wait, which wait for the chief together, go in one paste, the first one's, a line each under `2 notes at once, a line each:` (a chain, RS-25), so the note that said T-3 waits is given with it before the daemon resumes T-3, where Node pastes T-2's on its own and leaves T-3's queued; and the hold notes say the member may be back before its reset, where Node's say the task goes on at the reset; and the chief accepts T-1 before it gives the follow-up of T-1 (`--after`), which waits for T-1 to be accepted as a follow-up of a task at work does (T-1118), where Node's went into the window at once; and the window the session opens again resumes a record the copy of it has more of, and the copy puts the record's new items after the ones it kept (`seq`; T-1118), where Node's took the older ones' places and sorted among them",
     ),
     (
         "fails a launch whose first message never arrives",

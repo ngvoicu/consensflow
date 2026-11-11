@@ -153,7 +153,7 @@ replace = 'body.push_str(&format!("\nReopen them with: {}", reopen.join("; ")));
 
 [[plant]]
 name = "outage notes: a single failure is told in the words of several"
-meant = "a_single_failure_is_told_as_it_always_was_and_its_close_in_a_note_of_its_own"
+meant = "a_single_failure_is_told_as_it_always_was_and_its_close_shown_in_a_note_of_its_own"
 runs = ["on-engine"]
 
 [[plant.edit]]

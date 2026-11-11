@@ -106,6 +106,11 @@ const NAMED_BY_MODEL: &str = "the ledger Node left is migrated by 0031: each mem
 /// say it before a later departure of their own.
 const RELEASE_SHOWN: &str = "a task taken back from its member, with no follow-up bound to that window and nothing taken back with it, tells its requester in a note that asks no decision: to the chief it is shown on the task's line, not typed (RS-25), `read` with its receipt `shown`, where Node leaves it `queued` to be pasted";
 
+/// Why a trace departs at the read of a held task: its line says the hold (RS-25). The
+/// first note of a hold is typed to the chief as Node typed it, and its task's view says the
+/// hold too (`aside`) while it holds, where Node's view has no such field.
+const HOLD_SAID: &str = "a task held for its member's quota, whose first note of the hold is typed to the chief as Node typed it, says the hold on its line as well while it holds (`aside`: `waits with @…: out of quota until …`, RS-25), a field Node's task view has not";
+
 const DEPARTED: &[(&str, usize, &str)] = &[
     ("evals-measure-002", 0, NAMED_BY_MODEL),
     ("evals-measure-004", 0, NAMED_BY_MODEL),
@@ -144,6 +149,11 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-dispatcher-064", 86, RELEASE_SHOWN),
     ("core-dispatcher-065", 147, KEPT_IN_BRIEF),
     ("core-dispatcher-066", 304, RELEASE_SHOWN),
+    ("core-dispatcher-067", 95, HOLD_SAID),
+    ("core-dispatcher-068", 85, HOLD_SAID),
+    ("core-dispatcher-069", 85, HOLD_SAID),
+    ("core-dispatcher-070", 116, HOLD_SAID),
+    ("core-dispatcher-071", 114, HOLD_SAID),
     ("core-dispatcher-074", 91, "the chief queues a follow-up (`--after T-n`) while T-n's result is in and not accepted: it is taken, open and waiting for T-n to be accepted, where Node queued it for the window at once; the trace's later departure (the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn, where Node leaves it queued) is no longer reached"),
     ("core-dispatcher-080", 225, COPY_AFTER_THE_KEPT),
     ("core-dispatcher-082", 87, FOLLOW_UP_BEHIND_RESULT),
@@ -154,6 +164,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-dispatcher-090", 93, DECIDED_BEFORE_PASTED),
     ("core-dispatcher-091", 87, FOLLOW_UP_BEHIND_RESULT),
     ("core-dispatcher-107", 122, KEPT_IN_BRIEF),
+    ("core-dispatcher-075", 75, HOLD_SAID),
     ("core-dispatcher-113", 85, RELEASE_SHOWN),
     ("core-dispatcher-158", 87, FOLLOW_UP_BEHIND_RESULT),
     ("core-page-014", 6, "a task taken back from its member, with no follow-up bound to that window and nothing taken back with it, tells its requester in a note that asks no decision: to the chief it is shown on the task's line, not typed (RS-25), `read` with its receipt `shown`, where Node leaves it `queued` to be pasted; the trace's later departure: a release cancels the old window's kept rows with the reason `carried into T-n's brief for its next window`; Node gave none"),

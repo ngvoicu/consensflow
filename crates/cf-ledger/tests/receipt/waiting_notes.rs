@@ -202,8 +202,8 @@ fn a_task_taken_back_withdraws_the_notes_of_the_wait_it_leaves_and_keeps_its_own
         Some(task),
         &format!("T-1 is paused: @{session}'s window is gone."),
     );
-    // The hold note asks the chief nothing: it is shown, not typed (RS-25), and so given.
-    assert_eq!(w.states(&[hold.id, stall.id]), ["read", "queued"]);
+    // The first note of a hold is typed (RS-25): queued, as the stall's.
+    assert_eq!(w.states(&[hold.id, stall.id]), ["queued", "queued"]);
 
     // The human gives it to another member while it is held.
     w.ledger
@@ -213,7 +213,7 @@ fn a_task_taken_back_withdraws_the_notes_of_the_wait_it_leaves_and_keeps_its_own
         "cancelled".to_owned(),
         Some("T-1 was taken back".to_owned()),
     );
-    assert_eq!(fate(&w, hold.id), ("read".to_owned(), None), "it was given");
+    assert_eq!(fate(&w, hold.id), withdrawn);
     assert_eq!(fate(&w, stall.id), withdrawn);
     let told = told_chief(&w);
     let release = told.last().expect("the note of the release");
@@ -231,6 +231,71 @@ fn a_task_taken_back_withdraws_the_notes_of_the_wait_it_leaves_and_keeps_its_own
 }
 
 #[test]
+fn a_task_a_human_asked_for_taken_back_withdraws_the_notes_of_its_wait_and_keeps_its_own() {
+    // To anyone but a chief the note of the release is queued, not shown (RS-25): the
+    // release must leave it while it withdraws the notes of the wait.
+    let mut w = world();
+    let task = w
+        .ledger
+        .create_task(
+            w.project,
+            &cf_ledger::NewTask {
+                from: "human".into(),
+                pool: Some("worker".into()),
+                tier: Some("standard".into()),
+                body: "Parser".into(),
+                ..Default::default()
+            },
+        )
+        .expect("a task")
+        .task
+        .number;
+    let moved = w.assign(task, "zeus");
+    let session = moved.task.assignee.clone().expect("a session");
+    w.deliver(moved.message.expect("its brief").id);
+    w.hold(task);
+    let hold = w
+        .ledger
+        .note_hold(w.project, "human", task, &session, UNTIL)
+        .expect("the human is told");
+    let stall = consensflow_notes(
+        &mut w,
+        "human",
+        Some(task),
+        &format!("T-1 is paused: @{session}'s window is gone."),
+    );
+    assert_eq!(w.states(&[hold.id, stall.id]), ["queued", "queued"]);
+
+    w.ledger
+        .release_task(w.project, task, "by @human")
+        .expect("released");
+    let withdrawn = (
+        "cancelled".to_owned(),
+        Some("T-1 was taken back".to_owned()),
+    );
+    assert_eq!(fate(&w, hold.id), withdrawn);
+    assert_eq!(fate(&w, stall.id), withdrawn);
+    let release = w
+        .ledger
+        .inbox(w.id("human"), 100)
+        .expect("the human's inbox")
+        .into_iter()
+        .find(|message| message.body.starts_with("T-1 was taken back from"))
+        .expect("the human is told of the release");
+    assert_eq!(
+        (release.state.as_str(), release.body.as_str()),
+        (
+            "queued",
+            format!(
+                "T-1 was taken back from @{session} (by @human) and waits for another standard worker."
+            )
+            .as_str()
+        ),
+        "what the release says of itself stays"
+    );
+}
+
+#[test]
 fn a_requester_given_the_note_that_a_task_is_held_is_told_when_its_resumed_turn_gets_through_not_when_the_daemon_resumes_it(
 ) {
     let mut w = world();
@@ -242,8 +307,7 @@ fn a_requester_given_the_note_that_a_task_is_held_is_told_when_its_resumed_turn_
             "T-1 waits with @{session}: out of quota until {UNTIL}, or sooner if its account has quota again; it goes on by itself."
         )
     );
-    // Shown, not typed: the chief has it as it is written (RS-25).
-    assert_eq!(hold.state, "read");
+    w.deliver(hold.id);
 
     w.daemon_resumes(task);
     assert_eq!(
@@ -267,40 +331,52 @@ fn a_requester_given_the_note_that_a_task_is_held_is_told_when_its_resumed_turn_
     );
     assert_eq!(
         fate(&w, hold.id),
-        ("read".to_owned(), None),
+        ("delivered".to_owned(), None),
         "what the chief was given stays"
     );
     assert_eq!(told.len(), 2, "one note more");
 }
 
 #[test]
-fn a_chief_is_given_every_hold_note_as_it_is_written_and_so_told_each_time_its_task_goes_on() {
+fn a_requester_being_given_the_hold_note_is_told_too_but_one_not_given_it_is_told_nothing() {
     let mut w = world();
     let (task, session) = with_zeus(&mut w);
-    held(&mut w, task, &session);
+    let hold = held(&mut w, task, &session);
+    // Being pasted into the chief's window as the daemon resumes the task.
+    w.begin(hold.id);
     w.daemon_resumes(task);
     w.went_on(task);
     assert_eq!(
         told_chief(&w).last().map(|note| note.body.as_str()),
         Some(GOES_ON),
-        "the chief had the hold note, and is told it goes on"
+        "it reaches the chief's window, and the chief is told it goes on"
     );
 
-    // Another hold: its note is the chief's at once too (shown, not typed), and stays.
+    // Another hold, after the task went on, is typed again (RS-25): its note is still
+    // queued when the daemon resumes the task.
+    w.confirm(hold.id);
     let again = held(&mut w, task, &session);
+    assert_eq!(again.state, "queued");
     let before = told_chief(&w).len();
     w.daemon_resumes(task);
     w.went_on(task);
-    assert_eq!(fate(&w, again.id), ("read".to_owned(), None));
-    assert_eq!(told_chief(&w).len(), before + 1, "told it goes on again");
-    assert_eq!(w.next("chief"), None, "and nothing of it is typed");
+    assert_eq!(
+        fate(&w, again.id),
+        ("cancelled".to_owned(), Some("T-1 resumed".to_owned()))
+    );
+    assert_eq!(
+        told_chief(&w).len(),
+        before,
+        "nothing is said of a note nobody read"
+    );
 }
 
 #[test]
 fn a_resume_of_the_chiefs_own_tells_nothing_more() {
     let mut w = world();
     let (task, session) = with_zeus(&mut w);
-    held(&mut w, task, &session);
+    let hold = held(&mut w, task, &session);
+    w.deliver(hold.id);
     w.resume(task, "Go on");
     assert_eq!(w.state(task), "queued");
     let told = told_chief(&w);
@@ -314,7 +390,8 @@ fn a_resume_of_the_chiefs_own_tells_nothing_more() {
 fn only_the_note_of_the_hold_the_task_is_in_counts() {
     let mut w = world();
     let (task, session) = with_zeus(&mut w);
-    held(&mut w, task, &session);
+    let hold = held(&mut w, task, &session);
+    w.deliver(hold.id);
     w.daemon_resumes(task);
     w.went_on(task);
     assert_eq!(told_chief(&w).len(), 2);
@@ -335,19 +412,22 @@ fn only_the_note_of_the_hold_the_task_is_in_counts() {
 fn the_news_that_a_held_task_went_on_is_not_taken_back_by_a_hold_that_comes_after_it() {
     let mut w = world();
     let (task, session) = with_zeus(&mut w);
-    held(&mut w, task, &session);
+    let hold = held(&mut w, task, &session);
+    w.deliver(hold.id);
     w.daemon_resumes(task);
     w.went_on(task);
     let news = told_chief(&w).last().expect("the chief is told").id;
     assert_eq!(w.message(news).body, GOES_ON);
 
-    // The new account runs into its limit: a hold that comes after the news takes nothing
-    // of it back, or the chief would keep the promise it corrects. Both are the chief's as
-    // they are written (shown, not typed): neither is withdrawn.
+    // The new account runs into its limit before the chief is given the hold's note: it
+    // goes when the daemon resumes the task again, and the news, shown (RS-25), stays.
     let again = held(&mut w, task, &session);
     w.daemon_resumes(task);
     w.went_on(task);
-    assert_eq!(fate(&w, again.id), ("read".to_owned(), None));
+    assert_eq!(
+        fate(&w, again.id),
+        ("cancelled".to_owned(), Some("T-1 resumed".to_owned()))
+    );
     assert_eq!(fate(&w, news), ("read".to_owned(), None));
     w.ledger
         .cancel_task(w.project, task, "chief")
@@ -437,7 +517,8 @@ fn a_hold_note_of_an_older_build_counts_and_one_that_failed_or_is_not_one_does_n
 fn a_task_that_goes_back_on_the_board_when_its_hold_ends_is_not_told_to_go_on() {
     let mut w = world();
     let (task, session) = with_zeus(&mut w);
-    held(&mut w, task, &session);
+    let hold = held(&mut w, task, &session);
+    w.deliver(hold.id);
     // The session that held it was deleted meanwhile.
     w.ledger
         .end_session(w.project, &session, "human")

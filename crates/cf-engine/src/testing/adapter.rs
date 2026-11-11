@@ -519,12 +519,17 @@ impl FakeAdapter {
     /// Changes the latest window of `handle`: its own, or its newest session's.
     pub fn with<T>(&self, handle: &str, change: impl FnOnce(&mut FakeAgent) -> T) -> T {
         let mut agents = self.agents.borrow_mut();
-        let agent = agents
-            .iter_mut()
-            .rev()
-            .find(|agent| agent.handle == handle || agent.handle.starts_with(&format!("{handle}-")))
+        // A window of that very name first: `zeus-coral-canyon` is not `zeus-coral-canyon-2`'s.
+        let at = agents
+            .iter()
+            .rposition(|agent| agent.handle == handle)
+            .or_else(|| {
+                agents
+                    .iter()
+                    .rposition(|agent| agent.handle.starts_with(&format!("{handle}-")))
+            })
             .unwrap_or_else(|| panic!("no window of {handle}"));
-        change(agent)
+        change(&mut agents[at])
     }
 
     /// The latest window of `handle`, as it is now.

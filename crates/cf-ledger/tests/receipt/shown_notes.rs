@@ -46,48 +46,153 @@ fn shown(w: &mut World, to: &str, number: i64, body: &str, said: &str) -> Messag
         .expect("a note")
 }
 
+/// A hold of the kinds a chief is told of once (quota, an unavailable account, a moved
+/// model): the note of T-`number` with `session`, out of quota until `until` where it is one.
+#[derive(Clone, Copy)]
+enum Hold {
+    Quota,
+    Unavailable,
+    Moved,
+}
+
+/// ConsensFlow's note of `hold` of T-`number` to the chief, as the engine writes it.
+fn note_of(w: &mut World, hold: Hold, number: i64, session: &str, until: &str) -> MessageView {
+    let ledger = &mut w.ledger;
+    match hold {
+        Hold::Quota => ledger.note_hold(w.project, "chief", number, session, until),
+        Hold::Unavailable => {
+            ledger.note_hold_unavailable(w.project, "chief", number, session, "signed out")
+        }
+        Hold::Moved => ledger.note_hold_moved(
+            w.project,
+            "chief",
+            number,
+            session,
+            "its harness moved it from Opus to Sonnet",
+        ),
+    }
+    .expect("the chief is told")
+}
+
+/// What T-1's line says of `hold` with `session`.
+fn said_of(hold: Hold, session: &str) -> String {
+    match hold {
+        Hold::Quota => format!("waits with @{session}: out of quota until {UNTIL}"),
+        Hold::Unavailable => format!(
+            "waits with @{session}: its account is unavailable (signed out) until the human says it works"
+        ),
+        Hold::Moved => format!(
+            "waits with @{session}: its harness moved it from Opus to Sonnet, until the human says it may go on"
+        ),
+    }
+}
+
+const HOLDS: [Hold; 3] = [Hold::Quota, Hold::Unavailable, Hold::Moved];
+
 #[test]
-fn a_hold_note_to_the_chief_is_shown_on_its_task_and_never_typed() {
+fn the_first_note_of_a_hold_is_typed_to_the_chief_and_the_same_hold_said_again_is_shown() {
+    for hold in HOLDS {
+        let mut w = world();
+        let (task, session) = with_zeus(&mut w);
+        w.hold(task);
+        // The first word of a hold is typed: a chief waits for nothing else, and only the
+        // chief asks the human for an account or a model, or gives the work to another.
+        let first = note_of(&mut w, hold, task, &session, UNTIL);
+        assert_eq!(first.state, "queued");
+        assert_eq!(w.next("chief"), Some(first.id));
+        // Its task's line says it all the same.
+        assert_eq!(aside(&w, task), Some(said_of(hold, &session)));
+        // The same hold said again, before or after the first is typed: shown, not typed.
+        let again = note_of(&mut w, hold, task, &session, UNTIL);
+        assert_eq!(again.state, "read");
+        assert_eq!(again.receipt, json!({ SHOWN: said_of(hold, &session) }));
+        w.deliver(first.id);
+        let and_again = note_of(&mut w, hold, task, &session, UNTIL);
+        assert_eq!(and_again.state, "read");
+        assert_eq!(w.next("chief"), None);
+        assert_eq!(aside(&w, task), Some(said_of(hold, &session)));
+        // The chief's inbox lists them all.
+        let listed: Vec<i64> = w
+            .ledger
+            .inbox(w.id("chief"), 100)
+            .expect("the inbox")
+            .iter()
+            .map(|message| message.id)
+            .collect();
+        assert!([first.id, again.id, and_again.id]
+            .iter()
+            .all(|id| listed.contains(id)));
+    }
+}
+
+#[test]
+fn a_quota_hold_with_another_end_is_another_hold_and_is_typed() {
     let mut w = world();
     let (task, session) = with_zeus(&mut w);
     w.hold(task);
-    let note = w
-        .ledger
-        .note_hold(w.project, "chief", task, &session, UNTIL)
-        .expect("the chief is told");
-    // A row of the ledger, as it was, but never on its way to the chief's window.
-    assert_eq!(note.state, "read");
-    assert_eq!(
-        note.receipt,
-        json!({ SHOWN: format!("waits with @{session}: out of quota until {UNTIL}") })
+    let first = note_of(&mut w, Hold::Quota, task, &session, UNTIL);
+    w.deliver(first.id);
+    let later = note_of(
+        &mut w,
+        Hold::Quota,
+        task,
+        &session,
+        "2026-10-17T15:00:00.000Z",
     );
-    assert_eq!(
-        w.next("chief"),
-        None,
-        "nothing is typed into the chief's window"
-    );
-    // The chief's inbox still lists it.
-    assert!(w
-        .ledger
-        .inbox(w.id("chief"), 100)
-        .expect("the inbox")
-        .iter()
-        .any(|message| message.id == note.id));
-    // Its task's line says it while it holds.
-    assert_eq!(
-        aside(&w, task).as_deref(),
-        Some(format!("waits with @{session}: out of quota until {UNTIL}").as_str())
-    );
-    // The task goes on: the line says that, which is news and asks nothing either.
+    assert_eq!(later.state, "queued", "a new end is news");
+}
+
+#[test]
+fn a_hold_whose_note_was_withdrawn_before_it_was_typed_is_typed_when_it_comes_again() {
+    let mut w = world();
+    let (task, session) = with_zeus(&mut w);
+    w.hold(task);
+    let first = note_of(&mut w, Hold::Quota, task, &session, UNTIL);
+    // The daemon resumes it before the chief's window takes the note: it is withdrawn.
+    w.daemon_resumes(task);
+    assert_eq!(w.message(first.id).state, "cancelled");
+    w.hold(task);
+    let again = note_of(&mut w, Hold::Quota, task, &session, UNTIL);
+    assert_eq!(again.state, "queued", "the chief was never told");
+}
+
+#[test]
+fn a_hold_after_the_task_went_on_is_typed_again() {
+    let mut w = world();
+    let (task, session) = with_zeus(&mut w);
+    w.hold(task);
+    let first = note_of(&mut w, Hold::Quota, task, &session, UNTIL);
+    w.deliver(first.id);
     w.daemon_resumes(task);
     assert_eq!(aside(&w, task), None, "a move ends what the line said");
     w.went_on(task);
     assert_eq!(
         aside(&w, task).as_deref(),
-        Some("goes on: its account has quota again.")
+        Some("goes on: its account has quota again."),
+        "the news is shown"
     );
-    assert_eq!(w.next("chief"), None);
-    assert_eq!(w.message(note.id).state, "read", "the note stays as it was");
+    w.hold(task);
+    let again = note_of(&mut w, Hold::Quota, task, &session, UNTIL);
+    assert_eq!(
+        again.state, "queued",
+        "a wait that ended and came back is news"
+    );
+    assert_eq!(aside(&w, task), Some(said_of(Hold::Quota, &session)));
+}
+
+#[test]
+fn a_hold_of_a_task_for_anyone_but_a_chief_is_queued_each_time_and_says_nothing_on_its_line() {
+    let mut w = world();
+    let (task, session) = with_zeus(&mut w);
+    w.hold(task);
+    for _ in 0..2 {
+        let note = w
+            .ledger
+            .note_hold(w.project, "human", task, &session, UNTIL)
+            .expect("the human is told");
+        assert_eq!(note.state, "queued");
+    }
+    assert_eq!(aside(&w, task), None);
 }
 
 #[test]

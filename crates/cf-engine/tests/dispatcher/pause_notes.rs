@@ -371,8 +371,7 @@ fn takes_a_cancelled_task_out_of_a_note_that_names_several() {
 }
 
 #[test]
-fn the_note_that_says_a_task_is_held_is_shown_and_never_pasted_and_its_line_ends_when_the_daemon_resumes_it(
-) {
+fn withdraws_the_note_that_says_a_task_is_held_when_the_daemon_resumes_it() {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus", "diana"]);
     tiers.open();
@@ -396,16 +395,9 @@ fn the_note_that_says_a_task_is_held_is_shown_and_never_pasted_and_its_line_ends
         "the chief is told the task waits for its member"
     );
     let note = &notes[0];
-    // It asks the chief nothing: shown on T-1's line, not typed (RS-25).
-    assert_eq!(note.state, "read");
-    assert!(
-        tiers
-            .task(1)
-            .task
-            .aside
-            .is_some_and(|aside| aside.starts_with("waits with @")),
-        "{:?}",
-        tiers.task(1).task.aside
+    assert_eq!(
+        note.state, "queued",
+        "the chief's window has not been given it"
     );
 
     // The reset passes before the chief's turn ends: the daemon resumes the task.
@@ -415,16 +407,10 @@ fn the_note_that_says_a_task_is_held_is_shown_and_never_pasted_and_its_line_ends
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "working");
-    let kept = context.message(note.id);
+    let withdrawn = context.message(note.id);
     assert_eq!(
-        (kept.state.as_str(), kept.reason.as_deref()),
-        ("read", None),
-        "it stays in the ledger as it was"
-    );
-    assert_eq!(
-        tiers.task(1).task.aside,
-        None,
-        "the resume ends what the line said"
+        (withdrawn.state.as_str(), withdrawn.reason.as_deref()),
+        ("cancelled", Some("T-1 resumed"))
     );
     context.adapter.answer("chief", "Done.");
     context.pass().unwrap();

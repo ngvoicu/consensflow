@@ -99,7 +99,7 @@ replace = ""
 
 [[plant]]
 name = "waiting notes: a release withdraws the note it writes of itself"
-meant = "a_task_taken_back_withdraws_the_notes_of_the_wait_it_leaves_and_keeps_its_own"
+meant = "a_task_a_human_asked_for_taken_back_withdraws_the_notes_of_its_wait_and_keeps_its_own"
 runs = ["waiting-notes-ledger"]
 
 [[plant.edit]]

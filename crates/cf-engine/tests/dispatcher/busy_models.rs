@@ -13,6 +13,7 @@
 use cf_engine::testing::Context;
 use cf_engine::ActivityState;
 use cf_harness::records::Quota;
+use cf_ledger::NewTask;
 
 use crate::background::{results, working};
 use crate::fixtures::{after, assert_match, now, Tiers};
@@ -209,6 +210,46 @@ fn the_lane_and_the_board_say_the_model_is_busy_not_out_of_quota() {
         )),
         "{waits:?}"
     );
+}
+
+#[test]
+fn a_note_withdrawn_before_its_human_requester_was_given_it_is_told_again_at_the_next_try() {
+    // To anyone but a chief the note is queued (RS-25): the resume a minute on withdraws it,
+    // as every note of the wait, and the next refusal tells it again, as nobody was told.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    context.create_task(
+        tiers.project.id,
+        NewTask {
+            from: "human".to_owned(),
+            to: Some("zeus".to_owned()),
+            body: "Parser".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    refused(&context, "zeus");
+    let human = tiers.id("human");
+    let busy = |state: &str| {
+        context
+            .inbox(human)
+            .into_iter()
+            .filter(|message| message.body.contains("its model is busy") && message.state == state)
+            .count()
+    };
+    assert_eq!(busy("queued"), 1);
+    context.advance(61_000);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        (busy("queued"), busy("cancelled")),
+        (0, 1),
+        "withdrawn by the resume"
+    );
+    refused(&context, "zeus");
+    assert_eq!(busy("queued"), 1, "told again: nobody was told");
 }
 
 #[test]

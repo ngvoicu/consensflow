@@ -31,7 +31,19 @@ pub(crate) const TASK_SELECT: &str = "
              AND s.kind = 'note' AND json_valid(s.receipt)
              AND json_extract(s.receipt, '$.shown') IS NOT NULL
              AND json_extract(s.receipt, '$.over') IS NULL
-           ORDER BY s.id DESC LIMIT 1) AS aside
+           ORDER BY s.id DESC LIMIT 1) AS aside,
+         (SELECT h.body FROM message h JOIN participant hp ON hp.id = h.recipient_id
+           WHERE t.held_until IS NOT NULL AND h.task_id = t.id AND h.sender_id IS NULL
+             AND h.kind = 'note' AND hp.role = 'chief'
+             AND h.state IN ('queued', 'delivering', 'delivered', 'read')
+             AND NOT (json_valid(h.receipt) AND json_extract(h.receipt, '$.shown') IS NOT NULL)
+             AND h.body LIKE 'T-' || t.number || ' waits with @%'
+             AND h.id > coalesce((SELECT max(s.id) FROM message s
+                   WHERE s.task_id = t.id AND s.state = 'read' AND s.sender_id IS NULL
+                     AND s.kind = 'note' AND json_valid(s.receipt)
+                     AND json_extract(s.receipt, '$.shown') IS NOT NULL
+                     AND json_extract(s.receipt, '$.over') IS NULL), 0)
+           ORDER BY h.id DESC LIMIT 1) AS hold_typed
   FROM task t
   JOIN participant q ON q.id = t.requester_id
   LEFT JOIN participant a ON a.id = t.assignee_id
@@ -263,7 +275,12 @@ pub(crate) fn task_view(row: &Row<'_>) -> rusqlite::Result<TaskView> {
         deleted_at: row.get("deleted_at")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
-        aside: row.get("aside")?,
+        // A hold's first note is typed to the chief, not shown: its line says the hold all
+        // the same while the task is held, unless a newer note is shown (RS-25).
+        aside: row
+            .get::<_, Option<String>>("hold_typed")?
+            .and_then(|body| crate::messages::hold_said(row.get("number").ok()?, &body))
+            .map_or_else(|| row.get("aside"), |said| Ok(Some(said)))?,
     })
 }
 
