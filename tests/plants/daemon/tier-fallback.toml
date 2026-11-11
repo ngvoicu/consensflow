@@ -618,8 +618,8 @@ runs = ["tf-engine-text"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "    {{cf}} task edit T-3 \"…\" [--tier <tier>] [--needs …] [--before …]  change the brief, tier, needs or before of a task no window has yet (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes\n"
-replace = "    {{cf}} task edit T-3 \"…\"          replace the brief of a task no window has yet (open, queued, or paused)\n"
+find = "    {{cf}} task edit T-3 \"…\" [--tier <tier>] [--needs …] [--before …]  change the brief, tier, needs or before of a task before any window has its brief (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes\n"
+replace = "    {{cf}} task edit T-3 \"…\"          replace the brief of a task before any window has its brief (open, queued, or paused)\n"
 
 [[plant]]
 name = "tier fallback: cf help does not know the tier, needs and before of an edit"

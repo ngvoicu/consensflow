@@ -1,14 +1,13 @@
 cf inside a ConsensFlow window: the board's commands.
 
   cf task add --tier <critical|complex|standard|light> "…"
-                                    work for a worker of that tier; ConsensFlow picks
-                                    the member (--purpose for critical work)
+                                    work for a worker of that tier (--purpose for critical work)
   cf task add --advice --tier <tier> "…"
                                     a question for an advisor of that tier: findings and
-                                    recommendations back, no file changed
+                                    recommendations back, no project file changed
   cf task add --review --tier <tier> "…"
                                     a review for a reviewer of that tier: say what to
-                                    review; findings back, no file changed
+                                    review; findings back, no project file changed
   cf task add --test --tier <tier> "…"
                                     a test for a tester of that tier: say what to run
                                     and check; results back, no product code changed
@@ -30,8 +29,8 @@ cf inside a ConsensFlow window: the board's commands.
   cf task accept T-3 "…"            accept a failed task you checked; your words are its result
   cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
   cf task edit T-3 "…" [--tier <tier>] [--needs T-4,T-5|+T-5|-T-5] [--before …]
-                                    change the brief, tier, needs or before of a task no window has yet
-                                    (open, queued, or paused): a list replaces, +T-5 adds, -T-5 removes
+                                    change the brief, tier, needs or before of a task before any window
+                                    has its brief (open, queued, or paused): a list replaces, +T-5 adds, -T-5 removes
   cf task pause T-3                 stop a worker's task: the agent stops and its window waits;
                                     what it left running in the background runs on
   cf task resume T-3 "…"            go on with it: the same window, with your words
@@ -53,7 +52,7 @@ cf inside a ConsensFlow window: the board's commands.
                                     the chief's: what the human and the chiefs before you
                                     said, newest page first (after the chief was switched)
 
-Any "…" can be - to read the text from standard input, as written:
+Any "…" can be - to read the text from standard input, as written (not PowerShell: use --file):
   cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)
 A long one is surest in a file, which no shell cuts (every command that takes words):
   cf task add --tier standard --file brief.md

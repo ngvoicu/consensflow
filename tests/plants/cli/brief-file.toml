@@ -9,6 +9,10 @@
 brief = ["cargo", "test", "--offline", "-p", "cf", "--test", "brief_from_a_file"]
 # The words parser's own tests.
 words = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::words::"]
+# What encoding a text may come in, from a file and from standard input (T-1435, the review T-1447).
+encodings = ["cargo", "test", "--offline", "-p", "cf", "--test", "brief_encodings"]
+# The same for every command of `cf help` that takes a text.
+class = ["cargo", "test", "--offline", "-p", "cf", "--test", "text_commands"]
 
 [[plant]]
 name = "a brief's file: the moved task commands do not know --file, and it is words"
@@ -43,3 +47,115 @@ runs = ["brief"]
 file = "crates/cf/src/board/words.rs"
 find = "            if split.stray.is_none()"
 replace = "            if split.stray.is_some()"
+
+# What encoding a text may come in. Windows PowerShell 5.1 writes what `>` and `Out-File` send to a
+# file as UTF-16 with a byte order mark; `cf` once posted it read as UTF-8, `��W\0r\0i\0…`, and the
+# ledger took it as a brief (the review T-1447 of T-1435, finding 1): the wrong result is silent.
+# UTF-8 with or without its mark and UTF-16 with a mark are the text; any other bytes that are not
+# valid UTF-8 are refused, and nothing is posted. One plant takes one piece out.
+
+[[plant]]
+name = "a brief's encoding: a NUL byte is text"
+meant = "a_text_that_is_not_utf8_or_utf16_with_a_mark_is_refused_and_nothing_is_posted"
+runs = ["encodings", "class"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = '''    if let Some(at) = bytes.iter().position(|byte| *byte == 0) {'''
+replace = '''    if let Some(at) = bytes.iter().position(|byte| *byte == 0).filter(|_| false) {'''
+
+[[plant]]
+name = "a brief's encoding: what is not UTF-8 is read lossily, and posted"
+meant = "a_text_that_is_not_utf8_or_utf16_with_a_mark_is_refused_and_nothing_is_posted"
+runs = ["encodings", "class"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = '''    String::from_utf8(bytes.to_vec()).map_err(|cause| {'''
+replace = '''    #[allow(unreachable_code)]
+    return Ok(String::from_utf8_lossy(bytes).into_owned());
+    #[allow(unreachable_code)]
+    String::from_utf8(bytes.to_vec()).map_err(|cause| {'''
+
+[[plant]]
+name = "a brief's encoding: decoded UTF-16 that holds a NUL (UTF-32) is posted"
+meant = "a_text_that_is_not_utf8_or_utf16_with_a_mark_is_refused_and_nothing_is_posted"
+runs = ["encodings"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = '''    if marked && text.contains('\0') {'''
+replace = '''    if false && marked && text.contains('\0') {'''
+
+[[plant]]
+name = "a brief's encoding: a UTF-16 text of an odd number of bytes loses its last byte"
+meant = "a_text_that_is_not_utf8_or_utf16_with_a_mark_is_refused_and_nothing_is_posted"
+runs = ["encodings"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = '''    if !odd.is_empty() {'''
+replace = '''    if false && !odd.is_empty() {'''
+
+[[plant]]
+name = "a brief's encoding: half a surrogate pair becomes a replacement character"
+meant = "a_text_that_is_not_utf8_or_utf16_with_a_mark_is_refused_and_nothing_is_posted"
+runs = ["encodings"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = '''        .map(|each| each.map_err(|_| damaged()))'''
+replace = '''        .map(|each| Ok(each.unwrap_or('\u{fffd}')))'''
+
+[[plant]]
+name = "a brief's encoding: UTF-16 little-endian with a mark is read as UTF-8"
+meant = "utf16_with_a_mark_in_either_byte_order_is_decoded_and_posted_as_its_text"
+runs = ["encodings", "class"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = '''        [0xff, 0xfe, rest @ ..] => (utf16(rest, u16::from_le_bytes)?, true),
+'''
+replace = ''''''
+
+[[plant]]
+name = "a brief's encoding: UTF-16 big-endian is read little-endian"
+meant = "utf16_with_a_mark_in_either_byte_order_is_decoded_and_posted_as_its_text"
+runs = ["encodings"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = '''(utf16(rest, u16::from_be_bytes)?, true)'''
+replace = '''(utf16(rest, u16::from_le_bytes)?, true)'''
+
+[[plant]]
+name = "a brief's encoding: UTF-8's own mark is kept in the words"
+meant = "utf8_with_or_without_its_mark_is_the_text"
+runs = ["encodings"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = '''        [0xef, 0xbb, 0xbf, rest @ ..] => (utf8(rest, 3)?, false),
+'''
+replace = ''''''
+
+[[plant]]
+name = "a brief's encoding: standard input is read as UTF-8 with what is not replaced"
+meant = "utf16_with_a_mark_in_either_byte_order_is_decoded_and_posted_as_its_text"
+runs = ["encodings", "class"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''    brief::words_of(&bytes)
+        .map_err(|why| Failure::Failed(format!("cannot read standard input: {why}")))'''
+replace = '''    Ok(String::from_utf8_lossy(&bytes).into_owned())'''
+
+[[plant]]
+name = "a brief's encoding: a file is read as UTF-8 with what is not replaced"
+meant = "utf16_with_a_mark_in_either_byte_order_is_decoded_and_posted_as_its_text"
+runs = ["encodings", "class"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = '''    words_of(&bytes).map_err(|why| Failure::Failed(format!("cannot read {shown}: {why}")))'''
+replace = '''    Ok(String::from_utf8_lossy(&bytes).into_owned())'''

@@ -202,7 +202,7 @@ fn a_windows_first_word_is_the_path_as_its_harness_s_shell_runs_a_program_by_it(
     let texts = |windows| RoleTexts::new(Env::default(), spaced.to_owned()).on_windows(windows);
     for windows in [false, true] {
         for harness in Harness::ALL {
-            let powershell = windows && harness == Harness::Codex;
+            let powershell = windows && matches!(harness, Harness::Codex | Harness::Muse);
             let expected = if powershell {
                 format!("& '{spaced}'")
             } else {
@@ -505,7 +505,7 @@ async fn work_woken_from_outside_a_drain_is_run_by_the_driver() {
 #[test]
 fn a_window_is_told_how_a_command_starts_in_it_for_its_harness_and_the_platform() {
     // The default install of Windows has a space in its path: the word of a Git Bash harness
-    // is one quoted word, and of Codex's PowerShell an `&` call (T-1049).
+    // is one quoted word, and of Codex's and Muse's PowerShell an `&` call (T-1049).
     let scene = scene();
     let spaced = "C:/Program Files/ConsensFlow/bin/cf.exe";
     let member_of = |harness: Harness| {
@@ -525,7 +525,7 @@ fn a_window_is_told_how_a_command_starts_in_it_for_its_harness_and_the_platform(
     };
     for harness in Harness::ALL {
         assert_eq!(told(false, harness), [format!("'{spaced}'")]);
-        let on_windows = if harness == Harness::Codex {
+        let on_windows = if matches!(harness, Harness::Codex | Harness::Muse) {
             format!("& '{spaced}'")
         } else {
             format!("'{spaced}'")

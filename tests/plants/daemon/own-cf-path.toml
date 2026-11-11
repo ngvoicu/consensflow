@@ -66,8 +66,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '    {{cf}} ask "…"                    a question to the chief; then end your turn'
-replace = '    cf ask "…"                    a question to the chief; then end your turn'
+find = '    {{cf}} ask "…"                    a question to the chief'
+replace = '    cf ask "…"                    a question to the chief'
 
 [[plant]]
 name = "own cf path: a worker's closing line asks with the word cf"
@@ -122,8 +122,8 @@ runs = ["engine-text-roles", "engine-text-goldens-roles"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles.rs"
-find = "return member::text(role, cf.as_str());"
-replace = 'return member::text(role, "cf");'
+find = "return member::text(role, cf);"
+replace = "return member::text(role, &CfWord::bare());"
 
 [[plant]]
 name = "own cf path: the parts of a member's text are not given the cf"
@@ -164,8 +164,8 @@ runs = ["proto-lib-cf-word", "engine-text-roles"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/cf_word.rs"
-find = "        if path.is_empty() {"
-replace = "        if false {"
+find = "        let word = if path.is_empty() {"
+replace = "        let word = if false {"
 
 [[plant]]
 name = "own cf path: a path already written is written again"
@@ -189,12 +189,12 @@ replace = "            if !starts_a_word(text, at) {"
 
 [[plant]]
 name = "own cf path: every shell is taken for a bash-like one"
-meant = "only_codex_on_windows_runs_its_commands_in_powershell"
+meant = "only_codex_and_muse_on_windows_run_their_commands_in_powershell"
 runs = ["proto-lib-agents"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/agents.rs"
-find = "        if windows && self == Harness::Codex {"
+find = "        if windows && matches!(self, Harness::Codex | Harness::Muse) {"
 replace = "        if false {"
 
 [[plant]]

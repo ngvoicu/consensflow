@@ -128,7 +128,9 @@ fn the_section_says_when_to_use_a_spec_what_goes_to_the_board_and_how_a_spec_bec
         "The spec is a second exception to changing nothing yourself",
         "you write the spec and its registry in `docs/specs` with your own tools, and never give that writing to the staff",
         "Write the spec before any of its tasks go on the board",
-        "Everything Specmint calls research, a subagent or implementation goes on the board as tasks for the staff",
+        // Searching and reading may go to the chief's subagent, as its role says (What you never
+        // do); what Specmint calls research beyond that, and every implementation, is the board's.
+        "Everything Specmint calls research beyond searching and reading, or implementation, goes on the board as tasks for the staff, and you do none of it yourself or in a subagent",
         // From a spec: phase order, `--needs`, the spec item in each brief, progress marked after an acceptance.
         "in phase order",
         "`--needs`",
@@ -136,6 +138,14 @@ fn the_section_says_when_to_use_a_spec_what_goes_to_the_board_and_how_a_spec_bec
         "After you accept a task, mark the spec's progress",
     ] {
         assert!(section.contains(said), "{said:?} in {section}");
+    }
+    // A subagent is not something Specmint "calls", and the chief's role lets its subagent
+    // search and read: the section does not put "a subagent" among what goes to the board.
+    for gone in [
+        "research, a subagent or implementation",
+        "big enough for phases as a spec",
+    ] {
+        assert!(!section.contains(gone), "{gone:?} in {section}");
     }
     assert!(
         section.lines().count() < 14,
