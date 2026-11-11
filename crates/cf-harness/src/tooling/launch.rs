@@ -142,6 +142,7 @@ fn prepared(harness: Harness, question: &Value, services: &Services) -> Result<V
         specs: None,
         compaction: None,
         advisor_off: false,
+        suggestion_off: false,
         first_message_ms: FIRST_MESSAGE_MS,
         starts_given_up: 0,
     };

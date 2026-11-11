@@ -152,10 +152,20 @@ fn frame_most() -> usize {
 /// The parts `role` is cut into, each to be said by a hook: consecutive pieces of it
 /// that put together are the role, each of which, framed ([`blocks`]) and put in a hook's
 /// answer ([`hook_output`]), is at most 16,000 bytes. A role that fits in one hook as it
-/// is is one part, with no frame. A part ends at the last line start of its room that
-/// is outside a code fence (a line that begins with three backticks or tildes opens one,
-/// and closes it again), else at the last line start of it, and in the middle of a line
-/// (never of a character) only where a line is longer than a part. No role is no part.
+/// is is one part, with no frame. A part ends where a paragraph or a heading begins
+/// ([`begins_a_block`]) after a blank line, outside a code fence (a line that begins with
+/// three backticks or tildes opens one, and closes it again), and not after a heading or a
+/// line that ends in a colon, which introduce what follows; of those the last that leaves the
+/// part at least half its room. Where there is none (no paragraph or heading begins in the
+/// part's second half) it ends at the last line start of its room that is outside a fence, else at
+/// the last line start of it, and in the middle of a line (never of a character) only where a line
+/// is longer than a part. So a part does not end between a heading or a line and the paragraph,
+/// list, table or example it introduces, and the next begins with a sentence or a heading,
+/// **except** where no paragraph or heading begins in the part's second half: then the fallback
+/// to a line start can split a list, whether the list is longer than half a frame or shorter
+/// (the project's rules for its staff, 8,000 bytes at the most, can be 79 list items of escaped
+/// JSON; a real project's are not, and the 16 cuts of the texts measured for T-1435 are all at a
+/// paragraph or a heading). No role is no part.
 pub fn parts(role: &str) -> Vec<&str> {
     if role.is_empty() {
         return Vec::new();
@@ -166,31 +176,70 @@ pub fn parts(role: &str) -> Vec<&str> {
     cut(role, PART_OUTPUT - hook_output("").len() - frame_most())
 }
 
+/// Whether a part may end before `line`, a whole line: it has text, is not indented (the
+/// rest of an item or an example), is not a list item (`- `, `* `, `+ `, `1. `, `1) `), a
+/// table row (`|`), a quotation (`>`) or the opening of a code fence, which are lines that
+/// go on with what is before them.
+fn begins_a_block(line: &str) -> bool {
+    let Some(first) = line.chars().next() else {
+        return false;
+    };
+    if first.is_whitespace() || matches!(first, '|' | '>') || fenced(None, line).is_some() {
+        return false;
+    }
+    let marker =
+        |rest: Option<&str>| rest.is_some_and(|rest| rest.is_empty() || rest.starts_with(' '));
+    let digits = line.chars().take_while(char::is_ascii_digit).count();
+    let item = ['-', '*', '+']
+        .into_iter()
+        .any(|bullet| marker(line.strip_prefix(bullet)))
+        || (digits > 0 && marker(line[digits..].strip_prefix(['.', ')'])));
+    !item
+}
+
 /// `role` cut in pieces each of which takes at most `room` bytes of a JSON string.
 fn cut(role: &str, room: usize) -> Vec<&str> {
     let mut parts = Vec::new();
     let (mut start, mut used) = (0, 0);
-    // The last line start of the part so far, outside a fence and anywhere.
+    // The last line start of the part so far that begins a block (with the bytes of the part
+    // before it), outside a fence, and anywhere.
+    let mut block: Option<(usize, usize)> = None;
     let (mut outside, mut any): (Option<usize>, Option<usize>) = (None, None);
     let mut fence: Option<(char, usize)> = None;
+    // Whether the line before is blank, and whether the last line with text introduces what
+    // follows: it is a heading or ends in a colon.
+    let (mut blank_before, mut introduces) = (false, false);
     let mut line_starts = true;
     for (at, character) in role.char_indices() {
         if line_starts {
+            let line = role[at..].split('\n').next().unwrap_or("");
             if at > start {
                 any = Some(at);
                 if fence.is_none() {
                     outside = Some(at);
+                    if blank_before && !introduces && begins_a_block(line) {
+                        block = Some((at, used));
+                    }
                 }
             }
             fence = fenced(fence, &role[at..]);
+            blank_before = line.trim().is_empty();
+            if !blank_before {
+                let text = line.trim_end();
+                introduces = text.ends_with(':') || text.starts_with('#');
+            }
         }
         let cost = encoded(character);
         if used + cost > room {
-            let end = outside.or(any).unwrap_or(at);
+            let whole = block
+                .filter(|&(_, before)| before >= room / 2)
+                .map(|(line, _)| line);
+            let end = whole.or(outside).or(any).unwrap_or(at);
             parts.push(&role[start..end]);
             start = end;
             used = role[end..at].chars().map(encoded).sum();
-            outside = None;
+            block = None;
+            outside = outside.filter(|&line| line > end);
             any = any.filter(|&line| line > end);
         }
         used += cost;
@@ -757,6 +806,166 @@ mod tests {
             "four spaces of indent is code, not a fence"
         );
         assert_eq!(fenced(None, "``\nx"), None);
+    }
+
+    /// Whether the cut that begins a part at `at` of `role` is the one a part is given when a
+    /// paragraph or a heading is there to begin it: after a blank line, at a line of the
+    /// role under test that is a heading or a paragraph (it begins with `#` or a letter: its
+    /// list items, table rows, quotations, numbered items, fences and indented lines do not),
+    /// not after a heading or a line that ends in a colon, and outside a fence. It does not ask
+    /// [`begins_a_block`], which it checks.
+    fn at_a_block(role: &str, at: usize) -> Result<(), String> {
+        let before = &role[..at];
+        let line = role[at..].split('\n').next().unwrap_or("");
+        if !before.ends_with("\n\n") {
+            return Err(format!("no blank line before {line:?}"));
+        }
+        if !line.starts_with(|first: char| first == '#' || first.is_alphabetic()) {
+            return Err(format!("{line:?} goes on with what is before it"));
+        }
+        let last = before.trim_end().lines().last().unwrap_or("");
+        if last.ends_with(':') || last.starts_with('#') {
+            return Err(format!("{last:?} introduces {line:?}"));
+        }
+        let fences = before
+            .lines()
+            .filter(|line| line.starts_with("```"))
+            .count();
+        if fences % 2 != 0 {
+            return Err(format!("{line:?} is inside a fence"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_line_does_not_end_a_part_before_the_list_it_introduces_where_a_block_begins_in_the_room() {
+        // A paragraph of 40 bytes, a line that introduces a list of three, a paragraph. The room
+        // ends inside the list: the part ends before the line that introduces it (42), where it
+        // used to end between two items of the list (65).
+        let role = format!(
+            "{}\n\nThe tiers:\n- one\n- two\n- three\n\nThen the next paragraph.\n",
+            "p".repeat(40)
+        );
+        assert_eq!(cut(&role, 70), [&role[..42], &role[42..]]);
+        // A room of the first half of it or less is not given up: a part is not made shorter
+        // than half its room for a block's sake (the parts of a role stay few), and ends at the
+        // last line start, as before.
+        let short = format!(
+            "{}\n\nThe tiers:\n- one\n- two\n- three\n- four\n- five\n- six\n- seven\n",
+            "p".repeat(10)
+        );
+        let at = short.find("- six").unwrap();
+        assert_eq!(cut(&short, 68), [&short[..at], &short[at..]]);
+        // A paragraph after a line that ends in a colon is that line's, blank line or not.
+        let colon = format!(
+            "{}\n\nAs follows:\n\nthe paragraph it introduces, which\ncontinues here\n",
+            "p".repeat(40)
+        );
+        let cuts = cut(&colon, 80);
+        assert_eq!(cuts.concat(), colon);
+        assert_eq!(cuts[0], &colon[..42], "before the line that introduces");
+        // A blank line inside a fence, and a line that looks like a paragraph after it, is
+        // no place to end a part; the fence is kept whole where the room has the room.
+        let fence = format!(
+            "{}\n\n```text\nline one\n\nlooks like a paragraph\n```\n\nafter the fence\n",
+            "p".repeat(40)
+        );
+        let at = fence.find("```text").unwrap();
+        assert_eq!(cut(&fence, 78), [&fence[..at], &fence[at..]]);
+    }
+
+    #[test]
+    fn a_heading_is_not_left_at_the_end_of_a_part_from_the_paragraph_under_it() {
+        // The room ends inside the paragraph under a heading: the part ends before the heading
+        // (42), not between the heading and its paragraph (56).
+        let role = format!(
+            "{}\n\n## Heading\n\nA paragraph that goes on and on and on and on.\n",
+            "p".repeat(40)
+        );
+        assert_eq!(cut(&role, 70), [&role[..42], &role[42..]]);
+        // And a heading after a heading, with nothing between, is no place either: the first
+        // would be left alone at the end of a part.
+        let two = format!(
+            "{}\n\n## One\n\n## Two\n\nA paragraph that goes on and on and on and on.\n",
+            "p".repeat(40)
+        );
+        let at = two.find("## One").unwrap();
+        assert_eq!(cut(&two, 76), [&two[..at], &two[at..]]);
+    }
+
+    #[test]
+    fn every_part_of_a_role_of_blocks_ends_before_a_paragraph_or_a_heading() {
+        // Blocks of every kind a role holds, each shorter than half the smallest room: a
+        // paragraph, a heading, a line that introduces a list and its items (one with a line
+        // of its own indented), a table, a quotation, a numbered list, a fence with a blank
+        // line in it and a line after that looks like a paragraph.
+        let mut role = String::new();
+        for at in 0..24 {
+            role += &format!("## Heading {at}\n\n");
+            role += &format!("A paragraph of the role, number {at}, of one line.\n\n");
+            role +=
+                &format!("The list {at}:\n- first item\n  and its second line\n- second item\n\n");
+            role += "| a | b |\n|---|---|\n| 1 | 2 |\n\n";
+            role += &format!("> a quotation {at}\n\n");
+            role += "1. one\n2. two\n\n";
+            role += "```text\nrule\n\nlooks like a paragraph\n```\n\n";
+            role += &format!("A last paragraph {at}.\nTwo lines of it.\n\n");
+        }
+        let mut cuts = 0;
+        for room in 400..700 {
+            let parts = cut(&role, room);
+            assert_eq!(parts.concat(), role, "room {room}");
+            let mut at = 0;
+            for part in &parts[..parts.len() - 1] {
+                at += part.len();
+                cuts += 1;
+                if let Err(why) = at_a_block(&role, at) {
+                    panic!("room {room}, the cut at {at}: {why}");
+                }
+                assert!(
+                    part.chars().map(encoded).sum::<usize>() >= room / 2,
+                    "room {room}: a part of less than half the room"
+                );
+            }
+        }
+        assert!(cuts > 2_000, "{cuts} cuts were looked at");
+    }
+
+    #[test]
+    fn the_lines_that_go_on_with_what_is_before_them_do_not_begin_a_block() {
+        for goes_on in [
+            "",
+            "  indented",
+            "\tindented",
+            "- item",
+            "* item",
+            "+ item",
+            "-",
+            "1. item",
+            "12) item",
+            "7.",
+            "| row |",
+            "> quoted",
+            "```text",
+            "~~~",
+            "   ```",
+        ] {
+            assert!(!begins_a_block(goes_on), "{goes_on:?}");
+        }
+        for begins in [
+            "## Heading",
+            "# Title",
+            "A paragraph.",
+            "The tiers:",
+            "-not an item",
+            "1.5 is a number",
+            "2026 was the year",
+            "**bold** text",
+            "<<consensflow-role: empty>>",
+            "日本語",
+        ] {
+            assert!(begins_a_block(begins), "{begins:?}");
+        }
     }
 
     #[test]

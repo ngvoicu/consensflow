@@ -28,7 +28,7 @@ mc-pi-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "lau
 mc-muse = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "muse::adapter::tests::"]
 mc-pi-extension = ["node", "--test", "tests/pi-extension.test.mjs"]
 mc-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "members_compaction::"], builds = true }
-mc-page-suite = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "the members' compaction|saves the choice of a size|holds the size to the range|sections, in that order"]
+mc-page-suite = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "the members' compaction|saves the choice of a size|holds the size to the range|sections, in that order|under the least|says nothing of the least|takes the words about the least"]
 
 [[plant]]
 name = "members compaction: the ledger takes a size below the range"
@@ -39,6 +39,36 @@ runs = ["mc-ledger-lib"]
 file = "crates/cf-ledger/src/projects/compaction.rs"
 find = '''    (COMPACTION_MIN..=COMPACTION_MAX)'''
 replace = '''    (0..=COMPACTION_MAX)'''
+
+[[plant]]
+name = "members compaction: the ledger's floor is the old hundred thousand"
+meant = "the_range_is_a_quarter_of_a_million_to_a_million"
+runs = ["mc-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '''pub const COMPACTION_MIN: u32 = 250_000;'''
+replace = '''pub const COMPACTION_MIN: u32 = 100_000;'''
+
+[[plant]]
+name = "members compaction: the ledger's floor is the two hundred thousand a window that left the most compacts every few calls at"
+meant = "the_floor_leaves_a_claude_window_twenty_calls_above_the_largest_context_a_compaction_left"
+runs = ["mc-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '''pub const COMPACTION_MIN: u32 = 250_000;'''
+replace = '''pub const COMPACTION_MIN: u32 = 200_000;'''
+
+[[plant]]
+name = "members compaction: the ledger takes the size just under the floor"
+meant = "the_size_just_under_the_floor_is_refused_and_the_floor_itself_is_a_size"
+runs = ["mc-ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '''    (COMPACTION_MIN..=COMPACTION_MAX)'''
+replace = '''    (COMPACTION_MIN - 1..=COMPACTION_MAX)'''
 
 [[plant]]
 name = "members compaction: the ledger takes a size above the range"
@@ -203,7 +233,7 @@ runs = ["mc-daemon-page"]
 
 [[plant.edit]]
 file = "app/ui/core/compaction.js"
-find = '''const LEAST = 100_000
+find = '''const LEAST = 250_000
 '''
 replace = '''const LEAST = 10_000
 '''
@@ -227,8 +257,10 @@ runs = ["mc-engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''compaction: project.compaction.filter(|_| participant.role != "chief"),'''
-replace = '''compaction: project.compaction,'''
+find = '''.compaction
+                .filter(|_| participant.role != "chief")'''
+replace = '''.compaction
+                .filter(|_| true)'''
 
 [[plant]]
 name = "members compaction: only the chief's launch is given the size"
@@ -237,8 +269,10 @@ runs = ["mc-engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''compaction: project.compaction.filter(|_| participant.role != "chief"),'''
-replace = '''compaction: project.compaction.filter(|_| participant.role == "chief"),'''
+find = '''.compaction
+                .filter(|_| participant.role != "chief")'''
+replace = '''.compaction
+                .filter(|_| participant.role == "chief")'''
 
 [[plant]]
 name = "members compaction: only a Claude member is given the size, as before Phase 7"
@@ -247,10 +281,12 @@ runs = ["mc-engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''compaction: project.compaction.filter(|_| participant.role != "chief"),'''
-replace = '''compaction: project.compaction.filter(|_| {
-                participant.role != "chief" && Harness::from_kind(harness) == Some(Harness::Claude)
-            }),'''
+find = '''.compaction
+                .filter(|_| participant.role != "chief")'''
+replace = '''.compaction
+                .filter(|_| {
+                    participant.role != "chief" && Harness::from_kind(harness) == Some(Harness::Claude)
+                })'''
 
 [[plant]]
 name = "members compaction: no launch is given the project's size"
@@ -259,8 +295,10 @@ runs = ["mc-engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''compaction: project.compaction.filter(|_| participant.role != "chief"),'''
-replace = '''compaction: None::<u32>.filter(|_| participant.role != "chief"),'''
+find = '''.compaction
+                .filter(|_| participant.role != "chief")'''
+replace = '''.compaction
+                .filter(|_| false)'''
 
 [[plant]]
 name = "members compaction: a conversation opened again is given no size"
@@ -269,8 +307,109 @@ runs = ["mc-engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''compaction: project.compaction.filter(|_| participant.role != "chief"),'''
-replace = '''compaction: project.compaction.filter(|_| participant.role != "chief" && resume.is_none()),'''
+find = '''.compaction
+                .filter(|_| participant.role != "chief")'''
+replace = '''.compaction
+                .filter(|_| participant.role != "chief" && resume.is_none())'''
+
+# A size the project's row holds under the least the ledger takes now (an earlier build took
+# less) stays in the row and is given to a launch as the least (T-1439): the engine's one line,
+# and the ledger's `launch_size` it asks.
+[[plant]]
+name = "members compaction: a size the row holds under the least is given to a launch as it is"
+meant = "a_size_the_project_holds_under_the_least_is_given_to_every_harness_as_the_least_and_none_to_the_chief"
+runs = ["mc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''.map(launch_size),'''
+replace = '''.map(|size| launch_size(size).min(size)),'''
+
+[[plant]]
+name = "members compaction: a size the row holds under the least is given to a resumed conversation as it is"
+meant = "a_member_opened_again_on_its_conversation_by_a_project_holding_a_size_under_the_least_is_given_the_least_and_the_row_is_left_as_it_was"
+runs = ["mc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''.map(launch_size),'''
+replace = '''.map(|size| if resume.is_some() { size } else { launch_size(size) }),'''
+
+[[plant]]
+name = "members compaction: every size the row holds is given to a launch as the least"
+meant = "a_size_the_project_holds_under_the_least_is_given_to_every_harness_as_the_least_and_none_to_the_chief"
+runs = ["mc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''.map(launch_size),'''
+replace = '''.map(|_| launch_size(0)),'''
+
+[[plant]]
+name = "members compaction: the project's row is rewritten to the least where it held less"
+meant = "a_member_opened_again_on_its_conversation_by_a_project_holding_a_size_under_the_least_is_given_the_least_and_the_row_is_left_as_it_was"
+runs = ["mc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''.map(launch_size),'''
+replace = '''.map(|size| {
+                    if size < cf_ledger::COMPACTION_MIN {
+                        let _ = self.seams.ledger.borrow_mut().set_compaction(project.id, None);
+                    }
+                    launch_size(size)
+                }),'''
+
+[[plant]]
+name = "members compaction: a launch's least is under the ledger's"
+meant = "a_launch_is_given_the_least_for_a_size_the_row_holds_under_it_and_every_other_size_as_it_is"
+runs = ["mc-ledger-lib", "mc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '''stored.max(COMPACTION_MIN)'''
+replace = '''stored.max(200_000)'''
+
+[[plant]]
+name = "members compaction: a launch is given the smaller of the size and the least"
+meant = "a_launch_is_given_the_least_for_a_size_the_row_holds_under_it_and_every_other_size_as_it_is"
+runs = ["mc-ledger-lib", "mc-engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/compaction.rs"
+find = '''stored.max(COMPACTION_MIN)'''
+replace = '''stored.min(COMPACTION_MIN)'''
+
+[[plant]]
+name = "members compaction: the page does not say the windows run at the least"
+meant = "Project settings shows a size the board has under the least a size can now be as it is, says why it cannot be saved again and that the windows run at the least meanwhile, and keeps the harness's own point open"
+runs = ["mc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/core/compaction.js"
+find = '''    this.#held.hidden = !low'''
+replace = '''    this.#held.hidden = true'''
+
+[[plant]]
+name = "members compaction: the page says the windows run at the least for a size in the range"
+meant = "Project settings says nothing of the least for a size in the range, and for none"
+runs = ["mc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/core/compaction.js"
+find = '''const low = typeof size === 'number' && size < LEAST'''
+replace = '''const low = typeof size === 'number''''
+
+[[plant]]
+name = "members compaction: the words stay after a size in the range is saved"
+meant = "Project settings takes the words about the least away when a size in the range is saved over a size under it"
+runs = ["mc-page-suite"]
+
+[[plant.edit]]
+file = "app/ui/core/compaction.js"
+find = '''    this.#holds(size)
+'''
+replace = ''''''
 
 [[plant]]
 name = "members compaction: the settings file leaves the size out"
@@ -691,10 +830,12 @@ runs = ["mc-rig"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''compaction: project.compaction.filter(|_| participant.role != "chief"),'''
-replace = '''compaction: project.compaction.filter(|_| {
-                participant.role != "chief" && Harness::from_kind(harness) == Some(Harness::Claude)
-            }),'''
+find = '''.compaction
+                .filter(|_| participant.role != "chief")'''
+replace = '''.compaction
+                .filter(|_| {
+                    participant.role != "chief" && Harness::from_kind(harness) == Some(Harness::Claude)
+                })'''
 
 [[plant]]
 name = "members compaction: a Muse window is given no limit, end to end"

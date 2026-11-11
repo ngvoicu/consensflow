@@ -16,5 +16,6 @@ mod compaction;
 mod line;
 mod migration;
 mod name;
+mod prompt_suggestion;
 mod rules;
 mod world;

@@ -1187,6 +1187,12 @@ impl Asked {
         if launch.advisor_off {
             seen["advisorOff"] = json!(true);
         }
+        // The prompt suggestion is off in every window of a project that has not ticked it, the
+        // chief's too (2026-11-11), so it is on every launch a test sees of such a project; the
+        // call written down above does not hold it, so no recorded trace moves.
+        if launch.suggestion_off {
+            seen["suggestionOff"] = json!(true);
+        }
         fake.prepared.borrow_mut().push(seen);
         fake.first_message_ms
             .borrow_mut()

@@ -58,6 +58,7 @@ fn project(ledger: &mut Ledger) -> ProjectView {
             staff_rules: None,
             compaction: None,
             advisor_tool: false,
+            prompt_suggestion: false,
         })
         .expect("a project")
 }

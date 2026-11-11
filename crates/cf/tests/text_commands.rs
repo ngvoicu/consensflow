@@ -15,7 +15,10 @@
 //! - as one argument, many lines and every character a shell or cmd.exe has a meaning for;
 //! - in a file, for the commands the table's footer names as taking one (`--file`);
 //! - on Unix, through a real `sh` and the quoted heredoc the role cards show
-//!   (`cf task add --tier standard - <<'BRIEF'`).
+//!   (`cf task add --tier standard - <<'BRIEF'`);
+//! - in the encodings Windows PowerShell 5.1 writes (UTF-16 with a byte order mark, both ways in),
+//!   which are decoded, and in those that are no text (UTF-16 without a mark, a NUL byte, a Windows
+//!   code page), which are refused with nothing posted (the review T-1447, finding 1).
 //!
 //! A command that takes a text and is not in the table is found from the sources: every function
 //! of `src/board` that reads one (`text_of`, `brief_of`) is a command of the table, or `moved`,
@@ -33,7 +36,7 @@ use std::fs;
 use std::path::Path;
 
 use cf_board::scripted::{reply, scripted};
-use common::cf;
+use common::{cf, cf_bytes};
 use serde_json::{json, Value};
 
 /// What a double-quoted brief loses to the shell, and what cmd.exe and the other shells have a
@@ -335,6 +338,161 @@ fn every_command_that_takes_a_text_gets_it_whole_through_a_shells_quoted_heredoc
             );
         }
     }
+}
+
+/// `text` as PowerShell 5.1's `>` writes it: a mark, UTF-16 little-endian, a Windows line break.
+fn utf16_with_a_mark(text: &str) -> Vec<u8> {
+    let mut bytes = vec![0xff, 0xfe];
+    for unit in format!("{text}\r\n").encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    bytes
+}
+
+/// What the board received of `args` run with `input` as bytes on standard input.
+fn posted_bytes(args: &[String], input: &[u8]) -> (Option<i32>, Option<Value>, String) {
+    let api = scripted(vec![reply(201, the_answer())]);
+    let ran = cf_bytes(
+        args,
+        &[("CONSENSFLOW_URL", &api.url), ("CONSENSFLOW_TOKEN", "tok")],
+        input,
+    );
+    let body = api
+        .received()
+        .into_iter()
+        .next()
+        .and_then(|got| got.json())
+        .and_then(|sent| sent.get("body").cloned());
+    (
+        ran.status.code(),
+        body,
+        String::from_utf8_lossy(&ran.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn every_command_that_takes_a_text_decodes_utf16_with_a_mark_from_a_file_and_from_input() {
+    let takers = file_commands();
+    for command in commands() {
+        for text in TEXTS {
+            let bytes = utf16_with_a_mark(text);
+            let (code, body, err) = posted_bytes(&with(&command, &["-"]), &bytes);
+            assert_eq!(
+                (code, body.as_ref().and_then(Value::as_str)),
+                (Some(0), Some(text)),
+                "{} on standard input: {err}",
+                command.shown()
+            );
+            if !takers.contains(command.last()) {
+                continue;
+            }
+            let folder = tempfile::tempdir().expect("a folder");
+            let file = folder.path().join("brief.md");
+            fs::write(&file, &bytes).expect("the file");
+            let args = with(&command, &["--file", &file.to_string_lossy()]);
+            let (code, body, err) = posted_bytes(&args, b"");
+            assert_eq!(
+                (code, body.as_ref().and_then(Value::as_str)),
+                (Some(0), Some(text)),
+                "{} --file: {err}",
+                command.shown()
+            );
+        }
+    }
+}
+
+#[test]
+fn every_command_that_takes_a_text_refuses_what_is_no_utf8_and_posts_nothing() {
+    let takers = file_commands();
+    let mut without_a_mark = Vec::new();
+    for unit in "Write the parser.".encode_utf16() {
+        without_a_mark.extend_from_slice(&unit.to_le_bytes());
+    }
+    let refused: [(&str, Vec<u8>); 3] = [
+        ("UTF-16 without a mark", without_a_mark),
+        ("a Windows code page", b"Intrebarea: \xe9".to_vec()),
+        ("a NUL byte", b"Write\0 the parser.".to_vec()),
+    ];
+    for command in commands() {
+        for (what, bytes) in &refused {
+            let (code, body, err) = posted_bytes(&with(&command, &["-"]), bytes);
+            assert_eq!(
+                (code, &body),
+                (Some(1), &None),
+                "{} on standard input, {what}: {err}",
+                command.shown()
+            );
+            assert!(
+                err.starts_with("cf: cannot read standard input: ")
+                    && err.contains("Write it as UTF-8")
+                    && err.ends_with("Nothing was sent.\n"),
+                "{} on standard input, {what}: {err}",
+                command.shown()
+            );
+            if !takers.contains(command.last()) {
+                continue;
+            }
+            let folder = tempfile::tempdir().expect("a folder");
+            let file = folder.path().join("brief.md");
+            fs::write(&file, bytes).expect("the file");
+            let args = with(&command, &["--file", &file.to_string_lossy()]);
+            let (code, body, err) = posted_bytes(&args, b"");
+            assert_eq!(
+                (code, &body),
+                (Some(1), &None),
+                "{} --file, {what}: {err}",
+                command.shown()
+            );
+            assert!(
+                err.starts_with("cf: cannot read ") && err.ends_with("Nothing was sent.\n"),
+                "{} --file, {what}: {err}",
+                command.shown()
+            );
+        }
+    }
+}
+
+/// No function of the board decodes the bytes of a text its own way: `words_of` (`src/board/
+/// brief.rs`) is the one that does, for a file and for standard input. A `from_utf8_lossy` in the
+/// board's code is a reader that would post what is no text.
+#[test]
+fn only_words_of_decodes_a_text() {
+    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut found = Vec::new();
+    let mut stack = vec![folder];
+    while let Some(folder) = stack.pop() {
+        for entry in fs::read_dir(&folder).expect("the sources") {
+            let path = entry.expect("an entry").path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned());
+            if path.extension().is_none_or(|extension| extension != "rs")
+                || name.is_some_and(|name| name == "tests.rs" || name.ends_with("_tests.rs"))
+            {
+                continue;
+            }
+            for (number, line) in fs::read_to_string(&path)
+                .expect("a source")
+                .lines()
+                .enumerate()
+            {
+                if line.trim_start().starts_with("#[cfg(test)]") {
+                    break;
+                }
+                if !line.trim_start().starts_with("//") && line.contains("from_utf8_lossy") {
+                    found.push(format!("{}:{}", path.display(), number + 1));
+                }
+            }
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "a text is decoded by words_of alone, never lossily: {found:?}"
+    );
 }
 
 /// The names of the functions of `src/board` that read a text: a call of `text_of` or `brief_of`
