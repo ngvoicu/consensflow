@@ -20,7 +20,7 @@ use cf_e2e::live::{ask, calls, until, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
 use serde_json::{json, Value};
 
-use crate::{config, devin_config, on_the_installed_devin, secs, Outcome};
+use crate::{config, devin_config, installed_devin, on_the_installed_devin, secs, Outcome};
 
 /// The stand-in Devin, which the rig's windows find as `devin`, and the stand-in for
 /// the `cf` of a member's window.
@@ -274,11 +274,13 @@ fn cut_and_opened_again<'r>(
 /// and makes no turn, no item of its record and nothing the daemon's reader takes for
 /// an answer, and the window is ready. The check gives the window nothing itself: one
 /// that pasted the command passed whatever the product did (Astra and Sol on the fix).
+/// On Devin 3000.12.43's shape the window says no mode at all (`silent_on_3000_12`), in the
+/// case's twin `…_on_devin_3000_12`: each chooses its shape itself, not the environment.
 #[test]
 fn a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_readiness_switches_it(
 ) -> Outcome {
     ask::prepare()?;
-    let rig = Rig::start(config().devin(FAKE_DEVIN))?;
+    let rig = Rig::start(devin_config(FAKE_DEVIN))?;
     let install = Installed::at(
         Harness::Devin,
         FAKE_DEVIN,
@@ -292,9 +294,7 @@ fn a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_
         session,
     } = cut_and_opened_again(&rig, &install)?;
     let step = Duration::from_millis(200);
-    if cf_e2e::process::own_var("FAKE_DEVIN_STAMPS")
-        .is_some_and(|shape| shape.starts_with("3000.12"))
-    {
+    if installed_devin() {
         silent_on_3000_12(&rig, &again, &wire, &store, &session)?;
         drop((first, again));
         rig.close()?;
@@ -678,14 +678,22 @@ fn the_launch_of_a_member_is_prepared_for_devin_and_pi_alone() -> Outcome {
     Ok(())
 }
 
-/// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423). The case of a
-/// window cut in its first turn stays on the stand-in's default shape: on 3000.12.43's a window
-/// opened again on a turn a quit cut says no mode until it is typed to (T-1417, run 3), which
-/// another task takes.
+/// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423).
 #[test]
 fn a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversation_with_the_note_in_its_launch_on_devin_3000_12(
 ) -> Outcome {
     on_the_installed_devin(
         a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversation_with_the_note_in_its_launch,
+    )
+}
+
+/// The case of a window cut in its first turn on the wire log of Devin 3000.12.43, which opened
+/// again so says no mode until it is typed to (T-1417's run 3, A5-23): the daemon's readiness
+/// holds it a while and gives its delivery behind `/bypass` (`silent_on_3000_12`).
+#[test]
+fn a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_readiness_switches_it_on_devin_3000_12(
+) -> Outcome {
+    on_the_installed_devin(
+        a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_readiness_switches_it,
     )
 }

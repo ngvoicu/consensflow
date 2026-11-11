@@ -211,6 +211,12 @@ fn devin_config(devin: &str) -> Config {
     config().devin(devin).var("FAKE_DEVIN_STAMPS", shape)
 }
 
+/// Whether the case on this thread runs on the wire log Devin 3000.12.43 writes
+/// ([`on_the_installed_devin`]).
+fn installed_devin() -> bool {
+    INSTALLED_DEVIN.get()
+}
+
 /// Runs `case` with the stand-in Devin on the wire log Devin 3000.12.43 writes.
 fn on_the_installed_devin(case: fn() -> Outcome) -> Outcome {
     INSTALLED_DEVIN.set(true);

@@ -177,3 +177,16 @@ fn a_finished_devin_worker_opened_again_with_no_task_reads_at_rest_whatever_its_
     rig.close()?;
     Ok(())
 }
+
+// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423), which opened
+// again with no message on a session whose last turn was cut says nothing of its mode until it
+// is typed to (a red of T-1417 that A5-23's fix, T-1432, mends): the case as it is, the
+// stand-in's shape chosen here and not by the environment.
+
+#[test]
+fn a_finished_devin_worker_opened_again_with_no_task_reads_at_rest_whatever_its_record_cannot_say_on_devin_3000_12(
+) -> Outcome {
+    crate::on_the_installed_devin(
+        a_finished_devin_worker_opened_again_with_no_task_reads_at_rest_whatever_its_record_cannot_say,
+    )
+}

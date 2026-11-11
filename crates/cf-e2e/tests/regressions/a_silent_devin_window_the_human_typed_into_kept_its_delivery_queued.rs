@@ -241,8 +241,8 @@ fn a_silent_devin_window_the_human_typed_into_keeps_what_it_is_told_queued_with_
 /// The control: nobody typed into the window, and what it is told goes in behind `/bypass`,
 /// once.
 #[test]
-fn a_silent_devin_window_nobody_typed_into_is_given_what_it_is_told_behind_bypass_once(
-) -> Outcome {
+fn a_silent_devin_window_nobody_typed_into_is_given_what_it_is_told_behind_bypass_once() -> Outcome
+{
     let Shown {
         rig,
         project,

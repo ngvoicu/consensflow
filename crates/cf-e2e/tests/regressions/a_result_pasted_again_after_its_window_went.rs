@@ -144,3 +144,16 @@ fn a_result_a_devin_chiefs_window_took_as_it_went_is_not_pasted_again_into_the_w
     rig.close()?;
     Ok(())
 }
+
+// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423), whose window the
+// Resume opens on the session the crash cut says nothing of its mode until it is typed to (a red
+// of T-1417 that A5-23's fix, T-1432, mends): the case as it is, the stand-in's shape chosen
+// here and not by the environment.
+
+#[test]
+fn a_result_a_devin_chiefs_window_took_as_it_went_is_not_pasted_again_into_the_window_the_resume_opens_on_devin_3000_12(
+) -> Outcome {
+    crate::on_the_installed_devin(
+        a_result_a_devin_chiefs_window_took_as_it_went_is_not_pasted_again_into_the_window_the_resume_opens,
+    )
+}
