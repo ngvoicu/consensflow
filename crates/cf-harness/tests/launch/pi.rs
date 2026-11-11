@@ -673,6 +673,46 @@ fn follows_the_window_to_the_conversation_a_new_or_resume_left_it_on_holding_unt
     assert_eq!(ready(), Readiness::Ready);
 }
 
+/// What the extension writes when it asks Pi to compact the conversation at a rest for the
+/// project's size: its word, in the launch's settled folder.
+fn asks_for_a_compaction(home: &Home, session: &str, at: i64) {
+    let settled = path::join(&[&home.launch_folder(), "settled"]);
+    fs::create_dir_all(&settled).unwrap();
+    let file = path::join(&[&settled, &format!("{LAUNCH}.compacting.json")]);
+    let said = json!({ "launchId": LAUNCH, "sessionId": session, "startedAt": at });
+    fs::write(file, format!("{said}\n")).unwrap();
+}
+
+#[test]
+fn a_window_says_when_its_extension_asked_for_a_compaction_while_the_word_stands_and_the_conversation_is_its_own(
+) {
+    let home = Home::new();
+    let stand = Rc::new(Stand {
+        asked: RefCell::new(Vec::new()),
+        reading: settled_record("hello"),
+    });
+    let (adapter, _fakes) = adapter_with(&home, Rc::clone(&stand) as Rc<dyn Records>);
+    let plan = prepare(&adapter, &Request::default()).unwrap();
+    let (window, native) = (plan.window, plan.native_session.unwrap());
+    assert_eq!(window.compaction_asked(), None, "before any word");
+    asks_for_a_compaction(&home, &native, 1_790_000_000_000);
+    assert_eq!(window.compaction_asked(), Some(1_790_000_000_000));
+    // The window was switched to another conversation (a /new or /resume): the word was the
+    // earlier one's.
+    window.follow("0199a6f0-4cc1-7d3e-9f7a-3c5b2e1d0a98");
+    assert_eq!(window.compaction_asked(), None);
+    window.follow(&native);
+    assert_eq!(window.compaction_asked(), Some(1_790_000_000_000));
+    // Taken back as the compaction ends.
+    let settled = path::join(&[&home.launch_folder(), "settled"]);
+    fs::remove_file(path::join(&[
+        &settled,
+        &format!("{LAUNCH}.compacting.json"),
+    ]))
+    .unwrap();
+    assert_eq!(window.compaction_asked(), None);
+}
+
 #[test]
 fn reads_each_turn_s_end_from_the_extension_s_settled_marker() {
     let home = Home::new();

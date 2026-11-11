@@ -101,6 +101,9 @@ pub struct FakeAgent {
     pub lost_records: HashMap<String, Vec<usize>>,
     /// Why the window has not said which conversation it shows yet.
     pub unnamed: Option<String>,
+    /// When its extension said it asked its harness to compact the conversation for the
+    /// project's size, and has not said it over (`Window::compaction_asked`, Pi's).
+    pub compaction_asked: Option<i64>,
     /// How often the engine told the window it pressed the interrupt keys.
     pub interrupted: u32,
     /// The window stops where it is when it is interrupted, writing nothing:
@@ -1245,6 +1248,7 @@ impl Asked {
             records_unreadable: Vec::new(),
             lost_records: HashMap::new(),
             unnamed: None,
+            compaction_asked: None,
             interrupted: 0,
             stops_when_interrupted: false,
             takes_back: false,

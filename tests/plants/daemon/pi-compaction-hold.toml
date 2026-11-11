@@ -1,0 +1,184 @@
+# The close of a done task's Pi window waits for a compaction ConsensFlow's own extension asked for
+# (T-1475). A Pi member whose task is one turn is at rest as its result is taken; the extension
+# asks Pi to compact at that rest (`agent_settled`, past the project's size), and the engine closed
+# the window ten seconds after the result (`STILL_BOUND_MS`, the screen being drawn): the close's
+# TERM ran Pi's `dispose()` and `abortCompaction()`, the summary (39 to 80 seconds in the records)
+# ended `aborted`, and the compaction was lost every time (the owner's cached-compaction ledger
+# said `cancelled`, T-1467's Pi member at 477,875 tokens). Now the extension writes its word
+# (`settled/<launch>.compacting.json`: launch, conversation, time) before it asks and takes it back
+# as that compaction ends, however it ends and at shutdown; the Pi window says it
+# (`Window::compaction_asked`); and the engine holds the close (`Dispatcher::compaction_held`, in
+# `still_drawing`, so the session's next task waits as for a screen) while it stands, at most
+# `COMPACTION_HOLD_MS` from the word's time. Each plant breaks one half and the test written for it
+# fails.
+#
+# Every name holds `pi compaction hold`, so `npm run plants:daemon -- "pi compaction hold"` runs
+# them all.
+
+[run]
+pch-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "close_for_compaction::"]
+pch-channel = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::channel::"]
+pch-launch = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "pi::a_window_says_when_its_extension_asked"]
+pch-extension = ["node", "--test", "tests/pi-extension.test.mjs"]
+
+[[plant]]
+name = "pi compaction hold: the engine holds nothing for a compaction"
+meant = "a_done_tasks_window_stays_open_while_its_extension_compacts_and_closes_in_the_step_the_word_is_taken_back"
+runs = ["pch-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        now - from < COMPACTION_HOLD_MS"
+replace = "        now - from < 0"
+
+[[plant]]
+name = "pi compaction hold: the engine holds for as long as the word stands, with no bound"
+meant = "a_word_that_is_never_taken_back_holds_the_window_for_the_bound_from_the_word_and_no_longer"
+runs = ["pch-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        now - from < COMPACTION_HOLD_MS"
+replace = "        now - from < i64::MAX"
+
+[[plant]]
+name = "pi compaction hold: the bound runs from the engine's first sight of the word"
+meant = "the_bound_runs_from_the_words_time_not_from_the_look_that_found_the_window_free"
+runs = ["pch-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        let from = if asked <= now { asked } else { seen };"
+replace = "        let from = seen;"
+
+[[plant]]
+name = "pi compaction hold: a word whose time is ahead of the clock holds for ever"
+meant = "a_word_whose_time_is_ahead_of_the_clock_is_held_for_the_bound_from_the_first_look_at_it"
+runs = ["pch-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        let from = if asked <= now { asked } else { seen };"
+replace = "        let from = asked;"
+
+[[plant]]
+name = "pi compaction hold: the engine does not hold the window of the next task of the session"
+meant = "the_next_task_of_the_session_waits_for_the_compaction_and_goes_in_once_after_it"
+runs = ["pch-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "self.given_task_finished(record)? && self.compaction_held(record)"
+replace = "false && self.compaction_held(record)"
+
+[[plant]]
+name = "pi compaction hold: the window is held whatever happened to its task"
+meant = "a_window_whose_task_is_not_done_is_not_held_for_the_word_a_cancel_closes_it_at_once"
+runs = ["pch-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "self.given_task_finished(record)? && self.compaction_held(record)"
+replace = "self.compaction_held(record)"
+
+[[plant]]
+name = "pi compaction hold: the channel takes another conversation's word"
+meant = "the_extension_s_word_of_a_compaction_it_asked_for_is_its_own_launch_s_and_the_conversation_s_and_a_time"
+runs = ["pch-channel"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/channel.rs"
+find = '''            && word.get("sessionId")?.as_str()? == session;'''
+replace = '''            && word.get("sessionId")?.as_str().is_some();'''
+
+[[plant]]
+name = "pi compaction hold: the channel takes another launch's word"
+meant = "the_extension_s_word_of_a_compaction_it_asked_for_is_its_own_launch_s_and_the_conversation_s_and_a_time"
+runs = ["pch-channel"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/channel.rs"
+find = '''        let ours = word.get("launchId")?.as_str()? == self.launch_id
+            && word'''
+replace = '''        let ours = word.get("launchId")?.as_str().is_some()
+            && word'''
+
+[[plant]]
+name = "pi compaction hold: the Pi window says no word of its extension's"
+meant = "a_window_says_when_its_extension_asked_for_a_compaction_while_the_word_stands_and_the_conversation_is_its_own"
+runs = ["pch-launch"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = "        self.channel.compaction_asked(&self.session.borrow())"
+replace = "        None"
+
+[[plant]]
+name = "pi compaction hold: the extension writes no word"
+meant = "stands while it compacts and is taken back when it ends (complete)"
+runs = ["pch-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    if (asking) await writeCompactionWord()\n"
+replace = ""
+
+[[plant]]
+name = "pi compaction hold: the extension writes its word after the settlement evidence the engine takes the result by"
+meant = "writes it before it asks, with the launch, the conversation and the time"
+runs = ["pch-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    if (asking) await writeCompactionWord()\n    await writeSettlement()\n    if (asking) askCompaction(context)"
+replace = "    await writeSettlement()\n    if (asking) askCompaction(context)\n    if (asking) await writeCompactionWord()"
+
+[[plant]]
+name = "pi compaction hold: the extension keeps its word when Pi says the compaction ended"
+meant = "is taken back by Pi's word that the compaction was completed, before the callback of the ask comes"
+runs = ["pch-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    if (compacting) await takeCompactionWordBack()\n"
+replace = ""
+
+[[plant]]
+name = "pi compaction hold: the extension keeps its word when its callback comes"
+meant = "is taken back by the callback of the ask when Pi tells no event of the end (complete)"
+runs = ["pch-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "      compacting = false\n      void takeCompactionWordBack()\n      void consume()"
+replace = "      compacting = false\n      void consume()"
+
+[[plant]]
+name = "pi compaction hold: the extension keeps its word when Pi refuses the ask at once"
+meant = "is taken back too when Pi refuses the ask at once"
+runs = ["pch-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "      compacting = false\n      void takeCompactionWordBack()\n    }"
+replace = "      compacting = false\n    }"
+
+[[plant]]
+name = "pi compaction hold: the extension keeps its word at shutdown"
+meant = "is taken back when the window shuts down under the compaction"
+runs = ["pch-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    await takeCompactionWordBack()\n    watcher?.close()"
+replace = "    watcher?.close()"
+
+[[plant]]
+name = "pi compaction hold: the extension says it compacts for a compaction Pi began itself"
+meant = "has none for a compaction Pi began itself (complete)"
+runs = ["pch-extension"]
+
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "    piCompacting = true\n  })"
+replace = "    piCompacting = true\n    void writeCompactionWord()\n  })"

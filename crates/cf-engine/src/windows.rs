@@ -87,6 +87,16 @@ const DRAWN_QUIET_MS: f64 = 1_500.0;
 /// (`ownership`).
 const STILL_BOUND_MS: i64 = 10_000;
 
+/// The longest the window of a task that is done is held open for a compaction that
+/// ConsensFlow's own extension asked its harness for at the window's rest, for the
+/// project's size, from the word it wrote when it asked ([`Window::compaction_asked`],
+/// [`Dispatcher::compaction_held`], T-1475). The compactions of a Pi member's real windows
+/// took 39 to 80 seconds (a cached summary of 243,000 to 749,000 tokens); this is about
+/// four times the longest. Past it the window closes as it does without one, the
+/// compaction ended by the close as before. A word older than this is a stale one and holds
+/// nothing.
+pub(crate) const COMPACTION_HOLD_MS: i64 = 300_000;
+
 /// How soon a chief that could not start is tried again; the wait doubles
 /// with each failure, up to the most.
 const RELAUNCH_MS: i64 = 5_000;
@@ -357,6 +367,12 @@ pub(crate) struct WindowPart {
     /// is in hand (the wait is over, the next time it is done is a wait of its own), and
     /// once the window closes.
     pub(crate) found_free: Option<i64>,
+    /// When the engine first saw its extension's word that it asked the harness to compact
+    /// for the window's rest, while the task the window was given is done: the hold's
+    /// bound is counted from the word's own time, or from this where the word's time is
+    /// ahead of the clock. None while there is no word, and once the window closes
+    /// ([`Dispatcher::compaction_held`]).
+    pub(crate) compaction_seen: Option<i64>,
     /// The window of its last launch whose open the host never answered by the open's
     /// deadline: the host may have started its program since, or may yet, and it would
     /// run on the conversation the next window goes on with (a Codex thread one client
@@ -419,6 +435,7 @@ impl Default for WindowPart {
             owner: None,
             told_waiting: None,
             found_free: None,
+            compaction_seen: None,
             abandoned: None,
         }
     }
@@ -573,6 +590,7 @@ impl Dispatcher {
             window.unproven = false;
             window.told_waiting = None;
             window.found_free = None;
+            window.compaction_seen = None;
             window.activity = Activity::of(ActivityState::Closed);
             window.trust = Trusting::Past;
             window.trust_keys = 0;
@@ -1868,6 +1886,11 @@ impl Dispatcher {
         self: &Rc<Self>,
         record: &Rc<Record>,
     ) -> Result<bool, EngineError> {
+        // A compaction its own extension asked for holds the window first, and its screen
+        // is waited for after it (the wait of the screen begins when the compaction's ends).
+        if self.given_task_finished(record)? && self.compaction_held(record) {
+            return Ok(true);
+        }
         if !self.given_task_finished(record)? {
             return Ok(false);
         }
@@ -1891,6 +1914,33 @@ impl Dispatcher {
             .ok()
             .flatten()
             .is_some_and(|quiet| quiet < DRAWN_QUIET_MS))
+    }
+
+    /// Whether the window of `record`, whose task is done, is held open for a compaction its
+    /// harness's own extension said it asked for at the window's rest for the project's size
+    /// ([`Window::compaction_asked`]: Pi's, T-1475): a harness whose conversation the close
+    /// would cut under a summary that takes tens of seconds (a Pi member whose task is one
+    /// turn is at rest as its result is taken, and its summary 39 to 80 seconds long, which
+    /// the 10 seconds of [`STILL_BOUND_MS`] cut, the signal of the close aborting it). Held
+    /// while the word stands, at most [`COMPACTION_HOLD_MS`] from the word's time (from the
+    /// engine's first sight of it where that time is ahead of its clock), then the close goes
+    /// as it does without one. No word, or an old one, holds nothing. Only the ordinary close
+    /// of a done task's window comes here: a pause, a cancel, a failure, the human ending the
+    /// session and the app quitting close at once.
+    fn compaction_held(&self, record: &Record) -> bool {
+        let asked = self
+            .window_of(record)
+            .0
+            .and_then(|window| window.compaction_asked());
+        let now = self.now();
+        let mut part = record.window.borrow_mut();
+        let Some(asked) = asked else {
+            part.compaction_seen = None;
+            return false;
+        };
+        let seen = *part.compaction_seen.get_or_insert(now);
+        let from = if asked <= now { asked } else { seen };
+        now - from < COMPACTION_HOLD_MS
     }
 
     /// Closes a window whose exit is the engine's own (a switch, a Close, a

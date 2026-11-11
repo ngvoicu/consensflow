@@ -84,6 +84,13 @@ function frontierOf(ctx) {
  * `settled/<launchId>.json` is app-owned evidence with `{launchId, sessionId,
  * frontier: {id}, settledAt}`. It is written at `agent_settled` or when an idle
  * TUI restores a completed assistant leaf, and removed at new work.
+ * `settled/<launchId>.compacting.json` is the extension's word that it asked Pi to compact the
+ * conversation at a rest for the project's size: `{launchId, sessionId, startedAt}`. It is written
+ * before the ask (and before the settlement evidence the engine takes the result by) and taken back
+ * when that compaction ends, completed, failed or aborted, and at shutdown: only for the compaction
+ * this extension asked for, never for Pi's own or another extension's. The engine keeps the close of
+ * a done task's window open while it stands, up to its own bound from `startedAt` (T-1475: the
+ * close, ten seconds after the result, aborted the summary, which takes 39 to 80 seconds).
  * `settled/<launchId>.shown.json` says `{launchId, sessionId}`: the
  * conversation the window shows, written whenever this extension starts on
  * one (Pi starts it anew at every /new, /resume or /fork), so ConsensFlow
@@ -142,6 +149,7 @@ export function createDeliveryExtension(
   // request that hangs would leave ConsensFlow nothing to read but this.
   const workingFile = evidenceFile === null ? null : join(settled, `${launchId}.working.json`)
   const shownFile = evidenceFile === null ? null : join(settled, `${launchId}.shown.json`)
+  const compactingFile = evidenceFile === null ? null : join(settled, `${launchId}.compacting.json`)
 
   const uniquePath = async (directory, file) => {
     await mkdir(directory, { recursive: true })
@@ -195,6 +203,35 @@ export function createDeliveryExtension(
       await rename(`${shownFile}.tmp`, shownFile)
     } catch (cause) {
       logError(`could not record the conversation shown: ${cause?.message ?? String(cause)}`)
+    }
+  }
+
+  // The word that this extension's own compaction is at work: written before the ask.
+  const writeCompactionWord = async () => {
+    if (compactingFile === null) return
+    const sessionId = sessionIdOf(context)
+    if (sessionId === null) return
+    try {
+      await mkdir(settled, { recursive: true })
+      await writeFile(
+        `${compactingFile}.tmp`,
+        `${JSON.stringify({ launchId, sessionId, startedAt: Date.now() })}\n`,
+        'utf8',
+      )
+      await rename(`${compactingFile}.tmp`, compactingFile)
+    } catch (cause) {
+      logError(`could not record a compaction at work: ${cause?.message ?? String(cause)}`)
+    }
+  }
+
+  const takeCompactionWordBack = async () => {
+    if (compactingFile === null) return
+    try {
+      await unlink(compactingFile)
+    } catch (cause) {
+      if (cause?.code !== 'ENOENT') {
+        logError(`could not take back the word of a compaction: ${cause?.message ?? String(cause)}`)
+      }
     }
   }
 
@@ -412,15 +449,6 @@ export function createDeliveryExtension(
   pi.on('turn_start', newWork)
   pi.on('message_start', observeMessage)
   /**
-   * Asks Pi to compact the window's conversation at this rest, once its context is past
-   * the size the project chose (smaller-contexts, SCX-28 to SCX-30): Pi has no flag or
-   * variable for it, and its settings are the owner's. `ctx.compact()` aborts a turn at
-   * work, so it is asked only at a rest (idle, nothing pending, the turn not aborted by the
-   * human), and Pi's own compaction does the rest; a long turn grows meanwhile, to Pi's own
-   * point at most. A size at or above the model's window, or a context Pi cannot say yet,
-   * asks for none. A compaction that fails is said, and the next rest asks again.
-   */
-  /**
    * Whether the window compacts now: a compaction this extension asked for and whose callback
    * has not come, or one Pi said it began and has not said it ended. Pi tells no extension of
    * an end where it finds no entry it saved, so an idle Pi is taken for one that compacts
@@ -432,22 +460,40 @@ export function createDeliveryExtension(
     return piCompacting
   }
 
-  const compactAtRest = (event, ctx) => {
-    if (!Number.isInteger(compaction) || compaction <= 0 || compacting) return
-    if (event?.aborted === true) return
-    if (ctx?.isIdle?.() !== true || ctx.hasPendingMessages?.() !== false) return
+  /**
+   * Asks Pi to compact the window's conversation at this rest, once its context is past
+   * the size the project chose (smaller-contexts, SCX-28 to SCX-30): Pi has no flag or
+   * variable for it, and its settings are the owner's. `ctx.compact()` aborts a turn at
+   * work, so it is asked only at a rest (idle, nothing pending, the turn not aborted by the
+   * human), and Pi's own compaction does the rest; a long turn grows meanwhile, to Pi's own
+   * point at most. A size at or above the model's window, or a context Pi cannot say yet,
+   * asks for none. A compaction that fails is said, and the next rest asks again. The word
+   * (`compacting/<launch>.json`) is written before the ask and taken back as it ends, for the
+   * engine to keep the window open meanwhile (T-1475).
+   */
+  // Whether this rest asks for a compaction, and if so the compaction is marked as ours
+  // (`compacting`) at once, so no second ask comes before the first has begun.
+  const wantsCompaction = (event, ctx) => {
+    if (!Number.isInteger(compaction) || compaction <= 0 || compacting) return false
+    if (event?.aborted === true) return false
+    if (ctx?.isIdle?.() !== true || ctx.hasPendingMessages?.() !== false) return false
     let usage
     try {
       usage = ctx.getContextUsage?.()
     } catch {
-      return
+      return false
     }
     const tokens = usage?.tokens
-    if (!Number.isFinite(tokens) || tokens <= compaction) return
-    if (!(compaction < usage.contextWindow)) return
+    if (!Number.isFinite(tokens) || tokens <= compaction) return false
+    if (!(compaction < usage.contextWindow)) return false
     compacting = true
+    return true
+  }
+
+  const askCompaction = (ctx) => {
     const over = () => {
       compacting = false
+      void takeCompactionWordBack()
       void consume()
     }
     try {
@@ -461,6 +507,7 @@ export function createDeliveryExtension(
     } catch (cause) {
       logError(`compaction at ${compaction} tokens failed: ${cause?.message ?? String(cause)}`)
       compacting = false
+      void takeCompactionWordBack()
     }
   }
 
@@ -471,6 +518,9 @@ export function createDeliveryExtension(
   // Ended: a turn the compaction came in the middle of goes on as any turn does.
   const compactionEnded = async (_event, ctx) => {
     context = ctx ?? context
+    // The word is taken back as the compaction this extension asked for ends, completed,
+    // failed or aborted; one Pi began itself, or another extension did, never had one.
+    if (compacting) await takeCompactionWordBack()
     piCompacting = false
     await consume()
   }
@@ -478,11 +528,16 @@ export function createDeliveryExtension(
   pi.on('session_compact_failed', compactionEnded)
   pi.on('agent_settled', async (event, ctx) => {
     context = ctx ?? context
+    // The word comes before the settlement evidence the engine takes the result by: a window
+    // found free is never found free before the word that holds its close.
+    const asking = wantsCompaction(event, context)
+    if (asking) await writeCompactionWord()
     await writeSettlement()
-    compactAtRest(event, context)
+    if (asking) askCompaction(context)
     await consume()
   })
   pi.on('session_shutdown', async () => {
+    await takeCompactionWordBack()
     watcher?.close()
     watcher = undefined
     clearInterval(poller)

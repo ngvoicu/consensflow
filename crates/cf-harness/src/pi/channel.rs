@@ -114,6 +114,26 @@ impl Channel {
         }
     }
 
+    /// When the extension said it asked Pi to compact the conversation `session` for the
+    /// project's size, in milliseconds since the epoch, and has not taken its word back
+    /// (`compacting/<launch>.json` beside the settlement evidence, written before the ask and
+    /// removed when the compaction ends, completed, failed or aborted). None where there is
+    /// no such file, where it is no JSON, where it is another launch's or another
+    /// conversation's, or where the system will not read it: a word that cannot be read holds
+    /// nothing, and the close goes as it always did.
+    pub(super) fn compaction_asked(&self, session: &str) -> Option<i64> {
+        let file = path::join(&[
+            &self.settled,
+            &format!("{}.compacting.json", self.launch_id),
+        ]);
+        let bytes = read_file(Path::new(&file)).ok()?;
+        let word = from_slice_lossy(&bytes).ok()?;
+        let ours = word.get("launchId")?.as_str()? == self.launch_id
+            && word.get("sessionId")?.as_str()? == session;
+        let at = word.get("startedAt")?.as_i64()?;
+        ours.then_some(at)
+    }
+
     /// The conversation the extension says the window shows (it writes it
     /// whenever it starts on one), or none before it has said
     /// (`shownSession`). A file that is not there, is no JSON, or is another

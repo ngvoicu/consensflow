@@ -645,6 +645,17 @@ pub trait Window {
     fn compacting(&self, _screen: &[String]) -> bool {
         false
     }
+    /// When, in milliseconds since the epoch, the window's own extension said it asked its
+    /// harness to compact the conversation, and has not said the compaction over: the one
+    /// ConsensFlow's extension asked for at a rest for the project's size (Pi's
+    /// `compacting/<launch>.json`). None where it says none, where its word is another
+    /// conversation's or another launch's, and from a harness that says nothing of the kind
+    /// (the default). The engine keeps the close of a done task's window waiting for it,
+    /// up to a bound of its own ([`Dispatcher::still_drawing`]); the word is told stale by
+    /// its age there.
+    fn compaction_asked(&self) -> Option<i64> {
+        None
+    }
     /// What the window's harness says of a dialog of its own being open, by the look
     /// `observed`: the window's own question tool, where it waits on one, is no such dialog
     /// (the default: a window that waits says so of its own question), and a harness that says

@@ -162,6 +162,11 @@ impl Window for FakeWindow {
         holds(screen, COMPACTING)
     }
 
+    fn compaction_asked(&self) -> Option<i64> {
+        self.fake
+            .of_launch(&self.launch, |agent| agent.compaction_asked)
+    }
+
     /// Its harness tells a dialog from another read of its screen as Claude Code's window does,
     /// which is the real window's own rule (the countdown in Claude Code's warning line, the LSP
     /// offer from its title down; a time in a command, a hook's reason or a question is the

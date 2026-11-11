@@ -295,6 +295,10 @@ impl Window for PiWindow {
         compacting::drawn(screen, &compacting::PI)
     }
 
+    fn compaction_asked(&self) -> Option<i64> {
+        self.channel.compaction_asked(&self.session.borrow())
+    }
+
     fn follow(&self, session: &str) {
         session.clone_into(&mut self.session.borrow_mut());
         // The turn the record had open was a conversation's the window left.
