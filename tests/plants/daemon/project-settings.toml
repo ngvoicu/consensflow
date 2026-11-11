@@ -400,7 +400,7 @@ replace = '''      </fieldset>
 
 [[plant]]
 name = "project settings: New project has its sections before its staff"
-meant = "New project has Staff, the rules for the staff, compaction, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has"
+meant = "New project has Staff, the rules for the staff, compaction, the advisor tool, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has"
 runs = ["page-new-project"]
 
 [[plant.edit]]
@@ -442,7 +442,7 @@ replace = '''        await page.daemon('wakeup.set', { project: page.board().pro
 
 [[plant]]
 name = "project settings: New project's copy of the sections is not Project settings'"
-meant = "New project has Staff, the rules for the staff, compaction, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has"
+meant = "New project has Staff, the rules for the staff, compaction, the advisor tool, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has"
 runs = ["page-new-project"]
 
 [[plant.edit]]
@@ -492,7 +492,7 @@ replace = ""
 
 [[plant]]
 name = "project settings: New project sends the sections as they opened, whatever they say"
-meant = "New project has Staff, the rules for the staff, compaction, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has"
+meant = "New project has Staff, the rules for the staff, compaction, the advisor tool, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has"
 runs = ["page-new-project"]
 
 [[plant.edit]]

@@ -159,7 +159,7 @@ replace = '''
 
 [[plant]]
 name = "new project sections: the data-live parts are shown in New project"
-meant = "New project has Staff, the rules for the staff, compaction, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has"
+meant = "New project has Staff, the rules for the staff, compaction, the advisor tool, Human approval, Wake-up calls, Specs and Computer use after the folder and the chief, with the defaults a project has"
 runs = ["nps-page"]
 
 [[plant.edit]]
