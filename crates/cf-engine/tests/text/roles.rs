@@ -374,6 +374,40 @@ fn shows_the_chief_a_command_for_every_role_of_the_table_with_a_tier_only_where_
     }
 }
 
+/// What the chief is told of the four roles of spec new-roles and of a member's images (FD-06,
+/// FD-07; T-1480): when work goes to each, in the section on roles, and the researcher in What
+/// you do.
+#[test]
+fn tells_the_chief_when_work_goes_to_each_of_the_four_roles_and_how_a_members_images_are_drawn() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "What you do"),
+        "the chief's What you do",
+        &["reading of more than a few lookups to the researcher, so that only its answer enters your conversation."],
+    );
+    assert_says(
+        section(&text, "Choose the role, not the member"),
+        "the chief's section on roles",
+        &[
+            "Name the role a task needs, and its tier where its command above takes `--tier`.",
+            "Only a role nobody holds is refused, by its name: only the human adds members, so ask them for one.",
+            // The architect (A3, A5): a design first, and the briefs point to its files.
+            "Work big enough to need a design (a new module, a new API, a change of structure) goes to the architect first; its files stay, and the workers' briefs point to them.",
+            "It also reviews a change against its design.",
+            // The frontend designer: the purpose, never the look (rule 0); never beside a worker in the same files.
+            "How a screen looks, feels and moves is the frontend designer's call: its brief gives the purpose (who uses the screen, what they must be able to do, what exists already), never the look, and a worker's question of look goes to it through you.",
+            "Never give it and a worker the same files at once: order the two with `--needs`.",
+            "It can also go over a screen a worker built.",
+            // The integrator.
+            "Where the staff has an integrator, it lands accepted work; a conflict that needs a choice about what the product does comes back to you as a question with both sides.",
+            "It makes no tag, release or deploy unless its brief says so.",
+            // Rule 5, the image flow.
+            "A member that needs images asks you with a drawing order for each: add a `--design` task per order and, when all are done, answer in words, then each file's path and its line from ConsensFlow.",
+            "With no image designer, the member makes them itself (SVG, CSS or its harness's image tool), or you ask the human for them, with the orders.",
+        ],
+    );
+}
+
 #[test]
 fn tells_the_chief_one_member_runs_as_many_tasks_at_once_as_it_is_given() {
     // Item 2 says to give parallel work together however few members a role has; the staff's

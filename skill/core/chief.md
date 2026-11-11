@@ -206,8 +206,8 @@ revision goes back to its window with `--after`.
 A member that needs images asks you with a drawing order for each: add a
 `--design` task per order and, when all are done, answer in words, then each
 file's path and its line from ConsensFlow. With no image designer, the member
-makes them itself (SVG, CSS or its harness's image tool), or you give the
-human the orders.
+makes them itself (SVG, CSS or its harness's image tool), or you ask the
+human for them, with the orders.
 
 The tiers:
 {{tiers}}

@@ -255,7 +255,7 @@ and the shell-dependent paragraphs by shell below. By hand, in those words alone
   open from now on are given them (none); one already open keeps its rules".
 The role-change budgets moved with the shorter text: read whole to 151 rows with specs on
 (174 without), and to 15 and 38 with the most rules for the staff, 41 bytes and 57 lines to
-spare for the 15.
+spare for the 15 (T-1480 moved them again: the last paragraph).
 
 The paragraphs of a text that depend on the shell of the window's commands (how a text is passed
 to `cf`, and how a removal whose path a variable makes is written: the chief's input, a member's
@@ -284,4 +284,4 @@ says (the commands of a note, an answer and a review's brief) and what the text 
 opening's list of who gets what, What you never do's first two bullets, `--after`'s when and when
 not, the session files) is said once. A window left for hours is a new task too. The role-change
 budgets moved: read whole to 143 rows with specs on (168 without), and to 7 and 32 with the most
-rules for the staff, 26 bytes and 53 lines to spare for the 7.
+rules for the staff, 12 bytes and 53 lines to spare for the 7.
