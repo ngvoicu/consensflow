@@ -12,7 +12,11 @@
 //! the pane host's count of the human's keys was up; alpha.3 reads the box on the screen
 //! over the count (`input_box::read_unsent`). The owner's `tui` is fullscreen, but the
 //! app's own settings for a window say `default` (`claude::install::settings`): the
-//! window here is as the app opens it.
+//! window here is as the app opens it for a project that ticked "Prompt suggestion". The app
+//! leaves the suggestion off in every window of a project until it is ticked (T-1444: the
+//! launch's own file says `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` is `false`), and this case
+//! asks the settings file for no switch, so Claude Code draws its suggestion, which is what it
+//! waits for.
 //!
 //! A turn brings the window to rest, and the run waits for Claude Code's prompt
 //! suggestion in its box (it makes none while the terminal is blurred, and backs off

@@ -5,8 +5,8 @@
 use cf_base::js;
 use cf_ledger::model::{parse_gate, parse_meeting};
 use cf_ledger::{
-    parse_advisor_tool, parse_compaction, parse_description, parse_name, parse_staff_rules,
-    NewMember, NewProject,
+    parse_advisor_tool, parse_compaction, parse_description, parse_name, parse_prompt_suggestion,
+    parse_staff_rules, NewMember, NewProject,
 };
 use serde_json::{json, Map, Value};
 
@@ -77,6 +77,7 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         "rules",
         "compaction",
         "advisorTool",
+        "promptSuggestion",
     ] {
         if let Some(said) = body.get(key) {
             request.insert(key.to_owned(), said.clone());
@@ -241,6 +242,21 @@ pub(super) async fn advisor_tool(page: &Page, body: Body<'_>) -> Result<Fields, 
         .ledger
         .borrow_mut()
         .set_advisor_tool(body.whole("project")?, on)?;
+    one("project", project)
+}
+
+/// `project.prompt_suggestion`: whether the human leaves Claude Code's prompt suggestion on in
+/// the project's windows: a flag, checked before the project is looked for. Off is every
+/// project's until it is ticked. Only the page chooses it: no route of the agents' API does, so
+/// no `cf` command, the chief's or a member's, changes it. Each Claude Code window of the
+/// project, the chief's as each member's, is given the switch when it next starts (the Claude
+/// adapter's launch, fresh or resumed); an open window keeps what it began with.
+pub(super) async fn prompt_suggestion(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let on = parse_prompt_suggestion(body.get("promptSuggestion"))?;
+    let project = page
+        .ledger
+        .borrow_mut()
+        .set_prompt_suggestion(body.whole("project")?, on)?;
     one("project", project)
 }
 
@@ -445,6 +461,7 @@ mod tests {
                     staff_rules: None,
                     compaction: None,
                     advisor_tool: false,
+                    prompt_suggestion: false,
                 },
                 "{what}"
             );

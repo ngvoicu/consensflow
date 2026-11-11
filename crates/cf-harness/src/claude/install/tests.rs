@@ -32,6 +32,7 @@ fn every_role_enters_every_harness_with_its_whole_text_already_loaded() {
             specs: None,
             compaction: None,
             advisor_off: false,
+            suggestion_off: false,
             first_message_ms: crate::testing::FIRST_MESSAGE_MS,
             starts_given_up: 0,
         };
@@ -113,6 +114,7 @@ fn the_roles_skill_file_on_disk_is_the_one_whose_front_matter_hides_it_from_the_
         starts_given_up: 0,
         compaction: None,
         advisor_off: false,
+        suggestion_off: false,
     };
     let args = role(&env, &launch).unwrap();
     let folder = &args[args.iter().position(|arg| arg == "--add-dir").unwrap() + 1];

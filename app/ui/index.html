@@ -366,6 +366,16 @@
       <p class="staff-hint members-advisor-tool-hint" role="alert" hidden></p>
       <div class="dialog-actions" data-live><button class="primary-button" type="button" name="members-advisor-tool-save">Save advisor tool</button></div>
     </fieldset>
+    <!-- Prompt suggestion (core/prompt-suggestion.js): whether the project's Claude Code windows, the
+         chief's too, make Claude Code's grey guess at the next prompt; off until it is ticked;
+         chosen here only. -->
+    <fieldset class="project-section prompt-suggestion">
+      <legend>Prompt suggestion</legend>
+      <p class="dialog-help">After each turn, Claude Code can guess your next prompt and show it in grey in the input box. It makes that guess with one more model call, which reads the whole conversation again and costs tokens. Off, no Claude Code window of this project, the chief's or a member's, makes it from its next start; on, your own Claude Code settings decide. Only Claude Code has it, so Codex, Pi, Devin and Muse Code are not affected. A window already open keeps what it began with.</p>
+      <label class="check"><input type="checkbox" name="prompt-suggestion">Claude Code windows guess the next prompt</label>
+      <p class="staff-hint prompt-suggestion-hint" role="alert" hidden></p>
+      <div class="dialog-actions" data-live><button class="primary-button" type="button" name="prompt-suggestion-save">Save prompt suggestion</button></div>
+    </fieldset>
     <fieldset class="project-section">
       <legend>Human approval</legend>
       <label class="check"><input type="checkbox" name="gate">Human approval required: every message between the chief and its staff waits until you pass it on</label>
