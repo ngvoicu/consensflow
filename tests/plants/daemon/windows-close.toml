@@ -2983,8 +2983,8 @@ runs = ["quote-less-codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/log.rs"
-find = '''    let Some(home) = config_root(env) else {'''
-replace = '''    let Some(home) = config_root(env).filter(|_| false) else {'''
+find = '''    if let Some(home) = config_root(env) {'''
+replace = '''    if let Some(home) = config_root(env).filter(|_| false) {'''
 
 [[plant]]
 name = "windows close: quote less: the log has a socket folder's path and not the system's cause"
