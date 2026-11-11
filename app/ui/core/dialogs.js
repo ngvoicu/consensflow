@@ -1054,7 +1054,8 @@ export class NewProjectDialog {
     if (wakeUp !== null) body.wakeUp = wakeUp
     if (specs !== null) body.specs = specs
     if (rules !== null) body.rules = rules
-    if (compaction !== null) body.compaction = compaction
+    // Always said, null for the harness's own point: a request that says nothing starts on the default.
+    body.compaction = compaction
     if (advisorTool) body.advisorTool = true
     if (promptSuggestion) body.promptSuggestion = true
     this.#say('')

@@ -50,21 +50,28 @@ fn hold(context: &Context, project: i64, size: u32) {
     });
 }
 
-/// A project on `harness`, its chief and one member of each role in [`MEMBERS`].
-fn staffed_on(context: &Context, harness: &str) -> i64 {
+/// The request for a project on `harness`, its chief and one member of each role in
+/// [`MEMBERS`], that says nothing of the compaction.
+fn request_on(harness: &str) -> Value {
     let staff: Vec<Value> = MEMBERS
         .iter()
         .map(|(role, agent)| {
             json!({ "agent": agent, "harness": harness, "roles": [role], "tier": "standard" })
         })
         .collect();
+    json!({
+        "directory": "/work/app",
+        "name": "app",
+        "chief": { "harness": harness, "model": "apollo" },
+        "staff": staff,
+    })
+}
+
+/// A project on `harness`, its chief and one member of each role in [`MEMBERS`], on each
+/// harness's own point as the engine's kit opens every project (T-1400).
+fn staffed_on(context: &Context, harness: &str) -> i64 {
     context
-        .open_project(json!({
-            "directory": "/work/app",
-            "name": "app",
-            "chief": { "harness": harness, "model": "apollo" },
-            "staff": staff,
-        }))
+        .open_project(request_on(harness))
         .unwrap()
         .expect("the project")
         .id
@@ -150,6 +157,67 @@ fn a_project_that_chose_no_size_launches_every_member_as_it_always_did() {
     choose(&context, project, None);
     relaunch(&context, project);
     assert_eq!(chief_launches(&context)[1].get("compaction"), None);
+    context.close();
+}
+
+/// A new project whose request says nothing of the compaction starts on a size of 300,000
+/// tokens, which every member's launch is given and the chief's never is; one that says `null`
+/// launches every window as it always did (T-1400). The request is read as the API's is.
+#[test]
+fn a_new_project_that_said_nothing_of_its_compaction_launches_every_member_with_300000_and_never_the_chief(
+) {
+    for harness in HARNESSES {
+        let context = Context::made(Made {
+            harnesses: HARNESSES.to_vec(),
+            ..Made::default()
+        });
+        let project = context
+            .open_project_as_asked(request_on(harness))
+            .unwrap()
+            .expect("the project")
+            .id;
+        assert_eq!(context.project(project).compaction, Some(300_000));
+        assert_eq!(
+            chief_launches(&context)[0].get("compaction"),
+            None,
+            "{harness}: the chief"
+        );
+        for (role, _) in MEMBERS {
+            context.pool_task(project, role, &format!("A task for the {role}"));
+        }
+        context.pass().unwrap();
+        context.pass().unwrap();
+        for (role, _) in MEMBERS {
+            assert_eq!(
+                member_launch(&context, role)["compaction"],
+                json!(300_000),
+                "{harness}: {role}"
+            );
+        }
+        context.close();
+    }
+    // The harness's own point, said: no size, and the launches as they always were.
+    let context = Context::new();
+    let mut request = request_on("claude-code");
+    request["compaction"] = Value::Null;
+    let project = context
+        .open_project_as_asked(request)
+        .unwrap()
+        .expect("the project")
+        .id;
+    assert_eq!(context.project(project).compaction, None);
+    for (role, _) in MEMBERS {
+        context.pool_task(project, role, &format!("A task for the {role}"));
+    }
+    context.pass().unwrap();
+    context.pass().unwrap();
+    for (role, _) in MEMBERS {
+        assert_eq!(
+            member_launch(&context, role).get("compaction"),
+            None,
+            "{role}"
+        );
+    }
     context.close();
 }
 
