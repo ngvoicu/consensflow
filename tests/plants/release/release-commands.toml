@@ -144,7 +144,7 @@ meant = "an_older_release_run_of_the_same_commit_is_not_taken_for_the_new_one"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = "if newest.is_some() && newest != watched.before {"
 replace = "if newest.is_some() {"
 
