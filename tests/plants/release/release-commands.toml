@@ -1030,7 +1030,7 @@ meant = "a_main_that_moved_after_the_dispatch_does_not_stop_the_trial_of_the_com
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/trial.rs"
 find = '''
         let newest_before = self.newest_run("release.yml", None, Some("workflow_dispatch"))?;'''
 replace = "        let newest_before = None;"
