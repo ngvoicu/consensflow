@@ -212,7 +212,7 @@ meant = "ci_that_ended_red_on_the_version_commit_stops_it_before_the_tag"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
                 let rerun = match run {
                     Some(id) => format!('''
