@@ -261,6 +261,10 @@ pub struct FakeAdapter {
     /// (`adapter.one_account`, which no trace of Node's has): not, as an
     /// adapter that says no more.
     pub one_account: Cell<bool>,
+    /// Whether the machine has one login for its harness, whichever its windows do with a
+    /// login changed under them (`adapter.one_login`, T-1357): not, as an adapter that says
+    /// no more. A harness with `one_account` has one as well.
+    pub one_login: Cell<bool>,
     /// Whether its windows are asked whether they are ready before they have
     /// drawn their screens too, as Devin's are: not, as an adapter that says no more.
     pub ready_while_drawing: Cell<bool>,
@@ -434,6 +438,7 @@ impl FakeAdapter {
             silent_paste: Cell::new(None),
             keeps_first_instructions: Cell::new(false),
             one_account: Cell::new(false),
+            one_login: Cell::new(false),
             ready_while_drawing: Cell::new(false),
             prepare_holds: Holds::default(),
             observe_holds: Holds::default(),
@@ -1465,6 +1470,12 @@ impl Adapter for Asked {
     /// traces.
     fn one_account(&self) -> bool {
         self.fake.one_account.get()
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the
+    /// traces.
+    fn one_login(&self) -> bool {
+        self.fake.one_login.get() || self.fake.one_account.get()
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the

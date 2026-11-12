@@ -27,7 +27,7 @@ use cf_e2e::rig::{Project, Rig};
 use serde_json::json;
 
 use crate::devin_pause::write_roster;
-use crate::{config, secs, Outcome, FAKE_DEVIN};
+use crate::{devin_config, secs, Outcome};
 
 /// What the stand-in Devin says last on its screen, before its program ends.
 const LAST_WORDS: &str = "fatal: the agent runtime went away";
@@ -46,7 +46,7 @@ fn pause_note(project: &Project) -> cf_e2e::Result<Option<String>> {
 #[test]
 fn a_devin_window_that_ends_in_the_middle_of_its_task_pauses_it_with_how_it_ended_and_what_it_showed_last(
 ) -> Outcome {
-    let rig = Rig::start(config().devin(FAKE_DEVIN))?;
+    let rig = Rig::start(devin_config())?;
     write_roster(&rig)?;
     let project = Project::open(&rig, "chief", json!({}))?;
     project.add_member("devin-worker")?;
@@ -86,4 +86,13 @@ fn a_devin_window_that_ends_in_the_middle_of_its_task_pauses_it_with_how_it_ende
     );
     rig.close()?;
     Ok(())
+}
+
+// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423): the case as
+// it is, the stand-in's shape chosen here and not by the environment.
+
+#[test]
+fn a_devin_window_that_ends_in_the_middle_of_its_task_pauses_it_with_how_it_ended_and_what_it_showed_last_on_devin_3000_12(
+) -> Outcome {
+    crate::on_the_installed_devin(a_devin_window_that_ends_in_the_middle_of_its_task_pauses_it_with_how_it_ended_and_what_it_showed_last)
 }

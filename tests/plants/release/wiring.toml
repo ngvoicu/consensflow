@@ -107,8 +107,8 @@ find = """
       - run: npm run test:daemons
         env:
           CF_TEST_SHARD: ${{ matrix.shard }}
-          CF_TEST_SHARD_LIMIT_MINUTES: 30
-        timeout-minutes: 30
+          CF_TEST_SHARD_LIMIT_MINUTES: 40
+        timeout-minutes: 40
 """
 replace = ""
 
@@ -275,7 +275,7 @@ runs = ["xtask-suites"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "          CF_TEST_SHARD_LIMIT_MINUTES: 30\n"
+find = "          CF_TEST_SHARD_LIMIT_MINUTES: 40\n"
 replace = "          CF_TEST_SHARD_LIMIT_MINUTES: 45\n"
 
 # CI runs the offline cases of every live suite on both platforms, and the platform-free checks

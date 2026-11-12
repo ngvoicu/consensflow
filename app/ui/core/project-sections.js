@@ -126,7 +126,9 @@ export class ProjectSections {
    * What a new project starts with: whether the human approves each message,
    * and the rules, the compaction, the advisor tool, the prompt suggestion, the calls and the specs as the human set
    * them, each none while its section is as it opened (the project is then as
-   * one that never said it).
+   * one that never said it), but the compaction: a size, or none for each
+   * harness's own point, always said, since a request that says nothing of it
+   * starts on the default size.
    */
   values() {
     return {

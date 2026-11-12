@@ -888,7 +888,7 @@ replace = '''    let mut given = Vec::new();'''
 # The hooks of a launch: the owner's go with it (`-c hooks=` takes their place for the run).
 [[plant]]
 name = "muse: a launch drops the owner's hooks"
-meant = "the_owner_s_hooks_run_with_consensflow_s_after_them_and_their_file_is_never_written"
+meant = "the_owner_s_hooks_are_kept_for_the_run_and_their_settings_are_never_written"
 runs = ["muse-lib"]
 
 [[plant.edit]]
@@ -1954,10 +1954,12 @@ runs = ["muse-moved"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-            return Some(if moved_hold(until) {
+        if moved_hold(until) {
+            Held::Moved
 '''
 replace = '''
-            return Some(if false && moved_hold(until) {
+        if false && moved_hold(until) {
+            Held::Moved
 '''
 
 
@@ -2131,7 +2133,7 @@ runs = ["muse-page-held"]
 [[plant.edit]]
 file = "app/ui/core/board.js"
 find = '''
-          ? 'unavailable until you say it works again'
+          ? 'unavailable until you say its login or billing works again: Try its member again now'
 '''
 replace = '''
           ? 'out of quota until you say it works again'
@@ -2163,10 +2165,10 @@ runs = ["muse-page-why"]
 [[plant.edit]]
 file = "app/ui/core/board.js"
 find = '''
-      activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
+    activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
 '''
 replace = '''
-      null
+    null
 '''
 
 
@@ -2636,11 +2638,11 @@ runs = ["muse-devin-launch"]
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
 find = '''
-            let mut observed = observed_from(Arc::clone(&reading), wire.quota);
+            let mut observed = observed_from(Arc::clone(&reading), wire.quota.clone());
 '''
 replace = '''
             let mut observed = observed_from(Arc::clone(&reading), None);
-            observed.quota = wire.quota;
+            observed.quota = wire.quota.clone();
 '''
 
 

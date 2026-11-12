@@ -298,6 +298,18 @@ impl Context {
         })
     }
 
+    /// A member marked out for its busy model, as a refusal of one does (T-1112) but with no
+    /// window refused: out until `until`, and said to be busy.
+    pub fn mark_out_busy(&self, member: i64, until: &str) {
+        let marked = self
+            .ledger
+            .borrow_mut()
+            .mark_out(member, until, "model busy")
+            .expect("the member marked out");
+        self.dispatcher
+            .marked_busy(member, marked.out_until.as_deref().unwrap_or_default());
+    }
+
     /// The human says a member out of quota is back (`backFromQuota`).
     pub fn back_from_quota(
         &self,

@@ -20,6 +20,13 @@
 //! turns, as the rig's do ([`cf_e2e::serial`]), and run wherever the rig's do; a
 //! case whose bug Windows cannot have is Unix's.
 //!
+//! A case of a Devin window runs on the stand-in's default wire log (a 3000.11.92 log's shape:
+//! nothing stamped, nothing said back) and, in a case of the same name ending
+//! `_on_devin_3000_12`, on the log the installed Devin, 3000.12.43, writes (`devin_config`,
+//! `on_the_installed_devin`): each case names its shape itself, and none takes it from the
+//! environment, which CI sets nowhere. A case whose danger the installed Devin cannot bring
+//! about, or whose scene it cannot build, has no such case and says so in its doc.
+//!
 //!     cargo test -p cf-e2e --test regressions        (`npm run test:regressions`)
 
 // The cases are in `tests/regressions/`: cargo looks for the modules of a test's
@@ -122,6 +129,8 @@ mod a_result_that_starts_with_an_image_path_was_pasted_three_times;
 mod a_resumed_codex_window_lost_its_role_at_its_next_compaction;
 #[path = "regressions/a_resumed_devin_worker_skipped_every_call.rs"]
 mod a_resumed_devin_worker_skipped_every_call;
+#[path = "regressions/a_silent_devin_window_the_human_typed_into_kept_its_delivery_queued.rs"]
+mod a_silent_devin_window_the_human_typed_into_kept_its_delivery_queued;
 #[path = "regressions/a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task.rs"]
 mod a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task;
 #[path = "regressions/a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed.rs"]
@@ -240,6 +249,34 @@ const FAKE_CODEX: &str = env!("CARGO_BIN_EXE_fake-codex");
 /// says nothing of a case that passed.
 fn config() -> Config {
     Config::new(FAKE_AGENT).judged_by_outcome()
+}
+
+std::thread_local! {
+    /// Whether the case on this thread runs on the wire log Devin 3000.12.43 writes.
+    static INSTALLED_DEVIN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// [`config`] with the stand-in Devin for the windows of Devin's agents, writing the wire
+/// log the case chose: the stand-in's default (a 3000.11.92 log's shape: nothing stamped,
+/// nothing said back) or, in a case run through [`on_the_installed_devin`], the installed
+/// Devin's (3000.12.43). A case names its shape itself and never takes it from the
+/// environment (`FAKE_DEVIN_STAMPS`), which CI sets nowhere.
+fn devin_config() -> Config {
+    let shape = if INSTALLED_DEVIN.get() { "3000.12" } else { "" };
+    config().devin(FAKE_DEVIN).var("FAKE_DEVIN_STAMPS", shape)
+}
+
+/// Whether the case on this thread runs on the wire log Devin 3000.12.43 writes
+/// ([`on_the_installed_devin`]).
+fn installed_devin() -> bool {
+    INSTALLED_DEVIN.get()
+}
+
+/// Runs `case` with the stand-in Devin on the wire log Devin 3000.12.43 writes: the
+/// installed Devin's, as T-1417 and T-1423 recorded it.
+fn on_the_installed_devin(case: fn() -> Outcome) -> Outcome {
+    INSTALLED_DEVIN.set(true);
+    case()
 }
 
 /// [`config`], and the stand-in Codex for the windows of Codex's agents.

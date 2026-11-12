@@ -196,6 +196,33 @@ fn config() -> Config {
     Config::new(FAKE_AGENT).judged_by_outcome()
 }
 
+std::thread_local! {
+    /// Whether the case on this thread runs on the wire log Devin 3000.12.43 writes.
+    static INSTALLED_DEVIN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// [`config`] with the stand-in Devin at `devin` for the windows of Devin's agents, writing the
+/// wire log the case chose: the stand-in's default (a 3000.11.92 log's shape: nothing stamped,
+/// nothing said back) or, in a case run through [`on_the_installed_devin`], the installed
+/// Devin's (3000.12.43). A case names its shape itself and never takes it from the
+/// environment (`FAKE_DEVIN_STAMPS`), which CI sets nowhere.
+fn devin_config(devin: &str) -> Config {
+    let shape = if INSTALLED_DEVIN.get() { "3000.12" } else { "" };
+    config().devin(devin).var("FAKE_DEVIN_STAMPS", shape)
+}
+
+/// Whether the case on this thread runs on the wire log Devin 3000.12.43 writes
+/// ([`on_the_installed_devin`]).
+fn installed_devin() -> bool {
+    INSTALLED_DEVIN.get()
+}
+
+/// Runs `case` with the stand-in Devin on the wire log Devin 3000.12.43 writes.
+fn on_the_installed_devin(case: fn() -> Outcome) -> Outcome {
+    INSTALLED_DEVIN.set(true);
+    case()
+}
+
 /// `n` seconds.
 fn secs(n: u64) -> Duration {
     Duration::from_secs(n)

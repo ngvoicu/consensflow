@@ -751,7 +751,8 @@ async function open(page, given = model()) {
         if (data.openMakesBoard) {
           Object.assign(project, { state: 'open', gate: body.gate === true })
           if (body.rules !== undefined) project.staffRules = body.rules
-          if (body.compaction !== undefined) project.compaction = body.compaction
+          // The daemon's board says a size only where there is one: null is the harness's own point.
+          if (typeof body.compaction === 'number') project.compaction = body.compaction
           if (body.advisorTool === true) project.advisorTool = true
           if (body.promptSuggestion === true) project.promptSuggestion = true
           data.projects.push(project)
@@ -1514,7 +1515,9 @@ test("shows a member out of quota, and a reviewer's review tasks as cards on its
   await open(page, data)
   const diana = page.locator('tr[data-handle="diana"]')
   await expect(diana.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
-  await expect(diana.locator('.row-status')).toHaveText(/^Out of quota until (\S+ )?\d\d:\d\d$/)
+  await expect(diana.locator('.row-status')).toHaveText(
+    /^Out of quota until (\S+ )?\d\d:\d\d; renewed early\? Try again now$/,
+  )
   const hera = page.locator('tr[data-handle="hera"]')
   await expect(hera.locator('td[data-state="working"] button.card[data-task="9"]')).toHaveCount(1)
   await expect(hera.locator('td[data-state="done"] button.card[data-task="10"]')).toHaveCount(1)
@@ -1561,7 +1564,7 @@ test('says an account that refused for its billing or login is unavailable, with
   const diana = page.locator('tr[data-handle="diana"]')
   await expect(diana.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
   await expect(diana.locator('.row-status')).toHaveText(
-    'Unavailable: its account was refused for billing or login. Press Try again now once it works',
+    'Unavailable: its account was refused for billing or login. Logged in again, or paid? Press Try again now',
   )
   await diana.getByRole('button', { name: 'Try @diana again now, once its account works' }).click()
   expect(await calls(page, 'member.back')).toEqual([{ project: 1, participant: 'diana' }])
@@ -1622,11 +1625,15 @@ test('names the day of a reset that is not today, and tries a member or the chie
     return `${at.toLocaleDateString([], { weekday: 'short' })} ${time}`
   }, reset)
   const diana = page.locator('tr[data-handle="diana"]')
-  await expect(diana.locator('.row-status')).toHaveText(`Out of quota until ${day}`)
+  await expect(diana.locator('.row-status')).toHaveText(
+    `Out of quota until ${day}; renewed early? Try again now`,
+  )
   await diana.getByRole('button', { name: 'Try @diana again now, before its quota resets' }).click()
   expect(await calls(page, 'member.back')).toEqual([{ project: 1, participant: 'diana' }])
   const card = page.locator('#stage .terminal-card[data-handle="chief"]')
-  await expect(card.locator('.terminal-status')).toHaveText(`Out of quota until ${day}`)
+  await expect(card.locator('.terminal-status')).toHaveText(
+    `Out of quota until ${day}; renewed early? Try again now`,
+  )
   await card
     .getByRole('button', { name: 'Try Chief of Staff again now, before its quota resets' })
     .click()
@@ -1638,13 +1645,122 @@ test('names the day of a reset that is not today, and tries a member or the chie
   await expect(page.locator('tr[data-handle="zeus"] .try-again')).toHaveCount(0)
 })
 
+test('the staff in Project settings says a member is out of quota and tries it again now', async ({
+  page,
+}) => {
+  // The human renewed the quota by hand (T-1357): the staff list says who is out and has the
+  // button, as the board's row does, and a member not out has neither.
+  const data = model()
+  const reset = new Date(Date.now() + 90 * 60_000).toISOString()
+  const lanes = data.boards[1].lanes
+  lanes.find((lane) => lane.participant.handle === 'diana').participant.outUntil = reset
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const diana = dialog.locator('#staff-members tr[data-handle="diana"]')
+  await expect(diana.locator('.member-out')).toHaveText(
+    /^Out of quota until (\S+ )?\d\d:\d\d; renewed early\? Try again now$/,
+  )
+  await expect(dialog.locator('#staff-members tr[data-handle="zeus"] .member-out')).toHaveCount(0)
+  await expect(dialog.locator('#staff-members tr[data-handle="zeus"] .try-again')).toHaveCount(0)
+  await diana
+    .getByRole('button', { name: 'Try @diana again now, before its quota resets' })
+    .first()
+    .click()
+  expect(await calls(page, 'member.back')).toEqual([{ project: 1, participant: 'diana' }])
+})
+
+/**
+ * A board where zeus, the chief and one task of zeus's are held for `kind`, and the page
+ * showing it with Project settings open. Three holds look alike by their time and are three
+ * things (T-1357): a quota, which the human may have renewed by hand; an account whose login
+ * or billing was refused, which they may have fixed; and a model busy for a moment, which
+ * ConsensFlow tries again after a back-off of its own and no press shortens.
+ */
+async function heldFor(page, kind) {
+  const data = model()
+  const soon = new Date(Date.now() + 90 * 60_000).toISOString()
+  const until = kind === 'account' ? '9999-12-31T23:59:59.998Z' : soon
+  const lanes = data.boards[1].lanes
+  for (const handle of ['zeus', 'chief']) {
+    const lane = lanes.find((lane) => lane.participant.handle === handle)
+    lane.participant.outUntil = until
+    if (kind === 'busy') lane.busy = soon
+  }
+  const zeus = lanes.find((lane) => lane.participant.handle === 'zeus')
+  zeus.tasks.push(task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, { heldUntil: until }))
+  await open(page, data)
+  return {
+    row: page.locator('tr[data-handle="zeus"]'),
+    chief: page.locator('#stage .terminal-card[data-handle="chief"]'),
+    card: page.locator('button.card[data-task="9"] .card-route'),
+    async staff() {
+      await page.getByRole('button', { name: 'Project settings' }).click()
+      return page
+        .getByRole('dialog', { name: 'Project settings' })
+        .locator('#staff-members tr[data-handle="zeus"]')
+    },
+  }
+}
+
+test('a member out of quota says so, to renew early, on its row, the chief’s card, its held task and the staff list, with the button', async ({
+  page,
+}) => {
+  const shown = await heldFor(page, 'quota')
+  const said = /^Out of quota until (\S+ )?\d\d:\d\d; renewed early\? Try again now$/
+  await expect(shown.row.locator('.row-status')).toHaveText(said)
+  await expect(shown.row.locator('.try-again')).toHaveCount(1)
+  await expect(shown.chief.locator('.terminal-status')).toHaveText(said)
+  await expect(shown.chief.locator('.try-again')).toHaveCount(1)
+  await expect(shown.card).toHaveText(
+    /^out of quota until (\S+ )?\d\d:\d\d; renewed early\? Try its member again now · from /,
+  )
+  const staff = await shown.staff()
+  await expect(staff.locator('.member-out')).toHaveText(said)
+  await expect(staff.locator('.try-again')).toHaveCount(1)
+})
+
+test('a member held for its account says so, to log in again or pay, on its row, the chief’s card, its held task and the staff list, with the button', async ({
+  page,
+}) => {
+  const shown = await heldFor(page, 'account')
+  const said =
+    'Unavailable: its account was refused for billing or login. Logged in again, or paid? Press Try again now'
+  await expect(shown.row.locator('.row-status')).toHaveText(said)
+  await expect(shown.row.locator('.try-again')).toHaveCount(1)
+  await expect(shown.chief.locator('.terminal-status')).toHaveText(said)
+  await expect(shown.chief.locator('.try-again')).toHaveCount(1)
+  await expect(shown.card).toHaveText(
+    /^unavailable until you say its login or billing works again: Try its member again now · from /,
+  )
+  const staff = await shown.staff()
+  await expect(staff.locator('.member-out')).toHaveText(said)
+  await expect(staff.locator('.try-again')).toHaveCount(1)
+})
+
+test('a member whose model is busy says so, and when it is tried again, with no renewal and no button, on its row, the chief’s card, its held task and the staff list', async ({
+  page,
+}) => {
+  const shown = await heldFor(page, 'busy')
+  const said = /^Its model is busy: ConsensFlow tries it again at (\S+ )?\d\d:\d\d$/
+  await expect(shown.row.locator('.row-status')).toHaveText(said)
+  await expect(shown.row.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
+  await expect(shown.row.locator('.try-again')).toHaveCount(0)
+  await expect(shown.chief.locator('.terminal-status')).toHaveText(said)
+  await expect(shown.chief.locator('.try-again')).toHaveCount(0)
+  await expect(shown.card).toHaveText(/^model busy, tried again at (\S+ )?\d\d:\d\d · from /)
+  const staff = await shown.staff()
+  await expect(staff.locator('.member-out')).toHaveText(said)
+  await expect(staff.locator('.try-again')).toHaveCount(0)
+})
+
 test('a task held while its member is out of quota says when it goes on', async ({ page }) => {
   const data = model()
   const lane = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
   lane.tasks.push(task(9, 'Write the docs', 'paused', 'chief', 'zeus', 4, { heldUntil: at(-25) }))
   await open(page, data)
   await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
-    /^out of quota until (\S+ )?\d\d:\d\d · from /,
+    /^out of quota until (\S+ )?\d\d:\d\d; renewed early\? Try its member again now · from /,
   )
 })
 
@@ -1665,7 +1781,7 @@ test('a task held for an account no time resets says it waits for the human, not
   )
   await open(page, data)
   await expect(page.locator('button.card[data-task="9"] .card-route')).toHaveText(
-    /^unavailable until you say it works again · from /,
+    /^unavailable until you say its login or billing works again: Try its member again now · from /,
   )
   await expect(page.locator('button.card[data-task="10"] .card-route')).toHaveText(
     /^held until you say its model may go on · from /,
@@ -3031,7 +3147,9 @@ test("says on the chief's card in the dock what the chief is doing and runs on, 
     chief.participant.outUntil = new Date(Date.now() + 90 * 60_000).toISOString()
   })
   await expect(card.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
-  await expect(card.locator('.terminal-status')).toHaveText(/^Out of quota until (\S+ )?\d\d:\d\d$/)
+  await expect(card.locator('.terminal-status')).toHaveText(
+    /^Out of quota until (\S+ )?\d\d:\d\d; renewed early\? Try again now$/,
+  )
   await expect(card.locator('.terminal-status')).toHaveAttribute('data-state', 'out')
   // Switch chief is on the card: none on the board, though the chief's row is there for its tasks.
   await expect(page.locator('tr[data-handle="chief"]')).toHaveCount(1)
@@ -4473,6 +4591,7 @@ test("asks the chief's effort where its model lists efforts, and sends it with t
         model: 'claude-opus-5-5',
         effort: 'high',
         gate: false,
+        compaction: 300000,
         staff: [],
       },
     ])
@@ -5523,6 +5642,7 @@ test('starts a project with human approval required, and posts the checkbox with
         harness: 'claude-code',
         model: 'claude-sonnet-5',
         gate: true,
+        compaction: 300000,
         staff: [],
       },
     ])
@@ -5549,7 +5669,14 @@ test('starts no project until its chief is picked, a harness and one of its mode
   await expect
     .poll(() => calls(page, 'project.open'))
     .toEqual([
-      { directory: '/work/fresh', harness: 'pi', model: 'meta/muse-spark', gate: false, staff: [] },
+      {
+        directory: '/work/fresh',
+        harness: 'pi',
+        model: 'meta/muse-spark',
+        gate: false,
+        compaction: 300000,
+        staff: [],
+      },
     ])
   await expect(dialog).toBeHidden()
 })
@@ -5672,13 +5799,15 @@ test('New project has Staff, the rules for the staff, compaction, the advisor to
   await expect(made.specs.variant).toHaveValue('')
   await expect(made.specs.variant.locator('option:checked')).toHaveText('As the app says (core)')
   await expect(made.specs.version).toHaveText('Specmint 3.0.0')
-  // The rules and the compaction as a project that never said any has them.
+  // The rules as a project that never said any has them, and the compaction as a new project
+  // has it: a size of 300,000 tokens (T-1400), the harness's own point a choice.
   await expect(made.rules.text).toHaveValue('')
   await expect(made.rules.count).toHaveText('0 of 8,000 bytes · 0 of 150 lines')
-  await expect(made.compaction.own).toBeChecked()
-  await expect(made.compaction.size).not.toBeChecked()
-  await expect(made.compaction.tokens).toBeDisabled()
-  await expect(made.compaction.tokens).toHaveValue('')
+  await expect(made.compaction.size).toBeChecked()
+  await expect(made.compaction.own).not.toBeChecked()
+  await expect(made.compaction.tokens).toBeEnabled()
+  await expect(made.compaction.tokens).toHaveValue('300000')
+  await expect(made.compaction.hint).toBeHidden()
   // Nothing is saved before there is a project: no Save, and nothing of when a change reaches the chief.
   await expect(made.rules.save).toBeHidden()
   await expect(made.compaction.save).toBeHidden()
@@ -5734,6 +5863,7 @@ test('New project has Staff, the rules for the staff, compaction, the advisor to
         harness: 'claude-code',
         model: 'claude-sonnet-5',
         gate: false,
+        compaction: 300000,
         staff: [
           {
             harness: 'claude-code',
@@ -5770,6 +5900,7 @@ test('New project: starts a project with its approval, wake-up calls and specs s
         harness: 'claude-code',
         model: 'claude-sonnet-5',
         gate: true,
+        compaction: 300000,
         staff: [],
         wakeUp: { on: true, every: 2, unit: 'days', text: 'Anything left on the board?' },
         specs: { on: true, folder: 'docs/specs', variant: 'tdd' },
@@ -5802,6 +5933,7 @@ test('New project: says all of its specs and all of its wake-up calls once eithe
         harness: 'claude-code',
         model: 'claude-sonnet-5',
         gate: false,
+        compaction: 300000,
         staff: [],
         wakeUp: { on: false, every: 45, unit: 'minutes', text: DEFAULT_WAKE_UP_WORDS },
         specs: { on: null, folder: null, variant: 'core-html' },
@@ -6155,9 +6287,9 @@ test('New project opens on the defaults every time: what was set in it before is
   await page.getByRole('button', { name: 'New project' }).click()
   await expect(made.rules.text).toHaveValue('')
   await expect(made.rules.count).toHaveText('0 of 8,000 bytes · 0 of 150 lines')
-  await expect(made.compaction.own).toBeChecked()
-  await expect(made.compaction.tokens).toHaveValue('')
-  await expect(made.compaction.tokens).toBeDisabled()
+  await expect(made.compaction.size).toBeChecked()
+  await expect(made.compaction.tokens).toHaveValue('300000')
+  await expect(made.compaction.tokens).toBeEnabled()
   await expect(made.approval).not.toBeChecked()
   await expect(made.calls.on).not.toBeChecked()
   await expect(made.calls.every).toHaveValue('1')
@@ -6166,6 +6298,60 @@ test('New project opens on the defaults every time: what was set in it before is
   await expect(made.specs.folder).toHaveValue('')
   await expect(made.specs.variant).toHaveValue('')
   await expect(made.specs.folder).toBeEnabled()
+})
+
+test("New project started without touching the compaction asks for a size of 300,000, and the harness's own point is asked for as none", async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+        compaction: 300000,
+      },
+    ])
+  // The harness's own point is still a choice: said as null, which the daemon reads as none
+  // (a request that said nothing starts on the size).
+  await page.getByRole('button', { name: 'New project' }).click()
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await made.compaction.own.check()
+  await expect(made.compaction.tokens).toBeDisabled()
+  await made.start.click()
+  await expect.poll(() => calls(page, 'project.open')).toHaveLength(2)
+  expect((await calls(page, 'project.open'))[1]).toEqual({
+    directory: '/work/fresh',
+    harness: 'claude-code',
+    model: 'claude-sonnet-5',
+    gate: false,
+    staff: [],
+    compaction: null,
+  })
+})
+
+test('New project made without touching the compaction opens in Project settings on its size of 300,000', async ({
+  page,
+}) => {
+  const data = model()
+  data.openMakesBoard = true
+  await open(page, data)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await made.start.click()
+  await expect(made.dialog).toBeHidden()
+  await expect(page.locator('#project-title')).toHaveText('new')
+  const section = await compactionGroup(page)
+  await expect(section.size).toBeChecked()
+  await expect(section.own).not.toBeChecked()
+  await expect(section.amount).toHaveValue('300000')
 })
 
 /** The legends of a dialog's sections, in the order they are drawn, hidden ones too. */
@@ -6221,10 +6407,10 @@ test('New project: the rules for the staff and the compaction are written as the
   await made.rules.text.fill(STAFF_RULES)
   await expect(made.rules.count).toHaveText('75 of 8,000 bytes · 2 of 150 lines')
   await expect(made.rules.group).toContainText('No secrets: no passwords, tokens or keys')
-  // A size is checked as it is typed, and a first one starts from the proposal's.
-  await made.compaction.size.check()
+  // A size is checked as it is typed, and New project opens on the default's.
+  await expect(made.compaction.size).toBeChecked()
   await expect(made.compaction.tokens).toBeEnabled()
-  await expect(made.compaction.tokens).toHaveValue('400000')
+  await expect(made.compaction.tokens).toHaveValue('300000')
   await made.compaction.tokens.fill('250000')
   await expect(made.compaction.hint).toBeHidden()
   await made.start.click()
@@ -6391,6 +6577,7 @@ test("New project: computer use is read for the folder picked, shown while the c
   await made.start.click()
   await expect.poll(async () => (await calls(page, 'project.open')).length).toBe(1)
   expect(Object.keys((await calls(page, 'project.open'))[0]).sort()).toEqual([
+    'compaction',
     'directory',
     'gate',
     'harness',
@@ -6953,6 +7140,7 @@ test('New project says what following the app means as Project settings does, an
         harness: 'claude-code',
         model: 'claude-sonnet-5',
         gate: false,
+        compaction: 300000,
         staff: [],
       },
     ])
@@ -7254,10 +7442,10 @@ test("saves the choice of a size by its own Save, shows what the daemon kept, an
 }) => {
   await open(page)
   const section = await compactionGroup(page)
-  // A first size starts from the one the proposal measured.
+  // A first size starts from the one a new project starts on: 300,000.
   await section.size.check()
   await expect(section.amount).toBeEnabled()
-  await expect(section.amount).toHaveValue('400000')
+  await expect(section.amount).toHaveValue('300000')
   await section.amount.fill('250000')
   expect(await calls(page, 'project.compaction')).toEqual([])
   await section.save.click()
@@ -7468,6 +7656,7 @@ test('New project has the advisor tool off, and sends it only when the human tic
         model: 'claude-sonnet-5',
         gate: false,
         staff: [],
+        compaction: 300000,
       },
     ])
   await expect(made.dialog).toBeHidden()
@@ -7491,6 +7680,7 @@ test('New project with the advisor tool ticked starts the project with it, in th
         model: 'claude-sonnet-5',
         gate: false,
         staff: [],
+        compaction: 300000,
         advisorTool: true,
       },
     ])
@@ -7618,6 +7808,7 @@ test('New project has the prompt suggestion off, and sends it only when the huma
         model: 'claude-sonnet-5',
         gate: false,
         staff: [],
+        compaction: 300000,
       },
     ])
   await expect(made.dialog).toBeHidden()
@@ -7641,6 +7832,7 @@ test('New project with the prompt suggestion ticked starts the project with it, 
         model: 'claude-sonnet-5',
         gate: false,
         staff: [],
+        compaction: 300000,
         promptSuggestion: true,
       },
     ])
@@ -10955,6 +11147,7 @@ test('starts a project in a chosen folder with the chosen chief, the staff ticke
         harness: 'pi',
         model: 'meta/muse-spark',
         gate: false,
+        compaction: 300000,
         staff: [
           {
             harness: 'claude-code',
@@ -11042,6 +11235,7 @@ test('New project asks no tier of a role whose row has none, and a member that h
         harness: 'pi',
         model: 'meta/muse-spark',
         gate: false,
+        compaction: 300000,
         staff: [
           { harness: 'codex', model: 'gpt-6-astra', effort: 'max', roles: ['scout'] },
           {
@@ -13034,7 +13228,7 @@ test('says a message waits for what the human typed in a window out of quota too
   const status = page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status')
   await expect(status).toHaveAttribute('data-state', 'out')
   await expect(status).toHaveText(
-    /^Out of quota until (\S+ )?\d\d:\d\d\. A message waits until you send or erase what you typed here$/,
+    /^Out of quota until (\S+ )?\d\d:\d\d; renewed early\? Try again now\. A message waits until you send or erase what you typed here$/,
   )
 })
 

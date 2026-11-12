@@ -40,7 +40,10 @@
 //!
 //! A window can do wrong once, as Devin has (`faults`): drop a paste, as a TUI that
 //! never took it (`FAKE_DEVIN_DROP`), or end as its agent takes a message, once the
-//! message is recorded (`FAKE_DEVIN_CRASH`).
+//! message is recorded (`FAKE_DEVIN_CRASH`). Or it can say a message back late
+//! (`FAKE_DEVIN_GAP`): Devin 3000.12.43 says one back 0.2 to 2.1 s after its Enter, and a
+//! paste that comes in that gap goes in behind it; the stand-in holds the turn in the gap
+//! until the next message comes.
 //!
 //! `/new` opens a new conversation: the window shows it at once (its wire says so, and
 //! its store has the session), and the turns after the ones queued go into it. The turn
@@ -94,6 +97,7 @@ use std::convert::Infallible;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
@@ -163,6 +167,11 @@ fn main() -> ExitCode {
 }
 
 /// Says why the window could not run, on its error output.
+/// Counts a message handed to the window, before it is on its way.
+fn handed_one(handed: &AtomicU64) {
+    handed.fetch_add(1, Ordering::SeqCst);
+}
+
 fn fail(failed: &str) -> ExitCode {
     let _ = writeln!(io::stderr(), "fake-devin: {failed}");
     ExitCode::FAILURE
@@ -212,12 +221,12 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
         .map_err(said)?
         .shape(shape());
     let mut opened = 0;
-    // Devin 3000.12.43 opened again with no message on a conversation whose first turn a
-    // quit cut says nothing of its mode, or of the conversation it shows, until it is
-    // typed to (T-1417, run 3: 20 s at rest, then `/code`); 3000.11.234 said it at once.
-    // One window showed it; "cut" is the stand-in's own, a store with no turn's end.
-    let mut unannounced =
-        shape() == Shape::Unsaid && cut_in_its_first_turn && launch.prompt_file.is_none();
+    // Devin 3000.12.43 opened again with no message on a conversation whose last turn a
+    // quit cut says nothing of its mode until it is typed to, in either mode (T-1417 run 3;
+    // T-1432 runs A, 2 and 3: five windows, 20 to 65 s), while its replay names the
+    // conversation; 3000.11.234 said it at once. "Cut" is the stand-in's own: a store whose
+    // last message of the user's no turn's end follows.
+    let unannounced = shape() == Shape::Unsaid && store.ends_cut() && launch.prompt_file.is_none();
     if !unannounced {
         wire.announce(permission.mode()).map_err(said)?;
     }
@@ -225,6 +234,9 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
         let (user, answer) = store.last_turn()?;
         wire.replayed(user.as_deref(), answer.as_deref())
             .map_err(said)?;
+        if let Some(user) = user.as_deref().filter(|_| unannounced) {
+            wire.listed(user).map_err(said)?;
+        }
     }
     signals::leave_on(signals, || leave(0));
     say(&format!("fake devin started on {session}\n")).map_err(said)?;
@@ -245,18 +257,23 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
             .filter(|_| launch.resume.is_none()),
     );
     let unbegun = Fault::of(own_var(faults::UNBEGUN_VARIABLE).as_deref());
+    let gap = Fault::of(own_var(faults::GAP_VARIABLE).as_deref());
+    let handed = Arc::new(AtomicU64::new(0));
     let folder = std::env::current_dir().map_err(said)?;
     let stores_commands =
         own_var(turn::STORES_COMMANDS_VARIABLE).is_some_and(|stores| !stores.is_empty());
     {
         let (stop, permission) = (Arc::clone(&stop), Arc::clone(&permission));
+        let handed = Arc::clone(&handed);
         let file = file.clone();
         thread::spawn(move || {
             let mut window = Window::new(store, wire, stop, io::stdout(), pace)
                 .in_mode(permission, folder)
                 .crashing_on(crash)
                 .beginning_nothing_on(unbegun)
-                .storing_commands(stores_commands);
+                .beginning_late_on(gap, handed)
+                .storing_commands(stores_commands)
+                .unannounced(unannounced);
             if let Some(folder) = jobs {
                 window = window.leaving_jobs_in(folder, std::process::id(), command::THINKING);
             }
@@ -277,6 +294,7 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
     }
     if let Some(file) = &launch.prompt_file {
         let first = std::fs::read_to_string(file).map_err(|failed| format!("{file}: {failed}"))?;
+        handed_one(&handed);
         let _ = turns.send(Given::Message(first, true));
     }
 
@@ -293,11 +311,6 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
                 Event::Submit(text) if dropping.meets(&text) => {}
                 // Enter at a dialog takes its first option; anywhere else it submits.
                 Event::Submit(text) => {
-                    if std::mem::take(&mut unannounced) {
-                        Wire::open(Path::new(&wire_log), &session)
-                            .and_then(|mut shown| shown.announce(permission.mode()))
-                            .map_err(said)?;
-                    }
                     if permission.answer(Answer::Approved) {
                     } else if text.trim() == NEW {
                         opened += 1;
@@ -311,6 +324,7 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
                         if let Err(failed) = store::submitted(Path::new(&file), &session, &text) {
                             let _ = writeln!(io::stderr(), "fake-devin: {failed}");
                         }
+                        handed_one(&handed);
                         let _ = turns.send(Given::Message(text, false));
                     }
                 }

@@ -332,10 +332,28 @@ impl Context {
     /// A project opened (`dispatcher.openProject`), `request` as the API
     /// gives it, run to stillness.
     pub fn open_project(&self, request: Value) -> Result<Option<ProjectView>, EngineError> {
+        self.opened(request, staffed)
+    }
+
+    /// A project opened as [`Context::open_project`] opens one, but with a request that says
+    /// nothing of the compaction left as it is: the ledger gives it the size a new project
+    /// starts on (T-1400).
+    pub fn open_project_as_asked(
+        &self,
+        request: Value,
+    ) -> Result<Option<ProjectView>, EngineError> {
+        self.opened(request, as_node_asked)
+    }
+
+    fn opened(
+        &self,
+        request: Value,
+        read: fn(&Value) -> Value,
+    ) -> Result<Option<ProjectView>, EngineError> {
         let dispatcher = Rc::clone(&self.dispatcher);
         let asked = request.clone();
         let opening = self.operation("openProject", json!([request]), answer, async move {
-            let request = NewProject::from_json(&staffed(&asked))?;
+            let request = NewProject::from_json(&read(&asked))?;
             dispatcher.open_project(request).await
         });
         self.run(opening)
@@ -482,8 +500,21 @@ fn app(staff: Vec<Value>) -> Value {
 /// ready-made agent, `{agent: 'zeus', …}`), as this ledger takes it (harness-models): the
 /// agent's name is the member's model's name, so its handle is the one Node's had, and its
 /// model is the one Node's roster gave that agent ([`MODELS`]), none for any other, as
-/// Node's roster gave none.
+/// Node's roster gave none. A request that says nothing of the compaction stays on each
+/// harness's own point here, as every project of these tests has been (the launches and the
+/// events they hold are those of a project with no size): a size, or `null`, said by the
+/// test is kept, and the default a new project starts on is held by
+/// [`Context::open_project_as_asked`] and the ledger's own tests (T-1400).
 pub fn staffed(request: &Value) -> Value {
+    let mut request = as_node_asked(request);
+    if let Value::Object(fields) = &mut request {
+        fields.entry("compaction").or_insert(Value::Null);
+    }
+    request
+}
+
+/// [`staffed`]'s request, with nothing of the compaction said for the test.
+fn as_node_asked(request: &Value) -> Value {
     let mut request = request.clone();
     if let Some(Value::Array(staff)) = request.get_mut("staff") {
         for member in staff.iter_mut() {

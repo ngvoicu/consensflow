@@ -1,5 +1,13 @@
 import { button, element, redraw } from '../dom.js'
-import { HARNESS_NAMES, harnessLabel, isMember, modelShown, nameApart } from './board.js'
+import {
+  HARNESS_NAMES,
+  harnessLabel,
+  isMember,
+  modelShown,
+  nameApart,
+  outWords,
+  tryAgain,
+} from './board.js'
 import { harnessesOf } from './computer-use.js'
 import { holdEnter, ProjectSections } from './project-sections.js'
 import { isImageAgentRole, readRoles, roleIds, roleLabel, takesNoTier, untiered } from './roles.js'
@@ -1046,7 +1054,8 @@ export class NewProjectDialog {
     if (wakeUp !== null) body.wakeUp = wakeUp
     if (specs !== null) body.specs = specs
     if (rules !== null) body.rules = rules
-    if (compaction !== null) body.compaction = compaction
+    // Always said, null for the harness's own point: a request that says nothing starts on the default.
+    body.compaction = compaction
     if (advisorTool) body.advisorTool = true
     if (promptSuggestion) body.promptSuggestion = true
     this.#say('')
@@ -1508,6 +1517,34 @@ export class ProjectSettingsDialog {
     this.#computerUse.draw(harnessesOf(board))
   }
 
+  /**
+   * A member out of quota says so in its staff row, with the human's way to try it again now:
+   * the quota may have been renewed early, by hand (T-1357). A member not out says nothing.
+   */
+  #sayOut(cell, member) {
+    const lane = this.#board.lanes.find(
+      (found) => found.participant.handle === member.handle && isMember(found.participant),
+    )
+    const words = lane ? outWords(lane, Date.now()) : null
+    if (words === null) return
+    const page = this.#page
+    const { participant } = lane
+    cell.append(element('br'), element('span', 'member-out', words))
+    // A busy model is tried again after a back-off no press shortens (T-1357).
+    if (lane.busy) return
+    cell.append(
+      tryAgain(participant, () =>
+        page.act(async () => {
+          await page.daemon('member.back', {
+            project: this.#project,
+            participant: participant.handle,
+          })
+          page.note(`Trying @${participant.handle} again: what waited for it goes on.`)
+        }),
+      ),
+    )
+  }
+
   /** A member as the project's board has it now, which a Remove kept across redraws acts on. */
   #memberNow(member) {
     return (
@@ -1596,6 +1633,7 @@ export class ProjectSettingsDialog {
             `Edit ${name}`,
           )
       const row = staffRow(who([role]), role, remove, edit)
+      this.#sayOut(row.firstElementChild, member)
       row.dataset.handle = member.handle
       if (gone) row.dataset.modelGone = member.model
       return { role, row }

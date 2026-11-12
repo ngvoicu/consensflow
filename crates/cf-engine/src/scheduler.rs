@@ -119,6 +119,18 @@ pub(crate) fn busy_turn(observed: &Observed) -> bool {
     observed.failed && observed.quota.as_deref().is_some_and(Quota::busy)
 }
 
+/// What holds a member that is out now. Each ends its own way: a quota at its reset, or at
+/// the human's word that it was renewed; an account at the human's word that the login works
+/// or the credit is bought (T-1357); a busy model after its back-off, which no press shortens;
+/// a model that moved at the human's word for that member alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Held {
+    Quota,
+    Account,
+    Moved,
+    Busy,
+}
+
 /// What a window of a member out says it is doing: out of quota until the reset, or, where
 /// the member is held for no time, why: its account (MUS-23) or its model's move (MUS-24).
 pub(crate) fn out_words(until: &str, unwell: Option<Unwell<'_>>) -> String {
@@ -345,6 +357,24 @@ impl Dispatcher {
                         false => "none of them is free".to_owned(),
                     });
                 }
+                // A member out until its reset may have had its quota renewed by hand, and one
+                // whose account was refused may have been logged in again or paid for: the
+                // human's Try again now says either (T-1357), and the wait says to press it.
+                // A busy model is tried again after its back-off, and a model that moved waits
+                // for its own word: neither has a button here.
+                let mut renewed = String::new();
+                for (held, said) in [
+                    (Held::Quota, "the quota was renewed early"),
+                    (Held::Account, "the login or the billing was fixed"),
+                ] {
+                    let out = self.out_for(&candidates, held);
+                    if !out.is_empty() {
+                        renewed.push_str(&format!(
+                            " If {said}, the human presses Try again now on {}.",
+                            out.join(" or ")
+                        ));
+                    }
+                }
                 self.seams.ledger.borrow_mut().note(
                     project.id,
                     &NewNote {
@@ -352,7 +382,7 @@ impl Dispatcher {
                         to: task.requester.clone(),
                         task: Some(task.number),
                         body: format!(
-                            "T-{} waits for a free {pool}: {}.",
+                            "T-{} waits for a free {pool}: {}.{renewed}",
                             task.number,
                             why.join("; ")
                         ),
@@ -415,23 +445,20 @@ impl Dispatcher {
         }
         if self.out(member.out_until.as_deref()) {
             let until = member.out_until.as_deref().unwrap_or_default();
-            return Some(if moved_hold(until) {
-                format!(
+            return Some(match self.kind_of_hold(member.id, until) {
+                Held::Moved => format!(
                     "@{}'s model moved on its own (it waits for the human's word)",
                     member.handle
-                )
-            } else if never(until) {
-                format!(
+                ),
+                Held::Account => format!(
                     "@{}'s account is unavailable (its billing or login was refused)",
                     member.handle
-                )
-            } else if self.busy_until(member.id).as_deref() == Some(until) {
-                format!(
+                ),
+                Held::Busy => format!(
                     "@{}'s model is busy (ConsensFlow tries it again at {until})",
                     member.handle
-                )
-            } else {
-                format!("@{} is out of quota until {until}", member.handle)
+                ),
+                Held::Quota => format!("@{} is out of quota until {until}", member.handle),
             });
         }
         None
@@ -453,6 +480,35 @@ impl Dispatcher {
     /// Whether a member is out of quota now.
     pub(crate) fn is_out(&self, member: &ParticipantView) -> bool {
         self.out(member.out_until.as_deref())
+    }
+
+    /// What holds `member`, out until `until`: its model's move and its account's refusal
+    /// are marked by the time they are out until (`MOVED`, `NEVER`); a busy model by the
+    /// mark of its own (`marked_busy`) at that very time, which a later quota refusal
+    /// outlasts; else a quota.
+    pub(crate) fn kind_of_hold(&self, member: i64, until: &str) -> Held {
+        if moved_hold(until) {
+            Held::Moved
+        } else if never(until) {
+            Held::Account
+        } else if self.busy_until(member).as_deref() == Some(until) {
+            Held::Busy
+        } else {
+            Held::Quota
+        }
+    }
+
+    /// The handles, as "@zeus", of the `candidates` that are out now for `held`.
+    fn out_for(&self, candidates: &[Candidate], held: Held) -> Vec<String> {
+        candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.member.out_until.as_deref().is_some_and(|until| {
+                    self.out(Some(until)) && self.kind_of_hold(candidate.member.id, until) == held
+                })
+            })
+            .map(|candidate| format!("@{}", candidate.member.handle))
+            .collect()
     }
 
     fn out(&self, until: Option<&str>) -> bool {
@@ -736,7 +792,8 @@ impl Dispatcher {
     /// until its reset, with everything sent to it queued (the field report of
     /// 2026-10-22, T-254).
     ///
-    /// The human's word brings back all of them. A window's turn that got through
+    /// The human's word brings back all of them, in every project (`back_from_quota`):
+    /// the quota they renewed by hand is the account's. A window's turn that got through
     /// is news for those marked out before it, read from the ledger as it is now
     /// (one marked out earlier in this pass too), once for each answer. One
     /// account is not one quota: a plan may limit one model by the week, so a
@@ -753,12 +810,18 @@ impl Dispatcher {
         let Some(harness) = owner.harness.as_deref() else {
             return Ok(());
         };
-        let one_account = self
+        // A window's turn is news for the others only where nobody has to look to know they
+        // share the account (`one_account`); the human's word is for the harness's one login on
+        // the machine (`one_login`): the quota they renewed is the account's.
+        let shared = self
             .seams
             .adapters
             .adapter(harness)
-            .is_some_and(|adapter| adapter.one_account());
-        if !one_account {
+            .is_some_and(|adapter| match news {
+                News::Human => adapter.one_login(),
+                News::Turn { .. } => adapter.one_account(),
+            });
+        if !shared {
             return Ok(());
         }
         if let News::Turn {
@@ -793,6 +856,13 @@ impl Dispatcher {
             // another member does, or the engine would paste into a window on a model
             // nobody chose (T-816).
             if moved_hold(&until) {
+                continue;
+            }
+            // The human's word is that the login works again (a quota renewed, a login
+            // done again, a credit bought). A model busy for a moment is none of those:
+            // its back-off is its own, and a press that shortened it would send its task
+            // back into a model still at capacity and spend one of its tries (T-1357).
+            if matches!(news, News::Human) && self.kind_of_hold(other.id, &until) == Held::Busy {
                 continue;
             }
             let back = match news {
@@ -912,19 +982,31 @@ impl Dispatcher {
             return Ok(());
         }
         let until = owner.out_until.clone().unwrap_or_default();
+        // A busy model is tried again after a back-off no press shortens: nothing for the human
+        // to press, and not a quota (T-1357).
+        let body = if self.kind_of_hold(owner.id, &until) == Held::Busy {
+            format!(
+                "@{}'s model is busy, and m-{} ({}) waits for it, as does whatever is sent to it until ConsensFlow tries it again at {until}.",
+                participant.handle,
+                waiting.id,
+                what_it_is(&waiting.kind, waiting.task_number),
+            )
+        } else {
+            format!(
+                "@{} is out of quota until {until}, and m-{} ({}) waits for it, as does whatever is sent to it until then. If its account has quota again (another account, a bigger plan), press Try again now on @{}: what waits is typed in once it is back.",
+                participant.handle,
+                waiting.id,
+                what_it_is(&waiting.kind, waiting.task_number),
+                owner.handle
+            )
+        };
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
                 from: None,
                 to: "human".to_owned(),
                 task: None,
-                body: format!(
-                    "@{} is out of quota until {until}, and m-{} ({}) waits for it, as does whatever is sent to it until then. If its account has quota again (another account, a bigger plan), press Try again now on @{}: what waits is typed in once it is back.",
-                    participant.handle,
-                    waiting.id,
-                    what_it_is(&waiting.kind, waiting.task_number),
-                    owner.handle
-                ),
+                body,
             },
         )?;
         self.changed();
@@ -1140,6 +1222,18 @@ impl Dispatcher {
     /// Until when a member is out because its model was busy, where it is.
     pub(crate) fn busy_until(&self, member: i64) -> Option<String> {
         self.scheduler.busy_out.borrow().get(&member).cloned()
+    }
+
+    /// Until when `member`, as the ledger has it now, is out because its model is busy for a
+    /// moment (T-1112): none when it is not out, or is out for anything else. The page says it
+    /// of the member's lanes, for a busy hold looks like any timed hold by its time alone and
+    /// no press ends it (T-1357).
+    pub fn model_busy_until(&self, member: &ParticipantView) -> Option<String> {
+        let until = member
+            .out_until
+            .as_deref()
+            .filter(|_| self.is_out(member))?;
+        (self.kind_of_hold(member.id, until) == Held::Busy).then(|| until.to_owned())
     }
 
     /// A task whose window's model was busy got a turn through: its tries begin again.

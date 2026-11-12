@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use super::wire::selected_session;
+use super::wire::naming;
 use crate::contract::{Pane, PaneHost};
 use crate::shared::admission::Sent;
 use crate::shared::pane::write_paste;
@@ -18,9 +18,20 @@ fn refused(error: &str) -> Sent {
     }
 }
 
+/// What a paste needs the log to say of the conversation the window shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Guard {
+    /// That a configuration named it last: what every paste needs.
+    Configured,
+    /// That, or that the log configured none and names it alone, on every line that names one
+    /// (`wire::Naming::unannounced`): a window opened again silent, whose delivery goes behind
+    /// `/bypass` (the adapter's `DevinWindow::shows`).
+    Unannounced,
+}
+
 /// Pastes `text` into `pane` when Devin's wire log says the window shows
-/// `session`, the conversation it is known to be on. A window that is known
-/// to be on none (no session, or an empty one) shows no conversation a message
+/// `session`, the conversation it is known to be on, as `guard` asks it to say so. A window
+/// that is known to be on none (no session, or an empty one) shows no conversation a message
 /// is for. `read_empty` is the count of the human's keys its input box read
 /// empty at, if it did ([`write_paste`]).
 pub(super) async fn send(
@@ -28,16 +39,19 @@ pub(super) async fn send(
     pane: &Pane,
     wire: &Path,
     session: Option<&str>,
+    guard: Guard,
     text: &str,
     read_empty: Option<u64>,
 ) -> Sent {
-    let Ok(current) = selected_session(wire) else {
+    let Ok(naming) = naming(wire) else {
         return refused("Devin conversation is unavailable");
     };
+    let shows = |session: &str| {
+        naming.shown() == Some(session)
+            || (guard == Guard::Unannounced && naming.unannounced() == Some(session))
+    };
     match session.filter(|session| !session.is_empty()) {
-        Some(session) if current.as_deref() == Some(session) => {
-            write_paste(host, pane, text, read_empty).await
-        }
+        Some(session) if shows(session) => write_paste(host, pane, text, read_empty).await,
         _ => refused("Devin is displaying another conversation"),
     }
 }

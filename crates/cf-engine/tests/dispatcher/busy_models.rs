@@ -209,6 +209,10 @@ fn the_lane_and_the_board_say_the_model_is_busy_not_out_of_quota() {
         )),
         "{waits:?}"
     );
+    // A renewed quota does not end it, and the press is not about it: no renewal is hoped
+    // for and no button is named (T-1357).
+    assert!(!waits[0].contains("renewed"), "{waits:?}");
+    assert!(!waits[0].contains("Try again now"), "{waits:?}");
 }
 
 #[test]

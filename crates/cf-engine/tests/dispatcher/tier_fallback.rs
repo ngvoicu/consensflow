@@ -327,7 +327,7 @@ fn a_task_for_a_tier_somebody_holds_is_never_moved_though_that_member_is_out_of_
     assert_eq!(
         waits(&context, &project),
         [format!(
-            "T-{number} waits for a free complex worker: @zeus is out of quota until {until}."
+            "T-{number} waits for a free complex worker: @zeus is out of quota until {until}. If the quota was renewed early, the human presses Try again now on @zeus."
         )],
         "and says why"
     );
