@@ -188,6 +188,8 @@ fn the_note_that_a_task_was_taken_back_is_shown_never_typed_and_its_line_says_wh
         [taken["id"].clone(), json!("read")],
         "a shown note is what it was: nothing withdraws it"
     );
+    // What ends is its line: its receipt says since when it is over.
+    assert!(shown["receipt"]["over"].is_string(), "{shown}");
 
     // The chief's turn ends and the worker's result reaches it; the note never does.
     rig.wait_for("the worker's result to reach the chief", secs(120), || {
