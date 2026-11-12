@@ -182,17 +182,15 @@
 //!   goes back to that one, the launch says nothing, though the thread holds the
 //!   cut words after it. A staff that shrinks, or a role that changes again, tells
 //!   the thread a whole one.
-//! - The parts read are counted per note, not per conversation: a window that read the
-//!   first part, was cleared, and read the last in the new conversation, is told the role
-//!   in that one. `cf inbox read --json` prints a role whole, as it did, and says it read
-//!   only within the bound.
-//! - A read kept while the note was on its way tells the role only in the conversation
-//!   it was made in. One that began between the read and the confirmation (a `/clear`
-//!   while the paste was on its way) was not shown what the read printed: it is told
-//!   nothing by it, and the role is said again at its next Resume, with the line.
-//! - A role note read while its paste was on its way and then given up (failed) is
-//!   failed as any is: the read is not looked for, as the thread is not (the bullet
-//!   above on a delivery given up). Any other message so read is `read`, not failed.
+//! - A role is read only by the parts printed in the conversation it goes to: one that
+//!   began between two parts, or between the parts and the paste's confirmation (a
+//!   `/clear`), was not shown them all, is told nothing by them, and the role is said
+//!   again at its next Resume, with the line. `cf inbox read --json` prints a role whole,
+//!   as it did, and says it read only within the bound: the ledger refuses that read of a
+//!   role `cf` prints in more than one part.
+//! - A role note printed while its paste was on its way and then given up (failed) is
+//!   failed as any is: its parts printed are not looked for, as the thread is not (the
+//!   bullet above on a delivery given up). Any other message so read is `read`, not failed.
 //! - A note whose paste is given back to the queue after the window read it (the
 //!   window went before the daemon saw the paste arrive) keeps the read: a read does
 //!   not receive a role, so the note waits for its paste, and the read tells the role
