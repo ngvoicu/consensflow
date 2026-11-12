@@ -6,7 +6,7 @@
 //! its program ended, the bridge handlers that answer the daemon, and the headless host
 //! that serves them over stdin and stdout are here; the window that draws them
 //! is not. Nothing in the crate knows which program hosts it, so the app, the
-//! headless helper and the Rust daemon to come run the same code, and none
+//! headless helper and the Rust daemon run the same code, and none
 //! keeps a copy that could drift.
 //!
 //! A window closes the way a terminal does on Unix (`pty::close`): its programs
