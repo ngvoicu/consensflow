@@ -196,3 +196,45 @@ fn one_note_is_typed_when_a_task_is_held_an_hour_with_no_turn_of_its_own_and_one
         typed(&context, &tiers)
     );
 }
+
+#[test]
+fn a_restart_ends_a_background_hold_and_writes_no_note_of_it_again() {
+    // T-1500's finding 3 feared that a restart, which empties the engine's memory of a hold,
+    // writes a fresh shown note whose time the hour then counts from. No window survives a
+    // restart (`cf-daemon`'s start), and the hold ends with its window: on the Resume the
+    // turn is read from its conversation and its result typed to the chief, and no note of
+    // the hold is written again.
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let tiers = zeus_at_work(&context);
+    held(&context, "The soak test starts", 1);
+    let notes = |tiers: &Tiers<'_>| {
+        tiers
+            .task(1)
+            .messages
+            .into_iter()
+            .filter(|message| message.kind == "note")
+            .count()
+    };
+    assert_eq!(notes(&tiers), 1);
+
+    context.advance(AN_HOUR - 10 * 60_000);
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    after.resume_project(tiers.project.id).unwrap();
+    for _ in 0..4 {
+        after.pass().unwrap();
+    }
+    let thread = tiers.task(1);
+    assert_eq!(thread.task.state, "done", "{:#?}", thread.messages);
+    assert_eq!(notes(&tiers), 1, "the hold is told once: {:#?}", thread.messages);
+    assert_eq!(aside(&tiers), None, "its line says no hold");
+    let result = thread
+        .messages
+        .iter()
+        .find(|message| message.kind == "result")
+        .expect("its result");
+    assert_eq!(result.recipient, "chief");
+    assert_eq!(result.body, "The soak test starts");
+}
