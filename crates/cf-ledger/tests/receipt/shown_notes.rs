@@ -586,3 +586,116 @@ fn a_hold_after_its_task_left_its_member_is_another_hold_and_is_typed() {
         }
     }
 }
+
+/// A role read in parts (T-1513) meets a shown note (RS-25, T-1556): a note that says the chief
+/// its role is typed whatever else is shown, on every path that writes one (`note_role`: a role
+/// changed, a conversation begun without it, a setting's news), and its parts printed by `cf
+/// inbox read` make it `read` with no `shown` in its receipt: it is no shown note, nor its
+/// task's line, nor marked `not typed` (`cf`'s mark reads the receipt's `shown`).
+#[test]
+fn a_role_note_to_the_chief_is_typed_and_its_parts_read_make_it_no_shown_note() {
+    let mut w = world();
+    let (task, _) = with_zeus(&mut w);
+    let held = shown(
+        &mut w,
+        "chief",
+        task,
+        "T-1 is still working in the background: 1 command.",
+        "in the background: 1 command",
+    );
+    let chief = w.id("chief");
+    let conversation = w
+        .ledger
+        .start_conversation(chief, "codex")
+        .expect("a conversation")
+        .id;
+    let words: String = (1..=600).map(|line| format!("Rule {line}.\n")).collect();
+    let role = w
+        .ledger
+        .note_role(w.project, "chief", &words, "the long role")
+        .expect("a role");
+    let cf = cf_proto::cf_word::CfWord::bare();
+    let parts = cf_base::role_read::role_parts(&cf.in_text(&role.body)).len();
+    assert_eq!(parts, 2, "the role is read in parts");
+    // Typed: queued for its paste, no receipt, the next thing the chief's window is given.
+    let written = w.message(role.id);
+    assert_eq!(
+        (written.state.as_str(), &written.receipt),
+        ("queued", &json!(null))
+    );
+    assert_eq!(w.next("chief"), Some(role.id));
+    // Pasted (its opening), then read part by part in the chief's window.
+    w.deliver(role.id);
+    for part in 1..=parts {
+        w.ledger
+            .receive_read_part(chief, role.id, part, parts, cf_ledger::Read::Inbox, &cf)
+            .expect("a part read");
+    }
+    let read = w.message(role.id);
+    assert_eq!(
+        read.state, "read",
+        "the role is read once every part was printed"
+    );
+    assert!(read.receipt.get(SHOWN).is_none(), "{}", read.receipt);
+    assert_eq!(
+        w.ledger
+            .conversation_role_text(conversation)
+            .expect("read")
+            .as_deref(),
+        Some("the long role")
+    );
+    // The task's line is still the shown note's, and the shown note is as it was.
+    assert_eq!(
+        aside(&w, task).as_deref(),
+        Some("in the background: 1 command")
+    );
+    assert_eq!(
+        w.ledger
+            .aside_note(w.project, task)
+            .expect("read")
+            .map(|note| note.id),
+        Some(held.id)
+    );
+}
+
+/// The other way: a shown note read in the chief's inbox, whole or as a part, tells the
+/// conversation no role and is no part of one: it stays the shown note it was (T-1556).
+#[test]
+fn a_shown_note_read_in_the_inbox_is_no_role_read() {
+    let mut w = world();
+    let (task, _) = with_zeus(&mut w);
+    let chief = w.id("chief");
+    let conversation = w
+        .ledger
+        .start_conversation(chief, "codex")
+        .expect("a conversation")
+        .id;
+    let held = shown(
+        &mut w,
+        "chief",
+        task,
+        "T-1 is still working in the background: 1 command.",
+        "in the background: 1 command",
+    );
+    let before = w.message(held.id);
+    let cf = cf_proto::cf_word::CfWord::bare();
+    let whole = w
+        .ledger
+        .receive_read(chief, &[held.id], cf_ledger::Read::Inbox, &cf)
+        .expect("read in the inbox");
+    let part = w
+        .ledger
+        .receive_read_part(chief, held.id, 1, 1, cf_ledger::Read::Inbox, &cf)
+        .expect("a part read");
+    assert_eq!((whole, part), (0, 0), "nothing is received");
+    let after = w.message(held.id);
+    assert_eq!((after.state, after.receipt), (before.state, before.receipt));
+    assert_eq!(
+        w.ledger.conversation_role_text(conversation).expect("read"),
+        None
+    );
+    assert_eq!(
+        aside(&w, task).as_deref(),
+        Some("in the background: 1 command")
+    );
+}

@@ -332,3 +332,20 @@ find = '''
 replace = '''
             over: false,
 '''
+
+[[plant]]
+name = "chief-notes: a note that says the chief its role is shown, not typed"
+meant = "shown_notes::a_role_note_to_the_chief_is_typed_and_its_parts_read_make_it_no_shown_note"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/roles.rs"
+find = '''
+            role: Some(role),
+            ..Sent::default()
+'''
+replace = '''
+            role: Some(role),
+            shown: Some(body),
+            ..Sent::default()
+'''
