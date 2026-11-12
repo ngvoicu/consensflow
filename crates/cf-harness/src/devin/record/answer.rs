@@ -123,11 +123,15 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
     record.in_flight = working || (last_open && !cancelled && !failed && !reverted_to_none);
     record.settlement = if working {
         Settlement::InFlight
-    } else if last_complete || cancelled || failed || compacted_at_rest || reverted_to_none {
+    } else if last_complete || cancelled || failed || compacted_at_rest {
         Settlement::Settled
     } else {
         Settlement::Unknown
     };
+    // Apart from the match: what settles a chain there is planted on as it stands.
+    if reverted_to_none && !working {
+        record.settlement = Settlement::Settled;
+    }
     record
 }
 
