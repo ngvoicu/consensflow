@@ -549,3 +549,67 @@ fn the_turns_after_a_new_conversation_go_into_it_and_the_ones_before_stay_in_the
     assert_eq!(ended_in("BEFORE"), Some(Value::from("calm-river")));
     assert_eq!(ended_in("AFTER"), Some(Value::from("bright-dune")));
 }
+
+/// A case whose wire is written in `shape`.
+fn case_in(shape: Shape, pace: Pace) -> Case {
+    let folder = tempfile::tempdir().unwrap();
+    let store = Store::open(&folder.path().join("sessions.db"), "calm-river").unwrap();
+    let wire = Wire::open(&folder.path().join("wire.jsonl"), "calm-river")
+        .unwrap()
+        .shape(shape);
+    let window = Window::new(store, wire, Arc::new(Stop::default()), Vec::new(), pace);
+    Case { folder, window }
+}
+
+#[test]
+fn a_message_the_gap_meets_is_begun_once_another_is_handed_and_not_before() {
+    let mut case = case_in(Shape::Unsaid, Pace::default());
+    let handed = Arc::new(AtomicU64::new(1));
+    case.window = case
+        .window
+        .beginning_late_on(Fault::of(Some("BUSY")), Arc::clone(&handed));
+    let path = case.folder.path().join("wire.jsonl");
+    let taking = thread::spawn(move || {
+        case.window.take("Reply with exactly: BUSY").unwrap();
+        case
+    });
+    // In the gap nothing of the turn is written, not the message said back.
+    thread::sleep(Duration::from_millis(400));
+    assert!(std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .is_empty());
+    handed.fetch_add(1, Ordering::SeqCst);
+    let case = taking.join().unwrap();
+    let wire = case.wire();
+    assert_eq!(wire[0]["update"]["sessionUpdate"], "user_message_chunk");
+    assert_eq!(wire.last().unwrap()["cause"], "complete");
+}
+
+#[test]
+fn a_turn_of_devin_3000_12_stopped_over_its_thoughts_says_no_message_and_no_work_names_its_turn() {
+    let mut case = case_in(
+        Shape::Unsaid,
+        Pace {
+            first_word: Duration::ZERO,
+            work: Duration::from_secs(30),
+        },
+    );
+    let stop = Arc::clone(&case.window.stop);
+    let presser = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(300));
+        stop.press();
+    });
+    case.window.take("Reply with exactly: LATE").unwrap();
+    presser.join().unwrap();
+    let wire = case.wire();
+    // The recorded Stop (T-1423, runs 4 and 5): the thought, the turn named on a line of its
+    // own, the cause. No agent message, and no line of work carrying the turn's name.
+    assert!(wire
+        .iter()
+        .all(|record| record["update"]["sessionUpdate"] != "agent_message_chunk"));
+    for record in wire.iter().filter(|record| record.get("update").is_some()) {
+        assert!(record.get("turnClientMessageId").is_none(), "{record}");
+    }
+    assert_eq!(wire.last().unwrap()["cause"], "cancelled");
+    assert!(wire[wire.len() - 2]["turnClientMessageId"].is_string());
+}

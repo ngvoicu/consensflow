@@ -15,6 +15,7 @@ mod devin;
 mod first_instructions;
 mod first_message;
 mod kept;
+mod one_login;
 mod pi;
 mod scenarios;
 mod secrets;

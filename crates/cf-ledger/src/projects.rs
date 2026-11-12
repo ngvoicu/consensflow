@@ -21,8 +21,10 @@ use serde_json::{json, Value};
 
 pub use advisor_tool::parse_advisor_tool;
 pub(crate) use advisor_tool::set_advisor_tool;
-pub(crate) use compaction::set_compaction;
-pub use compaction::{launch_size, parse_compaction, COMPACTION_MAX, COMPACTION_MIN};
+pub use compaction::{
+    launch_size, parse_compaction, COMPACTION_DEFAULT, COMPACTION_MAX, COMPACTION_MIN,
+};
+pub(crate) use compaction::{parse_new_compaction, set_compaction};
 pub use describing::parse_description;
 pub(crate) use describing::{describe_project, rename_project};
 pub use prompt_suggestion::parse_prompt_suggestion;
@@ -167,7 +169,9 @@ pub struct NewProject {
     /// The rules the human wrote for its staff; none starts it with none.
     pub staff_rules: Option<String>,
     /// The size, in tokens, the human chose for its members' windows to compact
-    /// at; none starts it on each harness's own point.
+    /// at; none starts it on each harness's own point. A request in JSON that says
+    /// nothing of it is read as [`COMPACTION_DEFAULT`] (`from_json`), and one that says
+    /// `null` as none; a request built by hand says it either way.
     pub compaction: Option<u32>,
     /// Whether its members run with Claude Code's own advisor tool; false (off) is what
     /// every project starts with.
@@ -224,7 +228,7 @@ impl NewProject {
             wake_up: NewWakeUp::from_opening(value.get("wakeUp"))?,
             specs: SpecsChange::from_opening(value.get("specs"))?,
             staff_rules: parse_staff_rules(value.get("rules"))?,
-            compaction: parse_compaction(value.get("compaction"))?,
+            compaction: parse_new_compaction(value.get("compaction"))?,
             advisor_tool: match value.get("advisorTool") {
                 None => false,
                 said => parse_advisor_tool(said)?,

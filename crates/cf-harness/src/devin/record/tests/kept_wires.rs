@@ -6,9 +6,9 @@
 //! (`cargo test -p cf-harness kept_wires -- --ignored --nocapture`).
 //!
 //! At every line of every log the window's reading of the turn (`Turns`) is held to what
-//! the log says: a turn is open from a message said back live until the next `cause` of its
-//! session, and closed from that `cause`; the deliveries said back are those of the open
-//! turn. What it prints: the lines and messages of each log, the ones said back live, the
+//! the log says: a turn is open from a message said back live, or a prompt its `steps` list
+//! new (T-1432), until the next `cause` of its session, and closed from that `cause`; the
+//! deliveries said back or listed are those of the open turn. What it prints: the lines and messages of each log, the ones said back live, the
 //! turns a log ends with open (a run cut, or a turn at work when it was kept), and any
 //! message of 3000.11's that would open a turn by the rule (none is meant to).
 
@@ -34,13 +34,15 @@ fn every_kept_devin_wire_log_reads_its_turns_open_from_the_message_said_back_to_
         .collect();
     let mut wrong = Vec::new();
     let (mut lines_read, mut live, mut said_old, mut left_open) = (0, 0, 0, 0);
-    let (mut claimed, mut dropped) = (0, 0);
+    let (mut claimed, mut dropped, mut steps_new) = (0, 0, 0);
     for path in &paths {
         let mut turns = Turns::default();
         // What the log says of each session: a message said back live since its last cause.
         let mut open: HashMap<String, bool> = HashMap::new();
         let mut taken: HashMap<String, Vec<i64>> = HashMap::new();
         let mut unclaimed: HashMap<String, Vec<String>> = HashMap::new();
+        // The prompts each session's `steps` lines listed, from the first on (T-1432).
+        let mut listed: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
         let text = fs::read_to_string(path).unwrap();
         let (live_before, claimed_before, dropped_before) = (live, claimed, dropped);
         for (at, line) in text.lines().enumerate() {
@@ -75,6 +77,25 @@ fn every_kept_devin_wire_log_reads_its_turns_open_from_the_message_said_back_to_
                         .unwrap_or("")
                         .to_owned(),
                 );
+            }
+            // A prompt a `steps` line lists new, past the log's first, was taken in by a turn.
+            if let Some(steps) = event.get("steps").and_then(Value::as_array) {
+                let first = !listed.contains_key(&session);
+                let known = listed.entry(session.clone()).or_default();
+                for step in steps.iter().filter(|step| step["kind"] == "prompt") {
+                    let Some(id) = step["userMessageId"].as_str() else {
+                        continue;
+                    };
+                    if known.insert(id.to_owned()) && !first {
+                        steps_new += 1;
+                        open.insert(session.clone(), true);
+                        let summary = step["summary"].as_str().unwrap_or("");
+                        let summary = summary.strip_prefix("/bypass ").unwrap_or(summary);
+                        if let Some(message) = crate::contract::delivery_of(summary) {
+                            taken.entry(session.clone()).or_default().push(message);
+                        }
+                    }
+                }
             }
             let read = turns.open(&session);
             // An older Devin's message said back is the turn's once a turn is open around it,
@@ -127,7 +148,7 @@ fn every_kept_devin_wire_log_reads_its_turns_open_from_the_message_said_back_to_
         left_open += still.len();
         eprintln!(
             "{path}: {} lines, {} said back live, {} said back unmarked and taken by a turn, {} \
-             dropped as a replay's; ends with {} turn(s) said back live and not ended",
+             dropped as a replay's; ends with {} turn(s) said back live or listed new and not ended",
             text.lines().count(),
             live - live_before,
             claimed - claimed_before,
@@ -137,8 +158,8 @@ fn every_kept_devin_wire_log_reads_its_turns_open_from_the_message_said_back_to_
     }
     eprintln!(
         "{} logs, {lines_read} lines; {live} messages said back live, {said_old} said back with \
-         no event type ({claimed} taken by a turn, {dropped} dropped), {left_open} turn(s) open \
-         at a log's end",
+         no event type ({claimed} taken by a turn, {dropped} dropped), {steps_new} prompt(s) listed \
+         new among the steps, {left_open} turn(s) open at a log's end",
         paths.len()
     );
     assert!(

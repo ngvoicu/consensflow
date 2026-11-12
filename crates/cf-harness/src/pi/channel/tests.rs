@@ -155,3 +155,66 @@ fn a_shown_file_the_system_will_not_read_is_a_failure_in_node_s_words() {
         Err(format!("ENOTDIR: not a directory, open '{file}'"))
     );
 }
+
+#[test]
+fn the_extension_s_word_of_a_compaction_it_asked_for_is_its_own_launch_s_and_the_conversation_s_and_a_time(
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let settled = dir.path().join("settled");
+    let channel = channel_in(&settled);
+    let file = format!("{LAUNCH}.compacting.json");
+    assert_eq!(
+        channel.compaction_asked("s-1"),
+        CompactionWord::Absent,
+        "before it has said"
+    );
+    let said = |text: &str, session: &str| {
+        put(&settled, &file, text);
+        channel.compaction_asked(session)
+    };
+    let word = |launch: &str, session: &str| {
+        format!(r#"{{"launchId":"{launch}","sessionId":"{session}","startedAt":1790000000123}}"#)
+    };
+    assert_eq!(
+        said(&word(LAUNCH, "s-1"), "s-1"),
+        CompactionWord::Asked(1_790_000_000_123)
+    );
+    // Another conversation's word (the window was switched), or another launch's, is none.
+    assert_eq!(said(&word(LAUNCH, "s-1"), "s-2"), CompactionWord::Absent);
+    assert_eq!(said(&word("other", "s-1"), "s-1"), CompactionWord::Absent);
+    // A file that is there and is no word of ours cannot be told from a read that met the
+    // extension's rename: it is not a compaction that is over.
+    for unreadable in [
+        "",
+        "{",
+        "null",
+        "[]",
+        "\u{feff}{}",
+        &format!(r#"{{"launchId":"{LAUNCH}","sessionId":"s-1"}}"#),
+        &format!(r#"{{"launchId":"{LAUNCH}","sessionId":"s-1","startedAt":"soon"}}"#),
+        &format!(r#"{{"launchId":"{LAUNCH}","sessionId":"s-1","startedAt":null}}"#),
+        r#"{"launchId":7,"sessionId":"s-1","startedAt":5}"#,
+        &format!(r#"{{"launchId":"{LAUNCH}","sessionId":7,"startedAt":5}}"#),
+    ] {
+        assert_eq!(
+            said(unreadable, "s-1"),
+            CompactionWord::Unreadable,
+            "{unreadable:?}"
+        );
+    }
+    // Taken back: the file is gone, and only that is absent.
+    fs::remove_file(settled.join(&file)).unwrap();
+    assert_eq!(channel.compaction_asked("s-1"), CompactionWord::Absent);
+}
+
+#[test]
+fn a_word_file_the_system_will_not_read_is_unreadable_and_one_that_is_not_there_is_absent() {
+    let dir = tempfile::tempdir().unwrap();
+    let settled = dir.path().join("settled");
+    let channel = channel_in(&settled);
+    // No folder, no file: ENOENT.
+    assert_eq!(channel.compaction_asked("s-1"), CompactionWord::Absent);
+    // A folder where the file is: there, and no one can read it.
+    fs::create_dir_all(settled.join(format!("{LAUNCH}.compacting.json"))).unwrap();
+    assert_eq!(channel.compaction_asked("s-1"), CompactionWord::Unreadable);
+}

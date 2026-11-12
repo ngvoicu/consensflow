@@ -30,7 +30,9 @@ pub(super) async fn list(page: &Page) -> Result<Fields, Said> {
 /// takes them) and the compaction (`compaction`, as `project.compaction` takes it) are
 /// the human's word for the project, kept in the write that makes it, so the chief's
 /// first launch has them; one the ledger refuses refuses the whole start, in the words
-/// the Project settings dialog shows for it, and no project is made.
+/// the Project settings dialog shows for it, and no project is made. A `compaction` that
+/// is left out starts the project on the ledger's default size, and `null` on each
+/// harness's own point: what is passed to the ledger is what the page sent, `null` too.
 pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let directory = body.get("directory");
     let name = match body.get("name") {
@@ -323,7 +325,7 @@ fn received(value: Option<&Value>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use cf_ledger::NewChief;
+    use cf_ledger::{NewChief, COMPACTION_DEFAULT};
 
     use super::*;
 
@@ -459,7 +461,8 @@ mod tests {
                     wake_up: None,
                     specs: None,
                     staff_rules: None,
-                    compaction: None,
+                    // The request says nothing of it: the size a new project starts on (T-1400).
+                    compaction: Some(COMPACTION_DEFAULT),
                     advisor_tool: false,
                     prompt_suggestion: false,
                 },

@@ -438,3 +438,28 @@ and the hash that names a bundle of an extension is `$HASH`.
   as it is when it begins, and the record when released`, whose log says, while the record is
   held, that the window moved to another conversation; the look sees the move (`switched`,
   `settled: false`, what Node said at the next look, step 15) where Node saw it a look later.
+- **A prompt a Devin log lists new among its steps opens its turn** (2026-11-11, T-1432, A5-23;
+  the records' move T-1504). Devin lists a session's prompts on a `steps` line of its own; one
+  listed for the first time after the log's first such line is a message a turn took in, and
+  that turn is open until its `cause`. Devin 3000.12.43 says back no `/bypass <message>` given to
+  a window opened again silent on a cut turn, and its first streamed word can come minutes
+  later, so the listing is the only line that says the turn began. Node opened a turn only at
+  Devin's work, its `working` or a message said back, a line or a few later. In Devin
+  3000.10.21's own logs (`tests/engine/fixtures/completion/devin/native-tui.json` and
+  `worker-tui.json`) every such listing is followed by that turn's streamed reply and then its
+  `cause` (`complete`, and `cancelled` for `CANCEL_THIS_TURN`); in the 57 logs kept of 3000.11
+  and 3000.12.43, all 164 are followed by the turn's own work, and by its `cause` in all but the
+  22 launches cut in their turn. `records/` moved for it in 18 looks of two scenarios of
+  `sequences`, each read by both readers: `devin: native-tui.json read a row and a wire piece at
+  a time`, steps 57, 61, 63, 143, 145 and 147, and `devin: worker-tui.json read a row and a wire
+  piece at a time`, steps 45, 47, 49, 85, 89, 91, 209, 213, 215, 243, 245 and 247: the looks from
+  the listing to the reply's first chunk. Each reads `inFlight: true` and `settlement:
+  in-flight` where Node read `false` and `unknown` (`settled` at 209 to 247, where Node still
+  read the turn before as the last); the items, `asking`, `failed` and `quota` are Node's, no
+  look was added or taken, and the counts in `../records/main.rs` stand. Moved by hand: each
+  moved look names a reading of the same items read in flight, an existing one where the
+  scenario had it. `launch/` moved for it in step 3 of `devin: a wire log Devin wrote itself
+  (worker-tui.json)`, in both platforms' recordings, with a `kept` difference (`settled: false`
+  where Node said `true`). A `steps` line that lists ids anew with no prompt behind them (after
+  Devin's "Revert to step", a fork or a compaction) would open a turn no `cause` ends; no kept
+  log shows one.

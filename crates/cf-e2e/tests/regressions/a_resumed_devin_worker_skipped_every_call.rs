@@ -34,7 +34,7 @@ use cf_e2e::rig::{Project, Rig};
 use serde_json::json;
 
 use crate::devin_pause::write_roster;
-use crate::{config, secs, Outcome, FAKE_DEVIN};
+use crate::{devin_config, secs, Outcome};
 
 /// What Devin says of a call it refused for its permission.
 const SKIPPED: &str = "User skipped this tool call";
@@ -45,7 +45,7 @@ const MADE_TEXT: &str = "made by the turn's tool\n";
 
 #[test]
 fn a_devin_worker_cut_in_its_first_turn_and_resumed_goes_on_with_its_calls_running() -> Outcome {
-    let rig = Rig::start(config().devin(FAKE_DEVIN))?;
+    let rig = Rig::start(devin_config())?;
     write_roster(&rig)?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let id = project.id();
@@ -64,7 +64,7 @@ fn a_devin_worker_cut_in_its_first_turn_and_resumed_goes_on_with_its_calls_runni
 
     // The app quits, with the worker's turn at work, and starts again on the same home.
     let root = rig.close_keeping_the_root()?;
-    let config = config().devin(FAKE_DEVIN);
+    let config = devin_config();
     let rig = Rig::start(config.existing_root(root))?;
     let resumed = rig.page("project.resume", json!({ "project": id }))?;
     assert_eq!(resumed["ok"], true, "{resumed}");
@@ -93,4 +93,15 @@ fn a_devin_worker_cut_in_its_first_turn_and_resumed_goes_on_with_its_calls_runni
     assert!(state == "done" || state == "accepted", "T-1 is {state}");
     rig.close()?;
     Ok(())
+}
+
+// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423): the case as
+// it is, the stand-in's shape chosen here and not by the environment.
+
+#[test]
+fn a_devin_worker_cut_in_its_first_turn_and_resumed_goes_on_with_its_calls_running_on_devin_3000_12(
+) -> Outcome {
+    crate::on_the_installed_devin(
+        a_devin_worker_cut_in_its_first_turn_and_resumed_goes_on_with_its_calls_running,
+    )
 }

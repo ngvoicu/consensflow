@@ -15,8 +15,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Admission, Decline, Dialog, DialogSign, Held, InputBox, Observed, Over, Pane, PaneHost,
-    Question, Readiness, Trusts, Waiting, Window, Work, NOT_ADMITTED,
+    Admission, CompactionWord, Decline, Dialog, DialogSign, Held, InputBox, Observed, Over, Pane,
+    PaneHost, Question, Readiness, Trusts, Waiting, Window, Work, NOT_ADMITTED,
 };
 use cf_harness::records::{Item, Lines, Reading, Record, Settlement};
 use serde_json::{json, Value};
@@ -160,6 +160,18 @@ impl Window for FakeWindow {
 
     fn compacting(&self, screen: &[String]) -> bool {
         holds(screen, COMPACTING)
+    }
+
+    fn compaction_asked(&self) -> CompactionWord {
+        self.fake.of_launch(&self.launch, |agent| {
+            if agent.compaction_unreadable {
+                CompactionWord::Unreadable
+            } else {
+                agent
+                    .compaction_asked
+                    .map_or(CompactionWord::Absent, CompactionWord::Asked)
+            }
+        })
     }
 
     /// Its harness tells a dialog from another read of its screen as Claude Code's window does,

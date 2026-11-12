@@ -31,6 +31,8 @@ pub struct Wire {
     file: File,
     session: String,
     shape: Shape,
+    /// The prompt steps its `steps` lines list so far.
+    steps: Vec<Value>,
 }
 
 /// Which Devin's log a window writes.
@@ -84,6 +86,7 @@ impl Wire {
             file: OpenOptions::new().create(true).append(true).open(path)?,
             session: session.to_owned(),
             shape: Shape::Requests,
+            steps: Vec::new(),
         })
     }
 
@@ -185,6 +188,14 @@ impl Wire {
     /// One record of the conversation, whole in one write: a record of the turn's work
     /// stamped with its time where the log is [`Wire::stamped`].
     fn record(&mut self, mut record: Value) -> io::Result<()> {
+        // Devin 3000.12.43 names a turn on a line of its own at its end (`ended`); no line of
+        // its work carries the turn's client message at the top: none of the 5 recorded logs
+        // of T-1417 and T-1423 has one (the review T-1429).
+        if self.shape == Shape::Unsaid && record.get("update").is_some() {
+            if let Some(line) = record.as_object_mut() {
+                line.remove("turnClientMessageId");
+            }
+        }
         record["sessionId"] = json!(self.session);
         let kind = record["update"]["sessionUpdate"]
             .as_str()
@@ -216,6 +227,25 @@ impl Wire {
                 ],
             },
         }))
+    }
+
+    /// The conversation's steps, the prompt `text` among them, as Devin 3000.12.43 lists them
+    /// (T-1432: every prompt, a line of them all, its summary the prompt's first line with no
+    /// `/bypass`). The stand-in lists them only where Devin says no message back: a window
+    /// opened again silent, and the message it is given behind `/bypass`.
+    pub fn listed(&mut self, text: &str) -> io::Result<()> {
+        let number = self.steps.len() + 1;
+        self.steps.push(json!({
+            "stepId": format!("step-{number}"),
+            "stepNumber": number,
+            "kind": "prompt",
+            "userMessageId": format!("message-{number}"),
+            "revertTargetNodeId": number * 10,
+            "forkTargetNodeId": number * 10 + 2,
+            "summary": text.lines().next().unwrap_or_default(),
+        }));
+        let steps = json!({ "sessionId": self.session, "steps": self.steps });
+        self.raw(&steps)
     }
 
     /// The conversation's mode changed to `mode`: its configuration, and the change on
@@ -406,6 +436,7 @@ impl Wire {
             file: self.file.try_clone()?,
             session: self.session.clone(),
             shape: self.shape,
+            steps: Vec::new(),
         })
     }
 }
@@ -579,6 +610,10 @@ mod tests {
             meta(1, "cognition.ai/streamingMessageId"),
             "client-1-thought"
         );
+        // No line of the work names its turn at the top: none of the recorded logs has one.
+        assert!(records[..4]
+            .iter()
+            .all(|record| record.get("turnClientMessageId").is_none()));
         // A call is stamped and in no stream, as a replay is.
         assert_eq!(kind(2), "tool_call");
         assert!(meta(2, "cognition.ai/streamingMessageId").is_null());

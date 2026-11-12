@@ -58,7 +58,7 @@ use cf_e2e::rig::{Config, Project, Rig};
 use cf_e2e::Error;
 use serde_json::{json, Value};
 
-use crate::{config, secs, Outcome, FAKE_DEVIN};
+use crate::{devin_config, secs, Outcome};
 
 /// How long the daemon waits for the record of a paste to show it in the cases of a
 /// Devin that is late with it: the minute it gives a person's, cut to this by the
@@ -114,6 +114,31 @@ pub(crate) fn store_of(rig: &Rig) -> PathBuf {
     )
 }
 
+/// When the window's wire log said back the human's message that holds `words` and none of
+/// the daemon's headers, in milliseconds since the epoch: the time Devin 3000.12.43 stamps
+/// it with (T-1423). None where no log says it, a message the log does not stamp
+/// (3000.11's, replayed ones) included.
+pub(crate) fn said_back_at(rig: &Rig, words: &str) -> Option<i64> {
+    cf_e2e::live::wire::newest(&rig.home())
+        .and_then(|log| std::fs::read_to_string(log).ok())
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|line| line["update"]["sessionUpdate"] == "user_message_chunk")
+        .filter(|line| {
+            line["update"]["content"]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains(words) && !text.contains("[ConsensFlow m-"))
+        })
+        .find_map(|line| {
+            line["update"]["_meta"]["cognition.ai/timestamp"]
+                .as_str()?
+                .parse::<jiff::Timestamp>()
+                .ok()
+                .map(|time| time.as_millisecond())
+        })
+}
+
 /// The note of the chief's inbox that says `words`, if there is one.
 fn note(project: &Project, words: &str) -> cf_e2e::Result<Option<Value>> {
     Ok(project.inbox("chief")?.into_iter().find(|message| {
@@ -149,7 +174,7 @@ fn two_notes_that_come_together_after_a_cancel_go_in_once_each_with_no_settle() 
 
 /// The case, its daemon's settle `settle` milliseconds where it names one.
 fn once_each(settle: Option<&str>) -> Outcome {
-    let mut config = arrival(config().devin(FAKE_DEVIN))
+    let mut config = arrival(devin_config())
         .var("FAKE_DEVIN_FIRST_WORD_MS", FIRST_WORD_MS)
         .var("FAKE_DEVIN_WORK_MS", work_ms());
     if let Some(settle) = settle {
@@ -256,4 +281,23 @@ fn once_each(settle: Option<&str>) -> Outcome {
     }
     rig.close()?;
     Ok(())
+}
+
+// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423): the case as
+// it is, the stand-in's shape chosen here and not by the environment.
+
+#[test]
+fn two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_once_each_on_devin_3000_12(
+) -> Outcome {
+    crate::on_the_installed_devin(
+        two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_once_each,
+    )
+}
+
+#[test]
+fn two_notes_that_come_together_after_a_cancel_go_in_once_each_with_no_settle_on_devin_3000_12(
+) -> Outcome {
+    crate::on_the_installed_devin(
+        two_notes_that_come_together_after_a_cancel_go_in_once_each_with_no_settle,
+    )
 }
