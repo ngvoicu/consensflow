@@ -249,3 +249,131 @@ fn a_chain_is_gathered_by_what_its_paste_says_and_every_note_is_typed_once_in_or
         assert_eq!(context.message(*id).state, "delivered", "m-{id}");
     }
 }
+
+#[test]
+fn a_chain_in_flight_as_the_chief_is_switched_is_one_message_kept_or_given_back_whole() {
+    // T-1500's finding 5: a chain is one message across a switch too. Seen arrive by the
+    // last look, every note it carried is delivered; gone before it landed, the head and
+    // every note behind it are queued again, and the new chief is typed each once.
+    let context = with_codex();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    let landed: Vec<i64> = ["One went.", "Two went.", "Three went."]
+        .into_iter()
+        .map(|body| told(&context, project.id, None, body).id)
+        .collect();
+    context.pass().unwrap();
+    assert_eq!(context.message(landed[0]).state, "delivering");
+    assert!(
+        given(&context, "chief")
+            .last()
+            .unwrap()
+            .contains("3 notes at once"),
+        "one paste"
+    );
+    context
+        .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Now, false)
+        .unwrap();
+    for id in &landed {
+        assert_eq!(context.message(*id).state, "delivered", "m-{id}");
+    }
+
+    context.pass().unwrap();
+    context.codex.answer("chief", "Taken over");
+    context.pass().unwrap();
+    context.codex.with("chief", |agent| agent.arrive = false);
+    let lost: Vec<i64> = ["Four went.", "Five went.", "Six went."]
+        .into_iter()
+        .map(|body| told(&context, project.id, None, body).id)
+        .collect();
+    context.pass().unwrap();
+    assert_eq!(context.message(lost[0]).state, "delivering");
+    // The same three notes as the first, in one pass: one paste, which never lands (the
+    // fake keeps no item of it); none of the three begins a delivery of its own.
+    let begun: Vec<i64> = context
+        .ledger
+        .borrow()
+        .events(project.id, 0, 10_000)
+        .unwrap()
+        .iter()
+        .filter(|event| event.kind == "delivery.begun")
+        .filter_map(|event| event.data["message"].as_i64())
+        .filter(|id| lost.contains(id))
+        .collect();
+    assert_eq!(begun, [lost[0]]);
+    let before = given(&context, "chief").len();
+    context
+        .switch_chief(
+            project.id,
+            to("claude-code", "apollo"),
+            SwitchWhen::Now,
+            false,
+        )
+        .unwrap();
+    for id in &lost {
+        let row = context.message(*id);
+        assert_eq!(
+            (row.state.as_str(), row.attempts),
+            ("queued", 0),
+            "m-{id}: the window went before it could land"
+        );
+    }
+    for _ in 0..6 {
+        context.pass().unwrap();
+        context.adapter.answer("chief", "Done.");
+        context.pass().unwrap();
+    }
+    let pasted = given(&context, "chief").split_off(before).join("\n");
+    assert!(
+        pasted.contains("3 notes at once"),
+        "one paste again: {pasted}"
+    );
+    for body in ["Four went.", "Five went.", "Six went."] {
+        assert_eq!(pasted.matches(body).count(), 1, "{body} in: {pasted}");
+    }
+    for id in &lost {
+        assert_eq!(context.message(*id).state, "delivered", "m-{id}");
+    }
+}
+
+#[test]
+fn a_chain_a_restart_sends_again_says_so_once_for_all_its_notes() {
+    // T-1500's finding 5, at a restart: a chain whose window took it before its record showed
+    // it goes again whole, under one header that says it may be there already.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    let notes: Vec<i64> = ["One went.", "Two went.", "Three went."]
+        .into_iter()
+        .map(|body| told(&context, project.id, None, body).id)
+        .collect();
+    let before = given(&context, "chief").len();
+    {
+        let mut ledger = context.ledger.borrow_mut();
+        let begun = ledger.begin_delivery(notes[0]).unwrap();
+        let carried: Vec<i64> = begun.carried.iter().map(|row| row.id).collect();
+        assert_eq!(carried, notes[1..]);
+        ledger
+            .retry_delivery(
+                notes[0],
+                "the daemon stopped before its record showed it, and its window took it",
+                true,
+            )
+            .unwrap();
+    }
+    context.pass().unwrap();
+    let pasted = given(&context, "chief").split_off(before);
+    assert_eq!(pasted.len(), 1, "{pasted:?}");
+    assert!(
+        pasted[0].starts_with(&format!(
+            "[ConsensFlow m-{} · note from ConsensFlow{}]\n3 notes at once",
+            notes[0],
+            cf_engine::delivery_text::SENT_AGAIN
+        )),
+        "{}",
+        pasted[0]
+    );
+    for body in ["One went.", "Two went.", "Three went."] {
+        assert_eq!(pasted[0].matches(body).count(), 1, "{body}");
+    }
+}
