@@ -87,7 +87,14 @@ runs = [
 file = "crates/cf-engine/src/windows.rs"
 find = '''
         let begun = first
-            .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
+            .map(|first| -> Result<_, EngineError> {
+                let cf = self.cf_for(first)?;
+                Ok(self
+                    .seams
+                    .ledger
+                    .borrow_mut()
+                    .begin_delivery_as(first.id, None, &cf)?)
+            })
             .transpose()?;
         // The stops this window owes are those asked before this look: a pause
         // that comes while it is prepared or opened is asked after it, and is
@@ -97,7 +104,14 @@ find = '''
 replace = '''
         let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
         let begun = first
-            .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
+            .map(|first| -> Result<_, EngineError> {
+                let cf = self.cf_for(first)?;
+                Ok(self
+                    .seams
+                    .ledger
+                    .borrow_mut()
+                    .begin_delivery_as(first.id, None, &cf)?)
+            })
             .transpose()?;'''
 
 [[plant]]

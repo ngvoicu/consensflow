@@ -18,8 +18,11 @@
 # typed (`STILL_WORKING_REMINDED_AFTER_MS`). A shown close still joins a typed failure of the
 # same window (`outage.rs`, `queued_closes`). The notes of ConsensFlow's own that wait for a chief
 # together go in the first one's paste, a line each (a chain: `delivery.rs`, `gather_chain`), up
-# to the first row of another kind and within `CHAIN_CHARS`; given back, withdrawn or failed, the
-# chain lets its notes go (`release_riders`); a note handed in a chain is on its way (`PENDING`).
+# to the first row of another kind and while what its paste says, measured as the window's `cf`
+# writes each line (`cf_proto::chain`), is within `CHAIN_CHARS`; given back, withdrawn or failed,
+# the chain lets its notes go (`release_riders`); a note handed in a chain is on its way
+# (`PENDING`). A chief that takes over is told in its handoff each task it gave that holds
+# (`chief.rs`, `held_tasks`), and a task taken from its member holds with nobody (`held_until`).
 #
 # Every name holds `chief-notes`, so `cargo xtask plants daemon chief-notes` runs them all.
 
@@ -55,9 +58,10 @@ runs = ["chief-notes-ledger", "chief-notes-engine-chains"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
 find = '''
-        gather_chain(store, &message)?;
+        gather_chain(store, &message, cf)?;
 '''
 replace = '''
+        let _ = cf;
 '''
 
 [[plant]]
@@ -68,10 +72,14 @@ runs = ["chief-notes-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
 find = '''
-        if !ours || chars > CHAIN_CHARS {
+        if !ours {
+            break;
+        }
 '''
 replace = '''
-        if !ours && chars > CHAIN_CHARS {
+        if !ours && lines > CHAIN_CHARS {
+            break;
+        }
 '''
 
 [[plant]]
@@ -82,10 +90,10 @@ runs = ["chief-notes-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
 find = '''
-        if !ours || chars > CHAIN_CHARS {
+        if utf16_len(&chain::head(count + 1)) + longer > CHAIN_CHARS {
 '''
 replace = '''
-        if !ours {
+        if CHAIN_CHARS == 0 {
 '''
 
 [[plant]]
@@ -317,4 +325,90 @@ find = '''
 replace = '''
         if *said == goes_on(number) || *said == goes_on_moved(number) {
             continue;
+'''
+
+[[plant]]
+name = "chief-notes: a chain is measured by its notes' own words"
+meant = "note_chains::a_chain_is_gathered_by_what_its_paste_says_and_every_note_is_typed_once_in_order"
+runs = ["chief-notes-engine-chains"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+    let measure = |note: &MessageView| utf16_len(&chain::line(note, cf)) + 1;
+'''
+replace = '''
+    let measure = |note: &MessageView| utf16_len(&note.body) + 0 * utf16_len(&chain::line(note, cf));
+'''
+
+[[plant]]
+name = "chief-notes: a chain is measured for a bare cf in a window whose cf is a path"
+meant = "note_chains::a_chain_is_gathered_by_what_its_paste_says_and_every_note_is_typed_once_in_order"
+runs = ["chief-notes-engine-chains"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        let cf = self.cf_for(&message)?;
+        let look = self.paced_look(record, message.id);
+'''
+replace = '''
+        let cf = cf_proto::cf_word::CfWord::bare();
+        let look = self.paced_look(record, message.id);
+'''
+
+[[plant]]
+name = "chief-notes: a chief that takes over is told no held task"
+meant = "note_chains::a_chief_switched_while_a_task_holds_is_told_the_hold_in_its_handoff"
+runs = ["chief-notes-ledger", "chief-notes-engine-chains"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '''
+    let held = held_tasks(store, project_id, chief.id)?;
+'''
+replace = '''
+    let held = Vec::new();
+'''
+
+[[plant]]
+name = "chief-notes: a hold that became a busy model's wait is still named in a handoff"
+meant = "shown_notes::what_waits_on_a_chief_that_takes_over_names_each_task_it_gave_that_is_held_and_its_hold"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '''
+            if is_busy_note(task.number, body) {
+'''
+replace = '''
+            if is_busy_note(task.number, body) && body.is_empty() {
+'''
+
+[[plant]]
+name = "chief-notes: a task taken back to the board keeps its member's hold"
+meant = "shown_notes::a_held_task_taken_back_to_the_board_holds_with_nobody_and_its_line_says_no_hold"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0, held_until = NULL
+'''
+replace = '''
+           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0
+'''
+
+[[plant]]
+name = "chief-notes: a held task resumed after its session ended keeps the session's hold"
+meant = "shown_notes::a_held_task_resumed_after_its_session_ended_holds_no_more_and_its_line_says_no_hold"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+             paused_with_project = 0, held_until = NULL
+'''
+replace = '''
+             paused_with_project = 0
 '''
