@@ -678,22 +678,12 @@ impl Rig {
 
     /// Every window the pane host opened a process for, as it answered each `pane.open`, whoever
     /// asked it (the daemon, or the case's own): its id and which process its program is, read
-    /// then and kept ([`Rig::window_process`]); the last answer where an id was opened more than
-    /// once. In the order of the ids' first answers; a window the host named no process of is
-    /// not among them.
+    /// then and kept ([`Rig::window_process`]). Every window the host opened, those of a reopened
+    /// member that share a pane id among them: the engine opens the new window under the old id with
+    /// a new generation, and what the old one ran may have outlived it. In the order of the
+    /// answers; a window the host named no process of is not among them.
     pub fn window_roots(&self) -> Vec<(String, Identity)> {
-        let seen = self.shared.seen();
-        let mut found: Vec<(String, Identity)> = Vec::new();
-        for root in &seen.roots {
-            let (Some(id), Some(identity)) = (root.id.as_str(), root.identity) else {
-                continue;
-            };
-            match found.iter_mut().find(|(known, _)| known == id) {
-                Some(known) => known.1 = identity,
-                None => found.push((id.to_owned(), identity)),
-            }
-        }
-        found
+        window_roots_in(&self.shared.seen().roots)
     }
 
     /// Every `pane.exit` the pane host told so far, in order: which window
@@ -1073,6 +1063,25 @@ fn window_process_in(roots: &[route::Root], pane: &Value) -> Option<Identity> {
         .and_then(|root| root.identity)
 }
 
+/// The windows of `roots` and their processes, in the order they were answered (see
+/// [`Rig::window_roots`]): each process the host named, once, whatever id and generation it was
+/// opened under.
+fn window_roots_in(roots: &[route::Root]) -> Vec<(String, Identity)> {
+    let mut found: Vec<(String, Identity)> = Vec::new();
+    for root in roots {
+        let (Some(id), Some(identity)) = (root.id.as_str(), root.identity) else {
+            continue;
+        };
+        if !found
+            .iter()
+            .any(|(known, was)| known == id && *was == identity)
+        {
+            found.push((id.to_owned(), identity));
+        }
+    }
+    found
+}
+
 /// The records of the conversation `session` that the stand-in agent wrote
 /// under the Claude config folder `config`, whole ones only.
 fn recorded(config: &str, session: &str) -> String {
@@ -1086,6 +1095,38 @@ fn recorded(config: &str, session: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The engine opens the window of a reopened member under the same pane id with a new
+    /// generation, and the old window's process may have left what it ran: every process the host
+    /// named is a window of the run, whatever id it was opened under.
+    #[test]
+    fn a_pane_id_opened_again_under_a_new_generation_keeps_every_window_it_had() {
+        let root = |generation: u64, pid: u32, started: u64| route::Root {
+            id: serde_json::json!("p1-worker-1"),
+            generation: serde_json::json!(generation),
+            identity: Some(Identity { pid, started }),
+        };
+        let roots = [root(1, 100, 10), root(2, 200, 20)];
+        assert_eq!(
+            window_roots_in(&roots),
+            [
+                (
+                    "p1-worker-1".to_owned(),
+                    Identity {
+                        pid: 100,
+                        started: 10
+                    }
+                ),
+                (
+                    "p1-worker-1".to_owned(),
+                    Identity {
+                        pid: 200,
+                        started: 20
+                    }
+                ),
+            ]
+        );
+    }
 
     #[test]
     fn a_windows_process_is_the_one_read_as_the_host_answered_its_open_and_never_read_again() {

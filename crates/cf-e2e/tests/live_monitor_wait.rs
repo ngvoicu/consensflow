@@ -123,9 +123,17 @@ const STOPPED: &str = "STOPPED";
 const QUIETED: &str = "QUIETED";
 const RUN_OVER: &str = "RUN-OVER";
 
+/// `text` with the word made for the run ([`cf_e2e::live::members::run_word`]) where it says
+/// `{RUN}`: the no-op word the monitors' commands carry, which stays in the command line of what a
+/// monitor runs, so that what a closed window left is found by it whatever became of its parent
+/// (the sweep, on every platform).
+fn with_run(text: &str) -> String {
+    text.replace("{RUN}", cf_e2e::live::members::run_word())
+}
+
 /// What the agent is asked first: T-442's shape, with a monitor that expires within the
 /// run.
-const ARM: &str = "Do exactly this, using your tools. 1) Use the Bash tool with run_in_background set to true to run: for i in 1 2 3; do echo tick $i; sleep 5; done; echo finished . 2) Use ToolSearch to load the Monitor tool (select:Monitor), then use Monitor to watch that run: its command is : cf-mark-ticks; then tail -f on the background command's output file piped through grep --line-buffered tick, with timeout_ms 40000 and description 'ticks'. 3) End your turn at once, saying only WAITING. Then, each time a notification wakes you: if it is a monitor event with a tick line, reply only NOTED; if it says the background command completed, reply only REPORT-READY; if it says the monitor expired, reply only ALL-DONE.";
+const ARM: &str = "Do exactly this, using your tools. 1) Use the Bash tool with run_in_background set to true to run: for i in 1 2 3; do echo tick $i; sleep 5; done; echo finished . 2) Use ToolSearch to load the Monitor tool (select:Monitor), then use Monitor to watch that run: its command is : cf-mark-ticks {RUN}; then tail -f on the background command's output file piped through grep --line-buffered tick, with timeout_ms 40000 and description 'ticks'. 3) End your turn at once, saying only WAITING. Then, each time a notification wakes you: if it is a monitor event with a tick line, reply only NOTED; if it says the background command completed, reply only REPORT-READY; if it says the monitor expired, reply only ALL-DONE.";
 
 /// Claude's `hooks` setting of the window: a PostToolUse command hook on every tool, which
 /// prints an empty answer, as an owner's hook of any kind runs (Calliope on c593fd49).
@@ -143,7 +151,7 @@ const STOP: &str = "Do exactly this, using your tools. 1) Use the Bash tool with
 
 /// What it is asked third: T-442's own shape, a monitor that watches the run itself and is
 /// over when the run's command exits, which Claude Code says by the monitor's status.
-const EXITS: &str = "Do exactly this, using your tools. 1) Use Monitor to watch the command: : cf-mark-run; for i in 1 2 3; do echo tick $i; sleep 2; done , with timeout_ms 120000 and description 'run'. 2) End your turn at once, saying only WATCHING. Then, each time a notification wakes you: if it says the monitor or its command completed or ended, reply only RUN-OVER; otherwise reply only NOTED.";
+const EXITS: &str = "Do exactly this, using your tools. 1) Use Monitor to watch the command: : cf-mark-run {RUN}; for i in 1 2 3; do echo tick $i; sleep 2; done , with timeout_ms 120000 and description 'run'. 2) End your turn at once, saying only WATCHING. Then, each time a notification wakes you: if it says the monitor or its command completed or ended, reply only RUN-OVER; otherwise reply only NOTED.";
 
 /// What it is asked fourth: ten monitors of no output whose time runs out, five of them on a
 /// command that `exec`s, so that the run measures when Claude Code's notices of their
@@ -153,7 +161,7 @@ const TEN: &str = "Do exactly this, using your tools. 1) Use Monitor five times,
 /// What it is asked last: a monitor on a command that writes more than Claude Code lets
 /// through (2.1.306: ten events, then one each two seconds), which it stops after half a
 /// minute of holding events back, with its own notice and no status (`FIn` of its bundle).
-const NOISY: &str = "Do exactly this, using your tools. 1) Use Monitor to watch the command: : cf-mark-noisy; while true; do echo tick; sleep 0.1; done , with timeout_ms 300000 and description 'noisy'. 2) End your turn at once, saying only WATCHING. Then, each time a notification wakes you: if it says the monitor stopped, reply only QUIETED; otherwise reply only NOTED.";
+const NOISY: &str = "Do exactly this, using your tools. 1) Use Monitor to watch the command: : cf-mark-noisy {RUN}; while true; do echo tick; sleep 0.1; done , with timeout_ms 300000 and description 'noisy'. 2) End your turn at once, saying only WATCHING. Then, each time a notification wakes you: if it says the monitor stopped, reply only QUIETED; otherwise reply only NOTED.";
 
 /// How long the agent has for the whole of the first message's work (the command runs
 /// for 15 seconds and the monitor expires after 40), and for the second's; how often the
@@ -720,7 +728,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     let mut open = Open::new(&rig, &claude, FOLDER, FOLDER)
         .claude_alone_with_hooks(hooks())
         .mcp_config(server.config())
-        .seed(&live::ask::window_text(ARM)?);
+        .seed(&live::ask::window_text(&with_run(ARM))?);
     for name in session_identity() {
         open = open.without(name);
     }
@@ -831,7 +839,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
         stopped && settled_at(&stopping, STOPPED, 1),
         "a command the agent stopped with TaskStop was pending no more: the expired monitor alone was",
     ));
-    window.paste(&window.given(EXITS)?)?;
+    window.paste(&window.given(&with_run(EXITS))?)?;
     let exits = watch(&window, RUN_OVER, &mut starts);
     let raw = raw_records(&window);
     let told = notifications(&raw);
@@ -973,7 +981,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
             .is_some_and(|look| look.settled && look.jobs == 11 && look.noticed == 11),
         "the reader counted the ten pending and noticed, with the first monitor eleven, as the engine is told them",
     ));
-    window.paste(&window.given(NOISY)?)?;
+    window.paste(&window.given(&with_run(NOISY))?)?;
     let noisy = watch(&window, QUIETED, &mut starts);
     let raw = raw_records(&window);
     let told = notifications(&raw);

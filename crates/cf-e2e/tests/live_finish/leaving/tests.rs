@@ -95,12 +95,15 @@ fn the_command_of_a_harness_is_found_by_the_command_and_the_stand_ins_job_by_its
     // ping, whose seconds are not its last word (zeewin, round 7). The rig's stand-in starts
     // a job of its own, whose command line holds the seconds too.
     let harness = if cfg!(windows) {
-        format!("ping -n {SECONDS} 127.0.0.1")
+        format!("ping -n {} 127.0.0.1", seconds())
     } else {
-        format!("sleep {SECONDS}")
+        format!("sleep {}", seconds())
     };
     assert_eq!(wanted(Who::Harness(Harness::Pi)), harness);
-    assert_eq!(wanted(Who::StandIn), format!("--background-job {SECONDS}"));
+    assert_eq!(
+        wanted(Who::StandIn),
+        format!("--background-job {}", seconds())
+    );
 }
 
 /// A process `pid`, begun at `started`, started by `ppid`.
@@ -487,7 +490,7 @@ fn a_harness_is_asked_to_start_the_command_in_the_background_and_answer_and_the_
     let asked = brief(Who::Harness(Harness::Devin));
     assert!(
         asked.starts_with("Start the command `")
-            && asked.contains(&format!(" {SECONDS}"))
+            && asked.contains(&format!(" {}", seconds()))
             && asked.contains("in the background")
             && asked.contains("Do not wait for it")
             && asked.contains("reply with one line"),
@@ -497,16 +500,16 @@ fn a_harness_is_asked_to_start_the_command_in_the_background_and_answer_and_the_
     // The stand-in leaves its job in a shell that waits for it, or detached from it.
     assert_eq!(
         brief(Who::StandIn),
-        format!("BACKGROUND {SECONDS} left a job running")
+        format!("BACKGROUND {} left a job running", seconds())
     );
     assert_eq!(
         stand_in_brief(true),
-        format!("BACKGROUND --detach {SECONDS} left a job running")
+        format!("BACKGROUND --detach {} left a job running", seconds())
     );
     // The command is the platform's own.
     assert!(
-        command() == format!("sleep {SECONDS}")
-            || command() == format!("ping -n {SECONDS} 127.0.0.1"),
+        command() == format!("sleep {}", seconds())
+            || command() == format!("ping -n {} 127.0.0.1", seconds()),
         "{}",
         command()
     );
@@ -1012,4 +1015,205 @@ fn what_escaped_is_what_the_window_held_an_orphan_of_its_folder_since_it_began_a
     assert!(Chosen::default()
         .of_the_run(&all, (folder, "sleep 4711", None), folder_of)
         .is_empty());
+}
+
+/// Ends what it holds, each by which process it is, when the test ends however it does.
+#[cfg(unix)]
+struct Reaper(Vec<Running>);
+
+#[cfg(unix)]
+impl Drop for Reaper {
+    fn drop(&mut self) {
+        let _ = end_chosen(&self.0);
+    }
+}
+
+/// A command of this run's own word that detached out of every look (its shell ended before the
+/// host listed it, and the window has gone), in a folder that is none of the run's, escaped the
+/// ending as surely as one the window held: the folder and the descent cannot see it, and Windows
+/// has no folder to read at all. The word is in its command line wherever it went.
+#[cfg(unix)]
+#[test]
+fn a_command_of_this_runs_word_that_detached_unseen_and_runs_in_another_folder_escaped_and_fails_the_verdict(
+) {
+    let elsewhere = tempfile::tempdir().unwrap();
+    let ran = cf_e2e::process::Run::new("/bin/sh")
+        .args(["-c", &format!("{} > /dev/null 2>&1 & echo $!", command())])
+        .cwd(elsewhere.path())
+        .inheriting_env()
+        .run()
+        .unwrap();
+    let pid: u32 = ran.stdout.trim().parse().unwrap();
+    let mut reaper = Reaper(Vec::new());
+    let folder = tempfile::tempdir().unwrap();
+    let began = ThisMachine
+        .identity(std::process::id())
+        .unwrap()
+        .expect("this process is there")
+        .started;
+    // The run's window began before it and has gone; no look saw the command under it.
+    let chosen = Chosen {
+        window_began: Some(began),
+        number: Some(seconds().to_string()),
+        ..Chosen::default()
+    };
+    let wanted = wanted(Who::Harness(Harness::Claude));
+    let mut found = Vec::new();
+    for _ in 0..50 {
+        if let Some(own) = ThisMachine
+            .processes()
+            .unwrap()
+            .into_iter()
+            .find(|one| one.identity.pid == pid)
+        {
+            reaper.0 = vec![own];
+            found = on_the_machine(|all| {
+                chosen.of_the_run(all, (folder.path(), &wanted, None), working_folder)
+            });
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        !reaper.0.is_empty(),
+        "the command {pid} never ran: the test proves nothing"
+    );
+    assert!(
+        found
+            .iter()
+            .any(|line| line.starts_with(&format!("{pid} "))),
+        "the command {pid} of the run's own word is not among what escaped: {found:#?}"
+    );
+    let mut left = good();
+    left.listed.clear();
+    left.notes.clear();
+    left.escaped = found;
+    let problems = judge(&left, Expect::Ended).unwrap_err();
+    assert!(
+        problems
+            .iter()
+            .any(|problem| problem.starts_with("the command escaped the ending")),
+        "{problems:#?}"
+    );
+}
+
+/// The platform's own command of this run, started here and under no window: `sleep` or, on
+/// Windows, `ping -n`, whose number is the run's word. Found by the word alone and ended by which
+/// process it is; one of another run's number, started beside it, is neither found nor ended.
+#[test]
+fn the_command_of_this_runs_number_is_found_by_it_anywhere_and_ended_by_which_process_it_is_and_another_runs_number_is_none_of_it(
+) {
+    use cf_e2e::process::Run;
+
+    let spawn = |seconds: u64| {
+        let (program, args): (&str, Vec<String>) = if cfg!(windows) {
+            (
+                "ping",
+                ["-n".to_owned(), seconds.to_string(), "127.0.0.1".to_owned()].to_vec(),
+            )
+        } else {
+            ("sleep", vec![seconds.to_string()])
+        };
+        Run::new(program)
+            .args(args)
+            .inheriting_env()
+            .spawn()
+            .unwrap()
+    };
+    // Numbers of this test's own, near the run's: the run's own command of the other tests runs
+    // beside it, and what finds the run's number ends it.
+    let near = |step: u64| FIRST_SECOND + (seconds() - FIRST_SECOND + step) % NUMBERS;
+    let (own_number, other_number) = (near(2), near(3));
+    let mut own = spawn(own_number);
+    let mut other = spawn(other_number);
+    let chosen = Chosen {
+        number: Some(own_number.to_string()),
+        ..Chosen::default()
+    };
+    let wanted = if cfg!(windows) {
+        format!("ping -n {own_number} 127.0.0.1")
+    } else {
+        format!("sleep {own_number}")
+    };
+    let mut found = Vec::new();
+    for _ in 0..100 {
+        found = chosen.by_word(&ThisMachine.processes().unwrap(), &wanted);
+        if found.iter().any(|one| one.identity.pid == own.id()) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        found.iter().any(|one| one.identity.pid == own.id()),
+        "the command of the run's number is not found by it: {found:#?}"
+    );
+    assert!(
+        found.iter().all(|one| one.identity.pid != other.id()),
+        "another run's number is taken for this one's: {found:#?}"
+    );
+    let ended = end_chosen(&found);
+    assert!(ended.failed.is_empty(), "{ended:#?}");
+    let gone = own.wait(Duration::from_secs(10)).unwrap().is_some();
+    let other_runs = other.wait(Duration::from_millis(300)).unwrap().is_none();
+    other.kill();
+    own.kill();
+    assert!(gone, "the command of the run's number was not ended");
+    assert!(other_runs, "another run's command was ended");
+}
+
+#[test]
+fn the_window_and_its_program_hold_the_commands_words_in_their_own_command_line_and_are_none_of_what_the_number_finds(
+) {
+    // The brief that names the command is in the window's command line (T-548).
+    let words = format!("sleep {}", seconds());
+    let all = vec![
+        running(10, 1, 1, "pane-host"),
+        running(
+            100,
+            10,
+            10,
+            &format!("claude -p Start the command {words} now"),
+        ),
+        // A process of the window's own program, which holds the words too.
+        running(
+            101,
+            11,
+            1,
+            &format!("claude --resume Start the command {words} now"),
+        ),
+        running(300, 20, 1, &words),
+        running(301, 21, 1, &format!("sleep {}", seconds() + 1)),
+        // Windows' table lists a ping by the path of its image: the words are not its line.
+        running(
+            302,
+            22,
+            1,
+            &format!(
+                "\"C:\\Windows\\system32\\PING.EXE\" -n {} 127.0.0.1",
+                seconds()
+            ),
+        ),
+        // The same words in a program that is none of the command's, and not the window's.
+        running(303, 23, 1, &format!("editor notes {}", seconds())),
+    ];
+    let mut chosen = Chosen {
+        number: Some(seconds().to_string()),
+        ..Chosen::default()
+    };
+    chosen.choose(
+        &all,
+        Some(Identity {
+            pid: 100,
+            started: 10,
+        }),
+        &[],
+        &words,
+    );
+    let mut pids: Vec<u32> = chosen
+        .processes
+        .iter()
+        .map(|one| one.identity.pid)
+        .collect();
+    pids.sort_unstable();
+    assert_eq!(pids, [300, 302]);
 }

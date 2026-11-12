@@ -52,8 +52,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cf_e2e::live::members::{
-    self, delivered_result, end_chosen, find, holding, is_over, notes_of_work, orphans_in_folder,
-    working_folder, Account, Ended, Identity, Machine, Members, Plan, Running, ThisMachine,
+    self, delivered_result, descending_from, end_chosen, find, holding, is_over, notes_of_work,
+    orphans_in_folder, working_folder, Account, Ended, Identity, Machine, Members, Plan, Running,
+    ThisMachine,
 };
 use cf_e2e::live::tree::{self, Proc, Tree};
 use cf_e2e::live::{cut, secs, text, Harness, Log, Who};
@@ -64,9 +65,50 @@ use crate::check::{
     agent, failure, progress_line, Finished, Progress, CLOSES, DELIVERS, LOOK, WORK,
 };
 
-/// How many seconds the command the worker starts runs: more than a run lasts, and a
-/// number that is in no other command line of the machine.
-pub const SECONDS: u64 = 4711;
+/// The seconds the commands of the runs of this kit count from, and how many numbers there are.
+const FIRST_SECOND: u64 = 4000;
+const NUMBERS: u64 = 6000;
+
+/// Whether `command` has `word` as a whole argument: split at the blanks, one of them is it.
+pub fn has_arg(command: &str, word: &str) -> bool {
+    command.split_whitespace().any(|arg| arg == word)
+}
+
+/// Whether the program of `command` is the one the worker's command is: `sleep`, or on Windows
+/// `ping`, which that table lists by the path of its image (`"C:\Windows\system32\PING.EXE" -n
+/// 4711 127.0.0.1`), so that the command's own words are not in its line.
+fn is_the_command(command: &str) -> bool {
+    let first = command.split_whitespace().next().unwrap_or_default();
+    let name = first
+        .trim_matches('"')
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default();
+    let name = name.to_ascii_lowercase();
+    matches!(name.strip_suffix(".exe").unwrap_or(&name), "sleep" | "ping")
+}
+
+/// How many seconds the command the worker starts runs: more than a run lasts (an hour and
+/// more), and a number made for this run, which no other command line of the machine has as a
+/// whole argument when it is chosen (from the run's pid and the time, the next free number where
+/// that is taken): it is the run's own word in the command's process whatever becomes of its
+/// shell, its window and its folder. Another tree's run has another number, so what holds it
+/// is this run's alone ([`Chosen::of_the_run`]).
+pub fn seconds() -> u64 {
+    static NUMBER: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *NUMBER.get_or_init(|| {
+        let now = jiff::Timestamp::now().as_millisecond().unsigned_abs();
+        let seed = u64::from(std::process::id()).wrapping_mul(2_654_435_761) ^ now;
+        let table = ThisMachine.processes().unwrap_or_default();
+        (0..NUMBERS)
+            .map(|step| FIRST_SECOND + (seed % NUMBERS + step) % NUMBERS)
+            .find(|number| {
+                let word = number.to_string();
+                !table.iter().any(|process| has_arg(&process.command, &word))
+            })
+            .unwrap_or(FIRST_SECOND + seed % NUMBERS)
+    })
+}
 
 /// What the run expects of a worker that detaches the command: that the window's close ends
 /// it where the tree holds it, or the known macOS limit of two harnesses.
@@ -125,9 +167,9 @@ impl Waits {
 /// `sleep` in PowerShell or in `cmd`, and has `ping` in every one of them.
 fn command() -> String {
     if cfg!(windows) {
-        format!("ping -n {SECONDS} 127.0.0.1")
+        format!("ping -n {} 127.0.0.1", seconds())
     } else {
-        format!("sleep {SECONDS}")
+        format!("sleep {}", seconds())
     }
 }
 
@@ -136,7 +178,8 @@ fn command() -> String {
 fn detach() -> String {
     if cfg!(windows) {
         format!(
-            "`Start-Process -WindowStyle Hidden ping -ArgumentList '-n','{SECONDS}','127.0.0.1'` in PowerShell, or `nohup {} > /dev/null 2>&1 &` in a shell that has `nohup`",
+            "`Start-Process -WindowStyle Hidden ping -ArgumentList '-n','{}','127.0.0.1'` in PowerShell, or `nohup {} > /dev/null 2>&1 &` in a shell that has `nohup`",
+            seconds(),
             command()
         )
     } else {
@@ -160,13 +203,13 @@ pub fn brief(who: Who) -> String {
     }
 }
 
-/// What the chief gives the rig's stand-in: to start a job of [`SECONDS`] seconds and
+/// What the chief gives the rig's stand-in: to start a job of [`seconds`] seconds and
 /// answer; where `detached`, detached from the shell that runs it, as the agents of four
 /// harnesses detached theirs (`nohup … &`), which ends the shell and leaves the job with
 /// no parent.
 pub fn stand_in_brief(detached: bool) -> String {
     let how = if detached { "--detach " } else { "" };
-    format!("BACKGROUND {how}{SECONDS} left a job running")
+    format!("BACKGROUND {how}{} left a job running", seconds())
 }
 
 /// What the command line of the command the worker started holds, to find it on the
@@ -174,7 +217,7 @@ pub fn stand_in_brief(detached: bool) -> String {
 /// the job's words.
 fn wanted(who: Who) -> String {
     match who {
-        Who::StandIn => format!("--background-job {SECONDS}"),
+        Who::StandIn => format!("--background-job {}", seconds()),
         Who::Harness(_) => command(),
     }
 }
@@ -509,7 +552,13 @@ pub fn run_asked(
     let waits = Waits::of(who);
     // What the run chose to end is ended whatever came of the run, and what could not be
     // ended, or looked for, fails it (Astra and Sol on round 6).
-    let mut chosen = Chosen::default();
+    // The rig's stand-in tells its own jobs by their files (the rig's folder of them): the stand-in
+    // runs of one test program, which run side by side, count the same seconds, so for them the
+    // number is no word of a run's own. A harness's command is: one run at a time.
+    let mut chosen = Chosen {
+        number: matches!(who, Who::Harness(_)).then(|| seconds().to_string()),
+        ..Chosen::default()
+    };
     let finished = observe(
         &mut members,
         (&agent(who), brief, &wanted(who)),
@@ -549,7 +598,7 @@ fn observe(
     let number = members.give(agent, brief)?;
     log.say(format!("T-{number} is given: {}", cut(brief, 140)));
 
-    let mark = SECONDS.to_string();
+    let mark = seconds().to_string();
     let mut left = Left::default();
     let mut began: Option<Duration> = None;
     let mut pane: Option<String> = None;
@@ -666,6 +715,19 @@ fn observe(
             )
         }));
     }
+    // What holds this run's own number is the run's wherever it went, and is ended by which process
+    // it is, whichever way the case comes out (a command that escaped fails it, [`judge`]).
+    if let Ok(all) = ThisMachine.processes() {
+        for one in chosen.by_word(&all, wanted) {
+            if !chosen
+                .processes
+                .iter()
+                .any(|known| known.identity == one.identity)
+            {
+                chosen.processes.push(one);
+            }
+        }
+    }
     if looks_for_its_own_orphans(expect, &left) {
         match ThisMachine.processes() {
             Ok(all) => {
@@ -770,6 +832,9 @@ struct Chosen {
     /// The worker's window's process, as the first look at it said: what descends from it is
     /// the window's own, as long as it runs.
     window: Option<Identity>,
+    /// The run's own number of seconds ([`seconds`]), the word its command's process holds as a
+    /// whole argument: what holds it, and the command's words, is the run's wherever it went.
+    number: Option<String>,
     /// An orphan that holds the command's words and cannot be proved the run's own, each as the
     /// machine lists it: not ended, and not counted for the run either, as it may be any other
     /// run's ([`Chosen::take_orphans`]).
@@ -815,7 +880,8 @@ impl Chosen {
                 of_jobs.push(process.clone());
             }
         }
-        for one in in_window.into_iter().chain(of_jobs) {
+        let of_the_word = self.by_word(all, wanted);
+        for one in in_window.into_iter().chain(of_jobs).chain(of_the_word) {
             if !self
                 .processes
                 .iter()
@@ -824,6 +890,59 @@ impl Chosen {
                 self.processes.push(one);
             }
         }
+    }
+
+    /// What holds the run's own number as a whole argument and `wanted` in its command line,
+    /// wherever it runs and whoever started it, with what it started: the command of this run, or
+    /// the shell that holds its words, which no other run's has (the number is made for the run,
+    /// [`seconds`]). Not the worker's own window, what it descends from, or another process of
+    /// its program: the brief that names the command is in the window's command line too (T-548:
+    /// a check that ended what held the words ended the window's TUI).
+    fn by_word(&self, all: &[Running], wanted: &str) -> Vec<Running> {
+        let Some(number) = &self.number else {
+            return Vec::new();
+        };
+        let program = |process: &Running| {
+            process
+                .command
+                .split_whitespace()
+                .next()
+                .map(|first| first.rsplit(['/', '\\']).next().unwrap_or(first).to_owned())
+        };
+        let window = self
+            .window
+            .and_then(|own| all.iter().find(|process| process.identity == own));
+        let mut ancestors: Vec<Identity> = Vec::new();
+        if let Some(window) = window {
+            let mut at = window.clone();
+            while let Some(parent) = all.iter().find(|process| {
+                process.identity.pid == at.ppid && process.identity.started <= at.identity.started
+            }) {
+                if ancestors.contains(&parent.identity) {
+                    break;
+                }
+                ancestors.push(parent.identity);
+                at = parent.clone();
+            }
+        }
+        let own_program = window.and_then(program);
+        let mut found: Vec<Running> = Vec::new();
+        for process in all.iter().filter(|process| {
+            has_arg(&process.command, number)
+                && (process.command.contains(wanted) || is_the_command(&process.command))
+                && Some(process.identity) != self.window
+                && !ancestors.contains(&process.identity)
+                && !(own_program.is_some() && program(process) == own_program)
+        }) {
+            for one in
+                std::iter::once(process.clone()).chain(descending_from(all, process.identity))
+            {
+                if !found.iter().any(|known| known.identity == one.identity) {
+                    found.push(one);
+                }
+            }
+        }
+        found
     }
 
     /// What of `all` the run counts for the command that escaped, and for nothing else that
@@ -847,6 +966,7 @@ impl Chosen {
         if let Some(since) = self.window_began {
             found.extend(orphans_in_folder(all, wanted, folder, since, &folder_of));
         }
+        found.extend(self.by_word(all, wanted));
         if let Some(word) = word {
             found.extend(
                 all.iter()
@@ -887,13 +1007,13 @@ impl Chosen {
             Some(since) => orphans_in_folder(all, wanted, folder, since, &folder_of),
             None => Vec::new(),
         };
-        for orphan in &found {
+        for orphan in found.iter().cloned().chain(self.by_word(all, wanted)) {
             if !self
                 .processes
                 .iter()
                 .any(|chosen| chosen.identity == orphan.identity)
             {
-                self.processes.push(orphan.clone());
+                self.processes.push(orphan);
             }
         }
         self.unproven = all
