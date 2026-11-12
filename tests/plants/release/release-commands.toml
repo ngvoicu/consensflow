@@ -843,7 +843,7 @@ meant = "an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_ser
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/trial.rs"
 find = '''
             "--ref",
             "main",'''
