@@ -44,8 +44,8 @@ runs = ["meeting-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''        behind_held_words("m"),
-        held_by_meeting("m")'''
+find = '''            behind_held_words("m"),
+            held_by_meeting("m")'''
 replace = '''            behind_held_words("m"),
             { let _ = held_by_meeting; "(0)" }'''
 
@@ -56,8 +56,8 @@ runs = ["meeting-kit"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''        behind_held_words("m"),
-        held_by_meeting("m")'''
+find = '''            behind_held_words("m"),
+            held_by_meeting("m")'''
 replace = '''            behind_held_words("m"),
             { let _ = held_by_meeting; "(0)" }'''
 
@@ -68,8 +68,8 @@ runs = ["meeting-kit"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''        behind_held_words("m"),
-        held_by_meeting("m")'''
+find = '''            behind_held_words("m"),
+            held_by_meeting("m")'''
 replace = '''            behind_held_words("m"),
             { let _ = held_by_meeting; "(0)" }'''
 
@@ -449,8 +449,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''        behind_held_words("m"),
-        held_by_meeting("m")'''
+find = '''            behind_held_words("m"),
+            held_by_meeting("m")'''
 replace = '''            behind_held_words("m"),
             { let _ = held_by_meeting; "(0)" }'''
 

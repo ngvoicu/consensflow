@@ -39,11 +39,9 @@ runs = ["waiting-notes-ledger", "waiting-notes-engine"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = '''         AND state = 'queued' AND handed_at IS NULL AND body != ?
-         AND substr(body, 1, length(?)) != ?
+find = '''         AND state = 'queued' AND body != ? AND substr(body, 1, length(?)) != ?
          AND substr(body, 1, length(?)) != ? RETURNING body",'''
-replace = '''         AND body != ?
-         AND substr(body, 1, length(?)) != ?
+replace = '''         AND body != ? AND substr(body, 1, length(?)) != ?
          AND substr(body, 1, length(?)) != ? RETURNING body",'''
 
 [[plant]]
@@ -63,11 +61,9 @@ runs = ["waiting-notes-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = '''         AND state = 'queued' AND handed_at IS NULL AND body != ?
-         AND substr(body, 1, length(?)) != ?
+find = '''         AND state = 'queued' AND body != ? AND substr(body, 1, length(?)) != ?
          AND substr(body, 1, length(?)) != ? RETURNING body",'''
-replace = '''         AND state = 'queued' AND handed_at IS NULL
-         AND substr(body, 1, length(?)) != ?
+replace = '''         AND state = 'queued' AND substr(body, 1, length(?)) != ?
          AND substr(body, 1, length(?)) != ? RETURNING body",'''
 
 [[plant.edit]]

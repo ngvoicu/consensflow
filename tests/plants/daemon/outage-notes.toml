@@ -98,7 +98,7 @@ runs = ["on-engine"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/outage.rs"
 find = '''
-const PENDING: &str = "(state IN ('queued', 'delivering') AND handed_at IS NULL)";'''
+const PENDING: &str = "(state = 'queued' OR (state = 'delivering' AND handed_at IS NULL))";'''
 replace = 'const PENDING: &str = "(1 = 1)";'
 
 [[plant]]
@@ -109,7 +109,7 @@ runs = ["on-engine"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/outage.rs"
 find = '''
-const PENDING: &str = "(state IN ('queued', 'delivering') AND handed_at IS NULL)";'''
+const PENDING: &str = "(state = 'queued' OR (state = 'delivering' AND handed_at IS NULL))";'''
 replace = 'const PENDING: &str = "(1 = 1)";'
 
 [[plant]]
@@ -277,9 +277,9 @@ runs = ["on-ledger"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/outage.rs"
 find = '''
-const PENDING: &str = "(state IN ('queued', 'delivering') AND handed_at IS NULL)";'''
+const PENDING: &str = "(state = 'queued' OR (state = 'delivering' AND handed_at IS NULL))";'''
 replace = '''
-const PENDING: &str = "(state = 'queued' AND handed_at IS NULL)";'''
+const PENDING: &str = "(state = 'queued')";'''
 
 [[plant]]
 name = "outage notes: only the newest two hundred failures told are looked at for a note still to be given"
