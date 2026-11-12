@@ -37,7 +37,10 @@
 //!
 //! A Mac that sleeps stops the beats: a run woken after [`DEAD_AFTER_MS`] finds its ticket gone
 //! and makes it again under the same name, and may meanwhile have been gone past by one that did
-//! not wait for it; the machine's own lock is the last word on who runs.
+//! not wait for it; the machine's own lock is the last word on who runs. Two waiters that both read
+//! its stale time can take it away twice, the second time just after its run made it again: the
+//! run's wait then ends with "could not keep alive the queue ticket" (never seen), and running the
+//! command again is the way on.
 
 use std::fs;
 use std::io;
@@ -216,6 +219,12 @@ impl Queues {
                 }
             })
         };
+        #[cfg(test)]
+        KEPT.lock().unwrap_or_else(PoisonError::into_inner).push((
+            path.clone(),
+            text.clone(),
+            Arc::clone(&failed),
+        ));
         Ok(Ticket {
             path,
             text,
@@ -226,9 +235,18 @@ impl Queues {
     }
 }
 
+/// The tickets taken in this test process, each with its text and the cell its beats keep their
+/// failure in, so that a test of a whole run can drive a beat by hand.
+#[cfg(test)]
+pub(super) static KEPT: Mutex<Vec<KeptTicket>> = Mutex::new(Vec::new());
+
+/// A ticket's path, its text and the cell its beats keep their failure in.
+#[cfg(test)]
+pub(super) type KeptTicket = (PathBuf, String, Arc<Mutex<Option<io::Error>>>);
+
 /// One beat of a run's ticket: touched, or made again under its name if it is gone (taken for a
 /// dead one while this Mac slept), which is its place. What it could not do is kept in `failed`.
-fn beat_after(
+pub(super) fn beat_after(
     path: &Path,
     text: &str,
     failed: &Mutex<Option<io::Error>>,
