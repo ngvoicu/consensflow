@@ -761,7 +761,7 @@ meant = "a_ci_run_still_going_is_waited_for_beside_a_red_one"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/ci.rs"
 find = '''
                     self.system.pause(self.pace.poll);
                 }
