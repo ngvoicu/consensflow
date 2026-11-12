@@ -290,9 +290,9 @@ impl Chief<'_> {
             "the human types into the chief's window: {}",
             cf_e2e::live::cut(words, 120)
         ));
-        let mark = self.events().len();
         let given_before = evidence::given(&self.items(), words).len();
-        rig.tell(self.members.project_id(), words)?;
+        // Counted from the paste itself, after the wait for the chief to be idle.
+        let mark = rig.tell_marked(self.members.project_id(), words, AT_REST)?;
         for again in 0..=ENTERS {
             sleep(TAKES);
             let lane = self.state()?;

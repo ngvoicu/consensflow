@@ -10,6 +10,7 @@
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use cf_e2e::live::ask::{self, Item};
 use cf_e2e::live::members::{brief_delivered, find, is_over, Account, MemberWindow, Members};
 use cf_e2e::live::Harness;
 use cf_e2e::Result;
@@ -39,11 +40,38 @@ pub struct Doing {
 pub const DECLINED: &str =
     "the workload never began (the model declined): precondition unmet, no Stop was tried";
 
+/// The harnesses whose record readers write an item of the role `tool` for each tool a turn
+/// ran (Claude Code, Codex, Devin, Muse Code). Pi's does not: its record cannot show that no
+/// tool ran, so no turn of Pi's is shown to have run none.
+fn shows_tools(kind: &str) -> bool {
+    matches!(kind, "claude-code" | "codex" | "devin" | "muse")
+}
+
+/// Whether the member's own record shows its last turn (the items after the last item of the
+/// user's, the brief) answered in words and ran no tool: the one positive evidence there is that
+/// the model declined. A record that cannot show a tool, one of no turn, or one with a tool item
+/// in it shows nothing of the kind.
+pub fn ran_no_tool(kind: &str, items: &[Item]) -> bool {
+    if !shows_tools(kind) {
+        return false;
+    }
+    let Some(brief) = items.iter().rposition(|item| item.role == "user") else {
+        return false;
+    };
+    let turn = &items[brief + 1..];
+    turn.iter()
+        .any(|item| item.role == "assistant" && !item.text.trim().is_empty())
+        && !turn.iter().any(|item| item.role == "tool")
+}
+
 /// Whether the member of the task of `thread` declined the workload: its task is over with a
-/// result (it ended its turn with an answer: a task the daemon failed or the human cancelled
-/// is none of the model's), and the result is not the work's (it does not hold `word`, where
-/// the work has one). The caller says it only of a member whose work was never seen.
-pub fn declined(thread: &Value, word: Option<&str>) -> bool {
+/// result (a task the daemon failed or the human cancelled is none of the model's), the result is
+/// not the work's (it holds no `word`, where the work has one), **and its own record shows the
+/// turn ran no tool** ([`ran_no_tool`]; `items` are none where no record could be read). The
+/// caller says it only of a member whose work the case's reading never saw. Anything less, a
+/// record that shows a tool run or none that can be read, is a member that did not run its
+/// command, as before: the work may have run unseen.
+pub fn declined(thread: &Value, word: Option<&str>, kind: &str, items: Option<&[Item]>) -> bool {
     if !matches!(thread["state"].as_str(), Some("done" | "accepted")) {
         return false;
     }
@@ -54,7 +82,44 @@ pub fn declined(thread: &Value, word: Option<&str>) -> bool {
         .filter(|message| message["kind"] == "result")
         .filter_map(|message| message["body"].as_str())
         .collect();
-    !results.is_empty() && !word.is_some_and(|word| results.iter().any(|body| body.contains(word)))
+    !results.is_empty()
+        && !word.is_some_and(|word| results.iter().any(|body| body.contains(word)))
+        && items.is_some_and(|items| ran_no_tool(kind, items))
+}
+
+/// The member's own record, as the daemon's reader reads it: its conversation is the one its
+/// window was last seen on (`seen`) or is opened on, or, for a harness that names its own, the one the daemon bound to it.
+/// None where there is no window, no conversation, or no record that can be read.
+pub fn member_items(ctx: &Ctx, kind: &str, seen: Option<&str>) -> Option<Vec<Item>> {
+    let members = ctx.members;
+    let session = seen
+        .map(str::to_owned)
+        .or_else(|| {
+            members
+                .window_of(ctx.agent)
+                .ok()
+                .flatten()
+                .and_then(|window| window.session())
+        })
+        .or_else(|| bound_session(&members.events(), members.handle_of(ctx.agent)))?;
+    ask::records(kind, &session, members.rig().environment())
+        .ok()
+        .flatten()
+        .map(|record| record.items)
+}
+
+/// The native session the daemon bound to the newest conversation it started for `handle`.
+fn bound_session(events: &[Value], handle: &str) -> Option<String> {
+    let started = events.iter().rfind(|event| {
+        event["kind"] == "conversation.started" && event["data"]["participant"] == handle
+    })?["data"]["conversation"]
+        .as_i64()?;
+    events
+        .iter()
+        .rfind(|event| {
+            event["kind"] == "conversation.bound" && event["data"]["conversation"] == started
+        })
+        .and_then(|event| event["data"]["nativeSession"].as_str().map(str::to_owned))
 }
 
 /// How often the task is looked at while the member is waited for.
@@ -115,8 +180,9 @@ enum Waited {
     /// Its window shows the work while its lane reads something else (`state`): what the
     /// reading saw.
     Mismatch(String, String),
-    /// Its task, which is over: the daemon gave its window up, or its work ended.
-    Over(Value),
+    /// Its task, which is over: the daemon gave its window up, or its work ended; and the
+    /// conversation its window was last seen on (its window may be gone when the task is read).
+    Over(Value, Option<String>),
 }
 
 /// Waits for the member of the task `number` to be at the point `ready` finds (see the
@@ -136,6 +202,7 @@ fn await_ready(
     let members = ctx.members;
     let (mut worked, mut task_looked): (Option<Instant>, Option<Instant>) = (None, None);
     let mut delivered = false;
+    let mut session: Option<String> = None;
     let mut disagreement = Disagreement::default();
     find(
         ctx.log,
@@ -148,7 +215,7 @@ fn await_ready(
                 let thread = members.task(number)?;
                 delivered |= brief_delivered(&thread);
                 if is_over(&thread) {
-                    return Ok(Some(Waited::Over(thread)));
+                    return Ok(Some(Waited::Over(thread, session.clone())));
                 }
             }
             let lane = members.lane(ctx.agent)?;
@@ -156,6 +223,7 @@ fn await_ready(
             let Some(window) = members.window_in(lane) else {
                 return Ok(None);
             };
+            session = window.session().or(session.take());
             // A lane reads working while its window is still to show the brief.
             let working = window.activity["state"] == "working" && delivered;
             worked = working.then(|| worked.unwrap_or_else(Instant::now));
@@ -210,14 +278,26 @@ pub fn begin(
             unstarted::say_why(case, members, ctx.agent, number, &waiting, devin);
             return Ok(None);
         }
-        Some(Waited::Over(thread)) if declined(&thread, doing.word) => {
+        Some(Waited::Over(thread, session))
+            if declined(
+                &thread,
+                doing.word,
+                harness.map_or("claude-code", Harness::kind),
+                member_items(
+                    ctx,
+                    harness.map_or("claude-code", Harness::kind),
+                    session.as_deref(),
+                )
+                .as_deref(),
+            ) =>
+        {
             case.unmet(DECLINED);
             unstarted::say_why(case, members, ctx.agent, number, &waiting, devin);
             return Ok(None);
         }
         other => {
             let over = match &other {
-                Some(Waited::Over(thread)) => {
+                Some(Waited::Over(thread, _)) => {
                     Some(thread["state"].as_str().unwrap_or("undefined").to_owned())
                 }
                 _ => None,
@@ -270,30 +350,42 @@ mod tests {
     use super::*;
     use crate::midturn::tool::DOING;
 
+    fn item(role: &str, text: &str) -> Item {
+        Item {
+            id: String::new(),
+            role: role.to_owned(),
+            text: text.to_owned(),
+            complete: true,
+        }
+    }
+
+    fn thread(state: &str, bodies: &[&str]) -> Value {
+        serde_json::json!({
+            "state": state,
+            "messages": std::iter::once(serde_json::json!({ "kind": "task", "body": "brief" }))
+                .chain(bodies.iter().map(|body| serde_json::json!({ "kind": "result", "body": body })))
+                .collect::<Vec<_>>(),
+        })
+    }
+
     #[test]
     fn a_declined_workload_is_an_unmet_precondition_and_no_stop_failure() {
-        let thread = |state: &str, bodies: &[&str]| {
-            serde_json::json!({
-                "state": state,
-                "messages": std::iter::once(serde_json::json!({ "kind": "task", "body": "brief" }))
-                    .chain(bodies.iter().map(|body| serde_json::json!({ "kind": "result", "body": body })))
-                    .collect::<Vec<_>>(),
-            })
-        };
-        // A task over with a result that is not the work's: the model declined.
         let said = "I can't write all those numbers, it is too long.";
-        assert!(declined(&thread("done", &[said]), Some("5000")));
-        assert!(declined(&thread("accepted", &[said]), None));
-        // One whose result has the work's word did it, and the case's reading was late.
-        assert!(!declined(
-            &thread("done", &["1 2 3 ... 5000"]),
-            Some("5000")
+        let no_tool = [item("user", "brief"), item("assistant", said)];
+        // A task over with a result that is not the work's, and a record that shows the turn
+        // answered in words and ran no tool: the model declined.
+        assert!(declined(
+            &thread("done", &[said]),
+            Some("5000"),
+            "claude-code",
+            Some(&no_tool)
         ));
-        // A task the daemon failed or the human cancelled, or one with no result, is none the
-        // model's to decline.
-        assert!(!declined(&thread("failed", &[said]), Some("5000")));
-        assert!(!declined(&thread("cancelled", &[said]), None));
-        assert!(!declined(&thread("done", &[]), None));
+        assert!(declined(
+            &thread("accepted", &[said]),
+            None,
+            "codex",
+            Some(&no_tool)
+        ));
         // The case is then said unmet, and holds: no failure, and a count of its own.
         let mut case = Account::new();
         case.unmet(DECLINED);
@@ -308,6 +400,61 @@ mod tests {
         // A failure beside it is still a failure.
         run.fail("another");
         assert!(!run.held());
+    }
+
+    #[test]
+    fn work_that_ran_unseen_is_no_decline_and_stays_the_failure_it_was() {
+        let said = "Done.";
+        let ran = [
+            item("user", "brief"),
+            item("tool", "sleep 119"),
+            item("assistant", said),
+        ];
+        let no_tool = [item("user", "brief"), item("assistant", said)];
+        let over = thread("done", &[said]);
+        // The record shows a tool run (the readers missed the command): FAIL as before.
+        assert!(!declined(&over, None, "claude-code", Some(&ran)));
+        // No record could be read: nothing shows the model declined.
+        assert!(!declined(&over, None, "claude-code", None));
+        assert!(!declined(&over, None, "claude-code", Some(&[])));
+        // A record of a harness that writes no item for a tool (Pi's) cannot show none ran.
+        assert!(!declined(&over, None, "pi", Some(&no_tool)));
+        // A tool of an earlier turn is no tool of this one; the last turn answered in words only.
+        let later = [
+            item("user", "one"),
+            item("tool", "x"),
+            item("assistant", "a"),
+            item("user", "two"),
+            item("assistant", "no"),
+        ];
+        assert!(declined(&over, None, "devin", Some(&later)));
+        // A turn with no answer in words is no decline; nor is a failed or cancelled task, or one
+        // with no result, or whose result holds the work's word.
+        assert!(!declined(&over, None, "muse", Some(&[item("user", "b")])));
+        assert!(!declined(
+            &thread("failed", &[said]),
+            None,
+            "claude-code",
+            Some(&no_tool)
+        ));
+        assert!(!declined(
+            &thread("cancelled", &[said]),
+            None,
+            "claude-code",
+            Some(&no_tool)
+        ));
+        assert!(!declined(
+            &thread("done", &[]),
+            None,
+            "claude-code",
+            Some(&no_tool)
+        ));
+        assert!(!declined(
+            &thread("done", &["1 ... 5000"]),
+            Some("5000"),
+            "claude-code",
+            Some(&no_tool)
+        ));
     }
 
     #[test]

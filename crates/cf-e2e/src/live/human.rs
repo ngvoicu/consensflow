@@ -31,6 +31,9 @@ const SETTLE: Duration = Duration::from_secs(30);
 const TAKES: Duration = Duration::from_secs(5);
 const ENTERS: usize = 3;
 
+/// How long the chief is waited for to be idle at the paste ([`Rig::tell`]'s own minute).
+const TELLS_IDLE: Duration = Duration::from_secs(60);
+
 /// The key Enter sends.
 const ENTER: u8 = 13;
 
@@ -57,7 +60,8 @@ impl Taken {
 }
 
 /// What became of a prompt typed to the chief: `after` are the daemon's events written
-/// since the prompt was typed (oldest first), `lane` what the chief's lane reads now, and
+/// since the prompt was pasted (oldest first, counted from the mark [`Rig::tell_marked`]
+/// takes at the paste itself, never from before the wait for the chief to be idle), `lane` what the chief's lane reads now, and
 /// `recorded` whether the chief's own record holds the typed words as a user item since (a
 /// caller that cannot read the record says false).
 pub fn taken(after: &[Value], lane: &str, recorded: bool) -> Taken {
@@ -69,6 +73,12 @@ pub fn taken(after: &[Value], lane: &str, recorded: bool) -> Taken {
     if worked || lane != "idle" {
         return Taken::AtWork;
     }
+    // Which events count, and why each can only follow this prompt: the chief was idle when
+    // the prompt was pasted and the events counted are those written after the paste. A chief
+    // window reading working or waiting then is a turn the paste began; a ledger call of the
+    // chief's (`from` is `chief`) is made inside a turn, and none was open. What this cannot
+    // tell from the prompt is another thing that begins a turn of the chief's meanwhile (a
+    // result delivered to it): the suites that type to a chief with this give it none.
     // The ledger's events carry who made the call in `from` (`task.created`, `message.sent`…):
     // a chief that gave a task or sent a message since the prompt was typed took the prompt.
     let acted = after
@@ -134,8 +144,9 @@ impl<'a> Human<'a> {
             "the human types into the chief's window: {}",
             cut(words, 200)
         ));
-        let mark = Trace::read(self.rig).len();
-        self.rig.tell(self.project.id(), words)?;
+        // The mark is the daemon's event count at the paste itself, taken after the wait for
+        // the chief to be idle: what the chief did before the paste is no answer to it.
+        let mark = self.rig.tell_marked(self.project.id(), words, TELLS_IDLE)?;
         let pane = self.chief()?["pane"].clone();
         for again in 0..=ENTERS {
             sleep(TAKES);
@@ -314,6 +325,19 @@ mod tests {
         assert!(!taken(&seen, "idle", false).presses_again());
         // Or its record holds the typed words, and the daemon saw nothing of it.
         assert_eq!(taken(&[], "idle", true), Taken::AndOver);
+    }
+
+    #[test]
+    fn a_chief_call_before_the_paste_is_no_answer_to_it_and_the_prompt_is_pressed_again() {
+        // The chief's call landed while the human waited for it to be idle; the paste came
+        // after it, and nothing followed the paste.
+        let lines = [IDLE, CHIEF_GAVE_A_TASK];
+        // Counted from before the wait (the mark of the old code), it read as the answer.
+        assert_eq!(taken(&after(&lines, 1), "idle", false), Taken::AndOver);
+        // Counted from the paste (`Rig::tell_marked`), nothing followed it: pressed again.
+        let seen = after(&lines, 2);
+        assert_eq!(taken(&seen, "idle", false), Taken::NotTaken);
+        assert!(taken(&seen, "idle", false).presses_again());
     }
 
     #[test]

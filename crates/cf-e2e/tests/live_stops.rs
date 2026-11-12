@@ -267,17 +267,28 @@ fn a_stop_the_daemon_presses_is_paid_at_rest_and_never_said_to_be_ignored_where_
                     "== {} {version}, {} (native daemon): {}",
                     harness.name(),
                     case.name(),
-                    if account.held() { "ok" } else { "FAILED" }
+                    status(&account)
                 ),
                 &account.text(),
             );
             tally.add(harness.name(), case.name(), &account);
             checks.push(Check::new(
                 harness.name(),
-                case.name(),
+                &if account.is_unmet() && account.held() {
+                    format!("{} (unmet)", case.name())
+                } else {
+                    case.name().to_owned()
+                },
                 account.held(),
                 if account.is_unmet() {
-                    format!("{version}: UNMET, {}", midturn::begin::DECLINED)
+                    format!(
+                        "{version}: {}",
+                        account
+                            .lines()
+                            .iter()
+                            .find(|line| line.starts_with("UNMET"))
+                            .map_or("UNMET", String::as_str)
+                    )
                 } else {
                     version
                 },
@@ -287,6 +298,18 @@ fn a_stop_the_daemon_presses_is_paid_at_rest_and_never_said_to_be_ignored_where_
     log.say(tally.summary());
     report::conclude(&log, "what each case came to", &checks)?;
     tally.tried()
+}
+
+/// How a case's heading says it came out: `unmet` for a case whose precondition was not met
+/// (never `ok`, which says a Stop was tried and held), else `ok` or `FAILED`.
+fn status(account: &Account) -> &'static str {
+    if !account.held() {
+        "FAILED"
+    } else if account.is_unmet() {
+        "unmet"
+    } else {
+        "ok"
+    }
 }
 
 /// How the cases of a run came out, by name: held, failed, and unmet (their member declined
@@ -429,6 +452,19 @@ mod tests {
         );
         drop(watched);
         members.close().unwrap();
+    }
+
+    #[test]
+    fn the_heading_of_an_unmet_case_says_unmet_and_never_ok() {
+        let mut unmet = Account::new();
+        unmet.check("the foreground held", true, "x");
+        unmet.unmet("no job at the pause");
+        assert_eq!(status(&unmet), "unmet");
+        assert_eq!(status(&Account::new()), "ok");
+        let mut failed = Account::new();
+        failed.unmet("declined");
+        failed.fail("and a failure beside it");
+        assert_eq!(status(&failed), "FAILED");
     }
 
     #[test]

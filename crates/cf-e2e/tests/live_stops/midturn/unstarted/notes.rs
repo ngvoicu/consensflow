@@ -87,7 +87,12 @@ pub fn inbox_lines(who: &str, inbox: &[Value], most: usize) -> Vec<String> {
 pub fn told_why(number: i64, chief: &[Value]) -> Option<String> {
     chief
         .iter()
-        .find(|message| message["kind"] == "note" && message["taskNumber"] == number)
+        .find(|message| {
+            message["kind"] == "note"
+                && message["taskNumber"] == number
+                // The daemon's own notes have no sender; a note a participant wrote is theirs.
+                && message["sender"].is_null()
+        })
         .map(|note| {
             let body = squash(note["body"].as_str().unwrap_or_default(), WORDS);
             match note["state"].as_str() {
@@ -220,6 +225,8 @@ mod tests {
             json!({ "kind": "note", "taskNumber": 10, "state": "delivered", "body": "T-1 failed: not this one" }),
             json!({ "kind": "result", "taskNumber": 1, "state": "delivered", "body": "T-1 failed" }),
             json!({ "kind": "note", "state": "delivered" }),
+            // A note a member wrote of the task is not what the daemon told.
+            json!({ "kind": "note", "taskNumber": 1, "sender": "zeus", "state": "delivered", "body": "T-1 is going well" }),
             json!({ "kind": "note", "taskNumber": 1, "state": "cancelled", "body": "T-1 failed: the window never showed its first message; its screen ended with: \"No API key\". Reopen it with: cf task reopen T-1" }),
             json!({ "kind": "note", "taskNumber": 1, "state": "read", "body": "T-1 was reopened" }),
         ];

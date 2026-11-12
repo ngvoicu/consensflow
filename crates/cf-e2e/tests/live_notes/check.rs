@@ -107,8 +107,9 @@ pub fn drive(chief: Harness, mut members: Members, log: &Log) -> Result<Account>
 
     // The human asks the chief to run a long command: it is in a turn.
     let pane = members.lane("chief")?["pane"].clone();
-    let mark = members.events().len();
     let items_before = user_items(chief, &members);
+    // The mark is the events at the paste itself: what the chief did before it is no answer to it.
+    let mark = members.events().len();
     members.paste(&pane, &ask::window_text(&first_ask())?)?;
     // A window that has just gone idle can take the paste and lose its Enter (a Devin
     // chief kept the command in its input, twice on 2026-10-14): the human presses
