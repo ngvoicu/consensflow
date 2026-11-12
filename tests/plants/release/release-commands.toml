@@ -1166,7 +1166,7 @@ replace = """        if row_of(row).is_none() {
 
 [[plant]]
 name = "release: a hash of SHA256SUMS in capitals is read"
-meant = "a_release_whose_signed_sums_list_a_hash_in_capitals_or_a_name_twice_fails_naming_the_row"
+meant = "a_release_whose_signed_sums_list_a_hash_in_capitals_fails_naming_the_row"
 runs = ["release-commands"]
 
 [[plant.edit]]

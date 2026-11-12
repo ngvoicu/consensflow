@@ -240,12 +240,6 @@ mod after_a_release_is_published_the_files_and_the_feeds_serve_what_the_rule_say
                 "it named {named}: it did not go back"
             );
         }
-        record("{}");
-        assert_eq!(
-            world.check(),
-            Vec::<String>::new(),
-            "no record of this feed"
-        );
         fs::remove_file(world.dir.path().join(FEEDS_BEFORE)).unwrap();
         assert_eq!(
             world.check(),
@@ -320,6 +314,42 @@ mod after_a_release_is_published_the_files_and_the_feeds_serve_what_the_rule_say
         assert!(
             problems[0].ends_with("): no feed can be held to what it named before"),
             "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn refuses_a_record_that_has_no_entry_for_a_feed_this_release_moves_a_missing_one_is_not_null()
+    {
+        // The publisher writes an entry, a release or null, for every new feed it
+        // moves: a record that reads and lacks one holds that feed to nothing.
+        let world = after_publishing(LATER);
+        let path = world.dir.path().join(FEEDS_BEFORE);
+        let shown = path.display().to_string();
+        let missing = |feed: &str| {
+            format!(
+                "{shown} has no entry for {feed}, which this release moves: the feed cannot be held to what it named before"
+            )
+        };
+        for text in ["{}", r#"{"feed-stable":"3.0.0-alpha.83"}"#] {
+            fs::write(&path, text).unwrap();
+            assert_eq!(world.check(), [missing("feed-alpha")], "{text}");
+        }
+        // A stable release moves both new feeds; the stable one went backward
+        // and its entry is the one left out.
+        let world = after_publishing("3.0.1");
+        feed(
+            &world.github,
+            "feed-stable",
+            world.files.text("latest.json"),
+        );
+        let path = world.dir.path().join(FEEDS_BEFORE);
+        let shown = path.display().to_string();
+        fs::write(&path, r#"{"feed-alpha":"3.0.0"}"#).unwrap();
+        assert_eq!(
+            world.check(),
+            [format!(
+                "{shown} has no entry for feed-stable, which this release moves: the feed cannot be held to what it named before"
+            )]
         );
     }
 

@@ -251,20 +251,21 @@ pub fn check_prerequisites(
     }
 }
 
-/// What `dir`'s [`FEEDS_BEFORE`] says each feed named: the ones that named a
-/// release, and none where there is no such file (a check run by hand). A
-/// record that is there and does not read is not absent: it is a problem, and
-/// so is each feed's entry that is neither a release nor null (a feed that
-/// named none), while the feeds whose entries read are still held to them.
-fn named_before(dir: &Path) -> (HashMap<String, Version>, Vec<String>) {
+/// What `dir`'s [`FEEDS_BEFORE`] says each feed named, by feed: the release it
+/// named, or none (null: it named none). There is no record to hold the feeds
+/// to where there is no such file (a check run by hand), and none where one is
+/// there and does not read, which is a problem: a record is not absent because
+/// it cannot be read. So is each feed's entry that is neither a release nor
+/// null, while the feeds whose entries read are still held to them.
+fn named_before(dir: &Path) -> (Option<HashMap<String, Option<Version>>>, Vec<String>) {
     let path = dir.join(FEEDS_BEFORE);
     let shown = path.display();
     let text = match fs::read(&path) {
         Ok(text) => text,
-        Err(cause) if cause.kind() == ErrorKind::NotFound => return (HashMap::new(), Vec::new()),
+        Err(cause) if cause.kind() == ErrorKind::NotFound => return (None, Vec::new()),
         Err(cause) => {
             return (
-                HashMap::new(),
+                None,
                 vec![format!(
                     "{shown} cannot be read ({cause}): no feed can be held to what it named before"
                 )],
@@ -273,37 +274,21 @@ fn named_before(dir: &Path) -> (HashMap<String, Version>, Vec<String>) {
     };
     let record = match serde_json::from_slice::<Value>(&text) {
         Ok(Value::Object(record)) => record,
-        Ok(_) => {
-            return (
-                HashMap::new(),
-                vec![not_a_record(&path, "not an object of feeds")],
-            )
-        }
-        Err(cause) => {
-            return (
-                HashMap::new(),
-                vec![not_a_record(&path, &cause.to_string())],
-            )
-        }
+        Ok(_) => return (None, vec![not_a_record(&path, "not an object of feeds")]),
+        Err(cause) => return (None, vec![not_a_record(&path, &cause.to_string())]),
     };
     let mut named = HashMap::new();
     let mut problems = Vec::new();
     for (feed, entry) in record {
-        let version = match &entry {
-            Value::Null => continue,
-            Value::String(text) => Version::parse(text).ok(),
-            _ => None,
-        };
-        match version {
-            Some(version) => {
-                named.insert(feed, version);
-            }
-            None => problems.push(format!(
+        let version = entry.as_str().and_then(|text| Version::parse(text).ok());
+        if version.is_none() && !entry.is_null() {
+            problems.push(format!(
                 "{shown} says {feed} named {entry}, which is no release and not null: the feed cannot be held to it"
-            )),
+            ));
         }
+        named.insert(feed, version);
     }
-    (named, problems)
+    (Some(named), problems)
 }
 
 /// The problem with a [`FEEDS_BEFORE`] at `path` that is not a record (`why`).
@@ -326,7 +311,8 @@ fn not_a_record(path: &Path, why: &str) -> String {
 /// one that names an earlier release than it did when the publisher read it
 /// ([`FEEDS_BEFORE`], where the folder holds one): a feed that serves this
 /// release having gone back to it is told by that alone, so a record there
-/// that does not read is a problem too. An old feed of a
+/// that does not read, or has no entry for a feed this release moves, is a
+/// problem too. An old feed of a
 /// channel not in use may be absent, and when it is there does not serve this
 /// release, which the rule does not move it to.
 pub fn check_feeds(
@@ -347,6 +333,19 @@ pub fn check_feeds(
     problems.extend(unread);
     for channel in version.channels() {
         let feed = manifest.feeds.of(*channel);
+        // The publisher writes an entry for every new feed it moves, a release
+        // or null: a record without one holds that feed to nothing.
+        let was = match before.as_ref().map(|record| record.get(feed)) {
+            Some(Some(was)) => was.as_ref(),
+            Some(None) => {
+                problems.push(format!(
+                    "{} has no entry for {feed}, which this release moves: the feed cannot be held to what it named before",
+                    dir.join(FEEDS_BEFORE).display()
+                ));
+                None
+            }
+            None => None,
+        };
         let found = reads.feed(&format!("{base}/{feed}/latest.json"), &latest);
         let body = match &found {
             Ok(body) if *body == latest || later_release(body, version).is_some() => body,
@@ -362,7 +361,7 @@ pub fn check_feeds(
                 continue;
             }
         };
-        if let (Some(now), Some(was)) = (named_release(body), before.get(feed)) {
+        if let (Some(now), Some(was)) = (named_release(body), was) {
             if now < *was {
                 problems.push(format!(
                     "{feed} went backward: it named {was} when this release was published, and names {now} now"

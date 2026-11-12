@@ -396,8 +396,8 @@ runs = ["feeds"]
 
 [[plant.edit]]
 file = "tools/cf-publish/src/checks.rs"
-find = "Value::String(text) => Version::parse(text).ok(),"
-replace = "Value::String(text) => match Version::parse(text) { Ok(version) => Some(version), Err(_) => continue },"
+find = "if version.is_none() && !entry.is_null() {"
+replace = "if version.is_none() && !entry.is_null() && entry.is_null() {"
 
 [[plant]]
 name = "feeds: a feed that names a later release is waited for as if it were served stale"

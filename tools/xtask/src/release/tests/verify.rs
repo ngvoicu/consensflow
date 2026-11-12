@@ -254,22 +254,27 @@ fn a_release_whose_signed_sums_hold_a_row_that_is_no_hash_and_name_fails_naming_
     );
 }
 
-#[test]
-fn a_release_whose_signed_sums_list_a_hash_in_capitals_or_a_name_twice_fails_naming_the_row() {
+/// The refusal of the release whose SHA256SUMS rows `edit` changed (and signed
+/// again, so the list's signature holds), the rows it then has, and the row of
+/// the DMG among them, counted from one.
+fn resigned(edit: &dyn Fn(Vec<String>) -> Vec<String>) -> (String, Vec<String>, usize) {
     let dmg = format!("ConsensFlow_{VERSION}_aarch64.dmg");
-    let resigned = |edit: &dyn Fn(Vec<String>) -> Vec<String>| {
-        let (world, mut fake) = published();
-        let files = files_of(&mut fake);
-        let sums = String::from_utf8(files["SHA256SUMS"].clone()).unwrap();
-        let rows = edit(sums.lines().map(str::to_owned).collect());
-        let at = rows.iter().position(|row| row.ends_with(&dmg)).unwrap() + 1;
-        let sums: String = rows.iter().map(|row| format!("{row}\n")).collect();
-        files.insert("SHA256SUMS".to_owned(), sums.clone().into_bytes());
-        files.insert("SHA256SUMS.sig".to_owned(), signature_of(&sums, VERSION));
-        (refusal(verified(&world, &mut fake, VERSION).0), rows, at)
-    };
+    let (world, mut fake) = published();
+    let files = files_of(&mut fake);
+    let sums = String::from_utf8(files["SHA256SUMS"].clone()).unwrap();
+    let rows = edit(sums.lines().map(str::to_owned).collect());
+    let at = rows.iter().position(|row| row.ends_with(&dmg)).unwrap() + 1;
+    let sums: String = rows.iter().map(|row| format!("{row}\n")).collect();
+    files.insert("SHA256SUMS".to_owned(), sums.clone().into_bytes());
+    files.insert("SHA256SUMS.sig".to_owned(), signature_of(&sums, VERSION));
+    (refusal(verified(&world, &mut fake, VERSION).0), rows, at)
+}
+
+#[test]
+fn a_release_whose_signed_sums_list_a_hash_in_capitals_fails_naming_the_row() {
     // The installers read lowercase hex alone, so the DMG's row in capitals is
     // a DMG they would not install.
+    let dmg = format!("ConsensFlow_{VERSION}_aarch64.dmg");
     let (refused, rows, at) = resigned(&|rows| {
         rows.into_iter()
             .map(|row| {
@@ -288,7 +293,12 @@ fn a_release_whose_signed_sums_list_a_hash_in_capitals_or_a_name_twice_fails_nam
             rows[at - 1]
         )])
     );
+}
+
+#[test]
+fn a_release_whose_signed_sums_list_a_name_twice_fails_naming_the_row() {
     // The installers refuse a name listed twice, even with the same hash.
+    let dmg = format!("ConsensFlow_{VERSION}_aarch64.dmg");
     let (refused, rows, _) = resigned(&|mut rows| {
         let again = rows.iter().find(|row| row.ends_with(&dmg)).unwrap().clone();
         rows.push(again);
