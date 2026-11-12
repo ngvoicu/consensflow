@@ -980,7 +980,7 @@ meant = "a_run_of_another_commit_that_gh_lists_anyway_is_refused_for_what_it_say
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = "            if status.head_sha != watched.commit {"
 replace = "            if status.head_sha.is_empty() {"
 
