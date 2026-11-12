@@ -2,7 +2,17 @@ import { element } from './dom.js'
 
 const SIX_HOURS = 6 * 60 * 60 * 1_000
 const QUIET_DELAY = 10_000
-const BUSY_PHASES = new Set(['checking', 'downloading', 'installing'])
+// The shell's phases of an update, as it names them (`Phase` in updates.rs).
+const PHASE = Object.freeze({
+  idle: 'idle',
+  checking: 'checking',
+  available: 'available',
+  downloading: 'downloading',
+  ready: 'ready',
+  installing: 'installing',
+  error: 'error',
+})
+const BUSY_PHASES = new Set([PHASE.checking, PHASE.downloading, PHASE.installing])
 const CHANNELS = new Set(['alpha', 'stable'])
 const DISMISSED_KEY = 'consensflow.dismissed-update-versions.v1'
 // Blockers the backend synthesizes for panes already gone from its table, so
@@ -40,7 +50,7 @@ function normalizeSnapshot(value) {
     ok: true,
     currentVersion: text(value.currentVersion, 'Unknown'),
     channel: CHANNELS.has(value.channel) ? value.channel : 'stable',
-    phase: text(value.phase, 'idle'),
+    phase: text(value.phase, PHASE.idle),
     available: candidate,
     downloadedBytes: Number.isFinite(value.downloadedBytes) ? value.downloadedBytes : 0,
     totalBytes: Number.isFinite(value.totalBytes) ? value.totalBytes : null,
@@ -288,7 +298,7 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     }
 
     const hasDownload = candidate !== null
-    const isReady = current?.phase === 'ready'
+    const isReady = current?.phase === PHASE.ready
     const bytes = current?.downloadedBytes ?? 0
     const total = current?.totalBytes
     // Downloaded by hand from its page: nothing to download or install here.
@@ -301,17 +311,17 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     openPage.hidden = !byPage
     download.disabled = !hasDownload || busy() || isReady
     install.disabled =
-      !hasDownload || current?.phase !== 'ready' || (current?.blockers?.length ?? 0) !== 0
+      !hasDownload || current?.phase !== PHASE.ready || (current?.blockers?.length ?? 0) !== 0
     renderBlockers()
     renderBanner()
   }
 
   function stateText(current) {
-    if (current.phase === 'checking') return 'Checking for signed updates…'
-    if (current.phase === 'downloading') return 'Downloading update…'
-    if (current.phase === 'ready') return 'Update downloaded and ready to install.'
-    if (current.phase === 'installing') return 'Installing update and preparing restart…'
-    if (current.phase === 'error') return 'The last update operation failed.'
+    if (current.phase === PHASE.checking) return 'Checking for signed updates…'
+    if (current.phase === PHASE.downloading) return 'Downloading update…'
+    if (current.phase === PHASE.ready) return 'Update downloaded and ready to install.'
+    if (current.phase === PHASE.installing) return 'Installing update and preparing restart…'
+    if (current.phase === PHASE.error) return 'The last update operation failed.'
     if (current.available !== null && current.page !== null) {
       return 'A newer release is available: download its installer or portable exe from its page.'
     }
@@ -329,7 +339,7 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     const next = normalizeSnapshot(value)
     if (next === null) return false
     snapshot = next
-    if (next.error !== null && next.phase === 'error') setFeedback(next.error, 'error')
+    if (next.error !== null && next.phase === PHASE.error) setFeedback(next.error, 'error')
     render()
     return true
   }
@@ -386,7 +396,7 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
   }
 
   async function downloadUpdate() {
-    if (snapshot?.available === null || busy() || snapshot?.phase === 'ready') return
+    if (snapshot?.available === null || busy() || snapshot?.phase === PHASE.ready) return
     const result = await call('update_download')
     if (!applySnapshot(result)) {
       setFeedback(commandFailure(result) ?? 'The update download failed', 'error')
@@ -423,7 +433,7 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     const current = snapshot
     if (
       current === null ||
-      current.phase !== 'ready' ||
+      current.phase !== PHASE.ready ||
       current.available === null ||
       current.blockers.length > 0
     ) {

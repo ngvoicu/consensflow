@@ -90,9 +90,21 @@ fn current_snapshot<R: Runtime>(app: &AppHandle<R>) -> UpdateSnapshot {
     snapshot
 }
 
+/// An event to the page; an error that names the event where it could not be sent.
+fn emit_to_page<R: Runtime>(
+    app: &AppHandle<R>,
+    event: &str,
+    payload: impl Serialize + Clone,
+) -> Result<(), String> {
+    app.emit(event, payload)
+        .map_err(|error| format!("ConsensFlow could not send the page the event {event}: {error}"))
+}
+
 fn publish<R: Runtime>(app: &AppHandle<R>) -> Value {
     let snapshot = current_snapshot(app);
-    let _ = app.emit("update-state-changed", &snapshot);
+    if let Err(said) = emit_to_page(app, "update-state-changed", &snapshot) {
+        eprintln!("{said}");
+    }
     serde_json::to_value(snapshot).unwrap()
 }
 
@@ -274,11 +286,34 @@ pub fn setup(app: &tauri::App) -> tauri::Result<()> {
     app.on_menu_event(|app, event| {
         crate::panics::contained("the app's handler of its menu", || {
             if event.id().as_ref() == "check-updates" {
-                let _ = app.emit("check-updates", ());
+                if let Err(said) = emit_to_page(app, "check-updates", ()) {
+                    eprintln!("{said}");
+                }
             }
         });
     });
     Ok(())
+}
+
+/// Where an update is, as the page names it (`phase` of the snapshot, in lower case).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum Phase {
+    Idle,
+    Checking,
+    Available,
+    Downloading,
+    /// Downloaded and its signature verified; the bytes are held for the install.
+    Ready,
+    Installing,
+    Error,
+}
+
+impl Phase {
+    /// A check, a download or an install is running.
+    fn is_running(self) -> bool {
+        matches!(self, Self::Checking | Self::Downloading | Self::Installing)
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -287,7 +322,7 @@ pub struct UpdateSnapshot {
     ok: bool,
     current_version: String,
     channel: Channel,
-    phase: &'static str,
+    phase: Phase,
     available: Option<ReleaseInfo>,
     downloaded_bytes: u64,
     total_bytes: Option<u64>,
@@ -346,7 +381,7 @@ impl UpdateManager {
                     ok: true,
                     current_version: current.into(),
                     channel,
-                    phase: "idle",
+                    phase: Phase::Idle,
                     available: None,
                     downloaded_bytes: 0,
                     total_bytes: None,
@@ -382,10 +417,7 @@ impl UpdateManager {
 
     fn set_channel(&self, channel: Channel) -> Result<(), String> {
         let mut state = self.state();
-        if matches!(
-            state.snapshot.phase,
-            "checking" | "downloading" | "installing"
-        ) {
+        if state.snapshot.phase.is_running() {
             return Err("Wait for the current update operation to finish".into());
         }
         let parent = self
@@ -402,7 +434,7 @@ impl UpdateManager {
         .map_err(|e| e.to_string())?;
         state.preference_problem = None;
         state.snapshot.channel = channel;
-        state.snapshot.phase = "idle";
+        state.snapshot.phase = Phase::Idle;
         state.snapshot.available = None;
         state.snapshot.page = None;
         state.snapshot.error = None;
@@ -416,13 +448,10 @@ impl UpdateManager {
 
     fn begin_check(&self) -> bool {
         let mut state = self.state();
-        if matches!(
-            state.snapshot.phase,
-            "checking" | "downloading" | "ready" | "installing"
-        ) {
+        if state.snapshot.phase.is_running() || state.snapshot.phase == Phase::Ready {
             return false;
         }
-        state.snapshot.phase = "checking";
+        state.snapshot.phase = Phase::Checking;
         state.snapshot.error = None;
         state.snapshot.available = None;
         state.snapshot.page = None;
@@ -435,9 +464,9 @@ impl UpdateManager {
     fn found(&self, found: Found) {
         let mut state = self.state();
         state.snapshot.phase = if found.available.is_some() {
-            "available"
+            Phase::Available
         } else {
-            "idle"
+            Phase::Idle
         };
         state.pending = found.pending;
         state.snapshot.available = found.available;
@@ -449,7 +478,7 @@ impl UpdateManager {
 
     fn fail(&self, error: String) {
         let mut state = self.state();
-        state.snapshot.phase = "error";
+        state.snapshot.phase = Phase::Error;
         state.snapshot.error = Some(error);
     }
 
@@ -461,8 +490,9 @@ impl UpdateManager {
     ) -> Result<cf_panes::pty::UpdatePermit, String> {
         let (permit, bytes, version) = {
             let mut state = self.state();
-            if state.snapshot.phase != "ready" || state.bytes.is_none() {
-                return Err("Download and verify the update before installing".into());
+            const NOT_READY: &str = "Download and verify the update before installing";
+            if state.snapshot.phase != Phase::Ready {
+                return Err(NOT_READY.into());
             }
             let version = state
                 .snapshot
@@ -472,14 +502,17 @@ impl UpdateManager {
                 .version
                 .clone();
             let permit = panes.begin_update().map_err(|e| e.to_string())?;
-            state.snapshot.phase = "installing";
+            let Some(bytes) = state.bytes.take() else {
+                return Err(NOT_READY.into());
+            };
+            state.snapshot.phase = Phase::Installing;
             state.snapshot.error = None;
-            (permit, state.bytes.take().unwrap(), version)
+            (permit, bytes, version)
         };
         if let Err(error) = action(&bytes, &version) {
             let mut state = self.state();
             state.bytes = Some(bytes);
-            state.snapshot.phase = "ready";
+            state.snapshot.phase = Phase::Ready;
             state.snapshot.error = Some(error.clone());
             return Err(error);
         }
@@ -489,14 +522,14 @@ impl UpdateManager {
     async fn download(&self, notify: impl Fn(&UpdateSnapshot)) -> Result<(), String> {
         let mut update = {
             let mut state = self.state();
-            if !matches!(state.snapshot.phase, "available" | "error") {
+            if !matches!(state.snapshot.phase, Phase::Available | Phase::Error) {
                 return Err("Choose an available update before downloading".into());
             }
             let update = state
                 .pending
                 .clone()
                 .ok_or("Check for updates before downloading")?;
-            state.snapshot.phase = "downloading";
+            state.snapshot.phase = Phase::Downloading;
             state.snapshot.error = None;
             state.snapshot.downloaded_bytes = 0;
             state.snapshot.total_bytes = None;
@@ -526,7 +559,7 @@ impl UpdateManager {
             Ok(bytes) => {
                 let mut state = self.state();
                 state.bytes = Some(bytes);
-                state.snapshot.phase = "ready";
+                state.snapshot.phase = Phase::Ready;
             }
             Err(error) => {
                 let error = format!("Download or signature verification failed: {error}");
@@ -796,7 +829,7 @@ mod tests {
             let manager = UpdateManager::new("3.0.0-alpha.42", dir.path().join("prefs.json"));
             assert!(manager.begin_check());
             manager.fail(message);
-            assert_eq!(manager.snapshot().phase, "error");
+            assert_eq!(manager.snapshot().phase, Phase::Error);
             assert!(manager.snapshot().available.is_none());
             assert!(manager.begin_check(), "a failed check must be retryable");
         }
@@ -819,9 +852,53 @@ mod tests {
         assert!(!manager.begin_check());
         assert!(manager.set_channel(Channel::Alpha).is_err());
         manager.fail("Offline".into());
-        assert_eq!(manager.snapshot().phase, "error");
+        assert_eq!(manager.snapshot().phase, Phase::Error);
         assert!(manager.begin_check(), "a failed check must be retryable");
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// The page is told of the update's state and of the menu's "Check for Updates" by events that
+    /// the app only logs where they fail: the command's own answer carries the state, but a
+    /// download's progress and the menu's check have nothing else to say they were lost.
+    #[test]
+    fn a_page_event_that_cannot_be_sent_is_an_error_that_names_it() {
+        #[derive(Clone)]
+        struct Unsendable;
+        impl Serialize for Unsendable {
+            fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+                Err(serde::ser::Error::custom("not a payload"))
+            }
+        }
+        let app = tauri::test::mock_app();
+        let said = emit_to_page(app.handle(), "update-state-changed", Unsendable)
+            .expect_err("a payload that cannot be serialized is not sent");
+        assert!(
+            said.contains("update-state-changed") && said.contains("not a payload"),
+            "{said}"
+        );
+        assert_eq!(emit_to_page(app.handle(), "check-updates", ()), Ok(()));
+    }
+
+    /// The page reads `phase` as these words (`ui/updates.js`); the named states go out as them.
+    #[test]
+    fn the_phases_go_to_the_page_under_the_words_it_reads() {
+        for (phase, word) in [
+            (Phase::Idle, "idle"),
+            (Phase::Checking, "checking"),
+            (Phase::Available, "available"),
+            (Phase::Downloading, "downloading"),
+            (Phase::Ready, "ready"),
+            (Phase::Installing, "installing"),
+            (Phase::Error, "error"),
+        ] {
+            assert_eq!(serde_json::to_value(phase).unwrap(), word);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let manager = UpdateManager::new("3.0.0", dir.path().join("updates.json"));
+        assert_eq!(
+            serde_json::to_value(manager.snapshot()).unwrap()["phase"],
+            "idle"
+        );
     }
 
     /// A saved choice that is not there is no problem and takes the version's own channel; one
@@ -895,7 +972,7 @@ mod tests {
             .is_err());
         {
             let mut state = manager.state.lock().unwrap();
-            state.snapshot.phase = "ready";
+            state.snapshot.phase = Phase::Ready;
             state.snapshot.available = Some(ReleaseInfo {
                 version: "3.0.0-alpha.36".into(),
                 notes: String::new(),
@@ -910,7 +987,7 @@ mod tests {
             Err("Disk full".into())
         });
         assert!(result.is_err());
-        assert_eq!(manager.snapshot().phase, "ready");
+        assert_eq!(manager.snapshot().phase, Phase::Ready);
         assert_eq!(manager.snapshot().error.as_deref(), Some("Disk full"));
         assert!(manager.state.lock().unwrap().bytes.is_some());
         assert!(panes.begin_update().is_ok());
@@ -1016,15 +1093,15 @@ mod tests {
                     .unwrap();
                 let manager = UpdateManager::new("0.1.0", dir.path().join("prefs.json"));
                 manager.state.lock().unwrap().pending = Some(update);
-                manager.state.lock().unwrap().snapshot.phase = "available";
+                manager.state.lock().unwrap().snapshot.phase = Phase::Available;
                 let result = manager.download(|_| {}).await;
                 if tampered {
                     assert!(result.is_err());
-                    assert_eq!(manager.snapshot().phase, "error");
+                    assert_eq!(manager.snapshot().phase, Phase::Error);
                     assert!(manager.state.lock().unwrap().bytes.is_none());
                 } else {
                     result.unwrap();
-                    assert_eq!(manager.snapshot().phase, "ready");
+                    assert_eq!(manager.snapshot().phase, Phase::Ready);
                     assert_eq!(
                         manager.state.lock().unwrap().bytes.as_deref(),
                         Some(bytes.as_slice())
