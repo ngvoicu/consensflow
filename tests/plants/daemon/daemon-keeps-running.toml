@@ -68,7 +68,7 @@ meant = "a_frame_that_waits_for_room_says_so_now_and_then_and_the_bridge_stays_o
 runs = ["bridge-queue"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/writer.rs"
 find = "            self.report(BridgeError::Io(words.to_string()));"
 replace = "            let _ = words;"
 
