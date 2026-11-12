@@ -140,26 +140,16 @@ fn is_chain(message: &MessageView, carried: &[MessageView]) -> bool {
 
 /// What a chain's paste says: how many notes it holds, and each, in the order written, on a
 /// line of its own that begins with its id and its task; a note's further lines are indented
-/// under it.
+/// under it (`cf_proto::chain`, which the ledger gathers the chain by: no chain it gathers is
+/// longer than [`INLINE_LIMIT`]).
 fn chain(first: &MessageView, carried: &[MessageView], cf: &CfWord) -> String {
     let mut notes: Vec<&MessageView> = [first].into_iter().chain(carried).collect();
     notes.sort_by_key(|note| note.id);
-    let lines: Vec<String> = notes
-        .iter()
-        .map(|note| {
-            let task = note
-                .task_number
-                .map_or_else(String::new, |number| format!(" · T-{number}"));
-            let body = body_of(note, cf).replace('\n', "\n  ");
-            format!("m-{}{task}: {body}", note.id)
-        })
-        .collect();
-    format!(
-        "{} notes at once, a line each:\n{}",
-        notes.len(),
-        lines.join("\n")
-    )
+    cf_proto::chain::words(&notes, cf)
 }
+
+/// A chain the ledger gathers is no longer than a window is given whole, with room to spare.
+const _: () = assert!(cf_ledger::CHAIN_CHARS + 4_000 <= INLINE_LIMIT);
 
 /// The words of `row`, its commands started by `cf` where ConsensFlow wrote them
 /// (`sender` none), as they are where a participant did.

@@ -58,7 +58,7 @@ pub(crate) use delivery::{
     last_pasted, last_pastes, next_delivery, next_delivery_of, note_since, paste_into, pasted_into,
     received_of, retry_delivery, with_work,
 };
-pub use delivery::{HandOver, WITHDRAWN_AFTER_HANDED};
+pub use delivery::{HandOver, CHAIN_CHARS, WITHDRAWN_AFTER_HANDED};
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub use holds::is_busy_note;
 pub(crate) use holds::{

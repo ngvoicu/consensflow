@@ -5,6 +5,9 @@
 //! (`carrying`), and what the paste proves arrived is each of them.
 
 use cf_base::json::js_order;
+use cf_base::text::utf16_len;
+use cf_proto::cf_word::CfWord;
+use cf_proto::chain;
 use cf_proto::ledger::{Begun, MessageView};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
@@ -147,9 +150,11 @@ fn may_go() -> String {
     )
 }
 
-/// The most characters of the notes a chain gathers ([`gather_chain`]), its first one's
-/// beside: the paste stays well within what a window is given whole (the engine's
-/// `INLINE_LIMIT`, 16,000), with room for each line's label and a command's longer form.
+/// The most a chain's paste says ([`gather_chain`]), counted in UTF-16 code units as the
+/// engine counts what a window is given whole (its `INLINE_LIMIT`, 16,000, which it asserts
+/// this is well within): its first line and every note's, each with its id and task, its
+/// commands started by the window's `cf` by its whole path, and its further lines indented
+/// (`cf_proto::chain`). A chain so gathered is never cut to its opening (T-1500's finding 1).
 pub const CHAIN_CHARS: usize = 10_000;
 
 /// Whether `m` is a note of ConsensFlow's own a chain may hold: no participant wrote it,
@@ -159,12 +164,14 @@ const CONSENSFLOW_NOTE: &str =
 
 /// A chain is one message (RS-25): the delivery of `head`, a note of ConsensFlow's own to a
 /// chief just begun, carries the notes of its own that wait behind it, by the rule the head
-/// went by ([`may_go`]), up to the first row of another kind and within [`CHAIN_CHARS`].
+/// went by ([`may_go`]), in order, up to the first row of another kind and while what the
+/// paste says stays within [`CHAIN_CHARS`], each line measured as the window will be given it
+/// (`cf`, its own word for `cf`): what does not fit waits for the next paste, in order.
 /// One event of the board (a restart, a pause of several tasks) writes its notes while the
 /// chief's window is at work on the first, or in one pass: they wait together, and go in one
 /// paste, a line each. What the head carries is the set from now; given back, it carries
 /// none, and gathers again ([`release_riders`]).
-fn gather_chain(store: &mut Store, head: &MessageView) -> Result<(), LedgerError> {
+fn gather_chain(store: &mut Store, head: &MessageView, cf: &CfWord) -> Result<(), LedgerError> {
     if head.recipient_role != "chief" || head.kind != "note" || head.sender.is_some() || head.urgent
     {
         return Ok(());
@@ -179,28 +186,38 @@ fn gather_chain(store: &mut Store, head: &MessageView) -> Result<(), LedgerError
     if role || riding {
         return Ok(());
     }
-    let behind: Vec<(i64, bool, i64)> = store
+    let behind: Vec<(i64, bool)> = store
         .db
         .prepare(&format!(
-            "SELECT m.id, {CONSENSFLOW_NOTE}, length(m.body) FROM message m
+            "SELECT m.id, {CONSENSFLOW_NOTE} FROM message m
               WHERE {} AND m.id > ?3
               ORDER BY NOT (m.kind = 'question' AND m.urgent = 0), m.id",
             may_go()
         ))?
         .query_map(params![head.recipient_id, 0, head.id], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            Ok((row.get(0)?, row.get(1)?))
         })?
         .collect::<rusqlite::Result<_>>()?;
-    let mut chars = head.body.chars().count();
-    for (id, ours, length) in behind {
-        chars += usize::try_from(length).unwrap_or(usize::MAX);
-        if !ours || chars > CHAIN_CHARS {
+    // The lines so far, each with the line break before it: the head's first.
+    let measure = |note: &MessageView| utf16_len(&chain::line(note, cf)) + 1;
+    let mut lines = measure(head);
+    // `count`: the notes the chain holds so far, the head among them.
+    for (count, (id, ours)) in (1..).zip(behind) {
+        if !ours {
+            break;
+        }
+        let Some(note) = store.message(id)? else {
+            break;
+        };
+        let longer = lines + measure(&note);
+        if utf16_len(&chain::head(count + 1)) + longer > CHAIN_CHARS {
             break;
         }
         store.db.execute(
             "UPDATE message SET carried_by = ?1 WHERE id = ?2",
             params![head.id, id],
         )?;
+        lines = longer;
     }
     Ok(())
 }
@@ -338,6 +355,7 @@ pub(crate) fn begin_delivery(
     store: &mut Store,
     message_id: i64,
     look: Option<&Value>,
+    cf: &CfWord,
 ) -> Result<Begun, LedgerError> {
     store.write(|store| {
         let message = require_message(store, message_id, "queued")?;
@@ -397,7 +415,7 @@ pub(crate) fn begin_delivery(
          WHERE id = ?",
             [message_id],
         )?;
-        gather_chain(store, &message)?;
+        gather_chain(store, &message, cf)?;
         let begun = json!({ "message": message_id, "attempt": message.attempts + 1 });
         store.log(message.project_id, "delivery.begun", looked(begun, look))?;
         Ok(Begun {

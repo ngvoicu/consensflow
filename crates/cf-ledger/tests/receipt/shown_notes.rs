@@ -451,9 +451,12 @@ fn what_waits_on_a_chief_that_takes_over_names_each_task_it_gave_that_is_held_an
             .collect();
         assert_eq!(held, [(task, Some(said_of(hold, &session)))]);
     }
+    // A hold that became a busy model's wait is one no more.
     let mut w = world();
     let (task, session) = with_zeus(&mut w);
     w.hold(task);
+    let first = note_of(&mut w, HOLDS[0], task, &session, UNTIL);
+    w.deliver(first.id);
     w.ledger
         .note_hold_busy(w.project, "chief", task, &session, "overloaded", true)
         .expect("the chief is told");

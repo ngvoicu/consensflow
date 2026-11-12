@@ -1,6 +1,7 @@
 //! The ledger's messages, their delivery and the human's gate, as its callers
 //! hold them.
 
+use cf_proto::cf_word::CfWord;
 use serde_json::Value;
 
 use super::Ledger;
@@ -395,19 +396,24 @@ impl Ledger {
         messages::next_delivery_of(&self.store, participant_id, message_id)
     }
 
-    /// A message's delivery into its window begins: it, and the rows its paste carries.
+    /// A message's delivery into its window begins: it, and the rows its paste carries. A
+    /// chain is measured for a window whose commands start with the bare word `cf`: a paste
+    /// into a window whose `cf` is a path begins with [`Ledger::begin_delivery_as`].
     pub fn begin_delivery(&mut self, message_id: i64) -> Result<Begun, LedgerError> {
-        messages::begin_delivery(&mut self.store, message_id, None)
+        messages::begin_delivery(&mut self.store, message_id, None, &CfWord::bare())
     }
 
-    /// [`Ledger::begin_delivery`], its `delivery.begun` saying what the look that let
-    /// the message go read of the window (`look`: the pacing's evidence).
-    pub fn begin_delivery_looked(
+    /// [`Ledger::begin_delivery`] into a window whose commands start with `cf`, which a chain
+    /// its paste carries is measured with (`CHAIN_CHARS`), its `delivery.begun` saying what
+    /// the look that let the message go read of the window, where one did (`look`: the
+    /// pacing's evidence).
+    pub fn begin_delivery_as(
         &mut self,
         message_id: i64,
-        look: &Value,
+        look: Option<&Value>,
+        cf: &CfWord,
     ) -> Result<Begun, LedgerError> {
-        messages::begin_delivery(&mut self.store, message_id, Some(look))
+        messages::begin_delivery(&mut self.store, message_id, look, cf)
     }
 
     /// The newest message pasted into a participant's window about a task and proved.

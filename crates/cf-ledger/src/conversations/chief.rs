@@ -133,11 +133,7 @@ pub(crate) fn chief_open_work(
 /// (RS-25), so a chief switched since, in a conversation of its own, would never be typed it:
 /// its handoff names them (T-1500's finding 2). The hold is read from its newest note to the
 /// chief; a model busy for a moment is tried again by itself and is not listed.
-fn held_tasks(
-    store: &Store,
-    project_id: i64,
-    chief: i64,
-) -> Result<Vec<TaskView>, LedgerError> {
+fn held_tasks(store: &Store, project_id: i64, chief: i64) -> Result<Vec<TaskView>, LedgerError> {
     let tasks = store
         .db
         .prepare(&format!(

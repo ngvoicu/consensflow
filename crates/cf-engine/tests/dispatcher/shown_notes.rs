@@ -228,7 +228,12 @@ fn a_restart_ends_a_background_hold_and_writes_no_note_of_it_again() {
     }
     let thread = tiers.task(1);
     assert_eq!(thread.task.state, "done", "{:#?}", thread.messages);
-    assert_eq!(notes(&tiers), 1, "the hold is told once: {:#?}", thread.messages);
+    assert_eq!(
+        notes(&tiers),
+        1,
+        "the hold is told once: {:#?}",
+        thread.messages
+    );
     assert_eq!(aside(&tiers), None, "its line says no hold");
     let result = thread
         .messages

@@ -88,12 +88,13 @@ fn a_chain_holds_no_more_than_chain_chars_of_notes_and_the_rest_wait_for_the_nex
     let first = told(&mut w, Some(one), &words(6_000));
     let second = told(&mut w, Some(two), &words(3_000));
     let third = told(&mut w, None, &words(2_000));
-    // CHAIN_CHARS, the ledger's limit, is 10,000.
+    // CHAIN_CHARS, the ledger's limit, is 10,000 of what the paste says: the notes' words
+    // and each line's id and task.
     let begun = w.begin(first.id);
     assert_eq!(
         carried(&begun),
         [second.id],
-        "9,000 characters fit; 11,000 do not"
+        "9,000 characters and their labels fit; 11,000 do not"
     );
     w.confirm(first.id);
     assert_eq!(w.next("chief"), Some(third.id));

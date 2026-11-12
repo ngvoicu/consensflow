@@ -598,7 +598,12 @@ impl Dispatcher {
                     stale.unquiet_since = None;
                     stale.unquiet_last = None;
                 }
-                let begun = self.seams.ledger.borrow_mut().begin_delivery(message.id)?;
+                let cf = self.cf_for(&message)?;
+                let begun = self
+                    .seams
+                    .ledger
+                    .borrow_mut()
+                    .begin_delivery_as(message.id, None, &cf)?;
                 let carried = begun.carried.iter().map(|row| row.id).collect();
                 let delivering = self.delivering(record, message.id, carried);
                 return self.settle_failure(
@@ -629,14 +634,14 @@ impl Dispatcher {
         // What is pasted is what the ledger says it is when delivery begins: the
         // message, and the rows it carries still waiting, which are the set from now.
         // Its `delivery.begun` says what the look that let it go read, where one did.
-        let begun = match self.paced_look(record, message.id) {
-            Some(look) => self
-                .seams
+        // A chain it carries is measured as this window is given it (`cf_for`).
+        let cf = self.cf_for(&message)?;
+        let look = self.paced_look(record, message.id);
+        let begun =
+            self.seams
                 .ledger
                 .borrow_mut()
-                .begin_delivery_looked(message.id, &look)?,
-            None => self.seams.ledger.borrow_mut().begin_delivery(message.id)?,
-        };
+                .begin_delivery_as(message.id, look.as_ref(), &cf)?;
         let at = self.seams.ledger.borrow_mut().now();
         {
             let mut part = record.delivery.borrow_mut();
