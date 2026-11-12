@@ -593,7 +593,8 @@ fn a_window_the_case_opened_is_watched_with_what_its_tree_runs_and_found_clean_o
     rig.close()?;
     let swept = watch.sweep();
     assert!(swept.problems().is_empty(), "{}", swept.said());
-    // Whatever the window's close did not end is ended and said, and the watch is of the one window.
+    // Whatever the window's close did not end is found and said, never ended, and the watch is of
+    // the one window.
     assert_eq!(swept.watched.0, 1, "{}", swept.said());
     assert!(swept.watched.1 >= 2, "{}", swept.said());
     Ok(())

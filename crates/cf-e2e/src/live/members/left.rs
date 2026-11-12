@@ -362,7 +362,7 @@ impl Swept {
                 .join("; ")
         };
         format!(
-            "the windows left {} process(es) running after they were closed: {}; the kit ended none of them (it ends a process only by descent from the run's window, the stand-in's jobs or the run's own word)",
+            "the windows left {} process(es) running after they were closed: {}; the kit ended none of them (it ends a process only by descent from the run's window, the stand-in's jobs, the run's own word or an orphan of a folder under the run's temp root)",
             self.found.len(),
             list(&self.found)
         )
