@@ -80,11 +80,11 @@ runs = ["daemon-api"]
 file = "crates/cf/src/board/task.rs"
 find = '''
     let mut body = Map::new();
-    if mine {'''
+    // What a --self task'''
 replace = '''
     let mut body = Map::new();
     body.insert("body".into(), String::new().into());
-    if mine {'''
+    // What a --self task'''
 
 [[plant]]
 name = "players: cf asks who it is twice"

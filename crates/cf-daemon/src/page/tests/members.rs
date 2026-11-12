@@ -1329,3 +1329,62 @@ async fn a_member_holding_a_role_with_tiers_and_one_without_keeps_its_tier() {
         })
         .await;
 }
+
+/// A member whose roles have no tier was given none (spec new-roles, FD-04): a worker's role it
+/// gains comes with the tier the human chose. Add member onto an integrator on the same model
+/// takes the tier of the add; `member.roles` takes the `tier` it is sent, refuses the change
+/// without one in the ledger's words, and leaves a member that drops its role with tiers in
+/// the lowest.
+#[tokio::test]
+async fn an_integrator_gains_a_workers_role_only_with_the_tier_the_human_chose() {
+    LocalSet::new()
+        .run_until(async {
+            let staffing = staffing();
+            let integrator = staffing
+                .add(json!({ "harness": "claude-code", "model": "claude-sonnet-5-5", "effort": "medium", "roles": ["integrator"] }))
+                .await;
+            assert_eq!(integrator["ok"], true, "{integrator}");
+            let worker = staffing
+                .add(json!({ "harness": "claude-code", "model": "claude-sonnet-5-5", "effort": "medium", "tier": "standard", "roles": ["worker"] }))
+                .await;
+            assert_eq!(worker["ok"], true, "{worker}");
+            let member = staffing.member("claude-sonnet-5-5-medium");
+            assert_eq!(
+                (member.roles, member.tier.as_deref()),
+                (vec!["integrator".to_owned(), "worker".to_owned()], Some("standard"))
+            );
+
+            let alone = ask(
+                &staffing.app,
+                "member.roles",
+                json!({ "project": staffing.project, "agent": "claude-sonnet-5-5-medium", "roles": ["integrator"] }),
+            )
+            .await;
+            assert_eq!(alone["ok"], true, "{alone}");
+            assert_eq!(staffing.member("claude-sonnet-5-5-medium").tier.as_deref(), Some("light"));
+
+            let untold = ask(
+                &staffing.app,
+                "member.roles",
+                json!({ "project": staffing.project, "agent": "claude-sonnet-5-5-medium", "roles": ["integrator", "worker"] }),
+            )
+            .await;
+            assert_eq!(
+                untold,
+                json!({ "ok": false, "error": "claude-sonnet-5-5-medium has no tier: a worker's tasks have one, so its tier comes with the role" })
+            );
+            let told = ask(
+                &staffing.app,
+                "member.roles",
+                json!({ "project": staffing.project, "agent": "claude-sonnet-5-5-medium", "roles": ["integrator", "worker"], "tier": "complex" }),
+            )
+            .await;
+            assert_eq!(told["ok"], true, "{told}");
+            let member = staffing.member("claude-sonnet-5-5-medium");
+            assert_eq!(
+                (member.roles, member.tier.as_deref()),
+                (vec!["integrator".to_owned(), "worker".to_owned()], Some("complex"))
+            );
+        })
+        .await;
+}

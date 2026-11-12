@@ -24,9 +24,14 @@ async fn the_page_reads_the_roles_from_the_table_in_its_order_and_its_tests_read
         .run_until(async {
             let roles = roles_answered().await;
             assert_eq!(
-                roles[4],
+                roles[8],
                 json!({ "id": "designer", "name": "image designer", "label": "Image designer",
                     "article": "an", "tiered": false, "imageAgent": true })
+            );
+            assert_eq!(
+                roles[1],
+                json!({ "id": "frontend", "name": "frontend designer", "label": "Frontend designer",
+                    "article": "a", "tiered": false, "imageAgent": false })
             );
             let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../../app/tests/fixtures/roles.json");

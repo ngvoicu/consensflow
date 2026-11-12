@@ -209,7 +209,7 @@ runs = ["workflow"]
 [[plant.edit]]
 file = ".github/workflows/release.yml"
 find = '''
-      - run: rustup update stable --no-self-update && rustup default stable
+      - run: rustup toolchain install "$(cat .github/rust-version)" --profile minimal --no-self-update && rustup default "$(cat .github/rust-version)"
       - name: Build cf-publish, and say what it hashes to'''
 replace = '''
       - uses: dtolnay/rust-toolchain@stable

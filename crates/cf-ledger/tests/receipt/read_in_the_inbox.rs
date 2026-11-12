@@ -47,7 +47,7 @@ fn asked(w: &mut World) -> (i64, MessageView) {
 fn read_in_the_inbox(w: &mut World, ids: &[i64]) {
     let chief = w.id("chief");
     w.ledger
-        .receive_read(chief, ids, Read::Inbox)
+        .receive_read(chief, ids, Read::Inbox, &cf_proto::cf_word::CfWord::bare())
         .expect("read in the inbox");
 }
 
@@ -175,7 +175,12 @@ fn a_tasks_words_or_a_role_read_in_the_inbox_wait_for_their_paste() {
     let brief = created.message.expect("a brief").id;
     let zeus = w.id("zeus");
     w.ledger
-        .receive_read(zeus, &[brief], Read::Inbox)
+        .receive_read(
+            zeus,
+            &[brief],
+            Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
         .expect("read in the inbox");
     assert_eq!(w.states(&[brief]), ["queued"]);
     assert_eq!(w.next("zeus"), Some(brief));
@@ -227,7 +232,7 @@ fn role_on_its_way(w: &mut World, role: &str) -> (i64, MessageView) {
 fn reads(w: &mut World, handle: &str, ids: &[i64], via: Read) -> usize {
     let reader = w.id(handle);
     w.ledger
-        .receive_read(reader, ids, via)
+        .receive_read(reader, ids, via, &cf_proto::cf_word::CfWord::bare())
         .expect("a read was said")
 }
 
@@ -267,10 +272,20 @@ fn a_role_read_in_the_inbox_is_recorded_only_from_its_recipient_and_only_in_the_
     let chief = w.id("chief");
     let zeus = w.id("zeus");
     w.ledger
-        .receive_read(zeus, &[note.id], Read::Inbox)
+        .receive_read(
+            zeus,
+            &[note.id],
+            Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
         .expect("read by another");
     w.ledger
-        .receive_read(chief, &[note.id], Read::Task)
+        .receive_read(
+            chief,
+            &[note.id],
+            Read::Task,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
         .expect("read in a thread");
     assert_eq!(w.states(&[note.id]), ["delivered"]);
     assert_eq!(told(&w, conversation), None);
@@ -298,8 +313,8 @@ fn a_role_read_in_the_inbox_while_its_paste_is_on_its_way_is_kept_and_told_once_
     );
     assert_eq!(
         w.receipt(note.id),
-        json!({ "readEarly": "inbox", "readIn": conversation }),
-        "the read is kept with the conversation it was made in"
+        Value::Null,
+        "a role keeps no read in its receipt: the part printed is logged, with its conversation (T-1513)"
     );
 
     let confirmed = w.confirm(note.id);
@@ -315,8 +330,8 @@ fn a_role_read_in_the_inbox_while_its_paste_is_on_its_way_is_kept_and_told_once_
     );
     assert_eq!(
         w.receipt(note.id),
-        json!({ "item": format!("i-{}", note.id), "readEarly": "inbox", "readIn": conversation }),
-        "the proof of the paste and the read are both kept"
+        json!({ "item": format!("i-{}", note.id) }),
+        "the proof of the paste is kept"
     );
     assert!(
         w.message(note.id).delivered_at.is_some(),
@@ -349,11 +364,6 @@ fn a_role_read_again_in_a_later_conversation_while_its_paste_is_on_its_way_is_ke
         .start_conversation(chief, "codex")
         .expect("another conversation");
     reads(&mut w, "chief", &[note.id], Read::Inbox);
-    assert_eq!(
-        w.receipt(note.id),
-        json!({ "readEarly": "inbox", "readIn": later.id }),
-        "the read the note has is the last one"
-    );
     w.confirm(note.id);
     assert_eq!(w.states(&[note.id]), ["read"]);
     assert_eq!(told(&w, later.id).as_deref(), Some("the long role"));
@@ -604,7 +614,12 @@ fn what_the_thread_of_cf_task_get_carried_receives_only_its_answers() {
     let (_, question) = asked(&mut w);
     let chief = w.id("chief");
     w.ledger
-        .receive_read(chief, &[question.id], Read::Task)
+        .receive_read(
+            chief,
+            &[question.id],
+            Read::Task,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
         .expect("read in a thread");
     assert_eq!(w.states(&[question.id]), ["queued"]);
     assert_eq!(w.next("chief"), Some(question.id));
@@ -616,7 +631,12 @@ fn what_another_read_in_their_inbox_is_not_received() {
     let (_, question) = asked(&mut w);
     let diana = w.id("diana");
     w.ledger
-        .receive_read(diana, &[question.id], Read::Inbox)
+        .receive_read(
+            diana,
+            &[question.id],
+            Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
         .expect("a read by another");
     assert_eq!(w.states(&[question.id]), ["queued"]);
 }

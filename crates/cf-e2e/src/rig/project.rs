@@ -236,6 +236,24 @@ fn body_of(row: &Value, agent: &str, roles: Option<Value>) -> Value {
         "model": model,
         "tier": row.get("workTier").filter(|tier| !tier.is_null()).cloned().unwrap_or(json!("standard")),
     });
+    // A member of roles with no tier is given none, as Add member gives it: the daemon
+    // refuses one (spec new-roles).
+    let untiered = roles
+        .as_ref()
+        .and_then(Value::as_array)
+        .is_some_and(|roles| {
+            !roles.is_empty()
+                && roles.iter().all(|role| {
+                    role.as_str().is_some_and(|role| {
+                        crate::matrix::seating::POOLS_WITHOUT_TIER.contains(&role)
+                    })
+                })
+        });
+    if untiered {
+        if let Some(fields) = body.as_object_mut() {
+            fields.remove("tier");
+        }
+    }
     if let Some(effort) = ["effort", "thinking"]
         .into_iter()
         .find_map(|key| row.get(key).filter(|effort| !effort.is_null()))
@@ -309,6 +327,28 @@ mod tests {
                 "harness": "codex", "model": "gpt-6-astra", "tier": "standard",
                 "effort": "medium", "roles": ["reviewer"],
             })
+        );
+    }
+
+    /// A member of roles with no tier (spec new-roles) is asked for with none, which the daemon
+    /// would refuse; one that holds a role with tiers beside them keeps its tier.
+    #[test]
+    fn a_member_of_roles_with_no_tier_is_asked_for_with_none() {
+        let row =
+            json!({ "id": "iris", "kind": "pi", "model": "gpt-6-astra", "workTier": "standard" });
+        for roles in [
+            json!(["frontend"]),
+            json!(["architect", "researcher"]),
+            json!(["integrator"]),
+        ] {
+            assert_eq!(
+                body_of(&row, "iris", Some(roles.clone())),
+                json!({ "harness": "pi", "model": "gpt-6-astra", "roles": roles }),
+            );
+        }
+        assert_eq!(
+            body_of(&row, "iris", Some(json!(["worker", "integrator"])))["tier"],
+            "standard"
         );
     }
 }

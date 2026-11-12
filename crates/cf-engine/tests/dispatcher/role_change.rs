@@ -21,6 +21,7 @@ mod chief_launch;
 mod cleared;
 mod fresh;
 mod identity;
+mod in_parts;
 mod launch;
 mod members;
 mod skill;

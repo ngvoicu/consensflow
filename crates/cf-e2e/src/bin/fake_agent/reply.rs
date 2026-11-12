@@ -545,7 +545,7 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         text,
         pattern::once(
             &DISPATCH,
-            r"(?m)^DISPATCH ((?:(?:--(?:advice|review|test|design|self)|--\S+ \S+) )+)(.+)$",
+            r"(?m)^DISPATCH ((?:(?:--(?:advice|review|test|design|frontend|architect|research|integrate|self)|--\S+ \S+) )+)(.+)$",
         ),
     )
     .iter()
@@ -1121,10 +1121,10 @@ mod tests {
     #[test]
     fn each_dispatch_line_of_a_message_is_a_task_added_in_the_order_of_the_lines() {
         let line = Regex::new(
-            r"(?m)^DISPATCH ((?:(?:--(?:advice|review|test|design|self)|--\S+ \S+) )+)(.+)$",
+            r"(?m)^DISPATCH ((?:(?:--(?:advice|review|test|design|frontend|architect|research|integrate|self)|--\S+ \S+) )+)(.+)$",
         )
         .unwrap();
-        let text = "The plan.\nDISPATCH --tier complex JOB 60 SLEEP 30 Build\\nit\nnot a line: DISPATCH --tier light no\nDISPATCH --review --tier light Look at it";
+        let text = "The plan.\nDISPATCH --tier complex JOB 60 SLEEP 30 Build\\nit\nnot a line: DISPATCH --tier light no\nDISPATCH --review --tier light Look at it\nDISPATCH --frontend Draw the page\nDISPATCH --architect Frame it\nDISPATCH --research Find it\nDISPATCH --integrate Land it";
         let words: Vec<Vec<String>> = dispatches(text, &line);
         assert_eq!(
             words,
@@ -1137,6 +1137,10 @@ mod tests {
                     "JOB 60 SLEEP 30 Build\nit"
                 ],
                 vec!["task", "add", "--review", "--tier", "light", "Look at it"],
+                vec!["task", "add", "--frontend", "Draw the page"],
+                vec!["task", "add", "--architect", "Frame it"],
+                vec!["task", "add", "--research", "Find it"],
+                vec!["task", "add", "--integrate", "Land it"],
             ]
         );
         assert!(dispatches("DISPATCH nothing", &line).is_empty());

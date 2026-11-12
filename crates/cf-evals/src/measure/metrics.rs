@@ -24,6 +24,23 @@ pub struct Task {
     pub tier: Option<String>,
     pub state: String,
     pub assignee: Option<String>,
+    /// The role it is for: its pool, else the role of the participant that has it (a
+    /// window's, the one it began for); none for a task nobody has and no pool names. Read
+    /// through [`Task::is_for`]. It stays out of the answer's text, which is held to what
+    /// Node's ledger gave, byte for byte.
+    pub role: Option<String>,
+}
+
+impl Task {
+    /// The role it is for: its pool where it names one, else [`Task::role`].
+    pub fn is_for(&self) -> Option<&str> {
+        self.pool.as_deref().or(self.role.as_deref())
+    }
+
+    /// Whether it is work ([`is_work_role`]) by the role it is for.
+    pub fn is_work(&self) -> bool {
+        is_work_role(self.is_for())
+    }
 }
 
 /// A file a scenario reads whole: what it held as the run began, at the first look
@@ -58,6 +75,8 @@ pub struct Reopen {
 pub struct Rounds {
     pub number: i64,
     pub pool: Option<String>,
+    /// The role it is for, as [`Task::role`], and out of the answer's text as it is.
+    pub role: Option<String>,
     pub state: String,
     pub created_at: String,
     /// The brief the chief wrote.
@@ -69,12 +88,15 @@ pub struct Rounds {
     pub accepted_at: Option<String>,
 }
 
-/// Whether a task of `pool` is work for a worker: the worker's pool, or none (a task given
-/// to a window by name). Said by the worker's own pool, not by a list of the others: a role
-/// this crate knows nothing of yet (another row of the product's roles' table, which an
-/// eval does not read) is no worker's.
-pub fn is_work_pool(pool: Option<&str>) -> bool {
-    matches!(pool, None | Some("worker"))
+/// Whether a task for `role` ([`Task::role`]: its pool, else its window's) is work: what
+/// builds the product, the worker's or the frontend designer's (spec new-roles), or a task
+/// whose role nothing says. A fix a review sends either is rework. Said by those roles, not by
+/// a list of the others: the architect's design runs nothing, the researcher's findings change
+/// no file and the integrator's landing changes no behaviour, so none is work here, nor the
+/// chief's own step, and a role this crate knows nothing of yet (another row of the product's
+/// roles' table, which an eval does not read) is no work.
+pub fn is_work_role(role: Option<&str>) -> bool {
+    matches!(role, None | Some("worker" | "frontend"))
 }
 
 impl Rounds {
@@ -83,10 +105,11 @@ impl Rounds {
         self.pool.as_deref() == Some("reviewer")
     }
 
-    /// Whether the task is work for a worker (a task given to a window by name has no
-    /// pool): not a review, advice, a test or an image.
+    /// Whether the task is work for a worker or a frontend designer, by the role it is for
+    /// (a follow-up's is its window's): not a review, advice, a test, an image, a design,
+    /// findings or a landing.
     pub fn is_work(&self) -> bool {
-        is_work_pool(self.pool.as_deref())
+        is_work_role(self.pool.as_deref().or(self.role.as_deref()))
     }
 
     /// When the first result that stood came in.

@@ -95,7 +95,7 @@ fn a_role_in_the_table_alone_is_one_a_member_holds_and_the_refusals_list_it_in_i
     // Without its row it is no role at all.
     assert_eq!(
         said(require_roles(&["scout"], || "scout".to_owned()).unwrap_err()).1,
-        "a member is one or more of worker, advisor, reviewer, tester, designer, not scout"
+        "a member is one or more of worker, frontend, architect, researcher, advisor, reviewer, tester, integrator, designer, not scout"
     );
 }
 

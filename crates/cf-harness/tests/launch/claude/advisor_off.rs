@@ -37,7 +37,17 @@ fn a_launch_of_a_project_with_the_tool_on_writes_the_settings_file_it_always_wro
 #[test]
 fn every_members_launch_of_a_project_with_the_tool_off_has_it_switched_in_its_own_file_and_nothing_else_moves(
 ) {
-    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+    for role in [
+        "worker",
+        "frontend",
+        "architect",
+        "researcher",
+        "advisor",
+        "reviewer",
+        "tester",
+        "integrator",
+        "designer",
+    ] {
         let home = Home::new();
         let adapter = home.adapter();
         let plain = Request {

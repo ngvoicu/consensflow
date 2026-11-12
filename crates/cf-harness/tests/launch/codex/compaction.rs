@@ -41,7 +41,17 @@ fn without_bridge(env: &[(String, String)]) -> Vec<(String, String)> {
 
 #[test]
 fn every_members_launch_is_given_the_size_as_codex_s_compaction_limit_and_nothing_else_moves() {
-    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+    for role in [
+        "worker",
+        "frontend",
+        "architect",
+        "researcher",
+        "advisor",
+        "reviewer",
+        "tester",
+        "integrator",
+        "designer",
+    ] {
         let home = Home::new();
         let (adapter, _fakes) = adapter(&home);
         let plain = prepare(

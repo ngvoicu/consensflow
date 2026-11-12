@@ -3,7 +3,8 @@
 # version tag; run it by hand (Actions → Windows build → Run workflow) for any
 # commit, and the run carries both files as its download. Neither is
 # code-signed, so Windows shows its unknown-publisher warning on first run.
-# What builds them is ours or pinned: Rust from the runner's own rustup, and
+# What builds them is ours or pinned: Rust from the runner's own rustup at the
+# version .github/rust-version names, and
 # the one third-party action at a commit, never a tag that can move.
 name: Windows build
 
@@ -37,7 +38,7 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             app/package-lock.json
-      - run: rustup update stable --no-self-update && rustup default stable
+      - run: rustup toolchain install "$(cat .github/rust-version)" --profile minimal --no-self-update && rustup default "$(cat .github/rust-version)"
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ". -> app/src-tauri/target"

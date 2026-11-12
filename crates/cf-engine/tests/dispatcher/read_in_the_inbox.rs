@@ -68,7 +68,7 @@ fn read_in_the_inbox(context: &Context, project: i64, id: i64) {
     context
         .ledger
         .borrow_mut()
-        .receive_read(chief, &[id], Read::Inbox)
+        .receive_read(chief, &[id], Read::Inbox, &context.roles.cf.borrow())
         .unwrap();
 }
 

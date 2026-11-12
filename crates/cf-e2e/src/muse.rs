@@ -250,8 +250,10 @@ impl StandIn {
     }
 
     /// What Muse is run with for the command line `words`: on echo, its turns the rig's
-    /// length (`CF_TEST_MUSE_DELAY_MS` where a case sets it) and no model or effort,
-    /// which echo refuses; live, the words as they are.
+    /// length (`CF_TEST_MUSE_DELAY_MS` where a case sets it), its reminder roster empty
+    /// (Muse 1.4.15's blocking end-of-turn reminders run on the echo provider too, never
+    /// call `submit_reminder_decision`, and add three more echo turns to each turn), and
+    /// no model or effort, which echo refuses; live, the words as they are.
     pub fn args(&self, words: &[String]) -> Vec<String> {
         let Run::Echo { turn_ms } = self.run else {
             return words.to_vec();
@@ -262,6 +264,8 @@ impl StandIn {
             "echo".to_owned(),
             "--echo-delay-ms".to_owned(),
             delay,
+            "-c".to_owned(),
+            r#"run.reminder_roster={"agents":[]}"#.to_owned(),
         ];
         let mut rest = words.iter();
         while let Some(word) = rest.next() {
@@ -439,7 +443,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 {repaint}
-exec '{binary}' --provider echo --echo-delay-ms "${{CF_TEST_MUSE_DELAY_MS:-{delay_ms}}}" "${{words[@]}}"
+exec '{binary}' --provider echo --echo-delay-ms "${{CF_TEST_MUSE_DELAY_MS:-{delay_ms}}}" -c 'run.reminder_roster={{"agents":[]}}' "${{words[@]}}"
 "#,
         serve = serve_list_script(),
         argv = argv.display(),
@@ -1264,6 +1268,8 @@ mod tests {
                     "echo",
                     "--echo-delay-ms",
                     "4000",
+                    "-c",
+                    r#"run.reminder_roster={"agents":[]}"#,
                     "-c",
                     "hooks={}",
                     "--yolo"

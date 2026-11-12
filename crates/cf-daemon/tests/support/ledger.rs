@@ -343,7 +343,7 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, LedgerError> {
         ))
         .and_then(|member| encode(ledger.add_member(id(), &member))),
         "setRoles" => parse_roles(arg(args, 2))
-            .and_then(|roles| encode(ledger.set_roles(id(), text(arg(args, 1)), &roles))),
+            .and_then(|roles| encode(ledger.set_roles(id(), text(arg(args, 1)), &roles, None))),
         "endSession" => {
             encode(ledger.end_session(id(), text(arg(args, 1)), text(field(args, 2, "by"))))
         }

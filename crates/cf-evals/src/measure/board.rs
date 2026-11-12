@@ -42,8 +42,8 @@ impl TaskRow {
         self.requester == chief
     }
 
-    /// Whether it went to a pool of members of `role` (a worker's task may name
-    /// none: one given to a window by name).
+    /// Whether it went to a pool of members of `role` (a follow-up names none, and is the
+    /// role of its window: [`Task::role`]).
     pub fn pool_is(&self, pool: &str) -> bool {
         self.task.pool.as_deref() == Some(pool)
     }
@@ -94,16 +94,23 @@ pub(super) fn human_and_chief(db: &Connection, project: i64) -> Result<(Particip
     Ok((find("human")?, find("chief")?))
 }
 
+/// The role a task is for, as SQL over `task t` and its assignee `participant a`: its pool, or
+/// where it has none (a follow-up, the chief's own step, a task given by name) the role of the
+/// participant that has it. A window's role is the one its session began for, which the ledger
+/// writes once and no change of its member's roles touches (T-1453). Every measure that asks
+/// what a task is for reads this, with [`super::metrics::is_work_role`].
+pub(super) const ROLE_OF_TASK: &str = "COALESCE(t.pool, a.role)";
+
 /// Every task of the project, by number, with its messages.
 pub(super) fn tasks(db: &Connection, project: i64) -> Result<Vec<TaskRow>> {
-    let mut statement = db.prepare(
+    let mut statement = db.prepare(&format!(
         "SELECT t.id, t.number, t.title, t.pool, t.tier, t.state, t.updated_at,
-                q.handle AS requester, a.handle AS assignee
+                q.handle AS requester, a.handle AS assignee, {ROLE_OF_TASK} AS role
          FROM task t
          JOIN participant q ON q.id = t.requester_id
          LEFT JOIN participant a ON a.id = t.assignee_id
-         WHERE t.project_id = ?1 ORDER BY t.number",
-    )?;
+         WHERE t.project_id = ?1 ORDER BY t.number"
+    ))?;
     let rows = statement
         .query_map([project], |row| {
             Ok((
@@ -116,6 +123,7 @@ pub(super) fn tasks(db: &Connection, project: i64) -> Result<Vec<TaskRow>> {
                         tier: row.get(4)?,
                         state: row.get(5)?,
                         assignee: row.get(8)?,
+                        role: row.get(9)?,
                     },
                     updated_at: row.get(6)?,
                     requester: row.get(7)?,

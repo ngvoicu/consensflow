@@ -14,7 +14,7 @@ use super::carrying::{adopt, carried, release_carried};
 use super::continuations::{withdraw_stale_among, withdrawn_if_stale};
 use super::pauses::withdrawn_on_its_way;
 use super::receipt::{
-    kept_read, reconcile, settle_when_given_back, settle_when_given_up, told_when_confirmed,
+    kept_read, reconcile, settle_when_given_back, settle_when_given_up, told_if_read,
     with_kept_read,
 };
 use super::told::{arrived_after_all, behind_held_words, fail_for, kept_for_resume, told};
@@ -610,8 +610,9 @@ pub(crate) fn handed_over(store: &Store, project_id: i64) -> Result<Vec<i64>, Le
 /// The harness's own record proves the message arrived: `receipt` is what it
 /// showed. What its paste carried arrived with it, in the same step; then
 /// the task it is about is reconciled once. A read its recipient made while the
-/// paste was on its way (`keep_read`) is kept in the receipt beside the proof, and
-/// is told now, in this write: a role is read and recorded (`told_when_confirmed`).
+/// paste was on its way (`keep_read`) is kept in the receipt beside the proof. A role
+/// every part of which was printed in the conversation it goes to is read and recorded
+/// now, in this write (`told_if_read`), whatever state its note was in at each print.
 pub(crate) fn confirm_delivery(
     store: &mut Store,
     message_id: i64,
@@ -676,9 +677,9 @@ pub(crate) fn confirm_delivery(
             data["withdrawnAfterHanded"] = json!(late);
         }
         store.log(message.project_id, "delivery.confirmed", data)?;
-        if let Some(read) = early {
-            told_when_confirmed(store, message_id, read)?;
-        }
+        // A role is told once every part of it was printed in the conversation it goes to,
+        // whatever state its note was in at each: asked now, as at each part printed.
+        told_if_read(store, &known_message(store, message_id)?)?;
         if let Some(task) = message_task(store, message_id)? {
             reconcile(store, task.id)?;
         }

@@ -73,7 +73,7 @@ impl WindowEnv {
 /// How a command starts in the window of `participant`: the bundle's `cf`, `pane_cf`, as its
 /// harness's shell takes it on the platform (`windows`): a participant that names no harness,
 /// or one this build does not run, has a bash-like shell's.
-fn cf_word_of(participant: &ParticipantView, pane_cf: &str, windows: bool) -> CfWord {
+pub(crate) fn cf_word_of(participant: &ParticipantView, pane_cf: &str, windows: bool) -> CfWord {
     let shell = participant
         .harness
         .as_deref()

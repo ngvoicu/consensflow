@@ -29,7 +29,17 @@ fn env_at_home(env: &[(String, String)], root: &str) -> Vec<(String, String)> {
 
 #[test]
 fn a_devin_members_launch_is_the_same_whether_the_advisor_tool_is_switched_off_or_not() {
-    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+    for role in [
+        "worker",
+        "frontend",
+        "architect",
+        "researcher",
+        "advisor",
+        "reviewer",
+        "tester",
+        "integrator",
+        "designer",
+    ] {
         let plain_home = Home::new();
         let plain = prepare(
             &plain_home.adapter(),

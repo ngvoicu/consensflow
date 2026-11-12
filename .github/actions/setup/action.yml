@@ -1,5 +1,6 @@
 # What every job of the gate (ci.yml) starts from, after the checkout: Node with
-# the npm cache, Rust from the runner's own rustup with clippy and rustfmt,
+# the npm cache, Rust from the runner's own rustup at the version .github/rust-version
+# names (T-1523: never the runner's `stable`, which moves), with clippy and rustfmt,
 # Swatinem/rust-cache (pinned to a commit; its key holds the job's id, so each
 # job keeps the build it makes, and the shards of one job share one; saved
 # only after a green job, unless `cache-on-failure` is true), and the packages
@@ -21,7 +22,7 @@ runs:
           package-lock.json
           app/package-lock.json
     - shell: bash
-      run: rustup update stable --no-self-update && rustup default stable && rustup component add clippy rustfmt
+      run: rustup toolchain install "$(cat .github/rust-version)" --profile minimal --component clippy,rustfmt --no-self-update && rustup default "$(cat .github/rust-version)"
     - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       with:
         workspaces: ". -> app/src-tauri/target"

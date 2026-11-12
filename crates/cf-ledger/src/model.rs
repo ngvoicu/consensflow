@@ -464,7 +464,7 @@ mod tests {
         );
         assert_eq!(
             refusal(parse_roles(Some(&json!(["chief"])))).1,
-            r#"a member is one or more of worker, advisor, reviewer, tester, designer, not ["chief"]"#
+            r#"a member is one or more of worker, frontend, architect, researcher, advisor, reviewer, tester, integrator, designer, not ["chief"]"#
         );
     }
 

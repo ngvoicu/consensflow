@@ -209,11 +209,11 @@ runs = ["workflow-text"]
 [[plant.edit]]
 file = ".github/workflows/release.yml"
 find = '''
-      - run: rustup update stable --no-self-update && rustup default stable
+      - run: rustup toolchain install "$(cat .github/rust-version)" --profile minimal --no-self-update && rustup default "$(cat .github/rust-version)"
       - name: Build the release tool
         run: cargo build --release --locked -p cf-release'''
 replace = '''
-      - run: rustup update stable --no-self-update && rustup default stable
+      - run: rustup toolchain install "$(cat .github/rust-version)" --profile minimal --no-self-update && rustup default "$(cat .github/rust-version)"
       - name: Build the release tool
         run: cargo build --release -p cf-release'''
 

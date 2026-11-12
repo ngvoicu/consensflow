@@ -121,7 +121,12 @@ fn a_session_no_hook_greeted_is_given_a_long_role_in_part_and_told_it_once_it_is
     context
         .ledger
         .borrow_mut()
-        .receive_read(chief, &[note.id], cf_ledger::Read::Inbox)
+        .receive_read(
+            chief,
+            &[note.id],
+            cf_ledger::Read::Inbox,
+            &context.roles.cf.borrow(),
+        )
         .unwrap();
     assert!(recorded(&context, chief).is_some_and(|told| told.ends_with('x')));
     assert!(
@@ -164,7 +169,12 @@ fn a_cleared_session_that_reads_its_long_role_while_the_note_is_still_being_deli
         context
             .ledger
             .borrow_mut()
-            .receive_read(chief, &[note.id], cf_ledger::Read::Inbox)
+            .receive_read(
+                chief,
+                &[note.id],
+                cf_ledger::Read::Inbox,
+                &context.roles.cf.borrow()
+            )
             .unwrap(),
         0,
         "kept: the paste is not proved yet"

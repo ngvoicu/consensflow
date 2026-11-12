@@ -8,6 +8,7 @@
 use cf_ledger::{
     migrate, open_ledger, Ledger, NewChief, NewNote, NewProject, Options, ProjectView, MIGRATIONS,
 };
+use cf_proto::cf_word::CfWord;
 use rusqlite::Connection;
 
 const AT: &str = "2026-10-14T12:00:00.000Z";
@@ -153,4 +154,248 @@ fn a_ledger_opened_again_still_knows_which_messages_say_a_role_and_which_only_sa
         [said.id],
         "it is the file's"
     );
+}
+
+/// T-1513: a part of a role read (`receive_read_part`) is the recipient's own, of a note
+/// that says a role, and a part there is: anything else is nothing, logs nothing and
+/// leaves the note as it was. A role of one part is read as one printed whole is.
+/// T-1513 (review T-1516): a part read is of its recipient's own role, of a part there is,
+/// and of the number of parts its window's `cf` prints the note in, which the ledger counts
+/// itself: a read that says another number is refused and says why, a role in two parts said
+/// read as one whole is no read of it, and one in one part said read in two is none either.
+#[test]
+fn a_part_read_is_of_its_recipients_own_role_of_a_part_there_is_and_of_the_parts_the_ledger_counts()
+{
+    let dir = tempfile::tempdir().expect("a home");
+    let mut ledger = ledger_in(&dir);
+    let app = project(&mut ledger);
+    let chief = app
+        .participants
+        .iter()
+        .find(|participant| participant.role == "chief")
+        .expect("a chief")
+        .id;
+    let delivered = |ledger: &mut Ledger, id: i64| {
+        ledger.begin_delivery(id).expect("begun");
+        ledger.confirm_delivery(id, None).expect("confirmed");
+    };
+    let cf = CfWord::bare();
+    let long: String = (0..350)
+        .map(|at| format!("Line {at} of the role."))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    assert_eq!(cf_base::role_read::role_parts(&long).len(), 2);
+    let role = ledger
+        .note_role(app.id, "chief", &long, "the role")
+        .expect("a role")
+        .id;
+    delivered(&mut ledger, role);
+    let words = ledger
+        .note(
+            app.id,
+            &NewNote {
+                from: None,
+                to: "chief".into(),
+                body: long.clone(),
+                task: None,
+            },
+        )
+        .expect("a note")
+        .id;
+    delivered(&mut ledger, words);
+    let read = cf_ledger::Read::Inbox;
+    for (recipient, id, part, of, via, case) in [
+        (chief + 1_000, role, 2, 2, read, "another's"),
+        (chief, words, 2, 2, read, "no role"),
+        (chief, role, 0, 2, read, "part 0"),
+        (chief, role, 3, 2, read, "past the last"),
+        (chief, role, 2, 2, cf_ledger::Read::Task, "by cf task get"),
+    ] {
+        for part in [1, part] {
+            assert_eq!(
+                ledger
+                    .receive_read_part(recipient, id, part, of, via, &cf)
+                    .expect("read"),
+                0,
+                "{case}"
+            );
+        }
+        assert_eq!(
+            ledger.message(role).expect("read").expect("there").state,
+            "delivered",
+            "{case}"
+        );
+    }
+    let refused = ledger
+        .receive_read_part(chief, role, 1, 1, read, &cf)
+        .expect_err("a role in 2 parts is not read whole");
+    assert_eq!(refused.code(), Some("invalid-read"));
+    assert_eq!(
+        refused.to_string(),
+        format!("m-{role} is printed in 2 parts in this window, not 1: a read says the part `cf inbox read` printed and how many it prints the note in")
+    );
+    assert_eq!(
+        ledger.message(role).expect("read").expect("there").state,
+        "delivered"
+    );
+    let one = ledger
+        .note_role(app.id, "chief", "A short role.", "a short role")
+        .expect("a role")
+        .id;
+    delivered(&mut ledger, one);
+    let refused = ledger
+        .receive_read_part(chief, one, 2, 2, read, &cf)
+        .expect_err("a role in 1 part is not read in 2");
+    assert_eq!(
+        refused.to_string(),
+        format!("m-{one} is printed in 1 part in this window, not 2: a read says the part `cf inbox read` printed and how many it prints the note in")
+    );
+    assert_eq!(
+        ledger.message(one).expect("read").expect("there").state,
+        "delivered"
+    );
+    assert_eq!(
+        ledger
+            .receive_read_part(chief, one, 1, 1, read, &cf)
+            .expect("read"),
+        1
+    );
+    assert_eq!(
+        ledger.message(one).expect("read").expect("there").state,
+        "read"
+    );
+}
+
+/// What happens to a role note too long to be printed whole, between its paste's first
+/// try and its confirmation.
+#[derive(Debug, Clone, Copy)]
+enum Step {
+    /// The paste begins (`begin_delivery`): the note is `delivering`.
+    Begin,
+    /// The window prints part N, in whatever state the note is.
+    Prints(usize),
+    /// The paste is given back to the queue (`retry_delivery`): the note is `queued`.
+    Retry,
+    /// The paste is confirmed (`confirm_delivery`): the note is `delivered`, or `read`.
+    Confirm,
+    /// The window's conversation is cleared: a new one begins.
+    Cleared,
+}
+
+/// T-1513 (review T-1516): whether a role read in parts was read does not hang on the state
+/// its note was in when each part was printed. The review's case is the first row: part 1
+/// while the paste is on its way, the paste given back, part 2 while queued, then the paste
+/// again and confirmed. Then the other orders a retry makes, a part printed twice across
+/// one, parts out of order, and the reads before and after a confirmed paste. Every part
+/// printed in the conversation the role goes to is the role read, and told: the note is
+/// `read` and the conversation holds the role, so the next Resume says nothing of it. A
+/// part not printed, or printed in a conversation since cleared, is not.
+#[test]
+fn a_role_read_in_parts_across_a_retried_paste_is_read_whatever_state_each_part_was_printed_in() {
+    use Step::{Begin, Cleared, Confirm, Prints, Retry};
+    let body: String = (0..350)
+        .map(|at| format!("Line {at} of the role."))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let of = cf_base::role_read::role_parts(&body).len();
+    assert_eq!(of, 2, "the role is printed in 2 parts");
+    let mut wrong = Vec::new();
+    for (steps, told) in [
+        (
+            &[Begin, Prints(1), Retry, Prints(2), Begin, Confirm][..],
+            true,
+        ),
+        (&[Begin, Retry, Prints(1), Prints(2), Begin, Confirm], true),
+        (&[Begin, Retry, Prints(1), Begin, Prints(2), Confirm], true),
+        (
+            &[
+                Begin,
+                Prints(1),
+                Prints(2),
+                Retry,
+                Prints(2),
+                Begin,
+                Confirm,
+            ],
+            true,
+        ),
+        (&[Begin, Prints(2), Retry, Prints(1), Begin, Confirm], true),
+        (&[Begin, Prints(1), Prints(2), Confirm], true),
+        (&[Begin, Confirm, Prints(1), Prints(2)], true),
+        (&[Begin, Confirm, Prints(2), Prints(1)], true),
+        (&[Begin, Prints(1), Retry, Begin, Confirm], false),
+        (&[Begin, Confirm, Prints(1)], false),
+        (&[Begin, Prints(1), Prints(2), Cleared, Confirm], false),
+        (&[Begin, Prints(1), Cleared, Prints(2), Confirm], false),
+        (&[Begin, Confirm, Prints(1), Cleared, Prints(2)], false),
+    ] {
+        let dir = tempfile::tempdir().expect("a home");
+        let mut ledger = ledger_in(&dir);
+        let app = project(&mut ledger);
+        let chief = app
+            .participants
+            .iter()
+            .find(|participant| participant.role == "chief")
+            .expect("a chief")
+            .id;
+        let mut conversation = ledger
+            .start_conversation(chief, "codex")
+            .expect("a conversation")
+            .id;
+        let id = ledger
+            .note_role(app.id, "chief", &body, "the long role")
+            .expect("a role")
+            .id;
+        let mut states = Vec::new();
+        for step in steps {
+            match *step {
+                Begin => {
+                    ledger.begin_delivery(id).expect("begun");
+                }
+                Prints(part) => {
+                    printed(&mut ledger, chief, id, part, of);
+                }
+                Retry => {
+                    ledger
+                        .retry_delivery(id, "the record never showed it", true)
+                        .expect("given back");
+                }
+                Confirm => {
+                    ledger
+                        .confirm_delivery(id, Some(&serde_json::json!({ "item": "i-1" })))
+                        .expect("confirmed");
+                }
+                Cleared => {
+                    conversation = ledger
+                        .start_conversation(chief, "codex")
+                        .expect("a conversation")
+                        .id;
+                }
+            }
+            states.push(ledger.message(id).expect("read").expect("there").state);
+        }
+        let state = ledger.message(id).expect("read").expect("there").state;
+        let held = ledger.conversation_role_text(conversation).expect("read");
+        if state != if told { "read" } else { "delivered" }
+            || held.as_deref() != told.then_some("the long role")
+        {
+            wrong.push(format!("{steps:?}: {states:?}, told {:?}", held.is_some()));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The window of `recipient` printed part `part` of `of` of the note `id` (`cf inbox read
+/// m-N --part K`), and said so to the board.
+fn printed(ledger: &mut Ledger, recipient: i64, id: i64, part: usize, of: usize) -> usize {
+    ledger
+        .receive_read_part(
+            recipient,
+            id,
+            part,
+            of,
+            cf_ledger::Read::Inbox,
+            &CfWord::bare(),
+        )
+        .expect("read")
 }

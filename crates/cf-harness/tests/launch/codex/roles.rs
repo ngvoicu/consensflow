@@ -9,7 +9,16 @@ use super::*;
 #[test]
 fn every_role_enters_codex_with_its_whole_text_already_loaded() {
     for name in [
-        "chief", "advisor", "worker", "reviewer", "tester", "designer",
+        "chief",
+        "advisor",
+        "worker",
+        "reviewer",
+        "tester",
+        "designer",
+        "frontend",
+        "architect",
+        "researcher",
+        "integrator",
     ] {
         let home = Home::new();
         let existing = "User instructions: preserve \"quotes\", `backticks`, $HOME\nand newlines.";
@@ -174,7 +183,16 @@ fn no_codex_launch_of_either_platform_puts_its_role_on_a_command_line() {
 fn no_codex_window_this_adapter_launches_has_its_role_on_its_command_line() {
     let existing = "Codex's own instructions, which begin the developer's.";
     for name in [
-        "chief", "advisor", "worker", "reviewer", "tester", "designer",
+        "chief",
+        "advisor",
+        "worker",
+        "reviewer",
+        "tester",
+        "designer",
+        "frontend",
+        "architect",
+        "researcher",
+        "integrator",
     ] {
         for resume in [None, Some(THREAD)] {
             let home = Home::new();

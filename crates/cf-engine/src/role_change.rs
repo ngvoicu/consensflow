@@ -105,23 +105,35 @@
 //! daemon has seen the paste arrive: a read that comes while the note is still
 //! `delivering` is kept with it (`cf_ledger`'s `keep_read`, in its receipt) and told
 //! by the write that confirms the delivery (`confirm_delivery`), in the conversation
-//! it was made in. `cf` says so of a role up to a
-//! bound of its own (`cf_base::role_read`, 29,000 bytes and 500 lines, measured
-//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 151
-//! rows with specs on, 174 without, two roles to a row and a name of twenty characters, the
+//! it was made in. `cf` prints a role in one piece up to a bound of its own
+//! (`cf_base::role_read`, 29,000 bytes and 500 lines, measured on Codex and Muse, the
+//! harnesses a role goes to by a note, less the room its line takes): a staff of 141
+//! rows with specs on, 166 without, two roles to a row and a name of twenty characters, the
 //! model's id and effort, which a member is named by, on the same text (its bytes are the
-//! bound; 133 and 152 with a column of models in the table, 195 and 223 before it,
+//! bound; 143 and 168 before the ban on a task for a member by name came back, T-1513;
+//! 151 and 174 before the chief was told of the four roles of spec new-roles, T-1480; 133 and 152 with a column of models in the table, 195 and 223 before it,
 //! harness-models: the name says the model, so T-1234 took the column out, and the words
 //! on the designer's order and on the chief's own model took some of the room it made).
+//! A role longer than that `cf` prints in parts, each within the bound
+//! (`cf_base::role_read::role_parts`, cut at a paragraph where it can be, and where a
+//! table goes on past a part, its line says so): the first by the command the paste
+//! gives, each next by the command the part before ends with (`--part N`), and the
+//! opening says in how many ([`Telling::in_parts`]: two to a staff of 143 rows with
+//! specs on and the most rules, three at 300). Each part printed is said to the board, and
+//! logged as `message.part_read` (`receive_read_part`) whatever state the note is in: the
+//! role is read once every part was printed in the conversation it goes to, in any order,
+//! and told then or once its paste is confirmed, whichever is last (T-1513, review T-1510:
+//! the human chose parts over a smaller text, 2026-11-12; review T-1516).
 //!
 //! The project's rules for its staff (`roles::with_staff_rules`) are part of
 //! every text that says a role, and the ledger bounds them for it (at most 8,000
 //! bytes and 150 lines, `cf_ledger::STAFF_RULES_MAX_BYTES`): a member's real text
 //! with the most rules goes into its window whole, and a chief's with specs on,
-//! the most rules and a staff of up to 15 rows (38 without specs) is read whole,
-//! a staff of 15 with 41 bytes and 57 lines to spare (19 and 39 with the model column, 29
-//! and 58 before it; a staff of 25 with the most rules is told in part and not read whole,
-//! 559 bytes over: a row of the table is 60 bytes, and the text without a row is 28,060).
+//! the most rules and a staff of up to 5 rows (30 without specs) is printed in one piece
+//! (7 and 32 read whole before the ban on a task for a
+//! member by name, T-1513; 15 and 38 before the four roles of spec new-roles, T-1480; 19 and 39 with the model column, 29 and 58 before it), and a
+//! larger one in parts: a row of the table is 60 bytes, and the text without a row is
+//! about 28,641.
 //! A role read so is said nothing of at the next Resume, unless it changed again.
 //! One the window has not read by its next Resume is said again then, and the
 //! human has a line on the board that says so ([`Dispatcher::not_read`]).
@@ -170,15 +182,15 @@
 //!   goes back to that one, the launch says nothing, though the thread holds the
 //!   cut words after it. A staff that shrinks, or a role that changes again, tells
 //!   the thread a whole one.
-//! - A note printed past `cf`'s bound for a role is not said read: a role that long
-//!   is said again at every Resume, with the line to the human.
-//! - A read kept while the note was on its way tells the role only in the conversation
-//!   it was made in. One that began between the read and the confirmation (a `/clear`
-//!   while the paste was on its way) was not shown what the read printed: it is told
-//!   nothing by it, and the role is said again at its next Resume, with the line.
-//! - A role note read while its paste was on its way and then given up (failed) is
-//!   failed as any is: the read is not looked for, as the thread is not (the bullet
-//!   above on a delivery given up). Any other message so read is `read`, not failed.
+//! - A role is read only by the parts printed in the conversation it goes to: one that
+//!   began between two parts, or between the parts and the paste's confirmation (a
+//!   `/clear`), was not shown them all, is told nothing by them, and the role is said
+//!   again at its next Resume, with the line. `cf inbox read --json` prints a role whole,
+//!   as it did, and says it read only within the bound: the ledger refuses that read of a
+//!   role `cf` prints in more than one part.
+//! - A role note printed while its paste was on its way and then given up (failed) is
+//!   failed as any is: its parts printed are not looked for, as the thread is not (the
+//!   bullet above on a delivery given up). Any other message so read is `read`, not failed.
 //! - A note whose paste is given back to the queue after the window read it (the
 //!   window went before the daemon saw the paste arrive) keeps the read: a read does
 //!   not receive a role, so the note waits for its paste, and the read tells the role
@@ -217,8 +229,10 @@ mod prelude;
 mod tests;
 
 use cf_base::js;
+use cf_base::role_read::role_parts;
 use cf_harness::records::{Item, Role};
 use cf_ledger::{ConversationView, MessageView, NewNote, ParticipantView, ProjectView};
+use cf_proto::cf_word::CfWord;
 use serde_json::{json, Value};
 
 use crate::delivery_text::{fits_whole, goes_whole, header_id};
@@ -237,12 +251,54 @@ pub(crate) const OPENING: &str = "Your ConsensFlow role instructions have change
 /// that prints the rest, and is told to read the rest now.
 pub(crate) const OPENING_IN_PART: &str = "Your ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on, and where they differ from what you were told before, these are right. They are too long for one message, so only their opening follows; the line at its end gives the command that prints all of them. Run that command now, before anything else, and read everything it prints. This is context, not a task: once you have read them, say in one short line that you have them, and wait for the next message.";
 
+/// What [`OPENING_IN_PART`] and [`BEGAN_WITHOUT_IN_PART`] say of the rest where `cf inbox
+/// read` prints the note in `parts` parts, as it does a role it cannot print within the
+/// bound its window reads whole at (`cf_base::role_read::role_parts`).
+fn read_in_parts(parts: usize) -> String {
+    format!("They are too long for one message, so only their opening follows, and too long for one read, so the command the line at its end gives prints them in {parts} parts: the first, which ends with the command that prints the next. Run that command now, before anything else, then the command each part ends with, until a part says it is the last, and read everything they print.")
+}
+
 /// What a note that gives the role to a session no hook greeted says before the role
 /// text ([`Dispatcher::greet_switched`]).
 pub(crate) const BEGAN_WITHOUT: &str = "This conversation began without your ConsensFlow role instructions: it was started in your window (a /clear, or a new session), and your harness gave it none. They follow in full: follow them from now on. This is context, not a task: say in one short line that you have them, and wait for the next message.";
 
 /// [`BEGAN_WITHOUT`] where the note is too long for one message.
 pub(crate) const BEGAN_WITHOUT_IN_PART: &str = "This conversation began without your ConsensFlow role instructions: it was started in your window (a /clear, or a new session), and your harness gave it none. They are too long for one message, so only their opening follows; the line at its end gives the command that prints all of them. Run that command now, before anything else, and read everything it prints: follow them from now on. This is context, not a task: once you have read them, say in one short line that you have them, and wait for the next message.";
+
+/// What a note that says a role says before it: that it replaces the role the conversation
+/// began with ([`OPENING`]), or that it gives one to a session that began with none
+/// ([`BEGAN_WITHOUT`]).
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Telling {
+    Replaces,
+    BeganWithout,
+}
+
+impl Telling {
+    /// Its opening where the note goes in whole.
+    fn whole(self) -> &'static str {
+        match self {
+            Self::Replaces => OPENING,
+            Self::BeganWithout => BEGAN_WITHOUT,
+        }
+    }
+
+    /// Its opening where the note goes in cut, and `cf inbox read` prints it whole.
+    fn in_part(self) -> &'static str {
+        match self {
+            Self::Replaces => OPENING_IN_PART,
+            Self::BeganWithout => BEGAN_WITHOUT_IN_PART,
+        }
+    }
+
+    /// Its opening where the note goes in cut, and `cf inbox read` prints it in `parts`.
+    fn in_parts(self, parts: usize) -> String {
+        match self {
+            Self::Replaces => format!("Your ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on, and where they differ from what you were told before, these are right. {} This is context, not a task: once you have read them all, say in one short line that you have them, and wait for the next message.", read_in_parts(parts)),
+            Self::BeganWithout => format!("This conversation began without your ConsensFlow role instructions: it was started in your window (a /clear, or a new session), and your harness gave it none. {} Follow them from now on. This is context, not a task: once you have read them all, say in one short line that you have them, and wait for the next message.", read_in_parts(parts)),
+        }
+    }
+}
 
 /// Why a greeting that waited is withdrawn: the session was given its role since.
 const GREETED_SINCE: &str = "a hook of the harness gave the session its role since";
@@ -412,7 +468,11 @@ impl Dispatcher {
         let note = self.seams.ledger.borrow_mut().note_role(
             project.id,
             &participant.handle,
-            &note_of(BEGAN_WITHOUT, BEGAN_WITHOUT_IN_PART, &role.instructions),
+            &note_of(
+                Telling::BeganWithout,
+                &role.instructions,
+                &self.seams.roles.cf(participant),
+            ),
             &role.instructions,
         )?;
         record.delivery.borrow_mut().greeting = Some(note.id);
@@ -526,7 +586,7 @@ impl Dispatcher {
         Ok(self.seams.ledger.borrow_mut().note_role(
             project.id,
             &participant.handle,
-            &body_of(&role.instructions),
+            &body_of(&role.instructions, &self.seams.roles.cf(participant)),
             &role.instructions,
         )?)
     }
@@ -621,20 +681,36 @@ impl Dispatcher {
     }
 }
 
-/// What a note that replaces the role with `instructions` says: the words that
-/// say so, and the text in full.
-fn body_of(instructions: &str) -> String {
-    note_of(OPENING, OPENING_IN_PART, instructions)
+/// What a note that replaces the role with `instructions` says, in the window whose `cf`
+/// is `cf`: the words that say so, and the text in full.
+fn body_of(instructions: &str, cf: &CfWord) -> String {
+    note_of(Telling::Replaces, instructions, cf)
 }
 
-/// A note that says `instructions` after `whole`, where the two go into a window in
-/// one message, else after `in_part`, which tells the window to read the rest now.
-fn note_of(whole: &str, in_part: &str, instructions: &str) -> String {
-    let note = format!("{whole}\n\n{instructions}");
+/// A note that says `instructions` after the opening of `telling`, in the window whose `cf`
+/// is `cf`: the opening for a note that goes in whole, where the two go into a window in
+/// one message; else the one that tells the window to read the rest now, where `cf inbox
+/// read` prints it in one piece; else the one that says in how many parts it prints it and
+/// to read them all. The count is taken of the note with that opening in it, whose words
+/// move where the parts are cut, until the opening says the count of its own note.
+fn note_of(telling: Telling, instructions: &str, cf: &CfWord) -> String {
+    let note = format!("{}\n\n{instructions}", telling.whole());
     if fits_whole(&note) {
-        note
-    } else {
-        format!("{in_part}\n\n{instructions}")
+        return note;
+    }
+    let note = format!("{}\n\n{instructions}", telling.in_part());
+    let mut parts = role_parts(&cf.in_text(&note)).len();
+    if parts == 1 {
+        return note;
+    }
+    loop {
+        let note = format!("{}\n\n{instructions}", telling.in_parts(parts));
+        let counted = role_parts(&cf.in_text(&note)).len();
+        // A count that moves its own cut by a digit settles at the larger.
+        if counted <= parts {
+            return note;
+        }
+        parts = counted;
     }
 }
 

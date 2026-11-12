@@ -32,7 +32,17 @@ fn names(plan: &Prepared) -> Vec<&str> {
 
 #[test]
 fn every_members_launch_gives_the_extension_the_size_and_nothing_else_moves() {
-    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+    for role in [
+        "worker",
+        "frontend",
+        "architect",
+        "researcher",
+        "advisor",
+        "reviewer",
+        "tester",
+        "integrator",
+        "designer",
+    ] {
         let plain_home = Home::new();
         let (plain_adapter, _plain_fakes) = adapter(&plain_home);
         let plain = prepare(

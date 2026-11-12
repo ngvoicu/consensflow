@@ -136,6 +136,9 @@ fn the_section_says_when_to_use_a_spec_what_goes_to_the_board_and_how_a_spec_bec
         "`--needs`",
         "names the spec item it comes from",
         "After you accept a task, mark the spec's progress",
+        // With an architect, the spec is the work and its order; the architect's files are the
+        // software (spec new-roles, FD-06).
+        "With an architect, the spec says the work and its order and points to the architect's files for what the software is.",
     ] {
         assert!(section.contains(said), "{said:?} in {section}");
     }

@@ -403,3 +403,143 @@ fn a_turn_the_harness_gave_no_time_is_placed_where_the_daemon_copied_it() {
         ["2026-10-31T10:05:00.000Z", "2026-10-31T10:06:00.000Z"]
     );
 }
+
+/// Work is what a worker or a frontend designer builds (spec new-roles, FD-04): a fix a
+/// review sends either of them is rework. The architect's design, which runs nothing, the
+/// researcher's findings and the integrator's landing, which changes no behaviour, are not,
+/// nor the chief's own step, nor any role of the product's table this crate does not know. A
+/// task whose role nothing says (none has it, and no pool names one) is work, as it was.
+#[test]
+fn work_is_a_workers_or_a_frontend_designers_and_no_other_roles() {
+    use cf_evals::measure::is_work_role;
+    for role in [None, Some("worker"), Some("frontend")] {
+        assert!(is_work_role(role), "{role:?}");
+    }
+    for role in [
+        "architect",
+        "researcher",
+        "integrator",
+        "advisor",
+        "reviewer",
+        "tester",
+        "designer",
+        "chief",
+        "scout",
+    ] {
+        assert!(!is_work_role(Some(role)), "{role}");
+    }
+}
+
+/// A ledger whose chief (2) asked the worker zeus (3) for T-1, which came back short; gave
+/// T-2, a follow-up the ledger stores with no pool, to a window of the architect daedalus (4)
+/// begun for the architect's work (5); gave T-3, another, to a window of zeus begun for a
+/// worker's (6); gave itself T-4, its own step; and asked the researcher argus (7) for T-5,
+/// whose findings came back long. The architect's and the researcher's results are `long`.
+fn ledger_of_roles(long: usize) -> Folder {
+    let folder = Folder::new();
+    let (db, project) = project_with(&folder, &["zeus"]);
+    let join = |handle: &str, role: &str, member: Option<i64>| {
+        db.execute(
+            "INSERT INTO participant (project_id, handle, role, roles, harness, designer, tier, member_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, 'claude-code', 0, 'light', ?5, '2026-10-31T10:00:00.000Z')",
+            rusqlite::params![project, handle, role, format!(r#"["{role}"]"#), member],
+        )
+        .unwrap();
+        db.last_insert_rowid()
+    };
+    let daedalus = join("daedalus", "architect", None);
+    let drafting = join("daedalus-wren", "architect", Some(daedalus));
+    let fixing = join("zeus-otter", "worker", Some(3));
+    let argus = join("argus", "researcher", None);
+    let given = |number: i64, assignee: i64, pool: Option<&str>, result: usize| {
+        let id = task(&db, project, number, assignee, "done");
+        db.execute(
+            "UPDATE task SET pool = ?2, tier = CASE WHEN ?2 = 'worker' THEN 'standard' END WHERE id = ?1",
+            rusqlite::params![id, pool],
+        )
+        .unwrap();
+        message(
+            &db,
+            project,
+            (2, assignee),
+            "result",
+            id,
+            "delivered",
+            "2026-10-31T10:30:00.000Z",
+            None,
+        );
+        db.execute(
+            "UPDATE message SET body = ?2 WHERE id = ?1",
+            rusqlite::params![db.last_insert_rowid(), "r".repeat(result)],
+        )
+        .unwrap();
+    };
+    given(1, 3, Some("worker"), 40);
+    given(2, drafting, None, long);
+    given(3, fixing, None, 60);
+    given(4, 2, None, 10);
+    given(5, argus, Some("researcher"), long);
+    folder
+}
+
+/// A task with no pool is the role its window began for (the review of T-1441, T-1453): every
+/// such task was taken for work, so an architect's follow-up after a review passed for a change
+/// of the work, and a researcher's or an architect's long result for the worker's. The role of
+/// a task is its pool, else its window's: one given to a participant by name is none, and work
+/// as before.
+#[test]
+fn a_task_with_no_pool_is_the_role_its_window_began_for_in_the_rounds_and_the_tasks() {
+    let folder = ledger_of_roles(8000);
+    let metrics = measure(
+        &folder.ledger(),
+        &Options {
+            rounds: true,
+            ..Options::default()
+        },
+    )
+    .unwrap();
+    let classed: Vec<(i64, Option<&str>, bool)> = metrics
+        .rounds
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|task| (task.number, task.role.as_deref(), task.is_work()))
+        .collect();
+    assert_eq!(
+        classed,
+        [
+            (1, Some("worker"), true),
+            (2, Some("architect"), false),
+            (3, Some("worker"), true),
+            (4, Some("chief"), false),
+            (5, Some("researcher"), false),
+        ]
+    );
+    let roles: Vec<(i64, Option<&str>)> = metrics
+        .tasks
+        .iter()
+        .map(|task| (task.number, task.role.as_deref()))
+        .collect();
+    assert_eq!(
+        roles,
+        [
+            (1, Some("worker")),
+            (2, Some("architect")),
+            (3, Some("worker")),
+            (4, Some("chief")),
+            (5, Some("researcher")),
+        ]
+    );
+}
+
+/// The longest result of a worker is a worker's (the review of T-1441, T-1453): every task but
+/// an advisor's and a reviewer's went in its bucket, so a researcher's 8,000 characters met
+/// `long-trip`'s worker check while the worker's result was short. It reads the same role as
+/// the rounds: T-3, a worker's window's follow-up, 60 characters; not the architect's
+/// follow-up's 8,000 nor the researcher's.
+#[test]
+fn the_longest_result_of_a_worker_is_of_work_alone() {
+    let folder = ledger_of_roles(8000);
+    let metrics = measure(&folder.ledger(), &Options::default()).unwrap();
+    assert_eq!(metrics.longest_result.worker, 60);
+}

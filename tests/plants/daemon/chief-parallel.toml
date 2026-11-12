@@ -67,7 +67,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "that window's own work, only when it needs what that window already knows (carry out"
+find = """that window's own work, only when it needs
+what that window already knows (carry out"""
 replace = "that window's own work (carry out"
 
 [[plant]]
@@ -77,8 +78,10 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "stay fresh, and start at once beside that window's work\n"
-replace = "stay fresh\n"
+find = """stays fresh,
+and starts at once beside that window's work.
+"""
+replace = "stays fresh.\n"
 
 [[plant]]
 name = "chief parallel: the receipt of a task added says the first free one gets it again"

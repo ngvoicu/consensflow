@@ -94,16 +94,6 @@ find = 'Read::Inbox => message.kind != "task" && !says_a_role,'
 replace = 'Read::Inbox => true,'
 
 [[plant]]
-name = "read not retyped: a read in the inbox receives a role"
-meant = "a_tasks_words_or_a_role_read_in_the_inbox_wait_for_their_paste"
-runs = ["ledger-receipt"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/receipt.rs"
-find = 'Read::Inbox => message.kind != "task" && !says_a_role,'
-replace = 'Read::Inbox => message.kind != "task",'
-
-[[plant]]
 name = "read not retyped: a thread read with cf task get receives what is no answer"
 meant = "what_the_thread_of_cf_task_get_carried_receives_only_its_answers"
 runs = ["ledger-receipt"]

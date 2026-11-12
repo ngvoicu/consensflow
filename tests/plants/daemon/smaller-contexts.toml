@@ -240,9 +240,9 @@ runs = ["engine-text-roles"]
 [[plant.edit]]
 file = "skill/core/chief.md"
 find = '''
-For the next round add a new
-task that says where things stand (branch and head, done, left, findings
-still open), then accept the old one: its open findings go on in the new
+For the next round, or a late follow-up,
+add a new task that says where things stand (branch and head, done, left,
+findings still open), then accept the old one: its open findings go on in the new
 task. '''
 replace = ""
 
@@ -266,18 +266,6 @@ file = "skill/core/chief.md"
 find = '''
  Accepting releases whatever `--needs` it, so if tasks wait on it, add
 the new task `--before` them first.'''
-replace = ""
-
-[[plant]]
-name = "smaller contexts: the chief is not told --after is for a window's own next step"
-meant = "tells_the_chief_to_start_a_fresh_window_for_the_next_round_after_about_three_rounds_of_the_same_work"
-runs = ["engine-text-roles"]
-
-[[plant.edit]]
-file = "skill/core/chief.md"
-find = '''
- `--after` is for the next step of a
-window's own work, not for round after round.'''
 replace = ""
 
 [[plant]]
@@ -601,8 +589,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = '''That is a worker's task, unless the human told you to do it yourself.'''
-replace = '''That is a worker's task.'''
+find = ''' The one exception: the human tells you to do a change yourself.'''
+replace = ""
 
 [[plant]]
 name = "smaller contexts: the chief is not told the board is the only channel"

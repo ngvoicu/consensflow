@@ -48,6 +48,11 @@ impl Role {
         format!("{} {}", self.article, self.name)
     }
 
+    /// Whose a task of it is: `an architect's`, `a worker's`.
+    pub fn a_names(&self) -> String {
+        format!("{}'s", self.a_name())
+    }
+
     /// The name as a label begins it: `Image designer`.
     pub fn label(&self) -> String {
         let mut letters = self.name.chars();
@@ -66,6 +71,42 @@ pub const WORKER: Role = Role {
     tiered: true,
     image_agent: false,
     changes_files: true,
+};
+
+/// The frontend designer: how the product looks, feels and moves, designed and built, with
+/// no tier.
+pub const FRONTEND: Role = Role {
+    id: "frontend",
+    name: "frontend designer",
+    article: "a",
+    switch: Some("--frontend"),
+    tiered: false,
+    image_agent: false,
+    changes_files: true,
+};
+
+/// The architect: the software's design written down as files (documents, contracts and the
+/// code's frame) before it is built, with no tier.
+pub const ARCHITECT: Role = Role {
+    id: "architect",
+    name: "architect",
+    article: "an",
+    switch: Some("--architect"),
+    tiered: false,
+    image_agent: false,
+    changes_files: true,
+};
+
+/// The researcher: what the code, the project's documents and the web say, looked up and
+/// reported, with no tier.
+pub const RESEARCHER: Role = Role {
+    id: "researcher",
+    name: "researcher",
+    article: "a",
+    switch: Some("--research"),
+    tiered: false,
+    image_agent: false,
+    changes_files: false,
 };
 
 /// The advisor: advice for the chief, which only the chief asks for.
@@ -101,6 +142,17 @@ pub const TESTER: Role = Role {
     changes_files: false,
 };
 
+/// The integrator: accepted work merged, checked and landed, with no tier.
+pub const INTEGRATOR: Role = Role {
+    id: "integrator",
+    name: "integrator",
+    article: "an",
+    switch: Some("--integrate"),
+    tiered: false,
+    image_agent: false,
+    changes_files: true,
+};
+
 /// The image designer: an image drawn on Codex's image tool, with no tier.
 pub const IMAGE_DESIGNER: Role = Role {
     id: "designer",
@@ -112,9 +164,21 @@ pub const IMAGE_DESIGNER: Role = Role {
     changes_files: true,
 };
 
-/// The roles in their order: the tester right after the reviewer, the image designer last
-/// (the staff page's order, 2026-10-24).
-const ROLES: [Role; 5] = [WORKER, ADVISOR, REVIEWER, TESTER, IMAGE_DESIGNER];
+/// The roles in their order: the ones that make the work (the worker, the frontend designer,
+/// the architect) and the researcher, then the ones that weigh and check it (the advisor, the
+/// reviewer, the tester), the integrator who lands it, and the image designer last (the staff
+/// page's order, 2026-10-24; the four of spec new-roles, 2026-11-11).
+const ROLES: [Role; 9] = [
+    WORKER,
+    FRONTEND,
+    ARCHITECT,
+    RESEARCHER,
+    ADVISOR,
+    REVIEWER,
+    TESTER,
+    INTEGRATOR,
+    IMAGE_DESIGNER,
+];
 
 /// Every role, in its order.
 pub fn all() -> &'static [Role] {
@@ -162,20 +226,21 @@ pub fn needs_an_image_agent<S: AsRef<str>>(roles: &[S]) -> bool {
         .any(|role| find(role.as_ref()).is_some_and(|role| role.image_agent))
 }
 
-/// The role a task asks for by the fields that are `on`: a role with no tier before one
-/// with tiers (`--design` stands alone, whatever else is asked), then the table's order;
-/// the role with no switch, the worker, where none is on.
-pub fn asked(on: impl Fn(&str) -> bool) -> &'static Role {
-    let table = all();
-    let flagged = |tiered: bool| {
-        table
-            .iter()
-            .filter(move |role| role.tiered == tiered)
-            .find(|role| role.field().is_some_and(&on))
-    };
-    flagged(false)
-        .or_else(|| flagged(true))
-        .or_else(|| table.iter().find(|role| role.switch.is_none()))
+/// The roles a task asks for by the fields that are `on`, in the table's order: none where
+/// none is on, which is the worker's task; more than one is a task the ledger refuses
+/// (`tasks::asked_role`), never one of them taken for the others.
+pub fn asked(on: impl Fn(&str) -> bool) -> Vec<&'static Role> {
+    all()
+        .iter()
+        .filter(|role| role.field().is_some_and(&on))
+        .collect()
+}
+
+/// The role a task is for where it asks for none: the one with no switch, the worker.
+pub fn unasked() -> &'static Role {
+    all()
+        .iter()
+        .find(|role| role.switch.is_none())
         .unwrap_or(&WORKER)
 }
 
@@ -228,7 +293,7 @@ pub fn page_view() -> serde_json::Value {
 
 /// The tests' way to put another table in this one's place: on this thread, while `run`
 /// runs. A table that adds a role shows every reader takes it from here; the SQLite CHECKs
-/// of `participant.role` and `task.pool` still hold the five roles, so a test that writes
+/// of `participant.role` and `task.pool` hold the table's roles alone, so a test that writes
 /// a row of a role they do not name turns them off on its own connection.
 #[cfg(any(test, feature = "test-support"))]
 pub mod seam {
@@ -257,7 +322,8 @@ pub mod seam {
         changes_files: false,
     };
 
-    /// The five roles of today with the scout in its place.
+    /// The five roles the table began with (the registry's, FD-03), with the scout in its
+    /// place: what the registry's own tests of a role in the table alone were written on.
     pub static WITH_A_SCOUT: [Role; 6] = [
         super::WORKER,
         super::ADVISOR,
@@ -301,41 +367,80 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_roles_are_the_five_of_today_in_the_staff_pages_order() {
+    fn the_roles_are_the_nine_in_the_staff_pages_order() {
         assert_eq!(
             ids(),
-            ["worker", "advisor", "reviewer", "tester", "designer"]
+            [
+                "worker",
+                "frontend",
+                "architect",
+                "researcher",
+                "advisor",
+                "reviewer",
+                "tester",
+                "integrator",
+                "designer"
+            ]
         );
         let names: Vec<String> = all().iter().map(Role::a_name).collect();
         assert_eq!(
             names,
             [
                 "a worker",
+                "a frontend designer",
+                "an architect",
+                "a researcher",
                 "an advisor",
                 "a reviewer",
                 "a tester",
+                "an integrator",
                 "an image designer"
             ]
         );
         let labels: Vec<String> = all().iter().map(Role::label).collect();
         assert_eq!(
             labels,
-            ["Worker", "Advisor", "Reviewer", "Tester", "Image designer"]
-        );
-        let fields: Vec<Option<&str>> = all().iter().map(Role::field).collect();
-        assert_eq!(
-            fields,
             [
-                None,
-                Some("advice"),
-                Some("review"),
-                Some("test"),
-                Some("design")
+                "Worker",
+                "Frontend designer",
+                "Architect",
+                "Researcher",
+                "Advisor",
+                "Reviewer",
+                "Tester",
+                "Integrator",
+                "Image designer"
             ]
         );
+        let switches: Vec<Option<&str>> = all().iter().map(|role| role.switch).collect();
         assert_eq!(
-            all().iter().filter(|role| !role.tiered).collect::<Vec<_>>(),
-            [&IMAGE_DESIGNER]
+            switches,
+            [
+                None,
+                Some("--frontend"),
+                Some("--architect"),
+                Some("--research"),
+                Some("--advice"),
+                Some("--review"),
+                Some("--test"),
+                Some("--integrate"),
+                Some("--design")
+            ]
+        );
+        let untiered: Vec<&str> = all()
+            .iter()
+            .filter(|role| !role.tiered)
+            .map(|role| role.id)
+            .collect();
+        assert_eq!(
+            untiered,
+            [
+                "frontend",
+                "architect",
+                "researcher",
+                "integrator",
+                "designer"
+            ]
         );
         assert_eq!(
             all()
@@ -349,21 +454,42 @@ mod tests {
             .filter(|role| role.changes_files)
             .map(|role| role.id)
             .collect();
-        assert_eq!(writers, ["worker", "designer"]);
+        assert_eq!(
+            writers,
+            ["worker", "frontend", "architect", "integrator", "designer"]
+        );
+        // The two designers are told apart by their names wherever they are said.
+        assert_eq!(name_of("designer"), "image designer");
+        assert_eq!(name_of("frontend"), "frontend designer");
     }
 
     #[test]
-    fn a_task_asks_for_the_image_designer_before_anything_else_then_advice_review_and_test() {
-        let asked_by = |fields: &[&str]| asked(|field| fields.contains(&field)).id;
-        assert_eq!(asked_by(&[]), "worker");
-        assert_eq!(asked_by(&["tier", "purpose"]), "worker");
+    fn a_task_asks_for_every_role_whose_field_is_on_in_the_tables_order_and_the_worker_for_none() {
+        let asked_by = |fields: &[&str]| -> Vec<&str> {
+            asked(|field| fields.contains(&field))
+                .into_iter()
+                .map(|role| role.id)
+                .collect()
+        };
+        assert_eq!(asked_by(&[]), Vec::<&str>::new());
+        assert_eq!(
+            asked_by(&["tier", "purpose", "self", "after"]),
+            Vec::<&str>::new()
+        );
+        assert_eq!(unasked().id, "worker");
         assert_eq!(
             asked_by(&["test", "review", "advice", "design"]),
-            "designer"
+            ["advisor", "reviewer", "tester", "designer"]
         );
-        assert_eq!(asked_by(&["test", "review", "advice"]), "advisor");
-        assert_eq!(asked_by(&["test", "review"]), "reviewer");
-        assert_eq!(asked_by(&["test"]), "tester");
+        assert_eq!(asked_by(&["test"]), ["tester"]);
+        assert_eq!(asked_by(&["frontend"]), ["frontend"]);
+        assert_eq!(asked_by(&["architect", "advice"]), ["architect", "advisor"]);
+        assert_eq!(
+            asked_by(&["integrate", "research"]),
+            ["researcher", "integrator"]
+        );
+        assert_eq!(ARCHITECT.a_names(), "an architect's");
+        assert_eq!(WORKER.a_names(), "a worker's");
     }
 
     #[test]
@@ -401,7 +527,7 @@ mod tests {
         ];
         seam::with_table(&SIX, || {
             assert_eq!(ids(), ["worker", "sixth"]);
-            assert_eq!(asked(|field| field == "sixth").id, "sixth");
+            assert_eq!(asked(|field| field == "sixth")[0].id, "sixth");
             assert!(!is_role("designer"));
             assert!(std::thread::spawn(|| is_role("designer")).join().unwrap());
         });

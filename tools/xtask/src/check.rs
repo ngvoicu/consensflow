@@ -3,7 +3,8 @@
 //! it and stops at the first that fails, with that step's exit status as its
 //! own.
 //!
-//! The steps are rustfmt; clippy for the workspace, then the ceiling on the harnesses' crate's
+//! The steps are the Rust in use, which must be the version `.github/rust-version` names
+//! (`cargo xtask rust-version`: the lower-casing golden depends on it); rustfmt; clippy for the workspace, then the ceiling on the harnesses' crate's
 //! unreachable `pub` items (`cargo xtask unreachable-pub`), and clippy for the app and for
 //! Windows (the workspace's, then the app's); the tests of the workspace, the engine's kit
 //! again with the gate's pacing on in every case (`CF_KIT_PACED`), the tests of xtask and of
@@ -103,6 +104,9 @@ fn steps(
         Invocation::new(program, &context.root).args(words.iter().copied())
     };
     let mut steps = vec![
+        // The Rust everything after it builds with: a drift is said as one, not found
+        // through the lower-casing golden it changes (T-1523).
+        at("cargo", &["xtask", "rust-version"]),
         at("cargo", &["fmt", "--all", "--check"]),
         at(
             "cargo",
@@ -244,6 +248,7 @@ mod tests {
         assert_eq!(
             lines,
             [
+                "cargo xtask rust-version".to_string(),
                 "cargo fmt --all --check".to_string(),
                 "cargo clippy --workspace --exclude app --all-targets -- -D warnings".to_string(),
                 "cargo xtask unreachable-pub".to_string(),
@@ -274,6 +279,7 @@ mod tests {
                 root.clone(),
                 root.clone(),
                 root.clone(),
+                root.clone(),
                 app.clone(),
                 root.clone(),
                 root.clone(),
@@ -295,6 +301,7 @@ mod tests {
         assert_eq!(
             steps.iter().map(variables).collect::<Vec<_>>(),
             [
+                vec![],
                 vec![],
                 vec![],
                 vec![],
@@ -337,10 +344,10 @@ mod tests {
         let context = context();
         let archiver = Path::new("target").join("debug").join("xtask");
         let steps = steps(&context, &archiver, false, &families());
-        assert_eq!(steps[4], clippy_windows::lint(&context, &[], &archiver));
-        assert_eq!(steps[3], app::clippy(&context, &[]));
-        assert_eq!(steps[5].display(), "cargo xtask clippy-windows app");
-        assert_eq!(steps[9], app::test(&context, &[]));
+        assert_eq!(steps[5], clippy_windows::lint(&context, &[], &archiver));
+        assert_eq!(steps[4], app::clippy(&context, &[]));
+        assert_eq!(steps[6].display(), "cargo xtask clippy-windows app");
+        assert_eq!(steps[10], app::test(&context, &[]));
     }
 
     #[test]
@@ -348,14 +355,15 @@ mod tests {
         let context = context();
         let steps = steps(&context, Path::new("xtask"), true, &families());
         let lines: Vec<_> = steps.iter().map(Invocation::display).collect();
-        assert_eq!(lines.len(), 15);
+        assert_eq!(lines.len(), 16);
         assert!(lines.iter().all(
             |line| !line.contains("x86_64-pc-windows-msvc") && !line.contains("clippy-windows")
         ));
         // Everything else is where it was.
         assert_eq!(
-            lines[..4],
+            lines[..5],
             [
+                "cargo xtask rust-version",
                 "cargo fmt --all --check",
                 "cargo clippy --workspace --exclude app --all-targets -- -D warnings",
                 "cargo xtask unreachable-pub",
@@ -363,7 +371,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            lines[7..],
+            lines[8..],
             [
                 "cargo test --offline --",
                 "cargo xtask app fresh",
