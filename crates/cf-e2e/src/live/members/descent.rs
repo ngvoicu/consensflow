@@ -273,13 +273,62 @@ pub fn working_folder(pid: u32) -> Option<std::path::PathBuf> {
     native::working_folder(pid)
 }
 
+/// A folder of the run's own: one under the root the rig made for the run (its temp folder, which
+/// no other run has and nobody else works in), the one ground a path gives a rule of the kit's
+/// ([`orphans_in_folder`], and the words of what the closed windows left, [`super::Watch`]). A
+/// path outside the run's root is the person's or another run's: a live rig's home is the
+/// person's own, and the close's sweep that took `/Users/…` for a word of the run ended 22
+/// processes of the owner's and of other tasks (2026-11-12). It is refused here, whatever asks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunFolder {
+    /// The path as it was given, as a command line of what the kit asked writes it.
+    given: std::path::PathBuf,
+    /// Its real path, with no link in it, as the system says where a process runs.
+    real: std::path::PathBuf,
+}
+
+impl RunFolder {
+    /// `path` as a folder of the run whose root is `root`: none where its real path is not
+    /// `root`'s or under it (compared by whole components), where either cannot be read, or
+    /// where `root` holds the home of the person who runs the kit, as no run's root does.
+    pub fn under(root: &std::path::Path, path: &std::path::Path) -> Option<Self> {
+        let root = root.canonicalize().ok()?;
+        let real = path.canonicalize().ok()?;
+        let wide = crate::live::machine::home()
+            .is_ok_and(|home| home.canonicalize().unwrap_or(home).starts_with(&root));
+        (!wide && real.starts_with(&root)).then(|| Self {
+            given: path.to_path_buf(),
+            real,
+        })
+    }
+
+    /// A folder of the unit tests' process tables, taken as the run's unread.
+    #[cfg(test)]
+    pub(crate) fn assumed(path: &std::path::Path) -> Self {
+        Self {
+            given: path.to_path_buf(),
+            real: path.to_path_buf(),
+        }
+    }
+
+    /// The path as it was given.
+    pub fn given(&self) -> &std::path::Path {
+        &self.given
+    }
+
+    /// Its real path.
+    pub fn real(&self) -> &std::path::Path {
+        &self.real
+    }
+}
+
 /// The processes of `all` that a check can call its own although no window holds them any
 /// longer, and what descends from them: each holds `text` in its command line, is an orphan
 /// (its parent is the system's init, 1), began no earlier than `since` (when the check's window
-/// began), and runs in `folder`, which is the check's own (a folder made for the run, whose real
-/// path is compared), as `folder_of` says it. A process that began before the window, that has
-/// a parent, whose folder is another or cannot be read, or whose command does not hold `text`
-/// is none of them, whatever else it says: it is the parent, the start and the folder
+/// began), and runs in `folder`, which is the run's own ([`RunFolder`]: under the run's temp root,
+/// whose real path is compared), as `folder_of` says it. A process that began before the window,
+/// that has a parent, whose folder is another or cannot be read, or whose command does not hold
+/// `text` is none of them, whatever else it says: it is the parent, the start and the folder
 /// together that make a process the run's, never the command line alone.
 ///
 /// A job the agent detaches from a tool shell that leads a session of its own (`nohup sleep
@@ -289,11 +338,10 @@ pub fn working_folder(pid: u32) -> Option<std::path::PathBuf> {
 pub fn orphans_in_folder(
     all: &[Running],
     text: &str,
-    folder: &std::path::Path,
+    folder: &RunFolder,
     since: u64,
     folder_of: impl Fn(u32) -> Option<std::path::PathBuf>,
 ) -> Vec<Running> {
-    let folder = folder.canonicalize().unwrap_or_else(|_| folder.to_owned());
     // An orphan has no parent among the processes, so nothing that descends from one orphan is
     // another orphan, and no process is found twice.
     all.iter()
@@ -301,7 +349,7 @@ pub fn orphans_in_folder(
             process.ppid == 1
                 && process.identity.started >= since
                 && process.command.contains(text)
-                && folder_of(process.identity.pid).is_some_and(|there| there == folder)
+                && folder_of(process.identity.pid).is_some_and(|there| there == folder.real)
         })
         .flat_map(|orphan| {
             std::iter::once(orphan.clone()).chain(descending_from(all, orphan.identity))

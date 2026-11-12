@@ -166,7 +166,7 @@ fn an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by
         pids(orphans_in_folder(
             &all,
             "sleep 4711",
-            folder,
+            &RunFolder::assumed(folder),
             100,
             folder_of
         )),
@@ -175,7 +175,14 @@ fn an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by
     // A window that began after every one of them leaves them all out: a child (208) is taken
     // only with the orphan it descends from, never alone.
     assert!(
-        orphans_in_folder(&all, "sleep 4711", folder, 108, folder_of).is_empty(),
+        orphans_in_folder(
+            &all,
+            "sleep 4711",
+            &RunFolder::assumed(folder),
+            108,
+            folder_of
+        )
+        .is_empty(),
         "nothing orphaned began at or after 108"
     );
 }
@@ -205,10 +212,11 @@ fn a_monitor_whose_claude_was_killed_is_an_orphan_of_the_window_s_folder() {
         400 => Some(std::path::PathBuf::from("/runs/another-tree")),
         _ => None,
     };
-    let mut pids: Vec<u32> = orphans_in_folder(&all, "", folder, 100, folder_of)
-        .iter()
-        .map(|one| one.identity.pid)
-        .collect();
+    let mut pids: Vec<u32> =
+        orphans_in_folder(&all, "", &RunFolder::assumed(folder), 100, folder_of)
+            .iter()
+            .map(|one| one.identity.pid)
+            .collect();
     pids.sort_unstable();
     assert_eq!(pids, [300, 301, 302]);
     // The `tail` and the `grep` descend from the orphan shell.
@@ -232,12 +240,48 @@ fn a_folder_is_compared_by_its_real_path_and_another_folder_is_another() {
     std::os::unix::fs::symlink(&real, &link).unwrap();
     let real = real.canonicalize().unwrap();
     let all = [running(200, 101, 1, "sleep 4711")];
-    let found = orphans_in_folder(&all, "sleep 4711", &link, 100, |_| Some(real.clone()));
+    let linked = RunFolder::under(dir.path(), &link).expect("under the root");
+    assert_eq!(linked.given(), link);
+    let found = orphans_in_folder(&all, "sleep 4711", &linked, 100, |_| Some(real.clone()));
     assert_eq!(found.len(), 1);
     // Its parent folder holds the other's folder, and is no folder of the process's.
-    assert!(
-        orphans_in_folder(&all, "sleep 4711", dir.path(), 100, |_| Some(real.clone())).is_empty()
+    let parent = RunFolder::under(dir.path(), dir.path()).expect("the root itself");
+    assert!(orphans_in_folder(&all, "sleep 4711", &parent, 100, |_| Some(real.clone())).is_empty());
+}
+
+/// A path is a folder of the run's only under the root the rig made for the run: a live rig's
+/// home is the person's own, and a sweep that took it for the run's ended 22 processes of the
+/// owner's and of other tasks (2026-11-12). Refused: a folder outside the root, one whose name
+/// only begins with the root's, one that is not there to read, and any folder of a root that
+/// holds the person's home.
+#[test]
+fn a_folder_is_the_runs_only_under_the_runs_own_root() {
+    let root = tempfile::tempdir().unwrap();
+    let inside = root.path().join("home").join("live");
+    std::fs::create_dir_all(&inside).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let alike = std::path::PathBuf::from(format!("{}-x", root.path().display()));
+    std::fs::create_dir_all(&alike).unwrap();
+    let ours = RunFolder::under(root.path(), &inside).expect("a folder under the root");
+    assert_eq!(ours.given(), inside);
+    assert_eq!(ours.real(), inside.canonicalize().unwrap());
+    assert_eq!(RunFolder::under(root.path(), outside.path()), None);
+    assert_eq!(RunFolder::under(root.path(), &alike), None);
+    assert_eq!(
+        RunFolder::under(root.path(), &root.path().join("none")),
+        None
     );
+    // A root as wide as the machine's, which holds the person's home, is no run's.
+    let top = inside.ancestors().last().unwrap().to_path_buf();
+    assert_eq!(RunFolder::under(&top, &inside), None);
+    if let Ok(home) = crate::live::machine::home() {
+        assert_eq!(
+            RunFolder::under(&home, &home),
+            None,
+            "the person's home is no run's"
+        );
+    }
+    std::fs::remove_dir(&alike).unwrap();
 }
 
 #[cfg(target_os = "macos")]

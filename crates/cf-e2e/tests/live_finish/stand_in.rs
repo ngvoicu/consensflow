@@ -367,58 +367,44 @@ fn a_stand_in_that_leaves_a_job_running_and_answers_has_its_task_done_and_its_wi
 /// window's close does not find (the shape of a Monitor's pipeline left by a Claude that ended:
 /// `CLAUDE-MONITOR-ENDS` leaves its job so too, but the window's own close after the result ends
 /// that one on a Mac, whether the case looks first or not, so it cannot be waited for): the case's
-/// close, which the live kit makes every case's, finds it by its folder and its start, ends it by
-/// which process it is, and says so; and what runs elsewhere with the same words is left alone.
+/// close, which the live kit makes every case's, finds it by its folder and its start and says so,
+/// and ends nothing (the test ends the job, by its own number); and what runs elsewhere with the
+/// same words is not found.
 #[cfg(unix)]
 #[test]
-fn the_close_of_a_case_ends_what_its_window_left_and_says_so_and_leaves_another_runs_job() -> Result
-{
+fn the_close_of_a_case_finds_what_its_window_left_says_so_and_ends_nothing_and_leaves_another_runs_job(
+) -> Result {
     use std::time::Duration;
 
     use cf_e2e::live::members::{find, Machine, Members, ThisMachine};
-    use cf_e2e::process::{is_alive, Run};
 
     let log = Log::new("live finish test");
     let plan = leaving::plan(Who::StandIn);
     let mut members = Members::open(&plan, Path::new(FAKE_AGENT), &log)?;
     members.add("worker", &[])?;
-    // Another run's job: parent init's, the same words, a folder of its own.
+    // Another run's job: parent init's, the same words, a folder of its own. Told by the number
+    // its shell printed, and ended by which process it is however the test ends: another tree
+    // running this test has a `sleep 4713` of its own, which is none of this one's.
     let elsewhere = tempfile::tempdir().unwrap();
-    let ran = Run::new("/bin/sh")
+    let ran = cf_e2e::process::Run::new("/bin/sh")
         .args(["-c", "sleep 4713 > /dev/null 2>&1 & echo $!"])
         .cwd(elsewhere.path())
         .inheriting_env()
         .run()?;
     assert_eq!(ran.code, Some(0));
-    // Told by the number its shell printed, and ended by which process it is however the test ends:
-    // another tree running this test has a `sleep 4713` of its own, which is none of this one's.
-    let decoy_pid: u32 = ran.stdout.trim().parse().unwrap();
-    // Armed before any read that can fail: where none came first, the process of that number and
-    // that command line begun no earlier than the test.
-    struct Reaper(u32, Option<cf_e2e::live::members::Running>);
-    impl Drop for Reaper {
-        fn drop(&mut self) {
-            let unread = || {
-                let since = ThisMachine.identity(std::process::id()).ok()??.started;
-                ThisMachine.processes().ok()?.into_iter().find(|one| {
-                    one.identity.pid == self.0
-                        && one.command == "sleep 4713"
-                        && one.identity.started >= since
-                })
-            };
-            if let Some(decoy) = self.1.take().or_else(unread) {
-                let _ = cf_e2e::live::members::end_chosen(&[decoy]);
-            }
-        }
-    }
-    let mut reaper = Reaper(decoy_pid, None);
-    reaper.1 = ThisMachine
+    let mut decoy = Decoy {
+        pid: ran.stdout.trim().parse().unwrap(),
+        command: "sleep 4713".to_owned(),
+        read: None,
+    };
+    decoy.read = ThisMachine
         .processes()?
         .into_iter()
-        .find(|one| one.identity.pid == decoy_pid);
-    assert!(reaper.1.is_some(), "the other run's job was never listed");
+        .find(|one| one.identity.pid == decoy.pid && one.command == decoy.command);
+    assert!(decoy.read.is_some(), "the other run's job was never listed");
     members.give("worker", &leaving::stand_in_brief(true))?;
-    // The job the agent detached, an orphan the host lists nowhere.
+    // The job the agent detached, an orphan the host lists nowhere, as the process it is: the
+    // test's to end, however it ends.
     let job = find(
         &log,
         "the detached job to run with no parent",
@@ -428,34 +414,188 @@ fn the_close_of_a_case_ends_what_its_window_left_and_says_so_and_leaves_another_
             let Some(job) = members.rig().jobs("job").into_iter().next() else {
                 return Ok(None);
             };
-            let all = ThisMachine.processes()?;
-            Ok(all
-                .iter()
-                .any(|one| one.identity.pid == job.pid() && one.ppid == 1)
-                .then_some(job.pid()))
+            Ok(ThisMachine
+                .processes()?
+                .into_iter()
+                .find(|one| one.identity.pid == job.pid() && one.ppid == 1))
         },
     )?
     .expect("the stand-in detached its job");
-    assert!(is_alive(job));
+    let job = Decoy {
+        pid: job.identity.pid,
+        command: job.command.clone(),
+        read: Some(job),
+    };
     let (closed, swept) = members.close_and_sweep(Duration::from_secs(20));
     let found: Vec<u32> = swept.found.iter().map(|one| one.identity.pid).collect();
     let said = swept.said();
-    let gone = (0..100).any(|_| {
-        std::thread::sleep(Duration::from_millis(100));
-        !is_alive(job)
-    });
-    assert!(found.contains(&job), "the job {job} was not found: {said}");
+    std::thread::sleep(Duration::from_secs(1));
     assert!(
-        swept.ended.ended.iter().any(|one| one.identity.pid == job),
-        "{said}"
+        found.contains(&job.pid),
+        "the job {} was not found: {said}",
+        job.pid
     );
-    assert!(gone, "the job {job} is left running: {said}");
-    assert!(said.contains(&format!("{job} ")), "{said}");
+    assert!(said.contains(&format!("{} ", job.pid)), "{said}");
+    assert!(said.contains("the kit ended none of them"), "{said}");
+    assert!(job.runs(), "the sweep ended the job {}: {said}", job.pid);
     assert!(
-        !found.contains(&decoy_pid),
-        "another run's job is taken for the window's: {found:?} {decoy_pid}"
+        !found.contains(&decoy.pid),
+        "another run's job is taken for the window's: {found:?} {}",
+        decoy.pid
     );
     assert!(swept.problems().is_empty(), "{said}");
+    assert!(closed.is_ok(), "{closed:?}");
+    Ok(())
+}
+
+/// A process of the test's own that is none of the run's: `tail -f <file>`, which its shell left
+/// with no parent and whose number it printed, so that its command line holds the path of `file`.
+/// Ended when the test ends however it does: as the process it was read as, or, where no read
+/// came first, the process of that number and that command line begun no earlier than the test.
+#[cfg(unix)]
+struct Decoy {
+    pid: u32,
+    command: String,
+    read: Option<cf_e2e::live::members::Running>,
+}
+
+#[cfg(unix)]
+impl Decoy {
+    /// Started in `folder` by a shell of the test's own, which ends at once; armed before
+    /// anything that can fail is read.
+    fn start(file: &Path, folder: &Path) -> Result<Self> {
+        use cf_e2e::live::members::{Machine, ThisMachine};
+
+        let ran = cf_e2e::process::Run::new("/bin/sh")
+            .args(["-c", "tail -f \"$1\" > /dev/null 2>&1 & echo $!", "sh"])
+            .arg(file)
+            .cwd(folder)
+            .inheriting_env()
+            .run()?;
+        assert_eq!(ran.code, Some(0), "{ran}");
+        let pid = ran.stdout.trim().parse::<u32>();
+        assert!(pid.is_ok(), "the decoy's shell printed no pid: {ran}");
+        let mut decoy = Self {
+            pid: pid.unwrap_or_default(),
+            command: format!("tail -f {}", file.display()),
+            read: None,
+        };
+        decoy.read = ThisMachine
+            .processes()?
+            .into_iter()
+            .find(|one| one.identity.pid == decoy.pid && one.command == decoy.command);
+        assert!(
+            decoy.read.is_some(),
+            "the decoy {} was never listed",
+            decoy.pid
+        );
+        Ok(decoy)
+    }
+
+    /// Whether it still runs, as the process it was read as.
+    fn runs(&self) -> bool {
+        use cf_e2e::live::members::{Machine, ThisMachine};
+
+        self.read.as_ref().is_some_and(|read| {
+            ThisMachine
+                .processes()
+                .unwrap_or_default()
+                .iter()
+                .any(|one| one.identity == read.identity)
+        })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Decoy {
+    fn drop(&mut self) {
+        use cf_e2e::live::members::{end_chosen, Machine, ThisMachine};
+
+        let unread = || {
+            let since = ThisMachine.identity(std::process::id()).ok()??.started;
+            ThisMachine.processes().ok()?.into_iter().find(|one| {
+                one.identity.pid == self.pid
+                    && one.command == self.command
+                    && one.identity.started >= since
+            })
+        };
+        if let Some(decoy) = self.read.take().or_else(unread) {
+            let _ = end_chosen(&[decoy]);
+        }
+    }
+}
+
+/// A live rig's home is the person's own (the windows of a real harness run on it), outside the
+/// rig's own temp root: at 18:58 on 2026-11-12 the close's sweep took `/Users/…` for a word of the
+/// run and ended 22 processes of the owner's and of other tasks. Here the home is a folder of the
+/// test's own, and a process of the test's, begun before the run's windows, with no parent, holds
+/// its path: it is none of what the windows left, and it runs on.
+#[cfg(unix)]
+#[test]
+fn a_process_begun_before_the_run_that_holds_the_path_of_a_home_outside_the_runs_temp_root_is_none_of_what_the_windows_left_and_runs_on(
+) -> Result {
+    use std::time::Duration;
+
+    use cf_e2e::live::members::Members;
+
+    let log = Log::new("live finish test");
+    let home = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    let file = home.path().join("decoy");
+    std::fs::write(&file, "").unwrap();
+    let decoy = Decoy::start(&file, elsewhere.path())?;
+    let mut plan = leaving::plan(Who::StandIn);
+    plan.vars
+        .push(("HOME".to_owned(), home.path().display().to_string()));
+    let members = Members::open(&plan, Path::new(FAKE_AGENT), &log)?;
+    assert_eq!(
+        members.rig().var("HOME"),
+        Some(home.path().display().to_string().as_str()),
+        "the rig's home is the test's own folder"
+    );
+    let (closed, swept) = members.close_and_sweep(Duration::from_secs(20));
+    std::thread::sleep(Duration::from_secs(1));
+    let said = swept.said();
+    assert!(
+        swept.found.iter().all(|one| one.identity.pid != decoy.pid),
+        "a process that holds the path of a home outside the run's temp root is taken for what the windows left: {said}"
+    );
+    assert!(decoy.runs(), "the decoy {} was ended: {said}", decoy.pid);
+    assert!(closed.is_ok(), "{closed:?}");
+    Ok(())
+}
+
+/// A process of the test's own, begun after the run's window, with no parent, that holds a path
+/// under the rig's own temp root (its home's): what the windows left, as the close's sweep says
+/// it, and not ended by it: the sweep reports, and the test ends it by its own number.
+#[cfg(unix)]
+#[test]
+fn a_process_begun_after_the_window_that_holds_a_path_under_the_runs_temp_root_is_said_to_be_left_and_the_sweep_ends_nothing(
+) -> Result {
+    use std::time::Duration;
+
+    use cf_e2e::live::members::Members;
+
+    let log = Log::new("live finish test");
+    let members = Members::open(&leaving::plan(Who::StandIn), Path::new(FAKE_AGENT), &log)?;
+    let elsewhere = tempfile::tempdir().unwrap();
+    let file = Path::new(members.rig().var("HOME").expect("the rig has a home")).join("decoy");
+    std::fs::write(&file, "").unwrap();
+    let decoy = Decoy::start(&file, elsewhere.path())?;
+    let (closed, swept) = members.close_and_sweep(Duration::from_secs(20));
+    std::thread::sleep(Duration::from_secs(1));
+    let said = swept.said();
+    assert!(
+        swept.found.iter().any(|one| one.identity.pid == decoy.pid),
+        "the decoy {} is not said to be left: {said}",
+        decoy.pid
+    );
+    assert!(said.contains(&format!("{} ", decoy.pid)), "{said}");
+    assert!(
+        decoy.runs(),
+        "the sweep ended the decoy {}: {said}",
+        decoy.pid
+    );
     assert!(closed.is_ok(), "{closed:?}");
     Ok(())
 }

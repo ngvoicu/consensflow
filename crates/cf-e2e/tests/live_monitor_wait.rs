@@ -1060,7 +1060,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
         log.say(format!("the fixture, {} records: {file}", lines.len()));
     }
     // What the window runs while it is open is taken now, and what is left of it once it is
-    // closed is found, ended by which process it is and said: a Monitor armed on
+    // closed is found and said, never ended (it fails `left-nothing`): a Monitor armed on
     // `tail -f … | grep tick` outlived its Claude Code by seventeen hours (T-491), and the rig
     // notes only what its stand-ins ran, so nothing looked.
     let watch = Watch::of_rig(&rig, Some(window.workspace()));

@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 
 use super::*;
+#[cfg(unix)]
+use crate::live::members::descent::end_chosen;
 
 /// A process `pid`, begun at `started`, started by `ppid`.
 fn running(pid: u32, started: u64, ppid: u32, command: &str) -> Running {
@@ -42,7 +44,10 @@ fn what_a_window_ran_that_still_runs_once_it_is_closed_is_left_by_which_process_
         started: 10,
     };
     let mut watch = Watch::new();
-    watch.add(window, Path::new("/runs/monitor-wait"));
+    watch.add(
+        window,
+        Some(RunFolder::assumed(Path::new("/runs/monitor-wait"))),
+    );
     watch.look(&while_the_window_runs());
     // Closed: the window, its shell and its server have gone; the pipeline's programs run on
     // with no parent, and another process has the number of the shell now.
@@ -70,7 +75,7 @@ fn a_monitor_whose_claude_was_killed_is_found_as_an_orphan_of_the_windows_folder
             pid: 100,
             started: 10,
         },
-        folder,
+        Some(RunFolder::assumed(folder)),
     );
     let after = vec![
         running(300, 20, 1, MONITOR),
@@ -112,7 +117,7 @@ impl Machine for Lists {
 }
 
 #[test]
-fn a_process_on_its_way_out_when_the_windows_are_closed_is_no_leftover_and_one_that_stays_is_ended_and_said(
+fn a_process_on_its_way_out_when_the_windows_are_closed_is_no_leftover_and_one_that_stays_is_said_and_not_ended(
 ) {
     let mut watch = Watch::new();
     watch.add(
@@ -120,7 +125,7 @@ fn a_process_on_its_way_out_when_the_windows_are_closed_is_no_leftover_and_one_t
             pid: 100,
             started: 10,
         },
-        Path::new("/runs/monitor-wait"),
+        Some(RunFolder::assumed(Path::new("/runs/monitor-wait"))),
     );
     watch.look(&while_the_window_runs());
     let on_its_way = running(301, 21, 1, "tail -f out");
@@ -131,68 +136,47 @@ fn a_process_on_its_way_out_when_the_windows_are_closed_is_no_leftover_and_one_t
         vec![stays.clone()],
         vec![stays.clone()],
     ]));
-    let asked = RefCell::new(Vec::new());
     let swept = watch.sweep_by(
         &machine,
         |_| None,
-        |chosen| {
-            asked
-                .borrow_mut()
-                .extend(chosen.iter().map(|one| one.identity));
-            Ended {
-                ended: chosen.to_vec(),
-                ..Ended::default()
-            }
-        },
         // Looks again until the settle time is out: the first look found one more than the rest.
         Duration::from_millis(600),
     );
     assert_eq!(pids(&swept.found), [302], "{swept:#?}");
-    // Ended by which process it is, once.
-    assert_eq!(asked.into_inner(), [stays.identity]);
     assert!(!swept.is_clean());
     let said = swept.said();
-    assert!(
-        said.starts_with("the windows left 1 process(es) running after they were closed: 302 grep --line-buffered tick"),
-        "{said}"
+    assert_eq!(
+        said,
+        "the windows left 1 process(es) running after they were closed: 302 grep --line-buffered tick; the kit ended none of them (it ends a process only by descent from the run's window, the stand-in's jobs or the run's own word)"
     );
-    assert!(said.contains("1 ended, 0 gone already"), "{said}");
     assert!(swept.problems().is_empty());
 }
 
 #[test]
-fn windows_that_left_nothing_say_so_and_what_could_not_be_ended_or_read_is_a_problem() {
+fn windows_that_left_nothing_say_so_and_a_machine_that_could_not_be_read_is_a_problem() {
     let mut watch = Watch::new();
     watch.add(
         Identity {
             pid: 100,
             started: 10,
         },
-        Path::new("/runs/monitor-wait"),
+        Some(RunFolder::assumed(Path::new("/runs/monitor-wait"))),
     );
     let machine = Lists(RefCell::new(vec![vec![running(1, 1, 0, "launchd")]]));
-    let swept = watch.sweep_by(&machine, |_| None, |_| Ended::default(), Duration::ZERO);
+    let swept = watch.sweep_by(&machine, |_| None, Duration::ZERO);
     assert!(swept.is_clean());
     assert_eq!(
         swept.said(),
         "the windows left nothing running (1 window(s) watched, 0 process(es) seen under them while they ran)"
     );
     assert!(swept.problems().is_empty());
-    // A process that could not be ended may still run.
-    let stuck = running(301, 21, 1, "tail -f out");
-    let swept = Swept {
-        found: vec![stuck.clone()],
-        ended: Ended {
-            failed: vec![(stuck, "its end failed: refused".to_owned())],
-            ..Ended::default()
-        },
+    // What was found and left as it is is no problem of the close: it is said.
+    let left = Swept {
+        found: vec![running(301, 21, 1, "tail -f out")],
         unread: None,
         watched: (1, 3),
     };
-    assert_eq!(
-        swept.problems(),
-        ["process 301 (tail -f out) may still run: its end failed: refused"]
-    );
+    assert!(left.problems().is_empty());
     // A machine that could not be read says so and is not clean.
     let unread = Swept {
         unread: Some("ps: killed".to_owned()),
@@ -204,6 +188,7 @@ fn windows_that_left_nothing_say_so_and_what_could_not_be_ended_or_read_is_a_pro
         "{}",
         unread.said()
     );
+    assert_eq!(unread.problems().len(), 1);
 }
 
 /// Ends what it holds, each by which process it is, when the test ends however it does.
@@ -245,13 +230,15 @@ impl Drop for Decoy {
 }
 
 /// A real Monitor's shape, on a Mac or Linux: a window (a shell) that runs `tail -f … | grep` in a
-/// folder made for the case, killed, which leaves the pipeline with no parent. Found and ended by
-/// which process each is, and what runs in another folder, begun at the same time, is left alone:
-/// another tree running this test at the same time has its own, which this test never takes for
-/// its own, for each is told by the number the test's own shell printed.
+/// folder made for the case, killed, which leaves the pipeline with no parent. Found and said, and
+/// not ended (the test ends it, by which process each is), and what runs in another folder, begun
+/// at the same time, is left alone: another tree running this test at the same time has its own,
+/// which this test never takes for its own, for each is told by the number the test's own shell
+/// printed.
 #[cfg(unix)]
 #[test]
-fn a_real_monitor_pipeline_left_by_a_killed_window_is_ended_and_what_runs_elsewhere_is_not() {
+fn a_real_monitor_pipeline_left_by_a_killed_window_is_found_and_not_ended_and_what_runs_elsewhere_is_not_found(
+) {
     use crate::process::{is_alive, Run};
 
     let folder = tempfile::tempdir().unwrap();
@@ -282,7 +269,7 @@ fn a_real_monitor_pipeline_left_by_a_killed_window_is_ended_and_what_runs_elsewh
         .unwrap()
         .expect("the window is there");
     let mut watch = Watch::new();
-    watch.add(root, folder.path());
+    watch.add(root, RunFolder::under(folder.path(), folder.path()));
     // The pipeline's programs, as they run under the window.
     let mut tree = Vec::new();
     for _ in 0..100 {
@@ -318,17 +305,34 @@ fn a_real_monitor_pipeline_left_by_a_killed_window_is_ended_and_what_runs_elsewh
     window.kill();
     let swept = watch.sweep();
     let found = pids(&swept.found);
-    // Gone a moment after the signal, which is asked of the system and not waited for.
-    let gone = (0..100).any(|_| {
-        std::thread::sleep(Duration::from_millis(100));
-        !is_alive(tail.identity.pid) && !is_alive(grep.identity.pid)
-    });
+    std::thread::sleep(Duration::from_secs(1));
+    let runs = |one: &Running| {
+        ThisMachine
+            .processes()
+            .unwrap_or_default()
+            .iter()
+            .any(|now| now.identity == one.identity)
+    };
     assert!(
         found.contains(&tail.identity.pid) && found.contains(&grep.identity.pid),
         "the pipeline was not found: {found:?} {swept:#?}"
     );
     assert!(swept.problems().is_empty(), "{swept:#?}");
-    assert!(gone, "the pipeline still runs: {tail:?} {grep:?}");
+    assert!(
+        runs(&tail) && runs(&grep),
+        "the sweep ended the pipeline: {}",
+        swept.said()
+    );
+    // The test's own, ended by which process each is.
+    let ended = end_chosen(&[tail.clone(), grep.clone()]);
+    assert!(ended.problems().is_empty(), "{ended:#?}");
+    assert!(
+        (0..100).any(|_| {
+            std::thread::sleep(Duration::from_millis(100));
+            !is_alive(tail.identity.pid) && !is_alive(grep.identity.pid)
+        }),
+        "the pipeline still runs: {tail:?} {grep:?}"
+    );
     assert!(
         !found.contains(&decoy.identity.pid),
         "another folder's orphan is taken for the window's: {found:?}"
@@ -348,14 +352,17 @@ fn a_process_whose_parent_has_gone_and_whose_command_line_holds_a_word_of_the_ru
             pid: 100,
             started: 10,
         },
-        Path::new("/runs/monitor-wait"),
+        Some(RunFolder::assumed(Path::new("/runs/monitor-wait"))),
     );
     watch.add_word("cf-run-77-1700000000000");
     watch.add_word("short");
+    // A path is a word of a folder of the run's alone ([`RunFolder`]).
+    watch.add_word("/Users/someone/projects");
+    watch.add_word(r"C:\Users\someone");
     assert_eq!(
         watch.words,
         ["cf-run-77-1700000000000"],
-        "a short word is nobody's own"
+        "a short word is nobody's own, and a path no word"
     );
     let word = "zsh -c : cf-mark-ticks cf-run-77-1700000000000; tail -f out | grep tick";
     let after = vec![
@@ -377,6 +384,8 @@ fn a_process_whose_parent_has_gone_and_whose_command_line_holds_a_word_of_the_ru
         ),
         // An orphan that holds no word and has no folder to read.
         running(500, 25, 1, "tail -f out"),
+        // One that holds the word and began before the run's window: none of the run's.
+        running(600, 5, 90, word),
     ];
     let left = watch.left(&after, |_| None);
     assert_eq!(pids(&left), [300, 301, 310], "{left:#?}");
@@ -400,7 +409,7 @@ fn a_command_left_by_a_window_closed_and_reopened_under_the_same_pane_id_is_foun
             started: 50,
         },
     ] {
-        watch.add(root, folder);
+        watch.add(root, Some(RunFolder::assumed(folder)));
     }
     let while_it_runs = vec![
         running(100, 10, 1, "claude"),
@@ -424,7 +433,7 @@ fn a_command_left_by_a_window_closed_and_reopened_under_the_same_pane_id_is_foun
 fn a_sweep_that_watched_no_window_could_not_look_and_never_says_nothing() {
     let watch = Watch::new();
     let machine = Lists(RefCell::new(vec![vec![running(1, 1, 0, "launchd")]]));
-    let swept = watch.sweep_by(&machine, |_| None, |_| Ended::default(), Duration::ZERO);
+    let swept = watch.sweep_by(&machine, |_| None, Duration::ZERO);
     assert!(!swept.looked());
     assert!(!swept.is_clean());
     assert!(
@@ -439,8 +448,84 @@ fn a_sweep_that_watched_no_window_could_not_look_and_never_says_nothing() {
             pid: 100,
             started: 10,
         },
-        Path::new("/runs/x"),
+        Some(RunFolder::assumed(Path::new("/runs/x"))),
     );
-    let swept = watch.sweep_by(&machine, |_| None, |_| Ended::default(), Duration::ZERO);
+    let swept = watch.sweep_by(&machine, |_| None, Duration::ZERO);
     assert!(swept.looked() && swept.is_clean());
+}
+
+/// A live rig's home and project folder are the person's own, outside the rig's temp root: at
+/// 18:58 on 2026-11-12 the close's sweep took `/Users/…` for a word of the run. Each ground alone:
+/// a path outside the root is no word and no folder of the run's, whenever what holds it began; a
+/// path under the root is the run's only for what began no earlier than the run's first window.
+/// The window is watched all the same, by descent.
+#[test]
+fn a_path_is_a_ground_of_the_runs_only_under_its_temp_root_and_only_for_what_began_after_its_window(
+) {
+    let root = tempfile::tempdir().unwrap();
+    let inside = root.path().join("home");
+    let live = inside.join("live");
+    std::fs::create_dir_all(&live).unwrap();
+    let person = tempfile::tempdir().unwrap();
+    let theirs = person.path().join("live");
+    std::fs::create_dir_all(&theirs).unwrap();
+    let run_folder = |path: &Path| RunFolder::under(root.path(), path);
+    let window = Identity {
+        pid: 100,
+        started: 10,
+    };
+    let text = |path: &Path| path.display().to_string();
+
+    // The live shape: the home and the window's folder are the person's.
+    let mut watch = Watch::of_windows(
+        &run_folder,
+        &[(window, theirs.clone())],
+        Some(person.path()),
+    );
+    assert_eq!(watch.windows(), 1, "the window is watched, by descent");
+    assert!(watch.windows[0].folder.is_none(), "{:?}", watch.windows[0]);
+    assert_eq!(
+        watch.words,
+        [super::super::run_word()],
+        "no path of the person's is a word"
+    );
+    watch.look(&[
+        running(100, 10, 1, "claude"),
+        running(101, 11, 100, "sh -c sleep 4711"),
+    ]);
+    let after = vec![
+        // What the window ran, which descends from it: the run's, by descent.
+        running(101, 11, 1, "sh -c sleep 4711"),
+        // The person's and other tasks', begun after the window, holding the home's path or
+        // running in the window's folder.
+        running(
+            300,
+            20,
+            1,
+            &format!("tail -f {}", text(&person.path().join("log"))),
+        ),
+        running(301, 21, 1, "a program of the person's"),
+    ];
+    let folder_of = |pid: u32| (pid == 301).then(|| theirs.canonicalize().unwrap());
+    assert_eq!(pids(&watch.left(&after, folder_of)), [101]);
+
+    // The stand-in's shape: the home and the window's folder are under the run's root.
+    let watch = Watch::of_windows(&run_folder, &[(window, live.clone())], Some(&inside));
+    assert!(watch.windows[0].folder.is_some());
+    assert!(watch.words.contains(&text(&inside)), "{:?}", watch.words);
+    let after = vec![
+        // Holds the home's path: after the window, the run's; before it, none of the run's.
+        running(
+            300,
+            20,
+            1,
+            &format!("tail -f {}", text(&inside.join("log"))),
+        ),
+        running(302, 5, 1, &format!("tail -f {}", text(&inside.join("log")))),
+        // Runs in the window's folder: after the window, the run's; before it, none of the run's.
+        running(301, 21, 1, "a job"),
+        running(303, 6, 1, "a job"),
+    ];
+    let folder_of = |pid: u32| (pid == 301 || pid == 303).then(|| live.canonicalize().unwrap());
+    assert_eq!(pids(&watch.left(&after, folder_of)), [300, 301]);
 }

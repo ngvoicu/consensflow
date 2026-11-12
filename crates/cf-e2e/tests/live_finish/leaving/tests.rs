@@ -31,6 +31,17 @@ fn good() -> Left {
     }
 }
 
+/// A folder of a run's own for a test's table of processes: made under a root of the test's, as
+/// the rig makes the run's under its temp root ([`RunFolder::under`] reads both); kept while the
+/// root is.
+fn run_folder(name: &str) -> (tempfile::TempDir, RunFolder) {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join(name);
+    std::fs::create_dir(&path).unwrap();
+    let folder = RunFolder::under(root.path(), &path).expect("under the root");
+    (root, folder)
+}
+
 #[test]
 fn a_task_done_with_the_command_listed_gone_and_the_chief_told_of_the_close_passes() {
     assert_eq!(judge(&good(), Expect::Ended), Ok(()));
@@ -153,9 +164,21 @@ fn a_stand_in_job_is_taken_by_its_own_file_at_the_first_look_and_its_number_neve
     // A job is the process of its number that holds its file, which is the rig's own.
     let wanted = "--background-job 4711";
     let job = |pid: u32, n: u32| (pid, format!("/rig/jobs/job-100-{n}"));
-    let jobs = [job(200, 1), job(201, 2), job(202, 3)];
+    let jobs = [job(200, 1), job(201, 2), job(202, 3), job(203, 4)];
+    let window = Identity {
+        pid: 100,
+        started: 10,
+    };
     let all = vec![
         running(100, 10, 1, "fake-agent"),
+        // The number and the file of a job, in a process begun before the run's window: none of
+        // the run's.
+        running(
+            203,
+            5,
+            1,
+            "fake-agent --background-job 4711 /rig/jobs/job-100-4",
+        ),
         // The job the stand-in detached, which has no window to descend from.
         running(
             200,
@@ -180,7 +203,7 @@ fn a_stand_in_job_is_taken_by_its_own_file_at_the_first_look_and_its_number_neve
             .collect()
     };
     let mut chosen = Chosen::default();
-    chosen.choose(&all, None, &jobs, wanted);
+    chosen.choose(&all, Some(window), &jobs, wanted);
     assert_eq!(pids(&chosen), [200]);
     // Later, 200's job has gone and another process has its number, the job's file in its
     // words: the job was taken once, as the process it was, and nothing is taken for it
@@ -200,7 +223,7 @@ fn a_stand_in_job_is_taken_by_its_own_file_at_the_first_look_and_its_number_neve
             "fake-agent --background-job 4711 /rig/jobs/job-100-2",
         ),
     ];
-    chosen.choose(&later, None, &jobs, wanted);
+    chosen.choose(&later, Some(window), &jobs, wanted);
     assert_eq!(
         chosen
             .processes
@@ -783,7 +806,8 @@ fn a_worker_is_expected_to_come_to_the_limit_for_pi_and_devin_on_a_mac_and_to_th
 
 #[test]
 fn what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not() {
-    let folder = Path::new("/runs/leaving-pi");
+    let (root, own) = run_folder("leaving-pi");
+    let folder = own.real();
     let window = Identity {
         pid: 100,
         started: 10,
@@ -830,11 +854,22 @@ fn what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_
         chosen.processes.is_empty(),
         "nothing descends from the window"
     );
-    let found = chosen.take_orphans(&all, folder, "sleep 4711", folder_of);
+    // A folder outside the run's temp root (a live rig's project folder is in the person's home)
+    // is no ground of the run's: nothing is taken by it.
+    let elsewhere = tempfile::tempdir().unwrap();
+    let outside = RunFolder::under(root.path(), elsewhere.path());
+    assert_eq!(outside, None, "a folder outside the run's root is refused");
+    let mut live = Chosen::default();
+    live.choose(&all, Some(window), &[], "sleep 4711");
+    assert!(live
+        .take_orphans(&all, outside.as_ref(), "sleep 4711", folder_of)
+        .is_empty());
+    assert!(live.processes.is_empty());
+    let found = chosen.take_orphans(&all, Some(&own), "sleep 4711", folder_of);
     assert_eq!(pids(&chosen), [300]);
     assert_eq!(found.len(), 1, "what the folder found is answered");
     // Once, however often it looks, and what the folder found is answered each time.
-    let again = chosen.take_orphans(&all, folder, "sleep 4711", folder_of);
+    let again = chosen.take_orphans(&all, Some(&own), "sleep 4711", folder_of);
     assert_eq!(pids(&chosen), [300]);
     assert_eq!(again.len(), 1);
     // The others are not ended, and are none of the run's either: they may be another run's,
@@ -843,7 +878,7 @@ fn what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_
     assert!(chosen.problems(&Ended::default()).is_empty());
     // A run that never saw its window's process proves nothing its own.
     let mut blind = Chosen::default();
-    blind.take_orphans(&all, folder, "sleep 4711", folder_of);
+    blind.take_orphans(&all, Some(&own), "sleep 4711", folder_of);
     assert!(blind.processes.is_empty());
     assert_eq!(
         blind.unproven,
@@ -860,6 +895,7 @@ fn a_job_a_shell_detached_and_left_is_found_by_the_runs_folder_and_ended_by_whic
     // the window's start, and ended through the descent as any process the run chose.
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().canonicalize().unwrap();
+    let own = RunFolder::under(dir.path(), dir.path()).expect("the root itself");
     let began = ThisMachine
         .identity(std::process::id())
         .unwrap()
@@ -879,7 +915,7 @@ fn a_job_a_shell_detached_and_left_is_found_by_the_runs_folder_and_ended_by_whic
     let mut found = Vec::new();
     for _ in 0..100 {
         let all = ThisMachine.processes().unwrap();
-        chosen.take_orphans(&all, &folder, "sleep 25", working_folder);
+        chosen.take_orphans(&all, Some(&own), "sleep 25", working_folder);
         found = chosen.processes.clone();
         if !found.is_empty() {
             break;
@@ -936,6 +972,7 @@ fn a_process_of_another_run_that_holds_the_commands_words_is_not_among_what_esca
         .expect("this process is there")
         .started;
     let folder = tempfile::tempdir().unwrap();
+    let own = RunFolder::under(folder.path(), folder.path()).expect("the root itself");
     // The run's window began before the decoy did, and has a folder that is another.
     let chosen = Chosen {
         window_began: Some(began),
@@ -954,7 +991,7 @@ fn a_process_of_another_run_that_holds_the_commands_words_is_not_among_what_esca
         found = on_the_machine(|all| {
             chosen.of_the_run(
                 all,
-                (folder.path(), "sleep 4711", Some("/the-rigs-own/jobs/")),
+                (Some(&own), "sleep 4711", Some("/the-rigs-own/jobs/")),
                 working_folder,
             )
         });
@@ -977,7 +1014,8 @@ fn a_process_of_another_run_that_holds_the_commands_words_is_not_among_what_esca
 #[test]
 fn what_escaped_is_what_the_window_held_an_orphan_of_its_folder_since_it_began_and_what_holds_the_rigs_own_folder(
 ) {
-    let folder = Path::new("/runs/leaving-claude");
+    let (_root, own) = run_folder("leaving-claude");
+    let folder = own.real();
     let window = Identity {
         pid: 100,
         started: 10,
@@ -1020,20 +1058,20 @@ fn what_escaped_is_what_the_window_held_an_orphan_of_its_folder_since_it_began_a
     let pids =
         |found: Vec<Running>| -> Vec<u32> { found.iter().map(|one| one.identity.pid).collect() };
     assert_eq!(
-        pids(chosen.of_the_run(&all, (folder, "sleep 4711", None), folder_of)),
+        pids(chosen.of_the_run(&all, (Some(&own), "sleep 4711", None), folder_of)),
         [101, 102, 300]
     );
     assert_eq!(
         pids(chosen.of_the_run(
             &all,
-            (folder, "--background-job 4711", Some(jobs)),
+            (Some(&own), "--background-job 4711", Some(jobs)),
             folder_of
         )),
         [400]
     );
     // A run that never saw its window has none of it.
     assert!(Chosen::default()
-        .of_the_run(&all, (folder, "sleep 4711", None), folder_of)
+        .of_the_run(&all, (Some(&own), "sleep 4711", None), folder_of)
         .is_empty());
 }
 
@@ -1065,7 +1103,6 @@ fn a_command_of_this_runs_word_that_detached_unseen_and_runs_in_another_folder_e
         .unwrap();
     let pid: u32 = ran.stdout.trim().parse().unwrap();
     let mut reaper = Reaper(Vec::new());
-    let folder = tempfile::tempdir().unwrap();
     let began = ThisMachine
         .identity(std::process::id())
         .unwrap()
@@ -1086,9 +1123,8 @@ fn a_command_of_this_runs_word_that_detached_unseen_and_runs_in_another_folder_e
             .find(|one| one.identity.pid == pid)
         {
             reaper.0 = vec![own];
-            found = on_the_machine(|all| {
-                chosen.of_the_run(all, (folder.path(), &wanted, None), working_folder)
-            });
+            found =
+                on_the_machine(|all| chosen.of_the_run(all, (None, &wanted, None), working_folder));
             break;
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -1303,11 +1339,9 @@ fn an_unrelated_command_of_the_same_seconds_begun_after_the_runs_word_is_none_of
         ..run_chosen()
     };
     let wanted = wanted(Who::Harness(Harness::Claude));
-    let folder = tempfile::tempdir().unwrap();
     chosen.choose(&table, None, &[], &wanted);
-    let escaped = on_the_machine(|all| {
-        chosen.of_the_run(&ours(all), (folder.path(), &wanted, None), working_folder)
-    });
+    let escaped =
+        on_the_machine(|all| chosen.of_the_run(&ours(all), (None, &wanted, None), working_folder));
     let ended = end_chosen(&chosen.processes);
     let gone = own.wait(Duration::from_secs(10)).unwrap().is_some();
     let runs_on = unrelated

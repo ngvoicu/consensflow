@@ -808,6 +808,13 @@ impl Rig {
         }
     }
 
+    /// `path` as a folder of this run's own: under the folder the rig made for the run, its
+    /// temp root, which no other run has ([`crate::live::members::RunFolder`]). None for any
+    /// other: a live rig's home is the person's own, and is none of the run's.
+    pub fn run_folder(&self, path: &Path) -> Option<crate::live::members::RunFolder> {
+        crate::live::members::RunFolder::under(&self.root, path)
+    }
+
     /// Leaves the home where it is when the rig ends, however it ends (closed,
     /// or dropped by a case that failed), for a person to look at what the case
     /// did: where it is. A rig that starts a day later takes it away unless a process

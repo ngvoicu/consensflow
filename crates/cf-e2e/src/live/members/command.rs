@@ -21,18 +21,16 @@ use super::super::claude::{processes_with, Process};
 use super::descent::{descending_from, end_chosen, Ended, Identity, Machine, Running, ThisMachine};
 use crate::{pattern, Result};
 
-/// A word made for this run of the kit: `cf-run-<pid>-<time>`, the time its first call. It is in
-/// the command line of each [`LongCommand`] the run starts, so that what is read across the machine
-/// by it ([`LongCommand::running`]) is this run's alone: the marks are fixed words, and every tree's
-/// run of the same case on the machine has the same (T-635).
+/// A word made for this run of the kit: `cf-run-<16 hex digits>`, 64 random bits made at its first
+/// call. It is in the command line of each [`LongCommand`] the run starts and of what the kit asks a
+/// window to watch, so that what is read across the machine by it ([`LongCommand::running`], what
+/// the closed windows left, [`super::Watch`]) is this run's alone: the marks are fixed words, and
+/// every tree's run of the same case on the machine has the same (T-635).
 pub fn run_word() -> &'static str {
     static WORD: OnceLock<String> = OnceLock::new();
     WORD.get_or_init(|| {
-        format!(
-            "cf-run-{}-{}",
-            std::process::id(),
-            jiff::Timestamp::now().as_millisecond()
-        )
+        let (high, low) = uuid::Uuid::new_v4().as_u64_pair();
+        format!("cf-run-{:016x}", high ^ low)
     })
 }
 
@@ -365,6 +363,15 @@ mod tests {
                 run_word()
             )
         );
+    }
+
+    #[test]
+    fn the_runs_word_is_sixty_four_random_bits_made_once() {
+        let word = run_word();
+        let digits = word.strip_prefix("cf-run-").expect(word);
+        assert_eq!(digits.len(), 16, "{word}");
+        assert!(digits.chars().all(|at| at.is_ascii_hexdigit()), "{word}");
+        assert_eq!(word, run_word());
     }
 
     /// The same command of another tree's run: its line holds the mark, as every run's does, and is

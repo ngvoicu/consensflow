@@ -55,8 +55,8 @@ use std::time::Duration;
 
 use cf_e2e::live::members::{
     self, delivered_result, descending_from, end_chosen, find, holding, is_over, notes_of_work,
-    orphans_in_folder, working_folder, Account, Ended, Identity, Machine, Members, Plan, Running,
-    ThisMachine,
+    orphans_in_folder, working_folder, Account, Ended, Identity, Machine, Members, Plan, RunFolder,
+    Running, ThisMachine,
 };
 use cf_e2e::live::tree::{self, Proc, Tree};
 use cf_e2e::live::{cut, secs, text, Harness, Log, Who};
@@ -676,13 +676,16 @@ fn observe(
     }
     // What of the machine the run counts for its own is what its window held or an orphan of
     // its own folder since the window began, and for the stand-in's jobs what holds the rig's
-    // own folder of them: never what holds the command's words alone (`of_the_run`).
+    // own folder of them: never what holds the command's words alone (`of_the_run`). A folder is
+    // the run's only under the rig's own temp root: a live rig's project folder is in the person's
+    // home, and no ground of the run's.
     let word = jobs_folder(members);
+    let own_folder = members.rig().run_folder(members.folder());
     look_for_leftovers(&mut left, still_there, || {
         on_the_machine(|all| {
             chosen.of_the_run(
                 all,
-                (members.folder(), wanted, word.as_deref()),
+                (own_folder.as_ref(), wanted, word.as_deref()),
                 working_folder,
             )
         })
@@ -709,7 +712,7 @@ fn observe(
         left.after_close = Some(on_the_machine(|all| {
             chosen.of_the_run(
                 all,
-                (members.folder(), wanted, word.as_deref()),
+                (own_folder.as_ref(), wanted, word.as_deref()),
                 working_folder,
             )
         }));
@@ -730,7 +733,7 @@ fn observe(
     if looks_for_its_own_orphans(expect, &left) {
         match ThisMachine.processes() {
             Ok(all) => {
-                let found = chosen.take_orphans(&all, members.folder(), wanted, working_folder);
+                let found = chosen.take_orphans(&all, own_folder.as_ref(), wanted, working_folder);
                 if !chosen.unproven.is_empty() {
                     case.say(format!(
                         "an orphan that holds the command's words and is none of this run's by its window, its start and its folder is left as it is, for it may be another run's: {}",
@@ -846,7 +849,8 @@ impl Chosen {
     /// now (`all`): what descends from the worker's window's own process `own` and holds
     /// `wanted`, with what it started ([`holding`]); and the rig's stand-in jobs (`jobs`:
     /// each one's process, as the job wrote it, and its file, which no process but the job
-    /// has in its command line; one the stand-in detached has no window to descend from).
+    /// has in its command line, begun no earlier than the window; one the stand-in detached has
+    /// no window to descend from).
     /// A job is taken, as the process it is then, at the first look that finds the process
     /// of its number holding its file, which is when the rig knows it is its own, and never
     /// looked at again: a job that has gone leaves its number written, and another process
@@ -873,7 +877,11 @@ impl Chosen {
                 continue;
             }
             let found = all.iter().find(|process| {
-                process.identity.pid == *pid && process.command.contains(file.as_str())
+                process.identity.pid == *pid
+                    && process.command.contains(file.as_str())
+                    && self
+                        .window_began
+                        .is_some_and(|since| process.identity.started >= since)
             });
             if let Some(process) = found {
                 self.jobs.push(file.clone());
@@ -952,30 +960,33 @@ impl Chosen {
     /// What of `all` the run counts for the command that escaped, and for nothing else that
     /// holds its words: what descends from the worker's window's process and holds `wanted`
     /// ([`holding`]); an orphan that holds it, began no earlier than the window, and runs in the
-    /// run's own `folder` ([`orphans_in_folder`]); and, where the run has a word made for it
-    /// (`word`: the folder of the rig's own jobs, in which no process of another run holds
-    /// a file), what holds both `wanted` and `word`. A process of another tree's run that holds
+    /// run's own `folder`, where it has one under its temp root ([`orphans_in_folder`]); and,
+    /// where the run has a word made for it (`word`: the folder of the rig's own jobs, in which no
+    /// process of another run holds a file), what holds both `wanted` and `word` and began no
+    /// earlier than the window. A process of another tree's run that holds
     /// `wanted` is none of them, whatever else is the same (T-592: another tree's
     /// `--background-job 4711`). Each once.
     fn of_the_run(
         &self,
         all: &[Running],
-        (folder, wanted, word): (&Path, &str, Option<&str>),
+        (folder, wanted, word): (Option<&RunFolder>, &str, Option<&str>),
         folder_of: impl Fn(u32) -> Option<PathBuf>,
     ) -> Vec<Running> {
         let mut found: Vec<Running> = self
             .window
             .map(|own| holding(all, own, wanted))
             .unwrap_or_default();
-        if let Some(since) = self.window_began {
+        if let (Some(folder), Some(since)) = (folder, self.window_began) {
             found.extend(orphans_in_folder(all, wanted, folder, since, &folder_of));
         }
         found.extend(self.by_word(all, wanted));
-        if let Some(word) = word {
+        if let (Some(word), Some(since)) = (word, self.window_began) {
             found.extend(
                 all.iter()
                     .filter(|process| {
-                        process.command.contains(wanted) && process.command.contains(word)
+                        process.command.contains(wanted)
+                            && process.command.contains(word)
+                            && process.identity.started >= since
                     })
                     .cloned(),
             );
@@ -992,7 +1003,8 @@ impl Chosen {
     /// Adds what escaped every window and is provably the run's own, as the machine lists its
     /// processes now (`all`): an orphan that holds `wanted`, began no earlier than the worker's
     /// window did, and runs in the run's own `folder` as `folder_of` says it, with what it
-    /// started ([`orphans_in_folder`]). A job a tool shell that leads a session of its own
+    /// started ([`orphans_in_folder`]): a folder under the run's temp root alone ([`RunFolder`]),
+    /// and none where the run has none (a live rig's project folder is in the person's home). A job a tool shell that leads a session of its own
     /// detached, once the shell has ended, has nothing else that ties it to the window; the
     /// folder is the worker's alone, made for the run, and the start tells the job from a
     /// process of an earlier run in it. A command line that says the same is not enough, as it
@@ -1003,13 +1015,15 @@ impl Chosen {
     fn take_orphans(
         &mut self,
         all: &[Running],
-        folder: &Path,
+        folder: Option<&RunFolder>,
         wanted: &str,
         folder_of: impl Fn(u32) -> Option<PathBuf>,
     ) -> Vec<Running> {
-        let found = match self.window_began {
-            Some(since) => orphans_in_folder(all, wanted, folder, since, &folder_of),
-            None => Vec::new(),
+        let found = match (folder, self.window_began) {
+            (Some(folder), Some(since)) => {
+                orphans_in_folder(all, wanted, folder, since, &folder_of)
+            }
+            _ => Vec::new(),
         };
         for orphan in found.iter().cloned().chain(self.by_word(all, wanted)) {
             if !self
@@ -1055,13 +1069,20 @@ impl Chosen {
 
 /// The jobs the rig's stand-in agents started that run, each as its process and its file:
 /// those that have written their process and neither that they ran to their end nor that
-/// they were asked to end. None where the windows are a harness's.
+/// they were asked to end, whose files are under the rig's own temp root. None where the windows
+/// are a harness's.
 fn running_jobs(members: &Members) -> Vec<(u32, String)> {
     members
         .rig()
         .jobs("job")
         .iter()
         .filter(|job| !job.finished() && !job.released())
+        .filter(|job| {
+            job.file()
+                .parent()
+                .and_then(|folder| members.rig().run_folder(folder))
+                .is_some()
+        })
         .map(|job| (job.pid(), job.file().display().to_string()))
         .collect()
 }
@@ -1110,12 +1131,17 @@ fn on_the_machine(of_the_run: impl Fn(&[Running]) -> Vec<Running>) -> Vec<String
 
 /// The folder of the rig's own jobs, as the rig's stand-in names it in the command line of a
 /// job it started (`--background-job <seconds> <file>`, the file in this folder alone): a word
-/// that is this run's and no other's. None where the rig has written no job.
+/// that is this run's and no other's, under the rig's own temp root. None where the rig has
+/// written no job.
 fn jobs_folder(members: &Members) -> Option<String> {
     let jobs = members.rig().jobs("job");
     let file = jobs.first()?.file();
-    let folder = file.parent()?;
-    Some(format!("{}{}", folder.display(), std::path::MAIN_SEPARATOR))
+    let folder = members.rig().run_folder(file.parent()?)?;
+    Some(format!(
+        "{}{}",
+        folder.given().display(),
+        std::path::MAIN_SEPARATOR
+    ))
 }
 
 /// A line of `ps -axo pid=,ppid=,pgid=,tty=,command=` as the run says a process: its number

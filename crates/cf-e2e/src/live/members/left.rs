@@ -1,5 +1,5 @@
-//! What the windows of a live case left running once they were closed, found and ended by
-//! the kit and said: a Monitor armed on `tail -f … | grep tick` outlived its Claude Code by
+//! What the windows of a live case left running once they were closed, found by the kit and
+//! said, and never ended: a Monitor armed on `tail -f … | grep tick` outlived its Claude Code by
 //! seventeen hours (T-491), and nothing of a live case looked, for a live window has no stand-in
 //! to note its processes (`pids.jsonl` of the rig is the stand-ins' own).
 //!
@@ -7,9 +7,12 @@
 //! as it opened the window, read once and kept ([`Watch::look`]: the tree is taken while the
 //! window runs, each process by its number and when it began); or, where the window has gone and
 //! what it ran has no parent left (a Mac's init has it, 1), by being an orphan of the folder the
-//! window ran in that began no earlier than the window ([`orphans_in_folder`]). It is ended by
-//! which process it is ([`end_chosen`]), never by a pattern or a name, and what is said is what
-//! was found, what was ended and what could not be.
+//! window ran in that began no earlier than the window ([`orphans_in_folder`]), where that folder
+//! is under the run's own temp root ([`RunFolder`]). What is said is what was found. The sweep
+//! ends nothing: at 18:58 on 2026-11-12 it took a live rig's home, the owner's own, for a word of
+//! the run and ended 22 processes of the owner's and of other tasks. The kit ends a process only
+//! by descent from the run's window, the stand-in's jobs or the run's own word, where a case chose
+//! it.
 
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -18,8 +21,8 @@ use std::time::{Duration, Instant};
 use serde_json::json;
 
 use super::descent::{
-    descending_from, end_chosen, orphans_in_folder, working_folder, Ended, Identity, Machine,
-    Running, ThisMachine,
+    descending_from, orphans_in_folder, working_folder, Identity, Machine, RunFolder, Running,
+    ThisMachine,
 };
 use crate::live::cut;
 use crate::rig::Rig;
@@ -31,24 +34,25 @@ const SETTLE: Duration = Duration::from_secs(3);
 /// How often it is looked at while it settles.
 const LOOK: Duration = Duration::from_millis(250);
 
-/// One window the case opened: its process, the folder it ran in, and what descended from it
-/// at the looks made while it ran.
+/// One window the case opened: its process, the folder it ran in where that is the run's own
+/// ([`RunFolder`]), and what descended from it at the looks made while it ran.
 #[derive(Debug, Clone)]
 struct Watched {
     root: Identity,
-    folder: PathBuf,
+    folder: Option<RunFolder>,
     tree: Vec<Running>,
 }
 
-/// The windows of a case, watched until they are closed ([`Watch::sweep`] then says and ends
-/// what is left of them).
+/// The windows of a case, watched until they are closed ([`Watch::sweep`] then says what is
+/// left of them).
 #[derive(Debug, Clone, Default)]
 pub struct Watch {
     windows: Vec<Watched>,
     /// Words of the run's own, which the command line of what the kit asked a window to run or
-    /// watch holds: the folders it was made to run in and the word made for the run. A process
-    /// whose parent has gone and that holds one is the run's wherever it went and whenever it
-    /// began, on every platform ([`Watch::add_word`]).
+    /// watch holds: the folders of the run's it was made to run in, under the run's temp root
+    /// ([`RunFolder`]), and the word made for the run. A process whose parent has gone, that
+    /// began no earlier than the run's first window and that holds one is what the windows left,
+    /// wherever it went, on every platform ([`Watch::add_word`]).
     words: Vec<String>,
 }
 
@@ -62,41 +66,67 @@ impl Watch {
     /// (their folders are the `cwd` of the `pane.open` it asked) and the kit's own, whose folder
     /// is `own_folder` where the rig has no request of its (a window the case opened itself);
     /// looked at once now, while they run. A window whose process is not known, or whose folder
-    /// is not, is not watched.
+    /// is not, is not watched. A folder (the window's, the rig's home) is a ground of the run's
+    /// only where it is under the rig's own temp root ([`Rig::run_folder`]): a live rig's home and
+    /// project folder are the person's, and the window is then watched by descent and the run's
+    /// word alone.
     pub fn of_rig(rig: &Rig, own_folder: Option<&Path>) -> Self {
         let frames = rig.open_frames();
-        let mut watch = Self::new();
-        for (id, root) in rig.window_roots() {
-            let asked = frames
-                .iter()
-                .rev()
-                .find(|frame| frame["id"] == json!(id))
-                .and_then(|frame| frame["cwd"].as_str())
-                .map(PathBuf::from);
-            if let Some(folder) = asked.or_else(|| own_folder.map(Path::to_path_buf)) {
-                watch.add(root, &folder);
-                watch.add_folder_words(&folder);
-            }
-        }
-        if let Some(home) = rig.var("HOME").filter(|home| !home.is_empty()) {
-            watch.add_folder_words(Path::new(home));
-        }
-        watch.add_word(super::run_word());
+        let windows: Vec<(Identity, PathBuf)> = rig
+            .window_roots()
+            .into_iter()
+            .filter_map(|(id, root)| {
+                let asked = frames
+                    .iter()
+                    .rev()
+                    .find(|frame| frame["id"] == json!(id))
+                    .and_then(|frame| frame["cwd"].as_str())
+                    .map(PathBuf::from);
+                asked
+                    .or_else(|| own_folder.map(Path::to_path_buf))
+                    .map(|folder| (root, folder))
+            })
+            .collect();
+        let home = rig.var("HOME").filter(|home| !home.is_empty());
+        let mut watch =
+            Self::of_windows(&|path| rig.run_folder(path), &windows, home.map(Path::new));
         watch.look_now();
         watch
     }
 
-    /// Counts a folder of the run's as words: its path as the system says it, its real path, and
-    /// the path as Claude Code names a project's folder in the files it keeps (every character
-    /// that is no letter or digit a dash), which the command line of a program that reads one holds.
-    fn add_folder_words(&mut self, folder: &Path) {
-        let real = folder
-            .canonicalize()
-            .unwrap_or_else(|_| folder.to_path_buf());
-        for path in [folder, real.as_path()] {
+    /// The watch of `windows` (each window's process and the folder it runs in) and of the rig's
+    /// `home`, a folder being the run's where `run_folder` says it is ([`Rig::run_folder`]): its
+    /// words, and the folder rule of its window, are the run's then alone. And the word made for
+    /// the run ([`super::run_word`]).
+    fn of_windows(
+        run_folder: &dyn Fn(&Path) -> Option<RunFolder>,
+        windows: &[(Identity, PathBuf)],
+        home: Option<&Path>,
+    ) -> Self {
+        let mut watch = Self::new();
+        for (root, folder) in windows {
+            let folder = run_folder(folder);
+            if let Some(folder) = &folder {
+                watch.add_folder_words(folder);
+            }
+            watch.add(*root, folder);
+        }
+        if let Some(home) = home.and_then(run_folder) {
+            watch.add_folder_words(&home);
+        }
+        watch.add_word(super::run_word());
+        watch
+    }
+
+    /// Counts a folder of the run's as words: its path as it was given, its real path, and the
+    /// path as Claude Code names a project's folder in the files it keeps (every character that
+    /// is no letter or digit a dash), which the command line of a program that reads one holds.
+    /// A [`RunFolder`] alone: a path outside the run's temp root is never a word of the run's.
+    fn add_folder_words(&mut self, folder: &RunFolder) {
+        for path in [folder.given(), folder.real()] {
             let text = path.to_string_lossy().into_owned();
-            self.add_word(&text);
-            self.add_word(
+            self.push_word(&text);
+            self.push_word(
                 &text
                     .chars()
                     .map(|at| if at.is_alphanumeric() { at } else { '-' })
@@ -115,7 +145,7 @@ impl Watch {
         self.windows.iter().map(|window| window.tree.len()).sum()
     }
 
-    /// A [`Swept`] that says how much was watched: nothing found, nothing ended.
+    /// A [`Swept`] that says how much was watched: nothing found.
     fn counted(&self) -> Swept {
         Swept {
             watched: (self.windows(), self.seen()),
@@ -123,22 +153,29 @@ impl Watch {
         }
     }
 
-    /// Counts `word` for the run's own, as the command line of a process that holds it: a path
-    /// of the run's folders (the window's, the rig's home) in the forms a program writes it in, or
-    /// the word made for the run ([`super::run_word`]). One too short to be nobody else's is not
-    /// counted.
-    pub fn add_word(&mut self, word: &str) {
+    /// Counts `word` for the run's own, as the command line of a process that holds it: the word
+    /// made for the run ([`super::run_word`]). One that holds a path, which is a folder's word
+    /// and a [`RunFolder`]'s alone ([`Watch::add_folder_words`]), is not counted.
+    fn add_word(&mut self, word: &str) {
+        if !word.contains(['/', '\\']) {
+            self.push_word(word);
+        }
+    }
+
+    /// Counts `word`, unless it is too short to be nobody else's.
+    fn push_word(&mut self, word: &str) {
         if word.len() >= 8 && !self.words.iter().any(|known| known == word) {
             self.words.push(word.to_owned());
         }
     }
 
-    /// Watches the window whose process is `root`, which runs in `folder`.
-    pub fn add(&mut self, root: Identity, folder: &Path) {
+    /// Watches the window whose process is `root`, which runs in `folder` where that is the
+    /// run's own.
+    pub fn add(&mut self, root: Identity, folder: Option<RunFolder>) {
         if !self.windows.iter().any(|window| window.root == root) {
             self.windows.push(Watched {
                 root,
-                folder: folder.to_path_buf(),
+                folder,
                 tree: Vec::new(),
             });
         }
@@ -174,11 +211,12 @@ impl Watch {
 
     /// What of the watched windows is among `all`, the machine's processes, now: each process the
     /// looks saw descend from a window (or the window's own) that still is the process it was,
-    /// and each orphan of a window's folder that began no earlier than the earliest window of the
-    /// run, as `folder_of` says where a process runs, with what it started; and, on every platform,
-    /// each process whose parent has gone and whose command line holds a word of the run's own
-    /// ([`Watch::add_word`]), with what it started; each once. A process of another run, whatever
-    /// else its command line says, is none of them.
+    /// and each orphan of a window's folder of the run's that began no earlier than the earliest
+    /// window of the run, as `folder_of` says where a process runs, with what it started; and, on
+    /// every platform, each process whose parent has gone, that began no earlier than that window
+    /// and whose command line holds a word of the run's own ([`Watch::add_word`]), with what it
+    /// started; each once. A process of another run, or one that began before the run's first
+    /// window, whatever else its command line says, is none of them.
     pub fn left(
         &self,
         all: &[Running],
@@ -203,12 +241,15 @@ impl Watch {
                     add(now.clone());
                 }
             }
-            for orphan in orphans_in_folder(all, "", &window.folder, since, &folder_of) {
-                add(orphan);
+            if let Some(folder) = &window.folder {
+                for orphan in orphans_in_folder(all, "", folder, since, &folder_of) {
+                    add(orphan);
+                }
             }
         }
         for process in all.iter().filter(|process| {
             parent_gone(all, process)
+                && process.identity.started >= since
                 && self
                     .words
                     .iter()
@@ -223,20 +264,19 @@ impl Watch {
         left
     }
 
-    /// Finds what the windows left, after they were closed, ends it and says it. What is
-    /// listed is looked at again for a moment while it ends, so that a process on its way out
+    /// Finds what the windows left, after they were closed, and says it; it ends nothing. What
+    /// is listed is looked at again for a moment while it ends, so that a process on its way out
     /// is not one that was left.
     pub fn sweep(&self) -> Swept {
-        self.sweep_by(&ThisMachine, working_folder, end_chosen, SETTLE)
+        self.sweep_by(&ThisMachine, working_folder, SETTLE)
     }
 
     /// [`Watch::sweep`], the machine listed by `machine`, a process's folder said by `folder_of`,
-    /// each ended by `end`, and `settle` the time it is looked at again.
+    /// and `settle` the time it is looked at again.
     pub fn sweep_by(
         &self,
         machine: &dyn Machine,
         folder_of: impl Fn(u32) -> Option<PathBuf>,
-        end: impl Fn(&[Running]) -> Ended,
         settle: Duration,
     ) -> Swept {
         let until = Instant::now() + settle;
@@ -251,10 +291,8 @@ impl Watch {
                 Ok(all) => {
                     let found = self.left(&all, &folder_of);
                     if found.is_empty() || Instant::now() >= until {
-                        let ended = end(&found);
                         return Swept {
                             found,
-                            ended,
                             ..self.counted()
                         };
                     }
@@ -276,12 +314,11 @@ fn parent_gone(all: &[Running], process: &Running) -> bool {
         })
 }
 
-/// What the closed windows left: the processes found, what came of ending them, and why the
-/// machine could not be read where it could not.
+/// What the closed windows left: the processes found, none of them ended, and why the machine
+/// could not be read where it could not.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Swept {
     pub found: Vec<Running>,
-    pub ended: Ended,
     pub unread: Option<String>,
     /// How many windows were watched, and how many processes the looks saw under them while
     /// they ran: a watch that saw none says nothing of what was left.
@@ -301,7 +338,7 @@ impl Swept {
         self.found.is_empty() && self.looked()
     }
 
-    /// What it came to, in a line: nothing left, or what was left and what the kit did with it.
+    /// What it came to, in a line: nothing left, or what was left, which the kit left as it is.
     pub fn said(&self) -> String {
         if let Some(why) = &self.unread {
             return format!(
@@ -324,31 +361,23 @@ impl Swept {
                 .collect::<Vec<_>>()
                 .join("; ")
         };
-        let mut said = format!(
-            "the windows left {} process(es) running after they were closed: {}; the kit ended them by which process each is",
+        format!(
+            "the windows left {} process(es) running after they were closed: {}; the kit ended none of them (it ends a process only by descent from the run's window, the stand-in's jobs or the run's own word)",
             self.found.len(),
             list(&self.found)
-        );
-        said.push_str(&format!(
-            ": {} ended, {} gone already",
-            self.ended.ended.len(),
-            self.ended.gone.len()
-        ));
-        for problem in self.ended.problems() {
-            said.push_str(&format!("; {problem}"));
-        }
-        said
+        )
     }
 
-    /// What may still run or could not be told, a problem each.
+    /// What could not be told, a problem each: the machine that could not be read.
     pub fn problems(&self) -> Vec<String> {
-        let mut problems = self.ended.problems();
-        if let Some(why) = &self.unread {
-            problems.push(format!(
-                "the machine's processes could not be read to see what the windows left: {why}"
-            ));
-        }
-        problems
+        self.unread
+            .iter()
+            .map(|why| {
+                format!(
+                    "the machine's processes could not be read to see what the windows left: {why}"
+                )
+            })
+            .collect()
     }
 }
 
