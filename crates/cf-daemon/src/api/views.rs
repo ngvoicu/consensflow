@@ -98,6 +98,10 @@ pub struct MessageSummary {
     /// asks no decision, and its task's line says it (RS-25). Said only where it was.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub shown: bool,
+    /// A shown note whose line is over: its task moved on, and what it says no longer holds
+    /// (its receipt's `over`). Said only where it is.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub over: bool,
 }
 
 impl From<&MessageView> for MessageSummary {
@@ -115,6 +119,8 @@ impl From<&MessageView> for MessageSummary {
             choices: message.choices.clone(),
             created_at: message.created_at.clone(),
             shown: message.receipt.get(cf_ledger::SHOWN).is_some(),
+            over: message.receipt.get(cf_ledger::SHOWN).is_some()
+                && message.receipt.get(cf_ledger::OVER).is_some(),
         }
     }
 }

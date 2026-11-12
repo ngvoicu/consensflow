@@ -225,3 +225,100 @@ async fn the_chiefs_list_holds_nothing_of_the_answer_it_wrote_and_receives_nothi
     assert_eq!(scene.message(answer.id).state, "queued");
     assert_eq!(scene.kicks.get(), 0);
 }
+
+/// A note of ConsensFlow's own shown to the chief, not typed, is said `shown` in the list; once
+/// its line is over (another worker took the task it said was taken back and waits), the list
+/// says that too, `over`, from the receipt's own mark: `cf inbox` prints it `[not typed · over]`.
+/// A shown note that still holds says no `over` (RS-25, T-1556).
+#[tokio::test]
+async fn a_shown_note_whose_line_a_take_over_ended_is_said_over_in_the_list() {
+    use cf_ledger::{NewMember, NewTask};
+    let scene = scene();
+    let project = scene.project.id;
+    let (number, diana) = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let diana = ledger
+            .add_member(
+                project,
+                &NewMember {
+                    model: Some("claude-sonnet-5".to_owned()),
+                    effort: None,
+                    model_name: Some("diana".to_owned()),
+                    harness: "claude-code".to_owned(),
+                    designer: false,
+                    roles: vec!["worker".to_owned()],
+                    tier: "standard".to_owned(),
+                },
+            )
+            .unwrap()
+            .id;
+        let number = ledger
+            .create_task(
+                project,
+                &NewTask {
+                    from: "chief".to_owned(),
+                    pool: Some("worker".to_owned()),
+                    tier: Some("standard".to_owned()),
+                    body: "Parser".to_owned(),
+                    ..NewTask::default()
+                },
+            )
+            .unwrap()
+            .task
+            .number;
+        let zeus = scene.id("zeus");
+        let brief = ledger
+            .assign_task(project, number, zeus)
+            .unwrap()
+            .message
+            .unwrap()
+            .id;
+        ledger.begin_delivery(brief).unwrap();
+        ledger
+            .confirm_delivery(brief, Some(&serde_json::json!({ "item": "test" })))
+            .unwrap();
+        ledger
+            .release_task(project, number, "ran out of quota")
+            .unwrap();
+        (number, diana)
+    };
+    let taken_back = |said: &Value| -> Value {
+        said["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|message| {
+                message["preview"].as_str().is_some_and(|preview| {
+                    preview.starts_with(&format!("T-{number} was taken back"))
+                })
+            })
+            .cloned()
+            .unwrap_or_else(|| panic!("no note says T-{number} was taken back: {said}"))
+    };
+    let (status, said) = api(&scene, Method::GET, "/api/inbox", &scene.chief, "").await;
+    assert_eq!(status, 200);
+    let note = taken_back(&said);
+    assert_eq!(
+        (&note["shown"], &note.get("over")),
+        (&Value::Bool(true), &None),
+        "{note}"
+    );
+
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .assign_task(project, number, diana)
+        .unwrap();
+    let (_, said) = api(&scene, Method::GET, "/api/inbox", &scene.chief, "").await;
+    let note = taken_back(&said);
+    assert_eq!(
+        (&note["shown"], &note["over"]),
+        (&Value::Bool(true), &Value::Bool(true)),
+        "{note}"
+    );
+    assert_eq!(
+        note["state"], "read",
+        "the note stays what it was: nothing withdraws it"
+    );
+}

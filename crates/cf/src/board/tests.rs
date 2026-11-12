@@ -740,6 +740,59 @@ fn a_list_of_the_inbox_prints_first_lines_and_says_nothing_of_the_answers_in_it(
     }
 }
 
+/// A note of ConsensFlow's own shown, not typed, whose line is over (its task moved on: another
+/// worker took the task it said was taken back and waits) reads so wherever `cf` prints its line:
+/// `[not typed · over]`, where one that still holds reads `[not typed]`. The list has the
+/// summary's `over`; `cf inbox read` and `cf task get` have the receipt's (RS-25, T-1556).
+#[test]
+fn a_shown_note_whose_line_is_over_reads_so_in_the_inbox_its_read_and_its_tasks_thread() {
+    let taken_back =
+        "T-3 was taken back from @zeus (ran out of quota) and waits for another standard worker.";
+    let list = json!({ "messages": [
+        { "id": 21, "kind": "note", "state": "read", "task": 3, "sender": null,
+          "preview": "T-3 waits with @diana: out of quota until noon", "shown": true },
+        { "id": 20, "kind": "note", "state": "read", "task": 3, "sender": null,
+          "preview": taken_back, "shown": true, "over": true },
+    ] });
+    let ran = cf(&["inbox"], vec![reply(200, list)]);
+    assert_eq!(ran.code.unwrap(), 0);
+    assert_eq!(
+        ran.out.lines().collect::<Vec<_>>(),
+        [
+            "m-21 [not typed] note T-3 from ConsensFlow: T-3 waits with @diana: out of quota until noon",
+            &format!("m-20 [not typed · over] note T-3 from ConsensFlow: {taken_back}"),
+        ]
+    );
+    let over = json!({ "id": 20, "kind": "note", "state": "read", "taskNumber": 3, "sender": null,
+        "body": taken_back,
+        "receipt": { "shown": "was taken back from @zeus", "over": "2026-11-13T08:00:00.000Z" } });
+    let ran = cf(
+        &["inbox", "read", "m-20"],
+        vec![reply(200, json!({ "message": over.clone() }))],
+    );
+    assert_eq!(ran.code.unwrap(), 0);
+    assert!(
+        ran.out
+            .starts_with("m-20 [not typed · over] note T-3 from ConsensFlow\n"),
+        "{}",
+        ran.out
+    );
+    let mut task = thread();
+    task["task"]["messages"][3] = over;
+    let ran = cf(
+        &["task", "get", "T-3"],
+        vec![reply(200, task), reply(200, json!({}))],
+    );
+    assert_eq!(ran.code.unwrap(), 0);
+    assert!(
+        ran.out.contains(&format!(
+            "m-20 [not typed · over] note T-3 from ConsensFlow\n{taken_back}"
+        )),
+        "{}",
+        ran.out
+    );
+}
+
 /// `cf words…` run in the window whose `cf` is `word`, the board answering with `replies`.
 fn cf_as(word: &str, words: &[&str], json: bool, replies: Vec<Reply>) -> Ran {
     let api = scripted(replies);

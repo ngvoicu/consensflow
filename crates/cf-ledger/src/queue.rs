@@ -44,6 +44,11 @@ pub(crate) struct Queued<'a> {
 /// on the page as any note (RS-25, "nothing is told to the chief that it need not decide").
 pub const SHOWN: &str = "shown";
 
+/// The receipt word, beside [`SHOWN`], of a shown note whose line is over: its task moved on
+/// (`end_asides`), and the note no longer says what its task's line says. It holds the time it
+/// ended; the note stays as it was given, never withdrawn.
+pub const OVER: &str = "over";
+
 /// Writes a message on its way: queued for its recipient, read at once when
 /// the asker's own window gave it (its receipt says so), or waiting for the
 /// human instead when the project gates it. A row it keeps for a window joins

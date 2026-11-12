@@ -137,14 +137,21 @@ pub fn message_line(message: &Value) -> String {
 
 /// The state a message line says: its own, but `not typed` for a note of ConsensFlow's own
 /// that was shown and never typed into the window (it asks no decision; its task's line in
-/// `cf task list` says it), whose state is `read` though nobody read it.
+/// `cf task list` says it), whose state is `read` though nobody read it; and `not typed · over`
+/// once its line is over, its task moved on and what it says no longer so (the list's `over`,
+/// the receipt's `over` in a message read whole).
 fn state_said(message: &Value) -> String {
-    let shown = message.get("shown") == Some(&Value::Bool(true))
-        || message.pointer("/receipt/shown").is_some();
-    if shown {
-        "not typed".to_owned()
-    } else {
-        js::text(message.get("state")).into_owned()
+    let marked = |word: &str| {
+        message.get(word) == Some(&Value::Bool(true))
+            || message
+                .get("receipt")
+                .and_then(|receipt| receipt.get(word))
+                .is_some()
+    };
+    match (marked("shown"), marked("over")) {
+        (true, true) => "not typed · over".to_owned(),
+        (true, false) => "not typed".to_owned(),
+        _ => js::text(message.get("state")).into_owned(),
     }
 }
 

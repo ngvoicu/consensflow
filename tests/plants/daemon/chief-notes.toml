@@ -33,6 +33,7 @@ chief-notes-engine-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--
 chief-notes-engine-paused-left = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_left::"]
 chief-notes-engine-waiting = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "waiting_notes::"]
 chief-notes-engine-holds = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts::", "moved_models::"]
+chief-notes-daemon-inbox = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::inbox::"]
 
 [[plant]]
 name = "chief-notes: a shown note is queued and typed as any note"
@@ -315,4 +316,19 @@ find = '''
 '''
 replace = '''
               THEN NULL END AS member_left
+'''
+
+[[plant]]
+name = "chief-notes: the inbox's list says a shown note whose line is over as one that holds"
+meant = "api::routes::inbox::tests::a_shown_note_whose_line_a_take_over_ended_is_said_over_in_the_list"
+runs = ["chief-notes-daemon-inbox"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/views.rs"
+find = '''
+            over: message.receipt.get(cf_ledger::SHOWN).is_some()
+                && message.receipt.get(cf_ledger::OVER).is_some(),
+'''
+replace = '''
+            over: false,
 '''
