@@ -5,7 +5,24 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
-use tauri_plugin_updater::{RemoteRelease, Update, UpdaterExt};
+use tauri_plugin_updater::Update;
+
+mod check;
+#[cfg(target_os = "macos")]
+mod relaunch;
+
+use check::{check_by_page, check_in_app, Found};
+#[cfg(test)]
+use check::{describe_check_error, test_update_url, validate_release};
+pub(crate) use check::{feed_unavailable, ReleaseInfo};
+#[cfg(target_os = "macos")]
+pub(crate) use relaunch::relaunch_installed;
+#[cfg(all(test, target_os = "macos"))]
+use relaunch::{relaunch, relaunch_once};
+#[cfg(target_os = "macos")]
+use relaunch::{restart_swept, INSTALLED};
+#[cfg(test)]
+use tauri_plugin_updater::UpdaterExt;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -96,14 +113,6 @@ pub fn update_channel<R: Runtime>(app: AppHandle<R>, channel: Channel) -> Value 
 /// the page it is downloaded from.
 const INSTALLS_IN_APP: bool = cfg!(target_os = "macos");
 
-/// What a check found: the release, the signed update to download where the
-/// app installs it, and the page to download it from where it does not.
-struct Found {
-    pending: Option<Update>,
-    available: Option<ReleaseInfo>,
-    page: Option<String>,
-}
-
 #[tauri::command]
 pub async fn update_check<R: Runtime>(app: AppHandle<R>) -> Value {
     crate::panics::settled("update_check", async move {
@@ -127,92 +136,6 @@ pub async fn update_check<R: Runtime>(app: AppHandle<R>) -> Value {
     .await
 }
 
-/// The signed update the feed offers this platform, checked, for the app to
-/// download and install.
-#[allow(clippy::disallowed_methods)] // Reads the packaged smoke's CONSENSFLOW_SELFTEST_UPDATER_* variables: older than cf_base::env::Env.
-async fn check_in_app<R: Runtime>(
-    app: &AppHandle<R>,
-    snapshot: &UpdateSnapshot,
-) -> Result<Found, String> {
-    let fixture = test_update_url(
-        crate::selftest::enabled(),
-        std::env::var("CONSENSFLOW_SELFTEST_UPDATER_URL")
-            .ok()
-            .as_deref(),
-    )?;
-    let mut builder = app
-        .updater_builder()
-        .target(tauri_plugin_updater::target().ok_or("This platform has no update target")?)
-        .endpoints(vec![fixture
-            .clone()
-            .unwrap_or_else(|| snapshot.channel.endpoint())])
-        .map_err(|e| e.to_string())?
-        .timeout(std::time::Duration::from_secs(20))
-        .configure_client(|client| client.https_only(true));
-    if fixture.is_some() {
-        // Only the existing opt-in packaged self-test may replace the
-        // distribution boundary. TLS and archive signatures still verify.
-        let pem = std::fs::read(
-            std::env::var("CONSENSFLOW_SELFTEST_UPDATER_CERT").map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-        let certificate = reqwest::Certificate::from_pem(&pem).map_err(|e| e.to_string())?;
-        let public = std::fs::read_to_string(
-            std::env::var("CONSENSFLOW_SELFTEST_UPDATER_KEY").map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-        builder = builder
-            .pubkey(public.trim())
-            .no_proxy()
-            .configure_client(move |client| {
-                client
-                    .https_only(true)
-                    .add_root_certificate(certificate.clone())
-            });
-    }
-    let updater = builder.build().map_err(|e| e.to_string())?;
-    let mut pending = updater
-        .check()
-        .await
-        .map_err(|e| describe_check_error(snapshot.channel, e))?;
-    let available = pending
-        .as_ref()
-        .map(|update| {
-            validate_release(
-                &snapshot.current_version,
-                snapshot.channel,
-                &update.raw_json,
-                &update.target,
-            )
-        })
-        .transpose()?;
-    if let (Some(endpoint), Some(update)) = (fixture, pending.as_mut()) {
-        update.download_url = endpoint.join("archive").map_err(|e| e.to_string())?;
-    }
-    Ok(Found {
-        pending,
-        available,
-        page: None,
-    })
-}
-
-/// The release the feed names, checked as any release is, and the page it
-/// is downloaded from: the feed holds no archive this platform installs.
-async fn check_by_page(snapshot: &UpdateSnapshot) -> Result<Found, String> {
-    let document =
-        crate::update_page::read_feed(snapshot.channel.endpoint(), snapshot.channel).await?;
-    let available =
-        crate::update_page::newer_release(&snapshot.current_version, snapshot.channel, &document)?;
-    let page = available
-        .as_ref()
-        .map(|release| crate::update_page::page_of(&release.version));
-    Ok(Found {
-        pending: None,
-        available,
-        page,
-    })
-}
-
 /// Opens the page of the release a check found, where the app does not
 /// install it itself.
 #[tauri::command]
@@ -227,46 +150,6 @@ pub fn update_open_page<R: Runtime>(app: AppHandle<R>) -> Value {
         Ok(()) => publish(&app),
         Err(error) => command_error(&app, format!("The download page could not open: {error}")),
     }
-}
-
-fn describe_check_error(channel: Channel, error: tauri_plugin_updater::Error) -> String {
-    if matches!(error, tauri_plugin_updater::Error::ReleaseNotFound) {
-        feed_unavailable(channel)
-    } else {
-        error.to_string()
-    }
-}
-
-/// What a check says of a channel's feed that is not there.
-pub(crate) fn feed_unavailable(channel: Channel) -> String {
-    let label = if channel == Channel::Alpha {
-        "Alpha"
-    } else {
-        "Stable"
-    };
-    format!("The {label} update feed is unavailable. Please try again later.")
-}
-
-fn test_update_url(enabled: bool, address: Option<&str>) -> Result<Option<url::Url>, String> {
-    if !enabled {
-        return Ok(None);
-    }
-    let Some(address) = address else {
-        return Ok(None);
-    };
-    let url: url::Url = address
-        .parse()
-        .map_err(|e: url::ParseError| e.to_string())?;
-    if url.scheme() != "https"
-        || !matches!(url.host_str(), Some("localhost" | "127.0.0.1"))
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err("The packaged updater fixture must use loopback HTTPS".into());
-    }
-    Ok(Some(url))
 }
 
 #[tauri::command]
@@ -344,101 +227,6 @@ async fn install<R: Runtime>(app: AppHandle<R>) -> Value {
             }
         }
     }
-}
-
-/// Starts the app an update installed, by `restart` (Tauri's, which never returns), once every
-/// descriptor of this app's is close-on-exec, which a descriptor left inheritable would otherwise
-/// be the new app's for as long as it runs. Called off the main thread, as the install is,
-/// Tauri's restart only asks the event loop to end, and the loop's end starts the new app
-/// ([`relaunch_installed`]) after the app's last code, which marks them all again (`at_exit`,
-/// lib.rs). This one is for the ways Tauri starts the new app itself, without that: a restart
-/// called on the main thread, one whose request to end the loop failed, and one the relaunch
-/// could not start. The app is ending, and its own programs are started holding only their
-/// streams, so nothing here needs a descriptor passed on.
-#[cfg(target_os = "macos")]
-fn restart_swept<T>(restart: impl FnOnce() -> T) -> T {
-    if let Err(failed) = cf_process::close_all_on_exec() {
-        eprintln!(
-            "ConsensFlow restarts holding descriptors it could not mark close-on-exec: {failed}"
-        );
-    }
-    restart()
-}
-
-/// The app an update installed at this one's path, once the install has swapped it in: the
-/// event loop's end starts it ([`relaunch_installed`]).
-#[cfg(target_os = "macos")]
-static INSTALLED: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-
-/// Starts the app an update installed, as this one was started, and ends this process. Called
-/// at the event loop's end (lib.rs), after the app's last code and before Tauri's restart, which
-/// since Tauri 2.12.2 starts the new app through LaunchServices (`open -n`): launchd's child, in
-/// a session of its own, its input and output `/dev/null`. A self-test's app reads the smoke's
-/// FIFO and writes its reports on its output, and the smoke ends the app's process group: the
-/// app an update restarted so would hear nothing, say nothing, and outlive the smoke (T-930).
-/// This starts the bundle's executable itself, as Tauri 2.11 did: this app's environment,
-/// streams, process group and arguments, holding nothing of this app's but its streams. Returns
-/// where no update was installed, or where the new app could not be started: Tauri's restart
-/// then starts it as it does.
-#[cfg(target_os = "macos")]
-pub(crate) fn relaunch_installed<R: Runtime>(app: &AppHandle<R>) {
-    relaunch_once(
-        INSTALLED.get().map(PathBuf::as_path),
-        || app.cleanup_before_exit(),
-        |installed| relaunch(installed, std::env::args_os().skip(1)).map(drop),
-        || std::process::exit(0),
-    );
-}
-
-/// The installed app is started once, by `start`, or not at all here (T-941): Tauri's cleanup
-/// runs first, a panic of it stopped and said, and a start that succeeds is followed by `exit`
-/// and nothing else, so Tauri's restart, which runs where this returns, never starts it a second
-/// time. Where nothing was installed nothing runs; where the start fails it is said, and this
-/// returns.
-#[cfg(target_os = "macos")]
-fn relaunch_once(
-    installed: Option<&Path>,
-    cleanup: impl FnOnce(),
-    start: impl FnOnce(&Path) -> Result<(), String>,
-    exit: impl FnOnce(),
-) {
-    let Some(installed) = installed else {
-        return;
-    };
-    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(cleanup)).is_err() {
-        eprintln!("ConsensFlow's cleanup before starting the installed update panicked");
-    }
-    match start(installed) {
-        Ok(()) => exit(),
-        Err(error) => eprintln!(
-            "ConsensFlow could not start the installed update itself ({error}); Tauri's restart starts it"
-        ),
-    }
-}
-
-/// Starts the executable of the bundle at `app` (its Info.plist names it) with `args`, this
-/// process's environment and input, and nothing of its but the standard streams.
-#[cfg(target_os = "macos")]
-#[allow(clippy::disallowed_methods)] // The app starts the installed update itself, holding only its streams: older than cf-process's rule.
-fn relaunch(
-    app: &Path,
-    args: impl IntoIterator<Item = std::ffi::OsString>,
-) -> Result<std::process::Child, String> {
-    let tools = crate::update_install::Tools::system();
-    let executable = crate::update_install::plist_value(&tools, app, "CFBundleExecutable")?;
-    let mut parts = Path::new(&executable).components();
-    if !matches!(
-        (parts.next(), parts.next()),
-        (Some(std::path::Component::Normal(_)), None)
-    ) {
-        return Err(format!(
-            "the bundle names no executable of its own: {executable:?}"
-        ));
-    }
-    let mut command = std::process::Command::new(app.join("Contents/MacOS").join(&executable));
-    command.args(args);
-    cf_process::hold_only_the_streams(&mut command);
-    command.spawn().map_err(|e| e.to_string())
 }
 
 fn preferences_directory(home: &Path, configured: Option<PathBuf>) -> PathBuf {
@@ -709,65 +497,6 @@ impl UpdateManager {
         notify(&self.snapshot());
         Ok(())
     }
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct ReleaseInfo {
-    pub(crate) version: String,
-    pub(crate) notes: String,
-    pub(crate) date: Option<String>,
-}
-
-pub fn validate_release(
-    current: &str,
-    channel: Channel,
-    document: &Value,
-    target: &str,
-) -> Result<ReleaseInfo, String> {
-    let release: RemoteRelease =
-        serde_json::from_value(document.clone()).map_err(|e| e.to_string())?;
-    let current = Version::parse(current).map_err(|e| e.to_string())?;
-    if release.version <= current || !channel.accepts(&release.version) {
-        return Err("This release is not newer or does not belong to the selected channel".into());
-    }
-    let version = release.version.to_string();
-    if document["version"].as_str() != Some(&version) {
-        return Err("The release version must be a canonical semantic version".into());
-    }
-    let notes = release.notes.clone().unwrap_or_default();
-    if notes.len() > 64 * 1024 || release.pub_date.is_none() {
-        return Err("The release needs a publication date and bounded release notes".into());
-    }
-    let url = release.download_url(target).map_err(|e| e.to_string())?;
-    let prefix = format!("/ngvoicu/consensflow/releases/download/v{version}/");
-    let filename = url.path().strip_prefix(&prefix).unwrap_or_default();
-    if url.scheme() != "https"
-        || url.host_str() != Some("github.com")
-        || url.port().is_some()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-        || !filename.ends_with(".app.tar.gz")
-        || !filename.contains(&version)
-        || !filename
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-        || release
-            .signature(target)
-            .map_err(|e| e.to_string())?
-            .trim()
-            .is_empty()
-    {
-        return Err(
-            "The update archive must be a signed, versioned ConsensFlow GitHub asset".into(),
-        );
-    }
-    Ok(ReleaseInfo {
-        version,
-        notes,
-        date: document["pub_date"].as_str().map(str::to_owned),
-    })
 }
 
 #[cfg(test)]
