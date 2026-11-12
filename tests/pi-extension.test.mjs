@@ -816,20 +816,32 @@ describe('compaction at a rest', () => {
 
     // A reader that never takes a half-written word for none: the word is written under another
     // name and moved into place, as the settlement evidence is (a rename replaces a file a reader
-    // has open on Windows too: Rust's reads open it sharing delete).
+    // has open on Windows too: Rust's reads open it sharing delete). Node's own open does not share
+    // delete, so on Windows it can be refused (EPERM, EBUSY or EACCES) while the rename replaces the
+    // file: that is the file being replaced, not a torn word, and this reader opens it again, a few
+    // times, and counts it as never read if it never gets in (T-1499: CI run 43112168023).
     it('is never seen half written by a reader that reads it while it is written', async () => {
       const s = await setup(null, { compaction: 100_000, usage: past })
+      const replacing = new Set(['EPERM', 'EBUSY', 'EACCES'])
       try {
         let reading = true
         const seen = []
         const reader = (async () => {
           while (reading) {
-            try {
-              const text = await readFile(wordOf(s), 'utf8')
-              JSON.parse(text)
-              seen.push('whole')
-            } catch (cause) {
-              if (cause?.code !== 'ENOENT') seen.push(`torn: ${cause?.message}`)
+            for (let tries = 1; ; tries += 1) {
+              try {
+                const text = await readFile(wordOf(s), 'utf8')
+                JSON.parse(text)
+                seen.push('whole')
+              } catch (cause) {
+                if (replacing.has(cause?.code) && tries < 20) {
+                  await new Promise((resolve) => setTimeout(resolve, 5))
+                  continue
+                }
+                if (replacing.has(cause?.code)) seen.push(`never read: ${cause?.message}`)
+                else if (cause?.code !== 'ENOENT') seen.push(`torn: ${cause?.message}`)
+              }
+              break
             }
             await new Promise((resolve) => setImmediate(resolve))
           }
@@ -845,6 +857,7 @@ describe('compaction at a rest', () => {
           seen.filter((one) => one !== 'whole'),
           [],
         )
+        assert.ok(seen.includes('whole'), 'the reader never read the word whole')
         assert.equal(s.compactions.length, 40)
       } finally {
         await s.close()
