@@ -110,12 +110,25 @@ pub(super) async fn read(
         (Some(part), Some(parts), &[id]) if part <= parts => Some((id, part, parts)),
         _ => return Err(invalid()),
     };
+    // A role is counted in parts as the caller's `cf` prints it, and said read by a part of
+    // that count: one said read whole is its part 1 of 1, which the ledger refuses where it
+    // prints in more.
+    let cf = (context.cf)(&caller.participant);
+    let reader = caller.participant.id;
     let mut ledger = context.ledger.borrow_mut();
     let received = match part {
-        Some((id, part, parts)) => {
-            ledger.receive_read_part(caller.participant.id, id, part, parts, via)?
+        Some((id, part, parts)) => ledger.receive_read_part(reader, id, part, parts, via, &cf)?,
+        None if via == Read::Inbox => {
+            let roles = ledger.role_notes_to(reader)?;
+            let (roles, rest): (Vec<i64>, Vec<i64>) =
+                named.iter().copied().partition(|id| roles.contains(id));
+            let mut received = 0;
+            for id in roles {
+                received += ledger.receive_read_part(reader, id, 1, 1, via, &cf)?;
+            }
+            received + ledger.receive_read(reader, &rest, via)?
         }
-        None => ledger.receive_read(caller.participant.id, &named, via)?,
+        None => ledger.receive_read(reader, &named, via)?,
     };
     drop(ledger);
     if received > 0 {

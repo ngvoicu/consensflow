@@ -762,8 +762,8 @@ fn printed_in_part(out: &str) -> (&str, &str, &str) {
 /// printing the first, `--part N` the others. Each but the last ends with a line that says
 /// which part it is and the command for the next, and that a table goes on where the part
 /// ends in one; the last says it is the last. Each part printed is said to the board by its
-/// number and how many there are, for the ledger to tell the role once the last was
-/// printed after every part before it. A part there is not is said wrong. In JSON a role is
+/// number and how many there are, for the ledger to tell the role once every part was
+/// printed. A part there is not is said wrong. In JSON a role is
 /// printed whole, as it always was, and said read only within the bound.
 #[test]
 fn a_role_over_the_bound_is_printed_in_parts_each_within_it_and_each_said_to_the_board_by_its_number(

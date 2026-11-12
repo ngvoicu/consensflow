@@ -24,7 +24,8 @@
 //! what `cf` prints around it (the message's line above it, the part's own line below:
 //! [`part_line`]), so that every part rests on the same proof. The engine counts the parts
 //! with the same cut, for the opening it writes to say how many there are, and the ledger
-//! takes the role as read once the last part was printed after every part before it.
+//! takes the role as read once every part was printed, and refuses a read that says
+//! another count.
 
 /// An output of fewer bytes than this is read whole by the window of every
 /// harness a role goes to by a note.

@@ -18,8 +18,11 @@
 # A role `cf` cannot print within that bound it prints in parts, each within it (T-1513, review
 # T-1510): the opening says how many, each part's line gives the next one's command, and each
 # part printed is said to the board by its number and how many there are. The ledger logs each
-# (`message.part_read`) and reads the role once the last was printed after every part before it,
-# as it reads one printed in one piece. The plants at the end take out each of those rules.
+# (`message.part_read`, with the conversation it was printed in) whatever state the note is in,
+# and reads the role once every part was printed in the conversation it goes to: asked when a
+# part is printed and when the paste is confirmed (review T-1516). It counts the parts itself, as
+# the window's `cf` prints them, and refuses a read that says another count; a role said read
+# whole is its part 1 of 1. The plants at the end take out each of those rules.
 #
 # Every name holds `role read`, so `npm run plants:daemon -- "role read"` runs them all.
 
@@ -38,6 +41,9 @@ engine-in-parts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "d
 cf-board-parts = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::tests::a_role_"]
 cf-board-queued = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::tests::a_part_of_a_role_back_in_the_queue"]
 daemon-answers = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::answers::tests::a_role_said_read_by_its_parts"]
+ledger-role-note = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "role_note", "a_role_read_in_parts_across"]
+ledger-part-count = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "role_note", "a_part_read_is_of_its_recipients_own_role"]
+daemon-count = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::answers::tests::a_read_that_says_a_count"]
 
 # The engine: what a role told in part opens with, and what is said of it at the next Resume.
 
@@ -136,8 +142,12 @@ runs = ["ledger-read"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = '''            if via == Read::Inbox && role && message.state == "delivered" {'''
-replace = '''            if false {'''
+find = '''
+                part_printed(store, &message, 1, 1)?;
+                if told_if_read(store, &message)? {'''
+replace = '''
+                part_printed(store, &message, 1, 1)?;
+                if false {'''
 
 [[plant]]
 name = "role read: a role read in a task's thread is told"
@@ -146,8 +156,8 @@ runs = ["ledger-read"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = '''            if via == Read::Inbox && role && message.state == "delivered" {'''
-replace = '''            if role && message.state == "delivered" {'''
+find = '''            if via == Read::Inbox && role {'''
+replace = '''            if role {'''
 
 [[plant]]
 name = "role read: a role read before its delivery was confirmed is told"
@@ -156,8 +166,10 @@ runs = ["ledger-read"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = '''            if via == Read::Inbox && role && message.state == "delivered" {'''
-replace = '''            if via == Read::Inbox && role && message.state != "queued" {'''
+find = '''    if message.state != "delivered"
+        || !says_a_role(store, message.id)?'''
+replace = '''    if message.state == "queued"
+        || !says_a_role(store, message.id)?'''
 
 [[plant]]
 name = "role read: an older role read is recorded over a later one"
@@ -328,14 +340,18 @@ find = "\"UPDATE message SET receipt = ? WHERE id = ? AND state = 'delivering'\"
 replace = "\"UPDATE message SET receipt = ? WHERE id = ? AND state = 'delivering' AND receipt IS NULL\","
 
 [[plant]]
-name = "role read: a read is kept with no conversation"
+name = "role read: a part printed is logged with no conversation"
 meant = "a_role_read_in_the_inbox_while_its_paste_is_on_its_way_is_kept_and_told_once_the_paste_is_confirmed"
 runs = ["ledger-read"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = "    let conversation = current_conversation(store, message.recipient_id)?.map(|found| found.id);"
-replace = "    let conversation = None;"
+find = """
+    let conversation = current_conversation(store, message.recipient_id)?.map(|found| found.id);
+    store.log("""
+replace = """
+    let conversation: Option<i64> = None;
+    store.log("""
 
 # The ledger: what the confirmation of the paste does with it.
 
@@ -346,11 +362,9 @@ runs = ["ledger-read"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''
-        if let Some(read) = early {
-            told_when_confirmed(store, message_id, read)?;
-        }
-'''
+find = """
+        told_if_read(store, &known_message(store, message_id)?)?;
+"""
 replace = ""
 
 [[plant]]
@@ -360,11 +374,9 @@ runs = ["engine-told"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''
-        if let Some(read) = early {
-            told_when_confirmed(store, message_id, read)?;
-        }
-'''
+find = """
+        told_if_read(store, &known_message(store, message_id)?)?;
+"""
 replace = ""
 
 [[plant]]
@@ -388,8 +400,8 @@ runs = ["ledger-read"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = "    if now == kept.conversation {"
-replace = "    if true || now == kept.conversation {"
+find = "            AND json_extract(data, '$.of') = ? AND json_extract(data, '$.conversation') IS ?\","
+replace = "            AND json_extract(data, '$.of') = ? AND (json_extract(data, '$.conversation') IS ? OR 1)\","
 
 [[plant]]
 name = "role read: a message that says no role is read when its paste is confirmed after a read on its way"
@@ -398,8 +410,8 @@ runs = ["ledger-read"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = "    if kept.via != Read::Inbox || !says_a_role(store, message_id)? {"
-replace = "    if kept.via != Read::Inbox {"
+find = '''            if via == Read::Inbox && role {'''
+replace = '''            if via == Read::Inbox {'''
 
 # The ledger: what a paste given back does with it.
 
@@ -555,37 +567,32 @@ runs = ["engine-cleared"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''
-        if let Some(read) = early {
-            told_when_confirmed(store, message_id, read)?;
-        }
-'''
+find = """
+        told_if_read(store, &known_message(store, message_id)?)?;
+"""
 replace = ""
 
 # T-1513: a role read in parts.
 
 [[plant]]
 name = "role read: the last part tells the role though a part before it was never read"
-meant = "parts_read_out_of_order_or_twice_tell_the_role_only_when_the_last_comes_after_all_the_others"
+meant = "parts_read_out_of_order_or_twice_tell_the_role_once_every_part_was_printed"
 runs = ["engine-in-parts"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = "        if before + 1 < of as i64 {"
-replace = "        if false {"
+find = "    Ok(printed == of)"
+replace = "    Ok(printed >= 1)"
 
 [[plant]]
-name = "role read: a part before the last tells the role once the parts before it were read"
-meant = "parts_read_while_the_paste_is_on_its_way_tell_the_role_once_it_is_confirmed_and_only_all_of_them"
+name = "role read: a part printed twice counts as two parts"
+meant = "parts_read_out_of_order_or_twice_tell_the_role_once_every_part_was_printed"
 runs = ["engine-in-parts"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = """
-        if part < of {
-            return Ok(0);
-        }"""
-replace = ""
+find = "        \"SELECT COUNT(DISTINCT json_extract(data, '$.part')) FROM event"
+replace = "        \"SELECT COUNT(*) FROM event"
 
 [[plant]]
 name = "role read: cf says a part it printed of a role as the whole role read"
@@ -599,13 +606,13 @@ replace = "        let said = match None::<(usize, usize)> {"
 
 [[plant]]
 name = "role read: the board reads a part said of a role as the whole role read"
-meant = "a_role_said_read_by_its_parts_is_read_once_the_last_follows_every_other_and_a_bad_part_is_refused"
+meant = "a_role_said_read_by_its_parts_is_read_once_every_part_is_and_a_bad_part_is_refused"
 runs = ["daemon-answers"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/answers.rs"
-find = "            ledger.receive_read_part(caller.participant.id, id, part, parts, via)?"
-replace = "            ledger.receive_read(caller.participant.id, &[id], via)?"
+find = "        Some((id, part, parts)) => ledger.receive_read_part(reader, id, part, parts, via, &cf)?,"
+replace = "        Some((id, _, _)) => ledger.receive_read(reader, &[id], via)?,"
 
 [[plant]]
 name = "role read: the opening of a role read in parts says one part fewer than cf prints"
@@ -626,3 +633,52 @@ runs = ["cf-board-queued"]
 file = "crates/cf/src/board/mod.rs"
 find = "            None => said.having_written(\"inbox\", waiting).in_part(in_parts),"
 replace = "            None => said.having_written(\"inbox\", waiting),"
+
+# T-1513, review T-1516: a part printed is logged whatever state its note is in, and the ledger
+# counts the parts itself by the window's `cf`.
+
+[[plant]]
+name = "role read: a part printed while its note is back in the queue is not logged"
+meant = "a_role_read_in_parts_across_a_retried_paste_is_read_whatever_state_each_part_was_printed_in"
+runs = ["ledger-role-note"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = """
+        part_printed(store, &message, part, of)?;
+        Ok(usize::from(told_if_read(store, &message)?))"""
+replace = """
+        if message.state != "queued" {
+            part_printed(store, &message, part, of)?;
+        }
+        Ok(usize::from(told_if_read(store, &message)?))"""
+
+[[plant]]
+name = "role read: the ledger takes a read's word for how many parts a role is printed in"
+meant = "a_part_read_is_of_its_recipients_own_role_of_a_part_there_is_and_of_the_parts_the_ledger_counts"
+runs = ["ledger-part-count", "daemon-count"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "        if of != counted {"
+replace = "        if false {"
+
+[[plant]]
+name = "role read: the board counts a role's parts by a bare cf and not the window's"
+meant = "a_read_that_says_a_count_of_parts_the_window_does_not_print_is_refused_and_reads_nothing"
+runs = ["daemon-count"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/answers.rs"
+find = "    let cf = (context.cf)(&caller.participant);"
+replace = "    let cf = cf_proto::cf_word::CfWord::bare();"
+
+[[plant]]
+name = "role read: the board reads a role said read whole without counting its parts"
+meant = "a_read_that_says_a_count_of_parts_the_window_does_not_print_is_refused_and_reads_nothing"
+runs = ["daemon-count"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/answers.rs"
+find = "        None if via == Read::Inbox => {"
+replace = "        None if false => {"

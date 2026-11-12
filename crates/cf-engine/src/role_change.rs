@@ -119,11 +119,11 @@
 //! table goes on past a part, its line says so): the first by the command the paste
 //! gives, each next by the command the part before ends with (`--part N`), and the
 //! opening says in how many ([`Telling::in_parts`]: two to a staff of 143 rows with
-//! specs on and the most rules, three at 300). Each part printed is said to the board,
-//! and the last, printed after every part before it, is the role read
-//! (`receive_read_part`, which logs each part as `message.part_read`): as one printed in
-//! one piece, it is told then, or kept while the paste is on its way (T-1513, review
-//! T-1510: the human chose parts over a smaller text, 2026-11-12).
+//! specs on and the most rules, three at 300). Each part printed is said to the board, and
+//! logged as `message.part_read` (`receive_read_part`) whatever state the note is in: the
+//! role is read once every part was printed in the conversation it goes to, in any order,
+//! and told then or once its paste is confirmed, whichever is last (T-1513, review T-1510:
+//! the human chose parts over a smaller text, 2026-11-12; review T-1516).
 //!
 //! The project's rules for its staff (`roles::with_staff_rules`) are part of
 //! every text that says a role, and the ledger bounds them for it (at most 8,000

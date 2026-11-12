@@ -1,7 +1,6 @@
 //! T-1513 (review T-1510): a role whose note `cf inbox read` cannot print within the bound
 //! a role is read whole at (`cf_base::role_read`, 29,000 bytes and 500 lines) is printed in
-//! parts, each within it, and is told once the last part was printed after every part
-//! before it. Where it starts: specs on, the most rules for the staff and a staff of 8 of
+//! parts, each within it, and is told once every part was printed. Where it starts: specs on, the most rules for the staff and a staff of 8 of
 //! two roles a row (6 since T-1513 put the ban on a task for a member by name back). The
 //! review's case is the chief's real text, which the fake role texts carry here as words a
 //! release added to them. The window's `cf` is read the way `cf` reads it: each part
@@ -91,7 +90,7 @@ fn read_like_cf(context: &Context, project: i64, id: i64, order: &[usize]) -> us
         received += if of == 1 {
             ledger.receive_read(chief, &[id], Read::Inbox)
         } else {
-            ledger.receive_read_part(chief, id, part, of, Read::Inbox)
+            ledger.receive_read_part(chief, id, part, of, Read::Inbox, &cf)
         }
         .unwrap();
     }
@@ -240,8 +239,11 @@ fn parts_read_while_the_paste_is_on_its_way_tell_the_role_once_it_is_confirmed_a
     }
 }
 
+/// T-1513 (review T-1516): the role is read once every part of it was printed, in any
+/// order: a part printed twice is no more read, and the first part printed after the last
+/// reads it as the last after the first would.
 #[test]
-fn parts_read_out_of_order_or_twice_tell_the_role_only_when_the_last_comes_after_all_the_others() {
+fn parts_read_out_of_order_or_twice_tell_the_role_once_every_part_was_printed() {
     let context = codex();
     let project = project_of(&context, "codex");
     let id = the_reviews_role_told(&context, project.id, 20, true);
@@ -249,19 +251,13 @@ fn parts_read_out_of_order_or_twice_tell_the_role_only_when_the_last_comes_after
     assert_eq!(
         read_like_cf(&context, project.id, id, &[2, 2]),
         0,
-        "the last first"
+        "the last first, twice"
     );
     assert_eq!(context.message(id).state, "delivered");
     assert_eq!(
-        read_like_cf(&context, project.id, id, &[1, 1]),
-        0,
-        "then the first"
-    );
-    assert_eq!(context.message(id).state, "delivered");
-    assert_eq!(
-        read_like_cf(&context, project.id, id, &[2]),
+        read_like_cf(&context, project.id, id, &[1]),
         1,
-        "the last again"
+        "then the first"
     );
     assert_eq!(context.message(id).state, "read");
     assert_eq!(
