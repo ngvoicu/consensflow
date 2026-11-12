@@ -469,8 +469,8 @@ pub(crate) fn settle_claim(
 /// claimed one included (its claim is given up), and that the way they were
 /// served receives ([`Read::receives`]), are `read`, each with its receipt,
 /// and their tasks reconciled, once each. A note that says `recipient` a role,
-/// printed in the inbox, is its part 1 of 1 printed, whatever its state, and told
-/// as [`told_if_read`] says. One whose paste is still on its way
+/// printed in the inbox, is its part 1 of 1 printed in the window whose `cf` is `cf`
+/// ([`receive_read_part`]: refused where that window prints it in more). One whose paste is still on its way
 /// (`delivering`) and that the way it was served keeps ([`Read::keeps`]) keeps the
 /// read for when its delivery ends ([`keep_read`]); it is not received yet, and not
 /// counted. The rest are left as they are. How many were received.
@@ -479,6 +479,7 @@ pub(crate) fn receive_read(
     recipient: i64,
     ids: &[i64],
     via: Read,
+    cf: &CfWord,
 ) -> Result<usize, LedgerError> {
     store.write(|store| {
         let mut received = 0;
@@ -492,10 +493,7 @@ pub(crate) fn receive_read(
             };
             let role = says_a_role(store, message.id)?;
             if via == Read::Inbox && role {
-                part_printed(store, &message, 1, 1)?;
-                if told_if_read(store, &message)? {
-                    received += 1;
-                }
+                received += read_part(store, &message, 1, 1, cf)?;
                 continue;
             }
             if message.state == "delivering" {
@@ -555,20 +553,35 @@ pub(crate) fn receive_read_part(
         if !says_a_role(store, id)? {
             return Ok(0);
         }
-        let counted = role_parts(&cf.in_text(&message.body)).len();
-        if of != counted {
-            let parts = if counted == 1 { "part" } else { "parts" };
-            return Err(LedgerError::refused_with(
-                "invalid-read",
-                format!(
-                    "m-{id} is printed in {counted} {parts} in this window, not {of}: a read says the part `cf inbox read` printed and how many it prints the note in"
-                ),
-                400,
-            ));
-        }
-        part_printed(store, &message, part, of)?;
-        Ok(usize::from(told_if_read(store, &message)?))
+        read_part(store, &message, part, of, cf)
     })
+}
+
+/// Part `part` of `of` of `message`, a role to its recipient, printed by `cf inbox read` in
+/// the window whose `cf` is `cf`: refused where that is not the count of parts `cf` prints
+/// it in there, else logged and the role told if it was read ([`told_if_read`]). 1 where it
+/// was, else 0.
+fn read_part(
+    store: &mut Store,
+    message: &MessageView,
+    part: usize,
+    of: usize,
+    cf: &CfWord,
+) -> Result<usize, LedgerError> {
+    let id = message.id;
+    let counted = role_parts(&cf.in_text(&message.body)).len();
+    if of != counted {
+        let parts = if counted == 1 { "part" } else { "parts" };
+        return Err(LedgerError::refused_with(
+            "invalid-read",
+            format!(
+                "m-{id} is printed in {counted} {parts} in this window, not {of}: a read says the part `cf inbox read` printed and how many it prints the note in"
+            ),
+            400,
+        ));
+    }
+    part_printed(store, message, part, of)?;
+    Ok(usize::from(told_if_read(store, message)?))
 }
 
 /// Part `part` of `of` of `message`, a role, was printed to its recipient by `cf inbox

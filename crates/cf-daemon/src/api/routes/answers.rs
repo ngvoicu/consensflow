@@ -118,17 +118,7 @@ pub(super) async fn read(
     let mut ledger = context.ledger.borrow_mut();
     let received = match part {
         Some((id, part, parts)) => ledger.receive_read_part(reader, id, part, parts, via, &cf)?,
-        None if via == Read::Inbox => {
-            let roles = ledger.role_notes_to(reader)?;
-            let (roles, rest): (Vec<i64>, Vec<i64>) =
-                named.iter().copied().partition(|id| roles.contains(id));
-            let mut received = 0;
-            for id in roles {
-                received += ledger.receive_read_part(reader, id, 1, 1, via, &cf)?;
-            }
-            received + ledger.receive_read(reader, &rest, via)?
-        }
-        None => ledger.receive_read(reader, &named, via)?,
+        None => ledger.receive_read(reader, &named, via, &cf)?,
     };
     drop(ledger);
     if received > 0 {

@@ -231,7 +231,12 @@ fn an_answer_the_asking_window_read_by_cf_while_still_at_work_makes_the_task_wor
     context
         .ledger
         .borrow_mut()
-        .receive_read(zeus, &[answer.id], Read::Inbox)
+        .receive_read(
+            zeus,
+            &[answer.id],
+            Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
         .unwrap();
     assert_eq!(
         context.task(project.id, 1).task.state,

@@ -280,15 +280,16 @@ impl Ledger {
     /// Messages of `recipient` among `ids` that `cf` served whole are received,
     /// as the way they were served receives them (`Read`): how many were. One whose
     /// paste is still on its way keeps the read until its delivery ends, and is not
-    /// counted. A role printed in the inbox is its part 1 of 1 printed
-    /// ([`Ledger::receive_read_part`], its count not checked).
+    /// counted. A role printed in the inbox is its part 1 of 1 printed in the window whose
+    /// `cf` is `cf` ([`Ledger::receive_read_part`]: refused where it prints in more).
     pub fn receive_read(
         &mut self,
         recipient: i64,
         ids: &[i64],
         via: Read,
+        cf: &CfWord,
     ) -> Result<usize, LedgerError> {
-        messages::receive_read(&mut self.store, recipient, ids, via)
+        messages::receive_read(&mut self.store, recipient, ids, via, cf)
     }
 
     /// `cf inbox read` printed whole part `part` (the first is 1) of `of` of the note `id`,

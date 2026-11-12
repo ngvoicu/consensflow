@@ -342,7 +342,12 @@ async fn an_answer_read_already_is_ok_and_writes_nothing_more_by_whichever_way_i
         .context
         .ledger
         .borrow_mut()
-        .receive_read(zeus, &[other.id], cf_ledger::Read::Inbox)
+        .receive_read(
+            zeus,
+            &[other.id],
+            cf_ledger::Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
         .unwrap();
     let (status, _) = receipt_from(&scene, &scene.zeus, &other.id.to_string(), HANDED_OVER).await;
     assert_eq!(status, 200);

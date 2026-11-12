@@ -88,7 +88,7 @@ fn read_like_cf(context: &Context, project: i64, id: i64, order: &[usize]) -> us
         );
         let mut ledger = context.ledger.borrow_mut();
         received += if of == 1 {
-            ledger.receive_read(chief, &[id], Read::Inbox)
+            ledger.receive_read(chief, &[id], Read::Inbox, &cf)
         } else {
             ledger.receive_read_part(chief, id, part, of, Read::Inbox, &cf)
         }
