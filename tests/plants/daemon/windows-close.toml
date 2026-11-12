@@ -533,7 +533,7 @@ meant = "a_bridge_that_does_not_keep_its_output_ends_it_with_its_input"
 runs = ["bridge-lib-kept-output"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/shutdown.rs"
 find = "self.close_transport(BridgeError::Eof, false, self.inner.keeps_output);"
 replace = "self.close_transport(BridgeError::Eof, false, true);"
 
