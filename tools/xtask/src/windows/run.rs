@@ -21,7 +21,7 @@
 use super::interrupt::Interrupt;
 use super::machine::Machine;
 use super::options::Options;
-use super::queue::{self, Queues, Waited, Who};
+use super::queue::{self, Queues, Ticket, Waited, Who};
 use super::reach;
 use super::script::{
     command_line, encode_script, remote_script, run_id, run_script, stop_script, upload_name,
@@ -141,7 +141,7 @@ pub fn run(
         &mut |line| writeln!(console.err, "windows: {line}"),
     )?;
     // The ticket is the run's place, kept until the run is over.
-    let _turn = match waited {
+    let turn = match waited {
         Waited::Stopped => return Ok(Outcome::Stopped),
         Waited::Refused(why) => {
             writeln!(console.out, "{why}").map_err(Error::Output)?;
@@ -154,11 +154,35 @@ pub fn run(
             turn
         }
     };
-    let identity = match send_tree(context, machine, &plan, console, interrupt)? {
+    let ended = send_and_stream(context, machine, &plan, console, interrupt);
+    // A ticket that could not be kept alive does not end a run that is under way, nor take its
+    // result: the runs behind may have gone past it, and the lock of the machine decides.
+    let unkept = turn.as_ref().and_then(Ticket::beat_failure);
+    if let Some(cause) = unkept {
+        let said = writeln!(
+            console.err,
+            "windows: the run's place in the queue could not be kept alive ({cause}); the run goes on"
+        );
+        if let Err(cause) = said {
+            return ended.and(Err(Error::Output(cause)));
+        }
+    }
+    ended
+}
+
+/// Sends the tree and follows the run there to its end.
+fn send_and_stream(
+    context: &Context,
+    machine: &Machine,
+    plan: &Plan,
+    console: &mut Console,
+    interrupt: &Interrupt,
+) -> Result<Outcome, Error> {
+    let identity = match send_tree(context, machine, plan, console, interrupt)? {
         Sent::Stopped => return Ok(Outcome::Stopped),
         Sent::Identity(identity) => identity,
     };
-    stream_run(context, machine, &plan, console, interrupt, &identity)
+    stream_run(context, machine, plan, console, interrupt, &identity)
 }
 
 /// How sending the tree to the machine ended.

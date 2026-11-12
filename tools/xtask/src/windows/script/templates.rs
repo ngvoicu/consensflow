@@ -2,7 +2,7 @@
 //! builders fill: text with a `«name»` mark where each part goes.
 
 /// The bootstrap, with a mark where each part of it goes. It begins and ends with a line
-/// feed, as the JavaScript's template did. `Exit-Run` is the one way out: the line that
+/// feed. `Exit-Run` is the one way out: the line that
 /// says how the run went, then the exit (the `finally` that takes the run's record away
 /// writes nothing, so the line is the last).
 ///

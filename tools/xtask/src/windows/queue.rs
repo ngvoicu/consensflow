@@ -168,12 +168,6 @@ impl Queues {
         Ok(listed.iter().filter(|ticket| ticket.alive(now_ms)).count())
     }
 
-    /// [`Queues::queued`] for choosing a machine, where a queue that cannot be read counts as
-    /// empty: a run sent there waits in [`wait`], which does not go on without reading it.
-    pub fn depth(&self, machine: &str, now_ms: i64) -> usize {
-        self.queued(machine, now_ms).unwrap_or(0)
-    }
-
     /// Takes a ticket for `machine` for the run `who`, which came `now_ms`.
     pub fn join(&self, machine: &str, who: &Who, now_ms: i64) -> io::Result<Ticket> {
         let folder = self.folder(machine);
@@ -324,6 +318,14 @@ pub struct Ticket {
 }
 
 impl Ticket {
+    /// What the last beat could not do, if it failed; told once.
+    pub fn beat_failure(&self) -> Option<io::Error> {
+        self.failed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+    }
+
     /// The live runs that came before this one, oldest first. A ticket not touched for
     /// [`DEAD_AFTER_MS`] is a run that was killed, and is taken away; this one's own, if it was
     /// taken so, is made again. A ticket that cannot be kept alive, made again or listed with the
@@ -334,12 +336,7 @@ impl Ticket {
             path: self.path.clone(),
             cause,
         };
-        if let Some(cause) = self
-            .failed
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .take()
-        {
+        if let Some(cause) = self.beat_failure() {
             return Err(kept("keep alive the queue ticket", cause));
         }
         touch_if_gone(&self.path, &self.text, now_ms)

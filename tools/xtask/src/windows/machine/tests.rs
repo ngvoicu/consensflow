@@ -606,6 +606,40 @@ esac
     }
 
     #[test]
+    fn the_default_is_zeewin_while_zeewin2s_queue_cannot_be_read_and_says_why() {
+        let queues = tempfile::tempdir().unwrap();
+        let mut laptop = Laptop::new("free", "free 614");
+        laptop.context.env = Env::from_vars(
+            laptop
+                .context
+                .env
+                .iter()
+                .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                .chain([("CF_WINDOWS_QUEUES".into(), queues.path().into())]),
+        );
+        let who = Who {
+            tree: "a".into(),
+            command: "cargo test".into(),
+        };
+        let kept = Queues::of(&laptop.context.env)
+            .unwrap()
+            .join("zeewin2", &who, SystemClock.now_ms())
+            .unwrap();
+        let folder = queues.path().join("zeewin2");
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o000)).unwrap();
+        let (chosen, said) = laptop.choose();
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o755)).unwrap();
+        drop(kept);
+        assert_eq!(chosen, "zeewin", "{said}");
+        assert!(
+            said.starts_with(
+                "windows: on zeewin, as zeewin2 is not free: could not read the queue in "
+            ),
+            "{said}"
+        );
+    }
+
+    #[test]
     fn the_default_is_zeewin2_while_it_is_free_and_says_so() {
         let laptop = Laptop::new("free", "free 614");
         assert_eq!(

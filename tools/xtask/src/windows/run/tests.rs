@@ -1654,3 +1654,57 @@ fn the_words_ssh_says_of_a_silent_peer_are_no_silence_where_the_command_said_how
     let (ended, ..) = run_it(&rig, &Interrupt::default());
     assert_eq!(ended.unwrap(), Outcome::Exited(3));
 }
+
+/// The run's ticket is held while the command goes on, and its beats go on with it. One that
+/// cannot be touched does not end a run that is under way, nor take its result: it is said, once,
+/// with its cause, and the run goes on to its own end.
+#[test]
+fn a_ticket_that_cannot_be_kept_alive_while_the_run_goes_on_is_said_and_the_run_is_not_ended() {
+    let queues = tempfile::tempdir().unwrap();
+    let mut rig = Rig::new();
+    rig.waits_in(queues.path());
+    rig.program("scp", SENDS);
+    // The run goes on for longer than a beat (five seconds).
+    rig.program("ssh", &format!("/bin/sleep 6; {}", machine(0)));
+    let folder = queues.path().join("zeewin");
+    let damage = std::thread::spawn(move || {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while std::time::Instant::now() < until {
+            if let Some(Ok(ticket)) = fs::read_dir(&folder).ok().and_then(|mut dir| dir.next()) {
+                // Past the ticket's making, before the first beat: it becomes a folder.
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                let path = ticket.path();
+                fs::remove_file(&path).unwrap();
+                fs::create_dir(&path).unwrap();
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    });
+    let mut options = rig.options();
+    options.wait = 60;
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let ended = run(
+        &rig.context,
+        &Machine::at("zeewin"),
+        &options,
+        &mut Console {
+            out: &mut out,
+            err: &mut err,
+        },
+        &Interrupt::default(),
+    );
+    damage.join().unwrap();
+    let err = String::from_utf8(err).unwrap();
+    assert_eq!(ended.unwrap(), Outcome::Exited(0), "{err}");
+    assert_eq!(
+        err.matches("could not be kept alive").count(),
+        1,
+        "said once: {err}"
+    );
+    assert!(
+        err.contains("windows: the run's place in the queue could not be kept alive"),
+        "{err}"
+    );
+    assert!(String::from_utf8(out).unwrap().ends_with("== exit 0\n"));
+}

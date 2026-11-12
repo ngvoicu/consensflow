@@ -45,9 +45,9 @@ fn runs_are_ahead_of_each_other_in_the_order_they_came() {
     // Another machine's queue is its own.
     let other = queues.join("zeewin", &who("d"), DAY + 1).unwrap();
     assert_eq!(other.ahead(now).unwrap(), []);
-    assert_eq!(queues.depth("zeewin2", now), 3);
-    assert_eq!(queues.depth("zeewin", now), 1);
-    assert_eq!(queues.depth("nowhere", now), 0);
+    assert_eq!(queues.queued("zeewin2", now).unwrap(), 3);
+    assert_eq!(queues.queued("zeewin", now).unwrap(), 1);
+    assert_eq!(queues.queued("nowhere", now).unwrap(), 0);
 }
 
 #[test]
@@ -72,9 +72,9 @@ fn a_ticket_nobody_touches_is_a_run_that_was_killed_and_holds_no_one_back() {
     // The killed run's ticket was taken away by the look that found it dead; the waiting run's
     // own, touched a second later, is within its time.
     assert_eq!(fs::read_dir(dir.path().join("zeewin2")).unwrap().count(), 1);
-    assert_eq!(queues.depth("zeewin2", later), 1);
+    assert_eq!(queues.queued("zeewin2", later).unwrap(), 1);
     drop(killed);
-    assert_eq!(queues.depth("zeewin2", later), 1);
+    assert_eq!(queues.queued("zeewin2", later).unwrap(), 1);
 }
 
 #[test]
@@ -523,16 +523,16 @@ fn a_ticket_touched_in_the_future_is_a_run_killed_before_the_clock_was_set_back(
     let (_dir, queues) = queues();
     let _killed = queues.join("zeewin2", &who("killed"), DAY).unwrap();
     let back = DAY - 300_000;
-    assert_eq!(queues.depth("zeewin2", back), 0);
+    assert_eq!(queues.queued("zeewin2", back).unwrap(), 0);
     let waiting = queues.join("zeewin2", &who("waiting"), back).unwrap();
     assert!(waiting.ahead(back + 1_000).unwrap().is_empty());
-    assert_eq!(queues.depth("zeewin2", back + 1_000), 1);
+    assert_eq!(queues.queued("zeewin2", back + 1_000).unwrap(), 1);
     // Two processes' clocks a few milliseconds apart: not a step.
     let (_other, queues) = self::queues();
     let _beating = queues
         .join("zeewin2", &who("beating"), DAY + 3_000)
         .unwrap();
-    assert_eq!(queues.depth("zeewin2", DAY), 1);
+    assert_eq!(queues.queued("zeewin2", DAY).unwrap(), 1);
 }
 
 /// A machine that cannot be read once the wait is on does not end it: one probe of the laptop
@@ -716,6 +716,48 @@ fn a_queue_that_cannot_be_read_while_waiting_ends_the_wait_with_that_failure() {
 #[test]
 fn a_queue_folder_that_is_not_there_holds_no_one_and_is_no_failure() {
     let (dir, queues) = queues();
-    assert_eq!(queues.depth("zeewin2", DAY), 0);
+    assert_eq!(queues.queued("zeewin2", DAY).unwrap(), 0);
     assert!(!dir.path().join("zeewin2").exists());
+}
+
+/// A Mac that slept: its beats stopped, the run behind took its ticket for a dead run's and
+/// removed it, and the run woken makes it again under the same name. That is no failure: it keeps
+/// its place, ahead of the run that looked while it slept.
+#[test]
+fn a_run_woken_after_its_ticket_was_taken_for_dead_makes_it_again_under_its_name_and_keeps_its_place(
+) {
+    let (dir, queues) = queues();
+    let slept = queues.join("zeewin2", &who("slept"), DAY).unwrap();
+    let behind = queues.join("zeewin2", &who("behind"), DAY + 1_000).unwrap();
+    let name = slept.path.clone();
+    // Past the time a ticket may go untouched: the look of the run behind removes it.
+    let woken = DAY + 40_000;
+    assert!(behind.ahead(woken).unwrap().is_empty());
+    assert!(!name.exists(), "taken for a dead run's");
+    // The run wakes and looks: no failure, its ticket is back under its name, and it goes first.
+    assert!(slept.ahead(woken + 500).unwrap().is_empty());
+    assert!(name.exists());
+    assert_eq!(fs::read_dir(dir.path().join("zeewin2")).unwrap().count(), 2);
+    // The run behind (its own ticket was touched when it looked) is behind it again.
+    let ahead = behind.ahead(woken + 1_000).unwrap();
+    assert_eq!(ahead.len(), 1);
+    assert_eq!(ahead[0].who, who("slept"));
+}
+
+/// The same, by the beat: it wakes, finds the ticket gone, and makes it again without a failure.
+#[test]
+fn a_beat_that_finds_its_ticket_gone_makes_it_again_and_that_is_no_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let queues = Queues::at(dir.path(), Duration::from_millis(20));
+    let ticket = queues
+        .join("zeewin2", &who("a"), SystemClock.now_ms())
+        .unwrap();
+    fs::remove_file(&ticket.path).unwrap();
+    let until = std::time::Instant::now() + Duration::from_secs(10);
+    while !ticket.path.exists() {
+        assert!(std::time::Instant::now() < until, "never made again");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(ticket.beat_failure().is_none());
 }
