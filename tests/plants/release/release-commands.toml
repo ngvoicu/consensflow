@@ -610,7 +610,7 @@ meant = "a_tested_alpha_is_promoted_from_a_branch_at_its_commit_and_main_is_neve
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
     /// The newest run of `workflow`, on `commit` and by `event` where they are named.
 '''
