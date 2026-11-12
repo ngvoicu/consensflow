@@ -6,7 +6,7 @@
 #
 # What stands against it:
 #
-# - the app's end of the bridge (`crates/cf-bridge/src/lib.rs`) never ends the transport for a
+# - the app's end of the bridge (`crates/cf-bridge/src/writer.rs`) never ends the transport for a
 #   full queue: an event waits, a response waits at most `RESPONSE_WAIT_MS` and is dropped and
 #   told of past it, and no more than `MAX_WAITING_RESPONSES` wait at once; its tests are
 #   `queue_tests`;
