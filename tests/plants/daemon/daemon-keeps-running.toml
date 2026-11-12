@@ -251,7 +251,7 @@ meant = "a_response_waits_for_a_peer_that_reads_late_and_is_never_dropped"
 runs = ["bridge-queue"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/writer.rs"
 find = '''
         self.enqueue_encoded(
             encoded,
