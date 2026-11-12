@@ -93,8 +93,8 @@ runs = ["codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/broker/pair.rs"
-find = '''        *self.deciding.borrow_mut() = Some(Deciding {'''
-replace = '''        let _ = Some(Deciding {'''
+find = '''        *self.deciding.borrow_mut() = Some(Deciding(Bounded::default()));'''
+replace = '''        let _ = Some(Deciding(Bounded::default()));'''
 
 [[plant]]
 name = "codex role file: a read of another thread is taken for the thread asked"
