@@ -507,7 +507,7 @@ meant = "a_tag_whose_release_run_never_appears_says_what_to_do_with_the_tag"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
 None => format!("{tag} is on upstream; {}", rerun_advice(tag, None)),'''
 replace = '''
