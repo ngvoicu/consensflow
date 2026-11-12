@@ -574,6 +574,7 @@ fn a_run_ahead_of_the_queue_looks_at_a_busy_machine_every_half_minute_then_every
 }
 
 /// A wait behind a live elder (the machine, busy, is asked once the elder is taken for dead), with `on_pause(n)` run at the `n`th pause; how it ended, in words.
+#[cfg(unix)]
 fn waited_behind_an_elder(
     queues: &Queues,
     minutes: u32,
@@ -603,6 +604,7 @@ fn waited_behind_an_elder(
 }
 
 /// A run's own ticket is the last in the folder: the one that sorts after the elder's.
+#[cfg(unix)]
 fn own_ticket(dir: &Path) -> PathBuf {
     let mut names: Vec<_> = fs::read_dir(dir.join("zeewin2"))
         .unwrap()
@@ -704,6 +706,7 @@ fn a_run_woken_after_its_ticket_was_taken_for_dead_makes_it_again_under_its_name
 }
 
 /// What an `Error` says, for a case that holds one: `Error(...)` as `waited` words it.
+#[cfg(unix)]
 fn ended_in_words(came: Result<Waited, Error>) -> String {
     match came {
         Ok(Waited::Go(lines, ticket)) => format!("Go({lines:?}, ticket {})", ticket.is_some()),
