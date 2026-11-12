@@ -246,7 +246,7 @@ meant = "a_feed_alpha_that_never_serves_the_alpha_after_a_green_run_says_the_rel
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/feed.rs"
 find = "self.read_until(name, |served| served.as_str() == version)?"
 replace = "self.read_until(name, |_| true)?"
 
