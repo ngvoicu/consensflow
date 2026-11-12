@@ -119,7 +119,7 @@ pub fn mtime_ms(metadata: &Metadata) -> io::Result<f64> {
         Err(before) => (-1.0, before.duration()),
     };
     // Lossless: seconds since the epoch fit a double's 53 bits for millions of years.
-    #[allow(clippy::cast_precision_loss)]
+    #[allow(clippy::cast_precision_loss)] // Seconds fit 53 bits for millions of years.
     let seconds = since.as_secs() as f64;
     Ok(sign * (seconds * 1e3 + f64::from(since.subsec_nanos()) / 1e6))
 }
@@ -153,7 +153,7 @@ pub const WRITE_TIME_STEP_MS: f64 = 2_000.0;
 /// once (the issue `record-readers-trust-what-a-file-time-cannot-prove`, limit 3).
 pub fn settled(written_ms: f64, since_ms: i64, checked_ms: i64, now_ms: i64) -> bool {
     // A clock reading is within the 53 bits of a double for millions of years.
-    #[allow(clippy::cast_precision_loss)]
+    #[allow(clippy::cast_precision_loss)] // A clock reading fits 53 bits for millions of years.
     let (since, checked, now) = (since_ms as f64, checked_ms as f64, now_ms as f64);
     written_ms + WRITE_TIME_STEP_MS < checked
         || (since + WRITE_TIME_STEP_MS < checked && now + WRITE_TIME_STEP_MS < written_ms)
