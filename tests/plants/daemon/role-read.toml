@@ -284,8 +284,8 @@ replace = "pub const ROLE_READ_WHOLE_BYTES: usize = 40_000;"
 # The ledger: a read on its way is kept, and only the reads that tell something.
 
 [[plant]]
-name = "role read: a read made while the note's paste is on its way is dropped"
-meant = "a_role_read_in_the_inbox_while_its_paste_is_on_its_way_is_kept_and_told_once_the_paste_is_confirmed"
+name = "role read: a read made while a message's paste is on its way is dropped"
+meant = "a_message_read_in_the_inbox_while_its_paste_is_on_its_way_is_read_and_not_failed_when_its_delivery_is_given_up"
 runs = ["ledger-read"]
 
 [[plant.edit]]
@@ -377,7 +377,7 @@ replace = ""
 
 [[plant]]
 name = "role read: the proof of a paste takes the place of the read made while it was on its way"
-meant = "a_role_read_in_the_inbox_while_its_paste_is_on_its_way_is_kept_and_told_once_the_paste_is_confirmed"
+meant = "a_message_read_in_the_inbox_while_its_paste_is_on_its_way_is_what_its_paste_made_it_with_the_read_kept"
 runs = ["ledger-read"]
 
 [[plant.edit]]
@@ -422,8 +422,8 @@ find = "        if settle_when_given_back(store, message_id)? {"
 replace = "        if false {"
 
 [[plant]]
-name = "role read: a role given back to the queue forgets the read made while it was on its way"
-meant = "a_role_read_on_its_way_stays_with_the_note_when_its_paste_is_given_back_and_tells_the_role_when_it_goes_in"
+name = "role read: a message given back to the queue forgets the read made while it was on its way"
+meant = "a_message_read_in_the_inbox_while_its_paste_is_on_its_way_is_read_when_the_paste_is_given_back_and_never_typed_in_again"
 runs = ["ledger-read"]
 
 [[plant.edit]]
