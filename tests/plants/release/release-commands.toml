@@ -792,7 +792,7 @@ meant = "a_ci_run_github_does_not_list_yet_is_waited_for"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/ci.rs"
 find = "Err(Refusal::NeverRan(_)) if looks < self.pace.appear_attempts => {"
 replace = "Err(Refusal::NeverRan(_)) if looks > self.pace.appear_attempts => {"
 
