@@ -990,7 +990,7 @@ meant = "main_that_moved_between_the_check_and_the_dispatch_is_refused_at_once_w
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = "                self.main_moved(watched, head)?;"
 replace = "                let _ = head;"
 
