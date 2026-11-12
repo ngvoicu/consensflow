@@ -545,6 +545,59 @@ test('changing channel immediately checks the selected feed', async ({ page }) =
   await expect(dialog).toContainText('Stable release')
 })
 
+const DAMAGED =
+  'The saved update channel is not a channel (EOF), so the Alpha channel is used. Choose a channel to replace it.'
+
+test('a damaged saved channel is told in the dialog, and the shown channel can be kept to replace it', async ({
+  page,
+}) => {
+  const damaged = updateSnapshot({ error: DAMAGED, preferenceProblem: DAMAGED })
+  await boot(page, { snapshot: damaged })
+  await page.evaluate(() => window.__emitTauriEvent('check-updates'))
+  const dialog = page.locator('#updates-dialog')
+  await expect(dialog.locator('#updates-preference')).toContainText(DAMAGED)
+  await expect(page.locator('#updates-channel')).toHaveValue('alpha')
+  // The shell answers a kept channel with a state that has no problem left.
+  await page.evaluate(
+    (kept) => window.__setCommandResult('update_channel', kept),
+    updateSnapshot({ lastChecked: null }),
+  )
+
+  await dialog.getByRole('button', { name: 'Keep Alpha' }).click()
+
+  await expect
+    .poll(async () => (await commandCalls(page, 'update_channel')).map((call) => call.args))
+    .toEqual([{ channel: 'alpha' }])
+  await expect(dialog.locator('#updates-preference')).toBeHidden()
+  await expect(dialog).not.toContainText('Choose a channel to replace it')
+  await expect(dialog.locator('#updates-feedback')).toContainText('Keeping the Alpha channel')
+})
+
+test('choosing the other channel replaces a damaged saved one and its message', async ({
+  page,
+}) => {
+  const damaged = updateSnapshot({ error: DAMAGED, preferenceProblem: DAMAGED })
+  await boot(page, { snapshot: damaged })
+  await page.evaluate(() => window.__emitTauriEvent('check-updates'))
+  const dialog = page.locator('#updates-dialog')
+  await expect(dialog.locator('#updates-preference')).toBeVisible()
+  await page.evaluate(
+    (stable) => {
+      window.__setCommandResult('update_channel', stable)
+      window.__setCommandResult('update_check', stable)
+    },
+    updateSnapshot({ channel: 'stable' }),
+  )
+
+  await page.locator('#updates-channel').selectOption('stable')
+
+  await expect
+    .poll(async () => (await commandCalls(page, 'update_channel')).map((call) => call.args))
+    .toEqual([{ channel: 'stable' }])
+  await expect(dialog.locator('#updates-preference')).toBeHidden()
+  await expect(dialog).not.toContainText('Choose a channel to replace it')
+})
+
 test('aborts install when the pre-install status refresh fails', async ({ page }) => {
   const ready = updateSnapshot({
     phase: 'ready',

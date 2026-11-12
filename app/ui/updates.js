@@ -56,6 +56,8 @@ function normalizeSnapshot(value) {
     totalBytes: Number.isFinite(value.totalBytes) ? value.totalBytes : null,
     lastChecked: value.lastChecked === null ? null : text(value.lastChecked),
     error: value.error === null ? null : text(value.error),
+    // Why the saved channel could not be used while its file is not replaced; null otherwise.
+    preferenceProblem: text(value.preferenceProblem) || null,
     blockers: array(value.blockers).filter(record),
     // Where the release is downloaded by hand, on a system whose app installs
     // nothing itself (Windows, for now); null where the app installs it.
@@ -70,6 +72,10 @@ function commandFailure(result) {
 
 function eventPayload(event) {
   return record(event?.payload) ? event.payload : event
+}
+
+function channelLabelOf(channel) {
+  return channel === 'alpha' ? 'Alpha' : 'Stable'
 }
 
 function formatBytes(bytes) {
@@ -172,6 +178,13 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
 
   const stateLine = liveLine('updates-state')
   const feedback = liveLine('updates-feedback')
+  // A saved channel that could not be read: said with the way to keep the channel in use.
+  const preference = element('div', 'updates-feedback')
+  preference.id = 'updates-preference'
+  preference.dataset.tone = 'error'
+  const preferenceText = element('span')
+  const keep = updaterButton('quiet-button', 'Keep', 'updates-keep')
+  preference.append(preferenceText, ' ', keep)
   const progress = named('p', 'updates-progress', 'updates-progress')
   const content = element('div', 'updates-content')
   content.append(
@@ -183,6 +196,7 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     ),
     metadata,
     stateLine,
+    preference,
     feedback,
     candidateSection,
     progress,
@@ -288,6 +302,11 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     feedback.textContent = feedbackText
     feedback.dataset.tone = feedbackTone
     feedback.hidden = feedbackText.length === 0
+    const problem = current?.preferenceProblem ?? null
+    preference.hidden = problem === null
+    preferenceText.textContent = problem ?? ''
+    keep.textContent = `Keep ${channelLabelOf(current?.channel)}`
+    keep.disabled = busy()
 
     const candidate = current?.available ?? null
     candidateSection.hidden = candidate === null
@@ -370,7 +389,8 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     operation = null
     if (applySnapshot(result)) {
       if (!quiet) {
-        if (snapshot.error !== null) setFeedback(snapshot.error, 'error')
+        if (snapshot.error !== null && snapshot.error !== snapshot.preferenceProblem)
+          setFeedback(snapshot.error, 'error')
         else if (snapshot.available === null) setFeedback('You are up to date.', 'info')
         else setFeedback(`Update available: ${snapshot.available.version}`, 'info')
         render()
@@ -428,6 +448,20 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     await checkForUpdates()
   }
 
+  // The shown channel is chosen again, which writes it over a saved choice that could not be read.
+  async function keepChannel() {
+    if (snapshot === null || snapshot.preferenceProblem === null || busy()) return
+    const kept = snapshot.channel
+    const result = await call('update_channel', { channel: kept })
+    if (!applySnapshot(result)) {
+      setFeedback(commandFailure(result) ?? 'The channel could not be kept', 'error')
+      render()
+      return
+    }
+    setFeedback(`Keeping the ${channelLabelOf(kept)} channel.`, 'info')
+    render()
+  }
+
   async function installUpdate() {
     if (!(await refreshStatus({ explicit: true }))) return
     const current = snapshot
@@ -473,6 +507,7 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
   check.addEventListener('click', () => void checkForUpdates())
   download.addEventListener('click', () => void downloadUpdate())
   channel.addEventListener('change', () => void changeChannel())
+  keep.addEventListener('click', () => void keepChannel())
   install.addEventListener('click', () => void installUpdate())
   openPage.addEventListener('click', () => void openDownloadPage())
   dialog.addEventListener('close', () => previousFocus?.focus?.())

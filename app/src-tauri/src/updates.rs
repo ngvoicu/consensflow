@@ -90,22 +90,43 @@ fn current_snapshot<R: Runtime>(app: &AppHandle<R>) -> UpdateSnapshot {
     snapshot
 }
 
-/// An event to the page; an error that names the event where it could not be sent.
-fn emit_to_page<R: Runtime>(
-    app: &AppHandle<R>,
-    event: &str,
-    payload: impl Serialize + Clone,
-) -> Result<(), String> {
-    app.emit(event, payload)
-        .map_err(|error| format!("ConsensFlow could not send the page the event {event}: {error}"))
+/// An event to the page that was not sent, said with its name.
+fn unsent(event: &str, sent: tauri::Result<()>) -> Result<(), String> {
+    sent.map_err(|error| format!("ConsensFlow could not send the page the event {event}: {error}"))
 }
 
 fn publish<R: Runtime>(app: &AppHandle<R>) -> Value {
+    publish_with(
+        app,
+        |event, snapshot| app.emit(event, snapshot),
+        |said| eprintln!("{said}"),
+    )
+}
+
+/// The state, told to the page by `emit` and returned as the command's answer. A command's
+/// answer carries the state whatever the event does, so a failed send is `log`ged and nothing else.
+fn publish_with<R: Runtime>(
+    app: &AppHandle<R>,
+    emit: impl FnOnce(&str, &UpdateSnapshot) -> tauri::Result<()>,
+    log: impl FnOnce(&str),
+) -> Value {
     let snapshot = current_snapshot(app);
-    if let Err(said) = emit_to_page(app, "update-state-changed", &snapshot) {
-        eprintln!("{said}");
+    if let Err(said) = unsent(
+        "update-state-changed",
+        emit("update-state-changed", &snapshot),
+    ) {
+        log(&said);
     }
     serde_json::to_value(snapshot).unwrap()
+}
+
+/// The menu's "Check for Updates" asks the page to open its dialog.
+fn menu_selected(id: &str, emit: impl FnOnce(&str) -> tauri::Result<()>, log: impl FnOnce(&str)) {
+    if id == "check-updates" {
+        if let Err(said) = unsent("check-updates", emit("check-updates")) {
+            log(&said);
+        }
+    }
 }
 
 fn command_error<R: Runtime>(app: &AppHandle<R>, error: String) -> Value {
@@ -285,11 +306,11 @@ pub fn setup(app: &tauri::App) -> tauri::Result<()> {
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
         crate::panics::contained("the app's handler of its menu", || {
-            if event.id().as_ref() == "check-updates" {
-                if let Err(said) = emit_to_page(app, "check-updates", ()) {
-                    eprintln!("{said}");
-                }
-            }
+            menu_selected(
+                event.id().as_ref(),
+                |name| app.emit(name, ()),
+                |said| eprintln!("{said}"),
+            );
         });
     });
     Ok(())
@@ -328,6 +349,9 @@ pub struct UpdateSnapshot {
     total_bytes: Option<u64>,
     last_checked: Option<String>,
     error: Option<String>,
+    /// Why the saved channel could not be used, while its file is not replaced; the page offers
+    /// to keep the channel shown. Also the `error` where nothing else is.
+    preference_problem: Option<String>,
     blockers: Vec<Value>,
     /// Where an available release is downloaded from by hand, on a platform
     /// whose app does not install it itself; none where it does.
@@ -387,6 +411,7 @@ impl UpdateManager {
                     total_bytes: None,
                     last_checked: None,
                     error: None,
+                    preference_problem: None,
                     blockers: Vec::new(),
                     page: None,
                 },
@@ -409,6 +434,7 @@ impl UpdateManager {
     fn snapshot(&self) -> UpdateSnapshot {
         let state = self.state();
         let mut snapshot = state.snapshot.clone();
+        snapshot.preference_problem = state.preference_problem.clone();
         if snapshot.error.is_none() {
             snapshot.error = state.preference_problem.clone();
         }
@@ -857,26 +883,73 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
 
-    /// The page is told of the update's state and of the menu's "Check for Updates" by events that
-    /// the app only logs where they fail: the command's own answer carries the state, but a
-    /// download's progress and the menu's check have nothing else to say they were lost.
+    /// A failed send of the state or of the menu's check is said with the event's name, and
+    /// leaves the answer of the command and what was healthy as it was.
     #[test]
-    fn a_page_event_that_cannot_be_sent_is_an_error_that_names_it() {
-        #[derive(Clone)]
-        struct Unsendable;
-        impl Serialize for Unsendable {
-            fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
-                Err(serde::ser::Error::custom("not a payload"))
-            }
-        }
+    fn a_page_event_that_cannot_be_sent_is_said_and_stops_nothing() {
         let app = tauri::test::mock_app();
-        let said = emit_to_page(app.handle(), "update-state-changed", Unsendable)
-            .expect_err("a payload that cannot be serialized is not sent");
-        assert!(
-            said.contains("update-state-changed") && said.contains("not a payload"),
-            "{said}"
+        let dir = tempfile::tempdir().unwrap();
+        app.manage(UpdateManager::new("3.0.0", dir.path().join("updates.json")));
+        let gone = || -> tauri::Result<()> { Err(std::io::Error::other("webview gone").into()) };
+
+        let said = std::cell::RefCell::new(Vec::new());
+        let answer = publish_with(
+            app.handle(),
+            |_, _| gone(),
+            |line| said.borrow_mut().push(line.to_owned()),
         );
-        assert_eq!(emit_to_page(app.handle(), "check-updates", ()), Ok(()));
+        assert_eq!(
+            answer["phase"], "idle",
+            "the command still answers with the state"
+        );
+        let said = said.into_inner();
+        assert!(
+            matches!(said.as_slice(), [line] if line.contains("update-state-changed") && line.contains("webview gone")),
+            "{said:?}"
+        );
+
+        let told = std::cell::RefCell::new(Vec::new());
+        let said = std::cell::RefCell::new(Vec::new());
+        publish_with(
+            app.handle(),
+            |event, snapshot| {
+                told.borrow_mut().push((event.to_owned(), snapshot.phase));
+                Ok(())
+            },
+            |line| said.borrow_mut().push(line.to_owned()),
+        );
+        assert_eq!(
+            told.into_inner(),
+            [("update-state-changed".to_owned(), Phase::Idle)]
+        );
+        assert!(said.into_inner().is_empty(), "a sent event is not logged");
+
+        let said = std::cell::RefCell::new(Vec::new());
+        menu_selected(
+            "check-updates",
+            |_| gone(),
+            |line| said.borrow_mut().push(line.to_owned()),
+        );
+        let said = said.into_inner();
+        assert!(
+            matches!(said.as_slice(), [line] if line.contains("check-updates") && line.contains("webview gone")),
+            "{said:?}"
+        );
+        let sent = std::cell::RefCell::new(Vec::new());
+        menu_selected(
+            "check-updates",
+            |name| {
+                sent.borrow_mut().push(name.to_owned());
+                Ok(())
+            },
+            |line| panic!("nothing to say: {line}"),
+        );
+        menu_selected(
+            "quit",
+            |name| panic!("{name} is not the menu's check"),
+            |line| panic!("{line}"),
+        );
+        assert_eq!(sent.into_inner(), ["check-updates"]);
     }
 
     /// The page reads `phase` as these words (`ui/updates.js`); the named states go out as them.
@@ -901,6 +974,42 @@ mod tests {
         );
     }
 
+    /// The page names the phases once (`PHASE` in `ui/updates.js`): the same seven words, not
+    /// a word the shell does not send and none left out.
+    #[test]
+    fn the_pages_phase_names_are_the_words_the_shell_sends() {
+        let page = include_str!("../../ui/updates.js");
+        let block = page
+            .split("const PHASE = Object.freeze({")
+            .nth(1)
+            .and_then(|rest| rest.split("})").next())
+            .expect("the page's PHASE");
+        let mut named: Vec<(&str, &str)> = block
+            .lines()
+            .filter_map(|line| line.trim().trim_end_matches(',').split_once(": "))
+            .map(|(key, value)| (key, value.trim_matches('\'')))
+            .collect();
+        named.sort_unstable();
+        let mut sent: Vec<(String, String)> = [
+            Phase::Idle,
+            Phase::Checking,
+            Phase::Available,
+            Phase::Downloading,
+            Phase::Ready,
+            Phase::Installing,
+            Phase::Error,
+        ]
+        .map(|phase| {
+            let word = serde_json::to_value(phase).unwrap();
+            let word = word.as_str().unwrap().to_owned();
+            (word.clone(), word)
+        })
+        .to_vec();
+        sent.sort_unstable();
+        let sent: Vec<(&str, &str)> = sent.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        assert_eq!(named, sent);
+    }
+
     /// A saved choice that is not there is no problem and takes the version's own channel; one
     /// that is there and cannot be read or parsed is said to the page, which a user on Alpha
     /// whose file was damaged was not told of when the app turned to Stable.
@@ -910,6 +1019,7 @@ mod tests {
         let absent = UpdateManager::new("3.0.0-alpha.35", dir.path().join("absent.json"));
         assert_eq!(absent.snapshot().channel, Channel::Alpha);
         assert_eq!(absent.snapshot().error, None, "a first run has no problem");
+        assert_eq!(absent.snapshot().preference_problem, None);
 
         let saved = dir.path().join("saved.json");
         std::fs::write(&saved, br#""stable""#).unwrap();
@@ -934,6 +1044,11 @@ mod tests {
                 said.contains("saved update channel") && said.contains("Alpha"),
                 "{what}: the user is told, got {said:?}"
             );
+            assert_eq!(
+                serde_json::to_value(manager.snapshot()).unwrap()["preferenceProblem"],
+                said,
+                "{what}: the page is told which problem it is, to offer keeping the channel"
+            );
             assert!(manager.begin_check());
             assert!(
                 manager.snapshot().error.is_some(),
@@ -952,6 +1067,7 @@ mod tests {
         assert!(manager.snapshot().error.is_some());
         manager.set_channel(Channel::Alpha).unwrap();
         assert_eq!(manager.snapshot().error, None);
+        assert_eq!(manager.snapshot().preference_problem, None);
         let again = UpdateManager::new("3.0.0-alpha.35", path);
         assert_eq!(
             (again.snapshot().channel, again.snapshot().error),
