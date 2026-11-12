@@ -63,7 +63,7 @@
 # - the windows a pane host still has open when its peer ends its input are ended with it, and it
 #   tells the exit of each, with what the window left running, before it closes its own output
 #   (`crates/cf-panes/src/headless.rs`, `shut_down`; the bridge keeps its output past the end of its
-#   input for it, `crates/cf-bridge/src/lib.rs`): the long run's final drain learns what each window
+#   input for it, `crates/cf-bridge/src/shutdown.rs`): the long run's final drain learns what each window
 #   left from them, as it learns of a window that ended before. The host waits for the exits it owes
 #   three seconds at most (`FAREWELL`) and for what it told to be written two (`FLUSH`), and a peer
 #   that reads nothing is not waited for any longer (3.0.6, item 8). The daemon is not told: both
