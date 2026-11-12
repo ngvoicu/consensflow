@@ -1548,3 +1548,28 @@ fn what_escaped_the_ending_is_what_the_word_finds_that_the_run_never_chose() {
         )]
     );
 }
+
+/// What escaped the ending fails the case, but under the known macOS limit of Pi and Devin
+/// (`Expect::OwnSession`), which `judge` lets pass, where it is said and fails nothing: a live Pi or
+/// Devin `finish` on the Mac is not red for the limit it is known to have.
+#[test]
+fn what_escaped_fails_the_case_but_under_the_known_limit_of_a_session_of_its_own_where_it_is_said()
+{
+    let line = command();
+    let chosen = Chosen {
+        window_began: Some(10),
+        ..run_chosen()
+    };
+    let found = chosen.escaped_the_ending(&[running(301, 21, 1, &line)]);
+    assert_eq!(found.len(), 1, "{found:#?}");
+
+    let ended = Escaped::of(found.clone(), Expect::Ended);
+    assert_eq!(ended.failed, found);
+    assert!(ended.said.is_empty(), "{ended:#?}");
+
+    let own_session = Escaped::of(found.clone(), Expect::OwnSession);
+    assert!(own_session.failed.is_empty(), "{own_session:#?}");
+    assert_eq!(own_session.said.len(), 1, "{own_session:#?}");
+    assert!(own_session.said[0].starts_with(&found[0]), "{own_session:#?}");
+    assert!(own_session.said[0].contains("said, not failed"), "{own_session:#?}");
+}

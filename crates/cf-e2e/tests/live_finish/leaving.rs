@@ -600,7 +600,11 @@ pub fn run_asked(
     if chosen.word.is_some() {
         match ThisMachine.processes() {
             Ok(all) => {
-                for line in chosen.escaped_the_ending(&all) {
+                let escaped = Escaped::of(chosen.escaped_the_ending(&all), expect);
+                for line in escaped.said {
+                    finished.case.say(line);
+                }
+                for line in escaped.failed {
                     finished.case.fail(line);
                 }
             }
@@ -611,6 +615,34 @@ pub fn run_asked(
     }
     finished.case.closed(closed);
     Ok(finished)
+}
+
+/// What the run makes of the lines of what escaped the ending ([`Chosen::escaped_the_ending`]):
+/// each fails the case, but where the run expects the known macOS limit of Pi and Devin
+/// (`Expect::OwnSession`: their tool shell detaches the command into a session of its own, which
+/// no window's close reaches, and `judge` lets pass), where each is said and fails nothing.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Escaped {
+    said: Vec<String>,
+    failed: Vec<String>,
+}
+
+impl Escaped {
+    fn of(lines: Vec<String>, expect: Expect) -> Self {
+        match expect {
+            Expect::OwnSession => Self {
+                said: lines
+                    .into_iter()
+                    .map(|line| format!("{line} (the known limit of a command detached into a session of its own: said, not failed)"))
+                    .collect(),
+                failed: Vec::new(),
+            },
+            Expect::Ended => Self {
+                said: Vec::new(),
+                failed: lines,
+            },
+        }
+    }
 }
 
 /// The worker `agent` given its task (`brief`), and the board and the pane host looked at

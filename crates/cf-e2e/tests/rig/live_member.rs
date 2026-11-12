@@ -498,10 +498,11 @@ fn the_check_ends_the_command_its_window_runs_and_nothing_outside_the_window_tha
     let home = rig.var("HOME").unwrap_or_default().to_owned();
     let install = Installed::at(Harness::Devin, FAKE_DEVIN, &home);
     // What the window's command and the process outside it both say: the stand-in's command
-    // is `sleep <seconds>; true` in a shell.
+    // is `sleep <seconds>; true` in a shell. The outsider's shell becomes its `sleep` (`exec`), so
+    // the test's handle holds all of it, and its drop leaves nothing running.
     let command = LongCommand::new("sleep 613");
     let mut outsider = Run::new("/bin/sh")
-        .args(["-c", "sleep 613; true"])
+        .args(["-c", "exec sleep 613"])
         .inheriting_env()
         .spawn()?;
     let window = Open::new(&rig, &install, "work", "work-devin")
@@ -553,6 +554,31 @@ fn the_check_ends_the_command_its_window_runs_and_nothing_outside_the_window_tha
     assert!(
         outsider.wait(Duration::from_millis(500))?.is_none(),
         "the process outside the window runs on"
+    );
+    // The outsider is the test's own, and goes whole with its handle: nothing of it is left to
+    // run for ten minutes with its folder in the tree (a `sleep` its shell started was).
+    let all = ThisMachine.processes()?;
+    let outside = all
+        .iter()
+        .find(|process| process.identity.pid == outsider.id())
+        .map(|process| process.identity)
+        .ok_or("the process outside the window is not listed")?;
+    let started: Vec<_> = std::iter::once(outside)
+        .chain(
+            cf_e2e::live::members::descending_from(&all, outside)
+                .iter()
+                .map(|process| process.identity),
+        )
+        .collect();
+    drop(outsider);
+    let left: Vec<_> = ThisMachine
+        .processes()?
+        .into_iter()
+        .filter(|process| started.contains(&process.identity))
+        .collect();
+    assert!(
+        left.is_empty(),
+        "what the test started outside the window is left running: {left:#?}"
     );
     drop(window);
     rig.close()?;
