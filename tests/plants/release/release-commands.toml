@@ -919,7 +919,7 @@ meant = "a_trial_cancelled_with_no_step_to_name_is_refused_with_its_jobs"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = "        for job in self.jobs.iter().filter(|job| !passed(&job.conclusion)) {"
 replace = '''
         for job in self.jobs.iter().filter(|job| job.conclusion == "failure") {'''
