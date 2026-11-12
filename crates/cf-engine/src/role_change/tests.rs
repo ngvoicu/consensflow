@@ -128,13 +128,6 @@ fn a_launch_writes_the_replacement_as_the_note_the_ledger_knows_and_whose_words_
     context.close();
 }
 
-/// The real text of a chief with `rows` staff rows who each hold two roles, with
-/// specs on or off: the paths of a Mac, as long as the folder its skill's copy is
-/// kept in makes its path.
-fn a_chiefs_role(rows: usize, specs_on: bool) -> String {
-    a_chiefs_role_with(rows, specs_on, None)
-}
-
 /// The most rules for the staff the ledger takes, in what costs a text that says
 /// them the most: every byte the ledger allows and every line, the lines in
 /// characters of three bytes (a letter of a script outside the Latin ones) and
@@ -156,7 +149,9 @@ fn the_most_rules() -> String {
     rules
 }
 
-/// [`a_chiefs_role`] with the project's rules for the staff, if it has some.
+/// The real text of a chief with `rows` staff rows who each hold two roles, with
+/// specs on or off and the project's rules for the staff, if it has some: the paths
+/// of a Mac, as long as the folder its skill's copy is kept in makes its path.
 fn a_chiefs_role_with(rows: usize, specs_on: bool, rules: Option<&str>) -> String {
     a_chiefs_role_for(&a_mac(), rows, specs_on, rules)
 }

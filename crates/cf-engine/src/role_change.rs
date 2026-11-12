@@ -123,7 +123,7 @@
 //! and the last, printed after every part before it, is the role read
 //! (`receive_read_part`, which logs each part as `message.part_read`): as one printed in
 //! one piece, it is told then, or kept while the paste is on its way (T-1513, review
-//! T-1510: Gabriel chose parts over a smaller text, 2026-11-12).
+//! T-1510: the human chose parts over a smaller text, 2026-11-12).
 //!
 //! The project's rules for its staff (`roles::with_staff_rules`) are part of
 //! every text that says a role, and the ledger bounds them for it (at most 8,000
