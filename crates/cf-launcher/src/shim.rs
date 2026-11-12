@@ -67,7 +67,7 @@ fn names_itself(cf: &str, exe: &Path) -> bool {
 // The one program that starts another with `std` alone, on purpose: cf-process
 // brings an async runtime the user's terminal would load for every `cf` it
 // starts, and this program is the whole of what runs before it.
-#[allow(clippy::disallowed_methods)]
+#[allow(clippy::disallowed_methods)] // the shim starts `cf` with `std` alone: cf-process would load its async runtime into every `cf`.
 fn start(exe: &Path, args: &[OsString]) -> Result<i32, String> {
     let launch = launch_of(exe);
     let held = fs::read(&launch).map_err(|failed| {
