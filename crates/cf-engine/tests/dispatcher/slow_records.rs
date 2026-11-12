@@ -1272,3 +1272,124 @@ fn a_message_sent_again_after_a_restart_still_says_so_after_another_give_back() 
         )]
     );
 }
+
+/// ConsensFlow's notes `bodies` to the chief of `project`, then a pass: one chain, handed and
+/// on its way (the chief's record shows nothing yet: `holding`). The head, then its riders.
+fn chain_on_its_way(context: &Context, project: i64, bodies: &[&str]) -> Vec<MessageView> {
+    let ids: Vec<i64> = bodies
+        .iter()
+        .map(|body| {
+            context
+                .ledger
+                .borrow_mut()
+                .note(
+                    project,
+                    &cf_ledger::NewNote {
+                        from: None,
+                        to: "chief".to_owned(),
+                        task: None,
+                        body: (*body).to_owned(),
+                    },
+                )
+                .unwrap()
+                .id
+        })
+        .collect();
+    context.pass().unwrap();
+    let begun: Vec<i64> = context
+        .ledger
+        .borrow()
+        .events(project, 0, 10_000)
+        .unwrap()
+        .iter()
+        .filter(|event| event.kind == "delivery.begun")
+        .filter_map(|event| event.data["message"].as_i64())
+        .filter(|id| ids.contains(id))
+        .collect();
+    assert_eq!(begun, [ids[0]], "one paste carries them all");
+    assert_eq!(context.message(ids[0]).state, "delivering");
+    ids.iter().map(|id| context.message(*id)).collect()
+}
+
+/// T-1500's finding 5, at a real restart: a chain whose paste the chief's record shows is
+/// confirmed with every note it carried, and none is pasted again.
+#[test]
+fn a_restart_confirms_a_chain_its_record_shows_with_every_note_it_carried() {
+    let context = Context::new();
+    let project = holding(&context);
+    let pasted = counting(&context);
+    let chain = chain_on_its_way(
+        &context,
+        project,
+        &["One went.", "Two went.", "Three went."],
+    );
+    let text = delivery_text(&chain[0], &chain[1..], &CfWord::bare());
+    assert!(text.contains("3 notes at once"), "{text}");
+    let item = context.adapter.item(Role::User, &text);
+    context
+        .adapter
+        .with("chief", |agent| agent.items.push(item));
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    for note in &chain {
+        assert_eq!(context.message(note.id).state, "delivered", "m-{}", note.id);
+    }
+    after.resume_project(project).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(pasted.get(), 1, "never pasted again");
+}
+
+/// The same, with a record that does not show the chain though the harness's store says its
+/// window took it: the head and its notes go back to the queue, and go again in one paste
+/// whose header says it may be there already, each note once.
+#[test]
+fn a_restart_sends_a_chain_its_window_took_again_whole_saying_so() {
+    let context = Context::new();
+    let project = holding(&context);
+    let pasted = counting(&context);
+    let chain = chain_on_its_way(
+        &context,
+        project,
+        &["One went.", "Two went.", "Three went."],
+    );
+    let text = delivery_text(&chain[0], &chain[1..], &CfWord::bare());
+    context.adapter.with("chief", |agent| {
+        let native = agent.native.clone();
+        agent.records_settled.insert(native.clone(), false);
+        agent.stored.insert(native, vec![text]);
+    });
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    for note in &chain {
+        let row = context.message(note.id);
+        assert_eq!(
+            (row.state.as_str(), row.attempts),
+            ("queued", 0),
+            "m-{}",
+            note.id
+        );
+    }
+    context.adapter.with("chief", |agent| agent.arrive = true);
+    after.resume_project(project).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(pasted.get(), 2, "pasted once more");
+    let again = given_after_the_restart(&context, chain[0].id);
+    assert_eq!(again.len(), 1, "{again:?}");
+    assert!(
+        again[0].contains(cf_engine::delivery_text::SENT_AGAIN),
+        "{}",
+        again[0]
+    );
+    for body in ["One went.", "Two went.", "Three went."] {
+        assert_eq!(again[0].matches(body).count(), 1, "{body}");
+    }
+    for note in &chain {
+        assert_eq!(context.message(note.id).state, "delivered", "m-{}", note.id);
+    }
+}

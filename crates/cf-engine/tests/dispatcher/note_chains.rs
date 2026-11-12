@@ -377,3 +377,50 @@ fn a_chain_a_restart_sends_again_says_so_once_for_all_its_notes() {
         assert_eq!(pasted[0].matches(body).count(), 1, "{body}");
     }
 }
+
+#[test]
+fn the_notes_that_wait_for_a_project_resumed_after_a_restart_go_in_uncut_pastes() {
+    // T-1500's finding 1 after a restart: the notes that waited for the project's Resume go
+    // in chains measured with the window's own cf, none cut.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    *context.roles.cf.borrow_mut() = CfWord::new(
+        "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf",
+        Shell::Posix,
+    );
+    let notes: Vec<i64> = (0..300)
+        .map(|n| {
+            told(
+                &context,
+                project.id,
+                None,
+                &format!("Look {n}: cf task get T-1."),
+            )
+            .id
+        })
+        .collect();
+    let before = given(&context, "chief").len();
+    after.resume_project(project.id).unwrap();
+    for _ in 0..20 {
+        after.pass().unwrap();
+        context.adapter.answer("chief", "Done.");
+        after.pass().unwrap();
+    }
+    let pasted = given(&context, "chief").split_off(before);
+    assert!(!pasted.is_empty(), "the notes went in");
+    for paste in &pasted {
+        assert!(
+            !paste.contains("read all of it with"),
+            "a paste was cut: {}",
+            &paste[paste.len().saturating_sub(300)..]
+        );
+    }
+    for id in &notes {
+        assert_eq!(context.message(*id).state, "delivered", "m-{id}");
+    }
+}
