@@ -20,7 +20,8 @@
 # RS-25. A hold is its window's: another window's first refusal is another hold (`hold_of`). A
 # chief that takes over is told in its handoff each task it gave that holds (`chief.rs`,
 # `held_tasks`), and a task paused with its member gone from the staff as that, never its hold
-# (`member_gone`); a task taken from its member holds with nobody (`held_until`).
+# (`member_gone`), as its line says (`views.rs`, `member_left`); a task taken from its member
+# holds with nobody (`held_until`).
 #
 # Every name holds `chief-notes`, so `cargo xtask plants daemon chief-notes` runs them all.
 
@@ -300,4 +301,18 @@ find = '''
 '''
 replace = '''
         if let Some(member) = member_gone(store, task.id)?.filter(|_| false) {
+'''
+
+[[plant]]
+name = "chief-notes: a paused task's line says a hold with a member gone from the staff"
+meant = "shown_notes::a_held_task_whose_member_left_the_staff_says_on_its_line_it_is_paused_with_its_member_gone"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = '''
+              THEN coalesce(am.handle, a.handle) END AS member_left
+'''
+replace = '''
+              THEN NULL END AS member_left
 '''

@@ -43,7 +43,11 @@ pub(crate) const TASK_SELECT: &str = "
                      AND s.kind = 'note' AND json_valid(s.receipt)
                      AND json_extract(s.receipt, '$.shown') IS NOT NULL
                      AND json_extract(s.receipt, '$.over') IS NULL), 0)
-           ORDER BY h.id DESC LIMIT 1) AS hold_typed
+           ORDER BY h.id DESC LIMIT 1) AS hold_typed,
+         CASE WHEN t.state = 'paused'
+               AND coalesce(am.left_at, CASE WHEN a.member_id IS NULL THEN a.left_at END)
+                   IS NOT NULL
+              THEN coalesce(am.handle, a.handle) END AS member_left
   FROM task t
   JOIN participant q ON q.id = t.requester_id
   LEFT JOIN participant a ON a.id = t.assignee_id
@@ -275,12 +279,17 @@ pub(crate) fn task_view(row: &Row<'_>) -> rusqlite::Result<TaskView> {
         deleted_at: row.get("deleted_at")?,
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
+        // A paused task whose member left the staff says so, as a new chief's handoff does,
+        // never a hold with that member, though its hold is kept to its end (T-1517's note).
         // A hold's first note is typed to the chief, not shown: its line says the hold all
         // the same while the task is held, unless a newer note is shown (RS-25).
-        aside: row
-            .get::<_, Option<String>>("hold_typed")?
-            .and_then(|body| crate::messages::hold_said(row.get("number").ok()?, &body))
-            .map_or_else(|| row.get("aside"), |said| Ok(Some(said)))?,
+        aside: match row.get::<_, Option<String>>("member_left")? {
+            Some(member) => Some(format!("its member @{member} has left the staff")),
+            None => row
+                .get::<_, Option<String>>("hold_typed")?
+                .and_then(|body| crate::messages::hold_said(row.get("number").ok()?, &body))
+                .map_or_else(|| row.get("aside"), |said| Ok(Some(said)))?,
+        },
     })
 }
 

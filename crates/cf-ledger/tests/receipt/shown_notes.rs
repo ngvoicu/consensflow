@@ -518,6 +518,39 @@ fn a_paused_task_that_never_held_whose_member_left_the_staff_is_told_to_a_new_ch
     assert_eq!(told_held(&w), [(task, Some(MEMBER_GONE.to_owned()))]);
 }
 
+/// What the line of a paused task whose member left the staff says beside its state.
+const MEMBER_GONE_LINE: &str = "its member @zeus has left the staff";
+
+#[test]
+fn a_held_task_whose_member_left_the_staff_says_on_its_line_it_is_paused_with_its_member_gone() {
+    // The hold is kept to its end (`out_of_quota`'s test of a member given a task by name), but
+    // `cf task list` and `cf task get` say what the handoff says, not a hold with a member that
+    // is gone (T-1517's note): typed first, then said again and shown.
+    for hold in HOLDS {
+        let mut w = world();
+        let (task, session) = with_zeus(&mut w);
+        w.hold(task);
+        let first = note_of(&mut w, hold, task, &session, UNTIL);
+        w.deliver(first.id);
+        let again = note_of(&mut w, hold, task, &session, UNTIL);
+        assert_eq!(again.state, "read", "the same hold said again is shown");
+        assert_eq!(aside(&w, task), Some(said_of(hold, &session)));
+        w.ledger
+            .remove_member(w.project, "zeus")
+            .expect("zeus leaves the staff");
+        assert_eq!(held_until(&w, task).as_deref(), Some(UNTIL), "its hold is kept");
+        assert_eq!(aside(&w, task).as_deref(), Some(MEMBER_GONE_LINE));
+    }
+    // Paused and never held, the same.
+    let mut w = world();
+    let (task, _) = with_zeus(&mut w);
+    w.pause(task);
+    w.ledger
+        .remove_member(w.project, "zeus")
+        .expect("zeus leaves the staff");
+    assert_eq!(aside(&w, task).as_deref(), Some(MEMBER_GONE_LINE));
+}
+
 #[test]
 fn a_hold_after_its_task_left_its_member_is_another_hold_and_is_typed() {
     // T-1514's finding B: a hold is its member's. Taken back and given to another member, or
