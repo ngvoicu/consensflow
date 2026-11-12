@@ -32,7 +32,7 @@ meant = "events_wait_for_a_peer_that_reads_nothing_and_arrive_in_order"
 runs = ["bridge-queue"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/requests.rs"
 find = '''
             None,
             WRITER_QUEUE_CAPACITY,
