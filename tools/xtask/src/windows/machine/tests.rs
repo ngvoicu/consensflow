@@ -640,6 +640,72 @@ esac
     }
 
     #[test]
+    fn with_both_queues_unreadable_the_default_names_the_first_and_the_second_ends_the_run() {
+        use crate::windows::interrupt::Interrupt;
+        use crate::windows::queue::{wait, Real};
+
+        let queues = tempfile::tempdir().unwrap();
+        let mut laptop = Laptop::new("free", "free 614");
+        laptop.context.env = Env::from_vars(
+            laptop
+                .context
+                .env
+                .iter()
+                .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                .chain([("CF_WINDOWS_QUEUES".into(), queues.path().into())]),
+        );
+        let who = Who {
+            tree: "a".into(),
+            command: "cargo test".into(),
+        };
+        let all = Queues::of(&laptop.context.env).unwrap();
+        let kept: Vec<_> = ["zeewin2", "zeewin"]
+            .iter()
+            .map(|machine| all.join(machine, &who, SystemClock.now_ms()).unwrap())
+            .collect();
+        for machine in ["zeewin2", "zeewin"] {
+            fs::set_permissions(
+                queues.path().join(machine),
+                fs::Permissions::from_mode(0o000),
+            )
+            .unwrap();
+        }
+        let (chosen, said) = laptop.choose();
+        let interrupt = Interrupt::default();
+        let mut pace = Real::new(&interrupt, &laptop.context.env);
+        let came = wait(
+            Some(&all),
+            &chosen,
+            &who,
+            60,
+            &mut || Ok(Ready::Go(Vec::new())),
+            &mut pace,
+            &mut |_| Ok(()),
+        );
+        for machine in ["zeewin2", "zeewin"] {
+            fs::set_permissions(
+                queues.path().join(machine),
+                fs::Permissions::from_mode(0o755),
+            )
+            .unwrap();
+        }
+        drop(kept);
+        assert_eq!(chosen, "zeewin", "{said}");
+        assert!(
+            said.contains("as zeewin2 is not free: could not read the queue in "),
+            "{said}"
+        );
+        let error = came
+            .err()
+            .map(|error| error.to_string())
+            .unwrap_or_default();
+        assert!(
+            error.starts_with("could not take a place in the queue in "),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn the_default_is_zeewin2_while_it_is_free_and_says_so() {
         let laptop = Laptop::new("free", "free 614");
         assert_eq!(

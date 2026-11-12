@@ -189,7 +189,10 @@ impl Queues {
                 .open(&path)
             {
                 Ok(mut file) => {
-                    io::Write::write_all(&mut file, text.as_bytes())?;
+                    if let Err(error) = io::Write::write_all(&mut file, text.as_bytes()) {
+                        let _ = fs::remove_file(&path);
+                        return Err(error);
+                    }
                     break (path, text);
                 }
                 // A second run of this process in the same millisecond: after the first.
@@ -197,7 +200,11 @@ impl Queues {
                 Err(error) => return Err(error),
             }
         };
-        touch(&path, &text, now_ms)?;
+        // A ticket that was made and could not be kept is not left to hold the runs behind it.
+        if let Err(error) = touch(&path, &text, now_ms) {
+            let _ = fs::remove_file(&path);
+            return Err(error);
+        }
         let (stop, stopped) = mpsc::channel::<()>();
         let failed = Arc::new(Mutex::new(None));
         let beating = {
@@ -205,10 +212,7 @@ impl Queues {
                 (path.clone(), text.clone(), self.beat, Arc::clone(&failed));
             thread::spawn(move || {
                 while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(beat) {
-                    // A ticket that is gone (taken for a dead one while this Mac slept) is made
-                    // again under its name, which is its place.
-                    let beaten = touch(&path, &text, SystemClock.now_ms());
-                    *failed.lock().unwrap_or_else(PoisonError::into_inner) = beaten.err();
+                    beat_after(&path, &text, &failed, SystemClock.now_ms(), &mut || {});
                 }
             })
         };
@@ -222,12 +226,45 @@ impl Queues {
     }
 }
 
+/// One beat of a run's ticket: touched, or made again under its name if it is gone (taken for a
+/// dead one while this Mac slept), which is its place. What it could not do is kept in `failed`.
+fn beat_after(
+    path: &Path,
+    text: &str,
+    failed: &Mutex<Option<io::Error>>,
+    now_ms: i64,
+    between: &mut dyn FnMut(),
+) {
+    if let Err(cause) = touch_after(path, text, now_ms, between) {
+        // The first failure is the one told: a beat that works after it does not undo it.
+        failed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_or_insert(cause);
+    }
+}
+
 /// Touches the ticket `path`, writing it again with `text` if it is gone.
 fn touch(path: &Path, text: &str, now_ms: i64) -> io::Result<()> {
+    touch_after(path, text, now_ms, &mut || {})
+}
+
+/// [`touch`], with `between` run after the ticket was found there and before it is opened: the
+/// moment another run may take it away as a dead one's. A ticket that is gone then is made again
+/// under its name, as one that was gone before.
+fn touch_after(path: &Path, text: &str, now_ms: i64, between: &mut dyn FnMut()) -> io::Result<()> {
     if !path.exists() {
         fs::write(path, text)?;
     }
-    let file = fs::OpenOptions::new().write(true).open(path)?;
+    between();
+    let file = match fs::OpenOptions::new().write(true).open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            fs::write(path, text)?;
+            fs::OpenOptions::new().write(true).open(path)?
+        }
+        Err(error) => return Err(error),
+    };
     let since = u64::try_from(now_ms).unwrap_or(0);
     file.set_modified(UNIX_EPOCH + Duration::from_millis(since))
 }
@@ -318,7 +355,7 @@ pub struct Ticket {
 }
 
 impl Ticket {
-    /// What the last beat could not do, if it failed; told once.
+    /// What a beat could not do, if one failed (the first); told once.
     pub fn beat_failure(&self) -> Option<io::Error> {
         self.failed
             .lock()
@@ -484,7 +521,7 @@ pub fn wait(
         }
     }
     let ticket = match queues.filter(|_| minutes > 0) {
-        Some(queues) => take_ticket(queues, machine, who, began, say)?,
+        Some(queues) => Some(take_ticket(queues, machine, who, began)?),
         None => None,
     };
     let mut said: Option<(String, i64)> = None;
@@ -581,26 +618,17 @@ fn refused_for_the_queue(
     Ok((queued > 0).then(|| format!("{machine} is busy: {}", queued_words(queued))))
 }
 
-/// The run's place in `machine`'s queue. A queue that cannot be kept (a folder that cannot be
-/// made, a disk that is full) does not stop the run: it is said, and the run waits for the
-/// machine alone.
-fn take_ticket(
-    queues: &Queues,
-    machine: &str,
-    who: &Who,
-    now_ms: i64,
-    say: &mut dyn FnMut(&str) -> io::Result<()>,
-) -> Result<Option<Ticket>, Error> {
-    match queues.join(machine, who, now_ms) {
-        Ok(ticket) => Ok(Some(ticket)),
-        Err(cause) => {
-            say(&format!(
-                "no place could be kept in the queue for {machine} ({cause}): waiting for the machine alone"
-            ))
-            .map_err(Error::Output)?;
-            Ok(None)
-        }
-    }
+/// The run's place in `machine`'s queue. A queue that cannot be joined (a folder that cannot be
+/// made or listed, a disk that is full) ends the run with its cause: the order of the runs is the
+/// queue's whole use, and a run that went on without a place would go before the older ones.
+fn take_ticket(queues: &Queues, machine: &str, who: &Who, now_ms: i64) -> Result<Ticket, Error> {
+    queues
+        .join(machine, who, now_ms)
+        .map_err(|cause| Error::Files {
+            what: "take a place in the queue in",
+            path: queues.folder(machine),
+            cause,
+        })
 }
 
 /// `n` as "1st", "2nd", "3rd", "4th".

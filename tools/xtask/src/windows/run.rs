@@ -157,15 +157,22 @@ pub fn run(
     let ended = send_and_stream(context, machine, &plan, console, interrupt);
     // A ticket that could not be kept alive does not end a run that is under way, nor take its
     // result: the runs behind may have gone past it, and the lock of the machine decides.
-    let unkept = turn.as_ref().and_then(Ticket::beat_failure);
+    say_unkept(turn.as_ref().and_then(Ticket::beat_failure), console, ended)
+}
+
+/// Says that the run's ticket could not be kept alive, if it could not.
+fn say_unkept(
+    unkept: Option<std::io::Error>,
+    console: &mut Console,
+    ended: Result<Outcome, Error>,
+) -> Result<Outcome, Error> {
     if let Some(cause) = unkept {
-        let said = writeln!(
+        // Best effort: this line is told of a run that is over, and a stderr that cannot take it
+        // does not change how the run ended, nor cost it the reports that are brought back after.
+        let _ = writeln!(
             console.err,
             "windows: the run's place in the queue could not be kept alive ({cause}); the run goes on"
         );
-        if let Err(cause) = said {
-            return ended.and(Err(Error::Output(cause)));
-        }
     }
     ended
 }
