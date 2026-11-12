@@ -558,7 +558,7 @@ meant = "a_failed_write_ends_an_output_the_bridge_kept"
 runs = ["bridge-lib-kept-output"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/shutdown.rs"
 find = '''
             drop(lifecycle);
             if !keeps_output {
