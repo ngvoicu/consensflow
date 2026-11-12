@@ -777,7 +777,7 @@ meant = "a_github_that_cannot_be_asked_of_ci_stops_it_with_what_gh_said"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/ci.rs"
 find = '''
                 Err(Refusal::Unasked(said)) => {
                     return Err(Error::Answer {'''
