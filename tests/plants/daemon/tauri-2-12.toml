@@ -3,7 +3,7 @@
 # its own, its input and output `/dev/null`. The updater smoke's app reads the smoke's FIFO, writes
 # its reports on its output and is ended with its process group, so the app an update installed is
 # started by the app itself at its event loop's end, as Tauri 2.11 did
-# (`app/src-tauri/src/updates.rs`, `relaunch_installed`). One plant takes one part of that out; a
+# (`app/src-tauri/src/updates/relaunch.rs`, `relaunch_installed`). One plant takes one part of that out; a
 # test fails.
 #
 # Every name holds `tauri-2-12`, so `npm run plants:daemon -- "tauri-2-12:"` runs them all.
@@ -19,7 +19,7 @@ meant = "an_installed_update_starts_with_this_apps_environment_input_and_argumen
 runs = ["app-relaunch"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/updates.rs"
+file = "app/src-tauri/src/updates/relaunch.rs"
 find = """
     let mut command = std::process::Command::new(app.join("Contents/MacOS").join(&executable));
     command.args(args);"""
@@ -33,7 +33,7 @@ meant = "an_installed_update_starts_with_this_apps_environment_input_and_argumen
 runs = ["app-relaunch"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/updates.rs"
+file = "app/src-tauri/src/updates/relaunch.rs"
 find = """
     command.args(args);
     cf_process::hold_only_the_streams(&mut command);"""
@@ -47,7 +47,7 @@ meant = "an_installed_update_starts_with_this_apps_environment_input_and_argumen
 runs = ["app-relaunch"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/updates.rs"
+file = "app/src-tauri/src/updates/relaunch.rs"
 find = """
     command.args(args);
     cf_process::hold_only_the_streams(&mut command);"""
@@ -61,7 +61,7 @@ meant = "an_installed_update_starts_with_this_apps_environment_input_and_argumen
 runs = ["app-relaunch"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/updates.rs"
+file = "app/src-tauri/src/updates/relaunch.rs"
 find = """
     command.args(args);
     cf_process::hold_only_the_streams(&mut command);"""
@@ -77,7 +77,7 @@ meant = "the_installed_app_is_started_once_whatever_the_cleanup_and_the_start_do
 runs = ["app-relaunch-once"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/updates.rs"
+file = "app/src-tauri/src/updates/relaunch.rs"
 find = """
     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(cleanup)).is_err() {
         eprintln!("ConsensFlow's cleanup before starting the installed update panicked");
@@ -97,7 +97,7 @@ meant = "the_installed_app_is_started_once_whatever_the_cleanup_and_the_start_do
 runs = ["app-relaunch-once"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/updates.rs"
+file = "app/src-tauri/src/updates/relaunch.rs"
 find = """
     if std::panic::catch_unwind(std::panic::AssertUnwindSafe(cleanup)).is_err() {
         eprintln!("ConsensFlow's cleanup before starting the installed update panicked");
@@ -111,7 +111,7 @@ meant = "the_installed_app_is_started_once_whatever_the_cleanup_and_the_start_do
 runs = ["app-relaunch-once"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/updates.rs"
+file = "app/src-tauri/src/updates/relaunch.rs"
 find = "        Ok(()) => exit(),"
 replace = "        Ok(()) => drop(exit),"
 
@@ -121,7 +121,7 @@ meant = "the_installed_app_is_started_once_whatever_the_cleanup_and_the_start_do
 runs = ["app-relaunch-once"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/updates.rs"
+file = "app/src-tauri/src/updates/relaunch.rs"
 find = """
     let Some(installed) = installed else {
         return;
