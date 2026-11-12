@@ -225,13 +225,15 @@ runs = ["help"]
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
 find = '''
-    let asked = if reading {
-        Shape::NUMBERED
-    } else {'''
+const INBOX_READ: Shape = Shape {
+    valued: &["--part"],
+    ..Shape::NUMBERED
+};'''
 replace = '''
-    let asked = if reading {
-        Shape::TEXT
-    } else {'''
+const INBOX_READ: Shape = Shape {
+    valued: &["--part"],
+    ..Shape::TEXT
+};'''
 
 [[plant]]
 name = "help: a command takes its text as the words that were no flag, a double dash among them"

@@ -463,7 +463,12 @@ fn a_paste_a_row_of_which_was_read_while_the_screen_was_looked_at_is_taken_for_a
         context
             .ledger
             .borrow_mut()
-            .receive_read(zeus, &[answer.id], Read::Task)
+            .receive_read(
+                zeus,
+                &[answer.id],
+                Read::Task,
+                &cf_proto::cf_word::CfWord::bare(),
+            )
             .unwrap();
     });
     assert_eq!(enters(&context), 0, "the window has the paste: no key");

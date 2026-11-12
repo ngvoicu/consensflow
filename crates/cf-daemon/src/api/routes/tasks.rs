@@ -101,7 +101,7 @@ pub(super) async fn create(
         })?),
         None => None,
     };
-    let given = NewTask::from_json(&given(caller, &body, after))?;
+    let given = NewTask::from_json(&given(caller, &body, after)?)?;
     // A follow-up on a task that is no whole number names none: the ledger
     // would say so once it had checked what it checks first, as `from_json` has.
     if let Some(number) = after.filter(|number| whole(*number).is_none()) {
@@ -167,23 +167,30 @@ pub(super) async fn create(
 /// gives it; what it is for (the window that did `after`, the chief itself, or
 /// a pool, a tier and a purpose, each as it was asked, and only if it was);
 /// and its brief and its order. A follow-up of a task that is no whole number
-/// is given as task 0, which is refused in its place.
-fn given(caller: &Caller, body: &Map<String, Value>, after: Option<f64>) -> Value {
+/// is given as task 0, which is refused in its place. What the request asks of the
+/// staff is the ledger's to check first (`cf_ledger::asked_role`): one role at most,
+/// and nothing beside it that the task it is would drop; a role asked for a follow-up
+/// goes with it, for the ledger to hold it to the window's.
+fn given(caller: &Caller, body: &Map<String, Value>, after: Option<f64>) -> Result<Value, Failure> {
     let handle = &caller.participant.handle;
     let flag = |name: &str| body.get(name) == Some(&Value::Bool(true));
+    let asked = cf_ledger::asked_role(body)?;
     let mut task = Map::new();
     task.insert("from".to_owned(), json!(handle));
     match after {
         Some(number) => {
             task.insert("after".to_owned(), json!(whole(number).unwrap_or(0)));
+            if let Some(role) = asked {
+                task.insert("pool".to_owned(), json!(role.id));
+            }
         }
         None if flag("self") => {
             task.insert("to".to_owned(), json!(handle));
         }
         None => {
-            // The role whose field is true (`design`, `advice`, `review`, `test`), as the
-            // roles' table ranks them; a worker where none is.
-            let pool = cf_ledger::roles::asked(flag).id;
+            // The role whose field is true (`frontend`, `advice`, `design`, …); a worker where
+            // none is.
+            let pool = asked.unwrap_or_else(cf_ledger::roles::unasked).id;
             task.insert("pool".to_owned(), json!(pool));
             for name in ["tier", "purpose"] {
                 if let Some(asked) = body.get(name) {
@@ -197,7 +204,7 @@ fn given(caller: &Caller, body: &Map<String, Value>, after: Option<f64>) -> Valu
             task.insert(name.to_owned(), asked.clone());
         }
     }
-    Value::Object(task)
+    Ok(Value::Object(task))
 }
 
 #[cfg(test)]

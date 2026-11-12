@@ -214,25 +214,49 @@ async fn a_task_for_the_chief_itself_is_queued_with_its_message_named() {
     );
 }
 
+/// A task is for one role (the review of T-1441, T-1453): one that asks for two or more is
+/// refused in words that name each, where the first of the table's order took it and the rest
+/// went unsaid. One asked alone is that role's, as before.
 #[tokio::test]
-async fn the_kind_of_staff_asked_for_is_the_first_flag_that_is_true_design_advice_review_test() {
+async fn a_task_that_asks_for_two_roles_is_refused_naming_each_and_one_alone_is_its_roles() {
     let scene = scene();
     for (body, said) in [
         (
             r#"{"design":true,"advice":true,"review":true,"test":true,"body":"x","tier":"standard"}"#,
-            "no image designer is on the staff: ask the human for one, in your terminal",
+            "a task is for one role, and this one asks for an advisor, a reviewer, a tester and an image designer: add a task for each",
         ),
         (
-            r#"{"advice":true,"review":true,"test":true,"body":"x","tier":"standard"}"#,
+            r#"{"advice":true,"review":true,"body":"x","tier":"standard"}"#,
+            "a task is for one role, and this one asks for an advisor and a reviewer: add a task for each",
+        ),
+        (
+            r#"{"frontend":true,"architect":true,"body":"x"}"#,
+            "a task is for one role, and this one asks for a frontend designer and an architect: add a task for each",
+        ),
+        (
+            r#"{"research":true,"integrate":true,"after":1,"self":true,"body":"x"}"#,
+            "a task is for one role, and this one asks for a researcher and an integrator: add a task for each",
+        ),
+    ] {
+        let answered = post(&scene, &scene.chief, body).await;
+        assert_eq!(refused(&answered), (400, "two-roles", said), "{body}");
+    }
+    for (body, said) in [
+        (
+            r#"{"advice":true,"body":"x","tier":"standard"}"#,
             "no advisor is on the staff: ask the human for one, in your terminal",
         ),
         (
-            r#"{"review":true,"test":true,"body":"x","tier":"standard"}"#,
+            r#"{"review":true,"body":"x","tier":"standard"}"#,
             "no reviewer is on the staff: ask the human for one, in your terminal",
         ),
         (
             r#"{"test":true,"body":"x","tier":"standard"}"#,
             "no tester is on the staff: ask the human for one, in your terminal",
+        ),
+        (
+            r#"{"design":true,"body":"x"}"#,
+            "no image designer is on the staff: ask the human for one, in your terminal",
         ),
     ] {
         let answered = post(&scene, &scene.chief, body).await;
@@ -242,14 +266,6 @@ async fn the_kind_of_staff_asked_for_is_the_first_flag_that_is_true_design_advic
             "{body}"
         );
     }
-    // A designer asks for no tier, and what it says of one is not read.
-    let answered = post(
-        &scene,
-        &scene.chief,
-        r#"{"design":true,"body":"x","tier":"junk"}"#,
-    )
-    .await;
-    assert_eq!(answered.1["error"], "no-member-of-tier");
     // Only `true` is a flag.
     let (status, _) = post(
         &scene,
@@ -273,39 +289,36 @@ async fn the_kind_of_staff_asked_for_is_the_first_flag_that_is_true_design_advic
 }
 
 /// A role is one row of the roles' table: a sixth, put in it for this test alone, is asked
-/// for by its own field, before any role with tiers where its row has none, and with no tier;
-/// a staff with nobody in it refuses it by the role's name.
+/// for by its own field, with no tier where its row has none; a staff with nobody in it
+/// refuses it by the role's name.
 #[tokio::test]
 async fn a_role_in_the_table_alone_is_asked_for_by_its_field_and_refused_by_its_name() {
     let _scout = cf_ledger::roles::seam::put(&cf_ledger::roles::seam::WITH_A_SCOUT);
     let scene = scene();
-    for body in [
-        r#"{"scout":true,"body":"x"}"#,
-        r#"{"test":true,"scout":true,"advice":true,"body":"x","tier":"standard"}"#,
+    let answered = post(&scene, &scene.chief, r#"{"scout":true,"body":"x"}"#).await;
+    assert_eq!(
+        refused(&answered),
+        (
+            409,
+            "no-member-of-tier",
+            "no field scout is on the staff: ask the human for one, in your terminal"
+        )
+    );
+    // Asked beside others, it is named among them in the table's order, and none is taken
+    // (T-1453).
+    for (body, said) in [
+        (
+            r#"{"test":true,"scout":true,"advice":true,"body":"x","tier":"standard"}"#,
+            "a task is for one role, and this one asks for an advisor, a field scout and a tester: add a task for each",
+        ),
+        (
+            r#"{"design":true,"scout":true,"body":"x"}"#,
+            "a task is for one role, and this one asks for a field scout and an image designer: add a task for each",
+        ),
     ] {
         let answered = post(&scene, &scene.chief, body).await;
-        assert_eq!(
-            refused(&answered),
-            (
-                409,
-                "no-member-of-tier",
-                "no field scout is on the staff: ask the human for one, in your terminal"
-            ),
-            "{body}"
-        );
+        assert_eq!(refused(&answered), (400, "two-roles", said), "{body}");
     }
-    // Between two roles with no tier, the table's order: the scout stands before the image
-    // designer.
-    let answered = post(
-        &scene,
-        &scene.chief,
-        r#"{"design":true,"scout":true,"body":"x"}"#,
-    )
-    .await;
-    assert_eq!(
-        refused(&answered).2,
-        "no field scout is on the staff: ask the human for one, in your terminal"
-    );
 }
 
 #[tokio::test]
@@ -354,6 +367,80 @@ async fn a_test_opens_on_the_board_for_the_testers_of_its_tier_and_wakes_the_dis
     )
     .await;
     assert_eq!(refused(&answered).1, "not-a-coordinator");
+}
+
+/// The four roles of spec new-roles (FD-04): each is asked for by its field, with no tier, and a
+/// staff with none of it refuses it by the role's name; once a member of it is on the staff
+/// the task waits on the board for its role's pool, with no tier. A tier said beside it is
+/// refused in the role's name.
+#[tokio::test]
+async fn each_new_role_is_asked_for_by_its_field_and_refused_by_its_name_until_one_is_on_the_staff()
+{
+    let scene = scene();
+    for (field, pool, named, whose) in [
+        (
+            "frontend",
+            "frontend",
+            "frontend designer",
+            "a frontend designer's",
+        ),
+        ("architect", "architect", "architect", "an architect's"),
+        ("research", "researcher", "researcher", "a researcher's"),
+        ("integrate", "integrator", "integrator", "an integrator's"),
+    ] {
+        // A tier said beside it is refused in the role's name (T-1453), not dropped.
+        let tiered = format!(r#"{{"{field}":true,"body":"x","tier":"standard"}}"#);
+        let answered = post(&scene, &scene.chief, &tiered).await;
+        assert_eq!(
+            refused(&answered),
+            (
+                400,
+                "no-tier-for-role",
+                format!("{whose} task has no tier: leave out --tier").as_str()
+            ),
+            "{tiered}"
+        );
+        let body = format!(r#"{{"{field}":true,"body":"x"}}"#);
+        let answered = post(&scene, &scene.chief, &body).await;
+        assert_eq!(
+            refused(&answered),
+            (
+                409,
+                "no-member-of-tier",
+                format!("no {named} is on the staff: ask the human for one, in your terminal")
+                    .as_str()
+            ),
+            "{body}"
+        );
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .add_member(
+                scene.project.id,
+                &cf_ledger::NewMember {
+                    model: None,
+                    effort: None,
+                    model_name: Some(format!("{pool}-agent")),
+                    harness: "claude-code".to_owned(),
+                    designer: false,
+                    roles: vec![pool.to_owned()],
+                    tier: "light".to_owned(),
+                },
+            )
+            .unwrap();
+        let (status, said) = post(&scene, &scene.chief, &body).await;
+        assert_eq!(status, 201, "{said}");
+        assert_eq!(
+            (
+                said["task"]["pool"].as_str(),
+                said["task"]["tier"].as_str(),
+                said["task"]["state"].as_str(),
+            ),
+            (Some(pool), None, Some("open")),
+            "{body}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -497,6 +584,108 @@ async fn a_follow_up_checks_its_words_and_its_lists_before_it_looks_for_the_task
         let answered = post(&scene, &scene.chief, body).await;
         assert_eq!(refused(&answered), said, "{body}");
     }
+}
+
+/// What `cf task add` asked beside a role, a tier or `--self` went unsaid (the review of
+/// T-1441, T-1453): `--self` won over a role and a tier, a role with no tier let its tier and
+/// its purpose go. Each is refused now in words that name what was
+/// asked, for the old five roles' switches as for the four new ones, before anything is
+/// looked for.
+#[tokio::test]
+async fn a_role_or_a_tier_asked_beside_self_or_a_follow_up_or_a_tier_for_a_role_with_none_is_refused_in_its_words(
+) {
+    let scene = scene();
+    for (body, said) in [
+        (
+            r#"{"research":true,"self":true,"needs":[1],"body":"x"}"#,
+            (
+                400,
+                "self-takes-no-role",
+                "a --self task is your own step: leave out --research",
+            ),
+        ),
+        (
+            r#"{"review":true,"self":true,"needs":[1],"body":"x"}"#,
+            (
+                400,
+                "self-takes-no-role",
+                "a --self task is your own step: leave out --review",
+            ),
+        ),
+        (
+            r#"{"frontend":true,"tier":"critical","purpose":"design","body":"x"}"#,
+            (
+                400,
+                "no-tier-for-role",
+                "a frontend designer's task has no tier: leave out --tier and --purpose",
+            ),
+        ),
+        (
+            r#"{"design":true,"tier":"standard","body":"x"}"#,
+            (
+                400,
+                "no-tier-for-role",
+                "an image designer's task has no tier: leave out --tier",
+            ),
+        ),
+        (
+            r#"{"integrate":true,"purpose":"design","body":"x"}"#,
+            (
+                400,
+                "no-tier-for-role",
+                "an integrator's task has no tier, and so no purpose: leave out --purpose",
+            ),
+        ),
+    ] {
+        let answered = post(&scene, &scene.chief, body).await;
+        assert_eq!(refused(&answered), said, "{body}");
+    }
+}
+
+/// A role asked for with `--after T-n` (the review of T-1441, T-1453): `cf` sent the follow-up
+/// alone and the ledger gave it to T-n's window, whatever role that window was for, even with
+/// nobody on the staff in the role asked. It is taken when T-n's window is of the role asked
+/// and refused otherwise, by the ledger, in words that name both roles; one that asks for no
+/// role still continues the window, as before.
+#[tokio::test]
+async fn a_follow_up_for_a_role_is_taken_by_a_window_of_that_role_alone_and_refused_naming_both() {
+    let scene = scene();
+    let finished = finished_session_task(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .accept_task(scene.project.id, finished, "chief")
+        .unwrap();
+    for (switch, asked) in [
+        ("research", "a researcher's"),
+        ("advice", "an advisor's"),
+        ("review", "a reviewer's"),
+        ("integrate", "an integrator's"),
+    ] {
+        let body = format!(r#"{{"after":{finished},"{switch}":true,"body":"x"}}"#);
+        let answered = post(&scene, &scene.chief, &body).await;
+        assert_eq!(
+            refused(&answered),
+            (
+                409,
+                "follow-up-of-another-role",
+                format!("T-{finished} is a worker's task; {asked} task starts in a new window: leave out --after").as_str()
+            ),
+            "{body}"
+        );
+    }
+    assert_eq!(
+        scene.kicks.get(),
+        0,
+        "nothing was given for the refused ones"
+    );
+    let body = format!(r#"{{"after":{finished},"body":"Now the lexer"}}"#);
+    let (status, said) = post(&scene, &scene.chief, &body).await;
+    assert_eq!(status, 201, "{said}");
+    assert!(said["task"]["assignee"]
+        .as_str()
+        .is_some_and(|window| window.starts_with("zeus-")));
 }
 
 #[tokio::test]

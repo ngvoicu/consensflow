@@ -75,8 +75,12 @@ runs = ["daemon-lib-routes-answers"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/receipt.rs"
-find = '.filter(|message| message.recipient_id == recipient)'
-replace = '.filter(|_| true)'
+find = '''
+                .message(*id)?
+                .filter(|message| message.recipient_id == recipient)'''
+replace = '''
+                .message(*id)?
+                .filter(|_| true)'''
 
 [[plant]]
 name = "read: cf says what it wrote before it has written it"

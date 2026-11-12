@@ -76,8 +76,8 @@ pub(crate) use pauses::{
 pub use pauses::{MAY_STILL_RUN, NOT_PROVEN_GONE};
 pub use receipt::Read;
 pub(crate) use receipt::{
-    claim_answer, door_born_closed, receive_read, reconcile, release_all_claims, release_claims,
-    settle_claim,
+    claim_answer, door_born_closed, receive_read, receive_read_part, reconcile, release_all_claims,
+    release_claims, settle_claim,
 };
 pub(crate) use roles::{note_role, role_notes_to, role_of_note};
 pub(crate) use taken_back::take_back;

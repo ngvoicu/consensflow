@@ -61,6 +61,7 @@ impl Front {
             closing: Closing::new(),
             log,
             trace,
+            cf: Rc::new(|_| cf_proto::cf_word::CfWord::bare()),
             tooling_calls: false,
         });
         Self {

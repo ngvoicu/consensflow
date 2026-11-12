@@ -5,8 +5,10 @@
 //! was for ([`Read::receives`]). A message served whole while its paste is still
 //! on its way (`delivering`) is read all the same, but the paste is the window's
 //! to settle: the read is kept with the message ([`keep_read`], in its receipt as
-//! `readEarly`) and told when the delivery ends ([`told_when_confirmed`],
-//! [`settle_when_given_back`], [`settle_when_given_up`]). Withdrawing a message never resolves what it obliged:
+//! `readEarly`) and told when the delivery ends ([`settle_when_given_back`],
+//! [`settle_when_given_up`]). A role is none of these: each part of it `cf inbox read`
+//! prints is logged, whatever state its note is in, and it is read once every part was
+//! printed ([`told_if_read`]). Withdrawing a message never resolves what it obliged:
 //! only receipt does. A task moves between `queued`, `working` and `waiting`
 //! in one place, [`reconcile`], after each receipt.
 //!
@@ -16,6 +18,8 @@
 //! ledger's to deliver as text, and a claim that no one acknowledged is
 //! voided at the first sign that its door is gone.
 
+use cf_base::role_read::role_parts;
+use cf_proto::cf_word::CfWord;
 use cf_proto::ledger::{Claim, MessageView};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
@@ -49,8 +53,8 @@ impl Read {
     ///   (T-260). A task's words send its window on, and only their paste
     ///   proves them; a role is ConsensFlow's word to the conversation, which
     ///   is told it by its paste (`confirm_delivery_telling`), or, where the
-    ///   paste was cut, once it is delivered and then read ([`read_role`]), or was
-    ///   read while its paste was on its way ([`Read::keeps`]) and is then confirmed;
+    ///   paste was cut, once every part of it was printed and its paste is
+    ///   confirmed, in either order ([`told_if_read`]);
     /// - in the thread `cf task get` printed, an answer only: the thread is
     ///   the task's, and the rest of it is not the reader's to receive one by one.
     fn receives(self, message: &MessageView, says_a_role: bool) -> bool {
@@ -62,10 +66,9 @@ impl Read {
 
     /// Whether a message whose paste is still on its way (`delivering`) and served
     /// whole this way keeps the read until its delivery ends: whatever
-    /// [`Read::receives`] says of a queued one, and a note that says a conversation its
-    /// role as well, by `cf inbox read`: it is the read of a role that tells the
-    /// conversation, once the paste is confirmed. A task's words are none: their paste
-    /// alone proves them.
+    /// [`Read::receives`] says of a queued one. A role read by `cf inbox read` never comes
+    /// here: its parts printed are logged instead ([`told_if_read`]). A task's words are
+    /// none: their paste alone proves them.
     fn keeps(self, message: &MessageView) -> bool {
         match self {
             Read::Inbox => message.kind != "task",
@@ -145,38 +148,13 @@ fn keep_read(store: &mut Store, message: &MessageView, via: Read) -> Result<(), 
     Ok(())
 }
 
-/// A delivery was confirmed, and the message had been served whole to its recipient
-/// while it was on its way ([`keep_read`]): a note that says its recipient a role is
-/// read now as it is when it is read after (`read_role`), `read`, and the
-/// conversation recorded as told the role. Only in the conversation the read was made
-/// in: a conversation that began since was not shown the role the read printed, and
-/// is told it again at its next Resume. Any other message is what its paste made it:
-/// the window had it from the paste, so a read adds nothing, and it stays
-/// `delivered`, with the read in its receipt.
-pub(crate) fn told_when_confirmed(
-    store: &mut Store,
-    message_id: i64,
-    kept: Kept,
-) -> Result<(), LedgerError> {
-    if kept.via != Read::Inbox || !says_a_role(store, message_id)? {
-        return Ok(());
-    }
-    // The message as the confirmation left it: `read_role` weighs when it was delivered.
-    let delivered = known_message(store, message_id)?;
-    let now = current_conversation(store, delivered.recipient_id)?.map(|found| found.id);
-    if now == kept.conversation {
-        read_role(store, &delivered)?;
-    }
-    Ok(())
-}
-
 /// A delivery was given back to the queue (`retry_delivery`), and the message had been
 /// served whole to its recipient while it was on its way: where a read in the inbox
 /// would have received it queued ([`Read::receives`]), it is `read` now, and not
 /// pasted again after the reader had it (T-260). Whether it was is whether the
 /// paste was proved, which it was not. Its task is reconciled, as for any read.
-/// A note that says a role is not received by a read: the read stays with it, and
-/// tells the role if the paste comes in after all (`confirm_delivery`), as the
+/// A note that says a role is not received by a read: its parts printed stay logged,
+/// and tell the role if the paste comes in after all (`confirm_delivery`), as the
 /// note's words are the same in every paste of it. Whether the message was
 /// settled.
 pub(crate) fn settle_when_given_back(
@@ -490,9 +468,9 @@ pub(crate) fn settle_claim(
 /// those among `ids` that are still `queued` for `recipient`, a carried or
 /// claimed one included (its claim is given up), and that the way they were
 /// served receives ([`Read::receives`]), are `read`, each with its receipt,
-/// and their tasks reconciled, once each. A note that says `recipient` a role
-/// and was delivered (its paste cut, the role told in part) is read in the
-/// inbox as [`read_role`] says. One whose paste is still on its way
+/// and their tasks reconciled, once each. A note that says `recipient` a role,
+/// printed in the inbox, is its part 1 of 1 printed in the window whose `cf` is `cf`
+/// ([`receive_read_part`]: refused where that window prints it in more). One whose paste is still on its way
 /// (`delivering`) and that the way it was served keeps ([`Read::keeps`]) keeps the
 /// read for when its delivery ends ([`keep_read`]); it is not received yet, and not
 /// counted. The rest are left as they are. How many were received.
@@ -501,6 +479,7 @@ pub(crate) fn receive_read(
     recipient: i64,
     ids: &[i64],
     via: Read,
+    cf: &CfWord,
 ) -> Result<usize, LedgerError> {
     store.write(|store| {
         let mut received = 0;
@@ -513,9 +492,8 @@ pub(crate) fn receive_read(
                 continue;
             };
             let role = says_a_role(store, message.id)?;
-            if via == Read::Inbox && role && message.state == "delivered" {
-                read_role(store, &message)?;
-                received += 1;
+            if via == Read::Inbox && role {
+                received += read_part(store, &message, 1, 1, cf)?;
                 continue;
             }
             if message.state == "delivering" {
@@ -540,6 +518,132 @@ pub(crate) fn receive_read(
         }
         Ok(received)
     })
+}
+
+/// The kind of event that says `cf inbox read` printed a part of a role to its window.
+const PART_READ: &str = "message.part_read";
+
+/// Part `part` of `of` of the note `id`, a role, printed to `recipient` by `cf inbox read` in
+/// the window whose `cf` is `cf`: `of` is how many parts `cf` prints it in there
+/// (`cf_base::role_read::role_parts` of its words as that window's `cf` reads them), which
+/// the ledger counts itself and refuses any other count for. The part is logged as printed
+/// ([`part_printed`]), whatever state the note is in, and the role is told if that was the
+/// last part to print ([`told_if_read`]). A part printed twice or out of order is no fault.
+/// A part there is not, a read by `cf task get`, and a message that is not `recipient`'s or
+/// says no role are nothing. How many were received.
+pub(crate) fn receive_read_part(
+    store: &mut Store,
+    recipient: i64,
+    id: i64,
+    part: usize,
+    of: usize,
+    via: Read,
+    cf: &CfWord,
+) -> Result<usize, LedgerError> {
+    if part == 0 || part > of || via != Read::Inbox {
+        return Ok(0);
+    }
+    store.write(|store| {
+        let Some(message) = store
+            .message(id)?
+            .filter(|message| message.recipient_id == recipient)
+        else {
+            return Ok(0);
+        };
+        if !says_a_role(store, id)? {
+            return Ok(0);
+        }
+        read_part(store, &message, part, of, cf)
+    })
+}
+
+/// Part `part` of `of` of `message`, a role to its recipient, printed by `cf inbox read` in
+/// the window whose `cf` is `cf`: refused where that is not the count of parts `cf` prints
+/// it in there, else logged and the role told if it was read ([`told_if_read`]). 1 where it
+/// was, else 0.
+fn read_part(
+    store: &mut Store,
+    message: &MessageView,
+    part: usize,
+    of: usize,
+    cf: &CfWord,
+) -> Result<usize, LedgerError> {
+    let id = message.id;
+    let counted = role_parts(&cf.in_text(&message.body)).len();
+    if of != counted {
+        let parts = if counted == 1 { "part" } else { "parts" };
+        return Err(LedgerError::refused_with(
+            "invalid-read",
+            format!(
+                "m-{id} is printed in {counted} {parts} in this window, not {of}: a read says the part `cf inbox read` printed and how many it prints the note in"
+            ),
+            400,
+        ));
+    }
+    part_printed(store, message, part, of)?;
+    Ok(usize::from(told_if_read(store, message)?))
+}
+
+/// Part `part` of `of` of `message`, a role, was printed to its recipient by `cf inbox
+/// read`: logged ([`PART_READ`]) with the recipient's conversation it was printed in.
+fn part_printed(
+    store: &mut Store,
+    message: &MessageView,
+    part: usize,
+    of: usize,
+) -> Result<(), LedgerError> {
+    let conversation = current_conversation(store, message.recipient_id)?.map(|found| found.id);
+    store.log(
+        message.project_id,
+        PART_READ,
+        json!({ "message": message.id, "part": part, "of": of, "conversation": conversation }),
+    )
+}
+
+/// Whether the role `message` says was read: every part of it was printed ([`PART_READ`])
+/// in its recipient's current conversation, in the number of parts it was last printed in.
+/// The state the note was in at each print is no part of it: a part printed while its paste
+/// was on its way, or back in the queue, was read all the same.
+fn read_every_part(store: &Store, message: &MessageView) -> Result<bool, LedgerError> {
+    let Some(of) = store
+        .db
+        .query_row(
+            "SELECT json_extract(data, '$.of') FROM event
+              WHERE project_id = ? AND kind = ? AND json_extract(data, '$.message') = ?
+              ORDER BY id DESC LIMIT 1",
+            params![message.project_id, PART_READ, message.id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .optional()?
+        .flatten()
+    else {
+        return Ok(false);
+    };
+    let conversation = current_conversation(store, message.recipient_id)?.map(|found| found.id);
+    let printed: i64 = store.db.query_row(
+        "SELECT COUNT(DISTINCT json_extract(data, '$.part')) FROM event
+          WHERE project_id = ? AND kind = ? AND json_extract(data, '$.message') = ?
+            AND json_extract(data, '$.of') = ? AND json_extract(data, '$.conversation') IS ?",
+        params![message.project_id, PART_READ, message.id, of, conversation],
+        |row| row.get(0),
+    )?;
+    Ok(printed == of)
+}
+
+/// The role a note says is told where it was read ([`read_every_part`]) and its paste is
+/// confirmed (`delivered`): asked when a part of it is printed, and when its paste is
+/// confirmed (`confirm_delivery`), so whichever comes last tells it ([`read_role`]).
+/// Whether it was.
+pub(crate) fn told_if_read(store: &mut Store, message: &MessageView) -> Result<bool, LedgerError> {
+    let message = known_message(store, message.id)?;
+    if message.state != "delivered"
+        || !says_a_role(store, message.id)?
+        || !read_every_part(store, &message)?
+    {
+        return Ok(false);
+    }
+    read_role(store, &message)?;
+    Ok(true)
 }
 
 /// A note that says its recipient a role, delivered (its paste was cut to its

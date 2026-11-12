@@ -325,6 +325,9 @@ pub fn scene() -> Scene {
         closing: Closing::new(),
         log: Rc::new(Log::new(home.path())),
         trace: Rc::new(Trace::new(home.path())),
+        cf: Rc::new(|participant| {
+            crate::seams::cf_word_of(participant, "/bundle/bin/cf", cfg!(windows))
+        }),
         tooling_calls: false,
     });
     Scene {

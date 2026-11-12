@@ -43,7 +43,17 @@ fn without_thresholds(plan: &Prepared) -> Vec<(String, String)> {
 
 #[test]
 fn every_members_launch_is_given_the_size_as_devin_s_thresholds_and_nothing_else_moves() {
-    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+    for role in [
+        "worker",
+        "frontend",
+        "architect",
+        "researcher",
+        "advisor",
+        "reviewer",
+        "tester",
+        "integrator",
+        "designer",
+    ] {
         let home = Home::new();
         let adapter = home.adapter();
         let plain = prepare(

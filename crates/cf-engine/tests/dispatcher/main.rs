@@ -89,6 +89,7 @@ mod meeting;
 mod meeting_main;
 mod moved_models;
 mod named_by_model;
+mod new_roles;
 mod no_adapter;
 mod not_ready;
 mod nothing_to_stop;

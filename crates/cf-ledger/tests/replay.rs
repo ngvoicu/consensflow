@@ -875,7 +875,7 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
         // A member's tier is the human's: nothing follows a catalog's (harness-models).
         "refreshMemberTiers" => return Err(NO_TIERS_FOLLOWED.to_owned()),
         "setRoles" => parse_roles(arg(args, 2))
-            .and_then(|roles| encode(ledger.set_roles(id(), text(arg(args, 1)), &roles))),
+            .and_then(|roles| encode(ledger.set_roles(id(), text(arg(args, 1)), &roles, None))),
         "removeMember" => encode(ledger.remove_member(id(), text(arg(args, 1)))),
         "lastStaff" => encode(ledger.last_staff()),
         "holdsWork" => encode(ledger.has_task_in_hand(id())),

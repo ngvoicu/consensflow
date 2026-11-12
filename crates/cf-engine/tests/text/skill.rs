@@ -62,7 +62,7 @@ fn names_a_model_only_where_the_member_s_name_does_not() {
             "| Member | Roles | Work tier |",
             "|---|---|---|",
             "| claude-opus-5-5-high | worker | Standard work |",
-            "| codex-default (Codex default) | designer | Light work |",
+            "| codex-default (Codex default) | image designer | Light work |",
             "| old-one (no model: needs an edit) | reviewer | Complex work |",
         ]
         .join("\n")
@@ -146,7 +146,7 @@ fn says_none_for_an_image_designer_s_tier_and_refuses_any_other_member_with_none
     let table =
         team_table(&[staff_row("zeus", &["worker"], WorkTier::Standard), designer]).unwrap();
     assert!(
-        table.ends_with("| codex-default (Opus · high) | designer | none |"),
+        table.ends_with("| codex-default (Opus · high) | image designer | none |"),
         "{table}"
     );
     let advisor = StaffRow {
@@ -190,5 +190,31 @@ fn an_image_designer_is_read_off_the_project_with_no_tier() {
             .map(|member| member.work_tier)
             .collect::<Vec<_>>(),
         [None, Some(WorkTier::Light)]
+    );
+}
+
+/// The table says each role by its name (spec new-roles, FD-04): the frontend designer and the
+/// image designer are never one word, and a member that holds only roles with no tier says none.
+#[test]
+fn says_each_role_by_its_name_and_none_for_a_member_of_roles_with_no_tier() {
+    let untiered = |handle: &str, roles: &[&str]| StaffRow {
+        work_tier: None,
+        ..staff_row(handle, roles, WorkTier::Light)
+    };
+    let table = team_table(&[
+        untiered("iris", &["frontend"]),
+        untiered("daedalus", &["architect", "researcher"]),
+        staff_row("zeus", &["worker", "integrator"], WorkTier::Standard),
+        untiered("codex-default", &["designer"]),
+    ])
+    .unwrap();
+    assert_eq!(
+        table.lines().skip(2).collect::<Vec<_>>(),
+        [
+            "| iris (Opus · high) | frontend designer | none |",
+            "| daedalus (Opus · high) | architect, researcher | none |",
+            "| zeus (Opus · high) | worker, integrator | Standard work |",
+            "| codex-default (Opus · high) | image designer | none |",
+        ]
     );
 }

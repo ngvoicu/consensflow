@@ -332,6 +332,9 @@ async fn zeus_at_work() -> (Rig, Rc<Context>, String, Value) {
         closing: Closing::new(),
         log: Rc::new(Log::new(home)),
         trace: Rc::new(Trace::new(home)),
+        cf: Rc::new(|participant| {
+            crate::seams::cf_word_of(participant, "/bundle/bin/cf", cfg!(windows))
+        }),
         tooling_calls: false,
     });
     (rig, context, token, pane)

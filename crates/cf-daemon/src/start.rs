@@ -295,6 +295,12 @@ async fn run(
         closing: crate::api::context::Closing::new(),
         log: Rc::clone(&log),
         trace: Rc::clone(&trace),
+        cf: {
+            let pane_cf = options.bundle.pane_cf.clone();
+            Rc::new(move |participant| {
+                crate::seams::cf_word_of(participant, &pane_cf, cfg!(windows))
+            })
+        },
         tooling_calls: crate::api::calls::switched_on(env.os(crate::api::calls::TOOLING_API_CALLS)),
     });
     // The programs the daemon runs and the time it reads: the engine's windows

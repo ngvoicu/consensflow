@@ -255,7 +255,7 @@ and the shell-dependent paragraphs by shell below. By hand, in those words alone
   open from now on are given them (none); one already open keeps its rules".
 The role-change budgets moved with the shorter text: read whole to 151 rows with specs on
 (174 without), and to 15 and 38 with the most rules for the staff, 41 bytes and 57 lines to
-spare for the 15.
+spare for the 15 (T-1480 moved them again: the last paragraph).
 
 The paragraphs of a text that depend on the shell of the window's commands (how a text is passed
 to `cf`, and how a removal whose path a variable makes is written: the chief's input, a member's
@@ -266,3 +266,30 @@ parts are the words these paragraphs always had, so no row moved. The PowerShell
 and Muse's on Windows) are pinned in `tests/text/shells.rs`: their words, that a PowerShell
 text holds no heredoc and no bash removal, that it is no longer than the bash text with the same
 word for `cf`, and which lines differ.
+
+The staff table (the `table` row of `teamTable` and the two chief's texts whose staff holds
+an image designer) says "image designer" where Node's said `designer`: since spec new-roles
+(FD-04) a frontend designer can be on the staff too, and the table says each role by its
+name (`cf_ledger::roles`), so the two are never one word. Changed by hand, in that cell
+alone, on 2026-11-11.
+
+The chief's text was taught the four roles of spec new-roles (FD-06, FD-07; T-1480), in the twelve
+chief's rows that hold `chief.md` and in no other row, changed by hand on 2026-11-11 with the same
+exact replacements as the file: the card has a line for `--frontend`, `--architect`, `--research`
+and `--integrate`, and `--design`'s line points to its paragraph; "## Choose the tier, not the
+member" is "## Choose the role, not the member", which names the role and its tier where its
+command takes one, and has a paragraph for the architect, the frontend designer and the
+integrator, and the image designer's with the flow of a member's drawing orders; what the card
+says (the commands of a note, an answer and a review's brief) and what the text said twice (the
+opening's list of who gets what, What you never do's first two bullets, `--after`'s when and when
+not, the session files) is said once. A window left for hours is a new task too. The role-change
+budgets moved: read whole to 143 rows with specs on (168 without), and to 7 and 32 with the most
+rules for the staff, 12 bytes and 53 lines to spare for the 7.
+
+The same twelve rows say again, in What you never do, "Give a task to a member by name, or write
+one with a member in mind." (T-1513, changed by hand on 2026-11-12 with the file): T-1480 had
+taken the ban out to pay for the four roles' words, and what was left of it no longer banned a
+brief written for one member (review T-1510). The same task has `cf inbox read` print a role
+past the bound a role is read whole at in parts (`cf_base::role_read::role_parts`): it prints in
+one piece to 141 rows with specs on (166 without), and to 5 and 30 with the most rules for the
+staff, and in parts past that, so no staff is too large to be read.
