@@ -6,7 +6,6 @@
 //! dialog opens one: with the staff, specs on, and the owner's wake-up calls.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use cf_e2e::live::{self, agents, Harness, Installed, Log};
 use cf_e2e::rig::{Config, Masker, Rig};
@@ -16,7 +15,7 @@ use super::options::Options;
 use super::staff::{self, Found, LeftOut};
 use crate::plan::{chief_environment, harness, Agent, ChiefSetup, Staff};
 use crate::run::floor::Floor;
-use crate::run::login::{self, Throwaway};
+use crate::run::login::{self, Seated};
 use crate::run::machine::Machine;
 use crate::run::{daemon_of, trust, workspace, wrappers, Crew};
 use crate::scenarios::Scenario;
@@ -111,9 +110,10 @@ pub struct Opened {
     /// Where the run's Claude Code windows keep their records: the throwaway folder of the
     /// run, which goes with it.
     pub claude: PathBuf,
-    /// The login those windows run on, which says at the end what the run did to the owner's
-    /// Claude setup or to the copy of the login.
-    pub login: Option<Arc<Throwaway>>,
+    /// The machine the windows run on, whose homes of the run's own (Claude Code's login and
+    /// the kit's of the others) say at the end what the run did to the owner's setups or to the
+    /// copies of their logins.
+    pub machine: Machine,
 }
 
 /// Starts the rig the cast runs on and opens the project: the fixture of
@@ -128,13 +128,17 @@ pub fn open(
     masker: Masker,
 ) -> Result<Opened> {
     // The windows of a real Claude Code run on a throwaway config folder with a copy of the
-    // machine's login, which must last the run's budget and its end (a login that would end
-    // before is refused when the workspace is made, before anything is spent).
-    let login = login::throwaway(
-        login::real_claude(&options.chief, &cast.chief.model, &cast.staff),
+    // machine's login, and those of every other real harness on the kit's home of the run's own,
+    // which must last the run's budget and its end (a login that would end before is refused
+    // when the workspace is made or the rig starts, before anything is spent).
+    let seated = Seated::of(
+        &options.chief,
+        &cast.chief.model,
+        &cast.staff,
         options.budget,
     );
-    let machine = Machine::of(&cast.crew, login.clone())?;
+    let login = login::throwaway(&seated);
+    let machine = Machine::of(&cast.crew, &seated, login.clone())?;
     let wrappers = wrappers::write(&machine, &cast.crew, &cast.chief)?;
     let workspace = workspace::fresh(&machine, scenario)?;
     let claude_config = machine.claude_records()?;
@@ -185,6 +189,6 @@ pub fn open(
         project,
         daemon,
         claude: claude_config,
-        login,
+        machine,
     })
 }

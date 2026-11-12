@@ -142,6 +142,10 @@ fn window(
                 command: "pi",
                 args,
                 prompt: None,
+                // A person's Pi keeps its provider's variables: the cliproxyapi
+                // package reads `CLIPROXYAPI_*` before its own files, as the same
+                // Pi in their shell does. The live kit's windows run without them,
+                // as without every variable of the owner's its rig does not name.
                 drop_env: &[],
             }
         }

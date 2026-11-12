@@ -31,6 +31,15 @@
 //!
 //! **A run with no real Claude Code** (the dry runs, on the stand-in agent's models) has no
 //! use of a login and starts none: its windows are as they were.
+//!
+//! **The other harnesses** (Codex, Pi, Devin, Muse Code) run on the kit's homes
+//! ([`cf_e2e::live::isolation`]), each with a copy of its login and none of the owner's other
+//! files, made for every harness with a real window ([`Seated`], [`super::machine`]): before
+//! T-785 an eval's Pi, Codex and Devin windows ran for hours on the owner's own login folders.
+//! Pi is given only logins that last the run's planned length and the kit's margin of 30
+//! minutes, never an expired one. What those homes find at the end is kept for the report as
+//! Claude's is
+//! ([`cf_e2e::live::isolation::Isolation::keeping_what_it_finds`]), with the owner's hashes before and after.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -38,6 +47,7 @@ use std::time::Duration;
 
 use cf_e2e::live::agents::{STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL};
 use cf_e2e::live::login::Login;
+use cf_e2e::live::Harness;
 use cf_e2e::rig::ClaudeConfig;
 use cf_e2e::Result as Support;
 
@@ -52,15 +62,50 @@ use crate::Result;
 /// budget a while. Claude Code refreshes a token when five minutes of it are left.
 pub const MARGIN: Duration = Duration::from_secs(30 * 60);
 
-/// Whether a Claude Code window of the run is the real one: the chief's, if it is Claude Code
-/// on a model that is none of the stand-in agent's, or a member's of `staff`.
-pub fn real_claude(chief: &str, chief_model: &str, staff: &Staff) -> bool {
-    let real = |model: &str| model != STAND_IN_CHIEF_MODEL && model != STAND_IN_WORKER_MODEL;
-    (chief == "claude" && real(chief_model))
-        || staff
-            .agents
-            .iter()
-            .any(|agent| agent.kind == "claude-code" && real(&agent.model))
+/// The windows of a run as the homes they run on need them: the harness and model of each, and
+/// how long the run is planned to take.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Seated {
+    /// Each window's harness and model: the chief's, then each member's.
+    pub windows: Vec<(Harness, String)>,
+    /// How long the run is planned to take: what a login it is given must last, and a margin.
+    pub planned: Duration,
+}
+
+impl Seated {
+    /// The windows of a run whose chief is the harness `chief` on `chief_model` and whose staff
+    /// is `staff`, planned to take `planned`.
+    pub fn of(chief: &str, chief_model: &str, staff: &Staff, planned: Duration) -> Self {
+        let mut windows: Vec<(Harness, String)> = Harness::from_name(chief)
+            .map(|harness| (harness, chief_model.to_owned()))
+            .into_iter()
+            .collect();
+        windows.extend(staff.agents.iter().filter_map(|agent| {
+            Harness::ALL
+                .into_iter()
+                .find(|harness| harness.kind() == agent.kind)
+                .map(|harness| (harness, agent.model.clone()))
+        }));
+        Self { windows, planned }
+    }
+
+    /// Whether a window of `harness` is the real one: on a model that is none of the stand-in
+    /// agent's (the dry runs' windows are the stand-in, which reads no login).
+    pub fn real(&self, harness: Harness) -> bool {
+        !self.models(harness).is_empty()
+    }
+
+    /// The models of the real windows of `harness`, each once.
+    pub fn models(&self, harness: Harness) -> Vec<String> {
+        let mut models: Vec<String> = Vec::new();
+        for (held, model) in &self.windows {
+            let stand_in = model == STAND_IN_CHIEF_MODEL || model == STAND_IN_WORKER_MODEL;
+            if *held == harness && !stand_in && !models.contains(model) {
+                models.push(model.clone());
+            }
+        }
+        models
+    }
 }
 
 /// How long the login must last for a run that is planned to take `planned`.
@@ -68,29 +113,35 @@ pub fn lasting(planned: Duration) -> Duration {
     planned + MARGIN
 }
 
-/// The login the windows of a run that is planned to take `planned` run on, if the run has a
-/// real Claude Code (`real`) and the machine a login to copy.
-pub fn throwaway(real: bool, planned: Duration) -> Option<Arc<Throwaway>> {
-    if !real {
+/// The login the Claude Code windows of the run `seated` run on, if one of them is real and the
+/// machine has a login to copy.
+pub fn throwaway(seated: &Seated) -> Option<Arc<Throwaway>> {
+    if !seated.real(Harness::Claude) {
         return None;
     }
-    Login::of_machine_lasting(lasting(planned)).map(|login| Arc::new(Throwaway::over(login)))
+    Login::of_machine_lasting(lasting(seated.planned)).map(|login| Arc::new(Throwaway::over(login)))
 }
 
-/// What a report says of the run's login once its rig has ended: on the floor what the run did to
-/// the owner's Claude setup or to the copy of the login, if it did anything, and the check that it
-/// did not. None for a run with no throwaway login, which had no such thing to leave.
+/// What a report says of the homes of the run's own once its rig has ended: in its log what the
+/// owner's files of each harness were before the run and after it (their hashes), what the run did
+/// to the owner's setups or to the copies of their logins, if it did anything, and the check that it
+/// did not. None for a run with no such home, which had no such thing to leave.
 pub fn left_as_it_was(machine: &Machine, floor: &mut Floor) -> Result<Option<Check>> {
-    let Some(found) = machine.login.as_ref().map(|login| login.findings()) else {
+    if !machine.has_homes() {
         return Ok(None);
-    };
+    }
+    // Noted, not only said: the report keeps the floor's notes (its `log`), and these are evidence.
+    for checked in machine.homes_checked() {
+        floor.note(checked)?;
+    }
+    let found = machine.homes_findings();
     if let Some(found) = &found {
-        floor.say(format!(
-            "the run left the owner's Claude setup or login changed: {found}"
+        floor.note(format!(
+            "the run left the owner's setup or login of a harness changed: {found}"
         ))?;
     }
     Ok(Some(Check::new(
-        "the owner's Claude setup and the machine's login were left as they were",
+        "the owner's setups and logins of the run's harnesses were left as they were",
         found.is_none(),
     )))
 }
@@ -152,6 +203,10 @@ impl ClaudeConfig for Throwaway {
 
     fn keep_records(&self, into: &Path) -> Support {
         self.config.keep_records(into)
+    }
+
+    fn keeps_its_findings(&self) -> bool {
+        true
     }
 
     fn finish(&self) -> Support {

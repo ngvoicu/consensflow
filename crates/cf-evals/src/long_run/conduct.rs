@@ -291,7 +291,7 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
     let scenario = options.ask.scenario(options.quiet);
     let opened = setup::open(&options, &cast, &scenario, &mut floor, edge.masker())?;
     let daemon = opened.daemon.clone();
-    let login = opened.login;
+    let machine = opened.machine;
     let mut stage = Stage::new(opened.rig, opened.config, opened.project, opened.claude);
     if let Some(span) = options.drop_reading {
         stage.watcher.drop_readings(span);
@@ -377,9 +377,10 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
         extra_listed: options.ask.extra_work().len(),
         ending: run.ending.clone(),
         error,
-        // The app has closed: what the run did to the owner's Claude setup, or to the copy of
-        // the login, is known, and a run of hours keeps its report either way.
-        login: login.and_then(|login| login.findings()),
+        // The app has closed: what the run did to the owner's setups, or to the copies of the
+        // logins, is known, and a run of hours keeps its report either way.
+        login: machine.homes_findings(),
+        homes: machine.homes_checked(),
         log: floor.log(),
     };
     keep_and_say(&kept, edge, &options.reports, &name, &mut floor)

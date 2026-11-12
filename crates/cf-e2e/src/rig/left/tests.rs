@@ -48,6 +48,43 @@ fn noted(folder: &Path, pid: u32, ago: Duration) -> std::path::PathBuf {
     file
 }
 
+/// `began.jsonl` beside the `pids` file, saying the process `pid` began `started`,
+/// in the words [`start_of`] would say them.
+fn began(folder: &Path, pid: u32, started: &str) {
+    fs::write(folder.join("began.jsonl"), format!("{pid}\t{started}\n")).unwrap();
+}
+
+/// A process that began when the note says the window's began is the window's
+/// own, still there.
+#[test]
+fn a_process_that_began_when_its_note_says_is_the_windows() {
+    let folder = tempfile::tempdir().unwrap();
+    let window = sleeper();
+    let file = noted(folder.path(), window.id(), Duration::ZERO);
+    began(folder.path(), window.id(), &start_of(window.id()).unwrap());
+    let left = left_behind(&file, Duration::from_millis(200), SLEEPER).expect("a window was left");
+    assert!(left.starts_with(&window.id().to_string()), "{left}");
+}
+
+/// A window that ended gave its number back, and the system gave it to a program
+/// that began later. The note says when the window's process began, which is not
+/// when this one began: it is no window's.
+#[test]
+fn a_program_that_took_an_ended_windows_number_is_none_of_the_windows() {
+    let folder = tempfile::tempdir().unwrap();
+    let squatter = sleeper();
+    let file = noted(folder.path(), squatter.id(), Duration::ZERO);
+    began(
+        folder.path(),
+        squatter.id(),
+        "a start that is not this process's",
+    );
+    assert_eq!(
+        left_behind(&file, Duration::from_millis(200), SLEEPER),
+        None
+    );
+}
+
 #[test]
 fn a_window_still_there_is_said_with_what_it_is() {
     let folder = tempfile::tempdir().unwrap();
@@ -75,6 +112,7 @@ fn a_window_that_has_gone_is_none() {
 
 /// The number of a window that ended is held by a program that began after the last note was
 /// written. It is no window's, and is not said to be one that was left behind.
+#[cfg(unix)]
 #[test]
 fn a_program_that_began_after_the_last_note_is_none_of_the_windows() {
     let folder = tempfile::tempdir().unwrap();
@@ -168,4 +206,20 @@ fn the_program_a_window_runs_is_the_stand_in_binary_that_notes_its_number() {
         source.contains("note_process(beside, pid,"),
         "fake_agent notes its number"
     );
+}
+
+/// A process's start is read in the process, with no program started: a stand-in asks it of
+/// itself as its window opens, before its window draws anything, and a PowerShell to ask it
+/// (11 to 17 s on GitHub's Windows runner) held every window of a rig that long (T-1358: the
+/// rig's and the live matrix's Windows cases timed out on screens that stayed empty).
+#[test]
+fn a_processes_start_is_read_at_once_and_is_the_same_each_time() {
+    let me = std::process::id();
+    let at = std::time::Instant::now();
+    let first = start_of(me).expect("this process began");
+    for _ in 0..19 {
+        assert_eq!(start_of(me).as_deref(), Some(first.as_str()));
+    }
+    let took = at.elapsed();
+    assert!(took < Duration::from_millis(50), "20 reads took {took:?}");
 }
