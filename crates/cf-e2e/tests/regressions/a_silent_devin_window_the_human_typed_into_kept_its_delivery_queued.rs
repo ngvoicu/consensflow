@@ -84,10 +84,10 @@ fn told_in(store: &std::path::Path) -> Result<Vec<String>> {
         .collect())
 }
 
-/// What a quit left and the next start opened: the rig started again, its project, the worker's
+/// What a quit left and the next start opened (beside the rig started again, which goes back as
+/// a `Rig` of its own so that the rig suite's scan sees it handed on): its project, the worker's
 /// handle and window, and Devin's store.
 struct Shown {
-    rig: Rig,
     project: i64,
     handle: String,
     pane: Value,
@@ -115,7 +115,7 @@ fn shown(rig: &Rig, project: &Project, handle: &str) -> Result<Value> {
 /// T-1 is done; the human sends a long message in its worker's window, and the app quits, daemon
 /// first, with that turn at work. The app starts again on the same home, and the human opens the
 /// worker's window with Show: Devin opens it on the cut session with no message, silent.
-fn cut_by_a_quit_and_shown() -> Result<Shown> {
+fn cut_by_a_quit_and_shown() -> Result<(Rig, Shown)> {
     let mut rig = Rig::start(a_rig())?;
     write_roster(&rig)?;
     let project = Project::open(&rig, "chief", json!({}))?;
@@ -153,13 +153,15 @@ fn cut_by_a_quit_and_shown() -> Result<Shown> {
     let resumed = rig.page("project.resume", json!({ "project": id }))?;
     assert_eq!(resumed["ok"], true, "{resumed}");
     let pane = shown(&rig, &Project::new(&rig, id), &handle)?;
-    Ok(Shown {
+    Ok((
         rig,
-        project: id,
-        handle,
-        pane,
-        store,
-    })
+        Shown {
+            project: id,
+            handle,
+            pane,
+            store,
+        },
+    ))
 }
 
 /// The chief gives T-1 back to its worker with `TOLD`, as `cf` does in its window.
@@ -183,13 +185,15 @@ fn tell_t1(rig: &Rig, project: &Project) -> Result<()> {
 #[test]
 fn a_silent_devin_window_the_human_typed_into_keeps_what_it_is_told_queued_with_no_attempt_spent_until_its_log_configures(
 ) -> Outcome {
-    let Shown {
+    let (
         rig,
-        project,
-        handle,
-        pane,
-        store,
-    } = cut_by_a_quit_and_shown()?;
+        Shown {
+            project,
+            handle,
+            pane,
+            store,
+        },
+    ) = cut_by_a_quit_and_shown()?;
     let project = Project::new(&rig, project);
     let before = ids(&project, &handle)?;
 
@@ -243,13 +247,15 @@ fn a_silent_devin_window_the_human_typed_into_keeps_what_it_is_told_queued_with_
 #[test]
 fn a_silent_devin_window_nobody_typed_into_is_given_what_it_is_told_behind_bypass_once() -> Outcome
 {
-    let Shown {
+    let (
         rig,
-        project,
-        handle,
-        store,
-        ..
-    } = cut_by_a_quit_and_shown()?;
+        Shown {
+            project,
+            handle,
+            store,
+            ..
+        },
+    ) = cut_by_a_quit_and_shown()?;
     let project = Project::new(&rig, project);
     let before = ids(&project, &handle)?;
     std::thread::sleep(secs(12));
