@@ -49,6 +49,14 @@ impl Channel {
             .unwrap()
     }
 
+    fn label(self) -> &'static str {
+        if self == Self::Alpha {
+            "Alpha"
+        } else {
+            "Stable"
+        }
+    }
+
     fn default_for(version: &str) -> Self {
         if Version::parse(version).is_ok_and(|v| !v.pre.is_empty()) {
             Self::Alpha
@@ -295,6 +303,21 @@ struct UpdateState {
     snapshot: UpdateSnapshot,
     pending: Option<Update>,
     bytes: Option<Vec<u8>>,
+    /// Why the saved channel could not be used, while the file that holds it is not replaced.
+    preference_problem: Option<String>,
+}
+
+/// The channel the preferences file holds: none where there is no file, an error where there is
+/// one that cannot be read or is not a channel.
+fn saved_channel(preferences: &Path) -> Result<Option<Channel>, String> {
+    let bytes = match std::fs::read(preferences) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("could not be read ({error})")),
+    };
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|error| format!("is not a channel ({error})"))
 }
 
 pub struct UpdateManager {
@@ -304,10 +327,19 @@ pub struct UpdateManager {
 
 impl UpdateManager {
     pub fn new(current: &str, preferences: PathBuf) -> Self {
-        let channel = std::fs::read(&preferences)
-            .ok()
-            .and_then(|b| serde_json::from_slice::<Channel>(&b).ok())
-            .unwrap_or_else(|| Channel::default_for(current));
+        let (channel, preference_problem) = match saved_channel(&preferences) {
+            Ok(Some(channel)) => (channel, None),
+            Ok(None) => (Channel::default_for(current), None),
+            Err(reason) => {
+                let channel = Channel::default_for(current);
+                let problem = format!(
+                    "The saved update channel {reason}, so the {} channel is used. Choose a channel to replace it.",
+                    channel.label()
+                );
+                eprintln!("ConsensFlow: {problem} ({})", preferences.display());
+                (channel, Some(problem))
+            }
+        };
         Self {
             state: Mutex::new(UpdateState {
                 snapshot: UpdateSnapshot {
@@ -325,6 +357,7 @@ impl UpdateManager {
                 },
                 pending: None,
                 bytes: None,
+                preference_problem,
             }),
             preferences,
         }
@@ -336,8 +369,15 @@ impl UpdateManager {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// The page's state; a saved channel that could not be used is its error until a channel
+    /// is chosen, unless a failure of the update itself is already.
     fn snapshot(&self) -> UpdateSnapshot {
-        self.state().snapshot.clone()
+        let state = self.state();
+        let mut snapshot = state.snapshot.clone();
+        if snapshot.error.is_none() {
+            snapshot.error = state.preference_problem.clone();
+        }
+        snapshot
     }
 
     fn set_channel(&self, channel: Channel) -> Result<(), String> {
@@ -360,6 +400,7 @@ impl UpdateManager {
         )
         .and_then(|()| std::fs::rename(&temporary, &self.preferences))
         .map_err(|e| e.to_string())?;
+        state.preference_problem = None;
         state.snapshot.channel = channel;
         state.snapshot.phase = "idle";
         state.snapshot.available = None;
@@ -781,6 +822,64 @@ mod tests {
         assert_eq!(manager.snapshot().phase, "error");
         assert!(manager.begin_check(), "a failed check must be retryable");
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// A saved choice that is not there is no problem and takes the version's own channel; one
+    /// that is there and cannot be read or parsed is said to the page, which a user on Alpha
+    /// whose file was damaged was not told of when the app turned to Stable.
+    #[test]
+    fn a_saved_channel_that_cannot_be_read_is_told_apart_from_one_that_is_not_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let absent = UpdateManager::new("3.0.0-alpha.35", dir.path().join("absent.json"));
+        assert_eq!(absent.snapshot().channel, Channel::Alpha);
+        assert_eq!(absent.snapshot().error, None, "a first run has no problem");
+
+        let saved = dir.path().join("saved.json");
+        std::fs::write(&saved, br#""stable""#).unwrap();
+        let valid = UpdateManager::new("3.0.0-alpha.35", saved);
+        assert_eq!(valid.snapshot().channel, Channel::Stable);
+        assert_eq!(valid.snapshot().error, None);
+
+        let damaged = dir.path().join("damaged.json");
+        std::fs::write(&damaged, br#""sta"#).unwrap();
+        let unreadable = dir.path().join("a-folder.json");
+        std::fs::create_dir(&unreadable).unwrap();
+        for (what, path) in [("damaged", damaged), ("unreadable", unreadable)] {
+            let manager = UpdateManager::new("3.0.0-alpha.35", path.clone());
+            let snapshot = manager.snapshot();
+            assert_eq!(
+                snapshot.channel,
+                Channel::Alpha,
+                "{what}: the default is used"
+            );
+            let said = snapshot.error.unwrap_or_default();
+            assert!(
+                said.contains("saved update channel") && said.contains("Alpha"),
+                "{what}: the user is told, got {said:?}"
+            );
+            assert!(manager.begin_check());
+            assert!(
+                manager.snapshot().error.is_some(),
+                "{what}: a check does not take the problem away"
+            );
+        }
+    }
+
+    /// Choosing a channel replaces the damaged file, and with it the problem.
+    #[test]
+    fn choosing_a_channel_replaces_a_damaged_preference_and_its_problem() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("updates.json");
+        std::fs::write(&path, b"{").unwrap();
+        let manager = UpdateManager::new("3.0.0-alpha.35", path.clone());
+        assert!(manager.snapshot().error.is_some());
+        manager.set_channel(Channel::Alpha).unwrap();
+        assert_eq!(manager.snapshot().error, None);
+        let again = UpdateManager::new("3.0.0-alpha.35", path);
+        assert_eq!(
+            (again.snapshot().channel, again.snapshot().error),
+            (Channel::Alpha, None)
+        );
     }
 
     #[test]

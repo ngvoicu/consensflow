@@ -109,12 +109,10 @@ pub(super) fn describe_check_error(channel: Channel, error: tauri_plugin_updater
 
 /// What a check says of a channel's feed that is not there.
 pub(crate) fn feed_unavailable(channel: Channel) -> String {
-    let label = if channel == Channel::Alpha {
-        "Alpha"
-    } else {
-        "Stable"
-    };
-    format!("The {label} update feed is unavailable. Please try again later.")
+    format!(
+        "The {} update feed is unavailable. Please try again later.",
+        channel.label()
+    )
 }
 
 pub(super) fn test_update_url(
