@@ -540,7 +540,7 @@ meant = "a_feed_alpha_that_answers_no_release_is_an_outage_not_a_version_to_chan
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/feed.rs"
 find = "not a version to change; {}"
 replace = "set a later version; {}"
 
