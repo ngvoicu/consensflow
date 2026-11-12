@@ -43,6 +43,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -159,12 +160,18 @@ impl Queues {
         self.root.join(machine)
     }
 
-    /// How many runs are in `machine`'s queue now (alive), the one that goes on there included.
+    /// How many runs are in `machine`'s queue now (alive), the one that goes on there included; a
+    /// queue that cannot be read says so.
+    pub fn queued(&self, machine: &str, now_ms: i64) -> Result<usize, Error> {
+        let folder = self.folder(machine);
+        let listed = tickets(&folder).map_err(|cause| listing_failed(&folder, cause))?;
+        Ok(listed.iter().filter(|ticket| ticket.alive(now_ms)).count())
+    }
+
+    /// [`Queues::queued`] for choosing a machine, where a queue that cannot be read counts as
+    /// empty: a run sent there waits in [`wait`], which does not go on without reading it.
     pub fn depth(&self, machine: &str, now_ms: i64) -> usize {
-        tickets(&self.folder(machine))
-            .into_iter()
-            .filter(|ticket| ticket.alive(now_ms))
-            .count()
+        self.queued(machine, now_ms).unwrap_or(0)
     }
 
     /// Takes a ticket for `machine` for the run `who`, which came `now_ms`.
@@ -173,7 +180,7 @@ impl Queues {
         fs::create_dir_all(&folder)?;
         // Named for the moment it came, and after the newest run that is beating: a clock set back
         // since must not put a run that comes now ahead of the runs that were there (T-777, P3-5).
-        let newest = tickets(&folder)
+        let newest = tickets(&folder)?
             .iter()
             .filter(|ticket| ticket.alive(now_ms))
             .map(|ticket| ticket.came_ms)
@@ -198,19 +205,23 @@ impl Queues {
         };
         touch(&path, &text, now_ms)?;
         let (stop, stopped) = mpsc::channel::<()>();
+        let failed = Arc::new(Mutex::new(None));
         let beating = {
-            let (path, text, beat) = (path.clone(), text.clone(), self.beat);
+            let (path, text, beat, failed) =
+                (path.clone(), text.clone(), self.beat, Arc::clone(&failed));
             thread::spawn(move || {
                 while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(beat) {
                     // A ticket that is gone (taken for a dead one while this Mac slept) is made
                     // again under its name, which is its place.
-                    let _ = touch(&path, &text, SystemClock.now_ms());
+                    let beaten = touch(&path, &text, SystemClock.now_ms());
+                    *failed.lock().unwrap_or_else(PoisonError::into_inner) = beaten.err();
                 }
             })
         };
         Ok(Ticket {
             path,
             text,
+            failed,
             stop: Some(stop),
             beating: Some(beating),
         })
@@ -253,36 +264,52 @@ impl Entry {
     }
 }
 
-/// The tickets in `folder`, in the order the runs came.
-fn tickets(folder: &Path) -> Vec<Entry> {
-    let Ok(listing) = fs::read_dir(folder) else {
-        return Vec::new();
+/// The tickets in `folder`, in the order the runs came. A folder that is not there holds none; a
+/// folder or a ticket that cannot be read is an error, for a run that took it for no one ahead
+/// would go out of its turn.
+fn tickets(folder: &Path) -> io::Result<Vec<Entry>> {
+    let listing = match fs::read_dir(folder) {
+        Ok(listing) => listing,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
     };
-    let mut found: Vec<Entry> = listing
-        .filter_map(Result::ok)
-        .filter_map(|file| {
-            let name = file.file_name().to_string_lossy().into_owned();
-            let came_ms = name
-                .strip_suffix(".ticket")?
-                .split('-')
-                .next()?
-                .parse()
-                .ok()?;
-            let touched_ms = file
-                .metadata()
-                .and_then(|meta| meta.modified())
-                .ok()
-                .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-                .and_then(|since| i64::try_from(since.as_millis()).ok());
-            Some(Entry {
-                path: file.path(),
-                came_ms,
-                touched_ms,
-            })
-        })
-        .collect();
+    let mut found = Vec::new();
+    for file in listing {
+        let file = file?;
+        let name = file.file_name().to_string_lossy().into_owned();
+        let Some(came_ms) = name
+            .strip_suffix(".ticket")
+            .and_then(|stem| stem.split('-').next())
+            .and_then(|came| came.parse().ok())
+        else {
+            continue;
+        };
+        // A ticket taken away between the listing and the look at it is gone, not unreadable.
+        let modified = match file.metadata().and_then(|meta| meta.modified()) {
+            Ok(modified) => modified,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        let touched_ms = modified
+            .duration_since(UNIX_EPOCH)
+            .ok()
+            .and_then(|since| i64::try_from(since.as_millis()).ok());
+        found.push(Entry {
+            path: file.path(),
+            came_ms,
+            touched_ms,
+        });
+    }
     found.sort_by(|a, b| a.path.file_name().cmp(&b.path.file_name()));
-    found
+    Ok(found)
+}
+
+fn listing_failed(folder: &Path, cause: io::Error) -> Error {
+    Error::Files {
+        what: "read the queue in",
+        path: folder.to_path_buf(),
+        cause,
+    }
 }
 
 /// A run's place in a machine's queue: its file, kept alive by a thread that touches it, and
@@ -290,6 +317,8 @@ fn tickets(folder: &Path) -> Vec<Entry> {
 pub struct Ticket {
     path: PathBuf,
     text: String,
+    /// What the last beat could not do, if it failed.
+    failed: Arc<Mutex<Option<io::Error>>>,
     stop: Option<mpsc::Sender<()>>,
     beating: Option<JoinHandle<()>>,
 }
@@ -297,15 +326,30 @@ pub struct Ticket {
 impl Ticket {
     /// The live runs that came before this one, oldest first. A ticket not touched for
     /// [`DEAD_AFTER_MS`] is a run that was killed, and is taken away; this one's own, if it was
-    /// taken so, is made again.
-    pub fn ahead(&self, now_ms: i64) -> Vec<Ahead> {
-        let _ = touch_if_gone(&self.path, &self.text, now_ms);
+    /// taken so, is made again. A ticket that cannot be kept alive, made again or listed with the
+    /// others is an error: the run would otherwise be placed by what it could not read.
+    pub fn ahead(&self, now_ms: i64) -> Result<Vec<Ahead>, Error> {
+        let kept = |what, cause| Error::Files {
+            what,
+            path: self.path.clone(),
+            cause,
+        };
+        if let Some(cause) = self
+            .failed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        {
+            return Err(kept("keep alive the queue ticket", cause));
+        }
+        touch_if_gone(&self.path, &self.text, now_ms)
+            .map_err(|cause| kept("make again the queue ticket", cause))?;
         let Some(folder) = self.path.parent() else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
         let mine = self.path.file_name();
         let mut ahead = Vec::new();
-        for entry in tickets(folder) {
+        for entry in tickets(folder).map_err(|cause| listing_failed(folder, cause))? {
             if entry.path.file_name() >= mine {
                 break;
             }
@@ -318,7 +362,7 @@ impl Ticket {
                 let _ = fs::remove_file(&entry.path);
             }
         }
-        ahead
+        Ok(ahead)
     }
 }
 
@@ -438,7 +482,10 @@ pub fn wait(
     let began = pace.now_ms();
     let limit_ms = i64::from(minutes) * 60_000;
     if minutes == 0 {
-        let queued = queues.map_or(0, |queues| queues.depth(machine, began));
+        let queued = match queues {
+            Some(queues) => queues.queued(machine, began)?,
+            None => 0,
+        };
         if queued > 0 {
             return Ok(Waited::Refused(format!(
                 "{machine} is busy: {}",
@@ -466,10 +513,10 @@ pub fn wait(
     let mut looked = false;
     loop {
         let now = pace.now_ms();
-        let ahead = ticket
-            .as_ref()
-            .map(|ticket| ticket.ahead(now))
-            .unwrap_or_default();
+        let ahead = match &ticket {
+            Some(ticket) => ticket.ahead(now)?,
+            None => Vec::new(),
+        };
         // What stops the run (the same words while it is the same), how long the run ahead has
         // been there, if one is, and the machine's error, if it could not be read.
         let (blocked, elder_for, unread, pause) = if let Some(first) = ahead.first() {

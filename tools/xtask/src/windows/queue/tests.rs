@@ -27,9 +27,9 @@ fn runs_are_ahead_of_each_other_in_the_order_they_came() {
     let second = queues.join("zeewin2", &who("b"), DAY + 5_000).unwrap();
     let third = queues.join("zeewin2", &who("c"), DAY + 6_000).unwrap();
     let now = DAY + 10_000;
-    assert_eq!(first.ahead(now), []);
+    assert_eq!(first.ahead(now).unwrap(), []);
     assert_eq!(
-        second.ahead(now),
+        second.ahead(now).unwrap(),
         [Ahead {
             who: who("a"),
             since_ms: 10_000
@@ -37,13 +37,14 @@ fn runs_are_ahead_of_each_other_in_the_order_they_came() {
     );
     let behind: Vec<String> = third
         .ahead(now)
+        .unwrap()
         .into_iter()
         .map(|run| run.who.tree)
         .collect();
     assert_eq!(behind, ["a", "b"]);
     // Another machine's queue is its own.
     let other = queues.join("zeewin", &who("d"), DAY + 1).unwrap();
-    assert_eq!(other.ahead(now), []);
+    assert_eq!(other.ahead(now).unwrap(), []);
     assert_eq!(queues.depth("zeewin2", now), 3);
     assert_eq!(queues.depth("zeewin", now), 1);
     assert_eq!(queues.depth("nowhere", now), 0);
@@ -67,7 +68,7 @@ fn a_ticket_nobody_touches_is_a_run_that_was_killed_and_holds_no_one_back() {
         .unwrap();
     // The first was touched at DAY and the next run looks 31 s later: six beats gone.
     let later = DAY + 31_000;
-    assert!(waiting.ahead(later).is_empty());
+    assert!(waiting.ahead(later).unwrap().is_empty());
     // The killed run's ticket was taken away by the look that found it dead; the waiting run's
     // own, touched a second later, is within its time.
     assert_eq!(fs::read_dir(dir.path().join("zeewin2")).unwrap().count(), 1);
@@ -87,7 +88,7 @@ fn a_ticket_taken_away_while_its_run_lives_is_made_again_in_its_place() {
         .max()
         .unwrap();
     fs::remove_file(&mine).unwrap();
-    let ahead = second.ahead(DAY + 2_000);
+    let ahead = second.ahead(DAY + 2_000).unwrap();
     assert_eq!(ahead.len(), 1, "a still goes first");
     assert!(mine.exists(), "the second's ticket is back under its name");
     drop(first);
@@ -503,14 +504,15 @@ fn a_run_that_comes_after_the_clock_was_set_back_is_still_behind_the_runs_that_w
     let second = queues.join("zeewin2", &who("b"), back + 4_000).unwrap();
     let ahead: Vec<String> = second
         .ahead(back + 4_000)
+        .unwrap()
         .into_iter()
         .map(|run| run.who.tree)
         .collect();
     assert_eq!(ahead, ["a"]);
-    assert!(first.ahead(back + 4_000).is_empty());
+    assert!(first.ahead(back + 4_000).unwrap().is_empty());
     // Two runs of one process in one millisecond are told apart as before.
     let third = queues.join("zeewin2", &who("c"), back + 4_000).unwrap();
-    assert_eq!(third.ahead(back + 4_000).len(), 2);
+    assert_eq!(third.ahead(back + 4_000).unwrap().len(), 2);
 }
 
 /// What a run killed before the clock was set back leaves is a ticket touched in the future: no
@@ -523,7 +525,7 @@ fn a_ticket_touched_in_the_future_is_a_run_killed_before_the_clock_was_set_back(
     let back = DAY - 300_000;
     assert_eq!(queues.depth("zeewin2", back), 0);
     let waiting = queues.join("zeewin2", &who("waiting"), back).unwrap();
-    assert!(waiting.ahead(back + 1_000).is_empty());
+    assert!(waiting.ahead(back + 1_000).unwrap().is_empty());
     assert_eq!(queues.depth("zeewin2", back + 1_000), 1);
     // Two processes' clocks a few milliseconds apart: not a step.
     let (_other, queues) = self::queues();
@@ -590,4 +592,130 @@ fn a_run_ahead_of_the_queue_looks_at_a_busy_machine_every_half_minute_then_every
     );
     assert_eq!(ended, r#"Go(["on it"], ticket true)"#);
     assert_eq!(pace.pauses, [30_000, 60_000, 60_000, 60_000]);
+}
+
+/// A wait behind a live elder (the machine, busy, is asked once the elder is taken for dead), with `on_pause(n)` run at the `n`th pause; how it ended, in words.
+fn waited_behind_an_elder(
+    queues: &Queues,
+    minutes: u32,
+    on_pause: &mut dyn FnMut(usize),
+) -> String {
+    let _elder = queues.join("zeewin2", &who("elder"), DAY - 1_000).unwrap();
+    let mut slow = Slow::at(DAY);
+    let mut paced = Exiting {
+        slow: &mut slow,
+        on_pause,
+    };
+    let came = wait(
+        Some(queues),
+        "zeewin2",
+        &who("mine"),
+        minutes,
+        &mut || busy("held"),
+        &mut paced,
+        &mut |_| Ok(()),
+    );
+    match came {
+        Ok(Waited::Go(..)) => "Go".to_owned(),
+        Ok(Waited::Refused(why)) => format!("Refused({why})"),
+        Ok(Waited::Stopped) => "Stopped".to_owned(),
+        Err(error) => format!("Error({error})"),
+    }
+}
+
+/// A run's own ticket is the last in the folder: the one that sorts after the elder's.
+fn own_ticket(dir: &Path) -> PathBuf {
+    let mut names: Vec<_> = fs::read_dir(dir.join("zeewin2"))
+        .unwrap()
+        .map(|file| file.unwrap().path())
+        .collect();
+    names.sort();
+    names.pop().unwrap()
+}
+
+/// Whether a folder can be made unreadable here: a mode that holds on a Mac and not on Windows.
+#[cfg(unix)]
+fn deny(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+}
+
+#[test]
+fn a_ticket_that_cannot_be_kept_alive_ends_the_wait_with_that_failure_and_not_a_place_lost_unsaid()
+{
+    let dir = tempfile::tempdir().unwrap();
+    let queues = Queues::at(dir.path(), Duration::from_millis(20));
+    let ended = waited_behind_an_elder(&queues, 60, &mut |n| {
+        if n == 1 {
+            // The run's ticket becomes a folder: the beats that follow cannot touch it.
+            let mine = own_ticket(dir.path());
+            fs::remove_file(&mine).unwrap();
+            fs::create_dir(&mine).unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+        }
+    });
+    assert!(
+        ended.starts_with("Error(could not keep alive the queue ticket "),
+        "{ended}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_ticket_that_cannot_be_made_again_ends_the_wait_with_that_failure() {
+    let (dir, queues) = queues();
+    let folder = dir.path().join("zeewin2");
+    let ended = waited_behind_an_elder(&queues, 60, &mut |n| {
+        if n == 1 {
+            // Taken away, and the folder closed to new files.
+            fs::remove_file(own_ticket(dir.path())).unwrap();
+            deny(&folder, 0o555);
+        }
+    });
+    deny(&folder, 0o755);
+    assert!(
+        ended.starts_with("Error(could not make again the queue ticket "),
+        "{ended}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_queue_that_cannot_be_read_refuses_a_run_told_not_to_wait_and_does_not_let_it_go() {
+    let (dir, queues) = queues();
+    let _elder = queues.join("zeewin2", &who("elder"), DAY).unwrap();
+    let folder = dir.path().join("zeewin2");
+    deny(&folder, 0o000);
+    let mut pace = Slow::at(DAY);
+    let (ended, _) = waited(Some(&queues), 0, &mut [go()].into_iter(), &mut pace);
+    deny(&folder, 0o755);
+    assert!(
+        ended.starts_with("Error(could not read the queue in "),
+        "{ended}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_queue_that_cannot_be_read_while_waiting_ends_the_wait_with_that_failure() {
+    let (dir, queues) = queues();
+    let folder = dir.path().join("zeewin2");
+    let ended = waited_behind_an_elder(&queues, 60, &mut |n| {
+        if n == 1 {
+            // Its own ticket is there and can be touched; the listing is what is closed.
+            deny(&folder, 0o311);
+        }
+    });
+    deny(&folder, 0o755);
+    assert!(
+        ended.starts_with("Error(could not read the queue in "),
+        "{ended}"
+    );
+}
+
+#[test]
+fn a_queue_folder_that_is_not_there_holds_no_one_and_is_no_failure() {
+    let (dir, queues) = queues();
+    assert_eq!(queues.depth("zeewin2", DAY), 0);
+    assert!(!dir.path().join("zeewin2").exists());
 }
