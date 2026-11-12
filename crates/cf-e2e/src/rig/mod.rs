@@ -676,6 +676,26 @@ impl Rig {
         window_process_in(&self.shared.seen().roots, pane)
     }
 
+    /// Every window the pane host opened a process for, as it answered each `pane.open`, whoever
+    /// asked it (the daemon, or the case's own): its id and which process its program is, read
+    /// then and kept ([`Rig::window_process`]); the last answer where an id was opened more than
+    /// once. In the order of the ids' first answers; a window the host named no process of is
+    /// not among them.
+    pub fn window_roots(&self) -> Vec<(String, Identity)> {
+        let seen = self.shared.seen();
+        let mut found: Vec<(String, Identity)> = Vec::new();
+        for root in &seen.roots {
+            let (Some(id), Some(identity)) = (root.id.as_str(), root.identity) else {
+                continue;
+            };
+            match found.iter_mut().find(|(known, _)| known == id) {
+                Some(known) => known.1 = identity,
+                None => found.push((id.to_owned(), identity)),
+            }
+        }
+        found
+    }
+
     /// Every `pane.exit` the pane host told so far, in order: which window
     /// ended (`id`, `generation`), how (`exitCode`, `signal`) and the last lines
     /// its screen showed (`tail`).

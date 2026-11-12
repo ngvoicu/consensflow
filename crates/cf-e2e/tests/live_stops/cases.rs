@@ -262,7 +262,10 @@ mod tests {
     fn the_command_case_asks_the_member_to_run_the_long_command_and_stop() {
         assert_eq!(
             command_brief(),
-            "Run exactly this one shell command, then stop: node -e \"setTimeout(() => {}, 300000)\" cf-stops-live-long-command"
+            format!(
+                "Run exactly this one shell command, then stop: node -e \"setTimeout(() => {{}}, 300000)\" {} cf-stops-live-long-command",
+                cf_e2e::live::members::run_word()
+            )
         );
     }
 }

@@ -91,7 +91,7 @@ use std::collections::BTreeMap;
 
 use cf_e2e::live::claude::{self, Entry};
 use cf_e2e::live::mcp_server::{Runtime, Server};
-use cf_e2e::live::members::{Machine, ThisMachine};
+use cf_e2e::live::members::{Machine, ThisMachine, Watch};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window};
 use cf_e2e::live::{self, ask, Harness, Log};
@@ -1051,8 +1051,25 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
             .map_err(|error| Error::Daemon(format!("the fixture was not written: {error}")))?;
         log.say(format!("the fixture, {} records: {file}", lines.len()));
     }
+    // What the window runs while it is open is taken now, and what is left of it once it is
+    // closed is found, ended by which process it is and said: a Monitor armed on
+    // `tail -f … | grep tick` outlived its Claude Code by seventeen hours (T-491), and the rig
+    // notes only what its stand-ins ran, so nothing looked.
+    let watch = Watch::of_rig(&rig, Some(window.workspace()));
     drop(window);
     rig.close()?;
+    let swept = watch.sweep();
+    log.say(swept.said());
+    checks.push(Check::new(
+        "claude",
+        "left-nothing",
+        swept.is_clean() && swept.problems().is_empty(),
+        if swept.is_clean() {
+            "the closed window left nothing running: the thirteen monitors' commands ended with it or by their own time".to_owned()
+        } else {
+            swept.said()
+        },
+    ));
     let checks = host_can_answer(checks, cfg!(unix));
     report::conclude(
         &log,

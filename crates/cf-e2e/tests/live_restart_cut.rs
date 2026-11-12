@@ -1080,9 +1080,10 @@ mod tests {
     fn the_human_asks_the_window_to_run_the_long_command_and_to_wait_for_it() {
         let ask = the_ask();
         assert!(ask.starts_with("Run this exact command with your shell tool, wait for it to finish, and then reply with exactly one line: FINISHED\n"));
-        assert!(
-            ask.ends_with("node -e \"setTimeout(() => {}, 300000)\" cf-restart-cut-long-command")
-        );
+        assert!(ask.ends_with(&format!(
+            "node -e \"setTimeout(() => {{}}, 300000)\" {} cf-restart-cut-long-command",
+            cf_e2e::live::members::run_word()
+        )));
     }
 
     #[test]

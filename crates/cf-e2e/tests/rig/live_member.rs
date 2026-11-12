@@ -559,6 +559,46 @@ fn the_check_ends_the_command_its_window_runs_and_nothing_outside_the_window_tha
     Ok(())
 }
 
+/// A window the case opened itself (not the daemon: the rig has no request of its) is watched by
+/// the folder the case gives, from the process the pane host named, and what its tree ran is seen
+/// while it runs: what the live cases that open windows do to find what a closed window left
+/// (`Watch::of_rig`).
+#[test]
+fn a_window_the_case_opened_is_watched_with_what_its_tree_runs_and_found_clean_once_it_is_closed(
+) -> Outcome {
+    use cf_e2e::live::members::Watch;
+
+    ask::prepare()?;
+    let rig = Rig::start(devin_config(FAKE_DEVIN))?;
+    let home = rig.var("HOME").unwrap_or_default().to_owned();
+    let install = Installed::at(Harness::Devin, FAKE_DEVIN, &home);
+    let window = Open::new(&rig, &install, "work", "work-devin")
+        .agent(json!({ "kind": "devin", "model": "fake" }))
+        .member(Member::new("worker", "# ConsensFlow worker\n").first_message(
+            "[ConsensFlow m-1 · T-1 · task from @chief]\nBACKGROUND 614 Reply with exactly: LEFT_IT",
+        ))
+        .open(&Log::new("live member"))?;
+    // Looked at until the window's command is in its tree: the watch keeps what it saw.
+    let mut watch = Watch::of_rig(&rig, Some(window.workspace()));
+    let saw = until(secs(30), Duration::from_millis(200), || {
+        watch.look_now();
+        (watch.seen() >= 2).then_some(())
+    });
+    assert!(
+        saw.is_some(),
+        "the window's tree was never seen to run its command"
+    );
+    assert_eq!(watch.windows(), 1, "the case's own window is watched");
+    drop(window);
+    rig.close()?;
+    let swept = watch.sweep();
+    assert!(swept.problems().is_empty(), "{}", swept.said());
+    // Whatever the window's close did not end is ended and said, and the watch is of the one window.
+    assert_eq!(swept.watched.0, 1, "{}", swept.said());
+    assert!(swept.watched.1 >= 2, "{}", swept.said());
+    Ok(())
+}
+
 /// The folder Devin keeps its config in, in the home the rig gives its windows.
 fn config_folder(rig: &Rig, home: &str) -> PathBuf {
     let base = if cfg!(windows) {

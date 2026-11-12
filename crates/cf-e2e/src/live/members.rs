@@ -33,6 +33,7 @@ mod closing;
 mod command;
 mod descent;
 mod door;
+mod left;
 mod plan;
 #[cfg(test)]
 mod tests;
@@ -60,13 +61,14 @@ pub use board::{
     last_result, notes_of_work, session_of, MemberWindow, Paused,
 };
 pub use command::{
-    quiet_command, runs_command, shown, ticking_command, ticks_in, LongCommand, Moving,
+    quiet_command, run_word, runs_command, shown, ticking_command, ticks_in, LongCommand, Moving,
 };
 pub use descent::{
     descending_from, end_chosen, holding, orphans_in_folder, pause_chosen, with_cygwin_parents,
     working_folder, Ended, Identity, Machine, Pause, Running, ThisMachine,
 };
 pub use door::{judge, moves, ms_of, waited_then_worked, Finding, Judged, Seen};
+pub use left::{Swept, Watch};
 pub use plan::{
     member, member_as, question_brief, stand_in_chief, stand_in_question_brief, stand_in_worker,
     tier_flag, Plan, BENCH_BRIEF, BRIEF, STAND_IN_WORKER,
@@ -584,14 +586,26 @@ impl Members {
     /// Ends the rig: the daemon, the pane host and their windows, and the
     /// records of the stand-ins. The harnesses' windows are given the time the
     /// host gives them to leave, and a rig that does not end says which of its
-    /// processes were left ([`closing`]).
+    /// processes were left ([`closing`]). What the windows left running once they
+    /// were closed is found, ended by which process each is and said ([`Watch`]); a
+    /// process that could not be ended fails the close.
     pub fn close(self) -> Result {
         self.close_within(closing::EXIT)
     }
 
     /// [`Members::close`], with `within` for the daemon and the pane host to end.
     pub fn close_within(self, within: Duration) -> Result {
-        closing::end_within(self.rig, within)
+        let (closed, swept) = self.close_and_sweep(within);
+        swept_into(closed, &swept)
+    }
+
+    /// [`Members::close_within`], and what the windows left running once they were closed, found,
+    /// ended and told, as a [`Swept`]: the close's own result, which does not hold what the sweep
+    /// could not end.
+    pub fn close_and_sweep(self, within: Duration) -> (Result, Swept) {
+        let watch = Watch::of_rig(&self.rig, Some(&self.folder));
+        let closed = closing::end_within(self.rig, within);
+        (closed, watch.sweep())
     }
 
     /// [`Members::close_within`], with `within` counted from the moment `happened` says an
@@ -603,7 +617,26 @@ impl Members {
         happened: impl Fn(&Rig) -> bool,
         within: Duration,
     ) -> Result {
-        closing::end_after(self.rig, what, happened, within)
+        let watch = Watch::of_rig(&self.rig, Some(&self.folder));
+        let closed = closing::end_after(self.rig, what, happened, within);
+        swept_into(closed, &watch.sweep())
+    }
+}
+
+/// The result of a close (`closed`) and what its sweep found ([`Swept`]): what it found is said on
+/// the error output, and what it could not end fails the close, as one that did not end does.
+fn swept_into(closed: Result, swept: &Swept) -> Result {
+    use std::io::Write;
+
+    if !swept.is_clean() {
+        let _ = writeln!(std::io::stderr(), "live kit: {}", swept.said());
+    }
+    // What the machine could not say is said, and fails nothing: a look that failed is no process
+    // left.
+    let problems = swept.ended.problems();
+    match closed {
+        Ok(()) if !problems.is_empty() => Err(Error::Daemon(problems.join("; "))),
+        other => other,
     }
 }
 

@@ -788,12 +788,10 @@ fn what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_
             .map(|one| one.identity.pid)
             .collect()
     };
-    let mut chosen = Chosen {
-        strays_matter: true,
-        ..Chosen::default()
-    };
+    let mut chosen = Chosen::default();
     chosen.choose(&all, Some(window), &[], "sleep 4711");
     assert_eq!(chosen.window_began, Some(10), "the window's start is kept");
+    assert_eq!(chosen.window, Some(window), "so is the window's process");
     // The first look's, whatever a later one says of the number.
     chosen.choose(
         &all,
@@ -816,25 +814,19 @@ fn what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_
     let again = chosen.take_orphans(&all, folder, "sleep 4711", folder_of);
     assert_eq!(pids(&chosen), [300]);
     assert_eq!(again.len(), 1);
-    // The other is not ended, and is a problem of the run: it may still run.
-    assert_eq!(
-        chosen.problems(&Ended::default()),
-        ["the command escaped the window and cannot be proved the run's own (only an orphan that began after the worker's window and runs in the run's folder is), so it was not ended and may still run: 301 sleep 4711; 303 sleep 4711"]
-    );
-    // The stand-in's strays are other rigs' jobs, which tell their own by their files: they
-    // are looked at and are no problem of the run.
-    chosen.strays_matter = false;
+    // The others are not ended, and are none of the run's either: they may be another run's,
+    // which holds the same words, and a run that fails on them fails on a stranger's.
+    assert_eq!(chosen.unproven, ["301 sleep 4711", "303 sleep 4711"]);
     assert!(chosen.problems(&Ended::default()).is_empty());
     // A run that never saw its window's process proves nothing its own.
-    let mut blind = Chosen {
-        strays_matter: true,
-        ..Chosen::default()
-    };
+    let mut blind = Chosen::default();
     blind.take_orphans(&all, folder, "sleep 4711", folder_of);
     assert!(blind.processes.is_empty());
-    assert_eq!(blind.problems(&Ended::default()).len(), 1);
-    assert!(blind.problems(&Ended::default())[0]
-        .ends_with("300 sleep 4711; 301 sleep 4711; 303 sleep 4711"));
+    assert_eq!(
+        blind.unproven,
+        ["300 sleep 4711", "301 sleep 4711", "303 sleep 4711"]
+    );
+    assert!(blind.problems(&Ended::default()).is_empty());
 }
 
 #[cfg(target_os = "macos")]
@@ -899,10 +891,125 @@ fn the_run_looks_for_its_own_orphans_only_where_it_expects_the_limit_and_somethi
     assert!(!looks_for_its_own_orphans(Expect::Ended, &ran_on));
 }
 
+/// The processes of the machine that hold the command's words (`sleep 4711`, or the stand-in's
+/// `--background-job 4711`) are of every tree's run that uses them, and a case that took them
+/// all for its own failed a gate (T-592: another tree's `--background-job 4711`, pid 1832). A real
+/// one, started here in a folder that is not the case's and by no window of it, is none of what
+/// escaped, whichever way the run's own are told.
+#[cfg(unix)]
 #[test]
-fn a_stray_orphan_fails_the_run_of_a_harness_and_not_the_rigs_stand_in() {
-    for harness in Harness::ALL {
-        assert!(strays_matter(Who::Harness(harness)), "{harness:?}");
+fn a_process_of_another_run_that_holds_the_commands_words_is_not_among_what_escaped() {
+    let elsewhere = tempfile::tempdir().unwrap();
+    let mut decoy = cf_e2e::process::Run::new("sleep")
+        .arg("4711")
+        .cwd(elsewhere.path())
+        .inheriting_env()
+        .spawn()
+        .unwrap();
+    let pid = decoy.id();
+    let began = ThisMachine
+        .identity(std::process::id())
+        .unwrap()
+        .expect("this process is there")
+        .started;
+    let folder = tempfile::tempdir().unwrap();
+    // The run's window began before the decoy did, and has a folder that is another.
+    let chosen = Chosen {
+        window_began: Some(began),
+        ..Chosen::default()
+    };
+    let mut found = Vec::new();
+    let mut seen = false;
+    for _ in 0..50 {
+        // Whether the decoy is among the processes at all, so that a look that never reads it is
+        // not what passes.
+        seen = ThisMachine
+            .processes()
+            .unwrap()
+            .iter()
+            .any(|process| process.identity.pid == pid);
+        found = on_the_machine(|all| {
+            chosen.of_the_run(
+                all,
+                (folder.path(), "sleep 4711", Some("/the-rigs-own/jobs/")),
+                working_folder,
+            )
+        });
+        if seen {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
     }
-    assert!(!strays_matter(Who::StandIn));
+    decoy.kill();
+    assert!(
+        seen,
+        "the decoy {pid} was never listed: the test proves nothing"
+    );
+    assert!(
+        found.is_empty(),
+        "the decoy {pid} of another folder is taken for what the case's window left: {found:#?}"
+    );
+}
+
+#[test]
+fn what_escaped_is_what_the_window_held_an_orphan_of_its_folder_since_it_began_and_what_holds_the_rigs_own_folder(
+) {
+    let folder = Path::new("/runs/leaving-claude");
+    let window = Identity {
+        pid: 100,
+        started: 10,
+    };
+    let jobs = "/rig-7/jobs/";
+    let all = vec![
+        running(100, 10, 1, "claude"),
+        // The window's own: the shell its tool ran, and the command.
+        running(101, 11, 100, "/bin/sh -c sleep 4711"),
+        running(102, 12, 101, "sleep 4711"),
+        // The job the agent detached: an orphan, in the run's folder, begun after the window.
+        running(300, 20, 1, "sleep 4711"),
+        // Another tree's run of the same command: a folder of its own, and one that began
+        // before the window.
+        running(301, 21, 1, "sleep 4711"),
+        running(302, 5, 1, "sleep 4711"),
+        // A child of a shell of another tree.
+        running(303, 22, 50, "sleep 4711"),
+        // The stand-in's jobs: this rig's, and another tree's with the same number.
+        running(
+            400,
+            23,
+            1,
+            "fake-agent --background-job 4711 /rig-7/jobs/job-100-1",
+        ),
+        running(
+            401,
+            24,
+            1,
+            "fake-agent --background-job 4711 /rig-8/jobs/job-9-1",
+        ),
+    ];
+    let folder_of = |pid: u32| match pid {
+        300 | 302 => Some(folder.to_path_buf()),
+        301 => Some(PathBuf::from("/elsewhere")),
+        _ => None,
+    };
+    let mut chosen = Chosen::default();
+    chosen.choose(&all, Some(window), &[], "sleep 4711");
+    let pids =
+        |found: Vec<Running>| -> Vec<u32> { found.iter().map(|one| one.identity.pid).collect() };
+    assert_eq!(
+        pids(chosen.of_the_run(&all, (folder, "sleep 4711", None), folder_of)),
+        [101, 102, 300]
+    );
+    assert_eq!(
+        pids(chosen.of_the_run(
+            &all,
+            (folder, "--background-job 4711", Some(jobs)),
+            folder_of
+        )),
+        [400]
+    );
+    // A run that never saw its window has none of it.
+    assert!(Chosen::default()
+        .of_the_run(&all, (folder, "sleep 4711", None), folder_of)
+        .is_empty());
 }

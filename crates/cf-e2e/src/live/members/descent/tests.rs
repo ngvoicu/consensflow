@@ -180,6 +180,46 @@ fn an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by
     );
 }
 
+#[test]
+fn a_monitor_whose_claude_was_killed_is_an_orphan_of_the_window_s_folder() {
+    // A Monitor armed on `tail -f out | grep --line-buffered tick` runs in a shell of the window;
+    // the window is killed, and the shell and its pipeline are left with no parent (T-491: 17 h).
+    // Asked for with no words (what a window left is whatever it ran), it is the run's own by the
+    // folder and the start, and the `tail` and the `grep` of the pipeline are found with it.
+    let folder = std::path::Path::new("/runs/monitor-wait");
+    let monitor = "zsh -c tail -f out | grep --line-buffered tick";
+    let all = [
+        running(300, 120, 1, monitor),
+        running(301, 121, 300, "tail -f out"),
+        running(302, 122, 300, "grep --line-buffered tick"),
+        // The same command in another folder: another tree's.
+        running(400, 123, 1, monitor),
+        running(401, 124, 400, "tail -f out"),
+        // The same in the window's folder, older than the window (at 100): an earlier run's.
+        running(500, 90, 1, monitor),
+        // With a parent: the window's tree finds it while the window runs.
+        running(600, 125, 50, monitor),
+    ];
+    let folder_of = |pid: u32| match pid {
+        300 | 500 | 600 => Some(folder.to_path_buf()),
+        400 => Some(std::path::PathBuf::from("/runs/another-tree")),
+        _ => None,
+    };
+    let mut pids: Vec<u32> = orphans_in_folder(&all, "", folder, 100, folder_of)
+        .iter()
+        .map(|one| one.identity.pid)
+        .collect();
+    pids.sort_unstable();
+    assert_eq!(pids, [300, 301, 302]);
+    // The `tail` and the `grep` descend from the orphan shell.
+    let under: Vec<u32> = descending_from(&all, all[0].identity)
+        .iter()
+        .map(|one| one.identity.pid)
+        .collect();
+    assert_eq!(under.len(), 2);
+    assert!(under.contains(&301) && under.contains(&302));
+}
+
 #[cfg(unix)]
 #[test]
 fn a_folder_is_compared_by_its_real_path_and_another_folder_is_another() {
@@ -841,6 +881,7 @@ const WINDOWS_AWARE: &[(&str, &str)] = &[
     ("src/live/members/descent.rs", "`ps` of the Unix side only (cfg(unix))"),
     ("src/live/members/descent/native/tests.rs", "a test with a Windows branch of its own"),
     ("src/live/members/descent/tests.rs", "this guard and its examples"),
+    ("src/live/members/left/tests.rs", "a test of the Unix side: a window's pipeline killed"),
     ("tests/live_absorbed.rs", "Claude Code's commands run in Git Bash on Windows"),
     ("tests/live_approval/flow.rs", "not a Windows case: an advisor's window on a Mac"),
     ("tests/live_approval/minute.rs", "not a Windows case: an advisor's window on a Mac"),
@@ -848,6 +889,7 @@ const WINDOWS_AWARE: &[(&str, &str)] = &[
     ("tests/live_devin_wire.rs", "`sleep 30` is PowerShell's Start-Sleep and Git Bash's own (not run in cmd.exe; Devin's shell on Windows is PowerShell)"),
     ("tests/live_finish/leaving.rs", "`ps` on the Unix side, PowerShell's table on Windows"),
     ("tests/live_finish/leaving/tests.rs", "tests of the Unix side"),
+    ("tests/live_finish/stand_in.rs", "a test of the Unix side: another run's orphan, started with /bin/sh"),
     ("tests/live_folder_trust.rs", "a server of a .mcp.json the dialog asks of, never started"),
     ("tests/live_keychain.rs", "a Mac case: macOS's keychain, read with `security`"),
     ("tests/live_monitor_wait.rs", "Claude Code's commands run in Git Bash on Windows"),
@@ -857,6 +899,7 @@ const WINDOWS_AWARE: &[(&str, &str)] = &[
     ("tests/live_parity/claude.rs", "macOS's keychain"),
     ("tests/live_parity/codex_devin.rs", "/bin/sh only in its cfg(unix) tests of Muse's hook"),
     ("tests/live_parity/terminal_env.rs", "a Mac case: refuses elsewhere"),
+    ("tests/live_stops/hook.rs", "tests of the Unix side: a decoy that holds the words"),
     ("tests/live_stops/midturn/tool.rs", "text of process lists the case reads"),
     ("tests/live_stops/slow.rs", "a Claude hook, which Claude Code runs in Git Bash on Windows"),
     ("tests/live_tell.rs", "`sleep 15` is PowerShell's Start-Sleep and Git Bash's own; Claude's Monitor runs in Git Bash"),

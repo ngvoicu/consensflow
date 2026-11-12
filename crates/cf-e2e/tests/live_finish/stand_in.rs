@@ -361,3 +361,93 @@ fn a_stand_in_that_leaves_a_job_running_and_answers_has_its_task_done_and_its_wi
     );
     Ok(())
 }
+
+/// What a case's close finds of what its windows left, with the stand-in that detaches its job
+/// from the shell that ran it, which leaves it with no parent in a session of its own that the
+/// window's close does not find (the shape of a Monitor's pipeline left by a Claude that ended:
+/// `CLAUDE-MONITOR-ENDS` leaves its job so too, but the window's own close after the result ends
+/// that one on a Mac, whether the case looks first or not, so it cannot be waited for): the case's
+/// close, which the live kit makes every case's, finds it by its folder and its start, ends it by
+/// which process it is, and says so; and what runs elsewhere with the same words is left alone.
+#[cfg(unix)]
+#[test]
+fn the_close_of_a_case_ends_what_its_window_left_and_says_so_and_leaves_another_runs_job() -> Result
+{
+    use std::time::Duration;
+
+    use cf_e2e::live::members::{find, Machine, Members, ThisMachine};
+    use cf_e2e::process::{is_alive, Run};
+
+    let log = Log::new("live finish test");
+    let plan = leaving::plan(Who::StandIn);
+    let mut members = Members::open(&plan, Path::new(FAKE_AGENT), &log)?;
+    members.add("worker", &[])?;
+    // Another run's job: parent init's, the same words, a folder of its own.
+    let elsewhere = tempfile::tempdir().unwrap();
+    let ran = Run::new("/bin/sh")
+        .args(["-c", "sleep 4713 > /dev/null 2>&1 &"])
+        .cwd(elsewhere.path())
+        .inheriting_env()
+        .run()?;
+    assert_eq!(ran.code, Some(0));
+    members.give("worker", &leaving::stand_in_brief(true))?;
+    // The job the agent detached, an orphan the host lists nowhere.
+    let job = find(
+        &log,
+        "the detached job to run with no parent",
+        Duration::from_secs(120),
+        Duration::from_millis(250),
+        || {
+            let Some(job) = members.rig().jobs("job").into_iter().next() else {
+                return Ok(None);
+            };
+            let all = ThisMachine.processes()?;
+            Ok(all
+                .iter()
+                .any(|one| one.identity.pid == job.pid() && one.ppid == 1)
+                .then_some(job.pid()))
+        },
+    )?
+    .expect("the stand-in detached its job");
+    assert!(is_alive(job));
+    let (closed, swept) = members.close_and_sweep(Duration::from_secs(20));
+    let found: Vec<u32> = swept.found.iter().map(|one| one.identity.pid).collect();
+    let said = swept.said();
+    // Another run's job is a process of the machine with the same words: it is not found.
+    let other: Vec<u32> = ThisMachine
+        .processes()?
+        .iter()
+        .filter(|one| one.command == "sleep 4713" && one.ppid == 1)
+        .map(|one| one.identity.pid)
+        .collect();
+    let gone = (0..100).any(|_| {
+        std::thread::sleep(Duration::from_millis(100));
+        !is_alive(job)
+    });
+    // Ended by which process it is, whatever else this test finds wrong.
+    let ended = ThisMachine.processes()?;
+    for one in ended
+        .iter()
+        .filter(|one| one.command == "sleep 4713" && one.ppid == 1)
+        .filter(|one| {
+            cf_e2e::live::members::working_folder(one.identity.pid)
+                == elsewhere.path().canonicalize().ok()
+        })
+    {
+        let _ = cf_e2e::live::members::end_chosen(std::slice::from_ref(one));
+    }
+    assert!(found.contains(&job), "the job {job} was not found: {said}");
+    assert!(
+        swept.ended.ended.iter().any(|one| one.identity.pid == job),
+        "{said}"
+    );
+    assert!(gone, "the job {job} is left running: {said}");
+    assert!(said.contains(&format!("{job} ")), "{said}");
+    assert!(
+        other.iter().all(|pid| !found.contains(pid)),
+        "another run's job is taken for the window's: {found:?} {other:?}"
+    );
+    assert!(swept.problems().is_empty(), "{said}");
+    assert!(closed.is_ok(), "{closed:?}");
+    Ok(())
+}

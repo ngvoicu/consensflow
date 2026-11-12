@@ -21,6 +21,21 @@ use super::super::claude::{processes_with, Process};
 use super::descent::{descending_from, end_chosen, Ended, Identity, Machine, Running, ThisMachine};
 use crate::{pattern, Result};
 
+/// A word made for this run of the kit: `cf-run-<pid>-<time>`, the time its first call. It is in
+/// the command line of each [`LongCommand`] the run starts, so that what is read across the machine
+/// by it ([`LongCommand::running`]) is this run's alone: the marks are fixed words, and every tree's
+/// run of the same case on the machine has the same (T-635).
+pub fn run_word() -> &'static str {
+    static WORD: OnceLock<String> = OnceLock::new();
+    WORD.get_or_init(|| {
+        format!(
+            "cf-run-{}-{}",
+            std::process::id(),
+            jiff::Timestamp::now().as_millisecond()
+        )
+    })
+}
+
 /// A command that runs for a while, which a check finds by its mark.
 #[derive(Debug, Clone, Copy)]
 pub struct LongCommand {
@@ -69,26 +84,32 @@ impl LongCommand {
     }
 
     /// The command, as a member is told to run it: Node waits for its seconds, and the
-    /// mark is a word it is given and does nothing with.
+    /// run's word ([`run_word`]) and the mark are words it is given and does nothing with.
     pub fn text(&self) -> String {
         match self.counts_in {
             None => format!(
-                "node -e \"setTimeout(() => {{}}, {})\" {}",
+                "node -e \"setTimeout(() => {{}}, {})\" {} {}",
                 self.seconds * 1_000,
+                run_word(),
                 self.mark
             ),
             Some(file) => format!(
-                "node -e \"let n=0;const w=()=>require('fs').writeFileSync('{file}',String(++n));w();setInterval(w,1000);setTimeout(()=>process.exit(),{})\" {}",
+                "node -e \"let n=0;const w=()=>require('fs').writeFileSync('{file}',String(++n));w();setInterval(w,1000);setTimeout(()=>process.exit(),{})\" {} {}",
                 self.seconds * 1_000,
+                run_word(),
                 self.mark
             ),
         }
     }
 
-    /// Its own processes, read across the machine and never ended: the `node` it runs,
-    /// not the window whose launch text (the task, as an argument of Claude) names it too.
+    /// Its own processes, read across the machine by this run's word ([`run_word`]), which no
+    /// other run's command has, and never ended: the `node` it runs, not the window whose launch
+    /// text (the task, as an argument of Claude) names it too.
     pub fn running(&self) -> Result<Vec<Process>> {
-        Ok(of_node(processes_with(self.mark)?))
+        Ok(of_node(processes_with(run_word())?)
+            .into_iter()
+            .filter(|process| self.is_run_by(&process.command))
+            .collect())
     }
 
     /// Its processes in the window whose own process is `window` (found when the window
@@ -325,7 +346,10 @@ mod tests {
         assert_eq!(LongCommand::new("m").counts_in(), None);
         assert_eq!(
             LongCommand::new("m").text(),
-            "node -e \"setTimeout(() => {}, 300000)\" m"
+            format!(
+                "node -e \"setTimeout(() => {{}}, 300000)\" {} m",
+                run_word()
+            )
         );
         // As a process list gives it, it is the command that ends with the mark.
         assert!(command.is_run_by(&format!("node -e {text}")));
@@ -336,7 +360,58 @@ mod tests {
         let command = LongCommand::new("cf-stops-live-long-command");
         assert_eq!(
             command.text(),
-            "node -e \"setTimeout(() => {}, 300000)\" cf-stops-live-long-command"
+            format!(
+                "node -e \"setTimeout(() => {{}}, 300000)\" {} cf-stops-live-long-command",
+                run_word()
+            )
+        );
+    }
+
+    /// The same command of another tree's run: its line holds the mark, as every run's does, and is
+    /// the `node -e` the command is. Read across the machine, it was taken for this run's (T-635).
+    /// A real one, started here, outside the window and with no word of this run's.
+    #[cfg(unix)]
+    #[test]
+    fn the_same_command_of_another_run_on_the_machine_is_not_the_command_this_run_started() {
+        let mark = "cf-decoy-long-command";
+        let command = LongCommand::new(mark);
+        let mut decoy = crate::process::Run::new("node")
+            .args(["-e", "setTimeout(() => {}, 30000)", mark])
+            .inheriting_env()
+            .spawn()
+            .unwrap();
+        // The command this run starts, as a member is told to run it.
+        let mut own = crate::process::Run::new("node")
+            .args(["-e", "setTimeout(() => {}, 30000)", run_word(), mark])
+            .inheriting_env()
+            .spawn()
+            .unwrap();
+        let (pid, own_pid) = (decoy.id(), own.id());
+        let mut found = Vec::new();
+        for _ in 0..50 {
+            found = command.running().unwrap();
+            if found.iter().any(|process| process.pid == own_pid) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let listed = processes_with(mark)
+            .unwrap()
+            .iter()
+            .any(|process| process.pid == pid);
+        decoy.kill();
+        own.kill();
+        assert!(
+            listed,
+            "the decoy {pid} was never listed: the test proves nothing"
+        );
+        assert!(
+            found.iter().any(|process| process.pid == own_pid),
+            "the run's own command {own_pid} is not found: {found:#?}"
+        );
+        assert!(
+            found.iter().all(|process| process.pid != pid),
+            "the decoy {pid} is taken for the command this run started: {found:#?}"
         );
     }
 
