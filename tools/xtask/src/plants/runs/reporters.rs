@@ -185,21 +185,17 @@ impl Reporter {
             Self::Status => {
                 let mut invocation = as_written();
                 // A `cargo test` that nextest is not running is given the threads after
-                // its `--`, where its words name none of their own.
+                // its `--`, where the caller's number wins over a table's own.
                 if is_cargo_test(command) {
                     if let Some(threads) = caller_threads(context) {
-                        let named = invocation.args.iter().any(|word| {
-                            let word = word.to_string_lossy();
-                            word == "--test-threads" || word.starts_with("--test-threads=")
-                        });
-                        if !named {
-                            if !invocation.args.contains(&OsString::from("--")) {
-                                invocation.args.push(OsString::from("--"));
-                            }
-                            invocation
-                                .args
-                                .push(OsString::from(format!("--test-threads={threads}")));
+                        let before = invocation.args.len();
+                        take_out_threads(&mut invocation.args, before);
+                        if !invocation.args.contains(&OsString::from("--")) {
+                            invocation.args.push(OsString::from("--"));
                         }
+                        invocation
+                            .args
+                            .push(OsString::from(format!("--test-threads={threads}")));
                     }
                 }
                 invocation
@@ -491,6 +487,30 @@ fn nextest_words(args: &[OsString]) -> Result<Vec<OsString>, String> {
     Ok(words)
 }
 
+/// Takes out every `--test-threads` of `words` in their first `before` words, either way
+/// it is written (the two words, and the word with its value after `=`), with its value
+/// where the two-word form carries one: the caller's number is put in its place after,
+/// and both would reach the runner otherwise.
+fn take_out_threads(words: &mut Vec<OsString>, before: usize) {
+    loop {
+        let before = before.min(words.len());
+        let Some(at) = words[..before].iter().position(|word| {
+            let word = word.to_string_lossy();
+            word == "--test-threads" || word.starts_with("--test-threads=")
+        }) else {
+            return;
+        };
+        if words[at].to_string_lossy() == "--test-threads" {
+            if at + 1 < before {
+                words.remove(at + 1);
+            } else {
+                return;
+            }
+        }
+        words.remove(at);
+    }
+}
+
 /// `words` (nextest's, as [`nextest_words`] makes them) with the threads libtest is told by
 /// the environment (`RUST_TEST_THREADS`) given to nextest as its own option, if the command
 /// names none: nextest does not read that variable, and a machine's limit on the tests it runs
@@ -509,15 +529,8 @@ fn with_the_threads_of_the_environment(
             .iter()
             .position(|word| word == "--")
             .unwrap_or(words.len());
-        if let Some(at) = words[..before]
-            .iter()
-            .position(|word| word == "--test-threads")
-        {
-            if at + 1 < before {
-                words.remove(at + 1);
-                words.remove(at);
-            }
-        }
+        // Over a table's own, either way it was written.
+        take_out_threads(&mut words, before);
         let before = words
             .iter()
             .position(|word| word == "--")

@@ -191,6 +191,12 @@ pub trait Runner {
     fn lacks(&mut self, _harness: &str) -> Option<String> {
         None
     }
+
+    /// What is said of `command` that takes no threads (a Node or Playwright run, a
+    /// script): that the threads the driver was asked for have no effect on it. For a
+    /// command a plants table names under `[run]`, never for the driver's own, at
+    /// most once a run of the driver.
+    fn say_no_effect(&mut self, _command: &[String]) {}
 }
 
 impl Ran {
@@ -695,6 +701,21 @@ impl Runner for Execute {
         self.checkout.env = Env::from_vars(kept.into_iter().chain(given));
     }
 
+    fn say_no_effect(&mut self, command: &[String]) {
+        // A plants table's own [run] command that takes no threads: told once theirs
+        // has no effect on it, and the run goes on.
+        #[allow(clippy::print_stderr)] // The runner has no console of its own.
+        if !self.said_no_effect && !Reporter::of(command).takes_threads(command) {
+            if let Some(threads) = caller_threads(&self.checkout) {
+                eprintln!(
+                    "plants: --test-threads {threads} has no effect on: {}",
+                    command.join(" ")
+                );
+                self.said_no_effect = true;
+            }
+        }
+    }
+
     fn run(&mut self, command: &[String]) -> Result<Execution, Error> {
         let reporter = Reporter::of(command);
         if let Some(why) = reporter.refused(command, &self.checkout) {
@@ -703,18 +724,6 @@ impl Runner for Execute {
                 cause: std::io::Error::other(why),
             }
             .into());
-        }
-        // Runs that take no threads (Node, Playwright, a command that says no more
-        // than its status) are told once theirs has no effect on them.
-        #[allow(clippy::print_stderr)] // The runner has no console of its own.
-        if !reporter.takes_threads(command) && !self.said_no_effect {
-            if let Some(threads) = caller_threads(&self.checkout) {
-                eprintln!(
-                    "plants: --test-threads {threads} has no effect on: {}",
-                    command.join(" ")
-                );
-                self.said_no_effect = true;
-            }
         }
         // The programs the tests of cf-e2e run, built once for the run, before it: each
         // of its tests is a process of its own, which would build them for itself.
