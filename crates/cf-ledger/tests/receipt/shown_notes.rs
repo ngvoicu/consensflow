@@ -504,6 +504,21 @@ fn a_held_task_whose_member_left_the_staff_is_told_to_a_new_chief_as_paused_and_
 }
 
 #[test]
+fn a_paused_task_that_never_held_whose_member_left_the_staff_is_told_to_a_new_chief() {
+    // The handoff lists every paused task the chief gave whose member has left the staff, held
+    // or not: nothing else wakes a new chief for it (T-1517's note).
+    let mut w = world();
+    let (task, _) = with_zeus(&mut w);
+    w.pause(task);
+    w.ledger
+        .remove_member(w.project, "zeus")
+        .expect("zeus leaves the staff");
+    assert_eq!(w.state(task), "paused", "left for its resumption");
+    assert_eq!(held_until(&w, task), None, "it never held");
+    assert_eq!(told_held(&w), [(task, Some(MEMBER_GONE.to_owned()))]);
+}
+
+#[test]
 fn a_hold_after_its_task_left_its_member_is_another_hold_and_is_typed() {
     // T-1514's finding B: a hold is its member's. Taken back and given to another member, or
     // to a new window of the same member, the task's first refusal of the same kind and end is
