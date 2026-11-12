@@ -184,6 +184,18 @@ pub trait Adapter {
         false
     }
 
+    /// Whether the machine has one login for this harness, which all its windows use, so
+    /// that the human's word that its quota is renewed (Try again now, T-1357) is for every
+    /// member on it, in every project: the quota they renewed is the account's, not one
+    /// member's. Not Pi, which logs into a provider for each model, so two of its members may
+    /// be on two accounts. It holds where [`Adapter::one_account`] does, and for Codex, Devin
+    /// and Muse as well: each keeps the machine's one login, though nobody has probed what a
+    /// login changed under an open window does there, which `one_account` needs and this
+    /// does not (a window's own turn is never taken as news here: only the human's word is).
+    fn one_login(&self) -> bool {
+        self.one_account()
+    }
+
     /// How a window is given its first message ([`FirstMessage`]).
     fn first_message(&self) -> FirstMessage;
 
@@ -345,6 +357,14 @@ pub struct Launch<'a> {
     /// `CLAUDE_CODE_DISABLE_ADVISOR_TOOL`): the other four harnesses have no advisor tool,
     /// and their launches are the same whatever it says.
     pub advisor_off: bool,
+    /// The project has Claude Code's prompt suggestion off for its windows (its Project settings'
+    /// "Prompt suggestion" left off, which every project is until the human ticks it): the chief's
+    /// launch is given it as a member's is, and with it false the launch is as it always was, and
+    /// ConsensFlow writes nothing about the suggestion, whatever the owner's own settings say.
+    /// Only Claude's adapter reads it, by the launch's own settings file (`env`'s
+    /// `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` as `false`): the other four harnesses make no such
+    /// call (T-1434), and their launches are the same whatever it says.
+    pub suggestion_off: bool,
     /// How long the window has to show its first message, in milliseconds: the
     /// engine's limit for a launch (`CONSENSFLOW_LAUNCH_TIMEOUT_MS`). What a
     /// window waits for before that message can show, such as the conversation
@@ -543,6 +563,19 @@ pub struct Decline {
     pub members_only: bool,
 }
 
+/// What a window's extension says of a compaction it asked its harness for
+/// ([`Window::compaction_asked`]): no word (the file is absent, or is another launch's or another
+/// conversation's), the word with the time it says it was written, or a word that is there and
+/// cannot be read or parsed this time (a read that met a rename, a half-written file). Only an
+/// absent word says the compaction is over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CompactionWord {
+    #[default]
+    Absent,
+    Asked(i64),
+    Unreadable,
+}
+
 /// What a window's harness says of a dialog of its own being open, beside the screen
 /// ([`Window::dialog_sign`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -644,6 +677,16 @@ pub trait Window {
     /// none, and from a harness that draws no such status (the default).
     fn compacting(&self, _screen: &[String]) -> bool {
         false
+    }
+    /// What the window's own extension says of the compaction it asked its harness for at a
+    /// rest for the project's size, and has not said over (Pi's `settled/<launch>.compacting.json`):
+    /// absent where it says none, where its word is another conversation's or another
+    /// launch's, and from a harness that says nothing of the kind (the default); the word's
+    /// time, only to tell one word from another; or unreadable, a word that is there and cannot
+    /// be read this time. The engine keeps the close of a done task's window waiting for it,
+    /// up to a bound of its own ([`Dispatcher::still_drawing`]).
+    fn compaction_asked(&self) -> CompactionWord {
+        CompactionWord::Absent
     }
     /// What the window's harness says of a dialog of its own being open, by the look
     /// `observed`: the window's own question tool, where it waits on one, is no such dialog

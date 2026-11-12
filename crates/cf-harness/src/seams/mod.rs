@@ -54,6 +54,15 @@ pub trait Time {
     /// The wall clock, in milliseconds since the epoch: what JavaScript's
     /// `Date.now()` read, for a deadline as for a time written down.
     fn wall_ms(&self) -> i64;
+    /// Milliseconds on a clock that does not step: it never goes back and never jumps with the
+    /// wall clock (the machine's time being set, a time zone, a sync), counted from an origin of
+    /// its own, so that only the difference of two readings means anything. For a bound
+    /// that is a length of time (the hold of a window for a compaction, T-1475), where
+    /// [`Time::wall_ms`] is for a time written down. The default is the wall clock, for a
+    /// time that is a test's or a fake's.
+    fn monotonic_ms(&self) -> i64 {
+        self.wall_ms()
+    }
     /// A wait of `duration`: a poll's interval, a deadline's timer.
     fn sleep(&self, duration: Duration) -> Work<'_, ()>;
 }
@@ -159,9 +168,21 @@ pub fn uuid(entropy: &dyn Entropy) -> Result<String, String> {
 /// the runtime's timer, which the engine's runtime drives.
 pub struct SystemTime;
 
+/// The system's clock that does not step ([`Time::monotonic_ms`]): the time since the first
+/// time any part of the process asked, on the system's monotonic clock.
+pub fn system_monotonic_ms() -> i64 {
+    static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let elapsed = ORIGIN.get_or_init(std::time::Instant::now).elapsed();
+    i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+}
+
 impl Time for SystemTime {
     fn wall_ms(&self) -> i64 {
         SystemClock.now_ms()
+    }
+
+    fn monotonic_ms(&self) -> i64 {
+        system_monotonic_ms()
     }
 
     fn sleep(&self, duration: Duration) -> Work<'_, ()> {

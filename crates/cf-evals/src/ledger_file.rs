@@ -194,7 +194,10 @@ pub struct Member<'a> {
 }
 
 /// A project as the ledger's `createProject` leaves it, which [`add_project`]
-/// writes by hand.
+/// writes by hand. It writes no compaction: a project of the evals' own fixtures is on each
+/// harness's own point, as a project made before the default a new project starts on (a
+/// size of 300,000 tokens, T-1400) is; no fixture of these says a size or has a window
+/// launched by it.
 #[derive(Debug, Clone, Copy)]
 pub struct NewProject<'a> {
     pub directory: &'a str,

@@ -14,7 +14,7 @@
 use cf_e2e::rig::{Config, Project, Rig};
 use serde_json::{json, Value};
 
-use crate::{config, secs, Outcome};
+use crate::{devin_config, on_the_installed_devin, secs, Outcome};
 
 /// The stand-in for Devin, built for these tests.
 const FAKE_DEVIN: &str = env!("CARGO_BIN_EXE_fake-devin");
@@ -22,7 +22,7 @@ const FAKE_DEVIN: &str = env!("CARGO_BIN_EXE_fake-devin");
 /// A rig whose Devin windows are the stand-in's, storing a prompt it ran under `/bypass`
 /// with the command where `stores`.
 fn rig_storing(stores: bool) -> Config {
-    let config = config().devin(FAKE_DEVIN);
+    let config = devin_config(FAKE_DEVIN);
     if stores {
         config.var("FAKE_DEVIN_STORES_COMMANDS", "1")
     } else {
@@ -108,4 +108,13 @@ fn a_resumed_devin_workers_note_that_its_turn_was_cut_is_received_once_however_d
         rig.close()?;
     }
     Ok(())
+}
+
+/// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423).
+#[test]
+fn a_resumed_devin_workers_note_that_its_turn_was_cut_is_received_once_however_devin_stores_its_bypass_on_devin_3000_12(
+) -> Outcome {
+    on_the_installed_devin(
+        a_resumed_devin_workers_note_that_its_turn_was_cut_is_received_once_however_devin_stores_its_bypass,
+    )
 }

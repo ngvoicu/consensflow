@@ -195,6 +195,10 @@ impl Time for DaemonTime {
         SystemClock.now_ms()
     }
 
+    fn monotonic_ms(&self) -> i64 {
+        cf_harness::seams::system_monotonic_ms()
+    }
+
     fn sleep(&self, duration: Duration) -> Work<'_, ()> {
         self.spawn.arrival(Box::pin(tokio::time::sleep(duration)))
     }

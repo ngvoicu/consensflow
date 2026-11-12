@@ -101,6 +101,12 @@ pub struct FakeAgent {
     pub lost_records: HashMap<String, Vec<usize>>,
     /// Why the window has not said which conversation it shows yet.
     pub unnamed: Option<String>,
+    /// When its extension said it asked its harness to compact the conversation for the
+    /// project's size, and has not said it over (`Window::compaction_asked`, Pi's).
+    pub compaction_asked: Option<i64>,
+    /// Its word is there and cannot be read this time (`CompactionWord::Unreadable`): it
+    /// says so whatever `compaction_asked` is.
+    pub compaction_unreadable: bool,
     /// How often the engine told the window it pressed the interrupt keys.
     pub interrupted: u32,
     /// The window stops where it is when it is interrupted, writing nothing:
@@ -255,6 +261,10 @@ pub struct FakeAdapter {
     /// (`adapter.one_account`, which no trace of Node's has): not, as an
     /// adapter that says no more.
     pub one_account: Cell<bool>,
+    /// Whether the machine has one login for its harness, whichever its windows do with a
+    /// login changed under them (`adapter.one_login`, T-1357): not, as an adapter that says
+    /// no more. A harness with `one_account` has one as well.
+    pub one_login: Cell<bool>,
     /// Whether its windows are asked whether they are ready before they have
     /// drawn their screens too, as Devin's are: not, as an adapter that says no more.
     pub ready_while_drawing: Cell<bool>,
@@ -428,6 +438,7 @@ impl FakeAdapter {
             silent_paste: Cell::new(None),
             keeps_first_instructions: Cell::new(false),
             one_account: Cell::new(false),
+            one_login: Cell::new(false),
             ready_while_drawing: Cell::new(false),
             prepare_holds: Holds::default(),
             observe_holds: Holds::default(),
@@ -1024,6 +1035,14 @@ impl FakeAdapter {
                     reason: "refused by the test".to_owned(),
                 };
             }
+            // Pi's extension sends nothing into a window while the compaction it asked for is at
+            // work, whatever the word (its own `compacting` flag): refused busy, no attempt spent.
+            if agent.compaction_asked.is_some() || agent.compaction_unreadable {
+                return Admission::Busy {
+                    reason: "Pi is at work: its extension sends nothing until it is idle"
+                        .to_owned(),
+                };
+            }
             if agent.arrive {
                 let (recorded, sources) =
                     self.recorded_text(text, agent.items.iter().map(|item| &*item.text));
@@ -1187,6 +1206,12 @@ impl Asked {
         if launch.advisor_off {
             seen["advisorOff"] = json!(true);
         }
+        // The prompt suggestion is off in every window of a project that has not ticked it, the
+        // chief's too (2026-11-11), so it is on every launch a test sees of such a project; the
+        // call written down above does not hold it, so no recorded trace moves.
+        if launch.suggestion_off {
+            seen["suggestionOff"] = json!(true);
+        }
         fake.prepared.borrow_mut().push(seen);
         fake.first_message_ms
             .borrow_mut()
@@ -1245,6 +1270,8 @@ impl Asked {
             records_unreadable: Vec::new(),
             lost_records: HashMap::new(),
             unnamed: None,
+            compaction_asked: None,
+            compaction_unreadable: false,
             interrupted: 0,
             stops_when_interrupted: false,
             takes_back: false,
@@ -1443,6 +1470,12 @@ impl Adapter for Asked {
     /// traces.
     fn one_account(&self) -> bool {
         self.fake.one_account.get()
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the
+    /// traces.
+    fn one_login(&self) -> bool {
+        self.fake.one_login.get() || self.fake.one_account.get()
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the

@@ -248,7 +248,12 @@ async fn a_project_opened_with_rules_and_a_compaction_has_them_and_its_chief_is_
             let answer = ask(
                 &held.app,
                 "project.open",
-                opening(json!({ "rules": RULES, "compaction": 250_000, "advisorTool": true })),
+                opening(json!({
+                    "rules": RULES,
+                    "compaction": 250_000,
+                    "advisorTool": true,
+                    "promptSuggestion": true,
+                })),
             )
             .await;
             assert_eq!(answer["ok"], true, "{answer}");
@@ -256,6 +261,7 @@ async fn a_project_opened_with_rules_and_a_compaction_has_them_and_its_chief_is_
             assert_eq!(answer["project"]["staffRules"], RULES);
             assert_eq!(answer["project"]["compaction"], 250_000);
             assert_eq!(answer["project"]["advisorTool"], true);
+            assert_eq!(answer["project"]["promptSuggestion"], true);
             // The chief was launched once, as the project opened, and was given the rules then.
             let launches = chief_launches(&held);
             assert_eq!(launches.len(), before + 1);
@@ -273,6 +279,7 @@ async fn a_project_opened_with_rules_and_a_compaction_has_them_and_its_chief_is_
             assert_eq!(board["board"]["project"]["staffRules"], RULES);
             assert_eq!(board["board"]["project"]["compaction"], 250_000);
             assert_eq!(board["board"]["project"]["advisorTool"], true);
+            assert_eq!(board["board"]["project"]["promptSuggestion"], true);
             // The roles its cards name come with it, in the table's order.
             assert_eq!(board["roles"], cf_ledger::roles::page_view());
         })
@@ -307,6 +314,96 @@ async fn a_project_opened_without_the_flag_has_the_advisor_tool_off_and_one_the_
                 &held.app,
                 "project.advisor_tool",
                 json!({ "project": answer["project"]["id"], "advisorTool": "yes" }),
+            )
+            .await;
+            assert_eq!(dialog["error"], refused["error"]);
+            assert_eq!(
+                held.rig.kit.ledger.borrow().projects().unwrap().len(),
+                projects,
+                "no project was made"
+            );
+        })
+        .await;
+}
+
+/// A project opened with no `compaction` (a request that says nothing of it, as `cf`, the API, the
+/// kit and the evals ask) starts on a size of 300,000 tokens; `null` is the harness's own point,
+/// the one choice New project keeps beside a size; a project that was already there, with none,
+/// is as it was (T-1400).
+#[tokio::test]
+async fn a_project_opened_with_no_compaction_starts_on_300000_and_null_is_the_harness_s_own_point()
+{
+    LocalSet::new()
+        .run_until(async {
+            let held = asked();
+            let board = |project: i64| {
+                let app = &held.app;
+                async move {
+                    ask(app, "board.get", json!({ "project": project })).await["board"]["project"]
+                        .clone()
+                }
+            };
+            // The project the kit made before: none, no key, as before.
+            assert!(board(held.existing).await.get("compaction").is_none());
+            let answer = ask(&held.app, "project.open", opening(json!({}))).await;
+            assert_eq!(answer["ok"], true, "{answer}");
+            assert_eq!(answer["project"]["compaction"], 300_000, "{answer}");
+            let opened = answer["project"]["id"].as_i64().unwrap();
+            assert_eq!(board(opened).await["compaction"], 300_000);
+            let listed = ask(&held.app, "projects.list", json!({})).await["projects"].clone();
+            let listed = listed
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|project| project["id"] == opened)
+                .unwrap()
+                .clone();
+            assert_eq!(listed["compaction"], 300_000);
+            // The harness's own point, said: none, and no key on any view.
+            let own = ask(
+                &held.app,
+                "project.open",
+                opening(json!({ "compaction": null })),
+            )
+            .await;
+            assert_eq!(own["ok"], true, "{own}");
+            assert!(own["project"].get("compaction").is_none(), "{own}");
+            let own = own["project"]["id"].as_i64().unwrap();
+            assert!(board(own).await.get("compaction").is_none());
+            // The project the kit made before is as it was.
+            assert!(board(held.existing).await.get("compaction").is_none());
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_project_opened_without_the_flag_has_the_prompt_suggestion_off_and_one_the_daemon_refuses_makes_no_project(
+) {
+    LocalSet::new()
+        .run_until(async {
+            let held = asked();
+            let answer = ask(&held.app, "project.open", opening(json!({}))).await;
+            assert_eq!(answer["ok"], true, "{answer}");
+            assert!(
+                answer["project"].get("promptSuggestion").is_none(),
+                "off, no key"
+            );
+            let projects = held.rig.kit.ledger.borrow().projects().unwrap().len();
+            let refused = ask(
+                &held.app,
+                "project.open",
+                opening(json!({ "promptSuggestion": "yes" })),
+            )
+            .await;
+            assert_eq!(
+                refused,
+                json!({ "ok": false, "error": "the prompt suggestion is on (true) or off (false)" })
+            );
+            // The words the dialog of a project is refused in for the same.
+            let dialog = ask(
+                &held.app,
+                "project.prompt_suggestion",
+                json!({ "project": answer["project"]["id"], "promptSuggestion": "yes" }),
             )
             .await;
             assert_eq!(dialog["error"], refused["error"]);

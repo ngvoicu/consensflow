@@ -240,3 +240,69 @@ fn the_note_of_a_quit_goes_on_with_the_message_of_the_turn_it_cut_without_its_wa
         Some("DONE")
     );
 }
+
+/// What of the wire names its mode: configurations and changes of it.
+fn configured(wire: &[Value]) -> usize {
+    updates(wire, "config_option_update").len() + updates(wire, "current_mode_update").len()
+}
+
+#[test]
+fn a_window_opened_again_silent_writes_its_mode_only_when_typed_to_as_devin_3000_12_43_did() {
+    // T-1432 run A, b2: in full permission, `/bypass` alone writes nothing.
+    let mut bypassed = case(true);
+    bypassed.window = bypassed.window.unannounced(true);
+    bypassed.window.take("/bypass").unwrap();
+    assert_eq!(configured(&bypassed.wire()), 0);
+    // Runs 2 and 3: `/bypass <message>` writes the configuration as its turn begins, and lists
+    // the message among the steps, saying nothing of it back.
+    bypassed
+        .window
+        .take("/bypass [ConsensFlow m-2 · T-1 · note from @chief]\nReply with exactly: DONE")
+        .unwrap();
+    let wire = bypassed.wire();
+    let config = updates(&wire, "config_option_update");
+    assert_eq!(config.len(), 1);
+    assert_eq!(
+        config[0]["update"]["configOptions"][1]["currentValue"],
+        "bypass"
+    );
+    assert!(
+        updates(&wire, "user_message_chunk").is_empty(),
+        "no said-back"
+    );
+    let steps: Vec<&Value> = wire
+        .iter()
+        .filter(|line| line.get("steps").is_some())
+        .collect();
+    assert_eq!(steps.len(), 1);
+    assert_eq!(
+        steps[0]["steps"][0]["summary"],
+        "[ConsensFlow m-2 · T-1 · note from @chief]"
+    );
+    assert_eq!(wire.last().unwrap()["cause"], "complete");
+    // Run A, b1: in the normal mode `/bypass` alone switches it, and says so.
+    let mut normal = case(false);
+    normal.window = normal.window.unannounced(true);
+    normal.window.take("/bypass").unwrap();
+    assert_eq!(configured(&normal.wire()), 2);
+}
+
+#[test]
+fn a_message_alone_into_a_window_opened_again_silent_is_said_back_and_then_configured() {
+    let mut silent = case(false);
+    silent.window = silent.window.unannounced(true);
+    silent.window.wire = Wire::open(&silent.folder.path().join("wire.jsonl"), "calm-river")
+        .unwrap()
+        .shape(Shape::Unsaid);
+    silent.window.take("hello").unwrap();
+    let wire = silent.wire();
+    let said = wire
+        .iter()
+        .position(|line| line["update"]["sessionUpdate"] == "user_message_chunk")
+        .unwrap();
+    let config = wire
+        .iter()
+        .position(|line| line["update"]["sessionUpdate"] == "config_option_update")
+        .unwrap();
+    assert!(said < config, "{wire:?}");
+}

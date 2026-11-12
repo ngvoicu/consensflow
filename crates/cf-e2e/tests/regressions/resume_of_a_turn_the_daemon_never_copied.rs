@@ -35,7 +35,7 @@ use crate::config_with_codex;
 use crate::resume_of_a_chief_with_no_turn::{
     resumed_on, stays_open, wait_for_the_chief, windows_of,
 };
-use crate::{config, secs, Outcome, FAKE_DEVIN};
+use crate::{config, devin_config, secs, Outcome};
 
 /// What the human types into the chief's window, and what the stand-ins answer.
 const TYPED: &str = "Reply with exactly: SAVED";
@@ -169,18 +169,25 @@ fn devin_saved(rig: &Rig, _session: &str) -> bool {
 #[test]
 fn a_devin_chief_whose_window_saved_a_turn_the_daemon_never_copied_is_resumed_on_its_session(
 ) -> Outcome {
-    let rig = Rig::start(config().devin(FAKE_DEVIN))?;
+    let rig = Rig::start(devin_config())?;
     write_roster(&rig, "devin-chief", "devin")?;
     let project = Project::open(&rig, "devin-chief", json!({}))?.id();
 
-    let (session, again, rig) = resumed_after_a_turn_the_daemon_never_saw(
-        rig,
-        &config().devin(FAKE_DEVIN),
-        project,
-        devin_saved,
-    )?;
+    let (session, again, rig) =
+        resumed_after_a_turn_the_daemon_never_saw(rig, &devin_config(), project, devin_saved)?;
 
     goes_on_where_it_was(&rig, project, &session, &again)?;
     rig.close()?;
     Ok(())
+}
+
+// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423): the case as
+// it is, the stand-in's shape chosen here and not by the environment.
+
+#[test]
+fn a_devin_chief_whose_window_saved_a_turn_the_daemon_never_copied_is_resumed_on_its_session_on_devin_3000_12(
+) -> Outcome {
+    crate::on_the_installed_devin(
+        a_devin_chief_whose_window_saved_a_turn_the_daemon_never_copied_is_resumed_on_its_session,
+    )
 }

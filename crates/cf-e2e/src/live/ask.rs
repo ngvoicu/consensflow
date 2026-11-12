@@ -27,7 +27,7 @@ pub use launch::{
     devin_config, devin_hooks, devin_launch, devin_ready, devin_took, pi_launch, DevinLaunch,
     DevinReady, DevinTook, PiLaunch,
 };
-pub use readiness::{devin_readiness, DevinReadiness};
+pub use readiness::{devin_readiness, devin_readiness_then, DevinReadiness};
 
 /// Builds the test binary if it is not built yet, which the first question would
 /// do, minutes into a run: a live test asks this first, before it spends anything,

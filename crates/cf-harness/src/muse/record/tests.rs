@@ -11,6 +11,7 @@ mod live;
 mod pasted;
 mod provisional;
 mod shapes;
+mod workflow;
 
 use std::fs;
 use std::path::PathBuf;

@@ -71,7 +71,10 @@ fn said(readiness: &Readiness) -> String {
 /// The Devin window of the question (`wire`, the wire log of its launch, `session`,
 /// the conversation it is on, `pane` with its `id` and `generation`) asked whether it
 /// is ready every `everyMs` until it is ready or unfit, or `withinMs` are up. Each
-/// look's answer, the same one said once for as many looks as gave it in a row.
+/// look's answer, the same one said once for as many looks as gave it in a row. Where the
+/// question has a `deliver` text, a window found ready is given it as the engine gives a
+/// delivery ([`crate::contract::Window::deliver`]), and the answer says whether it was
+/// admitted (`delivered`).
 pub(super) fn devin_readiness(question: &Value) -> Result<Value, String> {
     let pane = question.get("pane").ok_or("the question names no pane")?;
     let pane = Pane {
@@ -114,9 +117,18 @@ pub(super) fn devin_readiness(question: &Value) -> Result<Value, String> {
             }
             let over = !matches!(readiness, Readiness::Held(_)) || started.elapsed() >= within;
             if over {
+                let deliver = question.get("deliver").and_then(Value::as_str);
+                let delivered = match deliver.filter(|_| readiness == Readiness::Ready) {
+                    Some(text) => Some(matches!(
+                        window.deliver(&Relay, &pane, text).await?,
+                        crate::contract::Admission::Admitted { .. }
+                    )),
+                    None => None,
+                };
                 return Ok(json!({
                     "answers": answers,
                     "ready": readiness == Readiness::Ready,
+                    "delivered": delivered,
                 }));
             }
             tokio::time::sleep(every).await;

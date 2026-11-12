@@ -36,7 +36,7 @@ use regex::Regex;
 use serde_json::Value;
 
 use super::record::Turns;
-use super::wire::{mode_in, shown_in};
+use super::wire::{mode_in, shown_in, Naming};
 use crate::shared::pattern::compile;
 use crate::shared::quota::{exhausted_quota, Quota};
 
@@ -65,6 +65,9 @@ pub(super) struct Said {
     pub(super) mode: Option<String>,
     /// Devin's word on its quota, shared with every look that finds it.
     pub(super) quota: Option<Arc<Quota>>,
+    /// The one conversation the log names, where it has configured none
+    /// ([`Naming::unannounced`]).
+    pub(super) unannounced: Option<String>,
 }
 
 /// How much of a log a look reads at a time when it reads again what it has read.
@@ -90,6 +93,8 @@ struct State {
     shown: Option<String>,
     mode: Option<String>,
     quota: Option<Arc<Quota>>,
+    /// The conversations its lines name.
+    naming: Naming,
     /// The turns the log says of each session.
     turns: Turns,
 }
@@ -136,6 +141,7 @@ impl WireLog {
             state.read = DefaultHasher::default();
             state.carry.clear();
             state.mode = None;
+            state.naming.read_anew();
             state.turns.read_anew();
         }
         if state.written != written {
@@ -239,6 +245,7 @@ impl State {
             shown: self.shown.clone(),
             mode: self.mode.clone(),
             quota: self.quota.clone(),
+            unannounced: self.naming.unannounced().map(str::to_owned),
         }
     }
 
@@ -248,6 +255,9 @@ impl State {
             return Ok(());
         };
         self.turns.follow(&event);
+        self.naming
+            .follow(&event)
+            .map_err(|_| UNREADABLE.to_owned())?;
         if let Some(shown) = shown_in(&event).map_err(|_| UNREADABLE.to_owned())? {
             // The conversation it shows now is in the mode its own configuration says.
             if self.shown.as_deref() != Some(shown) {

@@ -43,6 +43,15 @@ pub(crate) trait Parser {
     fn flush(&mut self) -> Result<(), String> {
         Ok(())
     }
+
+    /// A look that began at `now_ms` has read all it will: a parser whose answer rests on
+    /// the time that passed (a wait it counts from the look that first saw it begin)
+    /// takes the time. True where the answer is not what the last look's was though no
+    /// record came; the look then answers anew.
+    fn looked(&mut self, now_ms: i64) -> bool {
+        let _ = now_ms;
+        false
+    }
 }
 
 /// Where the transcript is, if the harness keeps one yet: or why it cannot
@@ -131,7 +140,8 @@ impl<P: Parser> Followed<P> {
             });
             match looked {
                 Ok(looked @ (Looked::Unchanged | Looked::Held(_) | Looked::Read(_))) => {
-                    let changed = matches!(looked, Looked::Read(_));
+                    let timed = state.looked(now_ms);
+                    let changed = timed || matches!(looked, Looked::Read(_));
                     if let Looked::Held(seen) | Looked::Read(seen) = looked {
                         self.seen = Some(seen);
                     }

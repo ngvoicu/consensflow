@@ -36,7 +36,7 @@ use serde_json::{json, Value};
 
 use crate::devin_notes_twice::store_of;
 use crate::resume_of_a_chief_with_no_turn::windows_of;
-use crate::{config, secs, Outcome, FAKE_DEVIN};
+use crate::{devin_config, secs, Outcome};
 
 /// What the worker answers, and what the chief's window ends at.
 const RESULT: &str = "RESULT_ONE";
@@ -74,7 +74,7 @@ fn given(rig: &Rig, id: i64) -> cf_e2e::Result<usize> {
 #[test]
 fn a_result_a_devin_chiefs_window_took_as_it_went_is_not_pasted_again_into_the_window_the_resume_opens(
 ) -> Outcome {
-    let rig = Rig::start(config().devin(FAKE_DEVIN).var("FAKE_DEVIN_CRASH", RESULT))?;
+    let rig = Rig::start(devin_config().var("FAKE_DEVIN_CRASH", RESULT))?;
     write_roster(&rig)?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
@@ -143,4 +143,17 @@ fn a_result_a_devin_chiefs_window_took_as_it_went_is_not_pasted_again_into_the_w
     );
     rig.close()?;
     Ok(())
+}
+
+// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423), whose window the
+// Resume opens on the session the crash cut says nothing of its mode until it is typed to (a red
+// of T-1417 that A5-23's fix, T-1432, mends): the case as it is, the stand-in's shape chosen
+// here and not by the environment.
+
+#[test]
+fn a_result_a_devin_chiefs_window_took_as_it_went_is_not_pasted_again_into_the_window_the_resume_opens_on_devin_3000_12(
+) -> Outcome {
+    crate::on_the_installed_devin(
+        a_result_a_devin_chiefs_window_took_as_it_went_is_not_pasted_again_into_the_window_the_resume_opens,
+    )
 }

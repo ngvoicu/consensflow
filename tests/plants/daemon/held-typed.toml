@@ -371,5 +371,5 @@ runs = ["held-typed-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = '''            self.input.replace(HumanInput::of(&snapshot));'''
-replace = '''            let _ = HumanInput::of(&snapshot);'''
+find = '''            self.input.replace(input);'''
+replace = '''            let _ = input;'''
