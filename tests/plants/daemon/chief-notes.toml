@@ -21,7 +21,10 @@
 # chief that takes over is told in its handoff each task it gave that holds (`chief.rs`,
 # `held_tasks`), and a task paused with its member gone from the staff as that, never its hold
 # (`member_gone`), as its line says (`views.rs`, `member_left`); a task taken from its member
-# holds with nobody (`held_until`).
+# holds with nobody (`held_until`). A shown note whose line is over (its task moved on) is said
+# `over` in the inbox's list (the daemon's `MessageSummary`), which `cf inbox` prints
+# `[not typed · over]` (T-1556). A note that says a chief its role (`note_role`, read in parts
+# since T-1513) is never shown: it is typed, and its parts read make it no shown note (T-1556).
 #
 # Every name holds `chief-notes`, so `cargo xtask plants daemon chief-notes` runs them all.
 
