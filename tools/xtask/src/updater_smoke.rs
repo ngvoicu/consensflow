@@ -265,7 +265,7 @@ fn smoke(context: &Context, options: &Options, releases: &[Release], say: &Say) 
     };
     fs::create_dir_all(&cache).map_err(files("make", &cache))?;
     // Held to the end of the run: one run to a cache.
-    let _hold = cache::hold(&cache)?;
+    let _hold = cache::hold(&cache, say)?;
     if options.cache.is_none() {
         cache::mark_checkout(&cache, root)?;
         talk(say, format!("the builds are kept in {}", cache.display()));
@@ -395,7 +395,7 @@ impl Run<'_> {
                     self.say,
                     format!("building the update from {} as {version}", root.display()),
                 );
-                cache::keep_update(root, &self.kept("update"), env, || {
+                cache::keep_update(root, &self.kept("update"), env, self.say, || {
                     build_app(
                         &Build {
                             checkout: root,
