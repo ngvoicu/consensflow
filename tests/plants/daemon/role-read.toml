@@ -240,8 +240,8 @@ runs = ["cf-board-role"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = "            .filter(|_| role && reached);"
-replace = "            .filter(|_| reached);"
+find = "            .filter(|_| role && unread);"
+replace = "            .filter(|_| unread);"
 
 [[plant]]
 name = "role read: cf says it read a role that was read already"
@@ -250,7 +250,7 @@ runs = ["cf-board-role"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = "            .filter(|_| role && reached);"
+find = "            .filter(|_| role && unread);"
 replace = "            .filter(|_| role);"
 
 [[plant]]
@@ -495,14 +495,14 @@ find = "        Some(\"queued\" | \"delivering\")"
 replace = "        Some(\"queued\")"
 
 [[plant]]
-name = "role read: cf says it read a role only once it is delivered, not while it is being delivered"
+name = "role read: cf says it read a role on its way or back in the queue only once it is delivered, not while it is being delivered"
 meant = "a_role_cf_inbox_read_printed_whole_once_delivered_or_while_delivering_is_acknowledged_up_to_the_bound_of_a_role"
 runs = ["cf-board-role"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = "            Some(\"delivered\" | \"delivering\")"
-replace = "            Some(\"delivered\")"
+find = "            Some(\"queued\" | \"delivering\" | \"delivered\")"
+replace = "            Some(\"queued\" | \"delivered\")"
 
 [[plant]]
 name = "role read: a message read while its paste was on its way is failed when its delivery is given up"
