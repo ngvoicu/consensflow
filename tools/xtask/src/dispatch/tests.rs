@@ -57,6 +57,7 @@ fn every_command_of_the_plan_is_there_once() {
             "specmint-sync",
             "departures",
             "unreachable-pub",
+            "rust-version",
             "bench records-memory",
             "plants",
             "smoke",

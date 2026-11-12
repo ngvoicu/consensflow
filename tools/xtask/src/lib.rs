@@ -20,7 +20,8 @@
 //! - the gate, and what runs a part of it or a suite beside it: `check` (the whole
 //!   gate), `app` and `clippy_windows` (the lint and the tests where the app or
 //!   the platform cannot be built as it ships), `unreachable_pub` (a ceiling on
-//!   the harnesses' crate's `pub` items that its crate does not export), `suites` (`test daemons`,
+//!   the harnesses' crate's `pub` items that its crate does not export), `rust_version`
+//!   (`rust-version`: the Rust in use is the one `.github/rust-version` names), `suites` (`test daemons`,
 //!   `daemon-and-rig`, `integration`, `clis`, `agents`, `load`: the black-box
 //!   suites of `crates/cf-e2e`), `departures` and `bench` (thin drivers of cargo);
 //! - the app as built, run as a user would: `smoke` (the packaged smoke, and
@@ -62,6 +63,7 @@ mod plants;
 mod portable;
 pub mod process;
 mod release;
+mod rust_version;
 mod screen;
 mod scrub_muse_session;
 mod scrub_transcript;

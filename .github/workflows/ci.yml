@@ -5,7 +5,8 @@
 # suites), the page's Playwright suite (on Linux: it needs no app, and once is
 # enough), and the Rust host's tests, headless ones included, and clippy; and on
 # the Mac the packaged smoke, on the app built as a download is (the `packaged`
-# job). Rust comes from the runner's own rustup; the
+# job). Rust comes from the runner's own rustup, at the version .github/rust-version
+# names (`cargo xtask rust-version` says a drift); the
 # third-party actions are pinned to a commit. A release publishes only a
 # commit this gate passed on both platforms (release.yml's `gate` job, cf-release
 # `ci-passed`): its run by a push or by hand, with `gate (macos-latest)` and
@@ -129,6 +130,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
+      # The Rust in use is the one .github/rust-version names, said in one line when it is
+      # not: the engine's lower-casing golden below holds only for that Rust (T-1523).
+      - run: cargo xtask rust-version
       - run: npm --prefix app run bundle:ui
       - run: npm --prefix app run prepare-sidecar
       # The workspace's other crates, the pane host's tests among them, from
