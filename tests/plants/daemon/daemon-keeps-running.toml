@@ -275,7 +275,7 @@ meant = "closing_the_bridge_ends_every_response_that_waits_for_room"
 runs = ["bridge-queue"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/writer.rs"
 find = '''
                 let Some(writer) = writer.as_ref() else {
                     return Err(BridgeError::Eof);
