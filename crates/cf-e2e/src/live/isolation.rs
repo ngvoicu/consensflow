@@ -91,7 +91,6 @@ use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use serde_json::Value;
-use tempfile::TempDir;
 
 use super::agents;
 use super::login::{private_folder, sweep, write_private};
@@ -420,7 +419,7 @@ struct Made {
     /// The owner's setup when it was made.
     owner: Seen,
     /// The folder, removed when this is dropped: with the run, however it ends.
-    folder: TempDir,
+    folder: crate::door::Made,
 }
 
 /// The home a harness's windows run on for a run: made when the rig first asks for it, with a
@@ -679,14 +678,13 @@ impl Isolation {
             .map(|seed| self.read(seed, now))
             .collect::<Result<Vec<_>>>()?;
         sweep(&self.parent, PREFIX);
-        let folder = tempfile::Builder::new()
-            .prefix(&format!("{PREFIX}{}-", std::process::id()))
-            .tempdir_in(&self.parent)
-            .map_err(|source| Error::File {
-                action: "make a folder in",
-                path: self.parent.clone(),
-                source,
-            })?;
+        let folder =
+            crate::door::made_in(&self.parent, &format!("{PREFIX}{}-", std::process::id()))
+                .map_err(|source| Error::File {
+                    action: "make a folder in",
+                    path: self.parent.clone(),
+                    source,
+                })?;
         private_folder(folder.path())?;
         for relative in &self.plan.folders {
             files::make_dir(&folder.path().join(relative))?;

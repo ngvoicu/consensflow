@@ -419,6 +419,9 @@ impl Window {
             }
             thread::sleep(Duration::from_millis(200));
         }
-        let _ = self.child.kill();
+        let child = &mut self.child;
+        cf_e2e::door::Door::of_run().close_own_terminal("Muse's terminal", || {
+            let _ = child.kill();
+        });
     }
 }

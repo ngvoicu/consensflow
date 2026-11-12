@@ -43,8 +43,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::door::Made;
 use serde_json::{json, Value};
-use tempfile::TempDir;
 
 use super::machine::{live_folder_in, Harness, Installed, ISOLATION};
 use super::window::trust_claude;
@@ -137,7 +137,7 @@ pub struct Members {
     /// by its model (harness-models), and a check names it by its agent.
     handles: BTreeMap<String, String>,
     /// Where the shim that starts Claude Code is, which the windows run through.
-    _shims: TempDir,
+    _shims: Made,
 }
 
 impl Members {
@@ -185,7 +185,7 @@ impl Members {
                 })?;
             isolation.write(file.variable, &file.name, &file.text)?;
         }
-        let shims = tempfile::tempdir().map_err(|source| Error::File {
+        let shims = crate::door::made("consensflow-live-shims-").map_err(|source| Error::File {
             action: "make a folder in",
             path: std::env::temp_dir(),
             source,
@@ -500,10 +500,8 @@ impl Members {
     /// Ends the program of the window `pane`, with whatever turn it has at work, as the
     /// app's quit does to every window (`pane.kill`): the daemon sees it exit.
     pub fn cut(&self, pane: &Value) -> Result<Value> {
-        self.rig.host(
-            "pane.kill",
-            json!({ "id": pane["id"], "generation": pane["generation"] }),
-        )
+        self.rig
+            .close_pane(json!({ "id": pane["id"], "generation": pane["generation"] }))
     }
 
     /// The human's Pause of the task, and when it was made.

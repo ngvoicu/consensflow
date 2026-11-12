@@ -57,10 +57,10 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use cf_e2e::door::{Door, Grounded};
 use cf_e2e::live::members::{
-    self, delivered_result, end_chosen, find, holding, is_over, notes_of_work, orphans_in_folder,
-    working_folder, Account, Ended, Identity, Machine, Members, Plan, RunFolder, Running,
-    ThisMachine,
+    self, delivered_result, find, is_over, notes_of_work, working_folder, Account, Ended, Identity,
+    Machine, Members, Plan, RunFolder, Running, ThisMachine,
 };
 use cf_e2e::live::tree::{self, Proc, Tree};
 use cf_e2e::live::{cut, secs, text, Harness, Log, Who};
@@ -589,7 +589,7 @@ pub fn run_asked(
         &log,
         &mut chosen,
     );
-    let ended = end_chosen(&chosen.processes);
+    let ended = Door::of_run().end(&chosen.processes);
     let closed = members.close();
     let mut finished = finished.unwrap_or_else(Finished::failed);
     for problem in chosen.problems(&ended) {
@@ -880,8 +880,9 @@ fn look_for_leftovers(
 /// machine's processes that failed.
 #[derive(Debug, Default)]
 struct Chosen {
-    /// The processes, each by which process it is ([`end_chosen`]).
-    processes: Vec<Running>,
+    /// The processes, each by which process it is and the ground that makes it the run's
+    /// ([`Door::end`]).
+    processes: Grounded,
     /// The rig's stand-in jobs looked at already, by their files.
     jobs: Vec<String>,
     /// Why a look at the machine's processes failed, each time one did.
@@ -904,7 +905,7 @@ struct Chosen {
 impl Chosen {
     /// Adds what of the command the run ends at its end, as the machine lists its processes
     /// now (`all`): what descends from the worker's window's own process `own` and holds
-    /// `wanted`, with what it started ([`holding`]); and the rig's stand-in jobs (`jobs`:
+    /// `wanted`, with what it started ([`Grounded::holding`]); and the rig's stand-in jobs (`jobs`:
     /// each one's process, as the job wrote it, and its file, which no process but the job
     /// has in its command line, begun no earlier than the window; one the stand-in detached has
     /// no window to descend from).
@@ -927,33 +928,26 @@ impl Chosen {
             self.window_began.get_or_insert(own.started);
             self.window.get_or_insert(own);
         }
-        let in_window = own.map(|own| holding(all, own, wanted)).unwrap_or_default();
-        let mut of_jobs = Vec::new();
+        let in_window = own
+            .map(|own| Grounded::holding(all, own, wanted))
+            .unwrap_or_default();
+        let mut of_jobs = Grounded::none();
         for (pid, file) in jobs {
             if self.jobs.contains(file) {
                 continue;
             }
-            let found = all.iter().find(|process| {
-                process.identity.pid == *pid
-                    && process.command.contains(file.as_str())
-                    && self
-                        .window_began
-                        .is_some_and(|since| process.identity.started >= since)
+            let found = self.window_began.and_then(|since| {
+                all.iter()
+                    .filter(|process| process.identity.pid == *pid)
+                    .find_map(|process| Grounded::stand_in_job(process, file, since))
             });
-            if let Some(process) = found {
+            if let Some(job) = found {
                 self.jobs.push(file.clone());
-                of_jobs.push(process.clone());
+                of_jobs.add(job);
             }
         }
-        for one in in_window.into_iter().chain(of_jobs) {
-            if !self
-                .processes
-                .iter()
-                .any(|known| known.identity == one.identity)
-            {
-                self.processes.push(one);
-            }
-        }
+        self.processes.add(in_window);
+        self.processes.add(of_jobs);
     }
 
     /// The command itself where the run's own word finds it: a process whose program is the
@@ -983,8 +977,8 @@ impl Chosen {
 
     /// What of `all` the run counts for the command that escaped, and for nothing else that
     /// holds its words: what descends from the worker's window's process and holds `wanted`
-    /// ([`holding`]); an orphan that holds it, began no earlier than the window, and runs in the
-    /// run's own `folder`, where it has one under its temp root ([`orphans_in_folder`]); and,
+    /// ([`Grounded::holding`]); an orphan that holds it, began no earlier than the window, and runs in the
+    /// run's own `folder`, where it has one under its temp root ([`Grounded::orphans_in_folder`]); and,
     /// where the run has a word made for it (`word`: the folder of the rig's own jobs, in which no
     /// process of another run holds a file), what holds both `wanted` and `word` and began no
     /// earlier than the window. A process of another tree's run that holds
@@ -998,10 +992,12 @@ impl Chosen {
     ) -> Vec<Running> {
         let mut found: Vec<Running> = self
             .window
-            .map(|own| holding(all, own, wanted))
+            .map(|own| Grounded::holding(all, own, wanted).processes())
             .unwrap_or_default();
         if let (Some(folder), Some(since)) = (folder, self.window_began) {
-            found.extend(orphans_in_folder(all, wanted, folder, since, &folder_of));
+            found.extend(
+                Grounded::orphans_in_folder(all, wanted, folder, since, &folder_of).processes(),
+            );
         }
         found.extend(self.by_word(all));
         if let (Some(word), Some(since)) = (word, self.window_began) {
@@ -1027,7 +1023,7 @@ impl Chosen {
     /// Adds what escaped every window and is provably the run's own, as the machine lists its
     /// processes now (`all`): an orphan that holds `wanted`, began no earlier than the worker's
     /// window did, and runs in the run's own `folder` as `folder_of` says it, with what it
-    /// started ([`orphans_in_folder`]): a folder under the run's temp root alone ([`RunFolder`]),
+    /// started ([`Grounded::orphans_in_folder`]): a folder under the run's temp root alone ([`RunFolder`]),
     /// and none where the run has none (a live rig's project folder is in the person's home). A job a tool shell that leads a session of its own
     /// detached, once the shell has ended, has nothing else that ties it to the window; the
     /// folder is the worker's alone, made for the run, and the start tells the job from a
@@ -1045,19 +1041,12 @@ impl Chosen {
     ) -> Vec<Running> {
         let found = match (folder, self.window_began) {
             (Some(folder), Some(since)) => {
-                orphans_in_folder(all, wanted, folder, since, &folder_of)
+                Grounded::orphans_in_folder(all, wanted, folder, since, &folder_of)
             }
-            _ => Vec::new(),
+            _ => Grounded::none(),
         };
-        for orphan in found.iter().cloned() {
-            if !self
-                .processes
-                .iter()
-                .any(|chosen| chosen.identity == orphan.identity)
-            {
-                self.processes.push(orphan);
-            }
-        }
+        self.processes.add(found.clone());
+        let found = found.processes();
         // What the run's word finds is the run's and is said as what escaped, not as unproven.
         let of_the_word = self.by_word(all);
         self.unproven = all

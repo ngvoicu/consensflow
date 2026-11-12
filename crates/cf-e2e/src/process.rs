@@ -643,15 +643,19 @@ fn wait(child: &mut Child, limit: Option<Duration>) -> io::Result<(Option<i32>, 
             Ok(Some(status)) => return Ok((status.code(), false)),
             Ok(None) => {}
             Err(cause) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                if crate::door::Door::of_run()
+                    .end_child("a program that could not be waited for", child)
+                {
+                    let _ = child.wait();
+                }
                 return Err(cause);
             }
         }
         if limit.is_some_and(|limit| started.elapsed() >= limit) {
             // It may have ended just now, which is no matter to say.
-            let _ = child.kill();
-            let _ = child.wait();
+            if crate::door::Door::of_run().end_child("a program past its limit", child) {
+                let _ = child.wait();
+            }
             return Ok((None, true));
         }
         thread::sleep(POLL);

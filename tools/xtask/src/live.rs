@@ -60,10 +60,22 @@
 //! when any run did, after all of them ran. `windows` is the regular live run on a Windows
 //! machine (the release's step 2 names it): the checks only a Windows machine holds, the
 //! typed marks of `live parity` among them (T-961, row 32; T-972).
+//!
+//! `cargo xtask live sweep [--in <folder>] [--older-than <days>] [--yes]` lists the rig folders
+//! older runs left (in the temp folder, older than a day, unless named), and with `--yes` takes
+//! them through the kit's door: one a person kept, or one a process uses, never (`live-sweep`,
+//! `cf_e2e::door`). A rig's start takes none.
+//!
+//! With `CF_LIVE_AUDIT=1` a run is say-only: the kit ends no process, closes no window and
+//! takes no file away, and writes down instead what it would have, each with its ground, in
+//! `CF_LIVE_AUDIT_FILE` (one in the temp folder that this names, unless given). Such a run is
+//! never a pass: this names the file and leaves with a code that is not 0.
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::Path;
+
+use cf_base::env::Env;
 
 use crate::context::Context;
 use crate::dispatch::{self, Command, Console, Failure, Run};
@@ -72,7 +84,7 @@ use crate::process::{self, Invocation};
 pub const COMMANDS: &[Command] = &[Command {
     words: &["live"],
     about: "Run a live test of cf-e2e (the tests/live_<name>.rs files): it runs real harnesses on the machine's own logins and spends real quota, so it is ignored unless asked for and is no part of check",
-    usage: "<name> [harness ...] | --set <set> (each run of the set, one after another: windows) [--keep] [--models harness=model[:effort],...] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; --keep leaves the run's home and project where they are (the Claude Code config folder goes, for it holds a copy of a login: its conversations and sessions are copied into the kept home); --models runs each harness it names on that model, and that effort where one is given, the others on their cheap one (--claude-model M is --models claude=M, and --models wins where both name Claude); words that are no flags name harnesses; run it with no name to list the tests)",
+    usage: "<name> [harness ...] | sweep [--in <folder>] [--older-than <days>] [--yes] | --set <set> (each run of the set, one after another: windows) [--keep] [--models harness=model[:effort],...] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; --keep leaves the run's home and project where they are (the Claude Code config folder goes, for it holds a copy of a login: its conversations and sessions are copied into the kept home); --models runs each harness it names on that model, and that effort where one is given, the others on their cheap one (--claude-model M is --models claude=M, and --models wins where both name Claude); words that are no flags name harnesses; run it with no name to list the tests)",
     run: Run::Native(live),
 }];
 
@@ -135,8 +147,61 @@ fn live(context: &Context, args: &[OsString], console: &mut Console) -> Result<i
     if args.first().is_some_and(|word| word == SET) {
         return run_set(context, args, &names, console);
     }
+    if args.first().is_some_and(|word| word == SWEEP) && !names.iter().any(|name| name == SWEEP) {
+        return Ok(process::run(&sweep(context, &args[1..]), &context.env)?);
+    }
     let asked = parse(args, &names)?;
-    Ok(process::run(&invocation(context, &asked), &context.env)?)
+    let Some(file) = audit_file(&context.env) else {
+        return Ok(process::run(&invocation(context, &asked), &context.env)?);
+    };
+    let code = process::run(
+        &invocation(context, &asked).var(AUDIT_FILE, &file),
+        &context.env,
+    )?;
+    let said = fs::read_to_string(&file).map_or(0, |text| text.lines().count());
+    writeln!(
+        console.err,
+        "say only ({AUDIT}): {said} ending{} and removal{} the run would have made are in {}; a say-only run is no pass",
+        if said == 1 { "" } else { "s" },
+        if said == 1 { "" } else { "s" },
+        file.display()
+    )?;
+    Ok(if code == 0 { 1 } else { code })
+}
+
+/// The word that sweeps the rig folders older runs left.
+const SWEEP: &str = "sweep";
+
+/// The variable that makes a run say-only, and the one that names where it says
+/// (`cf_e2e::door::AUDIT`, `cf_e2e::door::AUDIT_FILE`).
+const AUDIT: &str = "CF_LIVE_AUDIT";
+const AUDIT_FILE: &str = "CF_LIVE_AUDIT_FILE";
+
+/// Where a say-only run says what it would have done: the file `CF_LIVE_AUDIT_FILE` names, or
+/// one of this run's own in the temp folder. None where the run is not say-only.
+fn audit_file(env: &Env) -> Option<std::path::PathBuf> {
+    let audit = env.text(AUDIT).unwrap_or_default();
+    if audit.is_empty() || audit == "0" {
+        return None;
+    }
+    Some(
+        env.path(AUDIT_FILE)
+            .filter(|file| !file.as_os_str().is_empty())
+            .map_or_else(
+                || {
+                    std::env::temp_dir()
+                        .join(format!("consensflow-live-audit-{}.txt", std::process::id()))
+                },
+                Path::to_path_buf,
+            ),
+    )
+}
+
+/// `cargo xtask live sweep <args>`: the kit's own program for it.
+fn sweep(context: &Context, args: &[OsString]) -> Invocation {
+    Invocation::new("cargo", &context.root)
+        .args(["run", "-q", "-p", "cf-e2e", "--bin", "live-sweep", "--"])
+        .args(args)
 }
 
 /// The runs of a set, each the line of [`SETS`] it is and what it asks.

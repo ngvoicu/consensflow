@@ -239,6 +239,13 @@ impl Daemon {
         self.process.kill();
     }
 
+    /// Stops it where it is and lets it go on after `span`, through the door: whether it was
+    /// stopped.
+    #[cfg(unix)]
+    pub fn stall(&self, span: Duration) -> bool {
+        self.process.stall(span)
+    }
+
     /// Whether it has ended.
     pub fn has_exited(&mut self) -> bool {
         self.process.has_exited()

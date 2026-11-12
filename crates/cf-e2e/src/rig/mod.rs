@@ -37,7 +37,7 @@ mod project;
 mod report;
 mod route;
 mod stranger;
-mod sweep;
+pub mod sweep;
 mod wait;
 
 use std::path::{Path, PathBuf};
@@ -553,6 +553,13 @@ impl Rig {
         &self.cf
     }
 
+    /// Stops the rig's own daemon where it is, and lets it go on after `span`, through the door:
+    /// what a machine too loaded to run it does for a moment. Whether it was stopped.
+    #[cfg(unix)]
+    pub fn stall_daemon(&self, span: std::time::Duration) -> bool {
+        self.daemon.stall(span)
+    }
+
     /// The daemon's process id.
     pub fn daemon_pid(&self) -> u32 {
         self.daemon.id()
@@ -609,6 +616,12 @@ impl Rig {
     pub fn page(&self, op: &str, body: Value) -> Result<Value> {
         let id = self.shared.next_page_id();
         self.ask(&id, op, &body, self.daemon.sink(), "the daemon")
+    }
+
+    /// Closes the window `pane` of the rig's own pane host (`pane.kill`), through the door
+    /// ([`crate::door::Door::close_pane`]): the one way a case closes a window.
+    pub fn close_pane(&self, pane: Value) -> Result<Value> {
+        crate::door::Door::of_run().close_pane(&pane, |op, body| self.host(op, body))
     }
 
     /// What the desktop app asks the pane host: `op` with `body`, answered by
@@ -817,10 +830,13 @@ impl Rig {
 
     /// Leaves the home where it is when the rig ends, however it ends (closed,
     /// or dropped by a case that failed), for a person to look at what the case
-    /// did: where it is. A rig that starts a day later takes it away unless a process
-    /// works in it.
+    /// did: where it is. It holds the mark [`crate::door::KEPT`], and no sweep takes it.
     pub fn keep_home(&mut self) -> PathBuf {
         self.keep_root = true;
+        let _ = std::fs::write(
+            self.root.join(crate::door::KEPT),
+            "kept for a person to look at\n",
+        );
         self.root.clone()
     }
 
@@ -1023,7 +1039,7 @@ impl Drop for Rig {
         // what the run did in the person's setup, which the homes say loudly.
         let _ = self.finish_homes();
         if !self.keep_root {
-            let _ = std::fs::remove_dir_all(&self.root);
+            let _ = crate::door::Door::of_run().remove_made(&self.root);
         }
     }
 }

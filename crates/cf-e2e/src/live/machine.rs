@@ -451,7 +451,7 @@ pub fn rig(installs: &[Installed], stand_in: impl Into<PathBuf>) -> Config {
 }
 
 /// The folder below `home` that a run's live folders are made in ([`live_folder_in`]).
-fn live_root(home: &Path) -> PathBuf {
+pub fn live_root(home: &Path) -> PathBuf {
     home.join(".consensflow-candidate").join("live")
 }
 

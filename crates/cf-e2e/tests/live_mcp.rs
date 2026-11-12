@@ -230,8 +230,14 @@ fn a_real_claude_worker_with_an_mcp_server_finishes_its_task_and_the_chief_gets_
     let log = Log::begin("live mcp")?;
     let claude = log.found(Harness::Claude)?;
     let runtime = Runtime::of_machine()?;
-    let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-mcp");
-    files::make_dir(&made)?;
+    files::make_dir(Path::new(env!("CARGO_TARGET_TMPDIR")))?;
+    let made_here = cf_e2e::door::made_in(Path::new(env!("CARGO_TARGET_TMPDIR")), "live-mcp-")
+        .map_err(|source| cf_e2e::Error::File {
+            action: "make a folder in",
+            path: Path::new(env!("CARGO_TARGET_TMPDIR")).to_path_buf(),
+            source,
+        })?;
+    let made = made_here.path().to_path_buf();
     let server = Server::write(&made, &runtime)?;
     let shim = live::shimmed_claude_with_servers(
         &made,

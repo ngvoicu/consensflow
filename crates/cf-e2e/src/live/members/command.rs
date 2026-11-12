@@ -7,7 +7,7 @@
 //!
 //! A command is found and ended in the window's own tree alone, what descends from
 //! the window's process ([`LongCommand::in_window`], [`LongCommand::end_in`], and
-//! [`LongCommand::chosen_in`] with [`end_chosen`] for what a window that is cut
+//! [`LongCommand::chosen_in`] with [`Door::end`] for what a window that is cut
 //! leaves), never by the mark across the machine: a check that ended every process
 //! whose command line held its mark ended the worker that ran it, whose brief quoted
 //! the mark (2026-10-16). What is read across the machine by the mark
@@ -18,7 +18,8 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 use super::super::claude::{processes_with, Process};
-use super::descent::{descending_from, end_chosen, Ended, Identity, Machine, Running, ThisMachine};
+use super::descent::{descending_from, Ended, Identity, Machine, Running, ThisMachine};
+use crate::door::{Door, Grounded};
 use crate::{pattern, Result};
 
 /// A word made for this run of the kit: `cf-run-<16 hex digits>`, 64 random bits made at its first
@@ -131,30 +132,23 @@ impl LongCommand {
 
     /// Its processes in the window whose own process is `window`, and what they started:
     /// what a check ends of it, now ([`LongCommand::end_in`]), or once the window is cut,
-    /// which leaves what it ran with no window to descend from ([`end_chosen`]).
-    pub fn chosen_in(&self, machine: &dyn Machine, window: Identity) -> Result<Vec<Running>> {
+    /// which leaves what it ran with no window to descend from ([`Door::end`]).
+    pub fn chosen_in(&self, machine: &dyn Machine, window: Identity) -> Result<Grounded> {
         let all = machine.processes()?;
-        let mut chosen: Vec<Running> = Vec::new();
-        for process in descending_from(&all, window)
-            .into_iter()
-            .filter(|process| self.is_run_by(&process.command))
-        {
-            let under = descending_from(&all, process.identity);
-            for one in std::iter::once(process).chain(under) {
-                if !chosen.iter().any(|seen| seen.identity == one.identity) {
-                    chosen.push(one);
-                }
-            }
-        }
-        Ok(chosen)
+        Ok(Grounded::in_window_where(
+            &all,
+            window,
+            |line| self.is_run_by(line),
+            self.mark,
+        ))
     }
 
     /// Ends its processes in the window whose own process is `window`, and what they
-    /// started, on this machine ([`LongCommand::chosen_in`], [`end_chosen`]): what came of
+    /// started, on this machine ([`LongCommand::chosen_in`], [`Door::end`]): what came of
     /// each, nothing where the window runs no such command. Nothing outside the window is
     /// ended, whatever its command line says.
     pub fn end_in(&self, window: Identity) -> Result<Ended> {
-        Ok(end_chosen(&self.chosen_in(&ThisMachine, window)?))
+        Ok(Door::of_run().end(&self.chosen_in(&ThisMachine, window)?))
     }
 }
 
@@ -483,7 +477,10 @@ mod tests {
             |found: &[Running]| -> Vec<u32> { found.iter().map(|one| one.identity.pid).collect() };
         assert_eq!(pids(&command.in_window(&machine, window).unwrap()), [102]);
         let chosen = command.chosen_in(&machine, window).unwrap();
-        assert_eq!(pids(&end_chosen_by(&machine, &chosen).ended), [102, 103]);
+        assert_eq!(
+            pids(&end_chosen_by(&machine, &chosen.processes()).ended),
+            [102, 103]
+        );
         assert_eq!(machine.ended(), [102, 103]);
         // A window that runs no such command has nothing found or ended.
         let editor = Identity {
@@ -741,6 +738,8 @@ mod tests {
             (found.len() == 2).then_some(found)
         })
         .expect("the window's command and its sleep are chosen");
+        let grounded = chosen;
+        let chosen = grounded.processes();
         assert!(chosen
             .iter()
             .all(|one| one.identity.pid != outsider.id() && one.identity != own));
@@ -750,7 +749,7 @@ mod tests {
             command.in_window(&ThisMachine, own).unwrap().is_empty(),
             "a window that is gone has no tree to find the command in"
         );
-        assert_eq!(end_chosen(&chosen).ended, chosen);
+        assert_eq!(Door::acting().end(&grounded).ended, chosen);
         let gone = until(Duration::from_secs(10), Duration::from_millis(50), || {
             chosen
                 .iter()

@@ -489,3 +489,25 @@ fn a_test_threads_the_caller_gave_is_not_given_twice() {
         .0
         .contains("--test-threads=1"));
 }
+
+#[test]
+fn a_say_only_run_says_in_the_file_it_is_given_or_one_of_its_own_and_a_run_that_acts_in_none() {
+    assert_eq!(audit_file(&Env::default()), None);
+    assert_eq!(audit_file(&Env::default().with_var(AUDIT, "0")), None);
+    assert_eq!(audit_file(&Env::default().with_var(AUDIT, "")), None);
+    let own = audit_file(&Env::default().with_var(AUDIT, "1")).unwrap();
+    assert!(own.starts_with(std::env::temp_dir()), "{}", own.display());
+    let given = Env::default()
+        .with_var(AUDIT, "1")
+        .with_var(AUDIT_FILE, "/the/said.txt");
+    assert_eq!(audit_file(&given), Some(PathBuf::from("/the/said.txt")));
+}
+
+#[test]
+fn sweep_runs_the_kits_own_program_with_the_words_after_it() {
+    let ran = sweep(&context(), &words("--older-than 3 --yes")).display();
+    assert!(
+        ran.ends_with("cargo run -q -p cf-e2e --bin live-sweep -- --older-than 3 --yes"),
+        "{ran}"
+    );
+}

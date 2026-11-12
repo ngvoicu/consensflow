@@ -1093,12 +1093,14 @@ fn a_login_with_more_than_five_minutes_left_is_not_renewed_by_running_claude_cod
 /// What Claude Code keeps of the folder it was started in, in the owner's projects, is the
 /// renewal's own: it is taken away when the renewal is over, and nothing else of the owner's is
 /// (zeewin2: `projects/C--Users-AGV-AppData-Local-Temp-consensflow-integration-renew-…/memory`).
+/// The stand-in names it as Claude Code does, by the folder's real path, every character that
+/// is no letter or digit a dash.
 #[test]
 fn a_renewal_takes_away_the_record_claude_code_kept_of_its_own_folder_and_no_other() {
     let run = Renewing::new();
     let projects = run.person.home.path().join(".claude/projects");
     let body = format!(
-        "{}\nown=\"{}/C--tmp-$(basename \"$PWD\")\"\nmkdir -p \"$own\" && echo x > \"$own/memory\"",
+        "{}\nown=\"{}/$(pwd -P | sed 's/[^A-Za-z0-9]/-/g')\"\nmkdir -p \"$own\" && echo x > \"$own/memory\"",
         run.renews(),
         projects.display()
     );

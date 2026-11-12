@@ -10,9 +10,10 @@ use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use cf_e2e::door::Door;
 use cf_e2e::live::ask::{self, Record};
 use cf_e2e::live::claude::{record, runs, transcript_file, Status};
-use cf_e2e::live::members::{end_chosen, find, Account, Ended, Identity, ThisMachine};
+use cf_e2e::live::members::{find, Account, Ended, Identity, ThisMachine};
 use cf_e2e::live::window::{drawn, raw_end};
 use cf_e2e::live::window::{Open, Window, ANSWER, READY};
 use cf_e2e::live::{seconds, until, Harness, Installed, Log};
@@ -166,7 +167,11 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
         cut.closed().then_some(())
     });
     if let Some(left) = left {
-        said_ended(said, "the cut window", left.map(|left| end_chosen(&left)));
+        said_ended(
+            said,
+            "the cut window",
+            left.map(|left| Door::of_run().end(&left)),
+        );
     }
     sleep(Duration::from_secs(1));
     let left_by_the_cut = cut.recorded();

@@ -116,11 +116,14 @@ pub struct Ended {
     pub gone: Vec<Running>,
     /// What may still run: the process, and why it could not be ended.
     pub failed: Vec<(Running, String)>,
+    /// What a say-only door said it would end, and left ([`crate::door`]).
+    pub said: Vec<Running>,
 }
 
 impl Ended {
     /// What may still run, a problem for the case's verdict each: a process that could not
     /// be reached, read or ended.
+    /// A process a say-only door said and left is one: a say-only run passes no case.
     pub fn problems(&self) -> Vec<String> {
         self.failed
             .iter()
@@ -131,6 +134,13 @@ impl Ended {
                     crate::live::cut(&process.command, 90)
                 )
             })
+            .chain(self.said.iter().map(|process| {
+                format!(
+                    "process {} ({}) was said, not ended: the door only says (CF_LIVE_AUDIT)",
+                    process.identity.pid,
+                    crate::live::cut(&process.command, 90)
+                )
+            }))
             .collect()
     }
 }

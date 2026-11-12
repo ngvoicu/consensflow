@@ -123,11 +123,11 @@ pub fn make(program: &Path) -> Result<Home> {
         calls::install(&decoy.folder, program)?;
         let log = decoy.folder.join(calls::LOG);
         if log.exists() {
-            std::fs::remove_file(&log).map_err(|source| cf_e2e::Error::File {
-                action: "remove",
-                path: log.clone(),
-                source,
-            })?;
+            let removed = cf_e2e::door::Door::of_run()
+                .remove_in_live_root(&cf_e2e::live::machine::home()?, &log);
+            if !removed.is_gone() {
+                return Err(cf_e2e::Error::Daemon(removed.to_string()));
+            }
         }
     }
     for (name, text) in profiles(&decoys, windows) {
@@ -136,11 +136,11 @@ pub fn make(program: &Path) -> Result<Home> {
     for name in STALE {
         let stale = root.join(name);
         if stale.exists() {
-            std::fs::remove_file(&stale).map_err(|source| cf_e2e::Error::File {
-                action: "remove",
-                path: stale.clone(),
-                source,
-            })?;
+            let removed = cf_e2e::door::Door::of_run()
+                .remove_in_live_root(&cf_e2e::live::machine::home()?, &stale);
+            if !removed.is_gone() {
+                return Err(cf_e2e::Error::Daemon(removed.to_string()));
+            }
         }
     }
     Ok(Home { root, decoys })

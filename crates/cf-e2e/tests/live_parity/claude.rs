@@ -18,6 +18,9 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
+use cf_e2e::door::Door;
+#[cfg(unix)]
+use cf_e2e::door::Grounded;
 use cf_e2e::live::ask;
 use cf_e2e::live::machine::{home, live_folder};
 #[cfg(unix)]
@@ -363,8 +366,13 @@ fn opened(
     // a session of its own is no process the pane table may signal (`cf-panes`' test guard).
     #[cfg(unix)]
     let ended = ended_by_its_debug_log(debug);
-    let _ = table.kill(&pane.key);
-    let _ = drain.join();
+    let named = format!("pane {}#{}", pane.key.id, pane.key.generation);
+    let closed = Door::of_run().close_own_terminal(&named, || {
+        let _ = table.kill(&pane.key);
+    });
+    if closed {
+        let _ = drain.join();
+    }
     #[cfg(unix)]
     ended?;
     let log = files::read_string(debug).unwrap_or_default();
@@ -378,7 +386,7 @@ fn opened(
 }
 
 /// Ends the Claude this case started with `--debug-file debug`, and what it started, by
-/// the one way a live check ends a process ([`members::end_chosen`]): chosen from this
+/// the one way a live check ends a process ([`Door::end`]): chosen from this
 /// test's own tree of processes by that path, which no other command names. What may
 /// still run is the error.
 #[cfg(unix)]
@@ -388,8 +396,8 @@ fn ended_by_its_debug_log(debug: &Path) -> Result {
         .identity(std::process::id())?
         .ok_or_else(|| Error::Daemon("this test's own process is not listed".to_owned()))?;
     let all = machine.processes()?;
-    let chosen = members::holding(&all, me, &format!("--debug-file {}", debug.display()));
-    let problems = members::end_chosen(&chosen).problems();
+    let chosen = Grounded::holding(&all, me, &format!("--debug-file {}", debug.display()));
+    let problems = Door::of_run().end(&chosen).problems();
     if problems.is_empty() {
         Ok(())
     } else {
@@ -486,9 +494,17 @@ pub fn run(log: &Log) -> Result {
     let own = home()?.join(".claude");
     let own_json = home()?.join(".claude.json");
     let folder = live_folder("parity-claude")?;
-    let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-parity-claude");
-    let _ = fs::remove_dir_all(&made);
-    files::make_dir(&made)?;
+    files::make_dir(Path::new(env!("CARGO_TARGET_TMPDIR")))?;
+    let made_here = cf_e2e::door::made_in(
+        Path::new(env!("CARGO_TARGET_TMPDIR")),
+        "live-parity-claude-",
+    )
+    .map_err(|source| Error::File {
+        action: "make a folder in",
+        path: Path::new(env!("CARGO_TARGET_TMPDIR")).to_path_buf(),
+        source,
+    })?;
+    let made = made_here.path().to_path_buf();
     let before = own_state(&own, &own_json, &folder);
     let login = login(&own)?;
     let left = login["expiresAt"].as_i64().unwrap_or(0) - now_ms();
@@ -527,7 +543,7 @@ pub fn run(log: &Log) -> Result {
             )
         });
         // The copy of the login goes with the run, whatever came of it.
-        let _ = fs::remove_file(config.join(".credentials.json"));
+        let _ = Door::of_run().remove_in_made(&config.join(".credentials.json"));
         match result {
             Ok(loaded) => {
                 log.say(format!("{name}: {}", said(&loaded)));
@@ -539,8 +555,8 @@ pub fn run(log: &Log) -> Result {
             }
         }
     }
-    let _ = fs::remove_dir_all(made.join("config-terminal"));
-    let _ = fs::remove_dir_all(made.join("config-member"));
+    let _ = Door::of_run().remove_in_made(&made.join("config-terminal"));
+    let _ = Door::of_run().remove_in_made(&made.join("config-member"));
     if own_state(&own, &own_json, &folder) != before {
         return Err(Error::Daemon(
             "!!! the machine's own Claude config changed during the run".to_owned(),

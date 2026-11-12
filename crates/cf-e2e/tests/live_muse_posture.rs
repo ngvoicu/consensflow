@@ -146,7 +146,10 @@ fn script(port: u16, cf: &Path, outside: &Path) -> String {
 /// Makes `work` a git work tree of a repository beside it, `main`, with one commit.
 fn work_tree(root: &Path) -> Result<(), String> {
     let (main, work) = (root.join("main"), root.join("work"));
-    fs::remove_dir_all(&work).map_err(|error| error.to_string())?;
+    let removed = cf_e2e::door::Door::of_run().remove_in_made(&work);
+    if !removed.is_gone() {
+        return Err(removed.to_string());
+    }
     fs::create_dir_all(&main).map_err(|error| error.to_string())?;
     fs::write(main.join("README.md"), "A throwaway project.\n")
         .map_err(|error| error.to_string())?;
@@ -202,9 +205,7 @@ fn printed(log: &str) -> String {
 /// Runs one posture's turn in a home of its own under `under`, and reads what came of it.
 fn run(name: &str, posture: &[&str], under: &Path, log: &Log) -> Result<Done, String> {
     let binary = binary()?;
-    let root = tempfile::Builder::new()
-        .prefix(&format!("live-muse-posture-{name}-"))
-        .tempdir_in(under)
+    let mut root = cf_e2e::door::made_in(under, &format!("live-muse-posture-{name}-"))
         .map_err(|error| error.to_string())?;
     let root_path = root.path().to_path_buf();
     set_up(&root_path)?;

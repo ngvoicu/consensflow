@@ -179,7 +179,8 @@ impl Server {
             runtime,
             &[(NAME, STEM, false), (DETACHED_NAME, DETACHED_STEM, true)],
         )?;
-        let _ = std::fs::remove_file(folder.join(format!("{DETACHED_STEM}.pid")));
+        let _ = crate::door::Door::of_run()
+            .remove_in_made(&folder.join(format!("{DETACHED_STEM}.pid")));
         Ok(server)
     }
 
@@ -214,7 +215,7 @@ impl Server {
     /// Takes away the process id the server wrote: whatever wrote it is no longer
     /// the one the run looks for.
     pub fn forget(&self) {
-        let _ = std::fs::remove_file(&self.pid_file);
+        let _ = crate::door::Door::of_run().remove_in_made(&self.pid_file);
     }
 
     /// The configuration Claude Code is given the server by.
@@ -305,7 +306,7 @@ mod tests {
 
     #[test]
     fn the_server_that_leaves_the_group_is_told_so_beside_the_one_that_stays() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("mcp-server-test-").unwrap();
         let server = Server::write_leaving_group(folder.path(), &python()).unwrap();
         let said: Value =
             serde_json::from_str(&std::fs::read_to_string(server.config()).unwrap()).unwrap();
@@ -331,7 +332,7 @@ mod tests {
 
     #[test]
     fn a_server_that_has_not_started_has_no_process_and_is_not_running() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("mcp-server-test-").unwrap();
         let server = Server::write(folder.path(), &python()).unwrap();
         assert_eq!(server.pid(), None);
         assert!(!server.runs());
@@ -350,7 +351,7 @@ mod tests {
     /// What the server of `runtime` answers to `lines`, one request a line, and the process it
     /// wrote.
     fn answers(runtime: &Runtime, lines: &[&str]) -> (Vec<Value>, String) {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("mcp-server-test-").unwrap();
         let server = Server::write(folder.path(), runtime).unwrap();
         let script = folder.path().join(runtime.script().0);
         let ran = Run::new(runtime.program())
@@ -416,7 +417,7 @@ mod tests {
 
     #[test]
     fn a_runtime_that_cannot_leave_a_group_writes_the_one_server_that_stays_and_says_so() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("mcp-server-test-").unwrap();
         let node = Runtime::Node(PathBuf::from("node"));
         assert!(!node.can_leave_group());
         let server = Server::write_leaving_group(folder.path(), &node).unwrap();

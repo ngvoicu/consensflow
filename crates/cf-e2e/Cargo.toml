@@ -48,6 +48,12 @@ name = "fake-cf"
 path = "src/bin/fake_cf.rs"
 required-features = ["test-support"]
 
+# `cargo xtask live sweep`: the rig folders older runs left, listed, and with `--yes` taken
+# through the kit's door (`cf_e2e::door`), a kept one and one a process uses never.
+[[bin]]
+name = "live-sweep"
+path = "src/bin/live_sweep.rs"
+
 # The rig's Muse on Windows, which has no `exec`: the machine's Muse, run on its fake
 # model with the command line it is given written down (`cf_e2e::muse::StandIn`).
 [[bin]]
@@ -100,6 +106,10 @@ uuid.workspace = true
 
 [dev-dependencies]
 cf-e2e = { path = ".", features = ["test-support"] }
+# The rule that the kit ends and removes only through its door reads the kit's Rust as syntax
+# (`src/door/rule.rs`).
+syn = { version = "2", features = ["full", "visit"] }
+proc-macro2 = "1"
 # The recordings (`*.json.gz`) the repository holds, read unzipped by the rule that names no
 # removed harness (`tests/cli/a_removed_harness_is_named_nowhere.rs`).
 flate2.workspace = true

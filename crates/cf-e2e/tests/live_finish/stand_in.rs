@@ -509,18 +509,19 @@ impl Decoy {
 #[cfg(unix)]
 impl Drop for Decoy {
     fn drop(&mut self) {
-        use cf_e2e::live::members::{end_chosen, Machine, ThisMachine};
+        use cf_e2e::door::{Door, Grounded};
+        use cf_e2e::live::members::{Machine, ThisMachine};
 
         let unread = || {
-            let since = ThisMachine.identity(std::process::id()).ok()??.started;
-            ThisMachine.processes().ok()?.into_iter().find(|one| {
-                one.identity.pid == self.pid
-                    && one.command == self.command
-                    && one.identity.started >= since
-            })
+            let all = ThisMachine.processes().ok()?;
+            Grounded::started_here(&all, self.pid, &self.command)
         };
-        if let Some(decoy) = self.read.take().or_else(unread) {
-            let _ = end_chosen(&[decoy]);
+        let decoy = match self.read.take() {
+            Some(read) => Grounded::read_here(&read),
+            None => unread(),
+        };
+        if let Some(decoy) = decoy {
+            let _ = Door::of_run().end(&decoy);
         }
     }
 }

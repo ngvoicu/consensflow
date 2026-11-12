@@ -1226,12 +1226,10 @@ mod tests {
 /// the build's scratch folder (`target`), held until the run's close and removed then by its own
 /// path. A fixed name there was every invocation's of one built tree: a later one took away an
 /// earlier one's process file and wrote over its configuration while its server ran (T-1557).
-fn server_folder(target: &Path) -> Result<tempfile::TempDir> {
+fn server_folder(target: &Path) -> Result<cf_e2e::door::Made> {
     fs::create_dir_all(target)
         .map_err(|error| Error::Daemon(format!("{}: {error}", target.display())))?;
-    tempfile::Builder::new()
-        .prefix("live-monitor-wait-")
-        .tempdir_in(target)
+    cf_e2e::door::made_in(target, "live-monitor-wait-")
         .map_err(|error| Error::Daemon(format!("{}: {error}", target.display())))
 }
 

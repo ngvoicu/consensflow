@@ -53,9 +53,10 @@ use std::path::Path;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use cf_e2e::door::{Door, Grounded};
 use cf_e2e::live::members::{
-    end_chosen, find, member, member_as, stand_in_chief, stand_in_worker, ticks_in, Account, Ended,
-    LongCommand, Members, Moving, Plan, Running, ThisMachine, STAND_IN_WORKER,
+    find, member, member_as, stand_in_chief, stand_in_worker, ticks_in, Account, Ended,
+    LongCommand, Members, Moving, Plan, ThisMachine, STAND_IN_WORKER,
 };
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, ask, seconds, Harness, Log};
@@ -69,23 +70,15 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 const LONG: LongCommand = LongCommand::new("cf-restart-cut-long-command");
 
 /// The command the chief at rest starts in the background: the same mark, and it counts its seconds
-/// in a file of the project's folder whose name is this run's alone (`restart-cut-job-ticks-<pid>-<time>.txt`,
+/// in a file of the project's folder whose name is this run's alone (`restart-cut-job-ticks-<pid>-<time>-<n>.txt`, [`cf_e2e::door::own_name`],
 /// made at each call, given to the command in the words the chief is asked, so a file of that name can
 /// only be this command's: a command of an earlier run still writing its own has another name). A
 /// harness that starts a program with no shell (Codex, T-1137) leaves nothing for a process list to say
 /// of it that is the window's own, so what shows it running is that count going up. The name is leaked
 /// to the `'static` a [`LongCommand`] holds: a test binary makes a few.
 fn job() -> LongCommand {
-    let millis = jiff::Timestamp::now().as_millisecond();
-    static CASES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let case = CASES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let file: &'static str = Box::leak(
-        format!(
-            "restart-cut-job-ticks-{}-{millis}-{case}.txt",
-            std::process::id()
-        )
-        .into_boxed_str(),
-    );
+    let file: &'static str =
+        Box::leak(cf_e2e::door::own_name("restart-cut-job-ticks", "txt").into_boxed_str());
     LongCommand::counting("cf-restart-cut-long-command", 300, file)
 }
 
@@ -94,7 +87,7 @@ struct OwnTicks(std::path::PathBuf);
 
 impl Drop for OwnTicks {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        let _ = Door::of_run().remove_own_named(&self.0);
     }
 }
 
@@ -255,13 +248,13 @@ fn worker_plan(worker: Harness) -> Plan {
 /// agent), with what they started: what descends from the window's own process and
 /// holds the command's mark. None while the window has no process. A process outside
 /// the window is none of it, whatever its command line says.
-fn in_window(members: &Members, who: &str) -> Result<Vec<Running>> {
+fn in_window(members: &Members, who: &str) -> Result<Grounded> {
     let own = members
         .window_of(who)?
         .and_then(|window| members.window_process(&window));
     match own {
         Some(own) => LONG.chosen_in(&ThisMachine, own),
-        None => Ok(Vec::new()),
+        None => Ok(Grounded::none()),
     }
 }
 
@@ -269,7 +262,7 @@ fn in_window(members: &Members, who: &str) -> Result<Vec<Running>> {
 /// is the long one. Each process is ended only while it is still the one chosen, and what
 /// could not be ended fails the case ([`ended`]).
 fn end_in_window(members: &Members, who: &str, case: &mut Account) -> Result<()> {
-    ended(case, &end_chosen(&in_window(members, who)?));
+    ended(case, &Door::of_run().end(&in_window(members, who)?));
     Ok(())
 }
 
@@ -391,7 +384,7 @@ fn drive_chief(mut members: Members, log: &Log) -> Result<Account> {
     let quit_at = Instant::now();
     let left = in_window(&members, "chief")?;
     let restarted = members.restart(log);
-    ended(&mut case, &end_chosen(&left));
+    ended(&mut case, &Door::of_run().end(&left));
     let members = restarted?;
     case.say(format!(
         "quit and started again in {} s",
@@ -713,7 +706,7 @@ fn drive_chief_at_rest_with_a_job(mut members: Members, log: &Log) -> Result<Acc
             members.lane("chief")?["activity"]
         ),
     );
-    ended(&mut case, &end_chosen(&left));
+    ended(&mut case, &Door::of_run().end(&left));
 
     // The human's Resume: the chief comes back told nothing of a cut turn.
     members.resume()?;
@@ -810,7 +803,7 @@ fn drive_worker(mut members: Members, worker: Harness, agent: &str, log: &Log) -
     let quit_at = Instant::now();
     let left = in_window(&members, agent)?;
     let restarted = members.restart(log);
-    ended(&mut case, &end_chosen(&left));
+    ended(&mut case, &Door::of_run().end(&left));
     let members = restarted?;
     case.say(format!(
         "quit and started again in {} s",

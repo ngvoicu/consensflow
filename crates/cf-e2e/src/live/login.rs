@@ -70,12 +70,12 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tempfile::TempDir;
 
 use super::keychain;
 use super::machine::Harness;
 use super::renew::{self, Kept, Renewal, Renewed, TestMachine};
-use crate::process::{is_alive, own_var, Run};
+use crate::door::Removed;
+use crate::process::{own_var, Run};
 use crate::rig::ClaudeConfig;
 use crate::{files, Error, Result};
 
@@ -481,7 +481,7 @@ struct Made {
     /// What the renewal of the login came to, where the login had run short on a test machine.
     renewed: Option<Renewed>,
     /// The folder, removed when this is dropped: with the run, however it ends.
-    folder: TempDir,
+    folder: crate::door::Made,
 }
 
 /// What lets a login renew itself, and is never given to a run's copy: the refresh token and when it
@@ -694,14 +694,13 @@ impl Login {
         }
         let (oauth, renewed) = self.usable(self.source.read()?, now)?;
         sweep(&self.parent, PREFIX);
-        let folder = tempfile::Builder::new()
-            .prefix(&format!("{PREFIX}{}-", std::process::id()))
-            .tempdir_in(&self.parent)
-            .map_err(|source| Error::File {
-                action: "make a folder in",
-                path: self.parent.clone(),
-                source,
-            })?;
+        let folder =
+            crate::door::made_in(&self.parent, &format!("{PREFIX}{}-", std::process::id()))
+                .map_err(|source| Error::File {
+                    action: "make a folder in",
+                    path: self.parent.clone(),
+                    source,
+                })?;
         private_folder(folder.path())?;
         let copy = without_renewal(&oauth);
         let credentials = json!({ "claudeAiOauth": copy }).to_string();
@@ -831,12 +830,17 @@ fn copy_tree(from: &Path, to: &Path) -> Result {
 }
 
 /// Takes away the folders of runs that were killed before they could (`prefix`, the id of
-/// the process, and a random word), in `parent`: a folder whose process is gone is nobody's,
-/// and holds a login. A process that is there keeps its own.
+/// the process, and a random word), in `parent`, through the door: a folder whose run is gone
+/// and that no process uses is nobody's, and holds a login ([`Door::remove_unused`]). A run that
+/// is there keeps its own; a harness that run detached, which runs on the copy after its run
+/// ended, keeps it too (T-1557, finding 3b). Says, in one line, what it took and what it left in
+/// use.
+#[allow(clippy::print_stderr)] // Said in the output of the run.
 pub(super) fn sweep(parent: &Path, prefix: &str) {
     let Ok(entries) = fs::read_dir(parent) else {
         return;
     };
+    let (mut taken, mut left) = (Vec::new(), Vec::new());
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let owner = name
@@ -844,9 +848,32 @@ pub(super) fn sweep(parent: &Path, prefix: &str) {
             .and_then(|rest| rest.split('-').next())
             .and_then(|id| id.parse::<u32>().ok());
         let is_folder = entry.file_type().is_ok_and(|kind| kind.is_dir());
-        if is_folder && owner.is_some_and(|id| !is_alive(id)) {
-            let _ = fs::remove_dir_all(entry.path());
+        let (true, Some(owner)) = (is_folder, owner) else {
+            continue;
+        };
+        match crate::door::Door::of_run().remove_unused(&entry.path(), owner) {
+            Removed::Removed(_) | Removed::Said(_) => taken.push(name),
+            Removed::Left(_, why) if why != "its run is there" => {
+                left.push(format!("{name} ({why})"))
+            }
+            Removed::Left(..) | Removed::Absent(_) => {}
         }
+    }
+    if !taken.is_empty() || !left.is_empty() {
+        eprintln!(
+            "the login copies of runs that are gone in {}: taken {}; left {}",
+            parent.display(),
+            if taken.is_empty() {
+                "none".to_owned()
+            } else {
+                taken.join(", ")
+            },
+            if left.is_empty() {
+                "none".to_owned()
+            } else {
+                left.join(", ")
+            },
+        );
     }
 }
 

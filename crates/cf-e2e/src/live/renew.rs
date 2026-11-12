@@ -298,14 +298,11 @@ fn one_shot_within(
     limit: Duration,
     records: &[&Path],
 ) -> Result<Option<String>> {
-    let folder = tempfile::Builder::new()
-        .prefix(FOLDER)
-        .tempdir()
-        .map_err(|source| Error::File {
-            action: "make a folder in",
-            path: std::env::temp_dir(),
-            source,
-        })?;
+    let folder = crate::door::made(FOLDER).map_err(|source| Error::File {
+        action: "make a folder in",
+        path: std::env::temp_dir(),
+        source,
+    })?;
     let ran = Run::new(program)
         .args(words)
         .inheriting_env()
@@ -336,29 +333,16 @@ fn one_shot_within(
     )))
 }
 
-/// Takes away of each folder in `records` the entries the folder `own` made there, by name: the
-/// ones whose name ends with the name of `own` (a harness spells a folder's path into a name, with
-/// the path's own last part at the end, which is unique: [`FOLDER`] and a random tail). Nothing
-/// else of the owner's is touched, and an entry that cannot be taken away is left (the kit's
-/// watch then names it).
+/// Takes away of each folder in `records` the one entry the harness made there for the folder
+/// `own`, by its whole name ([`crate::door::Record`]: the real path of `own` spelt as Claude Code
+/// spells a folder into a name), through the door. Nothing else of the owner's is touched: an
+/// entry of theirs whose name ends the same is theirs (T-1557, finding 5). One that cannot be
+/// taken away is left (the kit's watch then names it).
 fn forget(records: &[&Path], own: &Path) {
-    let Some(name) = own.file_name().and_then(|name| name.to_str()) else {
-        return;
-    };
+    let door = crate::door::Door::of_run();
     for folder in records {
-        let Ok(entries) = std::fs::read_dir(folder) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            if !entry.file_name().to_string_lossy().ends_with(name) {
-                continue;
-            }
-            let path = entry.path();
-            let _ = if path.is_dir() {
-                std::fs::remove_dir_all(&path)
-            } else {
-                std::fs::remove_file(&path)
-            };
+        if let Some(record) = crate::door::Record::of(folder, own) {
+            let _ = door.remove_record(&record);
         }
     }
 }

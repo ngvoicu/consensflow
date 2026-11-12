@@ -187,7 +187,8 @@ pub fn run(run: &Run, case: Case) -> Done {
             // What the case made, and the launches' files with the copies of the owner's
             // config, go with it, unless the run is to be looked at.
             if !keep_requested() {
-                let _ = std::fs::remove_dir_all(&workspace);
+                let _ =
+                    cf_e2e::door::Door::of_run().remove_in_live_root(Path::new(home), &workspace);
             }
         }
         Err(failed) => done.account.fail(failed),

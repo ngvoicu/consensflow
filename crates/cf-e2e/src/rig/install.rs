@@ -307,7 +307,10 @@ pub(super) fn give_muse_its_folders(
         let link = moved.join("muse");
         match std::fs::symlink_metadata(&link) {
             Ok(meta) if meta.file_type().is_symlink() => {
-                std::fs::remove_file(&link).map_err(Error::file("remove", &link))?;
+                let removed = crate::door::Door::of_run().remove_in_made(&link);
+                if !removed.is_gone() {
+                    return Err(Error::Daemon(format!("the Muse link of a harness's home: {removed}")));
+                }
             }
             Ok(_) => {
                 return Err(Error::Daemon(format!(

@@ -7,8 +7,9 @@
 //! suites were made for.
 //!
 //! A run that was killed leaves its rigs' homes, and so does `CONSENSFLOW_LIVE_KEEP`. A
-//! rig that starts sweeps the ones in the folder it makes its own in that are older than
-//! a day, and that no process works in, without reading what is in them.
+//! rig that starts takes none of them, for they may be another run's (T-1557, finding 3a):
+//! `cargo xtask live sweep --yes` takes, through the kit's door, the ones older than a day
+//! that no person kept and no process works in or names, without reading what is in them.
 
 use std::fs;
 use std::path::Path;
@@ -84,7 +85,9 @@ mod sweeping {
     use std::path::Path;
     use std::time::{Duration, SystemTime};
 
+    use cf_e2e::door::Door;
     use cf_e2e::process::Run;
+    use cf_e2e::rig::sweep;
 
     use super::*;
 
@@ -107,7 +110,7 @@ mod sweeping {
     }
 
     #[test]
-    fn a_rig_that_starts_sweeps_the_homes_older_than_a_day_that_no_process_works_in_and_nothing_else(
+    fn a_rig_that_starts_takes_no_home_and_the_sweep_takes_the_old_ones_no_process_works_in_or_names(
     ) -> Outcome {
         let folder = tempfile::tempdir()?;
         let stale = home(folder.path(), "consensflow-integration-stale", DAY * 3)?;
@@ -124,10 +127,9 @@ mod sweeping {
         std::os::unix::fs::symlink(&elsewhere, &link)?;
 
         // A process working in one, and one that has the other's name in its command line.
-        // Each lasts until the case ends it: the rig sweeps once its turn comes, after every
-        // rig before it in the suite, which took longer than a sleeper of two minutes once
-        // the suite had four Devin cases more (T-655's gate, twice). And no longer than the
-        // case's process: `cargo test` ends no group of a test it gave up on, so a case
+        // Each lasts until the case ends it, after the sweep: a sleeper of a fixed time ran out
+        // before a rig's turn came in a loaded suite (T-655's gate, twice). And no longer than
+        // the case's process: `cargo test` ends no group of a test it gave up on, so a case
         // killed outright would leave a sleeper of its own time behind (Calliope on T-679).
         let mut sleeper = Run::new("sh")
             .args([
@@ -145,15 +147,40 @@ mod sweeping {
             .spawn()?;
 
         let rig = Rig::start(config().homes_in(folder.path()));
-        sleeper.kill();
-        namer.kill();
+        let started = [&stale, &worked_in, &named, &young, &other, &elsewhere]
+            .iter()
+            .all(|home| home.join("workspace").join("note").is_file());
         let rig = rig?;
         let own = rig.workspace().to_path_buf();
         rig.close()?;
+        assert!(started, "a rig's start took a home that was there");
+        assert!(report.is_file() && link.is_symlink());
 
-        assert!(
-            !stale.exists(),
-            "a home older than a day, worked in by none, is still there"
+        // The sweep: what it lists, and what its door takes of that.
+        #[allow(clippy::disallowed_methods)]
+        let now = SystemTime::now();
+        let listed = sweep::older(folder.path(), now, sweep::OLDER);
+        let swept: Vec<_> = listed
+            .iter()
+            .map(|home| Door::acting().remove_stale_rig(home, sweep::OLDER, now))
+            .collect();
+        sleeper.kill();
+        namer.kill();
+        assert_eq!(
+            listed,
+            vec![named.clone(), stale.clone(), worked_in.clone()]
+        );
+        // A machine where the kit cannot read which processes work in a folder takes none.
+        let reads = cfg!(target_os = "macos");
+        assert_eq!(
+            swept.iter().filter(|removed| removed.is_gone()).count(),
+            usize::from(reads),
+            "{swept:?}"
+        );
+        assert_eq!(
+            stale.exists(),
+            !reads,
+            "a home older than a day, worked in by none"
         );
         assert!(
             worked_in.join("workspace").join("note").is_file(),

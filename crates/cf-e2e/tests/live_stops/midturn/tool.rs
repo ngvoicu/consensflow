@@ -23,7 +23,6 @@
 //! way it goes.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use cf_e2e::live::ask;
@@ -104,7 +103,12 @@ impl Drop for OwnFiles<'_> {
 pub fn clear_ticks(folder: &Path, command: &Command) -> Vec<String> {
     tick_files(command)
         .into_iter()
-        .filter(|name| std::fs::remove_file(folder.join(name)).is_ok())
+        .filter(|name| {
+            matches!(
+                cf_e2e::door::Door::of_run().remove_own_named(&folder.join(name)),
+                cf_e2e::door::Removed::Removed(_)
+            )
+        })
         .map(str::to_owned)
         .collect()
 }
@@ -114,13 +118,7 @@ pub fn clear_ticks(folder: &Path, command: &Command) -> Vec<String> {
 /// may still be writing (a 360-second background one), can have it. The name is in the command line
 /// the member is given, which a process list shows, so a file of that name is the member's command's.
 fn tick_file(what: &str) -> String {
-    static CASES: AtomicU64 = AtomicU64::new(0);
-    let millis = jiff::Timestamp::now().as_millisecond();
-    format!(
-        "{what}-{}-{millis}-{}.txt",
-        std::process::id(),
-        CASES.fetch_add(1, Ordering::Relaxed)
-    )
+    cf_e2e::door::own_name(what, "txt")
 }
 
 /// The command the member is asked to run, and what tells it in a process list, in the file

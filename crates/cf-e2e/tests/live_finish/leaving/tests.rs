@@ -916,14 +916,14 @@ fn a_job_a_shell_detached_and_left_is_found_by_the_runs_folder_and_ended_by_whic
     for _ in 0..100 {
         let all = ThisMachine.processes().unwrap();
         chosen.take_orphans(&all, Some(&own), "sleep 25", working_folder);
-        found = chosen.processes.clone();
+        found = chosen.processes.processes();
         if !found.is_empty() {
             break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
     // Ended whatever came of the assertions below: the sleep is short, and this ends it now.
-    let ended = end_chosen(&found);
+    let ended = Door::acting().end(&chosen.processes);
     assert_eq!(found.len(), 1, "the one orphan of the folder: {found:#?}");
     assert!(found[0].command.contains("sleep 25"), "{found:#?}");
     assert_eq!(ended.ended.len(), 1, "{ended:#?}");
@@ -1077,12 +1077,12 @@ fn what_escaped_is_what_the_window_held_an_orphan_of_its_folder_since_it_began_a
 
 /// Ends what it holds, each by which process it is, when the test ends however it does.
 #[cfg(unix)]
-struct Reaper(Vec<Running>);
+struct Reaper(Grounded);
 
 #[cfg(unix)]
 impl Drop for Reaper {
     fn drop(&mut self) {
-        let _ = end_chosen(&self.0);
+        let _ = Door::acting().end(&self.0);
     }
 }
 
@@ -1102,7 +1102,7 @@ fn a_command_of_this_runs_word_that_detached_unseen_and_runs_in_another_folder_e
         .run()
         .unwrap();
     let pid: u32 = ran.stdout.trim().parse().unwrap();
-    let mut reaper = Reaper(Vec::new());
+    let mut reaper = Reaper(Grounded::none());
     let began = ThisMachine
         .identity(std::process::id())
         .unwrap()
@@ -1122,7 +1122,7 @@ fn a_command_of_this_runs_word_that_detached_unseen_and_runs_in_another_folder_e
             .into_iter()
             .find(|one| one.identity.pid == pid)
         {
-            reaper.0 = vec![own];
+            reaper.0 = Grounded::read_here(&own).expect("the command began after this test");
             found =
                 on_the_machine(|all| chosen.of_the_run(all, (None, &wanted, None), working_folder));
             break;
@@ -1333,7 +1333,7 @@ fn an_unrelated_command_of_the_same_seconds_begun_after_the_runs_word_is_none_of
     chosen.choose(&table, None, &[], &wanted);
     let escaped =
         on_the_machine(|all| chosen.of_the_run(&ours(all), (None, &wanted, None), working_folder));
-    let ended = end_chosen(&chosen.processes);
+    let ended = Door::acting().end(&chosen.processes);
     let own_runs_on = own.wait(Duration::from_millis(500)).unwrap().is_none();
     let runs_on = unrelated
         .wait(Duration::from_millis(500))
@@ -1497,7 +1497,7 @@ fn a_detached_command_of_the_runs_word_is_said_to_have_escaped_and_runs_on_after
         ..run_chosen()
     };
     chosen.choose(&table, None, &[], &wanted(Who::Harness(Harness::Claude)));
-    let ended = end_chosen(&chosen.processes);
+    let ended = Door::acting().end(&chosen.processes);
     let runs_on = own.wait(Duration::from_millis(500)).unwrap().is_none();
     assert!(
         runs_on,
@@ -1537,7 +1537,7 @@ fn what_escaped_the_ending_is_what_the_word_finds_that_the_run_never_chose() {
     let all = vec![chosen_one.clone(), running(301, 21, 1, &line)];
     let chosen = Chosen {
         window_began: Some(10),
-        processes: vec![chosen_one],
+        processes: Grounded::tree(&all, chosen_one.identity),
         ..run_chosen()
     };
     assert_eq!(
@@ -1570,6 +1570,12 @@ fn what_escaped_fails_the_case_but_under_the_known_limit_of_a_session_of_its_own
     let own_session = Escaped::of(found.clone(), Expect::OwnSession);
     assert!(own_session.failed.is_empty(), "{own_session:#?}");
     assert_eq!(own_session.said.len(), 1, "{own_session:#?}");
-    assert!(own_session.said[0].starts_with(&found[0]), "{own_session:#?}");
-    assert!(own_session.said[0].contains("said, not failed"), "{own_session:#?}");
+    assert!(
+        own_session.said[0].starts_with(&found[0]),
+        "{own_session:#?}"
+    );
+    assert!(
+        own_session.said[0].contains("said, not failed"),
+        "{own_session:#?}"
+    );
 }

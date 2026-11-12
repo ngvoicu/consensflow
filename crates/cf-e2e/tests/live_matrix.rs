@@ -262,7 +262,7 @@ mod tests {
     /// keeps nothing there.
     #[test]
     fn a_failed_case_keeps_its_evidence_where_ci_uploads_it_and_a_passed_one_does_not() {
-        let unique = format!("t1226-kept-{}", std::process::id());
+        let unique = cf_e2e::door::own_name("t1226-kept", "d");
         let kept = checkout::path(REPORTS).join(&unique);
         let write = |reports: &Reports, unique: &str| {
             let folder = reports.path().join(unique).join("windows");
@@ -289,7 +289,7 @@ mod tests {
         .join();
         assert!(failed.is_err());
         let screen = std::fs::read_to_string(kept.join("windows").join("p1-worker.txt"));
-        std::fs::remove_dir_all(&kept).ok();
+        let _ = cf_e2e::door::Door::acting().remove_own_named(&kept);
         assert_eq!(screen.unwrap(), "the worker's last screen\n");
     }
 

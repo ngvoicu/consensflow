@@ -93,7 +93,7 @@ pub fn claude(rig: &Rig, argv: &[String], folder: &Path) -> Result<&'static str>
             .join("\n")
     };
     let kill = || {
-        let _ = rig.host("pane.kill", pane.clone());
+        let _ = rig.close_pane(pane.clone());
     };
     let still = |within: Duration| -> bool {
         let started = Instant::now();

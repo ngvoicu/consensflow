@@ -150,7 +150,7 @@ fn check(log: &Log) -> Result<Check> {
                 Ok(exited(&members, &window.pane).then_some(()))
             })?;
             if closed.is_none() {
-                let _ = members.rig().host("pane.kill", window.pane.clone());
+                let _ = members.rig().close_pane(window.pane.clone());
                 find(
                     log,
                     "the first window to close once killed",

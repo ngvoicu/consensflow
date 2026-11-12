@@ -989,7 +989,7 @@ struct Written(PathBuf);
 
 impl Drop for Written {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        let _ = cf_e2e::door::Door::of_run().remove_in_made(&self.0);
     }
 }
 
@@ -1499,7 +1499,7 @@ mod tests {
     #[test]
     fn what_a_window_of_the_resumed_part_wrote_goes_with_it() {
         // However its turn of the loop ends.
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("live-folder-trust-test-").unwrap();
         let written = config.path().join("projects").join("written");
         fs::create_dir_all(&written).unwrap();
         fs::write(written.join("s.jsonl"), "{}").unwrap();

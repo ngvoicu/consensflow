@@ -170,8 +170,9 @@ fn user_config(home: &Path) -> Result {
     mcp(&agent.join("mcp.json"), &server, "user_mcp")
 }
 
-/// The project's own of each in `folder`, with an `APPEND_SYSTEM.md` where `append`.
-fn project_config(folder: &Path, server: &Path, append: bool) -> Result {
+/// The project's own of each in `folder`, a live folder of `home`, with an `APPEND_SYSTEM.md`
+/// where `append`.
+fn project_config(home: &Path, folder: &Path, server: &Path, append: bool) -> Result {
     let pi = folder.join(".pi");
     files::write(&folder.join("AGENTS.md"), "MARK_PROJECT_AGENTS\n")?;
     skill(&pi.join("skills"), "project-skill")?;
@@ -189,12 +190,9 @@ fn project_config(folder: &Path, server: &Path, append: bool) -> Result {
     if append {
         files::write(&appended, "MARK_PROJECT_APPEND\n")
     } else {
-        match std::fs::remove_file(&appended) {
-            Err(source) if source.kind() != std::io::ErrorKind::NotFound => Err(Error::File {
-                action: "remove",
-                path: appended,
-                source,
-            }),
+        let removed = cf_e2e::door::Door::of_run().remove_in_live_root(home, &appended);
+        match removed {
+            cf_e2e::door::Removed::Left(..) => Err(Error::Daemon(removed.to_string())),
             _ => Ok(()),
         }
     }
@@ -322,7 +320,12 @@ fn a_pi_members_window_has_everything_bare_pi_has_in_the_same_folder() -> Result
     let folder = live_folder_in(&home, FOLDER)?;
     let mut checks = Vec::new();
     for (at, case) in CASES.iter().enumerate() {
-        project_config(&folder, &home.join("mcp-server.mjs"), case.project_append)?;
+        project_config(
+            &home,
+            &folder,
+            &home.join("mcp-server.mjs"),
+            case.project_append,
+        )?;
         let (bare_out, member_out) = (
             users.path().join(format!("bare-{at}.json")),
             users.path().join(format!("member-{at}.json")),

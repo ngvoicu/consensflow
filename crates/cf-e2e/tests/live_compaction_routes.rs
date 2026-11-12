@@ -518,12 +518,12 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
         if own_var("CF_ONLY").is_some_and(|only| !name.contains(&only)) {
             continue;
         }
-        let scratch = Scratch::at(std::env::temp_dir().join(format!(
-            "compaction-routes-muse-{}-{}",
-            std::process::id(),
-            said.len()
-        )));
-        copy_muse_into(&home, &scratch.0).map_err(|source| Error::File {
+        let scratch = Scratch::made("compaction-routes-muse-").map_err(|source| Error::File {
+            action: "make a folder in",
+            path: std::env::temp_dir(),
+            source,
+        })?;
+        copy_muse_into(&home, scratch.path()).map_err(|source| Error::File {
             action: "copy the login and the model catalog of",
             path: home.join(".config/muse"),
             source,
@@ -555,16 +555,16 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
             .cwd(&folder)
             .inheriting_env()
             .vars([
-                ("XDG_CONFIG_HOME", scratch.0.join("config")),
-                ("XDG_DATA_HOME", scratch.0.join("data")),
-                ("XDG_CACHE_HOME", scratch.0.join("cache")),
-                ("XDG_STATE_HOME", scratch.0.join("state")),
+                ("XDG_CONFIG_HOME", scratch.path().join("config")),
+                ("XDG_DATA_HOME", scratch.path().join("data")),
+                ("XDG_CACHE_HOME", scratch.path().join("cache")),
+                ("XDG_STATE_HOME", scratch.path().join("state")),
             ])
             .var("MUSE_NO_AUTO_UPDATE", "1")
             .closed_input()
             .limit(TURN)
             .run()?;
-        let lines = muse_compaction_lines(&scratch.0.join("data"));
+        let lines = muse_compaction_lines(&scratch.path().join("data"));
         if ran.code != Some(0) {
             failed.push(format!("{name}: muse exec ended {:?}", ran.code));
         }

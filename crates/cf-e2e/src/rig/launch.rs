@@ -59,21 +59,21 @@ impl Rig {
         // real harnesses' windows open in no git repository there, where a home under the
         // checkout would put them in ConsensFlow's own (the repository's settings and
         // instructions, a project by its root for trust, one project for every window).
-        // The homes a killed run left in the folder, older than a day and worked in by no
-        // process, are taken away first, unread (`sweep`).
+        // The homes older runs left in the folder are counted, and none is taken (`sweep`).
+        // The home is a folder the door made, which goes through the door with the rig.
         let (root, scratch) = match &config.existing_root {
             Some(root) => (root.clone(), None),
             None => {
                 let folder = config.homes.clone().unwrap_or_else(std::env::temp_dir);
                 files::make_dir(&folder)?;
                 super::sweep::homes(&folder);
-                let scratch = tempfile::Builder::new()
-                    .prefix("consensflow-integration-")
-                    .tempdir_in(&folder)
-                    .map_err(|source| Error::File {
-                        action: "make a folder in",
-                        path: folder.clone(),
-                        source,
+                let scratch =
+                    crate::door::made_in(&folder, crate::door::RIG_PREFIX).map_err(|source| {
+                        Error::File {
+                            action: "make a folder in",
+                            path: folder.clone(),
+                            source,
+                        }
                     })?;
                 (scratch.path().to_path_buf(), Some(scratch))
             }
@@ -109,7 +109,7 @@ impl Rig {
 
         // The rig owns its home from here on: it goes with it.
         if let Some(scratch) = scratch {
-            let _ = scratch.keep();
+            let _ = scratch.hand_on();
         }
         Ok(Self {
             root,
