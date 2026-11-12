@@ -242,7 +242,7 @@ replace = "            let lived = 0;"
 
 [[plant]]
 name = "ci flakes a4b rig: a task held for the quota is not paused for it"
-meant = "a_chief_given_the_note_that_a_task_is_held_is_told_it_goes_on_when_the_account_is_switched"
+meant = "a_chief_given_the_note_that_a_task_is_held_is_shown_it_goes_on_when_the_account_is_switched"
 runs = ["a4b-rig-waiting"]
 builds = true
 

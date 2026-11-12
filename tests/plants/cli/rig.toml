@@ -25,7 +25,7 @@ rig-codex-session = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "ri
 # worker" reached the chief after another worker had taken T-357.
 [[plant]]
 name = "rig: a take-over leaves the note that the task was taken back for the chief to be given"
-meant = "the_note_that_a_task_was_taken_back_is_withdrawn_when_another_worker_takes_it_before_the_chief_is_given_the_note"
+meant = "the_note_that_a_task_was_taken_back_is_shown_never_typed_and_its_line_says_who_took_it_after"
 runs = ["rig-waiting-notes"]
 builds = true
 
@@ -57,7 +57,7 @@ replace = ""
 
 [[plant]]
 name = "rig: a held task goes on and the chief given the note is told nothing"
-meant = "a_chief_given_the_note_that_a_task_is_held_is_told_it_goes_on_when_the_account_is_switched"
+meant = "a_chief_given_the_note_that_a_task_is_held_is_shown_it_goes_on_when_the_account_is_switched"
 runs = ["rig-waiting-notes"]
 builds = true
 
