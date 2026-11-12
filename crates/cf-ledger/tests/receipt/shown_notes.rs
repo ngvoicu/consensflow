@@ -538,7 +538,11 @@ fn a_held_task_whose_member_left_the_staff_says_on_its_line_it_is_paused_with_it
         w.ledger
             .remove_member(w.project, "zeus")
             .expect("zeus leaves the staff");
-        assert_eq!(held_until(&w, task).as_deref(), Some(UNTIL), "its hold is kept");
+        assert_eq!(
+            held_until(&w, task).as_deref(),
+            Some(UNTIL),
+            "its hold is kept"
+        );
         assert_eq!(aside(&w, task).as_deref(), Some(MEMBER_GONE_LINE));
     }
     // Paused and never held, the same.
