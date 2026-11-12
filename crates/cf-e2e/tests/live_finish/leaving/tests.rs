@@ -1503,12 +1503,17 @@ fn a_detached_command_of_the_runs_word_is_said_to_have_escaped_and_runs_on_after
         runs_on,
         "the run ended a command it found by its word alone: {ended:#?}"
     );
-    let said = chosen.escaped_the_ending(&ours(&ThisMachine.processes().unwrap()));
+    let after = ours(&ThisMachine.processes().unwrap());
+    let said = chosen.escaped_the_ending(&after);
     own.kill();
+    // The line as the machine lists it: Windows' table quotes the program (`"ping" -n …`).
+    assert_eq!(after.len(), 1, "the command runs on: {after:#?}");
+    assert!(has_arg(&after[0].command, word()), "{after:#?}");
     assert_eq!(
         said,
         [format!(
-            "the command escaped the ending: pid {pid}, `{line}`; the kit did not end it, it ends by itself within {} s",
+            "the command escaped the ending: pid {pid}, `{}`; the kit did not end it, it ends by itself within {} s",
+            after[0].command,
             seconds()
         )],
     );
