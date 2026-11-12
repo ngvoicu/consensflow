@@ -807,7 +807,7 @@ replace = '''    format!("{}{}", note_of(Telling::Replaces, instructions, cf), "
 
 [[plant]]
 name = "codex role: the staff's rows grow, and the command line the docs measured is not the text's"
-meant = "the_command_line_of_a_windows_launch_is_the_size_the_docs_say"
+meant = "the_largest_roles_are_given_to_a_muse_window_in_the_parts_its_hooks_say_and_every_part_fits_a_hook"
 runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
