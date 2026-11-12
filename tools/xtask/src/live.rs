@@ -42,10 +42,12 @@
 //! The words end at a `--`, or at the first of cargo's own flags that a run is
 //! likely to want (`--offline`, `--locked`, `--frozen`): they and what follows
 //! are cargo's. After a `--` the rest goes to the test program, after what this
-//! always gives it, `--ignored --nocapture` (what a live run says as it goes is
-//! on the screen, and the ignored tests are the ones it runs; a word of those two
-//! that the caller gave as well is not given twice, which the test program
-//! refuses).
+//! always gives it, `--ignored --nocapture --test-threads=1` (what a live run says as it
+//! goes is on the screen, the ignored tests are the ones it runs, and they run one at a
+//! time: two live windows of Claude Code at once break the one-session rule; a word of
+//! those that the caller gave as well is not given twice, which the test program
+//! refuses, and a `--test-threads` of the caller's, as `=N` or as two words, replaces
+//! the one).
 //!
 //! A `--help` or `-h` among the words that are this command's own is its help,
 //! and starts nothing: the test's name comes first, so xtask's own rule (a help
@@ -288,10 +290,26 @@ fn parse(args: &[OsString], names: &[String]) -> Result<Asked, Failure> {
     })
 }
 
-/// What every run of a live test is given to run: the tests that are ignored, and
-/// what they say as they go, on the screen. A word the caller gave too is not
-/// given twice: the test program refuses a flag it is given more than once.
-const ALWAYS: [&str; 2] = ["--ignored", "--nocapture"];
+/// What every run of a live test is given to run: the tests that are ignored, what they
+/// say as they go, on the screen, and one test thread: the tests of one file run on parallel
+/// threads otherwise, and a file with more than one (`live_finish` has three) seats two windows
+/// of Claude Code at once, which the one live Claude Code session at a time rule forbids. A word
+/// the caller gave too is not given twice: the test program refuses a flag it is given more than
+/// once; a `--test-threads` of the caller's, in either spelling (`--test-threads=N`, or the
+/// flag and its number as two words), replaces the one given here ([`gives_threads`]).
+const ALWAYS: [&str; 3] = ["--ignored", "--nocapture", ONE_THREAD];
+
+/// The flag that gives the test program one test thread.
+const ONE_THREAD: &str = "--test-threads=1";
+
+/// Whether `given`, the words the caller gave the test program, say how many test threads it has:
+/// `--test-threads=N`, or `--test-threads` and the number after it.
+fn gives_threads(given: &[OsString]) -> bool {
+    given
+        .iter()
+        .filter_map(|word| word.to_str())
+        .any(|word| word == "--test-threads" || word.starts_with("--test-threads="))
+}
 
 /// The `cargo test` of the live test `asked` names: its ignored tests, with what
 /// it is asked for in the variables it reads.
@@ -301,9 +319,13 @@ fn invocation(context: &Context, asked: &Asked) -> Invocation {
         Some(at) => (&asked.rest[..at], &asked.rest[at + 1..]),
         None => (&asked.rest[..], &[][..]),
     };
-    let always = ALWAYS
-        .into_iter()
-        .filter(|word| !test_program.iter().any(|given| given == word));
+    let always = ALWAYS.into_iter().filter(|word| {
+        if *word == ONE_THREAD {
+            !gives_threads(test_program)
+        } else {
+            !test_program.iter().any(|given| given == word)
+        }
+    });
     let mut invocation = Invocation::new("cargo", &context.root)
         .args(["test", "-p", "cf-e2e", "--test"])
         .arg(format!("live_{}", asked.test))

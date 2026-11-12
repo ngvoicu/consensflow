@@ -55,7 +55,9 @@ fn a_live_test_is_the_ignored_case_of_its_test_and_runs_only_when_asked_for() {
         let (line, vars) = runs(name).unwrap();
         assert_eq!(
             line,
-            format!("cargo test -p cf-e2e --test live_{name} -- --ignored --nocapture")
+            format!(
+                "cargo test -p cf-e2e --test live_{name} -- --ignored --nocapture --test-threads=1"
+            )
         );
         assert!(vars.is_empty());
     }
@@ -70,7 +72,7 @@ fn a_live_test_is_the_ignored_case_of_its_test_and_runs_only_when_asked_for() {
 fn a_test_is_named_by_its_file_with_dashes_or_underscores() {
     assert_eq!(
         runs("input-box").unwrap().0,
-        "cargo test -p cf-e2e --test live_input_box -- --ignored --nocapture"
+        "cargo test -p cf-e2e --test live_input_box -- --ignored --nocapture --test-threads=1"
     );
     assert_eq!(runs("input_box").unwrap().0, runs("input-box").unwrap().0);
 }
@@ -125,7 +127,7 @@ fn the_models_of_the_harnesses_reach_the_suites_as_they_were_given_with_claudes_
             .unwrap();
     assert_eq!(
         line,
-        "cargo test -p cf-e2e --test live_approval -- --ignored --nocapture"
+        "cargo test -p cf-e2e --test live_approval -- --ignored --nocapture --test-threads=1"
     );
     assert_eq!(
         vars,
@@ -189,7 +191,7 @@ fn keep_takes_no_value_so_what_follows_it_is_a_word_of_its_own() {
     );
     assert_eq!(
         line,
-        "cargo test -p cf-e2e --test live_approval -- --ignored --nocapture"
+        "cargo test -p cf-e2e --test live_approval -- --ignored --nocapture --test-threads=1"
     );
 }
 
@@ -198,7 +200,7 @@ fn cargos_own_flags_end_the_words_and_they_and_what_follows_are_cargos() {
     let (line, vars) = runs("approval --steps worker devin --keep --offline claude").unwrap();
     assert_eq!(
         line,
-        "cargo test -p cf-e2e --test live_approval --offline claude -- --ignored --nocapture"
+        "cargo test -p cf-e2e --test live_approval --offline claude -- --ignored --nocapture --test-threads=1"
     );
     assert_eq!(
         vars,
@@ -222,37 +224,40 @@ fn cargos_own_flags_end_the_words_and_they_and_what_follows_are_cargos() {
 fn what_follows_a_double_dash_goes_to_the_test_program_after_what_every_run_gives_it() {
     assert_eq!(
         runs("paste -- --list").unwrap().0,
-        "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --list"
+        "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --test-threads=1 --list"
     );
     assert_eq!(
         runs("paste claude -- --list --exact the_name").unwrap(),
         (
-            "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --list --exact the_name"
+            "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --test-threads=1 --list --exact the_name"
                 .to_owned(),
             vec![var("CONSENSFLOW_LIVE_HARNESS", "claude")]
         )
     );
     // Words of live's after it are the test program's, flags among them.
     let (line, vars) = runs("paste -- --keep").unwrap();
-    assert!(line.ends_with("-- --ignored --nocapture --keep"), "{line}");
+    assert!(
+        line.ends_with("-- --ignored --nocapture --test-threads=1 --keep"),
+        "{line}"
+    );
     assert!(vars.is_empty());
     // What every run is given is not given twice: the test program refuses a flag it is
     // given more than once (`-- --nocapture` is what the live tests have always been run with).
     assert_eq!(
         runs("paste -- --nocapture --list").unwrap().0,
-        "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --list"
+        "cargo test -p cf-e2e --test live_paste -- --ignored --test-threads=1 --nocapture --list"
     );
     assert_eq!(
         runs("approval claude -- --ignored --nocapture").unwrap().0,
-        "cargo test -p cf-e2e --test live_approval -- --ignored --nocapture"
+        "cargo test -p cf-e2e --test live_approval -- --test-threads=1 --ignored --nocapture"
     );
     assert_eq!(
         runs("paste --offline -- --ignored").unwrap().0,
-        "cargo test -p cf-e2e --test live_paste --offline -- --nocapture --ignored"
+        "cargo test -p cf-e2e --test live_paste --offline -- --nocapture --test-threads=1 --ignored"
     );
     assert_eq!(
         runs("paste --offline -- --list").unwrap().0,
-        "cargo test -p cf-e2e --test live_paste --offline -- --ignored --nocapture --list"
+        "cargo test -p cf-e2e --test live_paste --offline -- --ignored --nocapture --test-threads=1 --list"
     );
 }
 
@@ -429,4 +434,58 @@ fn a_set_that_is_none_or_words_after_its_name_are_refused_saying_which_sets_ther
         refused("--set windows codex"),
         "--set takes the name of a set, and nothing after it: windows"
     );
+}
+
+#[test]
+fn every_live_run_is_given_one_test_thread_unless_the_caller_gave_its_own() {
+    // A live binary's tests run on parallel threads by default, and a file with more than one
+    // seats two windows of Claude Code at once, which the one live Claude Code session at a time
+    // rule forbids (`live_finish` holds three).
+    for name in ["designer", "approval", "paste", "input-box"] {
+        let line = runs(name).unwrap().0;
+        assert!(
+            line.ends_with("-- --ignored --nocapture --test-threads=1"),
+            "{line}"
+        );
+    }
+    // The caller's words come after what is always given, and the flag is one of it.
+    assert_eq!(
+        runs("paste -- --list").unwrap().0,
+        "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --test-threads=1 --list"
+    );
+    // A run of a set is built the same way, so each of its runs has it.
+    for (set, _) in SETS {
+        let (_, runs) = set_runs(&words(&format!("--set {set}")), &checkout_tests()).unwrap();
+        assert!(!runs.is_empty(), "{set}");
+        for (_, asked) in &runs {
+            let line = invocation(&context(), asked).display();
+            assert!(
+                line.ends_with(" -- --ignored --nocapture --test-threads=1"),
+                "{line}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_test_threads_the_caller_gave_is_not_given_twice() {
+    // The test program refuses a flag given twice: the caller's own replaces the one given, in
+    // either spelling (`--test-threads=N`, or the flag and its number as two words).
+    assert_eq!(
+        runs("paste -- --test-threads=4").unwrap().0,
+        "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --test-threads=4"
+    );
+    assert_eq!(
+        runs("paste -- --test-threads 2").unwrap().0,
+        "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --test-threads 2"
+    );
+    assert_eq!(
+        runs("paste -- --test-threads=1 --list").unwrap().0,
+        "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --test-threads=1 --list"
+    );
+    // A word that only begins like it is another flag.
+    assert!(runs("paste -- --test-threads-more")
+        .unwrap()
+        .0
+        .contains("--test-threads=1"));
 }
