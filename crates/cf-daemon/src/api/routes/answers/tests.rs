@@ -836,3 +836,54 @@ fn a_message_number_is_a_whole_number_over_zero_and_within_what_a_message_holds(
     }
     assert_eq!(whole_and_positive(None), None);
 }
+
+/// T-1513: `cf inbox read` prints a role over the bound in parts and says each it printed
+/// with its number and how many there are: the ledger reads the role once the last was
+/// printed after every part before it, and the dispatcher is woken then. A part that is no
+/// whole number from 1 to the parts, parts said of more than one message, or one of the two
+/// said without the other, is refused, and changes nothing.
+#[tokio::test]
+async fn a_role_said_read_by_its_parts_is_read_once_the_last_follows_every_other_and_a_bad_part_is_refused(
+) {
+    let scene = scene();
+    let role = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .note_role(scene.project.id, "chief", "Read it all.", "the role")
+        .unwrap();
+    {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        ledger.begin_delivery(role.id).unwrap();
+        ledger.confirm_delivery(role.id, None).unwrap();
+    }
+    let id = role.id;
+    let part = |part: Value, parts: Value| {
+        json!({ "answers": [id], "via": "inbox", "part": part, "parts": parts }).to_string()
+    };
+    for written in [
+        part(json!(0), json!(2)),
+        part(json!(3), json!(2)),
+        part(json!("1"), json!(2)),
+        part(json!(1.5), json!(2)),
+        part(json!(1), json!(null)),
+        part(json!(1), json!(0)),
+        json!({ "answers": [id], "via": "inbox", "part": 1 }).to_string(),
+        json!({ "answers": [id], "via": "inbox", "parts": 2 }).to_string(),
+        json!({ "answers": [id, id], "via": "inbox", "part": 2, "parts": 2 }).to_string(),
+    ] {
+        let (status, said) = read_from(&scene, &scene.chief, &written).await;
+        assert_eq!(status, 400, "{written}");
+        assert_eq!(said["error"], "invalid-read", "{written}");
+    }
+    assert_eq!(scene.logged("message.part_read"), 0);
+    let (status, said) = read_from(&scene, &scene.chief, &part(json!(1), json!(2))).await;
+    assert_eq!((status, said), (200, json!({})));
+    assert_eq!(scene.message(id).state, "delivered", "one part of two");
+    assert_eq!(scene.logged("message.part_read"), 1);
+    assert_eq!(scene.kicks.get(), 0);
+    let (status, _) = read_from(&scene, &scene.chief, &part(json!(2), json!(2))).await;
+    assert_eq!(status, 200);
+    assert_eq!(scene.message(id).state, "read", "the last, after the first");
+    assert_eq!(scene.kicks.get(), 1, "the dispatcher is woken");
+}

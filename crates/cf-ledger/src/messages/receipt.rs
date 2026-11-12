@@ -542,6 +542,64 @@ pub(crate) fn receive_read(
     })
 }
 
+/// The kind of event that says `cf inbox read` printed a part of a role to its window.
+const PART_READ: &str = "message.part_read";
+
+/// Part `part` of `of` of the note `id`, a role too long to be printed whole within the
+/// bound its window reads whole at (`cf_base::role_read::role_parts`), printed to
+/// `recipient` by `cf inbox read`: the read is logged ([`PART_READ`]), and the last part,
+/// printed after every part before it was, is the note read whole, as [`receive_read`]
+/// reads one printed in one piece (kept while its paste is on its way, the role told once
+/// it is confirmed). A part read out of order or twice is no fault, and tells nothing by
+/// itself. A role of one part is read as [`receive_read`] reads it; a part there is not,
+/// and a message that is not `recipient`'s or says no role, are nothing. How many were
+/// received.
+pub(crate) fn receive_read_part(
+    store: &mut Store,
+    recipient: i64,
+    id: i64,
+    part: usize,
+    of: usize,
+    via: Read,
+) -> Result<usize, LedgerError> {
+    if of == 1 && part == 1 {
+        return receive_read(store, recipient, &[id], via);
+    }
+    if part == 0 || part > of {
+        return Ok(0);
+    }
+    store.write(|store| {
+        let Some(message) = store
+            .message(id)?
+            .filter(|message| message.recipient_id == recipient)
+        else {
+            return Ok(0);
+        };
+        if !says_a_role(store, id)? {
+            return Ok(0);
+        }
+        store.log(
+            message.project_id,
+            PART_READ,
+            json!({ "message": id, "part": part, "of": of }),
+        )?;
+        if part < of {
+            return Ok(0);
+        }
+        let before: i64 = store.db.query_row(
+            "SELECT COUNT(DISTINCT json_extract(data, '$.part')) FROM event
+              WHERE project_id = ? AND kind = ? AND json_extract(data, '$.message') = ?
+                AND json_extract(data, '$.of') = ? AND json_extract(data, '$.part') < ?",
+            params![message.project_id, PART_READ, id, of as i64, of as i64],
+            |row| row.get(0),
+        )?;
+        if before + 1 < of as i64 {
+            return Ok(0);
+        }
+        receive_read(store, recipient, &[id], via)
+    })
+}
+
 /// A note that says its recipient a role, delivered (its paste was cut to its
 /// opening and the command that prints the rest), and now printed whole to its
 /// recipient by `cf inbox read`: the window has the whole role. The note is

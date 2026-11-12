@@ -289,6 +289,21 @@ impl Ledger {
         messages::receive_read(&mut self.store, recipient, ids, via)
     }
 
+    /// `cf inbox read` printed whole part `part` (the first is 1) of `of` of the note `id`,
+    /// a role, to `recipient` (`cf_base::role_read::role_parts`): the last, printed after
+    /// every part before it, reads the note as [`Ledger::receive_read`] does one printed in
+    /// one piece. How many messages were received.
+    pub fn receive_read_part(
+        &mut self,
+        recipient: i64,
+        id: i64,
+        part: usize,
+        of: usize,
+        via: Read,
+    ) -> Result<usize, LedgerError> {
+        messages::receive_read_part(&mut self.store, recipient, id, part, of, via)
+    }
+
     /// The claims no door acknowledged on answers for a participant are voided,
     /// for `because`.
     pub fn release_claims(

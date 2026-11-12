@@ -561,13 +561,13 @@ file = "crates/cf-engine/src/role_change.rs"
 find = '''        Ok(self.seams.ledger.borrow_mut().note_role(
             project.id,
             &participant.handle,
-            &body_of(&role.instructions),
+            &body_of(&role.instructions, &self.seams.roles.cf(participant)),
             &role.instructions,
         )?)'''
 replace = '''        let note = self.seams.ledger.borrow_mut().note_role(
             project.id,
             &participant.handle,
-            &body_of(&role.instructions),
+            &body_of(&role.instructions, &self.seams.roles.cf(participant)),
             &role.instructions,
         )?;
         if let Some(conversation) = self
@@ -797,13 +797,13 @@ replace = '''The instructions below are these: follow them from now on, and wher
 
 [[plant]]
 name = "codex role: a replacement is longer than its window reads whole, with the text at its start"
-meant = "the_real_text_of_a_chief_with_specs_and_a_large_staff_is_told_whole_or_told_and_read"
+meant = "the_real_text_of_a_chief_with_specs_any_staff_and_the_most_rules_is_told_whole_or_read_in_every_part"
 runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''    note_of(OPENING, OPENING_IN_PART, instructions)'''
-replace = '''    format!("{}{}", note_of(OPENING, OPENING_IN_PART, instructions), "\n".repeat(2_000))'''
+find = '''    note_of(Telling::Replaces, instructions, cf)'''
+replace = '''    format!("{}{}", note_of(Telling::Replaces, instructions, cf), "x\n".repeat(2_000))'''
 
 [[plant]]
 name = "codex role: the staff's rows grow, and the command line the docs measured is not the text's"

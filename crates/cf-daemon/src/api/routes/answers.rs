@@ -68,7 +68,9 @@ pub(super) async fn handle(
 /// are for the caller and still wait in the queue are `read`, each once, as
 /// the ledger receives them, and the dispatcher is woken, for the task they
 /// were what waited for may go on. A message for anyone else, or one that is
-/// not queued, is left as it is, and saying so again wakes nothing.
+/// not queued, is left as it is, and saying so again wakes nothing. A role `cf`
+/// printed in parts it says read by the part and how many there are (`part`, `parts`),
+/// of that one note: the ledger reads the role once the last follows every other.
 pub(super) async fn read(
     context: &Context,
     caller: &Caller,
@@ -79,7 +81,7 @@ pub(super) async fn read(
         Failure::refuse(
             400,
             "invalid-read",
-            "answers is a list of message numbers and via is inbox or task",
+            "answers is a list of message numbers and via is inbox or task; part and parts, of one message, are whole numbers from 1, part at most parts",
         )
     };
     let via = match body.get("via").and_then(Value::as_str) {
@@ -92,10 +94,30 @@ pub(super) async fn read(
         .and_then(Value::as_array)
         .and_then(|list| list.iter().map(Value::as_i64).collect::<Option<Vec<_>>>())
         .ok_or_else(invalid)?;
-    let received = context
-        .ledger
-        .borrow_mut()
-        .receive_read(caller.participant.id, &named, via)?;
+    // A role `cf` printed in parts (T-1513) is said read by the part printed and how many
+    // there are, the two together, of the one note.
+    let number = |key| match body.get(key) {
+        None => Ok(None),
+        Some(value) => value
+            .as_u64()
+            .and_then(|number| usize::try_from(number).ok())
+            .filter(|&number| number > 0)
+            .map(Some)
+            .ok_or_else(invalid),
+    };
+    let part = match (number("part")?, number("parts")?, named.as_slice()) {
+        (None, None, _) => None,
+        (Some(part), Some(parts), &[id]) if part <= parts => Some((id, part, parts)),
+        _ => return Err(invalid()),
+    };
+    let mut ledger = context.ledger.borrow_mut();
+    let received = match part {
+        Some((id, part, parts)) => {
+            ledger.receive_read_part(caller.participant.id, id, part, parts, via)?
+        }
+        None => ledger.receive_read(caller.participant.id, &named, via)?,
+    };
+    drop(ledger);
     if received > 0 {
         (context.kick)();
     }

@@ -15,6 +15,12 @@
 # daemon's `GET /api/inbox/<id>` and the `cf` command each hold a rule; one plant takes one out,
 # and a test of it fails.
 #
+# A role `cf` cannot print within that bound it prints in parts, each within it (T-1513, review
+# T-1510): the opening says how many, each part's line gives the next one's command, and each
+# part printed is said to the board by its number and how many there are. The ledger logs each
+# (`message.part_read`) and reads the role once the last was printed after every part before it,
+# as it reads one printed in one piece. The plants at the end take out each of those rules.
+#
 # Every name holds `role read`, so `npm run plants:daemon -- "role read"` runs them all.
 
 [run]
@@ -28,6 +34,9 @@ cf-board-thread = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::te
 cf-lines = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::lines::tests::the_answers_still_waiting"]
 base-role-read = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "role_read::"]
 daemon-message = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::message"]
+engine-in-parts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::in_parts::"]
+cf-board-parts = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::tests::a_role_"]
+daemon-answers = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::answers::tests::a_role_said_read_by_its_parts"]
 
 # The engine: what a role told in part opens with, and what is said of it at the next Resume.
 
@@ -68,8 +77,8 @@ runs = ["engine-cleared"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = "            &note_of(BEGAN_WITHOUT, BEGAN_WITHOUT_IN_PART, &role.instructions),"
-replace = "            &note_of(BEGAN_WITHOUT, BEGAN_WITHOUT, &role.instructions),"
+find = "            Self::BeganWithout => BEGAN_WITHOUT_IN_PART,"
+replace = "            Self::BeganWithout => BEGAN_WITHOUT,"
 
 [[plant]]
 name = "role read: the human is told of a role in part as soon as it is delivered"
@@ -551,3 +560,58 @@ find = '''
         }
 '''
 replace = ""
+
+# T-1513: a role read in parts.
+
+[[plant]]
+name = "role read: the last part tells the role though a part before it was never read"
+meant = "parts_read_out_of_order_or_twice_tell_the_role_only_when_the_last_comes_after_all_the_others"
+runs = ["engine-in-parts"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "        if before + 1 < of as i64 {"
+replace = "        if false {"
+
+[[plant]]
+name = "role read: a part before the last tells the role once the parts before it were read"
+meant = "parts_read_while_the_paste_is_on_its_way_tell_the_role_once_it_is_confirmed_and_only_all_of_them"
+runs = ["engine-in-parts"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = """
+        if part < of {
+            return Ok(0);
+        }"""
+replace = ""
+
+[[plant]]
+name = "role read: cf says a part it printed of a role as the whole role read"
+meant = "a_role_over_the_bound_is_printed_in_parts_each_within_it_and_each_said_to_the_board_by_its_number"
+runs = ["cf-board-parts"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = "        let said = match self.part.filter(|_| !json) {"
+replace = "        let said = match None::<(usize, usize)> {"
+
+[[plant]]
+name = "role read: the board reads a part said of a role as the whole role read"
+meant = "a_role_said_read_by_its_parts_is_read_once_the_last_follows_every_other_and_a_bad_part_is_refused"
+runs = ["daemon-answers"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/answers.rs"
+find = "            ledger.receive_read_part(caller.participant.id, id, part, parts, via)?"
+replace = "            ledger.receive_read(caller.participant.id, &[id], via)?"
+
+[[plant]]
+name = "role read: the opening of a role read in parts says one part fewer than cf prints"
+meant = "the_opening_of_a_role_read_in_parts_says_how_many_and_the_command_that_prints_the_first"
+runs = ["engine-in-parts"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = "        let note = format!(\"{}\\n\\n{instructions}\", telling.in_parts(parts));"
+replace = "        let note = format!(\"{}\\n\\n{instructions}\", telling.in_parts(parts - 1));"

@@ -289,6 +289,7 @@ rules for the staff, 12 bytes and 53 lines to spare for the 7.
 The same twelve rows say again, in What you never do, "Give a task to a member by name, or write
 one with a member in mind." (T-1513, changed by hand on 2026-11-12 with the file): T-1480 had
 taken the ban out to pay for the four roles' words, and what was left of it no longer banned a
-brief written for one member (review T-1510). The role-change budgets moved: read whole to 142
-rows with specs on (167 without), and to 5 and 31 with the most rules for the staff, 60 bytes
-and 54 lines to spare for the 5.
+brief written for one member (review T-1510). The same task has `cf inbox read` print a role
+past the bound a role is read whole at in parts (`cf_base::role_read::role_parts`): it prints in
+one piece to 141 rows with specs on (166 without), and to 5 and 30 with the most rules for the
+staff, and in parts past that, so no staff is too large to be read.

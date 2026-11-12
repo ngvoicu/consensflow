@@ -154,3 +154,87 @@ fn a_ledger_opened_again_still_knows_which_messages_say_a_role_and_which_only_sa
         "it is the file's"
     );
 }
+
+/// T-1513: a part of a role read (`receive_read_part`) is the recipient's own, of a note
+/// that says a role, and a part there is: anything else is nothing, logs nothing and
+/// leaves the note as it was. A role of one part is read as one printed whole is.
+#[test]
+fn a_part_read_is_of_its_recipients_own_role_and_of_a_part_there_is_and_one_part_is_the_whole() {
+    let dir = tempfile::tempdir().expect("a home");
+    let mut ledger = ledger_in(&dir);
+    let app = project(&mut ledger);
+    let chief = app
+        .participants
+        .iter()
+        .find(|participant| participant.role == "chief")
+        .expect("a chief")
+        .id;
+    let delivered = |ledger: &mut Ledger, id: i64| {
+        ledger.begin_delivery(id).expect("begun");
+        ledger.confirm_delivery(id, None).expect("confirmed");
+    };
+    let role = ledger
+        .note_role(app.id, "chief", "Your role.", "the role")
+        .expect("a role")
+        .id;
+    delivered(&mut ledger, role);
+    let words = ledger
+        .note(
+            app.id,
+            &NewNote {
+                from: None,
+                to: "chief".into(),
+                body: "Your role.".into(),
+                task: None,
+            },
+        )
+        .expect("a note")
+        .id;
+    delivered(&mut ledger, words);
+    let read = cf_ledger::Read::Inbox;
+    for (recipient, id, part, of, case) in [
+        (chief + 1_000, role, 2, 2, "another's"),
+        (chief, words, 2, 2, "no role"),
+        (chief, role, 0, 2, "part 0"),
+        (chief, role, 3, 2, "past the last"),
+    ] {
+        assert_eq!(
+            ledger
+                .receive_read_part(recipient, id, 1, of, read)
+                .expect("read"),
+            0,
+            "{case}"
+        );
+        assert_eq!(
+            ledger
+                .receive_read_part(recipient, id, part, of, read)
+                .expect("read"),
+            0,
+            "{case}"
+        );
+        assert_eq!(
+            ledger.message(role).expect("read").expect("there").state,
+            "delivered",
+            "{case}"
+        );
+    }
+    assert_eq!(
+        ledger.message(words).expect("read").expect("there").state,
+        "delivered"
+    );
+    let one = ledger
+        .note_role(app.id, "chief", "A short role.", "a short role")
+        .expect("a role")
+        .id;
+    delivered(&mut ledger, one);
+    assert_eq!(
+        ledger
+            .receive_read_part(chief, one, 1, 1, read)
+            .expect("read"),
+        1
+    );
+    assert_eq!(
+        ledger.message(one).expect("read").expect("there").state,
+        "read"
+    );
+}

@@ -665,47 +665,48 @@ fn a_role_cf_inbox_read_printed_whole_once_delivered_or_while_delivering_is_ackn
         answer
     };
     for json in [false, true] {
-        // The lines of a JSON output are one: its newlines are escapes.
-        for (body, taken, state) in [
-            ("x".repeat(20_000), true, "delivered"),
-            (
-                format!("{}\n", "x".repeat(40)).repeat(400),
-                true,
-                "delivered",
-            ),
-            ("x".repeat(30_000), false, "delivered"),
-            ("\n".repeat(600), json, "delivered"),
-            ("x".repeat(20_000), true, "delivering"),
-            (
-                format!("{}\n", "x".repeat(40)).repeat(400),
-                true,
-                "delivering",
-            ),
-            ("x".repeat(30_000), false, "delivering"),
-        ] {
-            let ran = cf_with(
-                &["inbox", "read", "m-12"],
-                json,
-                vec![
-                    reply(200, role(state, body.clone(), true)),
-                    reply(200, json!({})),
-                ],
-                None,
-            );
-            assert_eq!(ran.code.unwrap(), 0);
-            if taken {
-                assert_eq!(
-                    asked(&ran),
-                    [("GET", "/api/inbox/12"), ("POST", "/api/answers/read")]
-                );
-                assert_eq!(ran.asked[1].2, acknowledged(&[12], "inbox"));
+        // The lines of a JSON output are one: its newlines are escapes. Printed as text, a
+        // role past the bound is printed in parts (T-1513), and the first part is said read
+        // as the first of them; JSON prints it whole, said read only within the bound.
+        let in_parts = |of: usize| {
+            Some(if json {
+                acknowledged(&[12], "inbox").unwrap()
             } else {
-                assert_eq!(
-                    asked(&ran),
-                    [("GET", "/api/inbox/12")],
-                    "{} bytes {state}",
-                    body.len()
+                json!({ "answers": [12], "via": "inbox", "part": 1, "parts": of })
+            })
+        };
+        for state in ["delivered", "delivering"] {
+            for (body, taken) in [
+                ("x".repeat(20_000), acknowledged(&[12], "inbox")),
+                (
+                    format!("{}\n", "x".repeat(40)).repeat(400),
+                    acknowledged(&[12], "inbox"),
+                ),
+                ("x".repeat(30_000), if json { None } else { in_parts(2) }),
+                ("\n".repeat(600), in_parts(2)),
+            ] {
+                let ran = cf_with(
+                    &["inbox", "read", "m-12"],
+                    json,
+                    vec![
+                        reply(200, role(state, body.clone(), true)),
+                        reply(200, json!({})),
+                    ],
+                    None,
                 );
+                assert_eq!(ran.code.unwrap(), 0);
+                let case = format!("{} bytes {state} json {json}", body.len());
+                match taken {
+                    Some(said) => {
+                        assert_eq!(
+                            asked(&ran),
+                            [("GET", "/api/inbox/12"), ("POST", "/api/answers/read")],
+                            "{case}"
+                        );
+                        assert_eq!(ran.asked[1].2, Some(said), "{case}");
+                    }
+                    None => assert_eq!(asked(&ran), [("GET", "/api/inbox/12")], "{case}"),
+                }
             }
         }
     }
@@ -720,6 +721,173 @@ fn a_role_cf_inbox_read_printed_whole_once_delivered_or_while_delivering_is_ackn
         assert_eq!(ran.code.unwrap(), 0);
         assert_eq!(asked(&ran), [("GET", "/api/inbox/12")], "{state} {said}");
     }
+}
+
+/// A note that tells its reader a role (`"role": true`), from ConsensFlow, in `state`.
+fn a_role_note(state: &str, body: &str) -> Value {
+    json!({
+        "message": {
+            "id": 12, "kind": "note", "state": state, "taskNumber": null, "sender": null,
+            "body": body,
+        },
+        "role": true,
+    })
+}
+
+/// A role over the bound a role is read whole at: a paragraph, then a table of the staff
+/// longer than a part, then a paragraph.
+fn a_role_over_the_bound() -> String {
+    let rows: String = (0..700)
+        .map(|at| format!("| member-{at:03} | worker, reviewer | standard |\n"))
+        .collect();
+    format!(
+        "Your role.\n\n{}\n\n| Member | Roles | Tier |\n|---|---|---|\n{rows}\nThe last paragraph.",
+        "An opening paragraph. ".repeat(100)
+    )
+}
+
+/// What `cf` printed: the message's line, the words, and the line under them.
+fn printed_in_part(out: &str) -> (&str, &str, &str) {
+    let (head, rest) = out.split_once("\n\n").expect("the message's line");
+    let (words, line) = rest
+        .strip_suffix('\n')
+        .unwrap_or(rest)
+        .rsplit_once("\n\n")
+        .expect("the part's line");
+    (head, words, line)
+}
+
+/// T-1513 (review T-1510): `cf inbox read` prints a role over the bound a role is read
+/// whole at (`role_read_whole`) in parts, each within it, the command the paste gives
+/// printing the first, `--part N` the others. Each but the last ends with a line that says
+/// which part it is and the command for the next, and that a table goes on where the part
+/// ends in one; the last says it is the last. Each part printed is said to the board by its
+/// number and how many there are, for the ledger to tell the role once the last was
+/// printed after every part before it. A part there is not is said wrong. In JSON a role is
+/// printed whole, as it always was, and said read only within the bound.
+#[test]
+fn a_role_over_the_bound_is_printed_in_parts_each_within_it_and_each_said_to_the_board_by_its_number(
+) {
+    let body = a_role_over_the_bound();
+    assert!(!cf_base::role_read::role_read_whole(&body));
+    let mut words = Vec::new();
+    for state in ["delivered", "delivering"] {
+        words.clear();
+        for (part, last_line) in [
+            (None, "(Part 1 of 2 of m-12. The table above goes on in part 2. Print part 2 with: cf inbox read m-12 --part 2)"),
+            (Some("2"), "(Part 2 of 2 of m-12, the last: you have read all of it once you have read every part.)"),
+        ] {
+            let mut command = vec!["inbox", "read", "m-12"];
+            command.extend(part.map(|part| ["--part", part]).into_iter().flatten());
+            let ran = cf(
+                &command,
+                vec![reply(200, a_role_note(state, &body)), reply(200, json!({}))],
+            );
+            assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
+            assert!(
+                cf_base::role_read::role_read_whole(&ran.out),
+                "{state} {part:?}: {} bytes, {} lines",
+                ran.out.len(),
+                ran.out.matches('\n').count()
+            );
+            let (head, said, line) = printed_in_part(&ran.out);
+            assert_eq!(head, format!("m-12 [{state}] note from ConsensFlow"));
+            assert_eq!(line, last_line, "{state}");
+            words.push(said.to_owned());
+            assert_eq!(
+                asked(&ran),
+                [("GET", "/api/inbox/12"), ("POST", "/api/answers/read")]
+            );
+            let number = part.map_or(1, |part| part.parse::<usize>().unwrap());
+            assert_eq!(
+                ran.asked[1].2,
+                Some(json!({ "answers": [12], "via": "inbox", "part": number, "parts": 2 })),
+                "{state}"
+            );
+        }
+        assert!(words[0].starts_with("Your role.\n\nAn opening paragraph."));
+        assert!(words[0].ends_with(" | worker, reviewer | standard |"));
+        assert!(
+            words[1].starts_with("| member-"),
+            "the table goes on in part 2"
+        );
+        assert!(words[1].ends_with("\n\nThe last paragraph."));
+        assert_eq!(
+            format!("{}\n{}", words[0], words[1]),
+            body,
+            "the parts are the role"
+        );
+    }
+    // A part there is not, or none: said wrong, and nothing said to the board.
+    for part in ["3", "0", "two"] {
+        let ran = cf(
+            &["inbox", "read", "m-12", "--part", part],
+            vec![reply(200, a_role_note("delivered", &body))],
+        );
+        assert_eq!(ran.code.unwrap(), 2, "{part}");
+        assert!(ran.err.contains("--part"), "{part}: {}", ran.err);
+        assert_eq!(ran.out, "");
+        assert!(asked(&ran).len() <= 1, "{part}");
+    }
+    // In JSON: the role whole, as it always was, and over the bound, said read to nobody.
+    let ran = cf_with(
+        &["inbox", "read", "m-12"],
+        true,
+        vec![
+            reply(200, a_role_note("delivered", &body)),
+            reply(200, json!({})),
+        ],
+        None,
+    );
+    assert_eq!(ran.code.unwrap(), 0);
+    assert!(ran.out.contains("The last paragraph."));
+    assert_eq!(asked(&ran), [("GET", "/api/inbox/12")]);
+    // A PowerShell window's line names its own `cf`.
+    let ran = cf_as(
+        "& 'C:/Program Files/ConsensFlow/bin/cf.exe'",
+        &["inbox", "read", "m-12"],
+        false,
+        vec![
+            reply(200, a_role_note("delivered", &body)),
+            reply(200, json!({})),
+        ],
+    );
+    assert!(
+        ran.out.ends_with("Print part 2 with: & 'C:/Program Files/ConsensFlow/bin/cf.exe' inbox read m-12 --part 2)\n"),
+        "{}",
+        &ran.out[ran.out.len() - 200..]
+    );
+}
+
+/// A role within the bound is printed as it always was, by `--part 1` too: its line and
+/// its words, no line of a part, and said read as a whole. It has no part 2.
+#[test]
+fn a_role_within_the_bound_is_printed_as_it_always_was_with_no_part_line() {
+    let body = format!("{}\n", "x".repeat(40)).repeat(400);
+    for command in [
+        vec!["inbox", "read", "m-12"],
+        vec!["inbox", "read", "m-12", "--part", "1"],
+    ] {
+        let ran = cf(
+            &command,
+            vec![
+                reply(200, a_role_note("delivered", &body)),
+                reply(200, json!({})),
+            ],
+        );
+        assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
+        assert_eq!(
+            ran.out,
+            format!("m-12 [delivered] note from ConsensFlow\n\n{body}\n")
+        );
+        assert_eq!(ran.asked[1].2, acknowledged(&[12], "inbox"));
+    }
+    let ran = cf(
+        &["inbox", "read", "m-12", "--part", "2"],
+        vec![reply(200, a_role_note("delivered", &body))],
+    );
+    assert_eq!(ran.code.unwrap(), 2);
+    assert!(ran.err.contains("--part"), "{}", ran.err);
 }
 
 #[test]
