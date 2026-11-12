@@ -27,7 +27,9 @@ use std::time::Duration;
 
 use cf_e2e::live::ask;
 use cf_e2e::live::cut;
-use cf_e2e::live::members::{plus, quiet_command, runs_command, Account, MemberWindow, Members};
+use cf_e2e::live::members::{
+    plus, quiet_command, runs_command, ticks_in, Account, MemberWindow, Members, Moving,
+};
 use cf_e2e::live::tree::{self, Read};
 use cf_e2e::live::Harness;
 use cf_e2e::Result;
@@ -43,6 +45,7 @@ pub const DOING: Doing = Doing {
     did: "ran its command",
     doing: "running its command",
     shown: "its command running",
+    word: None,
 };
 
 /// What the case says where the command was seen by its process in the host's tree.
@@ -68,11 +71,34 @@ pub fn ticker_text() -> &'static str {
 /// How many seconds the ticking command in the project's `folder` says it has run, by its
 /// file `ticks`; none before it has written one.
 pub fn ticks(folder: &Path, ticks: &str) -> Option<u64> {
-    std::fs::read_to_string(folder.join(ticks))
-        .ok()?
-        .trim()
-        .parse()
-        .ok()
+    ticks_in(folder, ticks)
+}
+
+/// The tick files the case's own commands count in, by their literal names: the command's
+/// and its background one's.
+fn tick_files(command: &Command) -> Vec<&str> {
+    command
+        .ticks
+        .as_deref()
+        .into_iter()
+        .chain(
+            command
+                .background
+                .as_deref()
+                .and_then(|b| b.ticks.as_deref()),
+        )
+        .collect()
+}
+
+/// Takes the case's own tick files out of the project's `folder` before the member is given
+/// its task, each by its name (no glob): what is there then was written by this run's command,
+/// or by a leftover of the kit's that is said by its own guard. Those it took out.
+pub fn clear_ticks(folder: &Path, command: &Command) -> Vec<String> {
+    tick_files(command)
+        .into_iter()
+        .filter(|name| std::fs::remove_file(folder.join(name)).is_ok())
+        .map(str::to_owned)
+        .collect()
 }
 
 /// The command the member is asked to run, and what tells it in a process list, in the file
@@ -294,16 +320,21 @@ pub fn running(
     command: &Command,
     devin: bool,
 ) -> impl FnMut(&Members, &MemberWindow, Duration) -> Option<String> + '_ {
+    let mut moving = Moving::default();
     move |members, window, _worked| {
         let tree = tree::read(members.rig(), &window.pane);
         started(
             &tree,
             command,
+            // Its file counts only where it went up since the look before: the file of an
+            // earlier run does not.
             || {
-                command
-                    .ticks
-                    .as_deref()
-                    .and_then(|file| ticks(members.folder(), file))
+                moving.moved(
+                    command
+                        .ticks
+                        .as_deref()
+                        .and_then(|file| ticks(members.folder(), file)),
+                )
             },
             || {
                 command.replies.is_some_and(|replies| {
@@ -344,6 +375,14 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness, command: Command) ->
         // code, built before anything is spent.
         ask::prepare()?;
     }
+    // What a run before this one left in the project's folder says nothing of this one.
+    let cleared = clear_ticks(ctx.members.folder(), &command);
+    if !cleared.is_empty() {
+        case.say(format!(
+            "tick files of an earlier run taken out before the task was given: {}",
+            cleared.join(", ")
+        ));
+    }
     let Some(begun) = begin(
         ctx,
         case,
@@ -375,6 +414,24 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness, command: Command) ->
         )
     });
     let at_the_pause = counted(&command);
+    // The background command counts as left running only if it was running at the pause:
+    // its count went up once more in the moments before it. A file that stood still then
+    // (a command that ended, or an old file) says nothing of what the pause did to it.
+    let before = before.map(|(listed, counted_before)| {
+        let alive = background.and_then(|background| {
+            let mut moving = Moving::default();
+            let mut last = None;
+            for _ in 0..8 {
+                last = moving.moved(counted(background));
+                if last.is_some() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            last
+        });
+        (listed, counted_before, alive)
+    });
     stop_it(
         ctx,
         case,
@@ -392,7 +449,7 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness, command: Command) ->
             seconds_said(counted(&command))
         ));
     }
-    if let (Some(background), Some((listed, counted_before))) = (background, before) {
+    if let (Some(background), Some((listed, counted_before, alive))) = (background, before) {
         let after = holding(&tree::read(ctx.members.rig(), pane), &background.mark);
         let counted_after = counted(background);
         // Its own count says it ran on whether or not the host's tree lists it: a harness
@@ -409,6 +466,10 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness, command: Command) ->
         if counted_before.is_none() {
             case.say(format!(
                 "the command started in the background never ran, or ended before it began, so whether the pause left it is not said: {said_of_it}"
+            ));
+        } else if alive.is_none() {
+            case.say(format!(
+                "the command started in the background was not seen counting just before the pause (its file stood still), so whether the pause left it is not said: {said_of_it}"
             ));
         } else {
             case.check(
@@ -499,6 +560,68 @@ mod tests {
             after.brief()
         );
         assert!(after.brief().ends_with(&here.brief()), "{}", after.brief());
+    }
+
+    #[test]
+    fn a_stale_tick_file_is_no_running_command() {
+        let command = Command::here();
+        let unread = tree(&[(7, "bash")]);
+        let boom = || -> bool { panic!("not asked") };
+        let nothing = || false;
+        // A file of an earlier run: 60 s, and it stands still at every look since the brief.
+        let mut moving = Moving::default();
+        for _ in 0..3 {
+            let said = started(
+                &unread,
+                &command,
+                || moving.moved(Some(60)),
+                nothing,
+                nothing,
+            );
+            assert_eq!(
+                said, None,
+                "a counter that has not moved is no command running"
+            );
+        }
+        // One that counts: the first look has nothing to compare, the next sees it go up.
+        let mut moving = Moving::default();
+        assert_eq!(moving.moved(None), None, "no file yet");
+        assert_eq!(moving.moved(Some(1)), None, "the first look");
+        assert_eq!(
+            moving.moved(Some(1)),
+            None,
+            "half a second on, the same second"
+        );
+        assert_eq!(moving.moved(Some(2)), Some(2));
+        let said = started(&unread, &command, || Some(2), boom, boom);
+        assert!(said.unwrap().starts_with("its file says it has run 2 s"));
+        // A count that goes back (a file written again from 1) is a new run's, and says so
+        // only once it climbs.
+        let mut moving = Moving::default();
+        assert_eq!(moving.moved(Some(40)), None);
+        assert_eq!(moving.moved(Some(1)), None);
+        assert_eq!(moving.moved(Some(2)), Some(2));
+    }
+
+    #[test]
+    fn the_tick_files_of_an_earlier_run_are_taken_out_by_their_names_and_no_other_file() {
+        let folder = tempfile::tempdir().unwrap();
+        for name in [
+            "tool-ticks.txt",
+            "background-ticks.txt",
+            "tool-ticks.txt.keep",
+            "notes.txt",
+        ] {
+            std::fs::write(folder.path().join(name), "60").unwrap();
+        }
+        let cleared = clear_ticks(folder.path(), &Command::after_background());
+        assert_eq!(cleared, ["tool-ticks.txt", "background-ticks.txt"]);
+        assert!(!folder.path().join("tool-ticks.txt").exists());
+        assert!(!folder.path().join("background-ticks.txt").exists());
+        assert!(folder.path().join("tool-ticks.txt.keep").exists());
+        assert!(folder.path().join("notes.txt").exists());
+        // Where there are none, there is nothing to say.
+        assert!(clear_ticks(folder.path(), &Command::here()).is_empty());
     }
 
     #[test]

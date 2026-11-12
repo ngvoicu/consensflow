@@ -326,6 +326,26 @@ fn a_window_takes_what_it_is_handed_pasted_or_over_a_channel_as_the_harness_says
 }
 
 #[test]
+fn a_window_declares_how_it_reads_a_paste_as_its_adapter_says_it_on_this_machine() {
+    let declared = |kind: &str| answer(&ask("silent_paste", json!({ "kind": kind }))).unwrap();
+    // Only Codex on Windows reads a paste silently of these; the rest take it as it comes.
+    for kind in ["claude-code", "pi"] {
+        assert_eq!(declared(kind), json!(null), "{kind}");
+    }
+    if cfg!(windows) {
+        assert_eq!(
+            declared("codex"),
+            json!({
+                "paceUsPerCharacter": 600, "drawnAfterMs": 50, "quietMs": 120,
+                "mostMs": 1000, "mostUsPerCharacter": 1000
+            })
+        );
+    } else {
+        assert_eq!(declared("codex"), json!(null));
+    }
+}
+
+#[test]
 fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about_its_folder() {
     let read = |kind: &str, screen: &[&str]| {
         answer(&ask("trust", json!({ "kind": kind, "screen": screen }))).unwrap()

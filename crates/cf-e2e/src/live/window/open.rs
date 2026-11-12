@@ -74,6 +74,27 @@ pub fn pasted_installs(log: &Log) -> Result<Vec<Installed>> {
 
 /// What a run says of what came of asking Claude to trust the folder of the
 /// window of `who`: `claude: trust: trusted`.
+/// The `pane.open` request of a window the kit opens: as the engine's, with how the window's
+/// harness reads a paste (`silent`, [`ask::silent_paste`]) where it declares one, and only
+/// then, so that every other open is as it was.
+pub(super) fn open_request(
+    id: &str,
+    workspace: &Path,
+    argv: &[String],
+    (env, drop_env): (&serde_json::Map<String, Value>, &[String]),
+    silent: Option<Value>,
+) -> Value {
+    let mut request = json!({
+        "id": id, "generation": 1, "cwd": workspace, "argv": argv,
+        "env": env, "dropEnv": drop_env,
+        "size": { "rows": 40, "cols": 120 },
+    });
+    if let Some(silent) = silent {
+        request["silentPaste"] = silent;
+    }
+    request
+}
+
 pub(super) fn trust_line(who: &str, trust: &str) -> String {
     format!("{who}: trust: {trust}")
 }
@@ -446,11 +467,13 @@ impl<'a> Open<'a> {
         let opened_at_ms = jiff::Timestamp::now().as_millisecond();
         let opened = self.rig.host(
             "pane.open",
-            json!({
-                "id": self.id, "generation": 1, "cwd": workspace, "argv": argv,
-                "env": window_vars, "dropEnv": drop_env,
-                "size": { "rows": 40, "cols": 120 },
-            }),
+            open_request(
+                &self.id,
+                &workspace,
+                &argv,
+                (&window_vars, &drop_env),
+                ask::silent_paste(harness.kind())?,
+            ),
         )?;
         if opened["ok"] != true {
             return Err(Error::Daemon(format!(

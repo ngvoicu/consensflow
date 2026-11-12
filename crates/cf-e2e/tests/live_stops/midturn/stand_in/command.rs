@@ -206,10 +206,11 @@ fn a_member_whose_turn_goes_on_while_its_command_runs_is_a_stop_the_case_fails_a
 }
 
 /// A member that answers without running its command (the stand-in is not told to run
-/// anything): its turn is over before it is paused, its task done, and the case says so,
-/// and does not wait out its time.
+/// anything): its turn is over before it is paused, its task done with a result that is no
+/// run of the command: it declined the workload, which the case says is an unmet
+/// precondition (no Stop was tried) and no failed Stop, and it does not wait out its time.
 #[test]
-fn a_member_that_never_runs_its_command_is_said_to_have_got_no_further_than_its_task_done() {
+fn a_member_that_answers_without_running_its_command_is_an_unmet_precondition_with_its_task_done() {
     let (members, log) = project("stops-midtool-never-test", &[]);
     let ctx = context(&members, &log);
     let mut case = Account::new();
@@ -227,12 +228,13 @@ fn a_member_that_never_runs_its_command_is_said_to_have_got_no_further_than_its_
     .unwrap();
     let said = case.text();
     assert!(begun.is_none(), "{said}");
-    assert!(!case.held(), "{said}");
+    assert!(case.held() && case.is_unmet(), "{said}");
     assert!(started.elapsed() < Duration::from_secs(120), "{said}");
     assert!(
-        said.contains("FAIL the member did not run its command: its task is "),
+        said.contains("UNMET the workload never began (the model declined): precondition unmet, no Stop was tried"),
         "{said}"
     );
+    assert!(!said.contains("FAIL"), "{said}");
     assert!(said.contains("     the task: T-1 is "), "{said}");
     // The host's tree says what the window had of the turn: not the command.
     assert!(

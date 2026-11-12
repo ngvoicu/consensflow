@@ -247,6 +247,7 @@ fn a_stop_the_daemon_presses_is_paid_at_rest_and_never_said_to_be_ignored_where_
         live::option("transcripts"),
     )?;
     let mut checks = Vec::new();
+    let mut tally = Tally::default();
     for case in options.cases.clone() {
         for harness in runs_on(case, &options.harnesses) {
             let before = live::version_of(harness);
@@ -270,15 +271,75 @@ fn a_stop_the_daemon_presses_is_paid_at_rest_and_never_said_to_be_ignored_where_
                 ),
                 &account.text(),
             );
+            tally.add(harness.name(), case.name(), &account);
             checks.push(Check::new(
                 harness.name(),
                 case.name(),
                 account.held(),
-                version,
+                if account.is_unmet() {
+                    format!("{version}: UNMET, {}", midturn::begin::DECLINED)
+                } else {
+                    version
+                },
             ));
         }
     }
-    report::conclude(&log, "what each case came to", &checks)
+    log.say(tally.summary());
+    report::conclude(&log, "what each case came to", &checks)?;
+    tally.tried()
+}
+
+/// How the cases of a run came out, by name: held, failed, and unmet (their member declined
+/// the workload, so no Stop was tried: neither a pass nor a failure).
+#[derive(Debug, Default)]
+struct Tally {
+    held: Vec<String>,
+    failed: Vec<String>,
+    unmet: Vec<String>,
+}
+
+impl Tally {
+    fn add(&mut self, harness: &str, case: &str, account: &Account) {
+        let name = format!("{harness} {case}");
+        if account.is_unmet() && account.held() {
+            self.unmet.push(name);
+        } else if account.held() {
+            self.held.push(name);
+        } else {
+            self.failed.push(name);
+        }
+    }
+
+    /// The run's own line: the counts, and each unmet case and failed one by name.
+    fn summary(&self) -> String {
+        let named = |names: &[String]| {
+            if names.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", names.join(", "))
+            }
+        };
+        format!(
+            "{} held, {} failed{}, {} unmet{}",
+            self.held.len(),
+            self.failed.len(),
+            named(&self.failed),
+            self.unmet.len(),
+            named(&self.unmet)
+        )
+    }
+
+    /// A run in which no case reached its Stop tried nothing, whatever it says of why: it
+    /// fails, so that a release's check cannot read green from a run that tested nothing.
+    fn tried(&self) -> Result {
+        if self.held.is_empty() && self.failed.is_empty() {
+            return Err(cf_e2e::Error::Daemon(format!(
+                "nothing was tried: no case reached its Stop ({})",
+                self.summary()
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -368,5 +429,33 @@ mod tests {
         );
         drop(watched);
         members.close().unwrap();
+    }
+
+    #[test]
+    fn a_run_says_its_unmet_cases_by_name_apart_and_fails_where_none_reached_its_stop() {
+        let held = Account::new();
+        let mut unmet = Account::new();
+        unmet.unmet(
+            "the workload never began (the model declined): precondition unmet, no Stop was tried",
+        );
+        let mut failed = Account::new();
+        failed.fail("the turn was over before the pause");
+        let mut tally = Tally::default();
+        tally.add("devin", "midturn", &unmet);
+        tally.add("codex", "midtool", &held);
+        tally.add("pi", "midbg", &failed);
+        assert_eq!(
+            tally.summary(),
+            "1 held, 1 failed (pi midbg), 1 unmet (devin midturn)"
+        );
+        tally.tried().unwrap();
+        // Nothing reached its Stop: not green.
+        let mut none = Tally::default();
+        none.add("devin", "midturn", &unmet);
+        none.add("pi", "early", &unmet);
+        let said = none.tried().unwrap_err().to_string();
+        assert!(said.contains("nothing was tried"), "{said}");
+        assert!(said.contains("2 unmet (devin midturn, pi early)"), "{said}");
+        assert!(Tally::default().tried().is_err());
     }
 }

@@ -7,6 +7,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use cf_e2e::live::ask;
+use cf_e2e::live::human::{taken, Taken};
 use cf_e2e::live::members::{
     find, member_as, quiet_command, stand_in_worker, Account, Members, Plan, STAND_IN_WORKER,
 };
@@ -14,7 +15,7 @@ use cf_e2e::live::{seconds, Harness, Log};
 use cf_e2e::Result;
 use serde_json::json;
 
-use crate::board::{chief_state, delivered, named, record_of, retried, told};
+use crate::board::{chief_state, delivered, named, record_of, retried, told, user_items};
 use crate::turns::{held, worked_since, Quiet, HELD_S};
 use crate::verdict::{enter_again, first_paste, lateness, pasted_first, proofs, seen, Note, Proof};
 use crate::wire::Watch;
@@ -45,6 +46,10 @@ const GIVEN: Duration = Duration::from_secs(900);
 
 /// How often the board is looked at.
 const LOOK: Duration = Duration::from_millis(500);
+
+/// How often the human looks at whether the chief took what was typed: each look may read
+/// the harness's record.
+const TAKEN_LOOK: Duration = Duration::from_secs(2);
 
 /// How many times the human presses Enter again for the first command, and the key.
 const ENTERS: u32 = 3;
@@ -102,33 +107,53 @@ pub fn drive(chief: Harness, mut members: Members, log: &Log) -> Result<Account>
 
     // The human asks the chief to run a long command: it is in a turn.
     let pane = members.lane("chief")?["pane"].clone();
+    let mark = members.events().len();
+    let items_before = user_items(chief, &members);
     members.paste(&pane, &ask::window_text(&first_ask())?)?;
     // A window that has just gone idle can take the paste and lose its Enter (a Devin
     // chief kept the command in its input, twice on 2026-10-14): the human presses
-    // Enter again while the chief has not gone to work, as every live check that types
-    // to a chief does (`Human::tells`).
+    // Enter again only while nothing says the window took it (`live::human::taken`): a
+    // chief at work on it, or one whose turn was over between two looks, took it.
     let mut inside = None;
     for again in 0..=ENTERS {
         inside = find(
             log,
-            "the chief to go into its first turn",
+            "the chief to take what the human typed",
             WORK / (ENTERS + 1),
-            LOOK,
-            || Ok((chief_state(&members)? == "working").then_some(())),
+            TAKEN_LOOK,
+            || {
+                let lane = chief_state(&members)?;
+                let events = members.events();
+                let after = &events[mark.min(events.len())..];
+                let mut seen = taken(after, &lane, false);
+                if seen.presses_again() {
+                    // The record costs a look of the harness's store: read only when the
+                    // board and the daemon's events say nothing.
+                    seen = taken(after, &lane, user_items(chief, &members) > items_before);
+                }
+                Ok((!seen.presses_again()).then_some(seen))
+            },
         )?;
         if inside.is_some() || again == ENTERS {
             break;
         }
-        log.say(
-            "the chief has not gone to work on what the human typed: the human presses Enter again",
-        );
+        log.say("the chief has not taken what the human typed: the human presses Enter again");
         members.press(&pane, &[ENTER])?;
     }
-    if inside.is_none() {
-        case.fail(format!(
-            "the chief never went into a turn: {}",
-            members.tail(pane["id"].as_str().unwrap_or_default())
-        ));
+    if inside != Some(Taken::AtWork) {
+        case.fail(match inside {
+            Some(_) => format!(
+                "the chief took what the human typed and its turn was over before any look read \
+                 it working (an activity mismatch, or a command that did not last): the case \
+                 needs the chief inside its first command. {}",
+                members.tail(pane["id"].as_str().unwrap_or_default())
+            ),
+            None => format!(
+                "the chief's window did not take what the human typed, in {} Enters: {}",
+                ENTERS + 1,
+                members.tail(pane["id"].as_str().unwrap_or_default())
+            ),
+        });
         case.closed(members.close());
         return Ok(case);
     }

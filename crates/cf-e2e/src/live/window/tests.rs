@@ -5,8 +5,8 @@
 use std::cell::Cell;
 
 use super::open::{
-    add_hooks, asked_for, claude_flags, consensflows_hooks_of, new_session, pasted_into,
-    program_of, session_for, trust_line, with_hooks, Member,
+    add_hooks, asked_for, claude_flags, consensflows_hooks_of, new_session, open_request,
+    pasted_into, program_of, session_for, trust_line, with_hooks, Member,
 };
 use super::*;
 
@@ -17,6 +17,24 @@ fn item(role: &str, text: &str) -> Item {
         text: text.to_owned(),
         complete: false,
     }
+}
+
+#[test]
+fn a_window_the_kit_opens_declares_how_its_harness_reads_a_paste_where_the_adapter_says_it_does() {
+    let argv = vec!["codex".to_owned()];
+    let env = serde_json::Map::new();
+    let open = |silent| open_request("w", Path::new("/work"), &argv, (&env, &[]), silent);
+    let plain = open(None);
+    // A harness that declares nothing is opened as it was: no `silentPaste` at all.
+    assert!(plain.get("silentPaste").is_none(), "{plain}");
+    let silent = json!({
+        "paceUsPerCharacter": 600, "drawnAfterMs": 50, "quietMs": 120,
+        "mostMs": 1000, "mostUsPerCharacter": 1000
+    });
+    let declared = open(Some(silent.clone()));
+    assert_eq!(declared["silentPaste"], silent);
+    assert_eq!(declared["argv"], json!(["codex"]));
+    assert_eq!(declared["size"], json!({ "rows": 40, "cols": 120 }));
 }
 
 #[test]

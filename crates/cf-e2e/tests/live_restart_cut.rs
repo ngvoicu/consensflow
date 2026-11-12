@@ -54,8 +54,8 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use cf_e2e::live::members::{
-    end_chosen, find, member, member_as, stand_in_chief, stand_in_worker, Account, Ended,
-    LongCommand, Members, Plan, Running, ThisMachine, STAND_IN_WORKER,
+    end_chosen, find, member, member_as, stand_in_chief, stand_in_worker, ticks_in, Account, Ended,
+    LongCommand, Members, Moving, Plan, Running, ThisMachine, STAND_IN_WORKER,
 };
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, ask, seconds, Harness, Log};
@@ -67,6 +67,15 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
 /// The command a window is cut inside of.
 const LONG: LongCommand = LongCommand::new("cf-restart-cut-long-command");
+
+/// The command the chief at rest starts in the background: the same mark, and it counts its seconds
+/// in a file of the project's folder. A harness that starts a program with no shell (Codex,
+/// T-1137) leaves nothing for a process list to say of it that is the window's own, so what shows
+/// it running is that count going up.
+const JOB: LongCommand = LongCommand::counting("cf-restart-cut-long-command", 300, JOB_TICKS);
+
+/// The file [`JOB`] counts in, in the project's folder.
+const JOB_TICKS: &str = "restart-cut-job-ticks.txt";
 
 /// How long a window may take to be at its command.
 const WORK: Duration = Duration::from_secs(180);
@@ -102,7 +111,7 @@ fn worker_cut(number: i64) -> String {
 fn the_background_ask() -> String {
     format!(
         "Start this exact command with your shell tool, in the background (do not wait for it to finish), and then reply with exactly one line: STARTED\n{}",
-        LONG.text()
+        JOB.text()
     )
 }
 
@@ -622,17 +631,31 @@ fn drive_chief_at_rest_with_a_job(mut members: Members, log: &Log) -> Result<Acc
     members.add(STAND_IN_WORKER, &[])?;
 
     let pane = members.lane("chief")?["pane"].clone();
+    // A count an earlier run left in the folder is none of this command's.
+    let _ = std::fs::remove_file(members.folder().join(JOB_TICKS));
     members.paste(&pane, &ask::window_text(&the_background_ask())?)?;
+    let mut counted = Moving::default();
+    let mut shown_by_file = false;
     let at_rest = find(
         log,
         "the chief at rest with its command running",
         WORK,
         Duration::from_millis(200),
         || {
-            let running = !in_window(&members, "chief")?.is_empty();
+            // The command's process in the window's tree, or where it lists none (Codex starts
+            // the program with no shell), its file's count going up.
+            let listed = !in_window(&members, "chief")?.is_empty();
+            let moving = counted
+                .moved(ticks_in(members.folder(), JOB_TICKS))
+                .is_some();
+            shown_by_file |= moving && !listed;
+            let running = listed || moving;
             Ok((running && state_of(&members.lane("chief")?) == "idle").then_some(()))
         },
     )?;
+    if shown_by_file {
+        case.say("the command is shown running by its file's count: no process of the window's tree is it");
+    }
     if at_rest.is_none() {
         case.fail(format!(
             "the chief never came to rest with its command running: its lane reads {}; {}",
@@ -995,6 +1018,20 @@ mod tests {
 
     fn words(list: &[&str]) -> Vec<String> {
         list.iter().map(|word| (*word).to_owned()).collect()
+    }
+
+    #[test]
+    fn the_chief_at_rest_is_asked_for_a_background_command_that_counts_in_a_file_the_window_cannot_hide(
+    ) {
+        let ask = the_background_ask();
+        // The same mark ends it, so that the window's tree finds it where it lists it...
+        assert!(ask.ends_with("cf-restart-cut-long-command"), "{ask}");
+        // ...and it counts in the project's folder where the host lists nothing of it.
+        assert_eq!(JOB.counts_in(), Some(JOB_TICKS));
+        assert!(
+            ask.contains("writeFileSync('restart-cut-job-ticks.txt'"),
+            "{ask}"
+        );
     }
 
     #[test]

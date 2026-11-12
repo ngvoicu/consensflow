@@ -18,6 +18,7 @@ use cf_e2e::live::members::{find, shown, Account};
 use cf_e2e::Result;
 use serde_json::{json, Value};
 
+use crate::midturn::begin::{declined, DECLINED};
 use crate::resume::{resume_after, Expect};
 use crate::stop::{Shape, Stop};
 use crate::watch::say_events;
@@ -51,10 +52,15 @@ pub fn command(ctx: &Ctx, case: &mut Account) -> Result<()> {
         || Ok((!LONG.running()?.is_empty()).then_some(())),
     )?;
     if running.is_none() {
-        case.fail(format!(
-            "the member never ran the command in {} s",
-            WORK.as_secs()
-        ));
+        // A member that ended its task with an answer and never ran the command declined it.
+        if declined(&ctx.members.task(number)?, None) {
+            case.unmet(DECLINED);
+        } else {
+            case.fail(format!(
+                "the member never ran the command in {} s",
+                WORK.as_secs()
+            ));
+        }
         return Ok(());
     }
     sleep(Duration::from_secs(2));
@@ -134,7 +140,13 @@ fn early_once(ctx: &Ctx, tried: &mut Account) -> Result<Tried> {
         || Ok((ctx.members.task(number)?["state"] == "working").then_some(())),
     )?;
     if working.is_none() {
-        tried.fail("the task never began");
+        // A task that is over with a result that is not the brief's answer was declined; one
+        // with its answer was answered before a look saw it begin.
+        if declined(&ctx.members.task(number)?, Some(EARLY_ANSWER)) {
+            tried.unmet(DECLINED);
+        } else {
+            tried.fail("the task never began");
+        }
         return Ok(Tried::Stands);
     }
     tried.say(format!(

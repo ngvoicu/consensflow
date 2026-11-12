@@ -26,6 +26,9 @@ use crate::{pattern, Result};
 pub struct LongCommand {
     mark: &'static str,
     seconds: u64,
+    /// The file in the window's folder it counts its seconds in, where it does
+    /// ([`LongCommand::counting`]).
+    counts_in: Option<&'static str>,
 }
 
 impl LongCommand {
@@ -37,7 +40,27 @@ impl LongCommand {
     /// The command whose command line ends with `mark`, which runs for `seconds` and
     /// ends by itself: for a check that lets a window that runs it again finish it.
     pub const fn lasting(mark: &'static str, seconds: u64) -> Self {
-        Self { mark, seconds }
+        Self {
+            mark,
+            seconds,
+            counts_in: None,
+        }
+    }
+
+    /// [`LongCommand::lasting`], which writes how many seconds it has run into `file` (in the
+    /// folder it is run in) each second: a command Codex starts with no shell, which no
+    /// process tree of the host lists (T-1137), is shown running by its file's count.
+    pub const fn counting(mark: &'static str, seconds: u64, file: &'static str) -> Self {
+        Self {
+            mark,
+            seconds,
+            counts_in: Some(file),
+        }
+    }
+
+    /// The file it counts in, where it does.
+    pub const fn counts_in(&self) -> Option<&'static str> {
+        self.counts_in
     }
 
     /// How long it runs.
@@ -48,11 +71,18 @@ impl LongCommand {
     /// The command, as a member is told to run it: Node waits for its seconds, and the
     /// mark is a word it is given and does nothing with.
     pub fn text(&self) -> String {
-        format!(
-            "node -e \"setTimeout(() => {{}}, {})\" {}",
-            self.seconds * 1_000,
-            self.mark
-        )
+        match self.counts_in {
+            None => format!(
+                "node -e \"setTimeout(() => {{}}, {})\" {}",
+                self.seconds * 1_000,
+                self.mark
+            ),
+            Some(file) => format!(
+                "node -e \"let n=0;const w=()=>require('fs').writeFileSync('{file}',String(++n));w();setInterval(w,1000);setTimeout(()=>process.exit(),{})\" {}",
+                self.seconds * 1_000,
+                self.mark
+            ),
+        }
     }
 
     /// Its own processes, read across the machine and never ended: the `node` it runs,
@@ -106,6 +136,38 @@ impl LongCommand {
     /// ended, whatever its command line says.
     pub fn end_in(&self, window: Identity) -> Result<Ended> {
         Ok(end_chosen(&self.chosen_in(&ThisMachine, window)?))
+    }
+}
+
+/// How many seconds the ticking command in `folder` says it has run, by its `file`: none before it
+/// has written one (or while it is being written).
+pub fn ticks_in(folder: &std::path::Path, file: &str) -> Option<u64> {
+    std::fs::read_to_string(folder.join(file))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// A tick file read at each look: its count counts as the command running only when it has
+/// gone up since the look before. A file the command of an earlier run left holds its last count
+/// and moves no more, so it is no command running now, however many seconds it says (the live
+/// folders are the same ones each run).
+#[derive(Debug, Default)]
+pub struct Moving {
+    last: Option<u64>,
+}
+
+impl Moving {
+    /// The count `now` as this look read it: some where it is higher than the look before's,
+    /// none at the first look (it has nothing to be higher than) and where it stood still.
+    pub fn moved(&mut self, now: Option<u64>) -> Option<u64> {
+        let before = self.last;
+        self.last = now.or(before);
+        match (before, now) {
+            (Some(before), Some(now)) if now > before => Some(now),
+            _ => None,
+        }
     }
 }
 
@@ -246,6 +308,27 @@ mod tests {
             ppid,
             command: command.to_owned(),
         }
+    }
+
+    #[test]
+    fn a_counting_command_ends_with_its_mark_like_any_and_writes_its_seconds_in_its_file() {
+        let command = LongCommand::counting("cf-x-long-command", 300, "x-ticks.txt");
+        let text = command.text();
+        assert!(text.ends_with(" cf-x-long-command"), "{text}");
+        assert!(
+            text.contains("writeFileSync('x-ticks.txt',String(++n))"),
+            "{text}"
+        );
+        assert!(text.contains("process.exit(),300000"), "{text}");
+        assert_eq!(command.counts_in(), Some("x-ticks.txt"));
+        // A plain one counts in no file and is as it was.
+        assert_eq!(LongCommand::new("m").counts_in(), None);
+        assert_eq!(
+            LongCommand::new("m").text(),
+            "node -e \"setTimeout(() => {}, 300000)\" m"
+        );
+        // As a process list gives it, it is the command that ends with the mark.
+        assert!(command.is_run_by(&format!("node -e {text}")));
     }
 
     #[test]
