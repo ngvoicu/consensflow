@@ -437,9 +437,39 @@ runs = ["harness-specmint"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/specmint.rs"
-find = '''            let _ = rm_force(&beside);
+find = '''            match rm_force(&beside) {
+                Ok(()) => said,
+                Err(cleanup) => {
+                    format!(
+                        "{said}; temporary '{}' remains: {cleanup}",
+                        beside.display()
+                    )
+                }
+            }
 '''
-replace = ''
+replace = '''            said
+'''
+
+[[plant]]
+name = "codex role: a temporary that cannot be removed is not said beside the failure that put it there"
+meant = "a_temporary_that_cannot_be_removed_is_said_beside_the_failure_that_put_it_there"
+runs = ["harness-specmint"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = '''            match rm_force(&beside) {
+                Ok(()) => said,
+                Err(cleanup) => {
+                    format!(
+                        "{said}; temporary '{}' remains: {cleanup}",
+                        beside.display()
+                    )
+                }
+            }
+'''
+replace = '''            let _ = rm_force(&beside);
+            said
+'''
 
 [[plant]]
 name = "codex role: every launch writes a skill's file to the same temporary name"
