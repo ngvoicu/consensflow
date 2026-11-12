@@ -888,7 +888,7 @@ replace = '''    let mut given = Vec::new();'''
 # The hooks of a launch: the owner's go with it (`-c hooks=` takes their place for the run).
 [[plant]]
 name = "muse: a launch drops the owner's hooks"
-meant = "the_owner_s_hooks_run_with_consensflow_s_after_them_and_their_file_is_never_written"
+meant = "the_owner_s_hooks_are_kept_for_the_run_and_their_settings_are_never_written"
 runs = ["muse-lib"]
 
 [[plant.edit]]
