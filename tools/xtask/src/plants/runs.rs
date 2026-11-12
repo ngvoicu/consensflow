@@ -56,7 +56,7 @@ use cf_base::env::Env;
 use cf_process::{capture_whole, CaptureFailed, Captured, Limits, Run, LEFT_RUNNING};
 use tokio::runtime::Runtime;
 
-use self::reporters::Reporter;
+use self::reporters::{caller_threads, Reporter};
 use self::results::{Results, Test};
 use super::Error;
 use crate::context::Context;
@@ -454,6 +454,9 @@ pub struct Execute {
     untold: u64,
     /// The builds before a run of cf-e2e's tests (`CF_E2E_PROGRAMS`).
     programs: Vec<Vec<String>>,
+    /// Whether a run that takes no threads was told the driver's threads have no
+    /// effect on it: said once, and the run goes on.
+    said_no_effect: bool,
 }
 
 impl Execute {
@@ -514,6 +517,7 @@ impl Execute {
                 .iter()
                 .map(|build| build.iter().map(|word| (*word).to_owned()).collect())
                 .collect(),
+            said_no_effect: false,
         }
     }
 
@@ -699,6 +703,18 @@ impl Runner for Execute {
                 cause: std::io::Error::other(why),
             }
             .into());
+        }
+        // Runs that take no threads (Node, Playwright, a command that says no more
+        // than its status) are told once theirs has no effect on them.
+        #[allow(clippy::print_stderr)] // The runner has no console of its own.
+        if !reporter.takes_threads(command) && !self.said_no_effect {
+            if let Some(threads) = caller_threads(&self.checkout) {
+                eprintln!(
+                    "plants: --test-threads {threads} has no effect on: {}",
+                    command.join(" ")
+                );
+                self.said_no_effect = true;
+            }
         }
         // The programs the tests of cf-e2e run, built once for the run, before it: each
         // of its tests is a process of its own, which would build them for itself.

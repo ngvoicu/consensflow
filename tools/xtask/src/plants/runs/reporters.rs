@@ -33,6 +33,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use super::super::{threads_value, THREADS_VAR};
 use super::results::{self, Results};
 use crate::context::Context;
 use crate::process::Invocation;
@@ -54,6 +55,22 @@ const PLAYWRIGHT_REPORT_VAR: &str = "PLANTS_PLAYWRIGHT_REPORT";
 
 /// What reads a report of one kind.
 type Reader = fn(&str) -> Result<Results, String>;
+
+/// The threads the plants driver was asked for (`CF_PLANTS_TEST_THREADS`), as nextest
+/// takes them: none where neither flag nor variable asked, and a variable of no number
+/// of threads is none.
+pub(super) fn caller_threads(context: &Context) -> Option<String> {
+    context
+        .env
+        .text(THREADS_VAR)
+        .and_then(threads_value)
+        .map(|threads| threads.to_string())
+}
+
+/// Whether `command` is a `cargo test` in the shape a person writes it.
+pub(super) fn is_cargo_test(command: &[String]) -> bool {
+    matches!(command, [cargo, test, ..] if cargo == "cargo" && test == "test")
+}
 
 /// Who reports the tests of a command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -165,7 +182,28 @@ impl Reporter {
                     .args(playwright_words(command, &reporter).into_iter().skip(1))
                     .var(PLAYWRIGHT_REPORT_VAR, dir.join(PLAYWRIGHT_REPORT))
             }
-            Self::Status => as_written(),
+            Self::Status => {
+                let mut invocation = as_written();
+                // A `cargo test` that nextest is not running is given the threads after
+                // its `--`, where its words name none of their own.
+                if is_cargo_test(command) {
+                    if let Some(threads) = caller_threads(context) {
+                        let named = invocation.args.iter().any(|word| {
+                            let word = word.to_string_lossy();
+                            word == "--test-threads" || word.starts_with("--test-threads=")
+                        });
+                        if !named {
+                            if !invocation.args.contains(&OsString::from("--")) {
+                                invocation.args.push(OsString::from("--"));
+                            }
+                            invocation
+                                .args
+                                .push(OsString::from(format!("--test-threads={threads}")));
+                        }
+                    }
+                }
+                invocation
+            }
         })
     }
 
@@ -190,6 +228,12 @@ impl Reporter {
             Self::Playwright => retried(command),
             Self::Node | Self::Status => None,
         }
+    }
+
+    /// Whether `command` takes the threads the driver was asked for: a run under
+    /// nextest, and a plain `cargo test` it is not under (given them after its `--`).
+    pub(super) fn takes_threads(self, command: &[String]) -> bool {
+        self == Self::Nextest || is_cargo_test(command)
     }
 
     /// What the report in `dir` says the run's tests did: none for a command that
@@ -453,10 +497,37 @@ fn nextest_words(args: &[OsString]) -> Result<Vec<OsString>, String> {
 /// at once (zeewin's, 4: the run script sets it) did not reach the plants' runs, whose baseline
 /// suites ran as wide as the machine (T-777, P2-3). It goes before the `--`, where nextest takes
 /// it; a variable that is no number of threads, or 0, is none.
+///
+/// The threads the driver was asked for (`CF_PLANTS_TEST_THREADS`) are given the same way
+/// and win over the table's own, the caller's number being the one asked for.
 fn with_the_threads_of_the_environment(
     mut words: Vec<OsString>,
     context: &Context,
 ) -> Vec<OsString> {
+    if let Some(threads) = caller_threads(context) {
+        let before = words
+            .iter()
+            .position(|word| word == "--")
+            .unwrap_or(words.len());
+        if let Some(at) = words[..before]
+            .iter()
+            .position(|word| word == "--test-threads")
+        {
+            if at + 1 < before {
+                words.remove(at + 1);
+                words.remove(at);
+            }
+        }
+        let before = words
+            .iter()
+            .position(|word| word == "--")
+            .unwrap_or(words.len());
+        words.splice(
+            before..before,
+            [OsString::from("--test-threads"), OsString::from(threads)],
+        );
+        return words;
+    }
     let before = words
         .iter()
         .position(|word| word == "--")

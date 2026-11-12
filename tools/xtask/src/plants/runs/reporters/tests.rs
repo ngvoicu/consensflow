@@ -925,3 +925,180 @@ fn the_threads_libtest_is_told_by_the_environment_are_the_threads_nextest_is_giv
         ["-p", "x"]
     );
 }
+
+/// A checkout at `/checkout` whose environment asks for `threads` test threads.
+fn with_threads(threads: &str) -> Context {
+    Context {
+        root: PathBuf::from("/checkout"),
+        env: Env::from_vars([("CF_PLANTS_TEST_THREADS", threads)]),
+    }
+}
+
+#[test]
+fn the_threads_the_driver_was_asked_for_are_given_to_a_nextest_run_over_the_tables_own() {
+    let ran = |command: &[&str], context: &Context| under_nextest_for(command, context).0;
+    // Before the `--`, where nextest takes it.
+    assert_eq!(
+        ran(&["cargo", "test", "-p", "x"], &with_threads("4")),
+        ["-p", "x", "--test-threads", "4"]
+    );
+    assert_eq!(
+        ran(
+            &["cargo", "test", "-p", "x", "--", "--ignored"],
+            &with_threads("3")
+        ),
+        ["-p", "x", "--test-threads", "3", "--", "--ignored"]
+    );
+    // Over a table's own, either way it was written: the caller's number wins.
+    assert_eq!(
+        ran(
+            &["cargo", "test", "-p", "x", "--", "--test-threads=1"],
+            &with_threads("4")
+        ),
+        ["-p", "x", "--test-threads", "4", "--"]
+    );
+    assert_eq!(
+        ran(
+            &["cargo", "test", "-p", "x", "--", "--test-threads", "2"],
+            &with_threads("4")
+        ),
+        ["-p", "x", "--test-threads", "4", "--"]
+    );
+    // A suite of xtask's takes them too.
+    assert_eq!(
+        ran(
+            &["cargo", "xtask", "test", "clis", "--offline"],
+            &with_threads("4")
+        ),
+        [
+            "-p",
+            "cf-e2e",
+            "--test",
+            "cli",
+            "--offline",
+            "--test-threads",
+            "4"
+        ]
+    );
+    if cfg!(target_os = "macos") {
+        // Over the packaged smoke's own one at a time.
+        assert_eq!(
+            ran(
+                &["cargo", "xtask", "smoke", "--app", "a.app"],
+                &with_threads("4")
+            ),
+            [
+                "-p",
+                "cf-e2e",
+                "--test",
+                "smoke",
+                "--test-threads",
+                "4",
+                "--",
+                "--ignored"
+            ]
+        );
+    }
+}
+
+#[test]
+fn without_the_drivers_threads_a_run_holds_nothing_new() {
+    let ran = |command: &[&str], context: &Context| under_nextest_for(command, context).0;
+    let context = checkout(Path::new("/checkout"));
+    assert_eq!(ran(&["cargo", "test", "-p", "x"], &context), ["-p", "x"]);
+    // A table's own, where it names one, is given as it was.
+    assert_eq!(
+        ran(
+            &["cargo", "test", "-p", "x", "--", "--test-threads=1"],
+            &context
+        ),
+        ["-p", "x", "--test-threads", "1", "--"]
+    );
+    // A variable of no number of threads is none.
+    for threads in ["many", "0", "-2", "4 "] {
+        assert_eq!(
+            ran(&["cargo", "test", "-p", "x"], &with_threads(threads)),
+            ["-p", "x"],
+            "{threads:?}"
+        );
+    }
+}
+
+#[test]
+fn a_plain_cargo_test_that_is_not_under_nextest_gets_the_threads_after_its_dashes_or_keeps_its_own()
+{
+    let dir = tempfile::tempdir().unwrap();
+    let setup = |command: &[&str], context: &Context| {
+        args(
+            &Reporter::Status
+                .setup(&words(command), dir.path(), context, "")
+                .unwrap(),
+        )
+    };
+    // After the `--`, where libtest takes them.
+    assert_eq!(
+        setup(&["cargo", "test", "-p", "x"], &with_threads("4")),
+        ["test", "-p", "x", "--", "--test-threads=4"]
+    );
+    assert_eq!(
+        setup(
+            &["cargo", "test", "-p", "x", "--", "--ignored"],
+            &with_threads("4")
+        ),
+        ["test", "-p", "x", "--", "--ignored", "--test-threads=4"]
+    );
+    // Where the words name their own, either way written: kept.
+    assert_eq!(
+        setup(
+            &["cargo", "test", "-p", "x", "--", "--test-threads=3"],
+            &with_threads("4")
+        ),
+        ["test", "-p", "x", "--", "--test-threads=3"]
+    );
+    assert_eq!(
+        setup(
+            &["cargo", "test", "-p", "x", "--", "--test-threads", "3"],
+            &with_threads("4")
+        ),
+        ["test", "-p", "x", "--", "--test-threads", "3"]
+    );
+    // Without the driver's threads: as written.
+    assert_eq!(
+        setup(
+            &["cargo", "test", "-p", "x"],
+            &checkout(Path::new("/checkout"))
+        ),
+        ["test", "-p", "x"]
+    );
+}
+
+#[test]
+fn a_run_that_takes_no_threads_gets_none_of_them() {
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("app/src-tauri/target/plants-runs/run-7");
+    fs::create_dir_all(&dir).unwrap();
+    let context = Context {
+        root: root.path().to_path_buf(),
+        env: Env::from_vars([("CF_PLANTS_TEST_THREADS", "4")]),
+    };
+    // A command that says no more than its status: as written.
+    let command = words(&["cargo", "xtask", "smoke-updater", "--export-bridge"]);
+    let invocation = Reporter::Status
+        .setup(&command, &dir, &context, "")
+        .unwrap();
+    assert_eq!(args(&invocation), command[1..]);
+    // Node's: its reporter's words are added, no threads.
+    let invocation = Reporter::Node
+        .setup(
+            &words(&["node", "--test", "a.test.mjs"]),
+            &dir,
+            &context,
+            "",
+        )
+        .unwrap();
+    let said = args(&invocation);
+    assert!(
+        !said.iter().any(|word| word.contains("--test-threads")),
+        "{said:?}"
+    );
+}
