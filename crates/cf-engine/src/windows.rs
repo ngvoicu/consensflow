@@ -1159,16 +1159,8 @@ impl Dispatcher {
         } else {
             self.seams.ledger.borrow().task_given(participant.id)?
         };
-        // A chain it carries is measured as this window is given it (`cf_for`).
         let begun = first
-            .map(|first| -> Result<_, EngineError> {
-                let cf = self.cf_for(first)?;
-                Ok(self
-                    .seams
-                    .ledger
-                    .borrow_mut()
-                    .begin_delivery_as(first.id, None, &cf)?)
-            })
+            .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
             .transpose()?;
         // The stops this window owes are those asked before this look: a pause
         // that comes while it is prepared or opened is asked after it, and is

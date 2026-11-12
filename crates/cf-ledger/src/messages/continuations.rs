@@ -324,7 +324,6 @@ pub(crate) fn withdraw_stale(store: &mut Store, project_id: i64) -> Result<(), L
         .prepare(
             "SELECT id, recipient_id, body FROM message
              WHERE project_id = ? AND sender_id IS NULL AND kind = 'note' AND state = 'queued'
-               AND handed_at IS NULL
              ORDER BY id",
         )?
         .query_map([project_id], |row| {

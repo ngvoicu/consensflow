@@ -4,7 +4,7 @@
 use cf_proto::ledger::{
     ChiefConversation, ChiefOpenWork, LastSwitch, ProjectView, SwitchedFrom, TaskView,
 };
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
 use super::transcripts::items_of;
@@ -132,19 +132,30 @@ pub(crate) fn chief_open_work(
 /// its `aside`. The first note of a hold is typed to the chief once and its repeats are shown
 /// (RS-25), so a chief switched since, in a conversation of its own, would never be typed it:
 /// its handoff names them (T-1500's finding 2). The hold is read from its newest note to the
-/// chief; a model busy for a moment is tried again by itself and is not listed.
+/// chief; a model busy for a moment is tried again by itself and is not listed. A paused task
+/// whose member left the staff holds with nobody, whatever an older build left of its hold: it
+/// is listed as what it is, paused with its member gone (T-1514's finding A).
 fn held_tasks(store: &Store, project_id: i64, chief: i64) -> Result<Vec<TaskView>, LedgerError> {
     let tasks = store
         .db
         .prepare(&format!(
-            "{TASK_SELECT} WHERE t.project_id = ? AND t.requester_id = ?
-           AND t.state = 'paused' AND t.held_until IS NOT NULL
+            "{TASK_SELECT} WHERE t.project_id = ? AND t.requester_id = ? AND t.state = 'paused'
          ORDER BY t.number"
         ))?
         .query_map(params![project_id, chief], task_view)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut held = Vec::new();
     for mut task in tasks {
+        if let Some(member) = member_gone(store, task.id)? {
+            task.aside = Some(format!(
+                "is paused, and its member @{member} has left the staff"
+            ));
+            held.push(task);
+            continue;
+        }
+        if task.held_until.is_none() {
+            continue;
+        }
         let notes = store
             .db
             .prepare(
@@ -167,6 +178,22 @@ fn held_tasks(store: &Store, project_id: i64, chief: i64) -> Result<Vec<TaskView
         }
     }
     Ok(held)
+}
+
+/// The member that had task `task_id` (its session's member, or itself), when it has left the
+/// staff.
+fn member_gone(store: &Store, task_id: i64) -> Result<Option<String>, LedgerError> {
+    Ok(store
+        .db
+        .query_row(
+            "SELECT coalesce(m.handle, a.handle) FROM task t
+               JOIN participant a ON a.id = t.assignee_id
+               LEFT JOIN participant m ON m.id = a.member_id
+              WHERE t.id = ? AND coalesce(m.left_at, CASE WHEN a.member_id IS NULL THEN a.left_at END) IS NOT NULL",
+            [task_id],
+            |row| row.get(0),
+        )
+        .optional()?)
 }
 
 /// The human's Switch chief: the chief runs on the harness and the model picked from now

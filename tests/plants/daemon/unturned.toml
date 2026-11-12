@@ -105,14 +105,7 @@ runs = ["engine-launch-stops"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''        let begun = first
-            .map(|first| -> Result<_, EngineError> {
-                let cf = self.cf_for(first)?;
-                Ok(self
-                    .seams
-                    .ledger
-                    .borrow_mut()
-                    .begin_delivery_as(first.id, None, &cf)?)
-            })
+            .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
             .transpose()?;'''
 replace = '''        let conversation = if participant.role == "chief" {
             conversation
@@ -120,14 +113,7 @@ replace = '''        let conversation = if participant.role == "chief" {
             self.conversation_to_go_on_with(participant).await?
         };
         let begun = first
-            .map(|first| -> Result<_, EngineError> {
-                let cf = self.cf_for(first)?;
-                Ok(self
-                    .seams
-                    .ledger
-                    .borrow_mut()
-                    .begin_delivery_as(first.id, None, &cf)?)
-            })
+            .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
             .transpose()?;'''
 
 [[plant.edit]]

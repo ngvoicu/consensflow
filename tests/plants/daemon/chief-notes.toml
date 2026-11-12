@@ -16,19 +16,16 @@
 # ledger's notes: a withdrawn or shown note told nobody, and a note that the task went on ends
 # the hold). A task held in the background an hour with no turn of its own is told once,
 # typed (`STILL_WORKING_REMINDED_AFTER_MS`). A shown close still joins a typed failure of the
-# same window (`outage.rs`, `queued_closes`). The notes of ConsensFlow's own that wait for a chief
-# together go in the first one's paste, a line each (a chain: `delivery.rs`, `gather_chain`), up
-# to the first row of another kind and while what its paste says, measured as the window's `cf`
-# writes each line (`cf_proto::chain`), is within `CHAIN_CHARS`; given back, withdrawn or failed,
-# the chain lets its notes go (`release_riders`); a note handed in a chain is on its way
-# (`PENDING`). A chief that takes over is told in its handoff each task it gave that holds
-# (`chief.rs`, `held_tasks`), and a task taken from its member holds with nobody (`held_until`).
+# same window (`outage.rs`, `queued_closes`). Every note typed is its own paste, as before
+# RS-25. A hold is its window's: another window's first refusal is another hold (`hold_of`). A
+# chief that takes over is told in its handoff each task it gave that holds (`chief.rs`,
+# `held_tasks`), and a task paused with its member gone from the staff as that, never its hold
+# (`member_gone`); a task taken from its member holds with nobody (`held_until`).
 #
 # Every name holds `chief-notes`, so `cargo xtask plants daemon chief-notes` runs them all.
 
 [run]
-chief-notes-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "note_chains::", "shown_notes::", "waiting_notes::"]
-chief-notes-engine-chains = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "note_chains::"]
+chief-notes-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "shown_notes::", "waiting_notes::"]
 chief-notes-engine-busy = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "busy_models::"]
 chief-notes-engine-outage = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "outage_notes::"]
 chief-notes-engine-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::"]
@@ -48,115 +45,6 @@ find = '''
 '''
 replace = '''
     } else if message.from_window {
-'''
-
-[[plant]]
-name = "chief-notes: no chain is gathered: each note is a paste of its own"
-meant = "note_chains::the_notes_that_wait_together_for_the_chief_go_in_one_paste"
-runs = ["chief-notes-ledger", "chief-notes-engine-chains"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''
-        gather_chain(store, &message, cf)?;
-'''
-replace = '''
-        let _ = cf;
-'''
-
-[[plant]]
-name = "chief-notes: a chain runs on past a row that is not ConsensFlow's note"
-meant = "note_chains::a_chain_ends_at_the_first_row_that_is_not_consensflows_note"
-runs = ["chief-notes-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''
-        if !ours {
-            break;
-        }
-'''
-replace = '''
-        if !ours && lines > CHAIN_CHARS {
-            break;
-        }
-'''
-
-[[plant]]
-name = "chief-notes: a chain has no size"
-meant = "note_chains::a_chain_holds_no_more_than_chain_chars_of_notes_and_the_rest_wait_for_the_next"
-runs = ["chief-notes-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''
-        if utf16_len(&chain::head(count + 1)) + longer > CHAIN_CHARS {
-'''
-replace = '''
-        if CHAIN_CHARS == 0 {
-'''
-
-[[plant]]
-name = "chief-notes: a chain withdrawn keeps its notes carried"
-meant = "note_chains::a_chain_withdrawn_before_it_was_handed_over_lets_its_notes_go_on_their_own"
-runs = ["chief-notes-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''
-        release_riders(store, message_id)?;
-        known_message(store, message_id)
-    })
-'''
-replace = '''
-        known_message(store, message_id)
-    })
-'''
-
-[[plant]]
-name = "chief-notes: a chain given back keeps what it carried"
-meant = "note_chains::a_chain_given_back_carries_none_and_is_gathered_again_from_what_waits"
-runs = ["chief-notes-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''
-        withdraw_stale_among(store, &riding)?;
-        release_riders(store, message_id)?;
-'''
-replace = '''
-        withdraw_stale_among(store, &riding)?;
-'''
-
-[[plant]]
-name = "chief-notes: a chain that failed keeps its notes carried"
-meant = "note_chains::a_chain_whose_delivery_failed_lets_its_notes_go_on_their_own"
-runs = ["chief-notes-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''
-            looked(json!({ "message": message_id, "reason": reason }), look),
-        )?;
-        release_riders(store, message_id)?;
-'''
-replace = '''
-            looked(json!({ "message": message_id, "reason": reason }), look),
-        )?;
-'''
-
-[[plant]]
-name = "chief-notes: a failure handed in a chain is still one to write again"
-meant = "note_chains::a_failure_handed_over_in_a_chain_is_not_written_again_into_the_note_of_the_next"
-runs = ["chief-notes-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/outage.rs"
-find = '''
-const PENDING: &str = "(state IN ('queued', 'delivering') AND handed_at IS NULL)";
-'''
-replace = '''
-const PENDING: &str = "(state IN ('queued', 'delivering'))";
 '''
 
 [[plant]]
@@ -284,7 +172,7 @@ replace = '''
 [[plant]]
 name = "chief-notes: the first note of a hold is shown, not typed"
 meant = "shown_notes::the_first_note_of_a_hold_is_typed_to_the_chief_and_the_same_hold_said_again_is_shown"
-runs = ["chief-notes-ledger", "chief-notes-engine-chains", "chief-notes-engine-holds"]
+runs = ["chief-notes-ledger", "chief-notes-engine-shown", "chief-notes-engine-holds"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/holds.rs"
@@ -328,39 +216,9 @@ replace = '''
 '''
 
 [[plant]]
-name = "chief-notes: a chain is measured by its notes' own words"
-meant = "note_chains::a_chain_is_gathered_by_what_its_paste_says_and_every_note_is_typed_once_in_order"
-runs = ["chief-notes-engine-chains"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''
-    let measure = |note: &MessageView| utf16_len(&chain::line(note, cf)) + 1;
-'''
-replace = '''
-    let measure = |note: &MessageView| utf16_len(&note.body) + 0 * utf16_len(&chain::line(note, cf));
-'''
-
-[[plant]]
-name = "chief-notes: a chain is measured for a bare cf in a window whose cf is a path"
-meant = "note_chains::a_chain_is_gathered_by_what_its_paste_says_and_every_note_is_typed_once_in_order"
-runs = ["chief-notes-engine-chains"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = '''
-        let cf = self.cf_for(&message)?;
-        let look = self.paced_look(record, message.id);
-'''
-replace = '''
-        let cf = cf_proto::cf_word::CfWord::bare();
-        let look = self.paced_look(record, message.id);
-'''
-
-[[plant]]
 name = "chief-notes: a chief that takes over is told no held task"
-meant = "note_chains::a_chief_switched_while_a_task_holds_is_told_the_hold_in_its_handoff"
-runs = ["chief-notes-ledger", "chief-notes-engine-chains"]
+meant = "shown_notes::a_chief_switched_while_a_task_holds_is_told_the_hold_in_its_handoff"
+runs = ["chief-notes-ledger", "chief-notes-engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/chief.rs"
@@ -411,4 +269,35 @@ find = '''
 '''
 replace = '''
              paused_with_project = 0
+'''
+
+[[plant]]
+name = "chief-notes: a hold is the same hold whoever's window it is"
+meant = "shown_notes::a_hold_after_its_task_left_its_member_is_another_hold_and_is_typed"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/holds.rs"
+find = '''
+    Some(Hold { with, kind })
+'''
+replace = '''
+    Some(Hold {
+        with: &with[..0],
+        kind,
+    })
+'''
+
+[[plant]]
+name = "chief-notes: a handoff tells the hold of a member gone from the staff"
+meant = "shown_notes::a_held_task_whose_member_left_the_staff_is_told_to_a_new_chief_as_paused_and_not_held"
+runs = ["chief-notes-ledger", "chief-notes-engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '''
+        if let Some(member) = member_gone(store, task.id)? {
+'''
+replace = '''
+        if let Some(member) = member_gone(store, task.id)?.filter(|_| false) {
 '''

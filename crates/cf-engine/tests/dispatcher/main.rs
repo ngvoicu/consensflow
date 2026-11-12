@@ -91,7 +91,6 @@ mod moved_models;
 mod named_by_model;
 mod no_adapter;
 mod not_ready;
-mod note_chains;
 mod nothing_to_stop;
 mod open_deadline;
 mod out_of_quota;

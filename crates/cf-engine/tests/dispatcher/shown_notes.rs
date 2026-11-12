@@ -6,8 +6,10 @@
 //! with no turn of its worker's own; a hold that nothing but Finish ends is typed as it was.
 
 use cf_engine::testing::Context;
+use cf_engine::SwitchWhen;
 
-use crate::fixtures::{given, Tiers};
+use crate::chiefs::{to, with_codex};
+use crate::fixtures::{after, exhausted, given, now, Tiers};
 use crate::turn_end::pending;
 
 /// The notification Claude Code begins a turn with when a job of its ends.
@@ -242,4 +244,140 @@ fn a_restart_ends_a_background_hold_and_writes_no_note_of_it_again() {
         .expect("its result");
     assert_eq!(result.recipient, "chief");
     assert_eq!(result.body, "The soak test starts");
+}
+
+#[test]
+fn a_member_out_of_quota_with_seven_tasks_types_each_task_s_hold_once_in_a_paste_of_its_own() {
+    // RS-25: the first note of a hold is typed, once for each task, one paste a note.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    for n in 1..=7 {
+        tiers.open_body(&format!("Part {n}"));
+    }
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert!((1..=7).all(|n| tiers.task(n).task.state == "working"));
+    context.adapter.busy("chief");
+    let before = given(&context, "chief").len();
+    let resets_at = after(&context, 120 * 3_600_000);
+    for n in 1..=7 {
+        context.adapter.refuse(
+            &tiers.assignee(n),
+            exhausted(Some(&now(&context)), Some(&resets_at)),
+        );
+    }
+    context.pass().unwrap();
+    let states: Vec<String> = (1..=7).map(|n| tiers.task(n).task.state).collect();
+    assert!(states.iter().all(|state| state == "paused"), "{states:?}");
+    for _ in 0..12 {
+        context.adapter.answer("chief", "Done.");
+        context.pass().unwrap();
+    }
+    let pasted: Vec<String> = given(&context, "chief").split_off(before);
+    assert_eq!(pasted.len(), 7, "a paste a task: {pasted:?}");
+    for n in 1..=7 {
+        let hold = format!(
+            "T-{n} waits with @{}: out of quota until {resets_at}",
+            tiers.assignee(n)
+        );
+        let with = pasted.iter().filter(|paste| paste.contains(&hold)).count();
+        assert_eq!(with, 1, "T-{n}'s hold is typed once: {pasted:?}");
+        // Each task's line says its hold, typed as it was.
+        assert_eq!(
+            tiers.task(n).task.aside,
+            Some(format!(
+                "waits with @{}: out of quota until {resets_at}",
+                tiers.assignee(n)
+            ))
+        );
+    }
+    for paste in &pasted {
+        assert_eq!(paste.matches(" waits with @").count(), 1, "{paste}");
+    }
+}
+
+/// T-1 for zeus, at work and then refused for quota until five days from now, so its hold is
+/// typed to the chief: the hold's words.
+fn held_for_quota(context: &Context, tiers: &Tiers<'_>) -> String {
+    tiers.open_body("Part 1");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "working");
+    let zeus = tiers.assignee(1);
+    let resets_at = after(context, 120 * 3_600_000);
+    context
+        .adapter
+        .refuse(&zeus, exhausted(Some(&now(context)), Some(&resets_at)));
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let hold = format!("waits with @{zeus}: out of quota until {resets_at}");
+    assert!(
+        given(context, "chief")
+            .iter()
+            .any(|text| text.contains(&format!("T-1 {hold}"))),
+        "the old chief was typed the hold: {:?}",
+        given(context, "chief")
+    );
+    hold
+}
+
+/// The first message of the chief Codex's astraeus takes over with.
+fn handoff_on_switch(context: &Context, tiers: &Tiers<'_>) -> String {
+    context
+        .switch_chief(
+            tiers.project.id,
+            to("codex", "astraeus"),
+            SwitchWhen::Now,
+            false,
+        )
+        .unwrap();
+    let prepared = context.codex.prepared().last().cloned().unwrap();
+    prepared["message"].as_str().unwrap().to_owned()
+}
+
+#[test]
+fn a_chief_switched_while_a_task_holds_is_told_the_hold_in_its_handoff() {
+    // The first note of a hold was typed to the old chief; the new chief starts a new
+    // conversation, and the same hold said again is only shown: its handoff names the
+    // task and the hold (T-1500's finding 2).
+    let context = with_codex();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let hold = held_for_quota(&context, &tiers);
+    let handoff = handoff_on_switch(&context, &tiers);
+    assert!(
+        handoff.contains(&format!(
+            "What waits on you now:\n- T-1 \"{}\" {hold} (cf task get T-1)",
+            tiers.task(1).task.title
+        )),
+        "{handoff}"
+    );
+    assert!(
+        !handoff.contains("Nothing on the board waits on you."),
+        "{handoff}"
+    );
+}
+
+#[test]
+fn a_chief_switched_after_a_held_task_s_member_left_is_told_it_is_paused_and_no_hold() {
+    // T-1514's finding A: the human removes the member whose task is held; the task stays
+    // paused for its resumption, and the new chief is told so, not that it waits with a member
+    // that is gone.
+    let context = with_codex();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    held_for_quota(&context, &tiers);
+    context.remove_member(tiers.project.id, "zeus").unwrap();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let handoff = handoff_on_switch(&context, &tiers);
+    assert!(
+        handoff.contains(&format!(
+            "What waits on you now:\n- T-1 \"{}\" is paused, and its member @zeus has left the staff (cf task get T-1)",
+            tiers.task(1).task.title
+        )),
+        "{handoff}"
+    );
+    assert!(!handoff.contains("waits with @"), "{handoff}");
 }

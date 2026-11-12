@@ -50,9 +50,8 @@ pub const SAME_ERROR_WITHIN_MS: i64 = 30 * 60_000;
 const TOLD: &str = "failure.told";
 
 /// A message the requester has not been given and may still not be: queued, or in its
-/// delivery, and not handed over (`handed_at`), whose hand-over the transport then refuses. A
-/// note queued in a chain's paste handed over is the requester's (RS-25).
-const PENDING: &str = "(state IN ('queued', 'delivering') AND handed_at IS NULL)";
+/// delivery but not handed over (`handed_at`), whose hand-over the transport then refuses.
+const PENDING: &str = "(state = 'queued' OR (state = 'delivering' AND handed_at IS NULL))";
 
 /// What a note says of a task whose window closed, as the engine words it.
 pub fn window_closed(number: i64) -> String {

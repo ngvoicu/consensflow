@@ -41,7 +41,7 @@ use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
 
 pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{
-    adopt, fold, reconcile_released, release_carried, release_riders, release_stranded, transfer,
+    adopt, fold, reconcile_released, release_carried, release_stranded, transfer,
 };
 pub use continuations::{
     continuation, continuation_in, continuation_tasks, cut_turn, cut_turn_unquoted,
@@ -58,7 +58,7 @@ pub(crate) use delivery::{
     last_pasted, last_pastes, next_delivery, next_delivery_of, note_since, paste_into, pasted_into,
     received_of, retry_delivery, with_work,
 };
-pub use delivery::{HandOver, CHAIN_CHARS, WITHDRAWN_AFTER_HANDED};
+pub use delivery::{HandOver, WITHDRAWN_AFTER_HANDED};
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub use holds::is_busy_note;
 pub(crate) use holds::{

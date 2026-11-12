@@ -190,8 +190,8 @@ runs = ["pacing-kit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "        let look = self.paced_look(record, message.id);"
-replace = "        let look = self.paced_look(record, message.id).filter(|_| false);"
+find = "        let begun = match self.paced_look(record, message.id) {"
+replace = "        let begun = match self.paced_look(record, message.id).filter(|_| false) {"
 
 [[plant]]
 name = "pacing evidence: a retry says nothing of what its looks read"

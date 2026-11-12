@@ -63,8 +63,8 @@ pub use ledger::{open_ledger, Event, Ledger, Options};
 pub use meeting::{CHIEF_CUT, HANDOFF_TITLE, LEAD_HANDOFF_TITLE, SWITCH_ASKED};
 pub use messages::{
     continuation, continuation_in, continuation_tasks, cut_turn, cut_turn_unquoted, is_busy_note,
-    is_told, waiting_for_the_reopen, GivenUp, HandOver, NewNote, NewQuestion, Read, CHAIN_CHARS,
-    MAY_STILL_RUN, NOT_PROVEN_GONE, WITHDRAWN_AFTER_HANDED,
+    is_told, waiting_for_the_reopen, GivenUp, HandOver, NewNote, NewQuestion, Read, MAY_STILL_RUN,
+    NOT_PROVEN_GONE, WITHDRAWN_AFTER_HANDED,
 };
 pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;

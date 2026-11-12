@@ -463,3 +463,74 @@ fn what_waits_on_a_chief_that_takes_over_names_each_task_it_gave_that_is_held_an
     let open = w.ledger.chief_open_work(w.project).expect("the open work");
     assert!(open.held.is_empty(), "{:?}", open.held);
 }
+
+/// What a chief that takes over is told of each task it gave that is held or whose member left.
+fn told_held(w: &World) -> Vec<(i64, Option<String>)> {
+    w.ledger
+        .chief_open_work(w.project)
+        .expect("the open work")
+        .held
+        .iter()
+        .map(|task| (task.number, task.aside.clone()))
+        .collect()
+}
+
+/// What a chief that takes over is told of a paused task whose member left the staff.
+const MEMBER_GONE: &str = "is paused, and its member @zeus has left the staff";
+
+#[test]
+fn a_held_task_whose_member_left_the_staff_is_told_to_a_new_chief_as_paused_and_not_held() {
+    // T-1514's finding A: removal leaves a paused task for its resumption, its hold kept: at
+    // its end the daemon resumes it in a fresh window, or tells the chief it stays paused
+    // (`out_of_quota`'s test of a member given a task by name). A chief that takes over is
+    // told the task is paused with its member gone, not that it waits with that member.
+    for hold in HOLDS {
+        let mut w = world();
+        let (task, session) = with_zeus(&mut w);
+        w.hold(task);
+        let first = note_of(&mut w, hold, task, &session, UNTIL);
+        w.deliver(first.id);
+        w.ledger
+            .remove_member(w.project, "zeus")
+            .expect("zeus leaves the staff");
+        assert_eq!(w.state(task), "paused", "left for its resumption");
+        assert_eq!(
+            held_until(&w, task).as_deref(),
+            Some(UNTIL),
+            "its hold ends as it would"
+        );
+        assert_eq!(told_held(&w), [(task, Some(MEMBER_GONE.to_owned()))]);
+    }
+}
+
+#[test]
+fn a_hold_after_its_task_left_its_member_is_another_hold_and_is_typed() {
+    // T-1514's finding B: a hold is its member's. Taken back and given to another member, or
+    // to a new window of the same member, the task's first refusal of the same kind and end is
+    // typed: the chief's rescue failed, and only a typed note wakes it.
+    for hold in HOLDS {
+        for to in ["diana", "zeus"] {
+            let mut w = world();
+            let (task, session) = with_zeus(&mut w);
+            w.hold(task);
+            let first = note_of(&mut w, hold, task, &session, UNTIL);
+            w.deliver(first.id);
+            w.ledger
+                .release_task(w.project, task, "by @human")
+                .expect("released");
+            let moved = w.assign(task, to);
+            let other = moved.task.assignee.clone().expect("a session");
+            w.deliver(moved.message.expect("its brief").id);
+            w.hold(task);
+            let again = note_of(&mut w, hold, task, &other, UNTIL);
+            assert_eq!(
+                again.state, "queued",
+                "@{other}'s first hold after @{session}'s is typed"
+            );
+            assert_eq!(w.next("chief"), Some(again.id));
+            // Said again by the same window, it is the same hold: shown.
+            let same = note_of(&mut w, hold, task, &other, UNTIL);
+            assert_eq!(same.state, "read");
+        }
+    }
+}

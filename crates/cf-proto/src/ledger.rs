@@ -778,7 +778,7 @@ pub struct LatestMessages {
 /// to it without an answer, results it has not decided on, its own
 /// unfinished tasks, and the tasks it gave that are held (out of quota, an
 /// account unavailable, a model moved), each with what its line says of the
-/// hold (`aside`).
+/// hold (`aside`), or paused with their member gone from the staff, saying so.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ChiefOpenWork {
     pub questions: Vec<MessageView>,

@@ -131,11 +131,20 @@ pub(crate) fn said(number: i64, body: &str) -> Option<String> {
         .map(|moved| format!("{moved}, until the human says it may go on"))
 }
 
-/// Which hold a note of T-`number` says, `body`: one of quota with its end, one of an
-/// unavailable account, one of a moved model. A hold is the same hold while its kind is, and
-/// a quota's end; who holds it, and the words the harness gave, may differ.
+/// Which hold a note of T-`number` says, `body`: the window that holds it and the hold's kind.
+/// A hold is the same hold while its window and its kind are, and a quota's end; the words the
+/// harness gave may differ. A hold is its window's: a task that left its window (taken back,
+/// reassigned, resumed in a fresh window, its member removed) is given to a new one when it
+/// goes on, and that window's first refusal is another hold (T-1514's finding B).
 #[derive(PartialEq)]
-enum Hold<'a> {
+struct Hold<'a> {
+    with: &'a str,
+    kind: HoldKind<'a>,
+}
+
+/// What a hold is for: quota with its end, an unavailable account, a moved model.
+#[derive(PartialEq)]
+enum HoldKind<'a> {
     Quota(&'a str),
     Unavailable,
     Moved,
@@ -143,21 +152,21 @@ enum Hold<'a> {
 
 fn hold_of(number: i64, body: &str) -> Option<Hold<'_>> {
     let rest = body.strip_prefix(&format!("T-{number} waits with @"))?;
-    if let Some(quota) = rest
+    let (with, _) = rest.split_once(':')?;
+    let kind = if let Some(quota) = rest
         .strip_suffix(TAIL)
         .or_else(|| rest.strip_suffix(OLD_TAIL))
     {
-        return quota
-            .split_once(": out of quota until ")
-            .map(|(_, until)| Hold::Quota(until));
-    }
-    if rest.ends_with(TAIL_UNAVAILABLE) {
-        Some(Hold::Unavailable)
+        let (_, until) = quota.split_once(": out of quota until ")?;
+        HoldKind::Quota(until)
+    } else if rest.ends_with(TAIL_UNAVAILABLE) {
+        HoldKind::Unavailable
     } else if rest.ends_with(TAIL_MOVED) {
-        Some(Hold::Moved)
+        HoldKind::Moved
     } else {
-        None
-    }
+        return None;
+    };
+    Some(Hold { with, kind })
 }
 
 /// Whether `to` was typed the note of the hold `body` says of T-`number` already, or has it

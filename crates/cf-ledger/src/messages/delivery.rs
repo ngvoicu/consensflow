@@ -5,15 +5,12 @@
 //! (`carrying`), and what the paste proves arrived is each of them.
 
 use cf_base::json::js_order;
-use cf_base::text::utf16_len;
-use cf_proto::cf_word::CfWord;
-use cf_proto::chain;
 use cf_proto::ledger::{Begun, MessageView};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
 use super::again::tell_failed_answer;
-use super::carrying::{adopt, carried, release_carried, release_riders};
+use super::carrying::{adopt, carried, release_carried};
 use super::continuations::{withdraw_stale_among, withdrawn_if_stale};
 use super::pauses::withdrawn_on_its_way;
 use super::receipt::{
@@ -110,25 +107,7 @@ fn next_delivery_among(
         .db
         .prepare(&format!(
             "SELECT m.id FROM message m
-       WHERE {}
-         AND (?3 IS NULL OR m.id = ?3)
-       ORDER BY NOT (m.kind = 'question' AND m.urgent = 0), m.id LIMIT 1",
-            may_go()
-        ))?
-        .query_map(params![participant_id, serial, only], |row| {
-            row.get::<_, i64>(0)
-        })?
-        .next()
-        .transpose()?;
-    next.map_or(Ok(None), |id| store.message(id))
-}
-
-/// The rule every row `m` of participant `?1`'s queue goes by to be its head now (`?2`: 1
-/// where its window holds one task at a time, a member's): queued, its own and nobody's to
-/// claim, and held by no task's work, words or meeting.
-fn may_go() -> String {
-    format!(
-        "m.recipient_id = ?1 AND m.state = 'queued'
+       WHERE m.recipient_id = ?1 AND m.state = 'queued'
          AND m.carried_by IS NULL AND m.claimed_at IS NULL
          AND (m.kind != 'task' OR ?2 = 0 OR NOT EXISTS (
            SELECT 1 FROM task WHERE assignee_id = ?1 AND state IN ('working', 'waiting')
@@ -143,83 +122,19 @@ fn may_go() -> String {
              AND words.state = 'gated'
          ))
          AND NOT {}
-         AND NOT {}",
-        sql_list(&HELD_TASK_STATES),
-        behind_held_words("m"),
-        held_by_meeting("m")
-    )
-}
-
-/// The most a chain's paste says ([`gather_chain`]), counted in UTF-16 code units as the
-/// engine counts what a window is given whole (its `INLINE_LIMIT`, 16,000, which it asserts
-/// this is well within): its first line and every note's, each with its id and task, its
-/// commands started by the window's `cf` by its whole path, and its further lines indented
-/// (`cf_proto::chain`). A chain so gathered is never cut to its opening (T-1500's finding 1).
-pub const CHAIN_CHARS: usize = 10_000;
-
-/// Whether `m` is a note of ConsensFlow's own a chain may hold: no participant wrote it,
-/// it is no urgent tell, and it says no role (a role's note is confirmed by itself).
-const CONSENSFLOW_NOTE: &str =
-    "m.kind = 'note' AND m.sender_id IS NULL AND m.urgent = 0 AND m.role_text IS NULL";
-
-/// A chain is one message (RS-25): the delivery of `head`, a note of ConsensFlow's own to a
-/// chief just begun, carries the notes of its own that wait behind it, by the rule the head
-/// went by ([`may_go`]), in order, up to the first row of another kind and while what the
-/// paste says stays within [`CHAIN_CHARS`], each line measured as the window will be given it
-/// (`cf`, its own word for `cf`): what does not fit waits for the next paste, in order.
-/// One event of the board (a restart, a pause of several tasks) writes its notes while the
-/// chief's window is at work on the first, or in one pass: they wait together, and go in one
-/// paste, a line each. What the head carries is the set from now; given back, it carries
-/// none, and gathers again ([`release_riders`]).
-fn gather_chain(store: &mut Store, head: &MessageView, cf: &CfWord) -> Result<(), LedgerError> {
-    if head.recipient_role != "chief" || head.kind != "note" || head.sender.is_some() || head.urgent
-    {
-        return Ok(());
-    }
-    let (role, riding): (bool, bool) = store.db.query_row(
-        "SELECT role_text IS NOT NULL,
-                EXISTS (SELECT 1 FROM message WHERE carried_by = ?1)
-           FROM message WHERE id = ?1",
-        [head.id],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    if role || riding {
-        return Ok(());
-    }
-    let behind: Vec<(i64, bool)> = store
-        .db
-        .prepare(&format!(
-            "SELECT m.id, {CONSENSFLOW_NOTE} FROM message m
-              WHERE {} AND m.id > ?3
-              ORDER BY NOT (m.kind = 'question' AND m.urgent = 0), m.id",
-            may_go()
+         AND NOT {}
+         AND (?3 IS NULL OR m.id = ?3)
+       ORDER BY NOT (m.kind = 'question' AND m.urgent = 0), m.id LIMIT 1",
+            sql_list(&HELD_TASK_STATES),
+            behind_held_words("m"),
+            held_by_meeting("m")
         ))?
-        .query_map(params![head.recipient_id, 0, head.id], |row| {
-            Ok((row.get(0)?, row.get(1)?))
+        .query_map(params![participant_id, serial, only], |row| {
+            row.get::<_, i64>(0)
         })?
-        .collect::<rusqlite::Result<_>>()?;
-    // The lines so far, each with the line break before it: the head's first.
-    let measure = |note: &MessageView| utf16_len(&chain::line(note, cf)) + 1;
-    let mut lines = measure(head);
-    // `count`: the notes the chain holds so far, the head among them.
-    for (count, (id, ours)) in (1..).zip(behind) {
-        if !ours {
-            break;
-        }
-        let Some(note) = store.message(id)? else {
-            break;
-        };
-        let longer = lines + measure(&note);
-        if utf16_len(&chain::head(count + 1)) + longer > CHAIN_CHARS {
-            break;
-        }
-        store.db.execute(
-            "UPDATE message SET carried_by = ?1 WHERE id = ?2",
-            params![head.id, id],
-        )?;
-        lines = longer;
-    }
-    Ok(())
+        .next()
+        .transpose()?;
+    next.map_or(Ok(None), |id| store.message(id))
 }
 
 /// The message last pasted into a participant's window about a task, and
@@ -355,7 +270,6 @@ pub(crate) fn begin_delivery(
     store: &mut Store,
     message_id: i64,
     look: Option<&Value>,
-    cf: &CfWord,
 ) -> Result<Begun, LedgerError> {
     store.write(|store| {
         let message = require_message(store, message_id, "queued")?;
@@ -415,7 +329,6 @@ pub(crate) fn begin_delivery(
          WHERE id = ?",
             [message_id],
         )?;
-        gather_chain(store, &message, cf)?;
         let begun = json!({ "message": message_id, "attempt": message.attempts + 1 });
         store.log(message.project_id, "delivery.begun", looked(begun, look))?;
         Ok(Begun {
@@ -833,7 +746,6 @@ pub(crate) fn cancel_message(
         if let Some(task) = message_task(store, message_id)? {
             release_carried(store, task.id)?;
         }
-        release_riders(store, message_id)?;
         known_message(store, message_id)
     })
 }
@@ -892,7 +804,6 @@ pub(crate) fn retry_delivery(
             .map(|row| row.id)
             .collect();
         withdraw_stale_among(store, &riding)?;
-        release_riders(store, message_id)?;
         store.db.execute(
             "UPDATE message SET state = 'queued', reason = ?, attempts = MAX(attempts - ?, 0),
                handed_at = NULL
@@ -1010,7 +921,6 @@ pub(crate) fn give_up_delivery(
             "delivery.failed",
             looked(json!({ "message": message_id, "reason": reason }), look),
         )?;
-        release_riders(store, message_id)?;
         if let Some(task) = message_task(store, message_id)? {
             release_carried(store, task.id)?;
             if message.kind == "task" && task.state == "queued" {

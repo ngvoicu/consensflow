@@ -248,13 +248,6 @@ const NO_CAUSE_QUOTED: &str = "a launch that did not start is told by its stage 
 /// [`NO_CAUSE_QUOTED`] in a test that [`ACCEPT_IN_THE_FAIL_NOTE`] already departs in.
 const ACCEPT_AND_NO_CAUSE: &str = "the note that T-1 failed says how to reopen it and then `, or accept it with what you checked: cf task accept T-1 \"…\"`, where Node's ends at the reopen (a failed task whose work is done is accepted by the chief on its word); and the reason of the launch that did not start says its stage and the kind of failure its producer typed, and no word of the adapter's or the host's, which the log holds, masked, in a line of its own, where Node's reason quoted them (T-1328)";
 
-/// [`ACCEPT_AND_NO_CAUSE`] in a test whose two failures wait for the chief together: they
-/// go as one chain (RS-25).
-const ACCEPT_AND_NO_CAUSE_CHAINED: &str = "the note that T-1 failed says how to reopen it and then `, or accept it with what you checked: cf task accept T-1 \"…\"`, where Node's ends at the reopen (a failed task whose work is done is accepted by the chief on its word); the reason of the launch that did not start says its stage and the kind of failure its producer typed, and no word of the adapter's or the host's, which the log holds, masked, in a line of its own, where Node's reason quoted them (T-1328); and the two notes of failure, which wait for the chief together, go in one paste, the first one's, a line each under `2 notes at once, a line each:` and a header that names no task (a chain, RS-25), where Node pastes each on its own";
-
-/// Notes of ConsensFlow's own that wait for the chief together go in one paste (RS-25).
-const CHAINED: &str = "the notes of ConsensFlow's own that wait for the chief together (the human cancelled three tasks) go in one paste, the first one's, a line each under `3 notes at once, a line each:` and a header that names no task (a chain, RS-25), where Node pastes each on its own, one turn of the chief's a note";
-
 /// [`NO_CAUSE_QUOTED`] in a test that already departs from Node's trace because a member runs on
 /// its own model, with no saved agent to lose (harness-models).
 const NO_AGENT_AND_NO_CAUSE: &str = "a member runs on its own model, with no saved agent the human could delete: a session's window opened again opens, where Node's said its agent was gone; and the reason of a window that did not open says its stage and the kind of failure, and no word of the host's, which the log holds, masked, where Node's reason quoted them (T-1328)";
@@ -404,7 +397,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "keeps a held task paused, its hold cleared, when its session was deleted before the hold ended, and tells its requester once while every other task goes on",
-        "the notes that T-2 and T-3 wait, which wait for the chief together, go in one paste, the first one's, a line each under `2 notes at once, a line each:` (a chain, RS-25), so the note that said T-3 waits is given with it before the daemon resumes T-3, where Node pastes T-2's on its own and leaves T-3's queued; and the hold notes say the member may be back before its reset, where Node's say the task goes on at the reset; and the chief accepts T-1 before it gives the follow-up of T-1 (`--after`), which waits for T-1 to be accepted as a follow-up of a task at work does (T-1118), where Node's went into the window at once; and the window the session opens again resumes a record the copy of it has more of, and the copy puts the record's new items after the ones it kept (`seq`; T-1118), where Node's took the older ones' places and sorted among them",
+        "the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn, where Node leaves it queued; and the hold notes say the member may be back before its reset, where Node's say the task goes on at the reset; and the chief accepts T-1 before it gives the follow-up of T-1 (`--after`), which waits for T-1 to be accepted as a follow-up of a task at work does (T-1118), where Node's went into the window at once; and the window the session opens again resumes a record the copy of it has more of, and the copy puts the record's new items after the ones it kept (`seq`; T-1118), where Node's took the older ones' places and sorted among them",
     ),
     (
         "fails a launch whose first message never arrives",
@@ -516,12 +509,8 @@ const DEPARTED: &[(&str, &str)] = &[
         "the note that asks the chief where things stand is written only when the engine pastes it, with the chief at rest, so no `cf inbox read` in the chief's turn can receive it and let the switch go without its answer (T-351): its `message.sent` comes in the pass after the switch was asked, where Node wrote the note when the switch was asked",
     ),
     (
-        "stops its window: an agent at work on it is interrupted, the window closes, and the session stays",
-        CHAINED,
-    ),
-    (
         "begins the preparation of every launch of a pass before it writes the failure of the first",
-        ACCEPT_AND_NO_CAUSE_CHAINED,
+        ACCEPT_AND_NO_CAUSE,
     ),
     (
         "fails what was given to a member on it by name, and its requester hears why",
