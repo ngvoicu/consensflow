@@ -926,6 +926,48 @@ async fn a_role_said_read_by_its_parts_is_read_once_every_part_is_and_a_bad_part
     assert_eq!(scene.kicks.get(), 1, "the dispatcher is woken");
 }
 
+/// T-1513 (review T-1521): a part of a role printed while its note is back in the queue (its
+/// paste given back) is taken through the route as any part is, and counts: once every part
+/// was printed and the paste goes in, the role is read, though no part was printed after it.
+#[tokio::test]
+async fn parts_of_a_role_printed_while_its_note_is_back_in_the_queue_count_once_its_paste_goes_in()
+{
+    let scene = scene();
+    let id = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let role = ledger
+            .note_role(
+                scene.project.id,
+                "chief",
+                &a_role_in_two_parts_only_in_the_chiefs_window(&scene),
+                "the role",
+            )
+            .unwrap();
+        ledger.begin_delivery(role.id).unwrap();
+        ledger
+            .retry_delivery(role.id, "the record never showed it", true)
+            .unwrap();
+        role.id
+    };
+    assert_eq!(scene.message(id).state, "queued");
+    for part in [1, 2] {
+        let written = json!({ "answers": [id], "via": "inbox", "part": part, "parts": 2 });
+        let (status, said) = read_from(&scene, &scene.chief, &written.to_string()).await;
+        assert_eq!((status, said), (200, json!({})), "part {part}");
+        assert_eq!(scene.message(id).state, "queued", "part {part}");
+    }
+    assert_eq!(scene.logged("message.part_read"), 2);
+    let mut ledger = scene.context.ledger.borrow_mut();
+    ledger.begin_delivery(id).unwrap();
+    ledger.confirm_delivery(id, None).unwrap();
+    drop(ledger);
+    assert_eq!(
+        scene.message(id).state,
+        "read",
+        "every part was printed, then it went in"
+    );
+}
+
 /// T-1513 (review T-1516): the daemon does not take a read's word for how many parts a role
 /// is printed in. The ledger counts them as the caller's window's `cf` prints the note, and a
 /// read that says another count, or says read whole a role that prints in two, is refused

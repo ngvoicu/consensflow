@@ -579,14 +579,18 @@ find = "        let note = format!(\"{}\\n\\n{instructions}\", telling.in_parts(
 replace = "        let note = format!(\"{}\\n\\n{instructions}\", telling.in_parts(parts - 1));"
 
 [[plant]]
-name = "role read: cf says a part of a role back in the queue as the whole message read"
+name = "role read: cf says a part of a role back in the queue by the bound of any message waiting"
 meant = "a_part_of_a_role_back_in_the_queue_is_said_as_a_part_and_never_as_the_whole_role"
-runs = ["cf-board-queued"]
+runs = ["cf-board-queued", "cf-board-role"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = "            None => said.having_written(\"inbox\", waiting).in_part(in_parts),"
-replace = "            None => said.having_written(\"inbox\", waiting),"
+find = """            Some("queued" | "delivering" | "delivered")
+        );
+        let told = message"""
+replace = """            Some("delivering" | "delivered")
+        );
+        let told = message"""
 
 # T-1513, review T-1516: a part printed is logged whatever state its note is in, and the ledger
 # counts the parts itself by the window's `cf`.

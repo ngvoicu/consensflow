@@ -646,9 +646,10 @@ fn an_answer_cf_inbox_read_printed_past_what_a_harness_shows_is_not_acknowledged
 }
 
 /// A role too long for one message went into its window in part, and `cf inbox
-/// read` printed its note whole once it was delivered, or while its delivery was
+/// read` printed its note whole once it was delivered, while its delivery was
 /// still being confirmed (the note tells the window to read it now, before the
-/// daemon has seen the paste arrive): it says so to the board, up to the bound a
+/// daemon has seen the paste arrive), or back in the queue (its paste given back,
+/// T-1521): it says so to the board, up to the bound a
 /// role is read whole at by the windows a role goes to by a note
 /// (`role_read_whole`), past the one every harness shows. A note the board does not
 /// say tells a role, or one read already, is as any message.
@@ -675,7 +676,7 @@ fn a_role_cf_inbox_read_printed_whole_once_delivered_or_while_delivering_is_ackn
                 json!({ "answers": [12], "via": "inbox", "part": 1, "parts": of })
             })
         };
-        for state in ["delivered", "delivering"] {
+        for state in ["delivered", "delivering", "queued"] {
             for (body, taken) in [
                 ("x".repeat(20_000), acknowledged(&[12], "inbox")),
                 (
@@ -860,8 +861,9 @@ fn a_role_over_the_bound_is_printed_in_parts_each_within_it_and_each_said_to_the
 }
 
 /// A role back in the queue (its paste given back after the window had it) is said read
-/// by a part as a message still waiting is, within the bound every harness shows whole, and
-/// a part is said as a part: never as the whole role (T-1513).
+/// by each part as the part it is, by the role's own bound and not the one every harness
+/// shows whole: a part past 10,000 bytes and within the role's bound is said read as any
+/// part of a role delivered is, and never as the whole role (T-1513, review T-1521).
 #[test]
 fn a_part_of_a_role_back_in_the_queue_is_said_as_a_part_and_never_as_the_whole_role() {
     let body = a_role_over_the_bound();
@@ -874,17 +876,24 @@ fn a_part_of_a_role_back_in_the_queue_is_said_as_a_part_and_never_as_the_whole_r
             ],
         );
         assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
-        let said: Vec<_> = ran
-            .asked
-            .iter()
-            .skip(1)
-            .map(|asked| asked.2.clone())
-            .collect();
+        assert!(cf_base::role_read::role_read_whole(&ran.out), "part {part}");
+        if part == "1" {
+            assert!(
+                ran.out.len() > 10_000,
+                "part 1 is past the bound every harness shows: {} bytes",
+                ran.out.len()
+            );
+        }
         let number: usize = part.parse().unwrap();
-        assert!(
-            said.iter().all(|said| *said
-                == Some(json!({ "answers": [12], "via": "inbox", "part": number, "parts": 2 }))),
-            "part {part}: {said:?}"
+        assert_eq!(
+            asked(&ran),
+            [("GET", "/api/inbox/12"), ("POST", "/api/answers/read")],
+            "part {part}"
+        );
+        assert_eq!(
+            ran.asked[1].2,
+            Some(json!({ "answers": [12], "via": "inbox", "part": number, "parts": 2 })),
+            "part {part}"
         );
     }
 }

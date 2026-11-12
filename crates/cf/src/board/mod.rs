@@ -149,15 +149,6 @@ impl Said {
         self
     }
 
-    /// Of an output that carries `part` of a role (its number, and of how many), where it
-    /// was printed in parts: it is said read as that part alone.
-    fn in_part(mut self, part: Option<(usize, usize)>) -> Self {
-        if let Some(wrote) = self.wrote.as_mut() {
-            wrote.part = part;
-        }
-        self
-    }
-
     /// Of an output that carries whole the role the note `id` told its window
     /// in part, or `part` of it (its number, and of how many): it is read whole by the
     /// windows a role goes to by a note up to a bound of its own, past the one every
@@ -339,25 +330,25 @@ fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
         } else {
             return Err(a_part_there_is_not(&part.to_string()));
         };
-        // A role goes in by a note, and a window reads it as soon as it has the paste:
-        // before the daemon has seen the paste arrive, as often as after.
-        let reached = matches!(
+        // A role is said read by its own bound and as the part it is in every state its
+        // note is still to be read in: back in the queue, on its way or delivered. The board
+        // logs every part printed and tells the role once the conversation printed them all
+        // and its paste went in, so a part printed before the note is delivered counts too.
+        // A role read already is as any message.
+        let unread = matches!(
             message.get("state").and_then(Value::as_str),
-            Some("delivered" | "delivering")
+            Some("queued" | "delivering" | "delivered")
         );
         let told = message
             .get("id")
             .and_then(Value::as_i64)
-            .filter(|_| role && reached);
+            .filter(|_| role && unread);
         let waiting = lines::waiting_message(&message);
         let said = Said::new(message, text);
-        // A part is said as a part, whatever the note's state: a role back in the queue (its
-        // paste given back) is said read by the bound every harness shows whole, as any
-        // message waiting is, and only as the part it is.
         let in_parts = (parts > 1).then_some((part, parts));
         return Ok(match told {
             Some(id) => said.having_written_a_role(id, in_parts),
-            None => said.having_written("inbox", waiting).in_part(in_parts),
+            None => said.having_written("inbox", waiting),
         });
     }
     let mut answer = board.get("/api/inbox")?;
