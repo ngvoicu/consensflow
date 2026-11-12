@@ -107,11 +107,11 @@
 //! by the write that confirms the delivery (`confirm_delivery`), in the conversation
 //! it was made in. `cf` says so of a role up to a
 //! bound of its own (`cf_base::role_read`, 29,000 bytes and 500 lines, measured
-//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 143
-//! rows with specs on, 168 without, two roles to a row and a name of twenty characters, the
+//! on Codex and Muse, the harnesses a role goes to by a note): a staff of 142
+//! rows with specs on, 167 without, two roles to a row and a name of twenty characters, the
 //! model's id and effort, which a member is named by, on the same text (its bytes are the
-//! bound; 151 and 174 before the chief was told of the four roles of spec new-roles,
-//! T-1480; 133 and 152 with a column of models in the table, 195 and 223 before it,
+//! bound; 143 and 168 before the ban on a task for a member by name came back, T-1513;
+//! 151 and 174 before the chief was told of the four roles of spec new-roles, T-1480; 133 and 152 with a column of models in the table, 195 and 223 before it,
 //! harness-models: the name says the model, so T-1234 took the column out, and the words
 //! on the designer's order and on the chief's own model took some of the room it made).
 //!
@@ -119,11 +119,11 @@
 //! every text that says a role, and the ledger bounds them for it (at most 8,000
 //! bytes and 150 lines, `cf_ledger::STAFF_RULES_MAX_BYTES`): a member's real text
 //! with the most rules goes into its window whole, and a chief's with specs on,
-//! the most rules and a staff of up to 7 rows (32 without specs) is read whole,
-//! a staff of 7 with 12 bytes and 53 lines to spare (15 and 38 before the four roles of
-//! spec new-roles, T-1480; 19 and 39 with the model column, 29 and 58 before it; a staff of
-//! 25 with the most rules is told in part and not read whole, 1,065 bytes over: a row of
-//! the table is 60 bytes, and the text without a row is about 28,569).
+//! the most rules and a staff of up to 5 rows (31 without specs) is read whole,
+//! a staff of 5 with 60 bytes and 54 lines to spare (7 and 32 before the ban on a task for a
+//! member by name, T-1513; 15 and 38 before the four roles of spec new-roles, T-1480; 19 and 39 with the model column, 29 and 58 before it; a staff of
+//! 25 with the most rules is told in part and not read whole, 1,137 bytes over: a row of
+//! the table is 60 bytes, and the text without a row is about 28,641).
 //! A role read so is said nothing of at the next Resume, unless it changed again.
 //! One the window has not read by its next Resume is said again then, and the
 //! human has a line on the board that says so ([`Dispatcher::not_read`]).

@@ -676,6 +676,26 @@ fn with_no_path_the_commands_say_cf_and_a_path_that_is_empty_is_none() {
     }
 }
 
+/// T-1510's review of T-1480: the explicit ban went to pay for the four roles' words, and what
+/// was left said it only in part (a brief written for one member was no longer banned). It is
+/// back in What you never do (T-1513).
+#[test]
+fn never_gives_a_task_to_a_member_by_name_nor_writes_one_with_a_member_in_mind() {
+    let text = instructions("chief", &[]);
+    let never = text
+        .split("## What you never do")
+        .nth(1)
+        .and_then(|rest| rest.split("\n## ").next())
+        .expect("What you never do");
+    assert!(
+        found(
+            r"- Give a task to a member by name, or write one with a member in mind\.",
+            never
+        ),
+        "{never}"
+    );
+}
+
 #[test]
 fn gives_the_chief_s_subagents_if_its_harness_has_them_nothing_beyond_searching_and_reading() {
     assert!(found(

@@ -211,12 +211,13 @@ fn printed_by_cf(note: &MessageView) -> String {
 /// it is read.
 #[test]
 fn the_real_text_of_a_chief_with_specs_and_a_large_staff_is_told_whole_or_told_and_read() {
-    // A staff of 25 with no rules; with the most rules the ledger takes, a staff of 7, the
+    // A staff of 25 with no rules; with the most rules the ledger takes, a staff of 5, the
     // most the chief's words leave room for (T-1234: 19 with a model column in the table,
     // 29 before it; the words of the designer and of the chief's own model took some of it,
-    // and T-1480's of the four roles of spec new-roles 8 rows more, 15 before them).
+    // T-1480's of the four roles of spec new-roles 8 rows more, 15 before them, and T-1513's
+    // ban on a task for a member by name 2 more).
     let most = the_most_rules();
-    for (rows, rules) in [(25, None), (7, Some(most.as_str()))] {
+    for (rows, rules) in [(25, None), (5, Some(most.as_str()))] {
         told_whole_or_told_and_read(&a_chiefs_role_with(rows, true, rules));
     }
 }
@@ -273,13 +274,13 @@ fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
     );
     assert_eq!(
         rows_while(true, &read),
-        143,
-        "docs: read to 143 rows with specs on"
+        142,
+        "docs: read to 142 rows with specs on"
     );
     assert_eq!(
         rows_while(false, &read),
-        168,
-        "docs: read to 168 rows without"
+        167,
+        "docs: read to 167 rows without"
     );
     // With the most rules for the staff the ledger takes.
     let most = the_most_rules();
@@ -297,13 +298,13 @@ fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
     };
     assert_eq!(
         rows_with_the_most(true),
-        7,
-        "docs: read to 7 rows with specs on and the most rules"
+        5,
+        "docs: read to 5 rows with specs on and the most rules"
     );
     assert_eq!(
         rows_with_the_most(false),
-        32,
-        "docs: read to 32 rows without specs and the most rules"
+        31,
+        "docs: read to 31 rows without specs and the most rules"
     );
 }
 

@@ -142,6 +142,7 @@ tell you why.
 - Send work to another window: the board is the only channel, and
   only the human gives you work, here in your terminal; never read another agent's
   session files.
+- Give a task to a member by name, or write one with a member in mind.
 - Hand your harness's subagents or task tool, if it has them, any work
   beyond searching and reading: the board, the human and the staff never see
   that work, and nobody reviews it.
