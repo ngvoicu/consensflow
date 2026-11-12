@@ -171,6 +171,56 @@ fn a_cache_is_held_by_one_run_at_a_time_and_the_second_is_told_so() {
 }
 
 #[test]
+fn a_lock_that_cannot_say_who_holds_it_is_not_taken() {
+    let cache = tempfile::tempdir().unwrap();
+    let said = hold_recording(cache.path(), |_| Err(io::Error::other("disk full")))
+        .unwrap_err()
+        .to_string();
+    assert!(said.contains("disk full"), "{said}");
+    assert!(
+        said.contains(&cache.path().join(LOCK).display().to_string()),
+        "{said}"
+    );
+    // The refused run let go of what it had taken.
+    let _again = hold(cache.path()).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_of_the_checkout_that_cannot_be_read_is_no_state_to_reuse_a_build_on() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo = Repo::new();
+    repo.write("new", "one\n");
+    let path = repo.path().join("new");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    // A user who can read it anyway (root) has no failure to show.
+    if File::open(&path).is_ok() {
+        return;
+    }
+    let said = State::of(repo.path(), None, &Env::from_process())
+        .unwrap_err()
+        .to_string();
+    assert!(said.contains("could not read"), "{said}");
+    assert!(said.contains(&path.display().to_string()), "{said}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_repository_inside_the_checkout_is_there_by_its_name_and_is_no_failure() {
+    let repo = Repo::new();
+    let nested = repo.path().join("nested");
+    fs::create_dir(&nested).unwrap();
+    process::capture(
+        &Invocation::new("git", &nested).args(["init", "-q"]),
+        &Env::from_process(),
+    )
+    .unwrap();
+    fs::write(nested.join("f"), "inside\n").unwrap();
+    assert!(repo.state().changes.is_some());
+}
+
+#[test]
 fn the_state_of_a_checkout_is_its_commit_and_what_is_changed_in_it_staged_or_not() {
     let repo = Repo::new();
     let clean = repo.state();

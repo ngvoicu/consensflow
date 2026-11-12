@@ -15,6 +15,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use cf_base::env::Env;
+use cf_publish::digest::hex;
 use sha2::{Digest, Sha256};
 
 use super::bundle::{copy_bundle, remove_all};
@@ -74,6 +75,17 @@ pub struct Hold {
 /// take the first's exports away as it made them (an export that is not marked yet
 /// is made again) and its kept apps as it copied them.
 pub fn hold(cache: &Path) -> Result<Hold> {
+    hold_recording(cache, record_holder)
+}
+
+/// Whose the lock is, for whoever is refused.
+fn record_holder(file: &mut File) -> io::Result<()> {
+    file.set_len(0)?;
+    writeln!(file, "{}", std::process::id())
+}
+
+/// [`hold`], with `record` to write who holds the lock once it is taken.
+fn hold_recording(cache: &Path, record: impl FnOnce(&mut File) -> io::Result<()>) -> Result<Hold> {
     let path = cache.join(LOCK);
     let mut file = OpenOptions::new()
         .create(true)
@@ -84,9 +96,7 @@ pub fn hold(cache: &Path) -> Result<Hold> {
         .map_err(files("open", &path))?;
     match file.try_lock() {
         Ok(()) => {
-            // Whose it is, for whoever is refused.
-            let _ = file.set_len(0);
-            let _ = writeln!(file, "{}", std::process::id());
+            record(&mut file).map_err(files("write who holds the lock in", &path))?;
             Ok(Hold { _file: file })
         }
         Err(TryLockError::WouldBlock) => {
@@ -141,20 +151,19 @@ impl State {
                     .is_some_and(|cache| physical.join(path).starts_with(cache))
             })
             .collect();
-        let changes = (!diff.is_empty() || !untracked.is_empty()).then(|| {
+        let changes = if diff.is_empty() && untracked.is_empty() {
+            None
+        } else {
             let mut digest = Sha256::new();
             digest.update(diff.as_bytes());
             for path in untracked {
                 digest.update(b"\0untracked\0");
                 digest.update(path.as_bytes());
                 digest.update(b"\0");
-                // A file that cannot be read is one that is there and nothing more.
-                if let Ok(mut file) = File::open(root.join(path)) {
-                    let _ = io::copy(&mut file, &mut digest);
-                }
+                digest_file(&mut digest, &root.join(path))?;
             }
-            hex(&digest.finalize()[..6])
-        });
+            Some(hex(&digest.finalize()[..6]))
+        };
         Ok(Self { commit, changes })
     }
 
@@ -185,6 +194,18 @@ impl State {
             Some(changes) => format!("commit {commit} with changes {changes}"),
         }
     }
+}
+
+/// Feeds the contents of the file at `path` to `digest`: all of them, or an error. A directory is
+/// the one thing that is not read: git lists a repository inside the checkout as one, and the
+/// fingerprint holds its name and no more.
+fn digest_file(digest: &mut Sha256, path: &Path) -> Result {
+    if path.is_dir() {
+        return Ok(());
+    }
+    let mut file = File::open(path).map_err(files("read", path))?;
+    io::copy(&mut file, digest).map_err(files("read", path))?;
+    Ok(())
 }
 
 /// What `git <args>` wrote in the checkout at `root`.
@@ -261,11 +282,6 @@ pub fn older_update(update: &Path, root: &Path, env: &Env) -> Option<String> {
             now.said()
         )
     })
-}
-
-/// `bytes` as lower-case hex.
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[cfg(test)]
