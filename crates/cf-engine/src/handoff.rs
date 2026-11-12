@@ -166,6 +166,18 @@ pub fn handoff_text(handoff: &Handoff<'_>) -> String {
             t.number
         ));
     }
+    for t in &open.held {
+        let Some(hold) = &t.aside else {
+            continue;
+        };
+        waiting.push(format!(
+            "- T-{} \"{}\" {} (cf task get T-{})",
+            t.number,
+            defuse(&t.title),
+            defuse(hold),
+            t.number
+        ));
+    }
     for t in &open.own {
         waiting.push(format!(
             "- T-{} \"{}\" is yours, {}",

@@ -604,6 +604,8 @@ pub(crate) fn release_inside(
         // One statement: the row is never without an assignee in a working
         // state. It remembers the member it was taken from (a session's member),
         // and is no pause of its project's suspension now, for a Resume to resume.
+        // A hold goes with the member it was taken from: the task waits on the board,
+        // held for nobody's quota, and its line says no hold (T-1500's finding 4).
         let body = match (&member, &carried) {
             (Some(_), Some(carried)) if untouched => format!("{}{}", task.body, carried.kept),
             (Some(member), Some(carried)) => format!(
@@ -615,7 +617,7 @@ pub(crate) fn release_inside(
         let at = store.at();
         store.db.execute(
             "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
-           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0
+           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0, held_until = NULL
          WHERE id = ?",
             params![
                 body,

@@ -4,9 +4,11 @@
 //! each. Each stays a row of its own, proved by the paste.
 
 use cf_engine::testing::Context;
+use cf_engine::SwitchWhen;
 use cf_ledger::NewNote;
 use cf_proto::ledger::MessageView;
 
+use crate::chiefs::{to, with_codex};
 use crate::fixtures::{after, exhausted, given, now, Tiers};
 
 /// ConsensFlow's own note to the chief.
@@ -119,4 +121,55 @@ fn a_member_out_of_quota_with_seven_tasks_is_one_message_to_the_chief() {
             ))
         );
     }
+}
+
+#[test]
+fn a_chief_switched_while_a_task_holds_is_told_the_hold_in_its_handoff() {
+    // The first note of a hold was typed to the old chief; the new chief starts a new
+    // conversation, and the same hold said again is only shown: its handoff names the
+    // task and the hold (T-1500's finding 2).
+    let context = with_codex();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open_body("Part 1");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "working");
+    let zeus = tiers.assignee(1);
+    let resets_at = after(&context, 120 * 3_600_000);
+    context.adapter.refuse(
+        &zeus,
+        exhausted(Some(&now(&context)), Some(&resets_at)),
+    );
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let hold = format!("waits with @{zeus}: out of quota until {resets_at}");
+    assert!(
+        given(&context, "chief")
+            .iter()
+            .any(|text| text.contains(&format!("T-1 {hold}"))),
+        "the old chief was typed the hold: {:?}",
+        given(&context, "chief")
+    );
+
+    context
+        .switch_chief(
+            tiers.project.id,
+            to("codex", "astraeus"),
+            SwitchWhen::Now,
+            false,
+        )
+        .unwrap();
+    let prepared = context.codex.prepared().last().cloned().unwrap();
+    let handoff = prepared["message"].as_str().unwrap();
+    assert!(
+        handoff.contains(&format!(
+            "What waits on you now:\n- T-1 \"{}\" {hold} (cf task get T-1)",
+            tiers.task(1).task.title
+        )),
+        "{handoff}"
+    );
+    assert!(!handoff.contains("Nothing on the board waits on you."), "{handoff}");
 }

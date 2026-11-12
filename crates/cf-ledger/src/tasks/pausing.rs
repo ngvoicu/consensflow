@@ -1053,10 +1053,11 @@ pub(crate) fn resume_task(
             }
             let carried = transfer(store, &task, &assignee, &delivery_body(&task))?;
             let at = store.at();
-            // Taken from its session: no Resume of its project is to resume it.
+            // Taken from its session: no Resume of its project is to resume it, and the hold
+            // it had with that session holds no more.
             store.db.execute(
                 "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
-             paused_with_project = 0
+             paused_with_project = 0, held_until = NULL
            WHERE id = ?",
                 params![
                     format!(

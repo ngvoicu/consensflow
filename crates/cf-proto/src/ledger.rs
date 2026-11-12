@@ -775,13 +775,18 @@ pub struct LatestMessages {
 }
 
 /// What waits on the chief, for a chief that takes over: members' questions
-/// to it without an answer, results it has not decided on, and its own
-/// unfinished tasks.
+/// to it without an answer, results it has not decided on, its own
+/// unfinished tasks, and the tasks it gave that are held (out of quota, an
+/// account unavailable, a model moved), each with what its line says of the
+/// hold (`aside`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ChiefOpenWork {
     pub questions: Vec<MessageView>,
     pub results: Vec<TaskView>,
     pub own: Vec<TaskView>,
+    /// Absent where none is held, as a ledger before RS-25 wrote it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub held: Vec<TaskView>,
 }
 
 #[cfg(test)]

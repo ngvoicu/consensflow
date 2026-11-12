@@ -369,3 +369,94 @@ fn a_task_taken_back_with_a_follow_up_bound_to_its_window_is_typed_to_the_chief(
     );
     assert_eq!(note.state, "queued");
 }
+
+/// What task `number`'s row says it is held until.
+fn held_until(w: &World, number: i64) -> Option<String> {
+    w.ledger
+        .task(w.project, number)
+        .expect("a read")
+        .expect("the task")
+        .task
+        .held_until
+}
+
+#[test]
+fn a_held_task_taken_back_to_the_board_holds_with_nobody_and_its_line_says_no_hold() {
+    // A quota-held task with a follow-up bound to its window, taken back: its note is typed
+    // (a decision), so no shown note says its line; the hold went with the member it was taken
+    // from, and its line must not say it still waits with that member.
+    let mut w = world();
+    let (task, session) = with_zeus(&mut w);
+    w.follow_up(task, "Part 2", &[]).expect("a follow-up");
+    w.hold(task);
+    let typed = note_of(&mut w, Hold::Quota, task, &session, UNTIL);
+    w.deliver(typed.id);
+    assert_eq!(aside(&w, task), Some(said_of(Hold::Quota, &session)));
+    w.ledger
+        .release_task(w.project, task, "by @human")
+        .expect("released");
+    let view = w
+        .ledger
+        .task(w.project, task)
+        .expect("a read")
+        .expect("the task")
+        .task;
+    assert_eq!(view.state, "open");
+    assert_eq!(view.aside, None, "an open task says no hold");
+    assert_eq!(view.held_until, None, "it holds with nobody");
+}
+
+#[test]
+fn a_held_task_resumed_after_its_session_ended_holds_no_more_and_its_line_says_no_hold() {
+    let mut w = world();
+    let (task, session) = with_zeus(&mut w);
+    w.hold(task);
+    let typed = note_of(&mut w, Hold::Unavailable, task, &session, UNTIL);
+    w.deliver(typed.id);
+    assert_eq!(aside(&w, task), Some(said_of(Hold::Unavailable, &session)));
+    w.ledger
+        .end_session(w.project, &session, "human")
+        .expect("a session that holds only a paused task ends");
+    w.resume(task, "Go on");
+    assert_eq!(
+        w.ledger
+            .task(w.project, task)
+            .expect("a read")
+            .expect("the task")
+            .task
+            .state,
+        "open"
+    );
+    assert_eq!(aside(&w, task), None, "an open task says no hold");
+    assert_eq!(held_until(&w, task), None, "it holds with nobody");
+}
+
+#[test]
+fn what_waits_on_a_chief_that_takes_over_names_each_task_it_gave_that_is_held_and_its_hold() {
+    // A switched chief is a new conversation: the first note of a hold was typed to the old
+    // one, and the same hold said again is only shown. Its handoff names each held task with
+    // what its line says (T-1500's finding 2); a busy model goes on by itself and is not one.
+    for hold in HOLDS {
+        let mut w = world();
+        let (task, session) = with_zeus(&mut w);
+        w.hold(task);
+        let first = note_of(&mut w, hold, task, &session, UNTIL);
+        w.deliver(first.id);
+        note_of(&mut w, hold, task, &session, UNTIL);
+        let open = w.ledger.chief_open_work(w.project).expect("the open work");
+        let held: Vec<(i64, Option<String>)> = open
+            .held
+            .iter()
+            .map(|task| (task.number, task.aside.clone()))
+            .collect();
+        assert_eq!(held, [(task, Some(said_of(hold, &session)))]);
+    }
+    let mut w = world();
+    let (task, session) = with_zeus(&mut w);
+    w.hold(task);
+    w.ledger
+        .note_hold_busy(w.project, "chief", task, &session, "overloaded", true)
+        .expect("the chief is told");
+    let open = w.ledger.chief_open_work(w.project).expect("the open work");
+    assert!(open.held.is_empty(), "{:?}", open.held);
+}
