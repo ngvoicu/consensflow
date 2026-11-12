@@ -73,12 +73,9 @@ pub fn taken(after: &[Value], lane: &str, recorded: bool) -> Taken {
     if worked || lane != "idle" {
         return Taken::AtWork;
     }
-    // Which events count, and why each can only follow this prompt: the chief was idle when
-    // the prompt was pasted and the events counted are those written after the paste. A chief
-    // window reading working or waiting then is a turn the paste began; a ledger call of the
-    // chief's (`from` is `chief`) is made inside a turn, and none was open. What this cannot
-    // tell from the prompt is another thing that begins a turn of the chief's meanwhile (a
-    // result delivered to it): the suites that type to a chief with this give it none.
+    // Known limit: a chief turn that is not this prompt's (a result delivered to it between the idle
+    // read and the look) would read as taken. The suites that use this give the chief nothing else to
+    // answer; see issues/the-live-kits-known-limits-on-taken-prompts-and-pi-declines.md.
     // The ledger's events carry who made the call in `from` (`task.created`, `message.sent`…):
     // a chief that gave a task or sent a message since the prompt was typed took the prompt.
     let acted = after

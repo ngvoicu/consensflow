@@ -98,12 +98,6 @@ impl Drop for OwnTicks {
     }
 }
 
-/// What the case says of Codex when its chief came to rest after the command was started and
-/// nothing of the command is seen, by the window's tree or by its file: Codex's chief started it
-/// (it said STARTED and its turn is over) and the command is not running. That is no restart
-/// finding but a precondition no Codex meets today: see the issue page named here.
-const CODEX_LEAVES_NOTHING: &str = "Codex leaves no command running past its turn: its chief was asked to start the command, its turn is over (it reads idle), and neither the window's tree nor the command's own file shows it running, so there was no job to cut (issues/restart-cut-rest-job-codex-has-no-command-that-stays-running.md)";
-
 /// How long a window may take to be at its command.
 const WORK: Duration = Duration::from_secs(180);
 /// How long the app started again is watched for a window it opens by itself.
@@ -652,11 +646,7 @@ fn drive_chief_at_rest(mut members: Members, log: &Log) -> Result<Account> {
 /// command running; the human closes the project and resumes it. The chief comes back
 /// told nothing of a cut turn, and reads idle; what its harness says itself of the job
 /// its last program left is said.
-fn drive_chief_at_rest_with_a_job(
-    mut members: Members,
-    log: &Log,
-    chief: Harness,
-) -> Result<Account> {
+fn drive_chief_at_rest_with_a_job(mut members: Members, log: &Log) -> Result<Account> {
     let mut case = Account::new();
     case.say(format!("trust: {}", members.trust().unwrap_or("none")));
     members.add(STAND_IN_WORKER, &[])?;
@@ -690,18 +680,11 @@ fn drive_chief_at_rest_with_a_job(
         case.say("the command is shown running by its file's count: no process of the window's tree is it");
     }
     if at_rest.is_none() {
-        let seen = format!(
-            "its lane reads {}; {}",
+        case.fail(format!(
+            "the chief never came to rest with its command running: its lane reads {}; {}",
             members.lane("chief")?["activity"],
             members.tail(pane["id"].as_str().unwrap_or_default())
-        );
-        if chief == Harness::Codex && state_of(&members.lane("chief")?) == "idle" {
-            case.unmet(format!("{CODEX_LEAVES_NOTHING}; {seen}"));
-        } else {
-            case.fail(format!(
-                "the chief never came to rest with its command running: {seen}"
-            ));
-        }
+        ));
         end_in_window(&members, "chief", &mut case)?;
         case.closed(members.close());
         return Ok(case);
@@ -970,18 +953,6 @@ fn checked(
         &format!("== {} {who}: {version}", harness.name()),
         &case.text(),
     );
-    if case.held() && case.is_unmet() {
-        // Never `ok`: nothing was tried, and the line says why.
-        return Check::new(
-            &format!("{} {who} (unmet)", harness.name()),
-            case.lines()
-                .iter()
-                .find(|line| line.starts_with("UNMET"))
-                .map_or("a precondition was not met", String::as_str),
-            true,
-            version,
-        );
-    }
     Check::new(
         &format!("{} {who}", harness.name()),
         if case.held() { held } else { failed },
@@ -1034,7 +1005,7 @@ fn a_window_the_quit_cut_in_a_turn_comes_back_on_the_humans_resume_told_so_once_
     for chief in asked.jobbed {
         let scoped = log.scoped(format!("{} chief at rest with a job", chief.name()));
         let case = run(&job_plan(chief), &scoped, |members| {
-            drive_chief_at_rest_with_a_job(members, &scoped, chief)
+            drive_chief_at_rest_with_a_job(members, &scoped)
         });
         checks.push(checked(
             chief,
@@ -1103,34 +1074,6 @@ mod tests {
         assert!(ask.ends_with("cf-restart-cut-long-command"), "{ask}");
         assert!(ask.contains(&format!("writeFileSync('{file}'")), "{ask}");
         assert!(!ask.contains(earlier.counts_in().unwrap()), "{ask}");
-    }
-
-    #[test]
-    fn codex_that_leaves_no_command_running_is_an_unmet_precondition_never_a_pass_or_a_restart_finding(
-    ) {
-        let mut case = Account::new();
-        case.unmet(format!("{CODEX_LEAVES_NOTHING}; its lane reads idle"));
-        assert!(case.held() && case.is_unmet());
-        let log = Log::new("restart-cut test");
-        let check = checked(
-            Harness::Codex,
-            "chief at rest with a job",
-            "held",
-            "failed",
-            &case,
-            &log,
-        );
-        assert!(check.ok && check.who.ends_with("(unmet)"), "{check:?}");
-        assert!(
-            check
-                .what
-                .starts_with("UNMET Codex leaves no command running past its turn"),
-            "{}",
-            check.what
-        );
-        assert!(check
-            .what
-            .contains("restart-cut-rest-job-codex-has-no-command-that-stays-running.md"));
     }
 
     #[test]
