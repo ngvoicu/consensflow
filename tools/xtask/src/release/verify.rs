@@ -29,8 +29,10 @@
 //!    is a problem.
 //!
 //! Every problem found is said, not the first alone: a release that does not verify
-//! is refused with all of them. A release that cannot be read at all (no such
-//! release, no `SHA256SUMS`, a tag nobody has) is refused as it is.
+//! is refused with all of them. A `SHA256SUMS` with rows that do not read is said
+//! row by row, and no file is held to it: the files are checked against a list
+//! that reads. A release that cannot be read at all (no such release, no
+//! `SHA256SUMS`, a tag nobody has) is refused as it is.
 
 use std::ffi::OsString;
 use std::fs;
