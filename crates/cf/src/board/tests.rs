@@ -859,6 +859,36 @@ fn a_role_over_the_bound_is_printed_in_parts_each_within_it_and_each_said_to_the
     );
 }
 
+/// A role back in the queue (its paste given back after the window had it) is said read
+/// by a part as a message still waiting is, within the bound every harness shows whole, and
+/// a part is said as a part: never as the whole role (T-1513).
+#[test]
+fn a_part_of_a_role_back_in_the_queue_is_said_as_a_part_and_never_as_the_whole_role() {
+    let body = a_role_over_the_bound();
+    for part in ["1", "2"] {
+        let ran = cf(
+            &["inbox", "read", "m-12", "--part", part],
+            vec![
+                reply(200, a_role_note("queued", &body)),
+                reply(200, json!({})),
+            ],
+        );
+        assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
+        let said: Vec<_> = ran
+            .asked
+            .iter()
+            .skip(1)
+            .map(|asked| asked.2.clone())
+            .collect();
+        let number: usize = part.parse().unwrap();
+        assert!(
+            said.iter().all(|said| *said
+                == Some(json!({ "answers": [12], "via": "inbox", "part": number, "parts": 2 }))),
+            "part {part}: {said:?}"
+        );
+    }
+}
+
 /// A role within the bound is printed as it always was, by `--part 1` too: its line and
 /// its words, no line of a part, and said read as a whole. It has no part 2.
 #[test]

@@ -36,6 +36,7 @@ base-role-read = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "role_
 daemon-message = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::message"]
 engine-in-parts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::in_parts::"]
 cf-board-parts = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::tests::a_role_"]
+cf-board-queued = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::tests::a_part_of_a_role_back_in_the_queue"]
 daemon-answers = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::answers::tests::a_role_said_read_by_its_parts"]
 
 # The engine: what a role told in part opens with, and what is said of it at the next Resume.
@@ -615,3 +616,13 @@ runs = ["engine-in-parts"]
 file = "crates/cf-engine/src/role_change.rs"
 find = "        let note = format!(\"{}\\n\\n{instructions}\", telling.in_parts(parts));"
 replace = "        let note = format!(\"{}\\n\\n{instructions}\", telling.in_parts(parts - 1));"
+
+[[plant]]
+name = "role read: cf says a part of a role back in the queue as the whole message read"
+meant = "a_part_of_a_role_back_in_the_queue_is_said_as_a_part_and_never_as_the_whole_role"
+runs = ["cf-board-queued"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = "            None => said.having_written(\"inbox\", waiting).in_part(in_parts),"
+replace = "            None => said.having_written(\"inbox\", waiting),"
