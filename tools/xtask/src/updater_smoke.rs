@@ -133,7 +133,7 @@ use options::Options;
 pub use options::USAGE;
 use processes::Waits;
 use say::{Line, Say};
-use signing::generate_key;
+use signing::{generate_key, Key};
 use versions::update_version;
 
 /// How long each wait of a case is given, unless `--timeout` says.
@@ -291,63 +291,66 @@ fn smoke(context: &Context, options: &Options, releases: &[Release], say: &Say) 
     outcome
 }
 
-/// What the smoke does in the run's `folder`, in the `cache` the builds are kept in.
-fn smoke_in(
-    context: &Context,
-    options: &Options,
-    releases: &[Release],
-    cache: &Path,
-    folder: &Path,
-    say: &Say,
-) -> Result<i32> {
-    let (root, env) = (&context.root, &context.env);
-    let in_the_checkout = |path: &Path| root.join(path);
-    let key = generate_key(root, &folder.join("keys"), env)?;
-    talk(
-        say,
-        format!(
-            "this run's updater key is {}",
-            key.public_key_file.display()
-        ),
-    );
+/// What one run of the smoke has to build with: where, for whom, and with which key.
+struct Run<'a> {
+    context: &'a Context,
+    options: &'a Options,
+    /// Where the builds are kept.
+    cache: &'a Path,
+    /// The run's own folder.
+    folder: &'a Path,
+    key: &'a Key,
+    say: &'a Say,
+}
 
-    let kept = |name: &str| cache.join(name).join("ConsensFlow.app");
-    let take_kept = |name: &str| (options.reuse && kept(name).exists()).then(|| kept(name));
+impl Run<'_> {
+    fn in_the_checkout(&self, path: &Path) -> PathBuf {
+        self.context.root.join(path)
+    }
 
-    // The source of `release` to build: the checkout it was named, else its tag exported into the cache.
-    let source_of = |release: Release| -> Result<PathBuf> {
+    fn kept(&self, name: &str) -> PathBuf {
+        self.cache.join(name).join("ConsensFlow.app")
+    }
+
+    fn take_kept(&self, name: &str) -> Option<PathBuf> {
+        (self.options.reuse && self.kept(name).exists()).then(|| self.kept(name))
+    }
+
+    /// The source of `release` to build: the checkout it was named, else its tag exported into the cache.
+    fn source_of(&self, release: Release) -> Result<PathBuf> {
+        let (root, env, options) = (&self.context.root, &self.context.env, self.options);
         let named = match release {
             Release::Bridge => &options.bridge,
             Release::Flip => &options.flip,
         };
         if let Some(named) = named {
-            return Ok(in_the_checkout(named));
+            return Ok(self.in_the_checkout(named));
         }
         let tag = match (release, &options.flip_ref) {
             (Release::Bridge, _) => BRIDGE_TAG.to_string(),
             (Release::Flip, Some(named)) => named.clone(),
             (Release::Flip, None) => flip_release(root, env)?,
         };
-        talk(say, format!("the {} release is {tag}", release.name()));
+        talk(self.say, format!("the {} release is {tag}", release.name()));
         export_release(
             root,
-            &cache.join(format!("{}-source", release.name())),
+            &self.cache.join(format!("{}-source", release.name())),
             &tag,
             env,
         )
-    };
+    }
 
-    // The installed app of `release`: the one named, one a run kept, or one built from its source.
-    let installed_of = |release: Release| -> Result<PathBuf> {
-        if let Some(named) = &options.from_app {
-            return Ok(in_the_checkout(named));
+    /// The installed app of `release`: the one named, one a run kept, or one built from its source.
+    fn installed_of(&self, release: Release) -> Result<PathBuf> {
+        if let Some(named) = &self.options.from_app {
+            return Ok(self.in_the_checkout(named));
         }
-        if let Some(found) = take_kept(release.name()) {
+        if let Some(found) = self.take_kept(release.name()) {
             return Ok(found);
         }
-        let checkout = source_of(release)?;
+        let checkout = self.source_of(release)?;
         talk(
-            say,
+            self.say,
             format!(
                 "building the installed {} app from {}",
                 release.name(),
@@ -357,17 +360,155 @@ fn smoke_in(
         let built = build_app(
             &Build {
                 checkout: &checkout,
-                work: folder,
-                public_key: &key.public_key,
+                work: self.folder,
+                public_key: &self.key.public_key,
                 version: None,
             },
-            env,
+            &self.context.env,
         )?;
-        copy_bundle(&built, &kept(release.name()), env)
+        copy_bundle(&built, &self.kept(release.name()), &self.context.env)
+    }
+
+    /// The update to install, and what its daemon says it is, known where this run builds the
+    /// update from the checkout.
+    fn update(&self, installed: &[(Release, PathBuf)]) -> Result<(PathBuf, Option<String>)> {
+        let (root, env) = (&self.context.root, &self.context.env);
+        let mut daemon_version = None;
+        let update = match (&self.options.to_app, self.take_kept("update")) {
+            (Some(named), _) => self.in_the_checkout(named),
+            (None, Some(found)) => {
+                if let Some(older) = cache::older_update(&found, root, env) {
+                    talk(self.say, older);
+                }
+                found
+            }
+            (None, None) => {
+                let versions = installed
+                    .iter()
+                    .map(|(_, app)| plist_value(app, "CFBundleShortVersionString"))
+                    .collect::<Result<Vec<_>>>()?;
+                let versions: Vec<&str> = versions.iter().map(String::as_str).collect();
+                let own = source_version(root).map_err(|cause| Error::new(cause.to_string()))?;
+                let version = update_version(&own, &versions)?;
+                daemon_version = Some(own);
+                talk(
+                    self.say,
+                    format!("building the update from {} as {version}", root.display()),
+                );
+                cache::keep_update(root, &self.kept("update"), env, || {
+                    build_app(
+                        &Build {
+                            checkout: root,
+                            work: self.folder,
+                            public_key: &self.key.public_key,
+                            version: Some(&version),
+                        },
+                        env,
+                    )
+                })?
+            }
+        };
+        Ok((update, daemon_version))
+    }
+
+    /// Every release's cases against `update`, and 1 where one failed.
+    fn cases(
+        &self,
+        installed: &[(Release, PathBuf)],
+        update: &Path,
+        daemon_version: Option<&str>,
+    ) -> i32 {
+        let (root, env, options) = (&self.context.root, &self.context.env, self.options);
+        let machines = options
+            .machines
+            .as_deref()
+            .map_or_else(std::env::temp_dir, |path| self.in_the_checkout(path));
+        let waits = Waits::new(options.timeout.unwrap_or(WAIT));
+        let mut results = Vec::new();
+        for (release, app) in installed {
+            talk(
+                self.say,
+                format!("== the update from the {} release", release.name()),
+            );
+            let passed = match Inputs::load(&Given {
+                from_app: app,
+                release: *release,
+                to_app: update,
+                key: self.key,
+                keep: options.keep,
+                waits,
+                machines: &machines,
+                checkout: root,
+                daemon_version,
+                env,
+            }) {
+                Ok(inputs) => {
+                    let tally = cases::run_cases(&inputs, &options.only, self.say);
+                    talk(
+                        self.say,
+                        format!(
+                            "{}: {} passed, {} failed, {} skipped",
+                            release.name(),
+                            tally.passed,
+                            tally.failed,
+                            tally.skipped
+                        ),
+                    );
+                    tally.failed == 0
+                }
+                Err(cause) => {
+                    talk(
+                        self.say,
+                        format!("the inputs are not what the update needs: {cause}"),
+                    );
+                    false
+                }
+            };
+            results.push((*release, passed));
+        }
+        let said: Vec<String> = results
+            .iter()
+            .map(|(release, passed)| {
+                format!(
+                    "{}: {}",
+                    release.name(),
+                    if *passed { "passed" } else { "FAILED" }
+                )
+            })
+            .collect();
+        talk(self.say, said.join("; "));
+        i32::from(!results.iter().all(|(_, passed)| *passed))
+    }
+}
+
+/// What the smoke does in the run's `folder`, in the `cache` the builds are kept in.
+fn smoke_in(
+    context: &Context,
+    options: &Options,
+    releases: &[Release],
+    cache: &Path,
+    folder: &Path,
+    say: &Say,
+) -> Result<i32> {
+    let key = generate_key(&context.root, &folder.join("keys"), &context.env)?;
+    talk(
+        say,
+        format!(
+            "this run's updater key is {}",
+            key.public_key_file.display()
+        ),
+    );
+    let run = Run {
+        context,
+        options,
+        cache,
+        folder,
+        key: &key,
+        say,
     };
     let mut installed = Vec::new();
     for release in releases {
-        installed.push((*release, installed_of(*release)?));
+        installed.push((*release, run.installed_of(*release)?));
     }
     for (release, app) in &installed {
         talk(
@@ -375,107 +516,12 @@ fn smoke_in(
             format!("installed {} app: {}", release.name(), app.display()),
         );
     }
-
-    // What the update's daemon says it is, known where this run builds the update from the checkout.
-    let mut daemon_version = None;
-    let update = match (&options.to_app, take_kept("update")) {
-        (Some(named), _) => in_the_checkout(named),
-        (None, Some(found)) => {
-            if let Some(older) = cache::older_update(&found, root, env) {
-                talk(say, older);
-            }
-            found
-        }
-        (None, None) => {
-            let versions = installed
-                .iter()
-                .map(|(_, app)| plist_value(app, "CFBundleShortVersionString"))
-                .collect::<Result<Vec<_>>>()?;
-            let versions: Vec<&str> = versions.iter().map(String::as_str).collect();
-            let own = source_version(root).map_err(|cause| Error::new(cause.to_string()))?;
-            let version = update_version(&own, &versions)?;
-            daemon_version = Some(own);
-            talk(
-                say,
-                format!("building the update from {} as {version}", root.display()),
-            );
-            cache::keep_update(root, &kept("update"), env, || {
-                build_app(
-                    &Build {
-                        checkout: root,
-                        work: folder,
-                        public_key: &key.public_key,
-                        version: Some(&version),
-                    },
-                    env,
-                )
-            })?
-        }
-    };
+    let (update, daemon_version) = run.update(&installed)?;
     talk(say, format!("update: {}", update.display()));
     if options.build_only {
         return Ok(0);
     }
-
-    let machines = options
-        .machines
-        .as_deref()
-        .map_or_else(std::env::temp_dir, in_the_checkout);
-    let waits = Waits::new(options.timeout.unwrap_or(WAIT));
-    let mut results = Vec::new();
-    for (release, app) in &installed {
-        talk(
-            say,
-            format!("== the update from the {} release", release.name()),
-        );
-        let passed = match Inputs::load(&Given {
-            from_app: app,
-            release: *release,
-            to_app: &update,
-            key: &key,
-            keep: options.keep,
-            waits,
-            machines: &machines,
-            checkout: root,
-            daemon_version: daemon_version.as_deref(),
-            env,
-        }) {
-            Ok(inputs) => {
-                let tally = cases::run_cases(&inputs, &options.only, say);
-                talk(
-                    say,
-                    format!(
-                        "{}: {} passed, {} failed, {} skipped",
-                        release.name(),
-                        tally.passed,
-                        tally.failed,
-                        tally.skipped
-                    ),
-                );
-                tally.failed == 0
-            }
-            Err(cause) => {
-                talk(
-                    say,
-                    format!("the inputs are not what the update needs: {cause}"),
-                );
-                false
-            }
-        };
-        results.push((*release, passed));
-    }
-    let said: Vec<String> = results
-        .iter()
-        .map(|(release, passed)| {
-            format!(
-                "{}: {}",
-                release.name(),
-                if *passed { "passed" } else { "FAILED" }
-            )
-        })
-        .collect();
-    talk(say, said.join("; "));
-    Ok(i32::from(!results.iter().all(|(_, passed)| *passed)))
+    Ok(run.cases(&installed, &update, daemon_version.as_deref()))
 }
 
 #[cfg(test)]
