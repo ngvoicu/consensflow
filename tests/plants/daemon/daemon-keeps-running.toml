@@ -192,7 +192,7 @@ meant = "a_burst_far_over_the_old_cap_loses_no_response"
 runs = ["bridge-queue"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/writer.rs"
 find = '''
         self.enqueue_encoded(
             encoded,
