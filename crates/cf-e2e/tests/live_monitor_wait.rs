@@ -90,7 +90,7 @@ use std::time::{Duration, Instant};
 use std::collections::BTreeMap;
 
 use cf_e2e::live::claude::{self, Entry};
-use cf_e2e::live::mcp_server::{Runtime, Server};
+use cf_e2e::live::mcp_server::{Runtime, Server, STEM};
 use cf_e2e::live::members::{Machine, ThisMachine, Watch};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window};
@@ -719,10 +719,8 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     let claude = log.found(Harness::Claude)?;
     let rig = Rig::start(live::rig(std::slice::from_ref(&claude), FAKE_AGENT))?;
     let runtime = Runtime::of_machine()?;
-    let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-monitor-wait");
-    fs::create_dir_all(&made)
-        .map_err(|error| Error::Daemon(format!("{}: {error}", made.display())))?;
-    let server = Server::write_leaving_group(&made, &runtime)?;
+    let made = server_folder(Path::new(env!("CARGO_TARGET_TMPDIR")))?;
+    let server = Server::write_leaving_group(made.path(), &runtime)?;
     // The first message goes in as the window opens, its first turn under way from the
     // first look (`Open::seed`).
     let mut open = Open::new(&rig, &claude, FOLDER, FOLDER)
@@ -1222,6 +1220,60 @@ mod tests {
             json!({ "type": "queued_command", "commandMode": "task-notification", "prompt": "<task-notification>" })
         );
     }
+}
+
+/// The folder the server's files are written in: one of this invocation's own, made fresh under
+/// the build's scratch folder (`target`), held until the run's close and removed then by its own
+/// path. A fixed name there was every invocation's of one built tree: a later one took away an
+/// earlier one's process file and wrote over its configuration while its server ran (T-1557).
+fn server_folder(target: &Path) -> Result<tempfile::TempDir> {
+    fs::create_dir_all(target)
+        .map_err(|error| Error::Daemon(format!("{}: {error}", target.display())))?;
+    tempfile::Builder::new()
+        .prefix("live-monitor-wait-")
+        .tempdir_in(target)
+        .map_err(|error| Error::Daemon(format!("{}: {error}", target.display())))
+}
+
+/// Two set-ups of the server from one built tree (one build folder, `CARGO_TARGET_TMPDIR`), as two
+/// invocations of the suite make: each writes in a folder of its own, and the close of one leaves
+/// the other's files, its process's file among them (T-1557's fourth finding: a fixed folder was
+/// shared, and the later set-up took away the earlier's process file and wrote over its
+/// configuration while its server ran).
+#[test]
+fn two_set_ups_from_one_build_have_folders_of_their_own_and_the_close_of_one_leaves_the_others_files(
+) -> Result {
+    let target = tempfile::tempdir().map_err(|error| Error::Daemon(error.to_string()))?;
+    let runtime = Runtime::of_machine()?;
+    let first = server_folder(target.path())?;
+    let first_server = Server::write_leaving_group(first.path(), &runtime)?;
+    // Its server has started and written its process.
+    fs::write(first.path().join(format!("{STEM}.pid")), "4242\n")
+        .map_err(|error| Error::Daemon(error.to_string()))?;
+    let second = server_folder(target.path())?;
+    let _second_server = Server::write_leaving_group(second.path(), &runtime)?;
+    assert_ne!(first.path(), second.path(), "two set-ups share one folder");
+    assert_eq!(
+        first_server.pid(),
+        Some(4242),
+        "the second set-up took away the first's process file"
+    );
+    let second_folder = second.path().to_owned();
+    drop(second);
+    assert!(
+        !second_folder.exists(),
+        "the second's folder stays after its close"
+    );
+    assert!(
+        first_server.config().is_file(),
+        "the close of the second took away the first's configuration"
+    );
+    assert_eq!(
+        first_server.pid(),
+        Some(4242),
+        "the close of the second took away the first's process file"
+    );
+    Ok(())
 }
 
 #[test]

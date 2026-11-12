@@ -369,24 +369,96 @@ fn a_mac_lists_a_process_with_when_it_began_to_the_microsecond_and_not_one_whose
 ) {
     // `ps` lists 10, 11 and 12; since, 11 has ended and its number is a process that 99
     // started, and 12 is gone. Only 10 is listed, with when it began as the system says it.
+    // `ps` says when each began to the second, here as seconds since 1970 (`second`).
     let listed = vec![
-        running(10, 20_261_016_044_446, 1, "devin"),
-        running(11, 20_261_016_044_447, 10, "node cf-mark"),
-        running(12, 20_261_016_044_448, 10, "sleep 1"),
+        running(10, 1_792_118_686, 1, "devin"),
+        running(11, 1_792_118_687, 10, "node cf-mark"),
+        running(12, 1_792_118_688, 10, "sleep 1"),
     ];
-    let refined = refined_by_bsd(listed, |pid| match pid {
-        10 => Ok(Some(Bsd {
-            ppid: 1,
-            started: 1_792_118_686_123_456,
-        })),
-        11 => Ok(Some(Bsd {
-            ppid: 99,
-            started: 1_792_118_690_000_001,
-        })),
-        12 => Ok(None),
-        _ => Err(std::io::Error::other("unreadable")),
-    });
+    let refined = refined_by_bsd(
+        listed,
+        |pid| match pid {
+            10 => Ok(Some(Bsd {
+                ppid: 1,
+                started: 1_792_118_686_123_456,
+            })),
+            11 => Ok(Some(Bsd {
+                ppid: 99,
+                started: 1_792_118_690_000_001,
+            })),
+            12 => Ok(None),
+            _ => Err(std::io::Error::other("unreadable")),
+        },
+        second,
+    );
     assert_eq!(refined, [running(10, 1_792_118_686_123_456, 1, "devin")]);
+}
+
+/// This process, as `ps` lists it and macOS reads it: the two say its start in the same second
+/// (`lstart`, the machine's time of day), so the check that drops a row whose number changed hands
+/// keeps the rows of processes that still run.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_mac_lists_this_process_with_ps_and_the_system_agreeing_on_the_second_it_began() {
+    let own = std::process::id();
+    let listed = super::ps(Some(own)).unwrap();
+    assert_eq!(listed.len(), 1, "{listed:#?}");
+    let micros = ThisMachine
+        .identity(own)
+        .unwrap()
+        .expect("this process runs")
+        .started;
+    assert_eq!(
+        super::native::lstart_second(micros),
+        Some(listed[0].identity.started),
+        "ps and the system say this process began in other seconds"
+    );
+    assert!(
+        ThisMachine
+            .processes()
+            .unwrap()
+            .iter()
+            .any(|one| one.identity.pid == own && one.identity.started == micros),
+        "this process is not listed"
+    );
+}
+
+/// The second a start in microseconds falls in, as a test's `ps` says it: seconds since 1970.
+#[allow(clippy::unnecessary_wraps)]
+fn second(micros: u64) -> Option<u64> {
+    Some(micros / 1_000_000)
+}
+
+/// `ps` lists 20 and 21, both with no parent (1); between its listing and the system's read, 21
+/// ended and its number went to another process with no parent, begun later. Its parent is the
+/// same, its start is not: it is another process, and it is not listed with 21's command line.
+#[test]
+fn a_mac_row_whose_start_the_system_says_is_another_second_than_ps_said_is_another_process_and_not_listed(
+) {
+    let listed = vec![
+        running(20, 1_792_118_686, 1, "sleep 4711.1"),
+        running(21, 1_792_118_687, 1, "sleep 4711.2"),
+    ];
+    let refined = refined_by_bsd(
+        listed,
+        |pid| match pid {
+            20 => Ok(Some(Bsd {
+                ppid: 1,
+                started: 1_792_118_686_999_999,
+            })),
+            21 => Ok(Some(Bsd {
+                ppid: 1,
+                started: 1_792_118_699_000_001,
+            })),
+            _ => Ok(None),
+        },
+        second,
+    );
+    assert_eq!(
+        refined,
+        [running(20, 1_792_118_686_999_999, 1, "sleep 4711.1")],
+        "a row whose number another process took since `ps` listed it is listed as that process"
+    );
 }
 
 #[test]

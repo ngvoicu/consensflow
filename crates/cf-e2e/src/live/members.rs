@@ -588,8 +588,9 @@ impl Members {
     /// host gives them to leave, and a rig that does not end says which of its
     /// processes were left ([`closing`]). What the windows left running once they
     /// were closed is found and said ([`Watch`]), and never ended: the kit ends a
-    /// process only by descent from the run's window, the stand-in's jobs or the run's
-    /// own word, where a case chose it.
+    /// process only by descent from the run's window and, on the stand-in's rig, by the
+    /// stand-in's jobs and an orphan of a folder under the run's temp root, where a case
+    /// chose it.
     pub fn close(self) -> Result {
         self.close_within(closing::EXIT)
     }

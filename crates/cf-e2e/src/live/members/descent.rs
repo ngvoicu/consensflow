@@ -367,19 +367,23 @@ pub(crate) struct Bsd {
 }
 
 /// The processes `ps` listed (`listed`), each with when it began as macOS says it to the
-/// microsecond (`read`): one the system says nothing of, or whose parent it says is
-/// another than `ps` listed, has ended since, and its number may be another's: it is not
-/// listed.
+/// microsecond (`read`): one the system says nothing of, whose parent it says is another than
+/// `ps` listed, or whose start falls in another second than `ps` said (`second_of`, the second of a
+/// start in microseconds as `ps` says it), has ended since, and its number is another's or may be:
+/// it is not listed. The parent alone tells nothing where both have none (1): a number that went
+/// from one orphan to another in between would put the first one's command line on the second
+/// (T-1557).
 #[cfg(any(target_os = "macos", test))]
 pub(crate) fn refined_by_bsd(
     listed: Vec<Running>,
     read: impl Fn(u32) -> io::Result<Option<Bsd>>,
+    second_of: impl Fn(u64) -> Option<u64>,
 ) -> Vec<Running> {
     listed
         .into_iter()
         .filter_map(|mut process| {
             let bsd = read(process.identity.pid).ok()??;
-            if bsd.ppid != process.ppid {
+            if bsd.ppid != process.ppid || second_of(bsd.started)? != process.identity.started {
                 return None;
             }
             process.identity.started = bsd.started;

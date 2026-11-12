@@ -147,7 +147,7 @@ fn a_process_on_its_way_out_when_the_windows_are_closed_is_no_leftover_and_one_t
     let said = swept.said();
     assert_eq!(
         said,
-        "the windows left 1 process(es) running after they were closed: 302 grep --line-buffered tick; the kit ended none of them (it ends a process only by descent from the run's window, the stand-in's jobs, the run's own word or an orphan of a folder under the run's temp root)"
+        "the windows left 1 process(es) running after they were closed: 302 grep --line-buffered tick; the kit ended none of them (it ends a process only by descent from the run's window, the stand-in's jobs or an orphan of a folder under the run's temp root)"
     );
     assert!(swept.problems().is_empty());
 }

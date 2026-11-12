@@ -11,8 +11,9 @@
 //! is under the run's own temp root ([`RunFolder`]). What is said is what was found. The sweep
 //! ends nothing: at 18:58 on 2026-11-12 it took a live rig's home, the owner's own, for a word of
 //! the run and ended 22 processes of the owner's and of other tasks. The kit ends a process only
-//! by descent from the run's window, the stand-in's jobs or the run's own word, where a case chose
-//! it.
+//! by descent from the run's window and, on the stand-in's rig, by the stand-in's jobs and an
+//! orphan of a folder under the run's temp root, where a case chose it: never by a word, which
+//! any process can copy into its command line.
 
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -362,7 +363,7 @@ impl Swept {
                 .join("; ")
         };
         format!(
-            "the windows left {} process(es) running after they were closed: {}; the kit ended none of them (it ends a process only by descent from the run's window, the stand-in's jobs, the run's own word or an orphan of a folder under the run's temp root)",
+            "the windows left {} process(es) running after they were closed: {}; the kit ended none of them (it ends a process only by descent from the run's window, the stand-in's jobs or an orphan of a folder under the run's temp root)",
             self.found.len(),
             list(&self.found)
         )

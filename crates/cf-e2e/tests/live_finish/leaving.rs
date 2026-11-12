@@ -24,9 +24,12 @@
 //!   harness started, and the host names only what such a chain proves the turn's. The run
 //!   then looks again once the window has closed, and says whether the window's close
 //!   found it (it ends what its tree finds) or it runs on, and ends what it saw of the
-//!   command in the window's own tree, the jobs the rig's stand-in wrote it started, and what
-//!   holds the run's word as a whole argument and began after the run's window ([`choose`]):
-//!   never a process by the command's other words, which anybody's `sleep 4711` holds;
+//!   command in the window's own tree and the jobs the rig's stand-in wrote it started
+//!   ([`Chosen::choose`]). The command the run's word finds once the windows have closed (its
+//!   own program, the word one of its arguments, begun after the window) escaped the ending: it
+//!   is said, fails the case, and is left to end by itself ([`Chosen::escaped_the_ending`]). The
+//!   run ends nothing by a word, which can be copied, nor by the command's other words, which
+//!   anybody's `sleep 4711` holds;
 //!   The one shape that does not fail is the known macOS limit, which the run expects of Pi
 //!   and Devin on a Mac alone ([`Expect`]; the chief's decision of 2026-11-03, T-1100). Their
 //!   tool shells lead sessions of their own, so a job detached with `nohup … &` once its
@@ -34,9 +37,10 @@
 //!   the host never lists it and the close does not end it (`work.rs`). It passes when the task
 //!   is done and its result delivered, every process of the job has parent 1 and no terminal,
 //!   it still ran once the window had closed, and the chief was told nothing; the run then
-//!   ends what it can prove its own, an orphan begun after its window that runs in the folder
-//!   made for the run ([`Chosen::take_orphans`]), through the descent and by which process
-//!   it is. Any other shape fails as above. What the run counts for the command that escaped
+//!   ends what it can prove its own, an orphan begun after its window that runs in a folder
+//!   under the rig's own temp root (the stand-in's rig has one; a live rig's project folder is
+//!   in the person's home and is none, [`Chosen::take_orphans`]), through the descent and by
+//!   which process it is. Any other shape fails as above. What the run counts for the command that escaped
 //!   is what its window held, an orphan of its own folder begun after the window, and the
 //!   stand-in's jobs by the rig's own folder of them, and what holds the run's word
 //!   ([`Chosen::of_the_run`]): never a process of the machine that holds the command's words
@@ -54,9 +58,9 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use cf_e2e::live::members::{
-    self, delivered_result, descending_from, end_chosen, find, holding, is_over, notes_of_work,
-    orphans_in_folder, working_folder, Account, Ended, Identity, Machine, Members, Plan, RunFolder,
-    Running, ThisMachine,
+    self, delivered_result, end_chosen, find, holding, is_over, notes_of_work, orphans_in_folder,
+    working_folder, Account, Ended, Identity, Machine, Members, Plan, RunFolder, Running,
+    ThisMachine,
 };
 use cf_e2e::live::tree::{self, Proc, Tree};
 use cf_e2e::live::{cut, secs, text, Harness, Log, Who};
@@ -72,18 +76,37 @@ pub fn has_arg(command: &str, word: &str) -> bool {
     command.split_whitespace().any(|arg| arg == word)
 }
 
-/// Whether the program of `command` is the one the worker's command is: `sleep`, or on Windows
-/// `ping`, which that table lists by the path of its image (`"C:\Windows\system32\PING.EXE" -n
-/// 4711 127.0.0.1`), so that the command's own words are not in its line.
-fn is_the_command(command: &str) -> bool {
-    let first = command.split_whitespace().next().unwrap_or_default();
+/// The program of a process: the name of its image where the machine says it (Windows' table, as
+/// `C:\Windows\system32\PING.EXE`), else of its first argument (a Mac's `ps` line, `sleep …`), whole
+/// even where it is quoted (`"C:\Program Files\…\x.exe" …`); without its folder or `.exe`, in
+/// small letters. Never a word further on in the line, where any program may quote another's.
+fn program_of(process: &Running) -> String {
+    let first = match process.exe.as_deref() {
+        Some(image) => image,
+        None => match process.command.strip_prefix('"') {
+            Some(quoted) => quoted.split('"').next().unwrap_or_default(),
+            None => process
+                .command
+                .split_whitespace()
+                .next()
+                .unwrap_or_default(),
+        },
+    };
     let name = first
-        .trim_matches('"')
         .rsplit(['/', '\\'])
         .next()
-        .unwrap_or_default();
-    let name = name.to_ascii_lowercase();
-    matches!(name.strip_suffix(".exe").unwrap_or(&name), "sleep" | "ping")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    name.strip_suffix(".exe").unwrap_or(&name).to_owned()
+}
+
+/// The program of the worker's command ([`command`]): `sleep`, or on Windows `ping`.
+fn the_commands_program() -> String {
+    command()
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// How many seconds the command the worker starts runs: more than a run lasts (an hour and
@@ -97,7 +120,8 @@ pub const fn seconds() -> u64 {
 /// every form the worker is given ([`command`], [`detach`]): what `sleep` waits for on a Mac (a
 /// fraction it waits for too, less than a second more), and on Windows what `ping` waits for a
 /// reply to come back from `127.0.0.1` (`-w`, read up to the point: 4711 ms, where a reply comes in
-/// less than one). No process that is not the run's holds it ([`Chosen::by_word`]).
+/// less than one). Another process may copy it (one that quotes the command): it makes nothing the
+/// run's own to end, and finds only the command's own program ([`Chosen::by_word`]).
 pub fn word() -> &'static str {
     static WORD: OnceLock<String> = OnceLock::new();
     WORD.get_or_init(|| {
@@ -571,6 +595,20 @@ pub fn run_asked(
     for problem in chosen.problems(&ended) {
         finished.case.fail(problem);
     }
+    // What the run's word finds now, the run's choice ended and its windows closed, escaped the
+    // ending: said, failing the case, and left to end by itself ([`Chosen::escaped_the_ending`]).
+    if chosen.word.is_some() {
+        match ThisMachine.processes() {
+            Ok(all) => {
+                for line in chosen.escaped_the_ending(&all) {
+                    finished.case.fail(line);
+                }
+            }
+            Err(failed) => finished.case.fail(format!(
+                "the machine's processes could not be read once the windows had closed, and whether the command escaped the ending is not known: {failed}"
+            )),
+        }
+    }
     finished.case.closed(closed);
     Ok(finished)
 }
@@ -717,19 +755,6 @@ fn observe(
             )
         }));
     }
-    // What holds this run's own word is the run's wherever it went, and is ended by which process
-    // it is, whichever way the case comes out (a command that escaped fails it, [`judge`]).
-    if let Ok(all) = ThisMachine.processes() {
-        for one in chosen.by_word(&all, wanted) {
-            if !chosen
-                .processes
-                .iter()
-                .any(|known| known.identity == one.identity)
-            {
-                chosen.processes.push(one);
-            }
-        }
-    }
     if looks_for_its_own_orphans(expect, &left) {
         match ThisMachine.processes() {
             Ok(all) => {
@@ -834,9 +859,9 @@ struct Chosen {
     /// The worker's window's process, as the first look at it said: what descends from it is
     /// the window's own, as long as it runs.
     window: Option<Identity>,
-    /// The run's own word ([`word`]), which its command's process holds as a whole argument:
-    /// what holds it and began after the run's window is the run's wherever it went. None for
-    /// the rig's stand-in, whose jobs are told by their files.
+    /// The run's own word ([`word`]), which its command's process holds as a whole argument: the
+    /// command that holds it and began after the run's window is said wherever it went, and never
+    /// ended ([`Chosen::by_word`]). None for the rig's stand-in, whose jobs are told by their files.
     word: Option<String>,
     /// An orphan that holds the command's words and cannot be proved the run's own, each as the
     /// machine lists it: not ended, and not counted for the run either, as it may be any other
@@ -857,7 +882,7 @@ impl Chosen {
     /// that has the number since holds no file of this rig's, and is never taken for it
     /// (Astra and Sol on round 6). One a look does not find (its parent went between two
     /// reads of the machine) is looked for again. A process outside the window that no job
-    /// of the rig's is, is none of it, whatever its command line says.
+    /// of the rig's is, is none of it, whatever its command line says, the run's own word too.
     fn choose(
         &mut self,
         all: &[Running],
@@ -888,8 +913,7 @@ impl Chosen {
                 of_jobs.push(process.clone());
             }
         }
-        let of_the_word = self.by_word(all, wanted);
-        for one in in_window.into_iter().chain(of_jobs).chain(of_the_word) {
+        for one in in_window.into_iter().chain(of_jobs) {
             if !self
                 .processes
                 .iter()
@@ -900,61 +924,29 @@ impl Chosen {
         }
     }
 
-    /// What holds the run's own word as a whole argument, and `wanted` or the command's program,
-    /// and began no earlier than the run's window, wherever it runs and whoever started it, with
-    /// what it started: the command of this run, or the shell that holds its words. The word is
-    /// 64 random bits made for the run ([`word`]), which no other process holds; a process that
-    /// began before the window is none of the run's whatever it holds. Nothing where the run has
-    /// no word (the stand-in's) or has not seen its window (the host names it as it opens). Not
-    /// the worker's own window, what it descends from, or another process of its program: the
-    /// brief that names the command is in the window's command line too (T-548: a check that
-    /// ended what held the words ended the window's TUI).
-    fn by_word(&self, all: &[Running], wanted: &str) -> Vec<Running> {
+    /// The command itself where the run's own word finds it: a process whose program is the
+    /// command's ([`the_commands_program`]: `sleep`, or on Windows `PING.EXE`), read from its image or
+    /// its first argument ([`program_of`]), that has the word ([`word`]) as one of its arguments and
+    /// began no earlier than the run's window; not what it started, as neither program starts
+    /// anything. A process of another program that quotes the command in its own command line is
+    /// none of it, however its words fall: an owner's `grep -F 'sleep 4711.<digits>'`, which `ps`
+    /// shows as `grep -F sleep 4711.<digits>`, or a `Select-String` (T-1557). Nothing where the run
+    /// has no word (the stand-in's) or has not seen its window. What it finds is said and never
+    /// ended: a word can be copied, so it makes no process the run's own to end
+    /// ([`Chosen::escaped_the_ending`]).
+    fn by_word(&self, all: &[Running]) -> Vec<Running> {
         let (Some(word), Some(since)) = (&self.word, self.window_began) else {
             return Vec::new();
         };
-        let program = |process: &Running| {
-            process
-                .command
-                .split_whitespace()
-                .next()
-                .map(|first| first.rsplit(['/', '\\']).next().unwrap_or(first).to_owned())
-        };
-        let window = self
-            .window
-            .and_then(|own| all.iter().find(|process| process.identity == own));
-        let mut ancestors: Vec<Identity> = Vec::new();
-        if let Some(window) = window {
-            let mut at = window.clone();
-            while let Some(parent) = all.iter().find(|process| {
-                process.identity.pid == at.ppid && process.identity.started <= at.identity.started
-            }) {
-                if ancestors.contains(&parent.identity) {
-                    break;
-                }
-                ancestors.push(parent.identity);
-                at = parent.clone();
-            }
-        }
-        let own_program = window.and_then(program);
-        let mut found: Vec<Running> = Vec::new();
-        for process in all.iter().filter(|process| {
-            has_arg(&process.command, word)
-                && process.identity.started >= since
-                && (process.command.contains(wanted) || is_the_command(&process.command))
-                && Some(process.identity) != self.window
-                && !ancestors.contains(&process.identity)
-                && !(own_program.is_some() && program(process) == own_program)
-        }) {
-            for one in
-                std::iter::once(process.clone()).chain(descending_from(all, process.identity))
-            {
-                if !found.iter().any(|known| known.identity == one.identity) {
-                    found.push(one);
-                }
-            }
-        }
-        found
+        let program = the_commands_program();
+        all.iter()
+            .filter(|process| {
+                program_of(process) == program
+                    && has_arg(&process.command, word)
+                    && process.identity.started >= since
+            })
+            .cloned()
+            .collect()
     }
 
     /// What of `all` the run counts for the command that escaped, and for nothing else that
@@ -979,7 +971,7 @@ impl Chosen {
         if let (Some(folder), Some(since)) = (folder, self.window_began) {
             found.extend(orphans_in_folder(all, wanted, folder, since, &folder_of));
         }
-        found.extend(self.by_word(all, wanted));
+        found.extend(self.by_word(all));
         if let (Some(word), Some(since)) = (word, self.window_began) {
             found.extend(
                 all.iter()
@@ -1025,7 +1017,7 @@ impl Chosen {
             }
             _ => Vec::new(),
         };
-        for orphan in found.iter().cloned().chain(self.by_word(all, wanted)) {
+        for orphan in found.iter().cloned() {
             if !self
                 .processes
                 .iter()
@@ -1034,6 +1026,8 @@ impl Chosen {
                 self.processes.push(orphan);
             }
         }
+        // What the run's word finds is the run's and is said as what escaped, not as unproven.
+        let of_the_word = self.by_word(all);
         self.unproven = all
             .iter()
             .filter(|process| process.ppid == 1 && process.command.contains(wanted))
@@ -1041,11 +1035,38 @@ impl Chosen {
                 !self
                     .processes
                     .iter()
+                    .chain(&of_the_word)
                     .any(|chosen| chosen.identity == process.identity)
             })
             .map(|process| format!("{} {}", process.identity.pid, process.command))
             .collect();
         found
+    }
+
+    /// What the run's word finds of the command (`all`, read once the run has ended what it chose
+    /// and closed its windows): what escaped the ending, a line that fails the case each. The kit
+    /// does not end it, by its word or otherwise: it ends by itself when its seconds are out (a
+    /// detached `sleep` left for 78 minutes harms nothing; ending a process that is not the run's
+    /// does). One the run chose and could not end is not said again here: its ending's failure
+    /// fails the case ([`Chosen::problems`]).
+    fn escaped_the_ending(&self, all: &[Running]) -> Vec<String> {
+        self.by_word(all)
+            .iter()
+            .filter(|one| {
+                !self
+                    .processes
+                    .iter()
+                    .any(|chosen| chosen.identity == one.identity)
+            })
+            .map(|one| {
+                format!(
+                    "the command escaped the ending: pid {}, `{}`; the kit did not end it, it ends by itself within {} s",
+                    one.identity.pid,
+                    one.command,
+                    seconds()
+                )
+            })
+            .collect()
     }
 
     /// What may still run of what the run chose, a problem of the run each: what could not
