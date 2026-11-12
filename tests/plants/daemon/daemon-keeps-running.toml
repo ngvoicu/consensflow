@@ -54,7 +54,7 @@ meant = "responses_wait_for_room_and_the_reader_goes_on"
 runs = ["bridge-queue"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/requests.rs"
 find = '''
             thread::spawn(move || {
                 bridge.respond_or_report(frame.id, frame.op, unknown_op_body());
