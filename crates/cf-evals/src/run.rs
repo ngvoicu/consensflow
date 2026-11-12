@@ -117,14 +117,13 @@ pub fn command(words: &[String], out: &mut dyn Write) -> Result<i32> {
     );
     let crew = options.crew();
     // The windows of a real Claude Code run on a throwaway config folder with a copy of the
-    // machine's login, which must last as long as the plays of this command can: every repeat
-    // at its time limit (a login that would end before is refused when the first workspace is
-    // made, before anything is spent).
-    let login = login::throwaway(
-        login::real_claude(&options.chief, &chief.model, &staff),
-        options.planned(),
-    );
-    let machine = Machine::of(&crew, login)?;
+    // machine's login, and those of every other real harness on the kit's home of the run's own,
+    // which must last as long as the plays of this command can: every repeat at its time limit
+    // (a login that would end before is refused when the first workspace is made or the first
+    // rig starts, before anything is spent).
+    let seated = login::Seated::of(&options.chief, &chief.model, &staff, options.planned());
+    let login = login::throwaway(&seated);
+    let machine = Machine::of(&crew, &seated, login)?;
     let stand_ins =
         stand_in_agent.and_then(|agent| stand_in::StandIns::of(&machine, &options.scenario, agent));
     let wrappers = wrappers::write_with(&machine, &crew, &chief, stand_ins.as_ref())?;

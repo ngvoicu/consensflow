@@ -110,6 +110,13 @@ pub(super) fn environment(
         }
     }
     env.push(("TERM".to_owned(), "xterm-256color".to_owned()));
+    // No harness updates itself in a window of a rig: a live run keeps the owner's `HOME`, so a
+    // native updater would write the owner's `~/.local/bin` (T-1082). A case may still say
+    // otherwise below, or unset them, as the case that proves the switches are read does.
+    env.extend(
+        crate::live::launcher::updates_off()
+            .map(|(name, value)| (name.to_owned(), value.to_owned())),
+    );
     env.extend(config.vars.iter().cloned());
     env.retain(|(name, _)| !config.unset.contains(name));
     // A stand-in Devin keeps its store and settings in the rig's own home, whatever folders of

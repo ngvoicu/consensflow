@@ -135,6 +135,75 @@ impl Owner {
         made
     }
 
+    /// The `cliproxyapi` provider's files, as the owner's Mac keeps them in its agent folder:
+    /// the login (the only one the Mac's Pi has), the config pointed at the proxy `base_url`,
+    /// the models the proxy served last, `settings.json` naming the package among the owner's
+    /// other one, npm's manifests, and the package below `npm/node_modules` Pi loads it from.
+    fn cliproxyapi(&self, base_url: &str) {
+        let agent = self.path(".pi/agent");
+        write(&agent.join("auth.json"), &auth_cliproxyapi());
+        write(
+            &agent.join("cliproxyapi.json"),
+            &json!({
+                "baseUrl": base_url,
+                "apiKey": PROXY_KEY,
+                "providerId": "cliproxyapi",
+                "providerName": "CLIProxyAPI",
+            })
+            .to_string(),
+        );
+        write(
+            &agent.join("cliproxyapi-models.json"),
+            &json!({ "models": [{ "id": "swe-2" }], "fetchedAt": at(NOW) }).to_string(),
+        );
+        write(
+            &agent.join("settings.json"),
+            &json!({ "packages": ["npm:pi-web-access", "npm:@router-for-me/pi-cliproxyapi-provider"] })
+                .to_string(),
+        );
+        write(
+            &agent.join("npm/package.json"),
+            &json!({ "dependencies": {
+                "pi-web-access": "^0.46.0",
+                "@router-for-me/pi-cliproxyapi-provider": "^1.4.24",
+            } })
+            .to_string(),
+        );
+        write(&agent.join("npm/package-lock.json"), "{}");
+        let package = agent.join("npm/node_modules/@router-for-me/pi-cliproxyapi-provider");
+        write(
+            &package.join("package.json"),
+            &json!({
+                "name": "@router-for-me/pi-cliproxyapi-provider",
+                "version": "1.4.24",
+                "pi": { "extensions": ["./extensions/index.ts", "./extensions/tps.ts"] },
+            })
+            .to_string(),
+        );
+        write(&package.join("LICENSE"), "the package's license");
+        write(&package.join("README.md"), "the package's readme");
+        write(
+            &package.join("extensions/index.ts"),
+            "the provider's extension",
+        );
+        write(
+            &package.join("extensions/lib.ts"),
+            "the extension's library",
+        );
+        write(
+            &package.join("extensions/tps.ts"),
+            "the provider's second extension",
+        );
+    }
+
+    /// Pi's, on the models `models`, for a run of `run`.
+    fn pi_on(&self, models: &[&str], run: Duration) -> Isolation {
+        let models: Vec<String> = models.iter().map(|model| (*model).to_owned()).collect();
+        let mut made = Isolation::pi_on(self.home.path(), &self.path(".pi/agent"), &models, run);
+        made.parent = self.parent.path().to_path_buf();
+        made
+    }
+
     fn codex(&self) -> Isolation {
         let mut made = Isolation::codex(self.home.path(), &self.path(".codex"));
         made.parent = self.parent.path().to_path_buf();
@@ -334,14 +403,18 @@ fn a_pi_run_is_given_a_folder_of_its_own_with_the_login_it_needs_and_nothing_els
     let owner = Owner::new();
     let isolation = owner.pi("openrouter/meta/muse-spark-1.3", Duration::from_secs(3600));
     let home = isolation.made_at(at(NOW)).unwrap();
-    // One variable, the one Pi reads its folder by, and it names the run's.
+    // The variable Pi reads its folder by, naming the run's, and the one that keeps Pi from
+    // installing at its start.
     let vars = isolation.vars_in(&home);
     assert_eq!(
         vars,
-        [(
-            "PI_CODING_AGENT_DIR".to_owned(),
-            home.join("pi/agent").display().to_string()
-        )]
+        [
+            (
+                "PI_CODING_AGENT_DIR".to_owned(),
+                home.join("pi/agent").display().to_string()
+            ),
+            ("PI_OFFLINE".to_owned(), "1".to_owned())
+        ]
     );
     assert!(!vars[0].1.contains(&owner.home.path().display().to_string()));
     // Only the login: not the settings, the models, the MCP logins, the extensions or the sessions.
@@ -363,6 +436,494 @@ fn a_pi_run_is_given_a_folder_of_its_own_with_the_login_it_needs_and_nothing_els
     assert!(!home.exists());
 }
 
+// ------------------------------------------------------------- the provider's files (T-1172)
+
+/// The key CLIProxyAPI is asked its models with: `access` of the `cliproxyapi` login and
+/// `apiKey` of `cliproxyapi.json`. The login's `refresh` is the endpoint's own metadata,
+/// still not a thing a run is given.
+const PROXY_KEY: &str = "cli-proxy-key-fedcba987654";
+const PROXY_META: &str = "proxy-meta-zyxwvutsrqponm";
+
+/// The `auth.json` of a Mac whose Pi has the `cliproxyapi` login alone, as the provider's
+/// extension writes it: the key in `access`, the endpoint's metadata in `refresh`, and an
+/// `expires` a hundred years on.
+fn auth_cliproxyapi() -> String {
+    json!({
+        "cliproxyapi": { "type": "oauth", "access": PROXY_KEY, "refresh": PROXY_META, "expires": ends(hours(876_600)) },
+    })
+    .to_string()
+}
+
+/// A stand-in for CLIProxyAPI: answers every HTTP request it gets with `401`, its answer to a
+/// keyless one, on a port of its own. Its `http://` URL.
+fn proxy_answering() -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else {
+                return;
+            };
+            use std::io::Write;
+            let _ = stream.write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n");
+        }
+    });
+    url
+}
+
+/// A base URL nothing answers on: a port the system just let go of.
+fn proxy_gone() -> String {
+    format!(
+        "http://{}",
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+    )
+}
+
+/// Pi loads `cliproxyapi` as the package `settings.json`'s `packages` names, an `npm:` spec
+/// resolved below `npm/node_modules`, which reads `cliproxyapi.json` (the proxy's base URL
+/// and key) and `cliproxyapi-models.json` (the models it served last), and logs in by
+/// `auth.json`. A run on the provider's model is given all of it, the login without its
+/// `refresh`, and the owner's files are hashed with the provider's among them.
+#[test]
+fn a_pi_run_on_a_provider_the_agent_folder_gives_pi_carries_its_files_and_its_login() {
+    let owner = Owner::new();
+    owner.cliproxyapi(&proxy_answering());
+    let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
+    let home = isolation.made_at(at(NOW)).unwrap();
+    // The login, the provider's own files and its package, and a `settings.json` that names
+    // the provider's package alone: the owner's other package and npm's manifests are left.
+    assert_eq!(
+        files_below(&home),
+        [
+            "pi/agent/auth.json",
+            "pi/agent/cliproxyapi-models.json",
+            "pi/agent/cliproxyapi.json",
+            "pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider/LICENSE",
+            "pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider/README.md",
+            "pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider/extensions/index.ts",
+            "pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider/extensions/lib.ts",
+            "pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider/extensions/tps.ts",
+            "pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider/package.json",
+            "pi/agent/settings.json",
+        ]
+    );
+    let copied = fs::read_to_string(home.join("pi/agent/auth.json")).unwrap();
+    let held: Value = serde_json::from_str(&copied).unwrap();
+    assert_eq!(
+        held,
+        json!({ "cliproxyapi": {
+            "type": "oauth",
+            "access": PROXY_KEY,
+            "expires": ends(hours(876_600)),
+        } })
+    );
+    assert!(
+        !copied.contains(PROXY_META),
+        "the refresh was copied: {copied}"
+    );
+    // The config and the models come whole; the settings name the provider's package alone.
+    assert_eq!(
+        fs::read_to_string(home.join("pi/agent/cliproxyapi.json")).unwrap(),
+        fs::read_to_string(owner.path(".pi/agent/cliproxyapi.json")).unwrap()
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(
+            &fs::read_to_string(home.join("pi/agent/settings.json")).unwrap()
+        )
+        .unwrap(),
+        json!({ "packages": ["npm:@router-for-me/pi-cliproxyapi-provider"] })
+    );
+    // The provider's files of the owner's are hashed, before and after, as the rest are.
+    let said = isolation.evidence().unwrap();
+    for file in [
+        "cliproxyapi.json",
+        "cliproxyapi-models.json",
+        "npm/package.json",
+        "npm/package-lock.json",
+        "npm/node_modules/@router-for-me/pi-cliproxyapi-provider/package.json",
+    ] {
+        assert!(
+            said.contains(&format!("~/.pi/agent/{file}")),
+            "{file}: {said}"
+        );
+    }
+    assert!(isolation.finish().is_ok());
+}
+
+/// Pi installs a `git:` package below `git/<host>/<path>`, the ref left out, and loads it from
+/// there: the owner's Mac's Pi has named `cliproxyapi`'s package so since 2026-11-09 (a branch
+/// of a fork, as a string or as an object's `source`), and its npm copy, still there, is named no
+/// more. A run on the provider's model is given that package whole and a `settings.json` that
+/// names the same source, and the owner's copy of it is hashed; npm's is neither (T-1358).
+#[test]
+fn a_pi_run_on_a_provider_whose_package_pi_has_from_git_carries_that_package_and_names_it() {
+    const SOURCE: &str = "git:github.com/ngvoicu/pi-cliproxyapi-provider@feat/claude-messages";
+    for named in [
+        json!({ "source": SOURCE, "extensions": ["extensions/index.ts"] }),
+        json!(SOURCE),
+    ] {
+        let owner = Owner::new();
+        owner.cliproxyapi(&proxy_answering());
+        let package = owner.path(".pi/agent/git/github.com/ngvoicu/pi-cliproxyapi-provider");
+        write(
+            &package.join("package.json"),
+            &json!({
+                "name": "@router-for-me/pi-cliproxyapi-provider",
+                "version": "1.4.25",
+                "pi": { "extensions": ["./extensions/index.ts", "./extensions/tps.ts"] },
+            })
+            .to_string(),
+        );
+        write(&package.join("extensions/index.ts"), "the fork's extension");
+        let commit = git_checkout(&package);
+        write(
+            &owner.path(".pi/agent/settings.json"),
+            &json!({ "packages": ["npm:pi-web-access", named, "git:github.com/ngvoicu/pi-cached-compaction@main"] })
+                .to_string(),
+        );
+        let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
+        let home = isolation.made_at(at(NOW)).unwrap();
+        let copied: Vec<String> = files_below(&home)
+            .into_iter()
+            .filter(|file| !file.contains("/.git/") || file.ends_with("/.git/HEAD"))
+            .collect();
+        assert_eq!(
+            copied,
+            [
+                "pi/agent/auth.json",
+                "pi/agent/cliproxyapi-models.json",
+                "pi/agent/cliproxyapi.json",
+                "pi/agent/git/github.com/ngvoicu/pi-cliproxyapi-provider/.git/HEAD",
+                "pi/agent/git/github.com/ngvoicu/pi-cliproxyapi-provider/extensions/index.ts",
+                "pi/agent/git/github.com/ngvoicu/pi-cliproxyapi-provider/package.json",
+                "pi/agent/settings.json",
+            ],
+            "{named}"
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(
+                &fs::read_to_string(home.join("pi/agent/settings.json")).unwrap()
+            )
+            .unwrap(),
+            // The entry as the owner wrote it: an object's filter of the package's resources is
+            // kept, or Pi would load every resource the package lists.
+            json!({ "packages": [named] })
+        );
+        let copy = isolation.said().join("\n");
+        assert!(
+            copy.contains(&commit) && copy.contains("clean"),
+            "the run says the checkout's commit: {copy}"
+        );
+        let said = isolation.evidence().unwrap();
+        assert!(
+            said.contains(
+                "~/.pi/agent/git/github.com/ngvoicu/pi-cliproxyapi-provider/package.json"
+            ),
+            "{said}"
+        );
+        assert!(
+            !said.contains("npm/node_modules") && !said.contains("npm/package.json"),
+            "{said}"
+        );
+        assert!(isolation.finish().is_ok());
+    }
+}
+
+/// A package's files keep their mode in the run's copy: a provider that runs an executable it
+/// bundles would else be refused by the system in the run (T-1373 item 8).
+#[cfg(unix)]
+#[test]
+fn a_copied_pi_package_keeps_each_files_mode() {
+    let owner = Owner::new();
+    owner.cliproxyapi(&proxy_answering());
+    let below = "npm/node_modules/@router-for-me/pi-cliproxyapi-provider/bin/helper";
+    let helper = owner.path(&format!(".pi/agent/{below}"));
+    write(&helper, "#!/bin/sh\necho helper\n");
+    fs::set_permissions(&helper, fs::Permissions::from_mode(0o755)).unwrap();
+    let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
+    let home = isolation.made_at(at(NOW)).unwrap();
+    assert_eq!(mode(&home.join(format!("pi/agent/{below}"))), 0o755);
+}
+
+/// A git checkout of `folder`'s files, committed, as Pi's install leaves one: its commit.
+fn git_checkout(folder: &Path) -> String {
+    let git = |args: &[&str]| {
+        let ran = Run::new("git")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args.iter().copied())
+            .cwd(folder)
+            .finding_programs()
+            .inheriting_env()
+            .run()
+            .unwrap();
+        assert_eq!(ran.code, Some(0), "git {args:?}: {}", ran.stderr);
+        ran.stdout.trim().to_owned()
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&["commit", "-q", "-m", "the package"]);
+    git(&["rev-parse", "HEAD"])
+}
+
+/// A git checkout with a change of its own, or a file that is none of its commit's, is not what
+/// the source names: Pi would load bytes no commit holds. Refused before anything is made.
+#[test]
+fn a_pi_run_on_a_package_from_git_is_refused_where_its_checkout_is_not_clean() {
+    const SOURCE: &str = "git:github.com/ngvoicu/pi-cliproxyapi-provider@feat/claude-messages";
+    let owner = Owner::new();
+    owner.cliproxyapi(&proxy_answering());
+    let package = owner.path(".pi/agent/git/github.com/ngvoicu/pi-cliproxyapi-provider");
+    write(
+        &package.join("package.json"),
+        &json!({ "name": "@router-for-me/pi-cliproxyapi-provider", "version": "1.4.25" })
+            .to_string(),
+    );
+    write(&package.join("extensions/index.ts"), "the fork's extension");
+    git_checkout(&package);
+    write(
+        &owner.path(".pi/agent/settings.json"),
+        &json!({ "packages": [SOURCE] }).to_string(),
+    );
+    for (dirty, how) in [
+        ("extensions/index.ts", "changed"),
+        ("extensions/extra.ts", "a file of no commit"),
+    ] {
+        write(&package.join(dirty), "code no commit holds");
+        let said = owner
+            .pi("cliproxyapi/swe-2", hours(1))
+            .made_at(at(NOW))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            said.contains("not clean") && said.contains(dirty),
+            "{how}: {said}"
+        );
+        assert_eq!(owner.made(), 0, "{how}");
+        fs::remove_file(package.join(dirty)).ok();
+        git_checkout_reset(&package);
+    }
+}
+
+/// The checkout as its commit has it again.
+fn git_checkout_reset(folder: &Path) {
+    let ran = Run::new("git")
+        .args(["checkout", "-q", "--", "."])
+        .cwd(folder)
+        .finding_programs()
+        .inheriting_env()
+        .run()
+        .unwrap();
+    assert_eq!(ran.code, Some(0), "{}", ran.stderr);
+}
+
+/// An `npm:` spec that names a version Pi has not got on disk makes Pi install it at its start,
+/// from the network, into the run's home: refused before anything is made. A spec with no
+/// version is what is on disk; one with an exact version must be that version; a range or a
+/// tag, which the kit cannot hold to what is on disk, is refused too. The run says the version.
+#[test]
+fn a_pi_run_is_refused_where_the_npm_package_on_disk_is_not_the_version_its_spec_asks() {
+    let owner = Owner::new();
+    owner.cliproxyapi(&proxy_answering());
+    let settings = |spec: &str| {
+        write(
+            &owner.path(".pi/agent/settings.json"),
+            &json!({ "packages": [spec] }).to_string(),
+        );
+    };
+    let made = |owner: &Owner| {
+        let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
+        isolation
+            .made_at(at(NOW))
+            .map(|_| isolation.said().join("\n"))
+    };
+    settings("npm:@router-for-me/pi-cliproxyapi-provider@1.4.24");
+    let said = made(&owner).unwrap();
+    assert!(said.contains("1.4.24"), "{said}");
+    for (spec, words) in [
+        (
+            "npm:@router-for-me/pi-cliproxyapi-provider@1.4.25",
+            "1.4.25",
+        ),
+        ("npm:@router-for-me/pi-cliproxyapi-provider@^1.4.0", "exact"),
+        ("npm:@router-for-me/pi-cliproxyapi-provider@latest", "exact"),
+    ] {
+        settings(spec);
+        let refused = made(&owner).unwrap_err().to_string();
+        assert!(
+            refused.contains(words) && refused.contains("1.4.24"),
+            "{spec}: {refused}"
+        );
+        assert_eq!(owner.made(), 0, "{spec}: refused before anything is made");
+    }
+}
+
+/// A proxy URL can carry a key (a user and password, a query, a fragment): the refusal of a
+/// proxy that does not answer says its scheme, host, port and path alone.
+#[test]
+fn a_proxy_that_does_not_answer_is_said_with_no_part_of_its_url_that_can_hold_a_secret() {
+    let owner = Owner::new();
+    let port = proxy_gone().rsplit(':').next().unwrap().to_owned();
+    owner.cliproxyapi(&format!(
+        "http://user:SECRET-PASSWORD@127.0.0.1:{port}/v1?key=SECRET-KEY#SECRET-FRAGMENT"
+    ));
+    let said = owner
+        .pi("cliproxyapi/swe-2", hours(1))
+        .made_at(at(NOW))
+        .unwrap_err()
+        .to_string();
+    assert!(said.contains("does not answer"), "{said}");
+    assert!(
+        said.contains(&format!("http://127.0.0.1:{port}/v1")),
+        "{said}"
+    );
+    assert!(
+        !said.contains("SECRET") && !said.contains("user:"),
+        "{said}"
+    );
+}
+
+/// Pi installs a package its settings name and it has not got, and updates and downloads at its
+/// start (Pi 1.5.0, `dist/core/package-manager.js`: `installMissing` returns before installing
+/// when `PI_OFFLINE` is set): every window of the kit's Pi starts with it, so what runs is what
+/// the kit copied.
+#[test]
+fn a_pi_window_of_the_kit_starts_offline() {
+    let owner = Owner::new();
+    write(&owner.path(".pi/agent/auth.json"), &auth(hours(2)));
+    let isolation = owner.pi("openai/gpt-6-luna", hours(1));
+    let vars = HarnessHome::vars(&isolation).unwrap();
+    assert!(
+        vars.iter()
+            .any(|(name, value)| name == "PI_OFFLINE" && value == "1"),
+        "{vars:?}"
+    );
+}
+
+/// The forms of `packages` the kit finds the provider's package in, and where Pi keeps each:
+/// an `npm:` spec of its name (a version or not), a `git:` source of a repository of its name
+/// (a ref or not, a fork's or not), a string or an object's `source`. Not a package of another
+/// name, a repository of another name, a URL or a path, whose folder the kit does not know.
+#[test]
+fn the_providers_package_is_found_by_its_npm_spec_or_its_git_source_and_nothing_else() {
+    let provider = pi::provider("cliproxyapi").unwrap();
+    let found = |entries: Value| provider.source_in(entries.as_array().unwrap());
+    let folder = |entries: Value| found(entries).map(|source| source.folder);
+    let npm = Path::new("npm/node_modules/@router-for-me/pi-cliproxyapi-provider");
+    assert_eq!(
+        folder(json!(["npm:@router-for-me/pi-cliproxyapi-provider"])).as_deref(),
+        Some(npm)
+    );
+    assert_eq!(
+        folder(json!(["npm:@router-for-me/pi-cliproxyapi-provider@1.4.24"])).as_deref(),
+        Some(npm)
+    );
+    let git = Path::new("git/github.com/ngvoicu/pi-cliproxyapi-provider");
+    for spec in [
+        "git:github.com/ngvoicu/pi-cliproxyapi-provider",
+        "git:github.com/ngvoicu/pi-cliproxyapi-provider@feat/claude-messages",
+        "git:github.com/ngvoicu/pi-cliproxyapi-provider.git@v1",
+    ] {
+        assert_eq!(folder(json!([spec])).as_deref(), Some(git), "{spec}");
+        assert_eq!(
+            folder(json!([{ "source": spec }])).as_deref(),
+            Some(git),
+            "{spec}"
+        );
+    }
+    let source = found(json!([
+        7,
+        null,
+        "npm:pi-web-access",
+        "git:github.com/router-for-me/pi-cliproxyapi-provider@main"
+    ]))
+    .unwrap();
+    assert_eq!(
+        source.spec,
+        "git:github.com/router-for-me/pi-cliproxyapi-provider@main"
+    );
+    assert!(!source.npm);
+    for none in [
+        "npm:@router-for-me/pi-cliproxyapi-providers",
+        "npm:pi-cliproxyapi-provider",
+        "git:github.com/ngvoicu/pi-cached-compaction@main",
+        "git:https://github.com/ngvoicu/pi-cliproxyapi-provider",
+        "git:TOKEN@github.com/ngvoicu/pi-cliproxyapi-provider",
+        "git:github.com/../pi-cliproxyapi-provider",
+        "git:/opt/pi-cliproxyapi-provider",
+        "git:./pi-cliproxyapi-provider",
+        "git:../forks/pi-cliproxyapi-provider",
+        "git:github.com:ngvoicu/pi-cliproxyapi-provider",
+        "./pi-cliproxyapi-provider",
+        "/opt/pi-cliproxyapi-provider",
+    ] {
+        assert_eq!(found(json!([none])), None, "{none}");
+    }
+}
+
+/// Refused before anything is made, in words naming what is missing and what the human can
+/// do: where the provider's config is missing, where its package is, where `settings.json`
+/// does not name it, and where the proxy it is set for does not answer.
+#[test]
+fn a_pi_run_is_refused_before_a_window_where_the_provider_or_the_proxy_is_missing() {
+    let owner = Owner::new();
+    let refused = |owner: &Owner| {
+        owner
+            .pi("cliproxyapi/swe-2", hours(1))
+            .made_at(at(NOW))
+            .unwrap_err()
+            .to_string()
+    };
+    // The provider's own config is missing.
+    owner.cliproxyapi(&proxy_gone());
+    fs::remove_file(owner.path(".pi/agent/cliproxyapi.json")).unwrap();
+    let said = refused(&owner);
+    assert!(said.contains("`cliproxyapi`"), "{said}");
+    assert!(said.contains("cliproxyapi.json"), "{said}");
+    assert!(said.contains("--models pi="), "{said}");
+    assert!(!said_anywhere(&said) && !said.contains(PROXY_KEY), "{said}");
+    // The package Pi loads the provider from is missing.
+    owner.cliproxyapi(&proxy_gone());
+    fs::remove_dir_all(owner.path(".pi/agent/npm/node_modules")).unwrap();
+    let said = refused(&owner);
+    assert!(
+        said.contains("npm/node_modules/@router-for-me/pi-cliproxyapi-provider"),
+        "{said}"
+    );
+    assert!(!said_anywhere(&said) && !said.contains(PROXY_KEY), "{said}");
+    // `settings.json` does not name the package in `packages`: Pi would never load it.
+    owner.cliproxyapi(&proxy_gone());
+    write(
+        &owner.path(".pi/agent/settings.json"),
+        &json!({ "packages": ["npm:pi-web-access"] }).to_string(),
+    );
+    let said = refused(&owner);
+    assert!(said.contains("settings.json"), "{said}");
+    assert!(
+        said.contains("npm:@router-for-me/pi-cliproxyapi-provider"),
+        "{said}"
+    );
+    assert!(!said_anywhere(&said) && !said.contains(PROXY_KEY), "{said}");
+    // All of it is there, and the proxy does not answer.
+    owner.cliproxyapi(&proxy_gone());
+    let said = refused(&owner);
+    assert!(said.contains("does not answer"), "{said}");
+    assert!(said.contains("http://127.0.0.1:"), "{said}");
+    assert!(said.contains("--models pi="), "{said}");
+    assert!(!said_anywhere(&said) && !said.contains(PROXY_KEY), "{said}");
+    // No home was made anywhere along the refusals.
+    assert_eq!(owner.made(), 0);
+}
+
 #[test]
 fn a_login_that_is_too_short_is_refused_before_anything_is_made_and_one_that_fits_the_run_is_not() {
     let owner = Owner::new();
@@ -378,6 +939,102 @@ fn a_login_that_is_too_short_is_refused_before_anything_is_made_and_one_that_fit
     assert!(!said_anywhere(&said), "{said}");
     // Only the home that fit is on disk.
     assert_eq!(owner.made(), 1);
+}
+
+/// An eval's chief and staff may be on Pi models of two providers (T-785): the home holds the
+/// login of each, and a run is refused where one of them does not last it. A model that names no
+/// provider leaves it to Pi, which gets every login that is fit.
+#[test]
+fn a_pi_run_on_models_of_two_providers_needs_the_login_of_each_and_is_refused_where_one_ends_in_it()
+{
+    let owner = Owner::new();
+    write(&owner.path(".pi/agent/auth.json"), &auth(hours(2)));
+    let both = owner.pi_on(&["openrouter/deepseek/v4", "openai/gpt-6-luna"], hours(1));
+    let home = both.made_at(at(NOW)).unwrap();
+    let copied: Value =
+        serde_json::from_str(&fs::read_to_string(home.join("pi/agent/auth.json")).unwrap())
+            .unwrap();
+    let mut providers: Vec<&String> = copied.as_object().unwrap().keys().collect();
+    providers.sort();
+    assert_eq!(providers, ["openai", "openrouter"]);
+    assert!(!copied.to_string().contains(OTHER), "{copied}");
+    // The `openai` login lasts two hours: a run of two, and its margin, is refused for it.
+    let longer = owner.pi_on(&["openrouter/deepseek/v4", "openai/gpt-6-luna"], hours(2));
+    let said = longer.made_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("`openai` expires in 2 h"), "{said}");
+    assert!(!said.contains("`openrouter`"), "{said}");
+    // One model that names no provider: every fit login, the short one left out.
+    let any = owner.pi_on(&["openai/gpt-6-luna", "deepseek-v4"], hours(2));
+    let home = any.made_at(at(NOW)).unwrap();
+    let copied = fs::read_to_string(home.join("pi/agent/auth.json")).unwrap();
+    assert!(
+        copied.contains("openrouter") && !copied.contains(ACCESS),
+        "{copied}"
+    );
+}
+
+/// A home that keeps what it finds (an eval's, T-785) never fails the rig that ends on it: each
+/// change is kept once, however many rigs end (a long run restarts the app), with the owner's
+/// hashes before the run and after it, and none of what a file holds.
+#[test]
+fn a_home_that_keeps_what_it_finds_never_fails_the_rig_and_keeps_each_change_once_with_the_hashes()
+{
+    for which in ["pi", "codex", "devin", "muse"] {
+        let owner = Owner::new();
+        let isolation = isolation_of(&owner, which).keeping_what_it_finds();
+        assert_eq!(isolation.found(), Some(Found::default()), "{which}");
+        isolation.made_at(at(NOW)).unwrap();
+        assert!(isolation.finish().is_ok(), "{which}");
+        let found = isolation.found().unwrap();
+        assert!(found.changed.is_empty(), "{which}: {found:?}");
+        let checked = found.checked.unwrap();
+        assert!(
+            checked.contains("before the run and after it: ~/"),
+            "{which}: {checked}"
+        );
+        let file = watched(&owner, which).remove(0);
+        let shown = format!(
+            "~/{}",
+            file.strip_prefix(owner.home.path()).unwrap().display()
+        );
+        fs::write(&file, format!("{SENTINEL}-written-by-the-run")).unwrap();
+        for _ in 0..2 {
+            assert!(isolation.finish().is_ok(), "{which}: kept, not failed");
+        }
+        let found = isolation.found().unwrap();
+        assert_eq!(
+            found.changed,
+            [format!("{shown} is not as it was")],
+            "{which}"
+        );
+        let checked = found.checked.unwrap();
+        let (before, after) = checked
+            .strip_prefix(&format!(
+                "the owner's {} setup before the run: ",
+                proper(isolation.harness())
+            ))
+            .and_then(|hashes| hashes.split_once("; after it: "))
+            .unwrap_or_else(|| panic!("{which}: {checked}"));
+        let hash_of = |summary: &str| {
+            summary
+                .split(", ")
+                .find_map(|entry| entry.strip_prefix(&format!("{shown} ")))
+                .map(str::to_owned)
+        };
+        assert_ne!(hash_of(before), hash_of(after), "{which}: {checked}");
+        assert!(hash_of(before).is_some(), "{which}: {checked}");
+        assert!(
+            !checked.contains(SENTINEL) && !said_anywhere(&checked),
+            "{checked}"
+        );
+    }
+    // A home that does not keep them fails the rig, as it always has.
+    let owner = Owner::new();
+    let plain = owner.codex();
+    assert_eq!(plain.found(), None);
+    plain.made_at(at(NOW)).unwrap();
+    fs::write(owner.path(".codex/config.toml"), "written").unwrap();
+    assert!(plain.finish().is_err());
 }
 
 #[test]
@@ -450,7 +1107,7 @@ fn a_home_made_in_a_folder_reached_through_a_link_is_named_through_the_link() {
 }
 
 #[test]
-fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_reaches_the_other_programs_ones() {
+fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_none_of_the_other_programs_ones() {
     let owner = Owner::new();
     let isolation = owner.devin();
     let home = isolation.made_at(at(NOW)).unwrap();
@@ -476,18 +1133,10 @@ fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_reaches_the_othe
     assert!(home.join("config/devin/config.json").is_file());
     assert!(!home.join("data/devin/cli").exists());
     assert_eq!(mode(&home.join("data/devin/credentials.toml")), 0o600);
-    // What other programs keep there is reached through a link, as it was, and Devin's own
-    // folders are not: Devin writes in the run's.
-    let link = home.join("data/other-tool");
-    assert!(fs::symlink_metadata(&link)
-        .unwrap()
-        .file_type()
-        .is_symlink());
-    assert_eq!(
-        fs::read_link(&link).unwrap(),
-        owner.path(".local/share/other-tool")
-    );
-    assert!(fs::symlink_metadata(home.join("config/other-tool")).is_ok());
+    // What other programs keep there is not in the run's (T-1373): neither linked nor copied.
+    for below in ["data/other-tool", "config/other-tool"] {
+        assert!(fs::symlink_metadata(home.join(below)).is_err(), "{below}");
+    }
     write(
         &home.join("data/devin/cli/sessions.db"),
         "the run's session",
@@ -504,9 +1153,50 @@ fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_reaches_the_othe
         isolation.finish().is_ok(),
         "the run wrote in its own folders only"
     );
-    // Dropping the home takes the links away, and none of what they reach.
+    // Dropping the home takes none of the owner's.
     drop(isolation);
     assert!(owner.path(".local/share/other-tool/auth.json").is_file());
+}
+
+/// A link in the run's XDG folders to a folder of the owner's is a way for any program of the rig
+/// to write there: the owner's `~/.local/share/claude` (Claude Code's versions, which its updater
+/// writes) was the run's `$XDG_DATA_HOME/claude` in a rig that seated Devin and Claude (T-1373).
+/// A Devin home holds no link, and none of the owner's but Devin's own login and config and a
+/// copy of git's config, which a window's git reads below `XDG_CONFIG_HOME`.
+#[cfg(unix)]
+#[test]
+fn a_devin_home_holds_no_link_to_the_owners_folders_and_copies_gits_config_alone() {
+    let owner = Owner::new();
+    write(
+        &owner.path(".local/share/claude/versions/2.1.321"),
+        "the owner's Claude Code",
+    );
+    write(
+        &owner.path(".config/git/config"),
+        "[user]\n\tname = the owner\n",
+    );
+    let isolation = owner.devin();
+    let home = isolation.made_at(at(NOW)).unwrap();
+    let mut links = Vec::new();
+    let mut folders = vec![home.clone()];
+    while let Some(folder) = folders.pop() {
+        for entry in fs::read_dir(&folder).unwrap().flatten() {
+            let kind = entry.file_type().unwrap();
+            if kind.is_symlink() {
+                links.push(entry.path());
+            } else if kind.is_dir() {
+                folders.push(entry.path());
+            }
+        }
+    }
+    assert_eq!(links, Vec::<PathBuf>::new(), "links to the owner's folders");
+    assert!(fs::symlink_metadata(home.join("data/claude")).is_err());
+    let git = home.join("config/git/config");
+    assert!(fs::symlink_metadata(&git).unwrap().is_file());
+    assert_eq!(
+        fs::read_to_string(&git).unwrap(),
+        "[user]\n\tname = the owner\n"
+    );
 }
 
 /// T-1081: Devin's home moves the XDG folders, and Muse keeps its settings and sessions below
@@ -526,8 +1216,6 @@ fn a_devin_home_reaches_none_of_the_owners_muse() {
             "{below} is in the run's home"
         );
     }
-    // What another program keeps there is still reached.
-    assert!(fs::symlink_metadata(home.join("data/other-tool")).is_ok());
 }
 
 #[test]
@@ -934,6 +1622,61 @@ fn a_pi_entry_that_ended_on_a_test_machine_is_renewed_by_pi_once_and_the_run_goe
     isolation.finish().unwrap();
 }
 
+/// A run whose Pi windows are on two providers (an eval's chief and staff) is not renewed: the
+/// renewal runs Pi once on one model, for one login. Its refusal says so plainly, before Pi is
+/// run or anything is made (T-1373 item 6: no eval or live case seats two today).
+#[test]
+fn a_pi_run_on_two_providers_is_not_renewed_and_its_refusal_says_two_are_not_supported() {
+    let run = Renewing::new();
+    let models = ["openai/gpt-6-luna".to_owned(), "openrouter/x".to_owned()];
+    let mut isolation = Isolation::pi_on(
+        run.owner.home.path(),
+        &run.owner.path(".pi/agent"),
+        &models,
+        hours(1),
+    );
+    isolation.parent = run.owner.parent.path().to_path_buf();
+    let program = stand_in(run.tools.path(), &run.log(), &run.renews(), 0);
+    isolation.renewal = Some(pi::renewal(
+        zeewin2(),
+        run.owner.home.path(),
+        &run.owner.path(".pi/agent"),
+        &models[0],
+        move || Ok(program.clone()),
+    ));
+    let said = isolation.made_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("`openai` has expired"), "{said}");
+    assert!(
+        said.contains("two or more providers")
+            && said.contains("openai")
+            && said.contains("openrouter"),
+        "{said}"
+    );
+    assert_eq!(run.started(), None, "Pi was not run");
+    assert_eq!(run.owner.made(), 0);
+}
+
+/// The renewal runs the owner's Pi on the owner's own agent folder, before any home of the run's
+/// exists: Pi installs a package its settings name and has not got at its start unless it is told
+/// not to, and `--no-extensions` is applied after the packages are resolved (T-1378). It starts
+/// with `PI_OFFLINE=1`, as every Pi the kit starts does.
+#[test]
+fn the_renewal_runs_pi_with_pi_offline_so_it_installs_nothing_in_the_owners_folder() {
+    let run = Renewing::new();
+    let body = format!(
+        "printf 'PI_OFFLINE=%s\\n' \"$PI_OFFLINE\" >> '{}'\n{}",
+        run.log().display(),
+        run.renews()
+    );
+    let isolation = run.pi("openai/gpt-6-luna", Some(zeewin2()), &body, 0);
+    isolation.made_at(at(NOW)).unwrap();
+    let started = run.started().unwrap();
+    assert!(
+        started.iter().any(|line| line == "PI_OFFLINE=1"),
+        "the renewal's Pi was started with: {started:?}"
+    );
+}
+
 #[test]
 fn a_renewal_that_fails_refuses_the_pi_run_in_words_that_say_so_and_makes_no_home() {
     let run = Renewing::new();
@@ -959,20 +1702,38 @@ fn a_renewal_that_fails_refuses_the_pi_run_in_words_that_say_so_and_makes_no_hom
 #[test]
 fn a_renewal_that_moves_nothing_refuses_the_pi_run_and_says_when_pi_renews_an_entry() {
     let run = Renewing::new();
-    // An hour left of the hour and a half the run needs: Pi renews an entry once it has ended.
+    // Four minutes left of the run's length and its margin: Pi is run, as it renews an entry with
+    // five minutes left, and the stand-in moves nothing.
     write(
         &run.owner.path(".pi/agent/auth.json"),
-        &auth_ending(at(NOW + 3600), ACCESS),
+        &auth_ending(at(NOW + 4 * 60), ACCESS),
     );
     let isolation = run.pi("openai/gpt-6-luna", Some(zeewin2()), "", 0);
     let said = isolation.made_at(at(NOW)).unwrap_err().to_string();
-    assert!(said.contains("`openai` expires in 1 h"), "{said}");
+    assert!(said.contains("`openai` expires in 4 min"), "{said}");
     assert!(said.contains("the renewal ran and failed"), "{said}");
     assert!(
-        said.contains("the login still ends 2027-01-15T09:00:00Z (in 1 h): Pi renews a token only once the entry has ended"),
+        said.contains("the login still ends 2027-01-15T08:04:00Z (in 4 min): Pi renews a token only once the entry has ended"),
         "{said}"
     );
     assert!(!said_anywhere(&said), "{said}");
+    assert_eq!(run.owner.made(), 0);
+}
+
+/// Pi renews an entry when five minutes of it are left or it has ended, so running it on an entry
+/// that has more is a call of the model for nothing (T-1136).
+#[test]
+fn an_entry_with_more_than_five_minutes_left_is_not_renewed_by_running_pi() {
+    let run = Renewing::new();
+    write(
+        &run.owner.path(".pi/agent/auth.json"),
+        &auth_ending(at(NOW + 29 * 60), ACCESS),
+    );
+    let isolation = run.pi("openai/gpt-6-luna", Some(zeewin2()), &run.renews(), 0);
+    let said = isolation.made_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("`openai` expires in 29 min"), "{said}");
+    assert!(!said.contains("the renewal ran and failed"), "{said}");
+    assert_eq!(run.started(), None, "Pi was not run");
     assert_eq!(run.owner.made(), 0);
 }
 
@@ -1047,11 +1808,12 @@ fn off_a_test_machine_an_ended_pi_entry_is_not_renewed_but_refused_as_it_always_
     assert_eq!(run.owner.made(), 0);
     // A home made for the machine renews only where the runner said it is on a test machine.
     let home = run.owner.home.path();
-    let on = |machine| Isolation::of_machine_on(machine, Harness::Pi, home, hours(1));
+    let models = ["openai/gpt-6-luna".to_owned()];
+    let on = |machine| Isolation::of_machine_on(machine, Harness::Pi, home, hours(1), &models);
     assert!(on(None).unwrap().unwrap().renewal.is_none());
     assert!(on(Some(zeewin2())).unwrap().unwrap().renewal.is_some());
     // Codex is not covered by the rule: its logins are not renewed anywhere.
-    let codex = Isolation::of_machine_on(Some(zeewin2()), Harness::Codex, home, hours(1));
+    let codex = Isolation::of_machine_on(Some(zeewin2()), Harness::Codex, home, hours(1), &[]);
     assert!(codex.unwrap().unwrap().renewal.is_none());
 }
 

@@ -1,14 +1,16 @@
 //! What the windows left behind when the rig ended: the processes the stand-ins noted
 //! (`pids.jsonl`) that are still there once the pane host is gone.
 //!
-//! A number is no process. A stand-in noted its own, and a process it left is still the
-//! one with that number; but a window that ended before the rig did (a chief the case
-//! replaced, a worker that finished) gave its number back, and a rig that runs among a
-//! gate's (a dozen at once, each starting programs by the hundred) can find another
-//! program holding it by the time it looks. A program that began after the last note was
-//! written was never a window's: every window's began before its own note, and the last
-//! note is the latest of them.
+//! A number is no process. A stand-in noted its own, and when its process began, in the
+//! words the system says it in (`began.jsonl`): a window that ended gave its number
+//! back, and a rig that runs among a gate's (a dozen at once, each starting programs by
+//! the hundred) can find another program holding it by the time it looks — one that
+//! began at another time than the note says the window's did, which a run of minutes is
+//! old enough to meet (T-1077 found three of nine runs failed by one). Where no begin
+//! was noted, the file's time is the measure: a program that began after the last note
+//! was written was never a window's, every window's began before its own note.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
@@ -30,6 +32,7 @@ const SLACK: Duration = Duration::from_secs(2);
 /// are all gone.
 pub(super) fn left_behind(pids_file: &Path, within: Duration, program: &str) -> Option<String> {
     let noted = fs::read_to_string(pids_file).unwrap_or_default();
+    let began = began_beside(pids_file);
     for pid in noted
         .lines()
         .filter_map(|line| line.trim().parse::<u32>().ok())
@@ -37,7 +40,7 @@ pub(super) fn left_behind(pids_file: &Path, within: Duration, program: &str) -> 
         if wait::until(within, || !process::is_alive(pid)) {
             continue;
         }
-        if began_after(pid, pids_file) {
+        if another_holds(pid, &began, pids_file) {
             continue;
         }
         if runs_another(pid, program) {
@@ -95,6 +98,56 @@ fn command(pid: u32) -> Option<String> {
         .into_iter()
         .find(|running| running.identity.pid == pid)
         .map(|running| running.command)
+}
+
+/// When the process `pid` began, in the words the leftover check holds a noted
+/// number to: the same for the same process, others for one that took its number
+/// after it; none where it is gone. Read in this process from the system's own record
+/// of the process (macOS's `proc_pidinfo`, Windows' `GetProcessTimes`, `ps` on Linux),
+/// with no program started on the Mac or on Windows: a stand-in asks it of itself as its
+/// window opens, before the window draws anything, and a PowerShell asked it in 11 to
+/// 17 s on GitHub's Windows runner, which held every window of a rig that long (T-1358).
+pub fn start_of(pid: u32) -> Option<String> {
+    use crate::live::members::{Machine, ThisMachine};
+    let identity = ThisMachine.identity(pid).ok()??;
+    Some(identity.started.to_string())
+}
+
+/// Whether the process `pid` is another's than the window the note is of. Where the
+/// note says when the window's began, one that began at another time is another
+/// program's — the window's ended, and the system gave its number to it. Where none
+/// was noted, one that began after the last note was written is no window's.
+fn another_holds(pid: u32, began: &HashMap<u32, Vec<String>>, noted: &Path) -> bool {
+    let Some(begins) = began.get(&pid).filter(|begins| !begins.is_empty()) else {
+        return began_after(pid, noted);
+    };
+    match start_of(pid) {
+        Some(this) => !begins.contains(&this),
+        // The system will not say when it began: gone by now it is none of the
+        // windows'; still there but not to be told from, it is held to being one.
+        None => !process::is_alive(pid),
+    }
+}
+
+/// When each noted process began, by its number, as `began.jsonl` beside `pids_file`
+/// says it: a line for each a stand-in wrote, `pid` and the words the system said its
+/// start in ([`start_of`]), the same words it is looked at in here.
+fn began_beside(pids_file: &Path) -> HashMap<u32, Vec<String>> {
+    let mut began: HashMap<u32, Vec<String>> = HashMap::new();
+    let file = pids_file.with_file_name("began.jsonl");
+    for line in fs::read_to_string(file).unwrap_or_default().lines() {
+        let Some((pid, start)) = line.split_once('\t') else {
+            continue;
+        };
+        let Ok(pid) = pid.trim().parse::<u32>() else {
+            continue;
+        };
+        if start.is_empty() {
+            continue;
+        }
+        began.entry(pid).or_default().push(start.to_owned());
+    }
+    began
 }
 
 /// Whether the process `pid` began after the file `noted` was last written: one that did

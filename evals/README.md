@@ -40,15 +40,35 @@ with a refresh token that no longer works. Using Claude Code now does not refres
 has hours left: run again after the owner's own Claude Code has refreshed it, or make the run
 shorter (`--hours`, `--timeout-min`, `--repeat`); nothing refreshes it by hand, and nothing
 writes the Keychain). A token that ends in a run all the same is refreshed by Claude Code in the
-copy; the run goes on, and its report says the owner's login may be stale (and a Keychain item
-`Claude Code-credentials-<hash>` it left is named for the owner to delete; the kit never deletes
-it). The run says where its Claude records are (`claude config: …`); when the run's home is kept
+copy; the run goes on, and its report says the owner's login may be stale. A Keychain item
+`Claude Code-credentials-<hash>` that its Claude Code made for the run's folder is named for the
+owner to delete, and the kit never deletes it (Claude Code makes one when it connects to an MCP
+server that asks for OAuth, and carries the folder's login into it: the windows start with
+`--strict-mcp-config` so that it has none to connect to, `live keychain` shows it on the
+machine's Claude Code; an item another process made is a note of the run, and the guard of the
+launchers fails the rig for it). The run says where its Claude records are (`claude config: …`); when the run's home is kept
 (the report's `home`, the rig's `CONSENSFLOW_HOME`, is `<root>/consensflow`) its conversations are
 copied beside it, into `<root>/home/.claude/projects` and `sessions` (never the login, nor the
 `.key` files of a session's socket); `cargo xtask watch --tokens --claude-config DIR` reads them in
 either, the live throwaway or the kept copy. The
 dry runs, on the stand-in's models, start no real Claude Code and have no such folder. A test
 holds `cf-evals` to never setting or clearing `CLAUDE_CONFIG_DIR` (`tests/claude_config.rs`).
+
+**Nor do Codex, Pi, Devin or Muse Code run on the owner's logins** (T-785, the class T-724
+closed for the live suites). Every harness with a real window in the run (a model that is not
+the stand-in's) runs on the kit's home of the run's own (`cf_e2e::live::isolation`): `CODEX_HOME`,
+`PI_CODING_AGENT_DIR` or Devin's XDG folders, set by the rig over everything else, holding a copy
+of the login and nothing else of the owner's. Pi is given only the entries of its windows'
+providers (the chief's model and the staff's) that last the run's planned length and half an hour
+more, never an expired one; a login that does not is refused, in words, before the rig starts. At
+the end each home compares the owner's files with their hashes from before the run. What it finds
+does not fail the rig, which would cost the run its report: the report keeps the owner's hashes
+before and after (in its `log`, a line for each harness), fails the check "the owner's setups and
+logins of the run's harnesses were left as they were" where a file changed or a copy of a login was
+written again, and keeps everything else it measured (a long run keeps them as `login` and
+`homes`). `HOME` stays the owner's: the run's folders are below it, and no harness reads its login
+by it. `tests/cli/live_homes.rs` (cf-e2e) holds the evals to setting no variable a harness reads its
+login by.
 
 A run against the stand-in agent, which spends nothing, holds that a run gets to its
 end and says and keeps what it always does (the daemon it ran on, the verdict, a

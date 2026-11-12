@@ -1,0 +1,189 @@
+# The evals run every real harness on a home of the run's own (T-785, T-724's "Findings to file" 4).
+# `cf-evals/src/run/machine.rs` built its installs bare, so an eval's Pi, Codex and Devin windows
+# ran for hours on the owner's own login folders, and its rig gave every window the owner's
+# `CODEX_HOME`. Now each harness with a real window gets the kit's home (`live::isolation`), Pi's
+# with the logins of the run's own Pi models for the planned length and the evals' 30 minutes (the
+# kit's own margin is 10 since T-1067, so an eval asks it for the rest, T-1358), and
+# what the homes find at the end (the owner's hashes before and after, a file changed, a login
+# written again) is kept for the eval's report instead of failing a rig of hours at its end. The
+# guard (`tests/cli/live_homes.rs`) covers the evals now. One plant takes one rule out; a test of
+# it fails. Every name holds `evals isolation`.
+
+[run]
+ei-evals-machine = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "run::machine"]
+ei-evals-login = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "run::login"]
+ei-evals-report = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "long_run::report"]
+ei-kit-isolation = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation"]
+ei-guard = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "live_homes"]
+
+[[plant]]
+name = "evals isolation: an eval's real windows run on the owner's login folders"
+meant = "an_eval_machines_real_windows_run_on_the_kits_homes_and_its_rig_names_no_codex_home_of_the_owners"
+runs = ["ei-evals-machine"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/machine.rs"
+find = '''    if let Some(isolation) = isolation(harness, install.home(), seated)? {'''
+replace = '''    if let Some(isolation) = isolation(harness, install.home(), seated)?.filter(|_| false) {'''
+
+[[plant]]
+name = "evals isolation: the eval's rig gives every window the owner's CODEX_HOME again"
+meant = "no_live_source_makes_the_home_of_a_real_harness_by_hand"
+runs = ["ei-guard"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/machine.rs"
+find = '''            .var("HOME", &home)
+'''
+replace = '''            .var("HOME", &home)
+            .var(
+                "CODEX_HOME",
+                codex_home(&self.home).to_string_lossy().into_owned(),
+            )
+'''
+
+[[plant]]
+name = "evals isolation: a harness whose windows are all the stand-in gets a home with a login to copy"
+meant = "an_eval_machines_real_windows_run_on_the_kits_homes_and_its_rig_names_no_codex_home_of_the_owners"
+runs = ["ei-evals-machine"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/machine.rs"
+find = '''    if !seated.real(harness) {'''
+replace = '''    if !seated.real(harness) && seated.planned.is_zero() {'''
+
+[[plant]]
+name = "evals isolation: an eval's home fails the rig at the end of a run of hours"
+meant = "an_eval_machines_real_windows_run_on_the_kits_homes_and_its_rig_names_no_codex_home_of_the_owners"
+runs = ["ei-evals-machine"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/machine.rs"
+find = '''    Ok(made.map(Isolation::keeping_what_it_finds))'''
+replace = '''    Ok(made)'''
+
+[[plant]]
+name = "evals isolation: Pi's login must last the run and the margin twice over"
+meant = "an_eval_pi_home_holds_the_login_its_models_need_for_the_planned_run_and_its_half_hour"
+runs = ["ei-evals-machine"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/machine.rs"
+find = '''    let run = super::login::lasting(seated.planned).saturating_sub(cf_e2e::live::isolation::MARGIN);'''
+replace = '''    let run = super::login::lasting(seated.planned);'''
+
+[[plant]]
+name = "evals isolation: Pi's home is given none of the eval's Pi models"
+meant = "an_eval_pi_home_holds_the_login_its_models_need_for_the_planned_run_and_its_half_hour"
+runs = ["ei-evals-machine"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/machine.rs"
+find = '''&seated.models(Harness::Pi))?;'''
+replace = '''&Vec::new())?;'''
+
+[[plant]]
+name = "evals isolation: a stand-in window's model counts as a real one"
+meant = "every_harness_of_a_run_is_real_by_the_models_of_its_windows_and_pis_are_each_named_once"
+runs = ["ei-evals-login"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/login.rs"
+find = '''            if *held == harness && !stand_in && !models.contains(model) {'''
+replace = '''            if *held == harness && !models.contains(model) {'''
+
+[[plant]]
+name = "evals isolation: what the kit's homes found is not in the report"
+meant = "a_change_to_the_owners_login_in_a_run_on_the_kits_home_fails_the_report_and_not_the_rig"
+runs = ["ei-evals-login"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/machine.rs"
+find = '''                    .filter(|found| !found.changed.is_empty())'''
+replace = '''                    .filter(|_| false)'''
+
+[[plant]]
+name = "evals isolation: the owner's hashes are said and not kept in the report's log"
+meant = "a_change_to_the_owners_login_in_a_run_on_the_kits_home_fails_the_report_and_not_the_rig"
+runs = ["ei-evals-login"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/login.rs"
+find = '''        floor.note(checked)?;'''
+replace = '''        floor.say(checked)?;'''
+
+[[plant]]
+name = "evals isolation: what a home found is said and not kept in the report's log"
+meant = "a_change_to_the_owners_login_in_a_run_on_the_kits_home_fails_the_report_and_not_the_rig"
+runs = ["ei-evals-login"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/login.rs"
+find = '''        floor.note(format!('''
+replace = '''        floor.say(format!('''
+
+[[plant]]
+name = "evals isolation: the long run's report drops the owner's hashes"
+meant = "a_run_that_changed_the_owners_setup_of_a_harness_or_refreshed_its_login_fails_with_what_it_did_and_keeps_its_report"
+runs = ["ei-evals-report"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/report.rs"
+find = '''            "homes": self.homes,
+'''
+replace = ''
+
+[[plant]]
+name = "evals isolation: a home that keeps what it finds still fails the rig"
+meant = "a_home_that_keeps_what_it_finds_never_fails_the_rig_and_keeps_each_change_once_with_the_hashes"
+runs = ["ei-kit-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''        if self.kept.is_some() {
+            return Ok(());
+        }
+'''
+replace = ''
+
+[[plant]]
+name = "evals isolation: a change is kept again at every rig's end"
+meant = "a_home_that_keeps_what_it_finds_never_fails_the_rig_and_keeps_each_change_once_with_the_hashes"
+runs = ["ei-kit-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                if !kept.changed.contains(change) {
+                    kept.changed.push(change.clone());
+                }'''
+replace = '''                kept.changed.push(change.clone());'''
+
+[[plant]]
+name = "evals isolation: the hashes say the owner's setup after the run alone"
+meant = "a_home_that_keeps_what_it_finds_never_fails_the_rig_and_keeps_each_change_once_with_the_hashes"
+runs = ["ei-kit-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''        Some(if before == after {'''
+replace = '''        Some(if !before.is_empty() {'''
+
+[[plant]]
+name = "evals isolation: Pi's home on two providers holds the first one's login alone"
+meant = "a_pi_run_on_models_of_two_providers_needs_the_login_of_each_and_is_refused_where_one_ends_in_it"
+runs = ["ei-kit-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                (Some(provider), Some(held)) if !held.contains(&provider) => held.push(provider),'''
+replace = '''                (Some(provider), Some(held)) if held.is_empty() => held.push(provider),'''
+
+[[plant]]
+name = "evals isolation: an eval's Pi home is asked for the kit's margin alone"
+meant = "an_eval_pi_home_holds_the_login_its_models_need_for_the_planned_run_and_its_half_hour"
+runs = ["ei-evals-machine"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/machine.rs"
+find = '''    let run = super::login::lasting(seated.planned).saturating_sub(cf_e2e::live::isolation::MARGIN);'''
+replace = '''    let run = seated.planned;'''

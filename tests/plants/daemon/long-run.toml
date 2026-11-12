@@ -45,6 +45,10 @@ fake-devin-store = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", 
 # The rig's stranger, which runs beside every window: its own tests, and a real rig's close.
 e2e-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger"]
 e2e-lib-process-shell = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell::"]
+# The rig's look at what the windows left behind once the pane host is gone.
+e2e-lib-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::left::"]
+# What the stand-in writes a window's process down as.
+fake-agent-records = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "records::tests::"]
 rig-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stranger::"]
 # The rig's last word, once it has closed: a real daemon and pane host.
 e2e-rig-last-exits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "last_exits"]
@@ -4597,3 +4601,44 @@ runs = ["evals-lib-long-run"]
 file = "crates/cf-evals/src/long_run/ask.rs"
 find = "pub const MOST_SILENT_TURN: Duration = Duration::from_secs(80);"
 replace = "pub const MOST_SILENT_TURN: Duration = Duration::from_secs(900);"
+
+# T-1077 (2026-11-02): three of nine 20-minute runs failed the rig's close on a number a
+# window had given back — `caffeinate` children of other sessions held them, 37–44 s old.
+# A number is held to the process it is: the stand-in writes down when its process began
+# (`began.jsonl`), and what the look finds still there began at another time it is no
+# window's.
+
+[[plant]]
+name = "long run: a number still held is a window's whoever holds it"
+meant = "a_program_that_took_an_ended_windows_number_is_none_of_the_windows"
+runs = ["e2e-lib-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = "        if another_holds(pid, &began, pids_file) {"
+replace = "        if began_after(pid, pids_file) {"
+
+[[plant]]
+name = "long run: a window writes nothing of when its process began"
+meant = "the_processes_a_window_writes_down_go_to_the_files_beside_the_home_in_order"
+runs = ["fake-agent-records"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/records.rs"
+find = "    if let Some(began) = began.filter(|began| !began.is_empty()) {"
+replace = "    if let Some(began) = began.filter(|_| false) {"
+
+# T-1358: the stand-in reads its own start as its window opens, so the read starts no program:
+# a PowerShell held every window of a rig 11 to 17 s on GitHub's Windows runner.
+
+[[plant]]
+name = "long run: a window's start is read by a program it starts"
+meant = "a_processes_start_is_read_at_once_and_is_the_same_each_time"
+runs = ["e2e-lib-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = '''    let identity = ThisMachine.identity(pid).ok()??;
+    Some(identity.started.to_string())'''
+replace = '''    let _ = ThisMachine.identity(pid);
+    process::started(pid)'''

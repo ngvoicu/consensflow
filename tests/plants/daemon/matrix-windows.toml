@@ -1,0 +1,486 @@
+# Every harness can sit in a seat of one rig on zeewin2, isolated (T-1136, the live matrix's
+# prerequisites); and Pi can sit in one on the owner's Mac through the provider its Pi has,
+# CLIProxyAPI (T-1172). Rules, each held by tests a Mac runs: a test machine whose Pi has no
+# OpenRouter login runs Pi on the model the kit names for that machine, says which, and chooses
+# nothing else, and the owner's Mac whose Pi has only the local proxy's `cliproxyapi` login runs
+# Pi on `cliproxyapi/swe-2` at `medium` (T-1358), says which, and chooses nothing
+# else (`live/agents.rs`); a run on a provider the agent folder gives Pi carries its files, its
+# package, a `settings.json` that names it and its login with no refresh token, is refused before
+# a window where the provider or the proxy is missing, and holds every one of the provider's
+# owner files not to change (`live/isolation.rs`, `live/isolation/pi.rs`); a person's Pi window keeps
+# the proxy's variables, which only the kit's rigs leave out (`cf-harness`' `shared/window_args.rs`,
+# T-1358); no two harness homes of
+# one rig set one variable to two values (`rig/homes.rs`), the five harnesses' homes together
+# among them (`live/isolation/windows.rs`); the shell of every harness on Windows is named with
+# where it is known from (`live/members/descent/tests.rs`); and a seat's reply is the word and
+# the command's output (`tests/live_seat.rs`). One plant takes one rule out; a test of it fails.
+# Every name holds `matrix`.
+
+[run]
+agents-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::agents::"]
+homes-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::homes::"]
+isolation-windows-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation::windows::"]
+descent-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::"]
+seat-offline = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_seat"]
+login-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::login::"]
+pi-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation::tests::"]
+window-golden = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::window_args::tests::every_window_opens_and_resumes_as_node_built_it"]
+launch-lib = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::launch::tests::a_members_pi_window_is_the_adapters_whole"]
+
+# ---------------------------------------------------------------------------- Pi on a test machine
+
+[[plant]]
+name = "matrix: a Pi model the run named is replaced on a test machine"
+meant = "pi_is_never_given_another_model_than_the_cheap_one_or_the_named_one_by_chance"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        if self.named.contains(&Harness::Pi) || providers.iter().any(|name| name == cheap_provider)'''
+replace = '''        if providers.iter().any(|name| name == cheap_provider)'''
+
+[[plant]]
+name = "matrix: an OpenRouter login on a test machine is passed over for the machine's model"
+meant = "pi_is_never_given_another_model_than_the_cheap_one_or_the_named_one_by_chance"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = ''' || providers.iter().any(|name| name == cheap_provider)'''
+replace = ''''''
+
+[[plant]]
+name = "matrix: a machine the kit has no entry for gets a test machine's Pi model"
+meant = "pi_is_never_given_another_model_than_the_cheap_one_or_the_named_one_by_chance"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''            row.machine == machine && providers.iter().any(|name| name == row.provider)'''
+replace = '''            providers.iter().any(|name| name == row.provider)'''
+
+[[plant]]
+name = "matrix: any login on a test machine gets its Pi model, whatever the login is"
+meant = "pi_is_never_given_another_model_than_the_cheap_one_or_the_named_one_by_chance"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''            row.machine == machine && providers.iter().any(|name| name == row.provider)'''
+replace = '''            row.machine == machine'''
+
+[[plant]]
+name = "matrix: the owner's Mac gets a test machine's Pi model"
+meant = "pi_is_never_given_another_model_than_the_cheap_one_or_the_named_one_by_chance"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        let Some(providers) = pi_providers else {
+            return self;
+        };'''
+replace = '''        let machine = machine.or(Some("zeewin2"));
+        let Some(providers) = pi_providers else {
+            return self;
+        };'''
+
+[[plant]]
+name = "matrix: the run does not say which model Pi runs on, or why"
+meant = "a_test_machine_whose_pi_has_no_openrouter_login_runs_pi_on_the_model_the_kit_names_for_it_and_says_so"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        self.notes.push(format!('''
+replace = '''        let _ = (format!('''
+
+[[plant]]
+name = "matrix: the note on Pi's model leaves out that it spends no usage credits"
+meant = "a_test_machine_whose_pi_has_no_openrouter_login_runs_pi_on_the_model_the_kit_names_for_it_and_says_so"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        machine: Some("zeewin2"),
+        provider: "openai",
+        model: "openai/gpt-5.6-luna",
+        effort: None,
+        cheap: "a ChatGPT subscription's allowance, no usage credits",'''
+replace = '''        machine: Some("zeewin2"),
+        provider: "openai",
+        model: "openai/gpt-5.6-luna",
+        effort: None,
+        cheap: "a ChatGPT subscription's allowance",'''
+
+# ----------------------------------------------------------- Pi on the owner's Mac (T-1172)
+
+[[plant]]
+name = "matrix: the owner's Mac's Pi is run at no effort"
+meant = "the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        model: "cliproxyapi/swe-2",
+        effort: Some("medium"),'''
+replace = '''        model: "cliproxyapi/swe-2",
+        effort: None,'''
+
+[[plant]]
+name = "matrix: the owner's Mac's Pi runs on a model that is not swe-2"
+meant = "the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        model: "cliproxyapi/swe-2",'''
+replace = '''        model: "cliproxyapi/swe-1",'''
+
+[[plant]]
+name = "matrix: the owner's Mac is taken for a machine the kit has no row for"
+meant = "the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        machine: None,
+        provider: "cliproxyapi",'''
+replace = '''        machine: Some("elsewhere"),
+        provider: "cliproxyapi",'''
+
+[[plant]]
+name = "matrix: the note on the Mac's Pi model leaves out that the proxy's pool is free"
+meant = "the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so"
+runs = ["agents-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''        cheap: "the person's own CLIProxyAPI proxy's swe-2, a free pool, at the lowest effort Pi lists for it",'''
+replace = '''        cheap: "the person's own CLIProxyAPI proxy's swe-2, at the lowest effort Pi lists for it",'''
+
+[[plant]]
+name = "matrix: a provider's package is named but never copied"
+meant = "a_pi_run_on_a_provider_the_agent_folder_gives_pi_carries_its_files_and_its_login"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''        placed.push(Placed::Tree {
+            from: from.join(&source.folder),
+            to: to.join(&source.folder),
+        });'''
+replace = '''        let _ = (from.join(&source.folder), to.join(&source.folder));'''
+
+[[plant]]
+name = "matrix: the run's settings.json names every package the owner's does"
+meant = "a_pi_run_on_a_provider_the_agent_folder_gives_pi_carries_its_files_and_its_login"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            bytes: serde_json::json!({ "packages": [source.entry] })'''
+replace = '''            bytes: serde_json::json!({ "packages": ["npm:pi-web-access", source.entry] })'''
+
+[[plant]]
+name = "matrix: the provider's files are not hashed"
+meant = "a_pi_run_on_a_provider_the_agent_folder_gives_pi_carries_its_files_and_its_login"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            watched.extend(provider.watched(owner));'''
+replace = '''            let _ = provider.watched(owner);'''
+
+[[plant]]
+name = "matrix: a provider's config that is missing is no refusal"
+meant = "a_pi_run_is_refused_before_a_window_where_the_provider_or_the_proxy_is_missing"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            bytes: fs::read(from.join(provider.config))
+                .map_err(|_| missing(&format!("{} is missing", provider.config)))?,'''
+replace = '''            bytes: fs::read(from.join(provider.config)).unwrap_or_default(),'''
+
+[[plant]]
+name = "matrix: a settings.json that names no package is let through"
+meant = "a_pi_run_is_refused_before_a_window_where_the_provider_or_the_proxy_is_missing"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''        let Some(source) = provider.source(from) else {'''
+replace = '''        let Some(source) = provider.source(from).or_else(|| provider.source_in(&[Value::from("npm:@router-for-me/pi-cliproxyapi-provider")])) else {'''
+
+[[plant]]
+name = "matrix: the proxy is never asked whether it answers"
+meant = "a_pi_run_is_refused_before_a_window_where_the_provider_or_the_proxy_is_missing"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''        pi::answers(&base).map_err(|why| {
+            Error::Daemon(format!(
+                "Pi's `{}` provider is set up, but the proxy it is set for does not answer at {} ({why}): start it (the local CLIProxyAPI is a Homebrew install's service), or run on a model of another provider (--models pi=…)",
+                provider.name,
+                pi::shown_url(&base),
+            ))
+        })?;'''
+replace = '''        let _ = pi::answers(&base);'''
+
+[[plant]]
+name = "matrix: a person's Pi window drops the proxy's variables"
+meant = "a_members_pi_window_is_the_adapters_whole_with_the_users_own_append_file_before_its_role"
+runs = ["launch-lib", "window-golden"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/window_args.rs"
+find = '''                // as without every variable of the owner's its rig does not name.
+                drop_env: &[],'''
+replace = '''                // as without every variable of the owner's its rig does not name.
+                drop_env: &["CLIPROXYAPI_BASE_URL", "CLIPROXYAPI_API_KEY"],'''
+
+# ---------------------------------------------------------------------------- no clobbering
+
+[[plant]]
+name = "matrix: two homes that set one variable to two values are no refusal"
+meant = "two_homes_that_set_one_variable_to_two_values_are_a_refusal_naming_both"
+runs = ["homes-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/homes.rs"
+find = '''                .find(|(held, _, was)| *held == key(name) && was != value)'''
+replace = '''                .find(|(held, _, was)| *held == key(name) && was != value && false)'''
+
+[[plant]]
+name = "matrix: a value two homes share is a clash"
+meant = "the_same_value_twice_and_different_variables_are_no_clash"
+runs = ["homes-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/homes.rs"
+find = '''                .find(|(held, _, was)| *held == key(name) && was != value)'''
+replace = '''                .find(|(held, _, _)| *held == key(name))'''
+
+[[plant]]
+name = "matrix: a rig starts though two of its homes clash"
+meant = "a_rig_whose_homes_clash_does_not_start_and_one_whose_homes_do_not_does"
+runs = ["homes-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/homes.rs"
+find = '''        if let Some(said) = clashing(&each, cfg!(windows)) {'''
+replace = '''        if let Some(said) = clashing(&each, cfg!(windows)).filter(|_| false) {'''
+
+[[plant]]
+name = "matrix: a Mac reads a variable's name in either case"
+meant = "windows_reads_a_variable_in_either_case_and_a_mac_does_not"
+runs = ["homes-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/homes.rs"
+find = '''        if case_insensitive {
+            name.to_ascii_uppercase()'''
+replace = '''        if true {
+            name.to_ascii_uppercase()'''
+
+[[plant]]
+name = "matrix: Windows reads a variable's name in one case alone"
+meant = "windows_reads_a_variable_in_either_case_and_a_mac_does_not"
+runs = ["homes-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/homes.rs"
+find = '''        if case_insensitive {
+            name.to_ascii_uppercase()'''
+replace = '''        if false {
+            name.to_ascii_uppercase()'''
+
+[[plant]]
+name = "matrix: Pi's home also moves the whole rig's USERPROFILE"
+meant = "the_homes_of_all_five_harnesses_on_one_windows_rig_set_no_variable_twice"
+runs = ["isolation-windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            vars: vec![("PI_CODING_AGENT_DIR", "pi/agent".into())],'''
+replace = '''            vars: vec![
+                ("PI_CODING_AGENT_DIR", "pi/agent".into()),
+                ("USERPROFILE", "pi".into()),
+            ],'''
+
+[[plant]]
+name = "matrix: Codex's home also moves the whole rig's APPDATA"
+meant = "the_homes_of_all_five_harnesses_on_one_windows_rig_set_no_variable_twice"
+runs = ["isolation-windows-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''            vars: vec![("CODEX_HOME", "codex".into())],'''
+replace = '''            vars: vec![
+                ("CODEX_HOME", "codex".into()),
+                ("APPDATA", "codex".into()),
+            ],'''
+
+# ---------------------------------------------------------------------------- shells, seats
+
+[[plant]]
+name = "matrix: the guard knows no shell for Pi on Windows"
+meant = "every_harness_has_a_shell_on_windows_the_guard_knows_and_says_where_from"
+runs = ["descent-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent/tests.rs"
+find = '''    (
+        "pi",
+        "Git Bash",'''
+replace = '''    (
+        "pi-unknown",
+        "Git Bash",'''
+
+[[plant]]
+name = "matrix: a seat that replied the word alone did the task"
+meant = "a_reply_that_holds_the_word_and_the_output_is_a_seat_that_did_the_task"
+runs = ["seat-offline"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_seat.rs"
+find = '''    body.contains(word) && body.contains(OUTPUT)'''
+replace = '''    body.contains(word)'''
+
+[[plant]]
+name = "matrix: the seat's command has a quote in it, which a shell reads its own way"
+meant = "the_command_is_one_every_shell_of_the_five_runs_as_written"
+runs = ["seat-offline"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_seat.rs"
+find = '''const COMMAND: &str = "node -p 40+2";'''
+replace = '''const COMMAND: &str = "node -p '40+2'";'''
+
+# ---------------------------------------------------------------------------- the logins' renewal (item 5)
+
+[[plant]]
+name = "matrix: Claude Code is run on a login that has more than five minutes left"
+meant = "a_login_with_more_than_five_minutes_left_is_not_renewed_by_running_claude_code"
+runs = ["login-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            remaining(expires) < left && remaining(expires) <= renew::RENEWS_WITHIN'''
+replace = '''            remaining(expires) < left'''
+
+[[plant]]
+name = "matrix: Pi is run on an entry that has more than five minutes left"
+meant = "an_entry_with_more_than_five_minutes_left_is_not_renewed_by_running_pi"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''    has_refresh && near && matches!'''
+replace = '''    has_refresh && matches!'''
+
+[[plant]]
+name = "matrix: the renewal leaves Claude Code's record of its own folder in the owner's projects"
+meant = "a_renewal_takes_away_the_record_claude_code_kept_of_its_own_folder_and_no_other"
+runs = ["login-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''    forget(records, folder.path());'''
+replace = ''''''
+
+[[plant]]
+name = "matrix: the renewal takes away every record of a run in the owner's projects"
+meant = "a_renewal_takes_away_the_record_claude_code_kept_of_its_own_folder_and_no_other"
+runs = ["login-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''            if !entry.file_name().to_string_lossy().ends_with(name) {'''
+replace = '''            if entry.file_name().to_string_lossy().is_empty() {'''
+
+[[plant]]
+name = "matrix: Claude Code's renewal names no record to take away"
+meant = "a_renewal_takes_away_the_record_claude_code_kept_of_its_own_folder_and_no_other"
+runs = ["login-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''                &[projects.as_path()],'''
+replace = '''                &[],'''
+
+# ---------------------------------------------------------------------------- the package's source (T-1358)
+# Pi loads a provider's package from the source `packages` names it by: an `npm:` spec, below
+# `npm/node_modules`, or a `git:` source, below `git/<host>/<path>` (the owner's Mac's since
+# 2026-11-09). The kit carries the package Pi has, names the same source, and hashes that folder.
+
+[[plant]]
+name = "matrix: a provider's package from git is not found"
+meant = "a_pi_run_on_a_provider_whose_package_pi_has_from_git_carries_that_package_and_names_it"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''        let rest = spec.strip_prefix("git:")?;'''
+replace = '''        let rest = spec.strip_prefix("git-never:")?;'''
+
+[[plant]]
+name = "matrix: a git source's ref is taken into its folder"
+meant = "the_providers_package_is_found_by_its_npm_spec_or_its_git_source_and_nothing_else"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''        let path = path.split('@').next()?;'''
+replace = '''        let path = path.split('#').next()?;'''
+
+[[plant]]
+name = "matrix: a git repository of another name is taken for the provider's"
+meant = "the_providers_package_is_found_by_its_npm_spec_or_its_git_source_and_nothing_else"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''        if repository != self.repository {'''
+replace = '''        if repository.is_empty() && repository != self.repository {'''
+
+[[plant]]
+name = "matrix: a git source with no host, a folder's or a user's is taken"
+meant = "the_providers_package_is_found_by_its_npm_spec_or_its_git_source_and_nothing_else"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''        if host.is_empty() || host.starts_with('.') || host.contains([':', '@']) {'''
+replace = '''        if host.contains(':') {'''
+
+[[plant]]
+name = "matrix: an npm spec of another package is taken for the provider's"
+meant = "the_providers_package_is_found_by_its_npm_spec_or_its_git_source_and_nothing_else"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''            return (name == self.package).then(|| Source {'''
+replace = '''            return (name.ends_with("pi-cliproxyapi-provider") || name.starts_with(self.package)).then(|| Source {'''
+
+[[plant]]
+name = "matrix: npm's manifests are watched for a package from git"
+meant = "a_pi_run_on_a_provider_whose_package_pi_has_from_git_carries_that_package_and_names_it"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''            if source.npm {'''
+replace = '''            if source.npm || !source.npm {'''
+
+[[plant]]
+name = "matrix: the package's files are not watched"
+meant = "a_pi_run_on_a_provider_whose_package_pi_has_from_git_carries_that_package_and_names_it"
+runs = ["pi-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''            files.extend(below(&agent.join(&source.folder)));'''
+replace = '''            let _ = below(&agent.join(&source.folder));'''
