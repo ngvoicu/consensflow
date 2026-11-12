@@ -9,6 +9,7 @@ mod kept_wires;
 mod last_call;
 mod logs;
 mod messages;
+mod reverted;
 mod rows;
 mod stamped;
 mod turns;
