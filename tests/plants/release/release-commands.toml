@@ -132,7 +132,7 @@ meant = "a_release_run_that_fails_says_to_rerun_it_and_a_run_again_says_the_same
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
 if ended.conclusion != "success" {'''
 replace = '''
