@@ -930,7 +930,7 @@ meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
         let passed = |conclusion: &str| matches!(conclusion, "success" | "skipped" | "neutral");'''
 replace = '''
