@@ -519,7 +519,7 @@ meant = "a_feed_that_answers_404_or_no_network_for_a_while_is_read_again_and_is_
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/feed.rs"
 find = '''
 code => Read::Unreachable(format!("curl ended {code}: {}", answered.stderr.trim())),'''
 replace = "code => return Err(Error::Program { command: invocation.display(), code, said: answered.stderr.trim().to_owned() }),"
