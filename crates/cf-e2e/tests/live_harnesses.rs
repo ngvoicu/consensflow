@@ -30,7 +30,7 @@ use std::time::Duration;
 use cf_e2e::daemon::{Daemon, Home};
 use cf_e2e::http::{origin, Http};
 use cf_e2e::live::report::{self, Check};
-use cf_e2e::live::{self, Harness, Log};
+use cf_e2e::live::{self, launcher, Harness, Log};
 use cf_e2e::process::{own_var, Run};
 use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
@@ -146,11 +146,13 @@ fn named() -> Result<Vec<Harness>> {
         .collect()
 }
 
-/// The first line a program says to `--version`, or why it said none.
+/// The first line Pi's launcher `program` says to `--version`, or why it said none: told, as every
+/// Pi the kit starts is, to install nothing ([`launcher::updates_off_of`]).
 fn says(program: &Path) -> String {
     Run::new(program)
         .arg("--version")
         .inheriting_env()
+        .vars(launcher::updates_off_of(Harness::Pi).iter().copied())
         .run()
         .ok()
         .filter(|ran| ran.code == Some(0))

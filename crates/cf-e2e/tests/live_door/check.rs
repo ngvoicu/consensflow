@@ -406,9 +406,12 @@ mod tests {
         assert_eq!(row_of(Harness::Codex, &models)["model"], "gpt-5.6-luna");
         models.insert("codex".to_owned(), "gpt-other".to_owned());
         assert_eq!(row_of(Harness::Codex, &models)["model"], "gpt-other");
+        // Pi, which no flag named, runs on the kit's model for the machine: the cheap one, or the
+        // one `agents` names for a machine whose Pi has no login for its provider (the owner's
+        // Mac's cliproxyapi, T-1172), which `agents`' own tests hold.
         assert_eq!(
             row_of(Harness::Pi, &models)["model"],
-            "openrouter/meta/muse-spark-1.3"
+            cf_e2e::live::agents::model(Harness::Pi).name
         );
     }
 

@@ -1,23 +1,27 @@
 //! This machine as a run meets it: the user's home and the folders a run works in
 //! below it, the harnesses of the run found as a shell finds them, and the rig
-//! those harnesses run in, on the user's own logins.
+//! those harnesses run in, each on a copy of the user's login.
 //!
-//! A run's windows get the user's own home, never this shell's session identity
-//! and none of the test pane host's sandbox. Its Claude Code windows run on a
-//! config folder of the run's own, with a copy of the machine's login
-//! ([`super::login`]), never on the user's `~/.claude`: the rig starts the daemon and
-//! every window on it, and the folder goes with the run. The wrappers the run writes
-//! (`~/.consensflow-candidate/evals/bin`) are first on the `PATH`.
+//! A run's windows get the user's own home as `HOME`, where the run's folders are,
+//! never this shell's session identity and none of the test pane host's sandbox.
+//! Its Claude Code windows run on a config folder of the run's own, with a copy of
+//! the machine's login ([`super::login`]), never on the user's `~/.claude`; every
+//! other harness with a real window runs on the kit's home of the run's own
+//! ([`Isolation`]), with a copy of its login and none of the user's other files, whose
+//! variables the rig sets last: no window reads or writes the user's login folders. The
+//! rig starts the daemon and every window on them, and they go with the run. The
+//! wrappers the run writes (`~/.consensflow-candidate/evals/bin`) are first on the `PATH`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use cf_e2e::live::isolation::Isolation;
 use cf_e2e::live::{self, Harness, Installed};
 use cf_e2e::process::own_var;
 use cf_e2e::rig::{ClaudeConfig, Config};
 use cf_e2e::{checkout, Error, Result as Support};
 
-use super::login::Throwaway;
+use super::login::{Seated, Throwaway};
 use super::options::Crew;
 use crate::plan::ChiefSetup;
 
@@ -57,8 +61,9 @@ impl Machine {
     /// The machine's harnesses of this run: each found as a shell finds it. One
     /// that is not on the `PATH` is an error that says so; its login is the
     /// window's to ask for (a login page shows on the chief's screen in the report).
-    /// The windows of Claude Code run on `login`, where there is one.
-    pub fn of(crew: &Crew, login: Option<Arc<Throwaway>>) -> Support<Self> {
+    /// The windows of Claude Code run on `login`, where there is one; every other harness
+    /// with a real window of `seated` on a home of the run's own.
+    pub fn of(crew: &Crew, seated: &Seated, login: Option<Arc<Throwaway>>) -> Support<Self> {
         let home = live::machine::home()?;
         let mut names: Vec<&str> = vec![crew.chief.as_str()];
         names.extend(crew.staff.iter().map(String::as_str));
@@ -73,7 +78,7 @@ impl Machine {
             if installs.iter().any(|install| install.harness() == harness) {
                 continue;
             }
-            let install = installed(harness, live::command(name)?, &home, login.as_ref());
+            let install = installed(harness, live::command(name)?, &home, login.as_ref(), seated)?;
             installs.push(match &node {
                 Some(node) => install.with_node(node),
                 None => install,
@@ -109,10 +114,41 @@ impl Machine {
             .unwrap_or_else(|| self.home.join(".claude")))
     }
 
-    /// What the run did to the user's Claude setup or to the copy of the login, if it did
-    /// anything, once its rig has ended.
-    pub fn login_findings(&self) -> Option<String> {
-        self.login.as_ref().and_then(|login| login.findings())
+    /// The kit's homes of the run's own that its windows run on (Claude Code's is [`Self::login`]).
+    fn isolations(&self) -> impl Iterator<Item = &Arc<Isolation>> {
+        self.installs.iter().filter_map(Installed::isolation)
+    }
+
+    /// Whether any window of the run runs on a home of the run's own: Claude Code's throwaway
+    /// login, or the kit's home of another harness.
+    pub fn has_homes(&self) -> bool {
+        self.login.is_some() || self.isolations().next().is_some()
+    }
+
+    /// What the run did to the user's setup of a harness or to the copy of its login, in a line,
+    /// if it did anything, once its rig has ended: Claude Code's, then each other harness's.
+    pub fn homes_findings(&self) -> Option<String> {
+        let found: Vec<String> = self
+            .login
+            .as_ref()
+            .and_then(|login| login.findings())
+            .into_iter()
+            .chain(
+                self.isolations()
+                    .filter_map(|isolation| isolation.found())
+                    .filter(|found| !found.changed.is_empty())
+                    .map(|found| found.changed.join("; ")),
+            )
+            .collect();
+        (!found.is_empty()).then(|| found.join("; "))
+    }
+
+    /// What the end of the run's rig checked of the user's files of each harness on a home of
+    /// the kit's: the files with their hashes before the run and after it, a line each.
+    pub fn homes_checked(&self) -> Vec<String> {
+        self.isolations()
+            .filter_map(|isolation| isolation.found()?.checked)
+            .collect()
     }
 
     /// The harness `name` of the run.
@@ -184,18 +220,17 @@ impl Machine {
             .unwrap_or_default()
     }
 
-    /// The rig a run is on: the windows run the machine's harnesses on its own
+    /// The rig a run is on: the windows run the machine's harnesses on copies of its
     /// logins, through the wrappers, with what the arm and the chief's model add.
     /// `stand_in` is the program a rig has first on the `PATH` of the windows it
     /// has no use for here (the rig's own, which the `PATH` below leaves out).
     pub fn rig(&self, crew: &Crew, chief: &ChiefSetup, stand_in: &Path) -> Config {
         let home = self.home.to_string_lossy().into_owned();
+        // The user's home, where the run's folders are, over the one the kit gives each
+        // install: Codex's is its login folder, and a window on it would make the run's folders
+        // in `~/.codex`. No harness on a home of the run's own reads its login by it.
         let mut config = live::rig(&self.installs, stand_in)
             .var("HOME", &home)
-            .var(
-                "CODEX_HOME",
-                codex_home(&self.home).to_string_lossy().into_owned(),
-            )
             .var("PATH", self.path());
         if cfg!(windows) {
             config = config.var("USERPROFILE", &home);
@@ -215,21 +250,42 @@ impl Machine {
     }
 }
 
-/// The harness `harness` at `command` as the run's windows start it: the user's home for its
-/// login, and for Claude Code, where the run has a throwaway login, the config folder of it.
+/// The harness `harness` at `command` as the run's windows start it: for Claude Code, where the
+/// run has a throwaway login, the config folder of it; for every other harness with a real window
+/// of `seated`, the kit's home of the run's own, with a copy of the login read from the user's
+/// (below `home`) and kept for the report what its end finds.
 fn installed(
     harness: Harness,
     command: PathBuf,
     home: &Path,
     login: Option<&Arc<Throwaway>>,
-) -> Installed {
-    let install = Installed::at(harness, command, login_of(harness, home));
-    match login {
-        Some(login) if harness == Harness::Claude => {
-            install.with_claude_config(Arc::clone(login) as Arc<dyn ClaudeConfig>)
-        }
-        _ => install,
+    seated: &Seated,
+) -> Support<Installed> {
+    let mut install = Installed::at(harness, command, login_of(harness, home));
+    if let Some(login) = login.filter(|_| harness == Harness::Claude) {
+        install = install.with_claude_config(Arc::clone(login) as Arc<dyn ClaudeConfig>);
     }
+    if let Some(isolation) = isolation(harness, install.home(), seated)? {
+        install = install.with_isolation(Arc::new(isolation));
+    }
+    Ok(install)
+}
+
+/// The kit's home of `harness`, whose user's login is read from `home`, for the run `seated`: for
+/// as long as the run is planned to take, Pi's with the logins of its windows' models; none where
+/// every window of it is the stand-in (it reads no login) and for Claude Code ([`super::login`]).
+/// Its end keeps what it found for the report: a finding at the end of a run of hours does not
+/// cost its evidence.
+fn isolation(harness: Harness, home: &Path, seated: &Seated) -> Support<Option<Isolation>> {
+    if !seated.real(harness) {
+        return Ok(None);
+    }
+    // An eval's logins last its planned length and its own margin ([`super::login::MARGIN`], the
+    // half hour its Claude Code's login is held to); the kit adds its own, shorter one to what it
+    // is asked for, so it is asked for the rest.
+    let run = super::login::lasting(seated.planned).saturating_sub(cf_e2e::live::isolation::MARGIN);
+    let made = Isolation::of_machine_for(harness, home, run, &seated.models(Harness::Pi))?;
+    Ok(made.map(Isolation::keeping_what_it_finds))
 }
 
 /// The home `harness` reads its login from: Codex's own folder (`CODEX_HOME`, or

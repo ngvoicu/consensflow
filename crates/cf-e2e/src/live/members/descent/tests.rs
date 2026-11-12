@@ -780,10 +780,48 @@ fn the_powershell_that_lists_windows_processes_is_given_what_one_takes_on_a_load
 /// small tools a script is made of.
 const UNIX_ONLY: &str = "ps|pgrep|pkill|kill|killall|sh|bash|zsh|dash|python3?|perl|sleep|cat|tail|head|grep|sed|awk|lsof|security|tar|osascript|pbcopy|pbpaste|true|false|echo|mkfifo|nohup|setsid|launchctl";
 
+/// The shell each harness runs a command in on Windows, and where that is known from (T-1136:
+/// the guard took two of the five for granted before). A command a live case gives a harness
+/// must run in all of them: Node's, `ping -n`, `sleep N` (Git Bash's own, and PowerShell's
+/// alias of `Start-Sleep`).
+const SHELLS_ON_WINDOWS: &[(&str, &str, &str)] = &[
+    ("claude", "Git Bash", "T-1079: Claude Code's Bash tool; sh, sleep and for-loops work"),
+    ("codex", "PowerShell", "T-1079: no sh, ps, pgrep, python3, POSIX loops or $(...)"),
+    (
+        "pi",
+        "Git Bash",
+        "its `getShellConfig` (dist/bundle/chunks, Pi 1.4.0): Git for Windows' bash.exe, else bash on the PATH, else it refuses; `shellPath` in its settings.json changes it",
+    ),
+    (
+        "devin",
+        "PowerShell",
+        "its changelog: the default non-interactive shell on Windows is PowerShell, Git for Windows no longer required",
+    ),
+    (
+        "muse",
+        "PowerShell",
+        "T-1126's live runs: each command in its own `powershell.exe -NoLogo -NoProfile -Command`",
+    ),
+];
+
+/// Every harness has a shell the guard knows, so that one added later is a decision and not a
+/// guess.
+#[test]
+fn every_harness_has_a_shell_on_windows_the_guard_knows_and_says_where_from() {
+    for harness in crate::live::Harness::ALL {
+        let known = SHELLS_ON_WINDOWS
+            .iter()
+            .find(|(name, _, _)| *name == harness.name());
+        let (_, shell, source) = known.unwrap_or_else(|| panic!("{harness:?} has no shell here"));
+        assert!(!shell.is_empty() && !source.is_empty(), "{harness:?}");
+    }
+    assert_eq!(SHELLS_ON_WINDOWS.len(), crate::live::Harness::ALL.len());
+}
+
 /// The files of the live kit that start a Unix-only program or give a harness a POSIX-only
 /// command, with why each is no Windows case's start of one: a platform's own branch, a
 /// test of the Unix side, a case that runs on a Mac alone, a harness whose shell on Windows
-/// is Git Bash (Claude Code's: `sh` and `sleep` are there), or text the case only reads.
+/// is Git Bash (Claude Code's and Pi's: `sh` and `sleep` are there), or text the case only reads.
 /// A file that is not here and starts one is a case that cannot run on Windows (T-1079:
 /// `ps` in `codex-role`, `sh` in `stops`, `python3` in `outside-claude`).
 const WINDOWS_AWARE: &[(&str, &str)] = &[
@@ -791,6 +829,8 @@ const WINDOWS_AWARE: &[(&str, &str)] = &[
     ("src/live/claude.rs", "`ps` after the Windows branch returns the process table's"),
     ("src/live/codex.rs", "a disabled server's command is never started (enabled=false); /bin/sh only in cfg(unix) tests"),
     ("src/live/isolation/tests.rs", "a test of the Unix side"),
+    ("src/live/keychain.rs", "macOS's keychain: `security` only past its cfg!(target_os = \"macos\") gate"),
+    ("src/live/launcher.rs", "\"; do it by hand\" is the guard's banner text, no shell"),
     ("src/live/login.rs", "macOS's keychain"),
     ("src/live/login/tests.rs", "a test of the Unix side"),
     ("src/live/machine/tests.rs", "tests of the Unix side"),
@@ -805,14 +845,15 @@ const WINDOWS_AWARE: &[(&str, &str)] = &[
     ("tests/live_approval/flow.rs", "not a Windows case: an advisor's window on a Mac"),
     ("tests/live_approval/minute.rs", "not a Windows case: an advisor's window on a Mac"),
     ("tests/live_asks.rs", "Claude Code's commands run in Git Bash on Windows"),
-    ("tests/live_devin_wire.rs", "`sleep 30` is PowerShell's Start-Sleep and Git Bash's own (not run in cmd.exe; Devin's shell on Windows is unchecked)"),
+    ("tests/live_devin_wire.rs", "`sleep 30` is PowerShell's Start-Sleep and Git Bash's own (not run in cmd.exe; Devin's shell on Windows is PowerShell)"),
     ("tests/live_finish/leaving.rs", "`ps` on the Unix side, PowerShell's table on Windows"),
     ("tests/live_finish/leaving/tests.rs", "tests of the Unix side"),
     ("tests/live_folder_trust.rs", "a server of a .mcp.json the dialog asks of, never started"),
+    ("tests/live_keychain.rs", "a Mac case: macOS's keychain, read with `security`"),
     ("tests/live_monitor_wait.rs", "Claude Code's commands run in Git Bash on Windows"),
     ("tests/live_muse/tui.rs", "the live Muse TUI cases run Muse on the Mac's keychain login, with the Mac's PATH, `ps` and `lsof`: not a Windows case"),
     ("tests/live_muse_background.rs", "a Mac case: the keychain, lsof"),
-    ("tests/live_muse_window.rs", "`sleep 25` is PowerShell's Start-Sleep and Git Bash's own (Muse's shell on Windows is unchecked)"),
+    ("tests/live_muse_window.rs", "`sleep 25` is PowerShell's Start-Sleep and Git Bash's own (Muse's shell on Windows is PowerShell)"),
     ("tests/live_parity/claude.rs", "macOS's keychain"),
     ("tests/live_parity/codex_devin.rs", "/bin/sh only in its cfg(unix) tests of Muse's hook"),
     ("tests/live_parity/terminal_env.rs", "a Mac case: refuses elsewhere"),

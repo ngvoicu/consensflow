@@ -330,5 +330,8 @@ fn a_members_pi_window_is_the_adapters_whole_with_the_users_own_append_file_befo
         ["--model", "openrouter/x", "--thinking", "low", "--approve"]
     );
     assert_eq!(launched["env"]["CF_DELIVERY_LAUNCH_ID"], json!(LAUNCH));
+    // A person's Pi keeps every variable of its own: one on the cliproxyapi provider reads
+    // `CLIPROXYAPI_*` first, as their own shell's Pi does. Only the live kit's windows run without
+    // them, as they run without every variable of the owner's that the rig does not name.
     assert_eq!(launched["dropEnv"], json!([]));
 }

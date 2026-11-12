@@ -53,8 +53,8 @@ runs = ["renew-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''                pi.renewal = test_machine.map(|machine| {'''
-replace = '''                pi.renewal = Some(test_machine.unwrap_or_else(|| TestMachine::signalled(Some("mac")).unwrap())).map(|machine| {'''
+find = '''                made.renewal = test_machine.zip(pi.first()).map(|(machine, model)| {'''
+replace = '''                made.renewal = Some(test_machine.unwrap_or_else(|| TestMachine::signalled(Some("mac")).unwrap())).zip(pi.first()).map(|(machine, model)| {'''
 
 [[plant]]
 name = "kit renews logins: the runner gives its command no word of the machine"
@@ -117,8 +117,8 @@ runs = ["renew-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/login.rs"
-find = '''remaining(expires) < left)'''
-replace = '''remaining(expires) > left)'''
+find = '''remaining(expires) < left && remaining(expires) <= renew::RENEWS_WITHIN'''
+replace = '''remaining(expires) > left && remaining(expires) <= renew::RENEWS_WITHIN'''
 
 [[plant]]
 name = "kit renews logins: a login with no refresh token is renewed"
@@ -127,7 +127,8 @@ runs = ["renew-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/login.rs"
-find = '''    has_refresh && expires_at(text)'''
+find = '''    has_refresh
+        && expires_at(text)'''
 replace = '''    let _ = has_refresh;
     expires_at(text)'''
 
@@ -138,9 +139,9 @@ runs = ["renew-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation/pi.rs"
-find = '''    has_refresh && matches!('''
+find = '''    has_refresh && near && matches!('''
 replace = '''    let _ = has_refresh;
-    matches!('''
+    near && matches!('''
 
 [[plant]]
 name = "kit renews logins: Claude Code is run on a model of its own, not the run's"

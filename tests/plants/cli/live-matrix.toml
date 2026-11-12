@@ -184,15 +184,9 @@ file = "crates/cf-e2e/src/muse.rs"
 find = '''data="${{XDG_DATA_HOME:-}}"'''
 replace = '''data=""'''
 
-[[plant]]
-name = "live matrix: Devin's home of the run's own reaches the person's Muse folder"
-meant = "a_live_muse_beside_devin_writes_its_sessions_where_the_daemon_reads_them_and_not_in_the_persons"
-runs = ["matrix-rig-install"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''const XDG_HARNESSES: [&str; 2] = ["devin", "muse"];'''
-replace = '''const XDG_HARNESSES: [&str; 2] = ["devin", "devin"];'''
+# The plant "Devin's home of the run's own reaches the person's Muse folder" went with the links it
+# aimed at (T-1358: a Devin home links nothing of the owner's); muse-advisor-start.toml's twin holds
+# that no Muse folder of the owner's is carried.
 
 # T-1152, rows 2 and 3 of T-1133's design: the driver's machine, the oracle's primitives and the
 # tooling's look at the API.

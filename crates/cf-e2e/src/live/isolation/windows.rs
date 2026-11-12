@@ -348,3 +348,66 @@ fn on_windows_muse_watches_the_owners_login_settings_trust_and_session_index() {
         ]
     );
 }
+
+/// Five harnesses on one rig (T-1136): the homes' variables are set in turn over each other's, so
+/// the later would take an earlier's away. Devin on Windows moves `USERPROFILE`, `APPDATA` and
+/// `LOCALAPPDATA` for the whole rig; no other harness's home may name one of them, and no two
+/// homes set one variable twice, in either case on Windows.
+#[test]
+fn the_homes_of_all_five_harnesses_on_one_windows_rig_set_no_variable_twice() {
+    let owner = Owner::new();
+    let profile = owner.profile.path();
+    let run = Path::new("/run/home");
+    let homes = [
+        (
+            "Claude Code".to_owned(),
+            vec![("CLAUDE_CONFIG_DIR".to_owned(), "/run/claude".to_owned())],
+        ),
+        (
+            "Codex".to_owned(),
+            Isolation::codex(profile, &profile.join(".codex")).vars_in(run),
+        ),
+        (
+            "Pi".to_owned(),
+            Isolation::pi(
+                profile,
+                &profile.join(".pi").join("agent"),
+                "openai/gpt-5.6-luna",
+                Duration::from_secs(900),
+            )
+            .vars_in(run),
+        ),
+        (
+            "Devin".to_owned(),
+            Isolation::devin_on_windows(profile, &profile.join("AppData").join("Roaming"))
+                .vars_in(run),
+        ),
+        (
+            "Muse Code".to_owned(),
+            Isolation::muse(
+                profile,
+                &profile.join(".config"),
+                &profile.join(".local").join("share"),
+            )
+            .vars_in(run),
+        ),
+    ];
+    assert_eq!(crate::rig::clashing(&homes, true), None);
+    let names: Vec<&str> = homes
+        .iter()
+        .flat_map(|(_, vars)| vars.iter().map(|(name, _)| name.as_str()))
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "CLAUDE_CONFIG_DIR",
+            "CODEX_HOME",
+            "PI_CODING_AGENT_DIR",
+            "PI_OFFLINE",
+            "USERPROFILE",
+            "APPDATA",
+            "LOCALAPPDATA"
+        ],
+        "Muse's launcher sets its folders for its own window alone; its home sets none"
+    );
+}

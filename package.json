@@ -88,6 +88,8 @@
     "live:muse-window": "cargo xtask live muse-window",
     "live:own-cf": "cargo xtask live own-cf",
     "live:paste-enter": "cargo xtask live paste-enter",
+    "live:launcher": "cargo xtask live launcher",
+    "live:keychain": "cargo xtask live keychain",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },

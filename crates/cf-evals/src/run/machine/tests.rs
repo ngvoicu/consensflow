@@ -2,6 +2,7 @@
 //! `PATH`, and the environment the rig gives them.
 
 use std::path::Path;
+use std::time::Duration;
 
 use cf_e2e::rig::ClaudeConfig;
 
@@ -59,11 +60,39 @@ fn with_login(mut machine: Machine) -> Machine {
                 install.command().to_path_buf(),
                 &machine.home,
                 Some(&login),
+                &stand_ins(),
             )
+            .unwrap()
         })
         .collect();
     machine.login = Some(login);
     machine
+}
+
+/// A run whose every window is the stand-in agent's: no harness of it reads a login.
+fn stand_ins() -> Seated {
+    Seated {
+        windows: Vec::new(),
+        planned: Duration::from_secs(3600),
+    }
+}
+
+/// A run of an hour with a real window of each of `harnesses`, Pi's on an OpenRouter model.
+fn real(harnesses: &[Harness]) -> Seated {
+    Seated {
+        windows: harnesses
+            .iter()
+            .map(|harness| {
+                let model = if *harness == Harness::Pi {
+                    "openrouter/x/y"
+                } else {
+                    "m"
+                };
+                (*harness, model.to_owned())
+            })
+            .collect(),
+        planned: Duration::from_secs(3600),
+    }
 }
 
 fn options(line: &str) -> Options {
@@ -175,15 +204,25 @@ fn only_claude_code_runs_on_the_throwaway_login_of_a_run() {
     let login = Arc::new(Throwaway::over(Folder));
     let home = Path::new("/home/u");
     for harness in [Harness::Claude, Harness::Codex, Harness::Pi] {
-        let install = installed(harness, PathBuf::from("/bin/x"), home, Some(&login));
+        let install = installed(
+            harness,
+            PathBuf::from("/bin/x"),
+            home,
+            Some(&login),
+            &stand_ins(),
+        )
+        .unwrap();
         assert_eq!(
             install.claude_config().is_some(),
             harness == Harness::Claude,
             "{harness:?}"
         );
-        assert!(installed(harness, PathBuf::from("/bin/x"), home, None)
-            .claude_config()
-            .is_none());
+        assert!(
+            installed(harness, PathBuf::from("/bin/x"), home, None, &stand_ins())
+                .unwrap()
+                .claude_config()
+                .is_none()
+        );
     }
 }
 
@@ -252,14 +291,14 @@ fn a_runs_claude_records_are_in_its_throwaway_or_in_the_users_claude_when_it_has
 #[test]
 fn what_a_run_did_to_the_owners_claude_is_what_its_login_found() {
     let claude = [(Harness::Claude, "/home/u/.local/bin/claude")];
-    assert_eq!(machine(&claude, None).login_findings(), None);
-    assert_eq!(with_login(machine(&claude, None)).login_findings(), None);
+    assert_eq!(machine(&claude, None).homes_findings(), None);
+    assert_eq!(with_login(machine(&claude, None)).homes_findings(), None);
     let mut touched = with_login(machine(&claude, None));
     let login = Arc::new(Throwaway::over(Touches));
     login.finish().unwrap();
     touched.login = Some(login);
     assert_eq!(
-        touched.login_findings().as_deref(),
+        touched.homes_findings().as_deref(),
         Some("~/.claude/settings.json is not as it was")
     );
 }
@@ -293,4 +332,117 @@ fn the_rig_a_run_without_a_login_is_on_has_the_users_own_home_the_wrappers_first
         Path::new("claude"),
     );
     assert!(!format!("{plain:?}").contains("CONSENSFLOW_EVAL_CHIEF_CARD"));
+}
+
+/// Before T-785 the evals built their installs bare, so an eval's Pi, Codex and Devin windows ran
+/// for hours on the owner's own login folders, and the rig gave every window the owner's
+/// `CODEX_HOME`. Every harness with a real window of the run runs on the kit's home now, kept for
+/// the report; one whose every window is the stand-in reads no login and gets none.
+#[test]
+fn an_eval_machines_real_windows_run_on_the_kits_homes_and_its_rig_names_no_codex_home_of_the_owners(
+) {
+    let home = Path::new("/home/u");
+    let others: Vec<Harness> = if cfg!(unix) {
+        vec![Harness::Codex, Harness::Pi, Harness::Devin, Harness::Muse]
+    } else {
+        // Devin's and Muse's folders on Windows are not known to the kit (`live::isolation`).
+        vec![Harness::Codex, Harness::Pi]
+    };
+    let seated = real(&others);
+    let installs: Vec<Installed> = others
+        .iter()
+        .map(|harness| installed(*harness, PathBuf::from("/bin/x"), home, None, &seated).unwrap())
+        .collect();
+    for install in &installs {
+        let isolation = install
+            .isolation()
+            .unwrap_or_else(|| panic!("{:?} runs on the owner's login folders", install.harness()));
+        assert_eq!(isolation.harness(), install.harness());
+        // Its end keeps what it finds for the report, and fails no rig.
+        assert_eq!(isolation.found(), Some(Default::default()));
+    }
+    // The stand-in's windows (the dry runs) read no login: none is copied for them.
+    for harness in &others {
+        let bare = installed(*harness, PathBuf::from("/bin/x"), home, None, &stand_ins()).unwrap();
+        assert!(bare.isolation().is_none(), "{harness:?}");
+    }
+    // The rig sets each home's variables last. (Muse Code is no eval harness yet, T-1026; its
+    // rig runs it through a launcher of the kit's own, which needs a Muse installed.)
+    let seats: Vec<Harness> = others
+        .iter()
+        .copied()
+        .filter(|harness| *harness != Harness::Muse)
+        .collect();
+    let machine = Machine {
+        installs: installs
+            .into_iter()
+            .filter(|install| seats.contains(&install.harness()))
+            .collect(),
+        ..machine(&[], None)
+    };
+    let chief = chief_environment("codex", None).unwrap();
+    let config = machine.rig(
+        &options("--chief codex").crew(),
+        &chief,
+        Path::new("claude"),
+    );
+    let said = format!("{config:?}");
+    for harness in &seats {
+        let name = format!("{harness:?}");
+        assert!(
+            said.contains(&format!("Isolation {{ harness: {name}")),
+            "{name}: {said}"
+        );
+    }
+    assert!(!said.contains("\"CODEX_HOME\""), "{said}");
+    assert!(said.contains(r#"("HOME", "/home/u")"#), "{said}");
+}
+
+/// An eval's Pi home holds the login of its own windows' model (T-785: not the live kit's asked
+/// model), for the run's planned length and the evals' 30 minutes, once: a login that lasts an hour
+/// and 45 minutes fits a run of an hour, and is refused for one of an hour and a half.
+#[test]
+fn an_eval_pi_home_holds_the_login_its_models_need_for_the_planned_run_and_its_half_hour() {
+    use cf_e2e::rig::HarnessHome;
+    let owner = tempfile::tempdir().unwrap();
+    let agent = owner.path().join(".pi").join("agent");
+    std::fs::create_dir_all(&agent).unwrap();
+    let expires = jiff::Timestamp::now().as_millisecond() + 105 * 60 * 1000;
+    std::fs::write(
+        agent.join("auth.json"),
+        format!(
+            r#"{{"openrouter": {{"type": "api_key", "key": "k"}},
+                "openai": {{"type": "oauth", "access": "a", "refresh": "r", "expires": {expires}}}}}"#
+        ),
+    )
+    .unwrap();
+    let on = |minutes: u64| Seated {
+        windows: vec![(Harness::Pi, "openai/gpt-6-luna".to_owned())],
+        planned: Duration::from_secs(minutes * 60),
+    };
+    let fits = isolation(Harness::Pi, owner.path(), &on(60))
+        .unwrap()
+        .unwrap();
+    let vars = fits.vars().unwrap();
+    let (name, folder) = &vars[0];
+    assert_eq!(name, "PI_CODING_AGENT_DIR");
+    let copied = std::fs::read_to_string(Path::new(folder).join("auth.json")).unwrap();
+    assert!(
+        copied.contains("openai") && !copied.contains("openrouter"),
+        "{copied}"
+    );
+    // The eval's margin, not the kit's on top of it: a run of 70 minutes fits the login (70 and
+    // 30 minutes), which the kit's 10 more would not.
+    let seventy = isolation(Harness::Pi, owner.path(), &on(70))
+        .unwrap()
+        .unwrap();
+    assert!(
+        seventy.vars().is_ok(),
+        "70 minutes and the evals' half hour fit"
+    );
+    let longer = isolation(Harness::Pi, owner.path(), &on(90))
+        .unwrap()
+        .unwrap();
+    let said = longer.vars().unwrap_err().to_string();
+    assert!(said.contains("`openai` expires in 1 h 4"), "{said}");
 }
