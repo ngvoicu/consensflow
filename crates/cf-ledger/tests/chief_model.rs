@@ -34,6 +34,7 @@ fn project(harness: &str, model: Option<&str>) -> NewProject {
         staff_rules: None,
         compaction: None,
         advisor_tool: false,
+        prompt_suggestion: false,
     }
 }
 

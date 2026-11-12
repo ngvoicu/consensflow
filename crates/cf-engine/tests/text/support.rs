@@ -288,6 +288,7 @@ pub fn project_of(participants: Vec<ParticipantView>) -> ProjectView {
         staff_rules: None,
         compaction: None,
         advisor_tool: false,
+        prompt_suggestion: false,
     }
 }
 

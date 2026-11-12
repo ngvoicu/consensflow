@@ -41,6 +41,7 @@
 
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -243,6 +244,11 @@ pub struct Window<W: Write> {
     crash: Fault,
     /// The message the window's store takes and its agent begins no turn on (`faults`).
     unbegun: Fault,
+    /// The message whose turn begins late, once another is handed to the window (`faults`).
+    gap: Fault,
+    /// How many messages the window has been handed, and how many of them it has taken up.
+    handed: Arc<AtomicU64>,
+    taken: u64,
     /// The window's permission mode, which its key reader answers a dialog of.
     permission: Arc<Permission>,
     /// The folder its tools make files in: the one it runs in.
@@ -252,6 +258,10 @@ pub struct Window<W: Write> {
     /// Its store keeps a message that ran under `/bypass` as it was given, the command
     /// with the prompt, where it keeps the prompt alone otherwise.
     stores_commands: bool,
+    /// It was opened again silent (`unannounced`) and has written no configuration since.
+    unannounced: bool,
+    /// The next turn's message is listed among the steps and not said back.
+    listed: bool,
 }
 
 /// What a window that stores a message as it was given is told by: how Devin stores a
@@ -279,11 +289,29 @@ impl<W: Write> Window<W> {
             jobs: None,
             crash: Fault::default(),
             unbegun: Fault::default(),
+            gap: Fault::default(),
+            handed: Arc::new(AtomicU64::new(0)),
+            taken: 0,
             permission: Arc::new(Permission::new(true)),
             folder: std::env::current_dir().unwrap_or_default(),
             calls: 0,
             stores_commands: false,
+            unannounced: false,
+            listed: false,
         }
+    }
+
+    /// The window was opened again silent, as Devin 3000.12.43 opens one with no message on
+    /// a session whose last turn a quit cut (T-1417 run 3, T-1432 runs A, 2 and 3): it says
+    /// nothing of its mode until it is typed to. `/bypass` alone writes nothing where it is in
+    /// full permission already, and its configuration where it switches (run A, b1 and b2);
+    /// `/bypass <message>` writes its configuration as the turn begins, and lists the message
+    /// among the steps without saying it back (runs 2 and 3); a message alone is said back and
+    /// then configured (run A).
+    #[must_use]
+    pub fn unannounced(mut self, unannounced: bool) -> Self {
+        self.unannounced = unannounced;
+        self
     }
 
     /// The window's store keeps a message that ran under `/bypass` as it was given,
@@ -306,6 +334,16 @@ impl<W: Write> Window<W> {
     #[must_use]
     pub fn beginning_nothing_on(mut self, unbegun: Fault) -> Self {
         self.unbegun = unbegun;
+        self
+    }
+
+    /// The turn of the message `gap` meets begins once `handed` counts another message
+    /// after it: the gap between a message's Enter and Devin's word that it has it, in
+    /// which a paste goes in behind it (`faults`).
+    #[must_use]
+    pub fn beginning_late_on(mut self, gap: Fault, handed: Arc<AtomicU64>) -> Self {
+        self.gap = gap;
+        self.handed = handed;
         self
     }
 
@@ -353,10 +391,24 @@ impl<W: Write> Window<W> {
     /// The window takes the message `text`, the first of its launch where
     /// `prompt_file`, as [`Window::take`] does.
     pub fn take_message(&mut self, text: &str, prompt_file: bool) -> Result<(), String> {
+        self.taken += 1;
+        if self.gap.meets(text) {
+            self.wait_for_the_next_message();
+        }
         self.stop.begin();
         let done = self.command(text, prompt_file);
         self.stop.end();
         done
+    }
+
+    /// The gap: nothing of the message's turn is written until another message has been
+    /// handed to the window, or two minutes have passed.
+    fn wait_for_the_next_message(&self) {
+        let until = std::time::Instant::now() + Duration::from_secs(120);
+        while self.handed.load(Ordering::SeqCst) <= self.taken && std::time::Instant::now() < until
+        {
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// A message that is `/bypass` switches the window to full permission, and the
@@ -366,11 +418,16 @@ impl<W: Write> Window<W> {
         let Some(prompt) = permission::command(text) else {
             return self.turn(text, text, prompt_file);
         };
-        if self.permission.to_bypass() {
+        let silent = std::mem::take(&mut self.unannounced);
+        if self.permission.to_bypass() || (silent && !prompt.is_empty()) {
             self.wire
                 .mode_changed(self.permission.mode())
                 .map_err(said)?;
+        } else {
+            // Nothing changed, and nothing is written: a silent window stays silent.
+            self.unannounced = silent;
         }
+        self.listed = silent && !prompt.is_empty();
         self.say(&format!("{BYPASS}\n{SWITCHED}\n")).map_err(said)?;
         if prompt.is_empty() {
             return Ok(());
@@ -406,10 +463,16 @@ impl<W: Write> Window<W> {
         }
         // Devin 3000.12.43 says the message back as its turn takes it in, and stores it 0.5
         // to 27 s after (T-1423); 3000.11 stored it first.
-        if self.wire.shape_of() == Shape::Unsaid {
+        if std::mem::take(&mut self.listed) {
+            self.wire.listed(text).map_err(said)?;
+            self.store.user(stored, &client)?;
+        } else if self.wire.shape_of() == Shape::Unsaid {
             self.wire
                 .prompt(self.turns + 1, text, &client)
                 .map_err(said)?;
+            if std::mem::take(&mut self.unannounced) {
+                self.wire.announce(self.permission.mode()).map_err(said)?;
+            }
             self.store.user(stored, &client)?;
         } else {
             self.store.user(stored, &client)?;
@@ -486,10 +549,16 @@ impl<W: Write> Window<W> {
         if stopped {
             // The TUI asks its agent to cancel, which keeps what it said so far.
             self.wire.cancel().map_err(said)?;
-            self.wire
-                .said("Interrupted", &stream, &client)
-                .map_err(said)?;
-            self.store.assistant("Interrupted", false)?;
+            // Devin 3000.12.43's Stop over thoughts wrote no agent message before the
+            // cause, and nothing to its store but the user's message (T-1423, runs 4 and 5:
+            // 11 items before the Stop and 11 after, the last the user's): the turn is named
+            // and ended.
+            if self.wire.shape_of() != Shape::Unsaid {
+                self.wire
+                    .said("Interrupted", &stream, &client)
+                    .map_err(said)?;
+                self.store.assistant("Interrupted", false)?;
+            }
             self.wire.ended("cancelled", &client).map_err(said)?;
             return self.say("Interrupted\n").map_err(said);
         }

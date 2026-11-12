@@ -32,7 +32,68 @@ fn taking() -> AnsweringHost<impl Fn(&str) -> Result<Value, HostError>> {
 }
 
 fn send_into(host: &dyn PaneHost, wire: &Path, session: Option<&str>, text: &str) -> Sent {
-    finished(Box::pin(send(host, &pane(), wire, session, text, None)))
+    finished(Box::pin(send(
+        host,
+        &pane(),
+        wire,
+        session,
+        Guard::Configured,
+        text,
+        None,
+    )))
+}
+
+/// A line of a window's replay of `session`, which configures nothing.
+fn names(session: &str) -> String {
+    let record = json!({ "sessionId": session,
+        "update": { "sessionUpdate": "session_info_update", "title": "A sleep" } });
+    format!("{record}\n")
+}
+
+#[test]
+fn a_log_that_configured_none_takes_a_paste_only_where_the_adapter_says_the_window_is_unannounced_on_its_conversation(
+) {
+    // T-1432: a Devin 3000.12.43 window opened again silent names its conversation on every line
+    // and configures none. Only a paste the adapter put behind /bypass goes into it.
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    let send_as = |host: &dyn PaneHost, guard| {
+        finished(Box::pin(send(
+            host,
+            &pane(),
+            &wire,
+            Some("mild-coin"),
+            guard,
+            "/bypass hi",
+            None,
+        )))
+    };
+    fs::write(
+        &wire,
+        format!("{{}}\n{}{}", names("mild-coin"), names("mild-coin")),
+    )
+    .unwrap();
+    let host = taking();
+    assert!(send_as(&host, Guard::Configured).refused);
+    assert!(send_as(&host, Guard::Unannounced).ok);
+    // Another conversation named, two, or a configuration of another: refused all the same.
+    for log in [
+        names("fresh-leaf"),
+        format!("{}{}", names("mild-coin"), names("fresh-leaf")),
+        format!("{}{}", names("mild-coin"), shows("fresh-leaf")),
+    ] {
+        fs::write(&wire, log).unwrap();
+        let host = taking();
+        assert!(send_as(&host, Guard::Unannounced).refused);
+        assert!(host.asked.borrow().is_empty());
+    }
+    // A configuration of its own takes it, as any paste.
+    fs::write(
+        &wire,
+        format!("{}{}", names("mild-coin"), shows("mild-coin")),
+    )
+    .unwrap();
+    assert!(send_as(&taking(), Guard::Unannounced).ok);
 }
 
 #[test]

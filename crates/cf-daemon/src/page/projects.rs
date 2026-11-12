@@ -5,8 +5,8 @@
 use cf_base::js;
 use cf_ledger::model::{parse_gate, parse_meeting};
 use cf_ledger::{
-    parse_advisor_tool, parse_compaction, parse_description, parse_name, parse_staff_rules,
-    NewMember, NewProject,
+    parse_advisor_tool, parse_compaction, parse_description, parse_name, parse_prompt_suggestion,
+    parse_staff_rules, NewMember, NewProject,
 };
 use serde_json::{json, Map, Value};
 
@@ -30,7 +30,9 @@ pub(super) async fn list(page: &Page) -> Result<Fields, Said> {
 /// takes them) and the compaction (`compaction`, as `project.compaction` takes it) are
 /// the human's word for the project, kept in the write that makes it, so the chief's
 /// first launch has them; one the ledger refuses refuses the whole start, in the words
-/// the Project settings dialog shows for it, and no project is made.
+/// the Project settings dialog shows for it, and no project is made. A `compaction` that
+/// is left out starts the project on the ledger's default size, and `null` on each
+/// harness's own point: what is passed to the ledger is what the page sent, `null` too.
 pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let directory = body.get("directory");
     let name = match body.get("name") {
@@ -77,6 +79,7 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         "rules",
         "compaction",
         "advisorTool",
+        "promptSuggestion",
     ] {
         if let Some(said) = body.get(key) {
             request.insert(key.to_owned(), said.clone());
@@ -244,6 +247,21 @@ pub(super) async fn advisor_tool(page: &Page, body: Body<'_>) -> Result<Fields, 
     one("project", project)
 }
 
+/// `project.prompt_suggestion`: whether the human leaves Claude Code's prompt suggestion on in
+/// the project's windows: a flag, checked before the project is looked for. Off is every
+/// project's until it is ticked. Only the page chooses it: no route of the agents' API does, so
+/// no `cf` command, the chief's or a member's, changes it. Each Claude Code window of the
+/// project, the chief's as each member's, is given the switch when it next starts (the Claude
+/// adapter's launch, fresh or resumed); an open window keeps what it began with.
+pub(super) async fn prompt_suggestion(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let on = parse_prompt_suggestion(body.get("promptSuggestion"))?;
+    let project = page
+        .ledger
+        .borrow_mut()
+        .set_prompt_suggestion(body.whole("project")?, on)?;
+    one("project", project)
+}
+
 /// The request as the dispatcher takes it: read by the ledger (`NewProject::from_json`), whose
 /// words refuse what it cannot read. The page has already picked the chief and every member
 /// (`chief_asked`, `picked_member`), so the request holds what the ledger takes: a member with
@@ -307,7 +325,7 @@ fn received(value: Option<&Value>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use cf_ledger::NewChief;
+    use cf_ledger::{NewChief, COMPACTION_DEFAULT};
 
     use super::*;
 
@@ -443,8 +461,10 @@ mod tests {
                     wake_up: None,
                     specs: None,
                     staff_rules: None,
-                    compaction: None,
+                    // The request says nothing of it: the size a new project starts on (T-1400).
+                    compaction: Some(COMPACTION_DEFAULT),
                     advisor_tool: false,
+                    prompt_suggestion: false,
                 },
                 "{what}"
             );

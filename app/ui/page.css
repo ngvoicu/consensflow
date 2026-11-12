@@ -665,6 +665,8 @@ tr[data-session] .row-name { font-weight: 500; }
 .staff td { padding: 10px 10px; border-top: 1px solid var(--line-soft); vertical-align: middle; font-size: 14px; }
 .staff .member-name { font: 600 13px var(--mono); }
 .staff .member-meta { color: var(--muted); font: 11px/1.6 var(--mono); }
+.staff .member-out { color: var(--buoy); font-size: 12px; margin-right: 8px; }
+.staff .try-again { margin-top: 2px; }
 /* A section of a project's settings, in Project settings and in New project alike: Staff, Human
    approval, Wake-up calls and Specs, each a group of its own, one under another. */
 .project-section { display: grid; gap: 12px; min-width: 0; border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; margin: 0; }
@@ -697,6 +699,8 @@ tr[data-session] .row-name { font-weight: 500; }
 .members-compaction .staff-hint { color: var(--buoy); }
 /* Whether the project's members run with Claude Code's own advisor tool: a switch. */
 .members-advisor-tool .staff-hint { color: var(--buoy); }
+/* Whether the project's Claude Code windows make Claude Code's prompt suggestion: a switch. */
+.prompt-suggestion .staff-hint { color: var(--buoy); }
 /* The project's specs: the controls one under another. */
 .project-specs .specs-help { margin: 0; font-size: 12px; color: var(--muted); }
 .project-specs :disabled { opacity: .5; }

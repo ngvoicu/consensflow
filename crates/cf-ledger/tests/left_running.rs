@@ -49,6 +49,7 @@ fn ledger_with_two_tasks_at_work(dir: &tempfile::TempDir) -> Ledger {
             staff_rules: None,
             compaction: None,
             advisor_tool: false,
+            prompt_suggestion: false,
         })
         .expect("a project");
     let zeus = ledger

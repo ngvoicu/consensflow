@@ -40,7 +40,7 @@ use cf_e2e::Error;
 use serde_json::{json, Value};
 
 use crate::devin_notes_twice::store_of;
-use crate::{config, secs, Outcome, FAKE_DEVIN};
+use crate::{config, devin_config, secs, Outcome};
 
 /// What the chief answers the worker's two questions with.
 const ANSWERS: [&str; 2] = ["ANSWER_ONE", "ANSWER_TWO"];
@@ -60,7 +60,7 @@ impl Harness {
     fn config(self) -> Config {
         match self {
             Self::Claude => config(),
-            Self::Devin => config().devin(FAKE_DEVIN),
+            Self::Devin => devin_config(),
         }
     }
 
@@ -414,4 +414,23 @@ fn answers_a_paste_never_carried_into_a_claude_workers_window_go_again_in_it_aft
 fn answers_a_paste_never_carried_into_a_devin_workers_window_go_again_in_it_after_a_restart(
 ) -> Outcome {
     the_paste_never_reached_the_window_before_the_restart(Harness::Devin)
+}
+
+// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423): the case as
+// it is, the stand-in's shape chosen here and not by the environment.
+
+#[test]
+fn answers_a_paste_carried_into_a_devin_workers_window_are_not_pasted_again_after_a_restart_on_devin_3000_12(
+) -> Outcome {
+    crate::on_the_installed_devin(
+        answers_a_paste_carried_into_a_devin_workers_window_are_not_pasted_again_after_a_restart,
+    )
+}
+
+#[test]
+fn answers_a_paste_never_carried_into_a_devin_workers_window_go_again_in_it_after_a_restart_on_devin_3000_12(
+) -> Outcome {
+    crate::on_the_installed_devin(
+        answers_a_paste_never_carried_into_a_devin_workers_window_go_again_in_it_after_a_restart,
+    )
 }

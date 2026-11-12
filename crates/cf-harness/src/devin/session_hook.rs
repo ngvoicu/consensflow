@@ -12,7 +12,7 @@ use cf_base::js;
 use cf_base::json::{from_slice_lossy, js_order};
 use serde_json::{json, Value};
 
-use super::wire::selected_session;
+use super::wire::naming;
 
 /// The most of an event the hook reads; past it, the event is not read at all.
 const SESSION_EVENT_LIMIT: u64 = 1024 * 1024;
@@ -91,10 +91,19 @@ fn context(
 /// with the log still naming the conversation the window left. A log that names another
 /// conversation throughout, or none, or cannot be read, gets nothing when the wait is over: a
 /// session the window never shows is not given its text.
+///
+/// A window Devin 3000.12.43 opens again with no message on a session whose last turn a quit
+/// cut writes no configuration until it is typed to, and runs the hook after its replay, every
+/// line of which names the session (T-1432: the hook waited its whole while, 3007 and 3008 ms,
+/// and gave nothing). A log that configured none and names the session alone shows it
+/// (`wire::Naming::unannounced`); the adapter's while for such a window (`UNANNOUNCED_MS`) is for
+/// a delivery behind `/bypass`, and the hook, whose session is the one it starts, has no
+/// while to wait.
 fn shown(wire_log: &Path, session: &str, within: Duration) -> bool {
     let until = Instant::now() + within;
     loop {
-        if selected_session(wire_log).ok().flatten().as_deref() == Some(session) {
+        let naming = naming(wire_log).unwrap_or_default();
+        if naming.shown().or(naming.unannounced()) == Some(session) {
             return true;
         }
         let now = Instant::now();
@@ -345,6 +354,50 @@ mod tests {
             None,
             "a log that is not there"
         );
+    }
+
+    /// A replay's line of `session`, as a window opened again writes it before its start hook.
+    fn replayed(session: &str) -> String {
+        let record = json!({ "sessionId": session, "update": {
+            "sessionUpdate": "session_info_update", "title": "A sleep" } });
+        format!("{record}\n")
+    }
+
+    #[test]
+    fn a_window_reopened_silent_on_its_conversation_gives_its_start_its_role_text_at_once() {
+        // Devin 3000.12.43 opened again with no message on a session whose last turn a quit cut
+        // writes its replay and then runs the hook, and writes no configuration until it is typed
+        // to (T-1432: the hook ran its whole 3 s, 3007 and 3008 ms, and gave no role text). Every
+        // line that names a conversation names the session the hook starts.
+        let launch = launch();
+        fs::write(
+            &launch.wire,
+            format!("{{}}\n{{}}\n{}", replayed("native-a")),
+        )
+        .unwrap();
+        let began = Instant::now();
+        assert_eq!(
+            run_within(
+                &launch,
+                &event("SessionStart", "native-a"),
+                Duration::from_secs(3)
+            ),
+            Some(role())
+        );
+        assert!(
+            began.elapsed() < Duration::from_secs(1),
+            "{:?}",
+            began.elapsed()
+        );
+        // Its replay names another, or two: nothing.
+        assert_eq!(run(&launch, &event("SessionStart", "native-b")), None);
+        fs::write(
+            &launch.wire,
+            format!("{}{}", replayed("native-a"), replayed("native-b")),
+        )
+        .unwrap();
+        assert_eq!(run(&launch, &event("SessionStart", "native-a")), None);
+        assert_eq!(run(&launch, &event("SessionStart", "native-b")), None);
     }
 
     #[test]

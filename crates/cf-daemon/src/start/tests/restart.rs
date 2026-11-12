@@ -58,6 +58,7 @@ fn ledger_before_the_start(root: &Path) -> (Ledger, i64) {
             staff_rules: None,
             compaction: None,
             advisor_tool: false,
+            prompt_suggestion: false,
         })
         .unwrap();
     (ledger, project.id)
@@ -402,6 +403,7 @@ async fn a_devin_chiefs_first_message_behind_bypass_is_received_though_its_windo
                     staff_rules: None,
                     compaction: None,
                     advisor_tool: false,
+                    prompt_suggestion: false,
                 })
                 .unwrap()
                 .id;

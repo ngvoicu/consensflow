@@ -25,13 +25,18 @@ pub fn node_member(member: &Value) -> Value {
 }
 
 /// A project's request as Node's ledger was given it, each member of its staff as
-/// [`node_member`] takes it.
+/// [`node_member`] takes it. Node's ledger knew no compaction: a project it made is on each
+/// harness's own point, so a request that says nothing of it says `null` here, which a new
+/// project's request that says nothing of it no longer does (T-1400).
 pub fn node_staff(request: &Value) -> Value {
     let mut request = request.clone();
     if let Some(Value::Array(staff)) = request.get_mut("staff") {
         for member in staff.iter_mut() {
             *member = node_member(member);
         }
+    }
+    if let Value::Object(fields) = &mut request {
+        fields.entry("compaction").or_insert(Value::Null);
     }
     request
 }

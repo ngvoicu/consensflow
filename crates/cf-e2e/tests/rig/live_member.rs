@@ -20,7 +20,7 @@ use cf_e2e::live::{ask, calls, until, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
 use serde_json::{json, Value};
 
-use crate::{config, secs, Outcome};
+use crate::{config, devin_config, installed_devin, on_the_installed_devin, secs, Outcome};
 
 /// The stand-in Devin, which the rig's windows find as `devin`, and the stand-in for
 /// the `cf` of a member's window.
@@ -66,7 +66,7 @@ fn a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversati
     ask::prepare()?;
     let stand_in = tempfile::tempdir()?;
     calls::install(stand_in.path(), Path::new(FAKE_CF))?;
-    let rig = Rig::start(config().devin(FAKE_DEVIN).first_on_path(stand_in.path()))?;
+    let rig = Rig::start(devin_config(FAKE_DEVIN).first_on_path(stand_in.path()))?;
     let home = rig.var("HOME").unwrap_or_default().to_owned();
     let install = Installed::at(Harness::Devin, FAKE_DEVIN, &home);
     let agent = json!({ "kind": "devin", "model": "fake" });
@@ -206,20 +206,24 @@ fn a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversati
     Ok(())
 }
 
-/// A window the app's quit cut in its first turn comes back in Devin's normal mode,
-/// whatever its flag says (the stand-in does as Devin 3000.11.92 did, B1 of
-/// 2026-10-15): the daemon's readiness, the product's own (`ask::devin_readiness`),
-/// reads that mode on its wire and gives the window `/bypass` first, which switches it
-/// and makes no turn, no item of its record and nothing the daemon's reader takes for
-/// an answer, and the window is ready. The check gives the window nothing itself: one
-/// that pasted the command passed whatever the product did (Astra and Sol on the fix).
-#[test]
-fn a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_readiness_switches_it(
-) -> Outcome {
-    ask::prepare()?;
-    let rig = Rig::start(config().devin(FAKE_DEVIN))?;
+/// A Devin window of `rig` the app's quit cut in its first turn (its message in the store and
+/// nothing after it), and the window opened again on its conversation with nothing to say, as
+/// the human's Show opens one.
+struct Cut<'r> {
+    first: cf_e2e::live::window::Window<'r>,
+    again: cf_e2e::live::window::Window<'r>,
+    /// The wire log of the window opened again.
+    wire: PathBuf,
+    /// Devin's store.
+    store: PathBuf,
+    session: String,
+}
+
+fn cut_and_opened_again<'r>(
+    rig: &'r Rig,
+    install: &'r Installed,
+) -> Result<Cut<'r>, Box<dyn std::error::Error>> {
     let home = rig.var("HOME").unwrap_or_default().to_owned();
-    let install = Installed::at(Harness::Devin, FAKE_DEVIN, &home);
     let agent = json!({ "kind": "devin", "model": "fake" });
     let role = "# ConsensFlow worker\n";
     let task = "[ConsensFlow m-1 · T-1 · task from @chief]\nSLEEP 600 Reply with exactly: LATE";
@@ -232,7 +236,7 @@ fn a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_
     let step = Duration::from_millis(200);
 
     // Its first turn is at work: its message is in the store, and nothing after it.
-    let first = Open::new(&rig, &install, "cut", "cut-devin")
+    let first = Open::new(rig, install, "cut", "cut-devin")
         .agent(agent.clone())
         .member(Member::new("worker", role).first_message(task))
         .open(&Log::new("live member"))?;
@@ -248,12 +252,54 @@ fn a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_
     until(secs(30), step, || first.closed().then_some(())).ok_or("the window did not end")?;
 
     // Opened again on it with nothing to say, as the human's Show opens a window.
-    let again = Open::new(&rig, &install, "cut", "cut-devin-again")
+    let again = Open::new(rig, install, "cut", "cut-devin-again")
         .agent(agent)
         .member(Member::new("worker", role))
         .resume(&session)
         .open(&Log::new("live member"))?;
     let wire = file_of(again.argv(), "--config")?.with_file_name("wire.jsonl");
+    Ok(Cut {
+        first,
+        again,
+        wire,
+        store,
+        session,
+    })
+}
+
+/// A window the app's quit cut in its first turn comes back in Devin's normal mode,
+/// whatever its flag says (the stand-in does as Devin 3000.11.92 did, B1 of
+/// 2026-10-15): the daemon's readiness, the product's own (`ask::devin_readiness`),
+/// reads that mode on its wire and gives the window `/bypass` first, which switches it
+/// and makes no turn, no item of its record and nothing the daemon's reader takes for
+/// an answer, and the window is ready. The check gives the window nothing itself: one
+/// that pasted the command passed whatever the product did (Astra and Sol on the fix).
+/// On Devin 3000.12.43's shape the window says no mode at all (`silent_on_3000_12`), in the
+/// case's twin `…_on_devin_3000_12`: each chooses its shape itself, not the environment.
+#[test]
+fn a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_readiness_switches_it(
+) -> Outcome {
+    ask::prepare()?;
+    let rig = Rig::start(devin_config(FAKE_DEVIN))?;
+    let install = Installed::at(
+        Harness::Devin,
+        FAKE_DEVIN,
+        rig.var("HOME").unwrap_or_default(),
+    );
+    let Cut {
+        first,
+        again,
+        wire,
+        store,
+        session,
+    } = cut_and_opened_again(&rig, &install)?;
+    let step = Duration::from_millis(200);
+    if installed_devin() {
+        silent_on_3000_12(&rig, &again, &wire, &store, &session)?;
+        drop((first, again));
+        rig.close()?;
+        return Ok(());
+    }
     let read = until(secs(30), step, || {
         ask::devin_ready(&wire)
             .ok()
@@ -296,6 +342,144 @@ fn a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_
     Ok(())
 }
 
+/// The window of the case above on Devin 3000.12.43's shape, which says nothing of its mode
+/// opened again so (T-1417 run 3; T-1432 runs A, 2 and 3): its wire names the conversation on
+/// its lines and configures none. The daemon's readiness holds it while a Devin that announces
+/// would have, then finds it ready with nothing given, and its delivery goes behind `/bypass`,
+/// which runs the turn in full permission and makes the window say its mode. What the window
+/// is given is the product's.
+fn silent_on_3000_12(
+    rig: &Rig,
+    again: &cf_e2e::live::window::Window,
+    wire: &Path,
+    store: &Path,
+    session: &str,
+) -> Outcome {
+    let step = Duration::from_millis(200);
+    until(secs(30), step, || {
+        files::read_string(wire)
+            .ok()
+            .filter(|log| log.contains(&format!("\"sessionId\":\"{session}\"")))
+    })
+    .ok_or("its wire never named its conversation")?;
+    let read = ask::devin_ready(wire)?;
+    assert_eq!((read.shown, read.mode, read.command), (None, None, None));
+    let note = "[ConsensFlow m-2 · T-1 · note from @chief]\nReply with exactly: GONE_ON";
+    let began = std::time::Instant::now();
+    let readiness = ask::devin_readiness_then(rig, again, wire, secs(40), Some(note))?;
+    assert!(readiness.ready, "{readiness:?}");
+    assert!(
+        began.elapsed() >= Duration::from_secs(9),
+        "{:?}",
+        began.elapsed()
+    );
+    assert_eq!(
+        readiness.answers,
+        [
+            "held: Devin has not said yet which conversation its window shows",
+            "ready"
+        ],
+        "{readiness:?}"
+    );
+    assert_eq!(readiness.delivered, Some(true), "{readiness:?}");
+    // As the app pastes it: Devin on Windows gets its marks in ASCII (`console_text`).
+    assert_eq!(
+        readiness.given,
+        [format!("/bypass {}", again.given(note)?)],
+        "{readiness:?}"
+    );
+    // The turn says the mode as it begins, and runs: its answer is in the store, and its
+    // message is kept without the command.
+    until(secs(30), step, || {
+        ask::devin_ready(wire)
+            .ok()
+            .filter(|read| read.mode.as_deref() == Some("bypass"))
+    })
+    .ok_or("its wire never said full permission")?;
+    assert_eq!(ask::devin_ready(wire)?.shown.as_deref(), Some(session));
+    let answered = until(secs(30), step, || {
+        devin_store::messages_of(store, session)
+            .ok()
+            .filter(|kept| {
+                kept.iter()
+                    .any(|message| message.role == "assistant" && message.text.contains("GONE_ON"))
+            })
+    })
+    .ok_or("the note's turn never answered")?;
+    assert!(
+        answered
+            .iter()
+            .any(|message| message.role == "user" && message.text.starts_with("[ConsensFlow m-2 ")),
+        "{answered:?}"
+    );
+    Ok(())
+}
+
+/// The window of the case above on Devin 3000.12.43's shape, typed into by the human before the
+/// daemon's while is over: an Escape, which changes nothing in the window and leaves nothing in
+/// its box. Its log's silence says nothing now of where the window is (a `/new` that writes no
+/// line would leave it naming the conversation the window left, T-1466's review), and the
+/// daemon's readiness holds it as it did before T-1432, with nothing given, until its log
+/// configures (T-1474). The pane host is the rig's: the Escape comes by the human's door
+/// (`pane.typed`), the daemon's keys and pastes by its own. The case is 3000.12's shape whatever
+/// the run says: on the default shape the window says its mode, and nothing waits on the human's
+/// keys.
+#[test]
+fn a_window_cut_in_its_first_turn_that_the_human_typed_into_before_it_said_its_mode_is_held_with_nothing_given(
+) -> Outcome {
+    ask::prepare()?;
+    let rig = Rig::start(
+        config()
+            .devin(FAKE_DEVIN)
+            .var("FAKE_DEVIN_STAMPS", "3000.12"),
+    )?;
+    let install = Installed::at(
+        Harness::Devin,
+        FAKE_DEVIN,
+        rig.var("HOME").unwrap_or_default(),
+    );
+    let Cut {
+        first,
+        again,
+        wire,
+        session,
+        ..
+    } = cut_and_opened_again(&rig, &install)?;
+    let step = Duration::from_millis(200);
+    until(secs(30), step, || {
+        files::read_string(&wire)
+            .ok()
+            .filter(|log| log.contains(&format!("\"sessionId\":\"{session}\"")))
+    })
+    .ok_or("its wire never named its conversation")?;
+    again.types(b"\x1b")?;
+    let note = "[ConsensFlow m-2 · T-1 · note from @chief]\nReply with exactly: GONE_ON";
+    let readiness = ask::devin_readiness_then(&rig, &again, &wire, secs(16), Some(note))?;
+    assert!(!readiness.ready, "{readiness:?}");
+    assert_eq!(
+        readiness.answers,
+        ["held: Devin has not said yet which conversation its window shows"],
+        "{readiness:?}"
+    );
+    assert_eq!(
+        (readiness.delivered, readiness.given.as_slice()),
+        (None, [].as_slice()),
+        "{readiness:?}"
+    );
+    // The window took the Escape and said nothing of its mode.
+    let read = ask::devin_ready(&wire)?;
+    assert_eq!((read.shown, read.mode), (None, None));
+    let snapshot = again.snapshot(0)?;
+    assert_eq!(
+        (snapshot["typed"].as_u64(), snapshot["unsent"].as_bool()),
+        (Some(1), Some(false)),
+        "{snapshot}"
+    );
+    drop((first, again));
+    rig.close()?;
+    Ok(())
+}
+
 /// The live check finds and ends the command its window runs in the window's own tree,
 /// what descends from the process the pane host opened it as: a process outside the
 /// window that says the same words runs on. A check that ended every process whose
@@ -310,7 +494,7 @@ fn the_check_ends_the_command_its_window_runs_and_nothing_outside_the_window_tha
     use cf_e2e::process::Run;
 
     ask::prepare()?;
-    let rig = Rig::start(config().devin(FAKE_DEVIN))?;
+    let rig = Rig::start(devin_config(FAKE_DEVIN))?;
     let home = rig.var("HOME").unwrap_or_default().to_owned();
     let install = Installed::at(Harness::Devin, FAKE_DEVIN, &home);
     // What the window's command and the process outside it both say: the stand-in's command
@@ -393,7 +577,7 @@ fn config_folder(rig: &Rig, home: &str) -> PathBuf {
 fn a_member_launch_without_the_owners_hooks_keeps_the_ones_consensflow_adds_and_nothing_else(
 ) -> Outcome {
     ask::prepare()?;
-    let rig = Rig::start(config().devin(FAKE_DEVIN))?;
+    let rig = Rig::start(devin_config(FAKE_DEVIN))?;
     let home = rig.var("HOME").unwrap_or_default().to_owned();
     // The owner's own config of Devin, in the rig's home: a hook of theirs on an event of
     // its own, and one on an event ConsensFlow adds its own to.
@@ -492,4 +676,24 @@ fn the_launch_of_a_member_is_prepared_for_devin_and_pi_alone() -> Outcome {
     );
     rig.close()?;
     Ok(())
+}
+
+/// The same on the wire log of Devin 3000.12.43, the installed Devin (T-1423).
+#[test]
+fn a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversation_with_the_note_in_its_launch_on_devin_3000_12(
+) -> Outcome {
+    on_the_installed_devin(
+        a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversation_with_the_note_in_its_launch,
+    )
+}
+
+/// The case of a window cut in its first turn on the wire log of Devin 3000.12.43, which opened
+/// again so says no mode until it is typed to (T-1417's run 3, A5-23): the daemon's readiness
+/// holds it a while and gives its delivery behind `/bypass` (`silent_on_3000_12`).
+#[test]
+fn a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_readiness_switches_it_on_devin_3000_12(
+) -> Outcome {
+    on_the_installed_devin(
+        a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_readiness_switches_it,
+    )
 }

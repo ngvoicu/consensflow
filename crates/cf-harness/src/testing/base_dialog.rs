@@ -329,6 +329,11 @@ mod tests {
     /// it; the line is taken out again, where it was added, before the file is hashed.
     const T1399_ADVISOR_OFF: &str = "                launch.advisor_off,\n";
 
+    /// What T-1444 added to `claude/adapter.rs`: the launch's `suggestion_off` is handed to the
+    /// settings file's writer, in the same call. Nothing the corpus borrows reads it; the line is
+    /// taken out again, where it was added, before the file is hashed.
+    const T1444_SUGGESTION_OFF: &str = "                launch.suggestion_off,\n";
+
     /// What T-1423 added to `muse/window.rs`: the look a window gives before its session is
     /// known says no delivery began (`Observed::begun`, a field the contract gained). Nothing
     /// the corpus borrows reads it; the line is taken out again before the file is hashed.
@@ -366,6 +371,7 @@ mod tests {
                 .replace(T1328_IMPORT.0, T1328_IMPORT.1)
                 .replace(T1328_DEFAULT.0, T1328_DEFAULT.1)
                 .replace(T1399_ADVISOR_OFF, "")
+                .replace(T1444_SUGGESTION_OFF, "")
         } else if file == "muse/window.rs" {
             text.replacen(T1423_BEGUN, "", 1)
         } else {

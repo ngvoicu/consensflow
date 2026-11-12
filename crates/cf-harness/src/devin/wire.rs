@@ -81,23 +81,88 @@ pub(crate) fn mode_in<'a>(record: &'a Value, shown: Option<&str>) -> Option<&'a 
     .filter(|mode| !mode.is_empty())
 }
 
+/// What a log says, so far, of the conversation its window shows: the last conversation a
+/// configuration named ([`shown_in`]), and the ones its lines name by their `sessionId`.
+///
+/// A window Devin 3000.12.43 opens again with no message on a session whose last turn a quit cut
+/// configures nothing until it is typed to, so its log names no conversation by a configuration,
+/// while every line of its replay names the session it opened (T-1432: five windows, 20 to 65 s).
+/// Such a log names one conversation and no other ([`Naming::unannounced`]); one whose lines name
+/// two, or none, names nothing. Which of a window's conversations it is the adapter's to say
+/// (`adapter`'s `DevinWindow::shows`), and what may go into it the channel's (`channel::send`).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct Naming {
+    shown: Option<String>,
+    named: Named,
+}
+
+/// The conversations a log's lines name by their `sessionId`.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+enum Named {
+    #[default]
+    None,
+    One(String),
+    Many,
+}
+
+impl Naming {
+    /// What one record of the log says.
+    pub(crate) fn follow(&mut self, record: &Value) -> Result<(), Unreadable> {
+        if let Some(shown) = shown_in(record)? {
+            self.shown = Some(shown.to_owned());
+        }
+        if let Some(of) = record.get("sessionId").and_then(Value::as_str) {
+            self.named = match std::mem::take(&mut self.named) {
+                Named::None => Named::One(of.to_owned()),
+                Named::One(one) if one == of => Named::One(one),
+                _ => Named::Many,
+            };
+        }
+        Ok(())
+    }
+
+    /// The conversation the last configuration named: the one the window shows.
+    pub(crate) fn shown(&self) -> Option<&str> {
+        self.shown.as_deref()
+    }
+
+    /// The one conversation a log that configured none names on every line that names one.
+    pub(crate) fn unannounced(&self) -> Option<&str> {
+        match (&self.shown, &self.named) {
+            (None, Named::One(one)) => Some(one),
+            _ => None,
+        }
+    }
+
+    /// The log is read again from its start: its lines name what they name anew, and the
+    /// conversation a configuration named stays named.
+    pub(crate) fn read_anew(&mut self) {
+        self.named = Named::None;
+    }
+}
+
 /// The conversation the window shows, as the log has it so far: the last
-/// complete record that names one. The log is read a record at a time, as
+/// complete record that names one ([`naming`]).
+pub(crate) fn selected_session(file: &Path) -> Result<Option<String>, Unreadable> {
+    Ok(naming(file)?.shown)
+}
+
+/// What the log says so far of the conversation the window shows. The log is read a record at a time, as
 /// long a conversation's log grows; what follows its last newline is a
 /// record still being written, and is not read. A complete line that is not
 /// JSON is torn (a short write, which the next record's append completed) and
 /// says nothing, as the conversation's reader passes it over
 /// (`wire_log::follow`): Devin goes on past it, and so do the window's pastes.
-pub(crate) fn selected_session(file: &Path) -> Result<Option<String>, Unreadable> {
+pub(crate) fn naming(file: &Path) -> Result<Naming, Unreadable> {
     let size = fs::metadata(file)?.len();
     let mut log = BufReader::new(File::open(file)?.take(size));
-    let mut session = None;
+    let mut naming = Naming::default();
     let mut line = Vec::new();
     loop {
         line.clear();
         log.read_until(b'\n', &mut line)?;
         let Some(record) = line.strip_suffix(b"\n") else {
-            return Ok(session);
+            return Ok(naming);
         };
         if js::trim(&String::from_utf8_lossy(record)).is_empty() {
             continue;
@@ -105,9 +170,7 @@ pub(crate) fn selected_session(file: &Path) -> Result<Option<String>, Unreadable
         let Ok(record) = from_slice_lossy(record) else {
             continue;
         };
-        if let Some(shown) = shown_in(&record)? {
-            session = Some(shown.to_string());
-        }
+        naming.follow(&record)?;
     }
 }
 

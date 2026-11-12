@@ -180,6 +180,7 @@ pub(super) fn plain_copy(request: &Request) -> Request {
         specs: request.specs,
         compaction: request.compaction,
         advisor_off: request.advisor_off,
+        suggestion_off: request.suggestion_off,
         folder: request.folder,
         directory: request.directory.clone(),
     }
