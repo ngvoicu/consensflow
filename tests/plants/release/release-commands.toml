@@ -1041,7 +1041,7 @@ meant = "a_gh_that_fails_while_the_trial_is_watched_is_a_refusal_naming_the_run_
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
                 .status(id)
                 .map_err(|error| watched.unasked(&error, Some(id)))?;'''
