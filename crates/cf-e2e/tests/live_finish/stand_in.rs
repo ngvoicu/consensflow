@@ -393,20 +393,30 @@ fn the_close_of_a_case_ends_what_its_window_left_and_says_so_and_leaves_another_
     // Told by the number its shell printed, and ended by which process it is however the test ends:
     // another tree running this test has a `sleep 4713` of its own, which is none of this one's.
     let decoy_pid: u32 = ran.stdout.trim().parse().unwrap();
-    struct Reaper(Vec<cf_e2e::live::members::Running>);
+    // Armed before any read that can fail: where none came first, the process of that number and
+    // that command line begun no earlier than the test.
+    struct Reaper(u32, Option<cf_e2e::live::members::Running>);
     impl Drop for Reaper {
         fn drop(&mut self) {
-            let _ = cf_e2e::live::members::end_chosen(&self.0);
+            let unread = || {
+                let since = ThisMachine.identity(std::process::id()).ok()??.started;
+                ThisMachine.processes().ok()?.into_iter().find(|one| {
+                    one.identity.pid == self.0
+                        && one.command == "sleep 4713"
+                        && one.identity.started >= since
+                })
+            };
+            if let Some(decoy) = self.1.take().or_else(unread) {
+                let _ = cf_e2e::live::members::end_chosen(&[decoy]);
+            }
         }
     }
-    let reaper = Reaper(
-        ThisMachine
-            .processes()?
-            .into_iter()
-            .filter(|one| one.identity.pid == decoy_pid)
-            .collect(),
-    );
-    assert!(!reaper.0.is_empty(), "the other run's job was never listed");
+    let mut reaper = Reaper(decoy_pid, None);
+    reaper.1 = ThisMachine
+        .processes()?
+        .into_iter()
+        .find(|one| one.identity.pid == decoy_pid);
+    assert!(reaper.1.is_some(), "the other run's job was never listed");
     members.give("worker", &leaving::stand_in_brief(true))?;
     // The job the agent detached, an orphan the host lists nowhere.
     let job = find(

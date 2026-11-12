@@ -92,12 +92,12 @@ fn a_command_the_host_never_listed_that_still_runs_on_the_machine_escaped_and_fa
 #[test]
 fn the_command_of_a_harness_is_found_by_the_command_and_the_stand_ins_job_by_its_words() {
     // A harness's is the command itself, as this machine's shells know it: on Windows a
-    // ping, whose seconds are not its last word (zeewin, round 7). The rig's stand-in starts
-    // a job of its own, whose command line holds the seconds too.
+    // ping, whose seconds are not its last word (zeewin, round 7), and the run's word in its
+    // timeout. The rig's stand-in starts a job of its own, whose command line holds the seconds.
     let harness = if cfg!(windows) {
-        format!("ping -n {} 127.0.0.1", seconds())
+        format!("ping -n {} -w {} 127.0.0.1", seconds(), word())
     } else {
-        format!("sleep {}", seconds())
+        format!("sleep {}", word())
     };
     assert_eq!(wanted(Who::Harness(Harness::Pi)), harness);
     assert_eq!(
@@ -490,7 +490,7 @@ fn a_harness_is_asked_to_start_the_command_in_the_background_and_answer_and_the_
     let asked = brief(Who::Harness(Harness::Devin));
     assert!(
         asked.starts_with("Start the command `")
-            && asked.contains(&format!(" {}", seconds()))
+            && asked.contains(&format!(" {}", word()))
             && asked.contains("in the background")
             && asked.contains("Do not wait for it")
             && asked.contains("reply with one line"),
@@ -506,13 +506,33 @@ fn a_harness_is_asked_to_start_the_command_in_the_background_and_answer_and_the_
         stand_in_brief(true),
         format!("BACKGROUND --detach {} left a job running", seconds())
     );
-    // The command is the platform's own.
+    // The command is the platform's own, and carries the run's word as a whole argument in
+    // every form the worker is given.
     assert!(
-        command() == format!("sleep {}", seconds())
-            || command() == format!("ping -n {} 127.0.0.1", seconds()),
+        command() == format!("sleep {}", word())
+            || command() == format!("ping -n {} -w {} 127.0.0.1", seconds(), word()),
         "{}",
         command()
     );
+    assert!(has_arg(&command(), word()), "{}", command());
+    assert!(
+        detach().contains(&format!("'{}'", word())) || detach().contains(&command()),
+        "{}",
+        detach()
+    );
+}
+
+#[test]
+fn the_runs_word_is_its_seconds_and_twenty_digits_made_once() {
+    let (seconds_part, digits) = word().split_once('.').expect("a point");
+    assert_eq!(seconds_part, seconds().to_string());
+    assert_eq!(digits.len(), 20, "{}", word());
+    assert!(
+        digits.bytes().all(|digit| digit.is_ascii_digit()),
+        "{}",
+        word()
+    );
+    assert_eq!(word(), word());
 }
 
 #[test]
@@ -1054,8 +1074,7 @@ fn a_command_of_this_runs_word_that_detached_unseen_and_runs_in_another_folder_e
     // The run's window began before it and has gone; no look saw the command under it.
     let chosen = Chosen {
         window_began: Some(began),
-        number: Some(seconds().to_string()),
-        ..Chosen::default()
+        ..run_chosen()
     };
     let wanted = wanted(Who::Harness(Harness::Claude));
     let mut found = Vec::new();
@@ -1097,22 +1116,31 @@ fn a_command_of_this_runs_word_that_detached_unseen_and_runs_in_another_folder_e
     );
 }
 
-/// The platform's own command of this run, started here and under no window: `sleep` or, on
-/// Windows, `ping -n`, whose number is the run's word. Found by the word alone and ended by which
-/// process it is; one of another run's number, started beside it, is neither found nor ended.
+/// The platform's own command, started here and under no window: `sleep`, or on Windows
+/// `ping -n … -w`, with a run's word as a whole argument. Found by the word alone and ended by
+/// which process it is; one of another run's word, of the same seconds and started beside it, is
+/// neither found nor ended.
 #[test]
-fn the_command_of_this_runs_number_is_found_by_it_anywhere_and_ended_by_which_process_it_is_and_another_runs_number_is_none_of_it(
+fn the_command_of_this_runs_word_is_found_by_it_anywhere_and_ended_by_which_process_it_is_and_another_runs_word_is_none_of_it(
 ) {
     use cf_e2e::process::Run;
 
-    let spawn = |seconds: u64| {
+    // Words of this test's own, made as the run's is: the run's own command of the other tests
+    // runs beside it, and what finds the run's word ends it.
+    let a_word = || {
+        let (high, low) = uuid::Uuid::new_v4().as_u64_pair();
+        format!("{}.{:020}", seconds(), high ^ low)
+    };
+    let spawn = |word: &str| {
         let (program, args): (&str, Vec<String>) = if cfg!(windows) {
             (
                 "ping",
-                ["-n".to_owned(), seconds.to_string(), "127.0.0.1".to_owned()].to_vec(),
+                ["-n", &seconds().to_string(), "-w", word, "127.0.0.1"]
+                    .map(str::to_owned)
+                    .to_vec(),
             )
         } else {
-            ("sleep", vec![seconds.to_string()])
+            ("sleep", vec![word.to_owned()])
         };
         Run::new(program)
             .args(args)
@@ -1120,20 +1148,23 @@ fn the_command_of_this_runs_number_is_found_by_it_anywhere_and_ended_by_which_pr
             .spawn()
             .unwrap()
     };
-    // Numbers of this test's own, near the run's: the run's own command of the other tests runs
-    // beside it, and what finds the run's number ends it.
-    let near = |step: u64| FIRST_SECOND + (seconds() - FIRST_SECOND + step) % NUMBERS;
-    let (own_number, other_number) = (near(2), near(3));
-    let mut own = spawn(own_number);
-    let mut other = spawn(other_number);
+    let began = ThisMachine
+        .identity(std::process::id())
+        .unwrap()
+        .expect("this process is there")
+        .started;
+    let (own_word, other_word) = (a_word(), a_word());
+    let mut own = spawn(&own_word);
+    let mut other = spawn(&other_word);
     let chosen = Chosen {
-        number: Some(own_number.to_string()),
+        word: Some(own_word.clone()),
+        window_began: Some(began),
         ..Chosen::default()
     };
     let wanted = if cfg!(windows) {
-        format!("ping -n {own_number} 127.0.0.1")
+        format!("ping -n {} -w {own_word} 127.0.0.1", seconds())
     } else {
-        format!("sleep {own_number}")
+        format!("sleep {own_word}")
     };
     let mut found = Vec::new();
     for _ in 0..100 {
@@ -1145,11 +1176,11 @@ fn the_command_of_this_runs_number_is_found_by_it_anywhere_and_ended_by_which_pr
     }
     assert!(
         found.iter().any(|one| one.identity.pid == own.id()),
-        "the command of the run's number is not found by it: {found:#?}"
+        "the command of the run's word is not found by it: {found:#?}"
     );
     assert!(
         found.iter().all(|one| one.identity.pid != other.id()),
-        "another run's number is taken for this one's: {found:#?}"
+        "another run's word is taken for this one's: {found:#?}"
     );
     let ended = end_chosen(&found);
     assert!(ended.failed.is_empty(), "{ended:#?}");
@@ -1157,15 +1188,15 @@ fn the_command_of_this_runs_number_is_found_by_it_anywhere_and_ended_by_which_pr
     let other_runs = other.wait(Duration::from_millis(300)).unwrap().is_none();
     other.kill();
     own.kill();
-    assert!(gone, "the command of the run's number was not ended");
+    assert!(gone, "the command of the run's word was not ended");
     assert!(other_runs, "another run's command was ended");
 }
 
 #[test]
-fn the_window_and_its_program_hold_the_commands_words_in_their_own_command_line_and_are_none_of_what_the_number_finds(
+fn the_window_and_its_program_hold_the_commands_words_in_their_own_command_line_and_are_none_of_what_the_word_finds(
 ) {
     // The brief that names the command is in the window's command line (T-548).
-    let words = format!("sleep {}", seconds());
+    let words = command();
     let all = vec![
         running(10, 1, 1, "pane-host"),
         running(
@@ -1182,24 +1213,24 @@ fn the_window_and_its_program_hold_the_commands_words_in_their_own_command_line_
             &format!("claude --resume Start the command {words} now"),
         ),
         running(300, 20, 1, &words),
-        running(301, 21, 1, &format!("sleep {}", seconds() + 1)),
+        // Another run's word, and anybody's `sleep` of the same seconds.
+        running(301, 21, 1, &format!("sleep {}.1", seconds())),
+        running(304, 24, 1, &format!("sleep {}", seconds())),
         // Windows' table lists a ping by the path of its image: the words are not its line.
         running(
             302,
             22,
             1,
             &format!(
-                "\"C:\\Windows\\system32\\PING.EXE\" -n {} 127.0.0.1",
-                seconds()
+                "\"C:\\Windows\\system32\\PING.EXE\" -n {} -w {} 127.0.0.1",
+                seconds(),
+                word()
             ),
         ),
         // The same words in a program that is none of the command's, and not the window's.
-        running(303, 23, 1, &format!("editor notes {}", seconds())),
+        running(303, 23, 1, &format!("editor notes {}", word())),
     ];
-    let mut chosen = Chosen {
-        number: Some(seconds().to_string()),
-        ..Chosen::default()
-    };
+    let mut chosen = run_chosen();
     chosen.choose(
         &all,
         Some(Identity {
@@ -1216,4 +1247,120 @@ fn the_window_and_its_program_hold_the_commands_words_in_their_own_command_line_
         .collect();
     pids.sort_unstable();
     assert_eq!(pids, [300, 302]);
+}
+
+/// The run's own command, as the member is told to run it, and an unrelated one of the same seconds
+/// (anybody's `sleep`, or `ping -n` on Windows, begun after the run's word was made and after the
+/// run's window): what the run takes for its own, counts as escaped and ends is its own command
+/// alone. The other is none of it, and runs on after the case's ending (T-1538's fifth finding).
+/// The table the run reads is cut to these two processes, so that nothing else on the machine is
+/// reached.
+#[test]
+fn an_unrelated_command_of_the_same_seconds_begun_after_the_runs_word_is_none_of_the_run_and_runs_on(
+) {
+    use cf_e2e::process::Run;
+
+    let spawn = |line: &str| {
+        let mut words = line.split_whitespace();
+        let program = words.next().unwrap().to_owned();
+        Run::new(program)
+            .args(words)
+            .inheriting_env()
+            .spawn()
+            .unwrap()
+    };
+    // The run's window began before either.
+    let began = ThisMachine
+        .identity(std::process::id())
+        .unwrap()
+        .expect("this process is there")
+        .started;
+    let own_line = command();
+    let unrelated_line = if cfg!(windows) {
+        format!("ping -n {} 127.0.0.1", seconds())
+    } else {
+        format!("sleep {}", seconds())
+    };
+    let mut own = spawn(&own_line);
+    let mut unrelated = spawn(&unrelated_line);
+    let ours = |all: &[Running]| -> Vec<Running> {
+        all.iter()
+            .filter(|one| one.identity.pid == own.id() || one.identity.pid == unrelated.id())
+            .cloned()
+            .collect()
+    };
+    let mut table = Vec::new();
+    for _ in 0..100 {
+        table = ours(&ThisMachine.processes().unwrap());
+        if table.len() == 2 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(table.len(), 2, "both commands run: {table:#?}");
+    let mut chosen = Chosen {
+        window_began: Some(began),
+        ..run_chosen()
+    };
+    let wanted = wanted(Who::Harness(Harness::Claude));
+    let folder = tempfile::tempdir().unwrap();
+    chosen.choose(&table, None, &[], &wanted);
+    let escaped = on_the_machine(|all| {
+        chosen.of_the_run(&ours(all), (folder.path(), &wanted, None), working_folder)
+    });
+    let ended = end_chosen(&chosen.processes);
+    let gone = own.wait(Duration::from_secs(10)).unwrap().is_some();
+    let runs_on = unrelated
+        .wait(Duration::from_millis(500))
+        .unwrap()
+        .is_none();
+    unrelated.kill();
+    own.kill();
+    assert!(
+        escaped
+            .iter()
+            .all(|line| !line.starts_with(&format!("{} ", unrelated.id()))),
+        "an unrelated `{unrelated_line}` is among what escaped: {escaped:#?}"
+    );
+    assert!(
+        ended
+            .ended
+            .iter()
+            .all(|one| one.identity.pid != unrelated.id()),
+        "an unrelated `{unrelated_line}` was ended: {ended:#?}"
+    );
+    assert!(runs_on, "an unrelated `{unrelated_line}` was ended");
+    assert!(
+        escaped
+            .iter()
+            .any(|line| line.starts_with(&format!("{} ", own.id()))),
+        "the run's own `{own_line}` is not among what escaped: {escaped:#?}"
+    );
+    assert!(gone, "the run's own `{own_line}` was not ended: {ended:#?}");
+}
+
+/// What holds the run's word but began before the run's first window is none of the run's: the
+/// word is made for the run, and nothing of the run's runs before its window does.
+#[test]
+fn what_holds_the_runs_word_but_began_before_the_runs_window_is_none_of_the_run() {
+    let line = command();
+    let all = vec![running(300, 5, 1, &line), running(301, 30, 1, &line)];
+    let chosen = Chosen {
+        window_began: Some(20),
+        ..run_chosen()
+    };
+    let found: Vec<u32> = chosen
+        .by_word(&all, &wanted(Who::Harness(Harness::Codex)))
+        .iter()
+        .map(|one| one.identity.pid)
+        .collect();
+    assert_eq!(found, [301]);
+}
+
+/// What the run chooses with, as `run_asked` makes it for a harness's worker.
+fn run_chosen() -> Chosen {
+    Chosen {
+        word: Some(word().to_owned()),
+        ..Chosen::default()
+    }
 }

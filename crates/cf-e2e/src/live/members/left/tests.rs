@@ -217,6 +217,33 @@ impl Drop for Reaper {
     }
 }
 
+/// A process the test's own shell started and printed the number of (`pid`, running `command`),
+/// ended when the test ends however it does: as the process it was read as, or, where no read
+/// came first, the process of that number and that command line begun no earlier than the test.
+#[cfg(unix)]
+struct Decoy {
+    pid: u32,
+    command: &'static str,
+    read: Option<Running>,
+}
+
+#[cfg(unix)]
+impl Drop for Decoy {
+    fn drop(&mut self) {
+        let unread = || {
+            let since = ThisMachine.identity(std::process::id()).ok()??.started;
+            ThisMachine.processes().ok()?.into_iter().find(|one| {
+                one.identity.pid == self.pid
+                    && one.command == self.command
+                    && one.identity.started >= since
+            })
+        };
+        if let Some(decoy) = self.read.take().or_else(unread) {
+            let _ = end_chosen(&[decoy]);
+        }
+    }
+}
+
 /// A real Monitor's shape, on a Mac or Linux: a window (a shell) that runs `tail -f … | grep` in a
 /// folder made for the case, killed, which leaves the pipeline with no parent. Found and ended by
 /// which process each is, and what runs in another folder, begun at the same time, is left alone:
@@ -238,7 +265,11 @@ fn a_real_monitor_pipeline_left_by_a_killed_window_is_ended_and_what_runs_elsewh
         .run()
         .unwrap();
     assert_eq!(ran.code, Some(0));
-    let decoy_pid: u32 = ran.stdout.trim().parse().unwrap();
+    let mut guard = Decoy {
+        pid: ran.stdout.trim().parse().unwrap(),
+        command: "sleep 31",
+        read: None,
+    };
     let mut reaper = Reaper(Vec::new());
     let mut window = Run::new("/bin/sh")
         .args(["-c", "tail -f /dev/null | grep --line-buffered tick & wait"])
@@ -257,6 +288,8 @@ fn a_real_monitor_pipeline_left_by_a_killed_window_is_ended_and_what_runs_elsewh
     for _ in 0..100 {
         watch.look_now();
         tree = watch.windows[0].tree.clone();
+        // What the window runs is ended however the test ends, from the first look that saw it.
+        reaper.0.clone_from(&tree);
         let has = |word: &str| tree.iter().any(|one| one.command == word);
         if has("tail -f /dev/null") && has("grep --line-buffered tick") {
             break;
@@ -273,15 +306,14 @@ fn a_real_monitor_pipeline_left_by_a_killed_window_is_ended_and_what_runs_elsewh
         .find(|one| one.command == "grep --line-buffered tick")
         .cloned()
         .expect("the window ran its pipeline");
-    reaper.0 = vec![tail.clone(), grep.clone()];
     // The decoy, by the number the shell printed: the same process, as it runs.
     let decoy = ThisMachine
         .processes()
         .unwrap()
         .into_iter()
-        .find(|one| one.identity.pid == decoy_pid)
+        .find(|one| one.identity.pid == guard.pid)
         .expect("the other run's orphan was never listed: the test proves nothing");
-    reaper.0.push(decoy.clone());
+    guard.read = Some(decoy.clone());
     // Killed, as a window that is closed is, and not its children: they are left with no parent.
     window.kill();
     let swept = watch.sweep();
