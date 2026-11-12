@@ -482,30 +482,12 @@ pub fn wait(
     let began = pace.now_ms();
     let limit_ms = i64::from(minutes) * 60_000;
     if minutes == 0 {
-        let queued = match queues {
-            Some(queues) => queues.queued(machine, began)?,
-            None => 0,
-        };
-        if queued > 0 {
-            return Ok(Waited::Refused(format!(
-                "{machine} is busy: {}",
-                queued_words(queued)
-            )));
+        if let Some(refused) = refused_for_the_queue(queues, machine, began)? {
+            return Ok(Waited::Refused(refused));
         }
     }
-    // A queue that cannot be kept (a folder that cannot be made, a disk that is full) does not stop
-    // the run: it is said, and the run waits for the machine alone.
     let ticket = match queues.filter(|_| minutes > 0) {
-        Some(queues) => match queues.join(machine, who, began) {
-            Ok(ticket) => Some(ticket),
-            Err(cause) => {
-                say(&format!(
-                    "no place could be kept in the queue for {machine} ({cause}): waiting for the machine alone"
-                ))
-                .map_err(Error::Output)?;
-                None
-            }
-        },
+        Some(queues) => take_ticket(queues, machine, who, began, say)?,
         None => None,
     };
     let mut said: Option<(String, i64)> = None;
@@ -585,6 +567,41 @@ pub fn wait(
         }
         if !pace.pause(pause) {
             return Ok(Waited::Stopped);
+        }
+    }
+}
+
+/// Why a run told not to wait is refused before the machine is asked: runs are queued for it.
+fn refused_for_the_queue(
+    queues: Option<&Queues>,
+    machine: &str,
+    now_ms: i64,
+) -> Result<Option<String>, Error> {
+    let queued = match queues {
+        Some(queues) => queues.queued(machine, now_ms)?,
+        None => 0,
+    };
+    Ok((queued > 0).then(|| format!("{machine} is busy: {}", queued_words(queued))))
+}
+
+/// The run's place in `machine`'s queue. A queue that cannot be kept (a folder that cannot be
+/// made, a disk that is full) does not stop the run: it is said, and the run waits for the
+/// machine alone.
+fn take_ticket(
+    queues: &Queues,
+    machine: &str,
+    who: &Who,
+    now_ms: i64,
+    say: &mut dyn FnMut(&str) -> io::Result<()>,
+) -> Result<Option<Ticket>, Error> {
+    match queues.join(machine, who, now_ms) {
+        Ok(ticket) => Ok(Some(ticket)),
+        Err(cause) => {
+            say(&format!(
+                "no place could be kept in the queue for {machine} ({cause}): waiting for the machine alone"
+            ))
+            .map_err(Error::Output)?;
+            Ok(None)
         }
     }
 }
