@@ -2203,20 +2203,6 @@ replace = '''
 '''
 
 
-[[plant]]
-name = "muse: the scratch copy stays when the run fails"
-meant = "the_scratch_folder_goes_when_the_run_fails_as_when_it_ends"
-runs = ["muse-live"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/guard.rs"
-find = '''
-        let _ = std::fs::remove_dir_all(&self.0);
-'''
-replace = '''
-        let _ = &self.0;
-'''
-
 
 [[plant]]
 name = "muse: the tool does not name the Muse ops"

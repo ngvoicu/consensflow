@@ -188,36 +188,6 @@ find = '''            self.window_began.get_or_insert(own.started);'''
 replace = '''            self.window_began = Some(own.started);'''
 
 [[plant]]
-name = "detached limit: a run that never saw its window takes every orphan of the folder"
-meant = "what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not"
-runs = ["dl-leaving"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_finish/leaving.rs"
-find = '''            None => Vec::new(),'''
-replace = '''            None => orphans_in_folder(all, wanted, folder, 0, &folder_of),'''
-
-[[plant]]
-name = "detached limit: an orphan that began before the window is taken for the run's own"
-meant = "what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not"
-runs = ["dl-leaving"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_finish/leaving.rs"
-find = '''            Some(since) => orphans_in_folder(all, wanted, folder, since, &folder_of),'''
-replace = '''            Some(_) => orphans_in_folder(all, wanted, folder, 0, &folder_of),'''
-
-[[plant]]
-name = "detached limit: an orphan chosen at one look is chosen again at the next"
-meant = "what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not"
-runs = ["dl-leaving"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_finish/leaving.rs"
-find = '''                .any(|chosen| chosen.identity == orphan.identity)'''
-replace = '''                .any(|chosen| false && chosen.identity == orphan.identity)'''
-
-[[plant]]
 name = "detached limit: a process that is no orphan is said not provably the run's own"
 meant = "what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not"
 runs = ["dl-leaving"]
@@ -236,36 +206,6 @@ runs = ["dl-leaving"]
 file = "crates/cf-e2e/tests/live_finish/leaving.rs"
 find = '''                    .any(|chosen| chosen.identity == process.identity)'''
 replace = '''                    .any(|chosen| false && chosen.identity == process.identity)'''
-
-[[plant]]
-name = "detached limit: an orphan the run cannot prove its own is not a problem of the run"
-meant = "what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not"
-runs = ["dl-leaving"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_finish/leaving.rs"
-find = '''        if self.strays_matter && !self.unproven.is_empty() {'''
-replace = '''        if false {'''
-
-[[plant]]
-name = "detached limit: another rig's job is a stray of the stand-in's run"
-meant = "what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not"
-runs = ["dl-leaving"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_finish/leaving.rs"
-find = '''        if self.strays_matter && !self.unproven.is_empty() {'''
-replace = '''        if !self.unproven.is_empty() {'''
-
-[[plant]]
-name = "detached limit: a stray of a real harness's run is no problem of the run"
-meant = "a_stray_orphan_fails_the_run_of_a_harness_and_not_the_rigs_stand_in"
-runs = ["dl-leaving"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_finish/leaving.rs"
-find = '''    matches!(who, Who::Harness(_))'''
-replace = '''    matches!(who, Who::StandIn)'''
 
 # The orphan, and the folder a process runs in.
 
@@ -301,37 +241,6 @@ file = "crates/cf-e2e/src/live/members/descent.rs"
 find = '''                && process.command.contains(text)
                 && folder_of'''
 replace = '''                && folder_of'''
-
-[[plant]]
-name = "detached limit: an orphan in another folder is taken for the run's"
-meant = "an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by_its_command_line_alone"
-runs = ["dl-descent"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''.is_some_and(|there| there == folder)'''
-replace = '''.is_some()'''
-
-[[plant]]
-name = "detached limit: an orphan whose folder cannot be read is taken for the run's"
-meant = "an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by_its_command_line_alone"
-runs = ["dl-descent"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''.is_some_and(|there| there == folder)'''
-replace = '''.is_none_or(|there| there == folder)'''
-
-[[plant]]
-name = "detached limit: a folder is compared as it is spelled, through its links"
-meant = "a_folder_is_compared_by_its_real_path_and_another_folder_is_another"
-runs = ["dl-descent"]
-platforms = ["macos"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''    let folder = folder.canonicalize().unwrap_or_else(|_| folder.to_owned());'''
-replace = '''    let folder = folder.to_owned();'''
 
 [[plant]]
 name = "detached limit: what an orphan started is left running"

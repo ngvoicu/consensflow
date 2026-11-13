@@ -227,10 +227,12 @@ impl Door {
         };
         let line = format!("{act}\t{}\t{}", escaped(what), escaped(ground));
         eprintln!("[say only] {line}");
+        // One write for the line and its break: programs of the run add to the same file, and
+        // two writes could be cut between by another's.
         let written = fs::OpenOptions::new()
             .append(true)
             .open(file)
-            .and_then(|mut open| writeln!(open, "{line}"));
+            .and_then(|mut open| open.write_all(format!("{line}\n").as_bytes()));
         if let Err(failed) = written {
             let why = format!(
                 "[say only] {} could not be written: {failed}: the run stops, for what it would do is no longer said",

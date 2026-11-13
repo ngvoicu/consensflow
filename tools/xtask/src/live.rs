@@ -166,12 +166,26 @@ fn live(context: &Context, args: &[OsString], console: &mut Console) -> Result<i
     let Some(file) = audit_file(&context.env) else {
         return Ok(process::run(&invocation(context, &asked), &context.env)?);
     };
+    refuse_old_audit_file(&file)?;
     let code = process::run(
         &invocation(context, &asked).var(AUDIT_FILE, &file),
         &context.env,
     )?;
     writeln!(console.err, "{}", audit_report(&file))?;
     Ok(if code == 0 { 1 } else { code })
+}
+
+/// Stops before anything starts where `file` is there: a say-only run makes its file as a new one
+/// of its own and never adds to an older run's, and what an older file says is not what this run
+/// would have done.
+fn refuse_old_audit_file(file: &Path) -> Result<(), Failure> {
+    if fs::symlink_metadata(file).is_ok() {
+        return Err(Failure::Usage(format!(
+            "the audit file {} is there already: a say-only run ({AUDIT}) makes its file as a new one of its own and never adds to an older run's; name another in {AUDIT_FILE}, or take it away if it is nobody's",
+            file.display()
+        )));
+    }
+    Ok(())
 }
 
 /// What a say-only run left, as the person is told: the acts its file says, or that the run
@@ -296,6 +310,12 @@ fn run_set(
 ) -> Result<i32, Failure> {
     let (name, runs) = set_runs(args, names)?;
     let audit = audit_file(&context.env);
+    if let Some(base) = &audit {
+        // Before the first run starts, so that no run of the set is begun on an older file.
+        for at in 1..=runs.len() {
+            refuse_old_audit_file(&audit_file_of(base, at))?;
+        }
+    }
     let mut came = Vec::new();
     for (at, (line, asked)) in runs.iter().enumerate() {
         writeln!(console.out, "== live {line}")?;

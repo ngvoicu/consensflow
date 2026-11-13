@@ -180,6 +180,35 @@ fn a_say_only_door_writes_each_process_it_would_end_or_stop_and_ends_none() {
 }
 
 #[test]
+fn lines_said_by_many_at_once_into_one_file_are_each_whole() {
+    // The programs of a run, and the test, add to one file: a line and its break written apart
+    // could be cut between by another's line.
+    let folder = tempfile::tempdir().unwrap();
+    let (door, file) = saying_in(folder.path());
+    let long = "x".repeat(3000);
+    let door = &door;
+    std::thread::scope(|scope| {
+        for who in 0..8 {
+            let long = &long;
+            scope.spawn(move || {
+                for at in 0..150 {
+                    door.say("remove", &format!("{who}-{at}-{long}"), "ground");
+                }
+            });
+        }
+    });
+    let said = acts(&file);
+    assert_eq!(said.len(), 8 * 150, "a line was cut or run into another");
+    for line in &said {
+        let parts: Vec<&str> = line.split('\t').collect();
+        assert_eq!(parts.len(), 3, "{}", &line[..line.len().min(80)]);
+        assert_eq!(parts[0], "remove");
+        assert_eq!(parts[2], "ground");
+        assert!(parts[1].ends_with(&long), "a line was cut");
+    }
+}
+
+#[test]
 fn a_say_only_door_kills_no_child_of_its_own_and_closes_no_pane() {
     let folder = tempfile::tempdir().unwrap();
     let (door, file) = saying_in(folder.path());
