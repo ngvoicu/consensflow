@@ -14,6 +14,9 @@
 //! made, or the run is refused as before. This is the one exception to the kit never writing the
 //! owner's harness files, and only the harness's own renewal of its own login is allowed it:
 //!
+//! - **Never in a say-only run.** A run that only says ([`crate::door::Door`], `CF_LIVE_AUDIT=1`)
+//!   starts no harness: a login that would need the renewal stops the run before anything acts,
+//!   with one line that says so, which the audit file holds too ([`Renewal::renew`]).
 //! - **Never on the owner's Mac.** A run knows it is on a test machine by one variable,
 //!   [`TEST_MACHINE`], that the Windows runner (`cargo xtask windows`) gives the command it runs
 //!   with the machine's name, and that nothing else sets. No variable, no renewal.
@@ -45,6 +48,7 @@ use std::time::{Duration, Instant};
 
 use super::login::span;
 use super::machine::Harness;
+use crate::door::Door;
 use crate::process::{own_var, Run};
 use crate::{Error, Result};
 
@@ -176,6 +180,8 @@ pub struct Renewal {
     /// and ended badly (a status, its limit), and an error where it could not be run, or changed
     /// what it must not.
     shot: Box<dyn Fn() -> Result<Option<String>> + Send + Sync>,
+    /// The run's door: a run that only says renews nothing ([`Renewal::renew`]).
+    door: Door,
 }
 
 impl Renewal {
@@ -190,7 +196,16 @@ impl Renewal {
             harness,
             only,
             shot: Box::new(shot),
+            door: Door::of_run().clone(),
         }
+    }
+
+    /// The same renewal under `door`, which is the run's own (the tests of a say-only run give
+    /// theirs).
+    #[must_use]
+    pub fn under(mut self, door: Door) -> Self {
+        self.door = door;
+        self
     }
 
     pub fn machine(&self) -> &TestMachine {
@@ -200,6 +215,14 @@ impl Renewal {
     /// Runs the harness once and reads the login again: what the machine keeps of it now, and
     /// what the renewal came to. The words that say why it did not, if the harness could not renew.
     pub fn renew(&self, kept: &Kept, text: &str) -> std::result::Result<(String, Renewed), String> {
+        // The harness would run as the owner on the owner's own login, which no run's folder holds:
+        // a run that only says starts none, stops here before anything acts, and says so in the
+        // audit file as well.
+        if self.door.says_only() {
+            let line = self.not_here();
+            self.door.note(&line);
+            return Err(line);
+        }
         let before = (kept.expiry)(text);
         let started = Instant::now();
         let ended = (self.shot)().map_err(|failed| self.failed(&failed.to_string()))?;
@@ -222,6 +245,14 @@ impl Renewal {
             return Err(self.failed(how));
         }
         Ok((fresh, renewed))
+    }
+
+    /// What a run that only says says of a login it would renew.
+    pub fn not_here(&self) -> String {
+        format!(
+            "say only: the login of {} would be renewed here; a say-only run renews nothing",
+            self.harness
+        )
     }
 
     /// What follows the refusal of a login the renewal did not mend, at `now` (milliseconds since

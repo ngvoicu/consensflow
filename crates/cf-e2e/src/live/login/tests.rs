@@ -1188,6 +1188,35 @@ fn a_login_that_ended_on_a_test_machine_is_renewed_by_claude_code_once_and_the_r
 }
 
 #[test]
+fn a_say_only_run_never_renews_a_login_on_a_test_machine_and_leaves_the_original_as_it_was() {
+    let run = Renewing::new();
+    let ended = login_ending(at(NOW - 3600), ACCESS);
+    // The stand-in would renew the login: a run that says only never starts it.
+    let mut login = run.login(&ended, Some(zeewin2()), &run.renews(), 0);
+    let audit = run.parent.path().join("audit.txt");
+    let door = crate::door::Door::asked(Some("1".as_ref()), Some(audit.as_os_str()), None).unwrap();
+    login.renewal = login.renewal.take().map(|renewal| renewal.under(door));
+    let said = login.folder_at(at(NOW)).unwrap_err().to_string();
+    let line =
+        "say only: the login of Claude Code would be renewed here; a say-only run renews nothing";
+    assert!(said.contains(line), "{said}");
+    assert!(!said_anywhere(&said), "{said}");
+    assert!(run.started().is_none(), "the stand-in was started");
+    assert_eq!(
+        std::fs::read_to_string(run.file()).unwrap(),
+        ended,
+        "the original login changed"
+    );
+    // Nothing of the run was made, and the audit file holds the line.
+    assert_eq!(std::fs::read_dir(run.parent.path()).unwrap().count(), 1);
+    let text = std::fs::read_to_string(&audit).unwrap();
+    assert!(
+        text.lines().any(|said| said == format!("# {line}")),
+        "{text}"
+    );
+}
+
+#[test]
 fn a_renewal_that_fails_refuses_the_run_in_words_that_say_so_and_makes_no_folder() {
     let run = Renewing::new();
     let ended = login_ending(at(NOW - 3600), ACCESS);

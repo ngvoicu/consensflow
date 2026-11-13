@@ -658,9 +658,12 @@ fn live_files() -> (PathBuf, Vec<PathBuf>) {
             || *file == src.join("process").join("pid.rs")
             // The builder of the programs a suite starts: it runs `cargo build` in the checkout and
             // keeps a lock and a stamp in the folder the builds share (`cf-e2e-builds` below the
-            // checkout's target folder), which no run of the live kit makes: `cargo xtask live`
-            // builds first and names the folder (`CF_E2E_BUILT`), and the builder then takes the
-            // programs from it and writes nothing.
+            // checkout's target folder), which no run of the live kit makes. A live run never
+            // reaches it to build: `cargo xtask live` builds every program its cases can need
+            // before any case starts and names the folders (`CF_E2E_BUILT`, `CF_E2E_HELPERS`) and
+            // that a case builds nothing (`CF_E2E_NO_BUILD`); the builder then takes the programs
+            // from there, and a program that is missing is an error that names it, never a
+            // `cargo` (`cf::tests`).
             || *file == src.join("cf.rs");
         let unit_test = gated.iter().any(|gate| file.starts_with(gate));
         !own && !unit_test

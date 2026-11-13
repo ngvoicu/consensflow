@@ -538,15 +538,17 @@ fn what_a_say_only_run_left_is_told_as_acts_without_its_first_lines_and_never_as
     let told = audit_report(&file);
     assert!(told.contains("2 endings and removals"), "{told}");
     assert!(told.contains("no pass"), "{told}");
-    // A run that made no file stopped before it acted, and the person is told that, not zero acts.
+    // A run that made no file: nothing is known of what it did before, and the person is told that,
+    // not zero acts and not that it stopped before it acted.
     let none = audit_report(&folder.path().join("none.txt"));
     assert!(
-        none.contains("made no audit file") && none.contains("stopped before it acted"),
+        none.contains("made no audit file")
+            && none.contains("what it did before is not known")
+            && !none.contains("stopped before it acted"),
         "{none}"
     );
     assert!(none.contains("no pass"), "{none}");
-    // A file the run made that cannot be read says that what the run did is not known, and not
-    // that it stopped before it acted.
+    // A file the run made that cannot be read says that what the run did is not known.
     let unreadable = folder.path().join("unreadable.txt");
     fs::write(&unreadable, [0xff, 0xfe, b'\n']).unwrap();
     let told = audit_report(&unreadable);
@@ -618,5 +620,110 @@ fn a_variable_that_hands_the_made_folders_on_is_never_a_persons_to_set_for_the_t
         vars.iter()
             .any(|(name, value)| name == "CF_LIVE_MADE_ROOTS" && value.is_none()),
         "{vars:?}"
+    );
+}
+
+/// The words of `cargo` that `cargo xtask live <line>` hands its builds.
+fn build_lines(line: &str) -> Vec<String> {
+    let asked = parse(&words(line), &names()).unwrap();
+    builds(&context(), &asked)
+        .iter()
+        .map(Invocation::display)
+        .collect()
+}
+
+#[test]
+fn the_programs_a_case_can_need_are_built_apart_before_any_case_starts() {
+    let lines = build_lines("paste claude");
+    let shim = if cfg!(windows) { " --bin cf-shim" } else { "" };
+    assert_eq!(
+        lines,
+        [
+            format!("cargo build --release --locked -p cf --bin cf{shim}"),
+            "cargo build --release --locked -p cf-panes --bin consensflow-bridge".to_owned(),
+            "cargo build --release --locked -p cf-harness --bin harness-ask --features test-support"
+                .to_owned(),
+            "cargo build --release --locked -p cf-engine --bin engine-ask --features test-support"
+                .to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn the_builds_take_the_callers_switches_and_jobs_and_none_of_the_tests_own_words() {
+    let lines = build_lines("paste --offline -j 4 --no-fail-fast --features x -- --exact a_test");
+    assert!(!lines.is_empty());
+    for line in &lines {
+        assert!(line.contains(" --offline -j 4"), "{line}");
+        assert!(
+            !line.contains("--no-fail-fast") && !line.contains("--exact"),
+            "{line}"
+        );
+        assert_eq!(line.matches("--locked").count(), 1, "{line}");
+    }
+    let lines = build_lines("paste --locked --jobs=2 --frozen");
+    for line in &lines {
+        assert!(line.contains(" --jobs=2 --frozen"), "{line}");
+        assert_eq!(line.matches("--locked").count(), 1, "{line}");
+    }
+}
+
+#[test]
+fn a_started_case_is_told_where_its_programs_are_and_that_it_builds_none() {
+    let asked = parse(&words("paste"), &names()).unwrap();
+    let vars: Vec<(String, String)> = started(&context(), &asked)
+        .vars
+        .iter()
+        .filter_map(|(name, value)| {
+            value.as_ref().map(|value| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.to_string_lossy().into_owned(),
+                )
+            })
+        })
+        .collect();
+    let folder = built_in(&context().root).to_string_lossy().into_owned();
+    assert!(
+        folder.ends_with(&format!(
+            "app{0}src-tauri{0}target{0}release",
+            std::path::MAIN_SEPARATOR
+        )),
+        "{folder}"
+    );
+    for (name, value) in [
+        ("CF_E2E_BUILT", folder.as_str()),
+        ("CF_E2E_HELPERS", folder.as_str()),
+        ("CF_E2E_NO_BUILD", "1"),
+    ] {
+        assert!(vars.contains(&var(name, value)), "{name}: {vars:?}");
+    }
+}
+
+#[test]
+fn the_variables_that_say_where_the_programs_are_are_the_builders_own() {
+    // xtask does not link cf-e2e: the names are read from its source.
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/cf-e2e/src/cf.rs"),
+    )
+    .unwrap();
+    for (constant, name) in [
+        ("BUILT", BUILT),
+        ("HELPERS", HELPERS),
+        ("NO_BUILD", NO_BUILD),
+    ] {
+        assert!(
+            source.contains(&format!("pub const {constant}: &str = \"{name}\";")),
+            "{constant} = {name}"
+        );
+    }
+}
+
+#[test]
+fn the_help_says_a_build_is_the_checkouts_own_act_before_the_run() {
+    let help = dispatch::command_help(&COMMANDS[0]);
+    assert!(
+        help.contains("builds the programs its cases need first"),
+        "{help}"
     );
 }

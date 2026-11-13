@@ -32,8 +32,9 @@
 //!
 //! **Writes** have a guard where the kit's own writers are ([`crate::files`], [`writable`]): in
 //! the live folder every run on the machine shares (`~/.consensflow-candidate/live`) a file or a
-//! folder is made only below a folder this run made through [`made_in`], by its real path, and
-//! never through a link. Outside it the kit writes in folders of its own (a rig's, a login copy's)
+//! folder is made only below a folder this run made through [`made_in`], by its real path. The
+//! last link of a path is refused, and a path through an earlier link is taken only where its real
+//! place is inside what the run made. Outside it the kit writes in folders of its own (a rig's, a login copy's)
 //! that it made through the door.
 //!
 //! **Say only.** With `CF_LIVE_AUDIT=1` the door does nothing: it writes what it would do, one
@@ -93,7 +94,9 @@ pub const STILL_ACTS: &[&str] = &[
     "keys the run types into the rig's own panes (an Escape, a Ctrl-C, /exit, a dialog's answer, a paste) are typed",
     "a terminal the run opened itself (a pane of its own test, Muse's window) is hung up by the system when the run's process ends, with what runs in it",
     "the programs the run starts (a harness's window and what it runs, its tools, git, a stand-in) run, and what they do or end is theirs, not the kit's door",
-    "the files and folders the run writes below its own folders (its rig's folder in the temp folder, a project folder of its own in the live folder, the config folder of its login copy, its wrappers, what it exports into a new folder of its own in a folder a caller names) are written",
+    "the files and folders the run writes below its own folders (its rig's folder in the temp folder, a project folder of its own in the live folder, the config folder of its login copy, its wrappers, what it exports into a new folder of its own in a folder a caller names) are written; besides them the run makes new files of its own outside its folders and never writes over one that is there (the audit file, a fixture or a report file a caller names, a failure report), and makes a folder that is missing on the way to them",
+    "an acting run on a test machine (CONSENSFLOW_TEST_MACHINE, which the Windows runner sets) may renew that machine's own Claude Code or Pi login by running the harness itself, which writes that login; a say-only run never does: a login that would need it stops the run before anything acts, with one line that says so",
+    "a say-only run uses the real model's quota, and keeps what it made for reading: its folders, its transcripts, the whole command lines in the audit file, and its copy of the login's access token (no refresh token) in its own config folder",
 ];
 
 /// The file a folder kept for a person holds: an older rig folder that holds it is never swept.
@@ -255,8 +258,26 @@ impl Door {
         };
         let line = format!("{act}\t{}\t{}", escaped(what), escaped(ground));
         eprintln!("[say only] {line}");
-        // One write for the line and its break: programs of the run add to the same file, and
-        // two writes could be cut between by another's.
+        self.append(file, &line);
+    }
+
+    /// Writes `line`, a sentence of the run's own and no act, as a comment line of the audit file
+    /// (the file's first lines are comment lines too: a line that starts with `#` is no ending and
+    /// no removal), and on the error output; nothing where the door acts. A run that stops because
+    /// it would act where it only says (a login it would renew) leaves the reason there.
+    #[allow(clippy::print_stderr)] // Said in the run's output as well as in its file.
+    pub fn note(&self, line: &str) {
+        let Some(file) = &self.said else {
+            return;
+        };
+        eprintln!("[say only] {line}");
+        self.append(file, &format!("# {}", escaped(line)));
+    }
+
+    /// Adds `line` and its break to `file` in one write: programs of the run add to the same file,
+    /// and two writes could be cut between by another's.
+    #[allow(clippy::print_stderr)]
+    fn append(&self, file: &Path, line: &str) {
         let written = fs::OpenOptions::new()
             .append(true)
             .open(file)
@@ -752,7 +773,8 @@ pub fn in_live_zone(path: &Path) -> bool {
 
 /// Whether a file or folder may be made at `path`: only below a folder this run made through the
 /// door ([`made_in`]) or handed down to this program ([`MADE_ROOTS`]), or as a file this run made
-/// ([`made_file`]), by the real path, and never as a link that leads elsewhere. Everywhere else is
+/// ([`made_file`]), by the real path; the last link of a path is refused, and a path through an earlier
+/// link is taken only where its real place is inside what the run made. Everywhere else is
 /// another run's, a person's, or nobody's: the live folder, the temp folder, a config folder a caller
 /// named. A folder (`folder`) may also be the run's own folder itself, made again.
 pub fn writable(path: &Path, folder: bool) -> Result<(), String> {

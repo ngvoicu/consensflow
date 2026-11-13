@@ -9,17 +9,27 @@
 //! A Claude Code window of a run never runs on the owner's `~/.claude`: it runs on a
 //! config folder of the run's own, with a copy of the Keychain's login (the first
 //! run on a machine asks the owner once to allow the Keychain read; on Linux and on
-//! Windows, of `~/.claude/.credentials.json`), which is removed when the run is over,
+//! Windows, of `~/.claude/.credentials.json`), which an acting run removes when it is over,
 //! `--keep` or not (`--keep` copies the conversations and sessions it kept into the kept
 //! home first, never the login). A run refuses to start when the login's
 //! access token expires within the case's planned length (ten minutes unless the case says
 //! more: `cf_e2e::live::Log::lasting`) and ten minutes more (Claude Code refreshes a token only when five
 //! minutes of it are left, so on a machine the Windows runner started the command on, `cargo xtask
 //! windows` gives it `CONSENSFLOW_TEST_MACHINE` and the kit runs the harness once as the owner to
-//! renew a login that has run short, T-1067; elsewhere run again after the owner's own Claude
+//! renew a login that has run short, T-1067 (an acting run only: a say-only run renews nothing, and
+//! a login that would need it stops the run before anything acts); elsewhere run again after the owner's own Claude
 //! Code has), and fails if the owner's `settings.json`
 //! changed or `~/.claude.json`, `history.jsonl` or `projects` gained anything of its
 //! folders (`cf_e2e::live::login`).
+//!
+//! **The programs of a run are built before it.** `cargo xtask live` builds what the cases can need
+//! (`cf`, the pane host `consensflow-bridge`, and the test binaries `harness-ask` and `engine-ask`)
+//! first, each by its own `cargo build --release` in the checkout's own build folder, with the
+//! caller's `--offline`, `--locked`, `--frozen` and `-j`, and names the folder to the run
+//! (`CF_E2E_BUILT`, `CF_E2E_HELPERS`) and that no case builds (`CF_E2E_NO_BUILD`): a case that finds
+//! a program missing stops and names it, and starts no `cargo`. A build is the checkout's own act
+//! before the run, a say-only run's too; it is no act of the run's cases, which could cut a program
+//! out from under another run of the same checkout.
 //!
 //! What the test is asked to do is said in words after its name, which this turns
 //! into the variables it reads (`CONSENSFLOW_LIVE_<FLAG>`, which `cf_e2e::live`
@@ -79,7 +89,9 @@
 //! - keys the run types into the rig's own panes (an Escape, a Ctrl-C, /exit, a dialog's answer, a paste) are typed
 //! - a terminal the run opened itself (a pane of its own test, Muse's window) is hung up by the system when the run's process ends, with what runs in it
 //! - the programs the run starts (a harness's window and what it runs, its tools, git, a stand-in) run, and what they do or end is theirs, not the kit's door
-//! - the files and folders the run writes below its own folders (its rig's folder in the temp folder, a project folder of its own in the live folder, the config folder of its login copy, its wrappers, what it exports into a new folder of its own in a folder a caller names) are written
+//! - the files and folders the run writes below its own folders (its rig's folder in the temp folder, a project folder of its own in the live folder, the config folder of its login copy, its wrappers, what it exports into a new folder of its own in a folder a caller names) are written; besides them the run makes new files of its own outside its folders and never writes over one that is there (the audit file, a fixture or a report file a caller names, a failure report), and makes a folder that is missing on the way to them
+//! - an acting run on a test machine (CONSENSFLOW_TEST_MACHINE, which the Windows runner sets) may renew that machine's own Claude Code or Pi login by running the harness itself, which writes that login; a say-only run never does: a login that would need it stops the run before anything acts, with one line that says so
+//! - a say-only run uses the real model's quota, and keeps what it made for reading: its folders, its transcripts, the whole command lines in the audit file, and its copy of the login's access token (no refresh token) in its own config folder
 //!
 //! Such a run is never a pass: this names the file and leaves with a code that is not 0, whatever
 //! the run came to; so does `--set` (each run of the set with a file of its own, `<name>-<n>`) and
@@ -98,7 +110,7 @@ use crate::process::{self, Invocation};
 pub const COMMANDS: &[Command] = &[Command {
     words: &["live"],
     about: "Run a live test of cf-e2e (the tests/live_<name>.rs files): it runs real harnesses on the machine's own logins and spends real quota, so it is ignored unless asked for and is no part of check",
-    usage: "<name> [harness ...] | sweep [--in <folder>] [--home <folder>] [--older-than <days>] (lists what earlier runs left; takes none) | --set <set> (each run of the set, one after another: windows) [--keep] [--models harness=model[:effort],...] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; a folder or file a flag names to be read (--claude-config) is read and never written, and one it names for the run to write (--fixture, --transcripts, CF_EVIDENCE) is made new, or a new child of it, and refused where it is there; a run that came to a pass takes the project folders it made in the live folder away when it is done, and one that did not, or --keep, leaves them marked kept; --keep leaves the run's home and project where they are (the Claude Code config folder goes, for it holds a copy of a login: its conversations and sessions are copied into the kept home); --models runs each harness it names on that model, and that effort where one is given, the others on their cheap one (--claude-model M is --models claude=M, and --models wins where both name Claude); words that are no flags name harnesses; run it with no name to list the tests) | with CF_LIVE_AUDIT=1 the run is say-only: the kit's door ends no process, closes no window and takes no file away, and writes down instead what it would have, in CF_LIVE_AUDIT_FILE (a new file of the run's own, whole command lines; one that cannot be made or written stops the run before anything acts), and the run is no pass (exit is never 0; --set gives each run a file of its own; sweep exits 1). What it still does (the first lines of the audit file say the same, word for word): the product's own shutdown at the rig's close still runs: the daemon ends, the pane host ends, and every pane of the rig and what descends from it (a Codex session's children among them) is ended by the product's own code, not the kit's door; the product's own operations while the case runs go on, each by the product's own code and not the kit's door: the daemon closes a window at a task's end, ends a pane it restarts or kills, and moves what it is asked to; the product's own clean-up of files goes on: a Codex session removes the private socket folder it made, and the daemon takes the files it wrote; keys the run types into the rig's own panes (an Escape, a Ctrl-C, /exit, a dialog's answer, a paste) are typed; a terminal the run opened itself (a pane of its own test, Muse's window) is hung up by the system when the run's process ends, with what runs in it; the programs the run starts (a harness's window and what it runs, its tools, git, a stand-in) run, and what they do or end is theirs, not the kit's door; the files and folders the run writes below its own folders (its rig's folder in the temp folder, a project folder of its own in the live folder, the config folder of its login copy, its wrappers, what it exports into a new folder of its own in a folder a caller names) are written",
+    usage: "<name> [harness ...] | sweep [--in <folder>] [--home <folder>] [--older-than <days>] (lists what earlier runs left; takes none) | --set <set> (each run of the set, one after another: windows) [--keep] [--models harness=model[:effort],...] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; a folder or file a flag names to be read (--claude-config) is read and never written, and one it names for the run to write (--fixture, --transcripts, CF_EVIDENCE) is made new, or a new child of it, and refused where it is there; a run that came to a pass takes the project folders it made in the live folder away when it is done, and one that did not, or --keep, leaves them marked kept; --keep leaves the run's home and project where they are (the Claude Code config folder goes in an acting run, for it holds a copy of a login: its conversations and sessions are copied into the kept home; a say-only run removes nothing, so its config folder and the copy of the login's access token in it stay); --models runs each harness it names on that model, and that effort where one is given, the others on their cheap one (--claude-model M is --models claude=M, and --models wins where both name Claude); words that are no flags name harnesses; run it with no name to list the tests) | it builds the programs its cases need first (cf, the pane host and the two test binaries the cases ask), in the checkout's own build folder, before any case starts, and a case builds nothing: a build is the checkout's own act before the run, in a say-only run too, and a program a case finds missing stops it by name | with CF_LIVE_AUDIT=1 the run is say-only: the kit's door ends no process, closes no window and takes no file away, and writes down instead what it would have, in CF_LIVE_AUDIT_FILE (a new file of the run's own, whole command lines; one that cannot be made or written stops the run before anything acts), and the run is no pass (exit is never 0; --set gives each run a file of its own; sweep exits 1). What it still does (the first lines of the audit file say the same, word for word): the product's own shutdown at the rig's close still runs: the daemon ends, the pane host ends, and every pane of the rig and what descends from it (a Codex session's children among them) is ended by the product's own code, not the kit's door; the product's own operations while the case runs go on, each by the product's own code and not the kit's door: the daemon closes a window at a task's end, ends a pane it restarts or kills, and moves what it is asked to; the product's own clean-up of files goes on: a Codex session removes the private socket folder it made, and the daemon takes the files it wrote; keys the run types into the rig's own panes (an Escape, a Ctrl-C, /exit, a dialog's answer, a paste) are typed; a terminal the run opened itself (a pane of its own test, Muse's window) is hung up by the system when the run's process ends, with what runs in it; the programs the run starts (a harness's window and what it runs, its tools, git, a stand-in) run, and what they do or end is theirs, not the kit's door; the files and folders the run writes below its own folders (its rig's folder in the temp folder, a project folder of its own in the live folder, the config folder of its login copy, its wrappers, what it exports into a new folder of its own in a folder a caller names) are written; besides them the run makes new files of its own outside its folders and never writes over one that is there (the audit file, a fixture or a report file a caller names, a failure report), and makes a folder that is missing on the way to them; an acting run on a test machine (CONSENSFLOW_TEST_MACHINE, which the Windows runner sets) may renew that machine's own Claude Code or Pi login by running the harness itself, which writes that login; a say-only run never does: a login that would need it stops the run before anything acts, with one line that says so; a say-only run uses the real model's quota, and keeps what it made for reading: its folders, its transcripts, the whole command lines in the audit file, and its copy of the login's access token (no refresh token) in its own config folder",
     run: Run::Native(live),
 }];
 
@@ -167,12 +179,18 @@ fn live(context: &Context, args: &[OsString], console: &mut Console) -> Result<i
         return Ok(process::run(&sweep(context, &args[1..]), &context.env)?);
     }
     let asked = parse(args, &names)?;
-    let Some(file) = audit_file(&context.env) else {
-        return Ok(process::run(&invocation(context, &asked), &context.env)?);
+    let audit = audit_file(&context.env);
+    if let Some(file) = &audit {
+        refuse_old_audit_file(file)?;
+    }
+    if let Some(code) = prepare(context, &asked, console)? {
+        return Ok(code);
+    }
+    let Some(file) = audit else {
+        return Ok(process::run(&started(context, &asked), &context.env)?);
     };
-    refuse_old_audit_file(&file)?;
     let code = process::run(
-        &invocation(context, &asked).var(AUDIT_FILE, &file),
+        &started(context, &asked).var(AUDIT_FILE, &file),
         &context.env,
     )?;
     writeln!(console.err, "{}", audit_report(&file))?;
@@ -194,7 +212,7 @@ fn refuse_old_audit_file(file: &Path) -> Result<(), Failure> {
 
 /// What a say-only run left, as the person is told: the acts its file says, or that the run
 /// made no file, and in both that a say-only run is no pass. The file is made by the run (a new
-/// one of its own), so one that is not there is a run that stopped before it acted.
+/// one of its own), so one that is not there says nothing of what the run did.
 fn audit_report(file: &Path) -> String {
     match fs::read_to_string(file) {
         Ok(text) => {
@@ -206,10 +224,11 @@ fn audit_report(file: &Path) -> String {
                 file.display()
             )
         }
-        // A file that is not there is a run that stopped before it acted; any other failure is a
-        // file the run made that this cannot read, and then what the run did is not known.
+        // A file that is not there says nothing of what the run did before: it may have stopped
+        // before it made one, or the file was taken away; any other failure is a file the run
+        // made that this cannot read. In both, what the run did is not known.
         Err(failed) if failed.kind() == std::io::ErrorKind::NotFound => format!(
-            "say only ({AUDIT}): the run made no audit file {}: it stopped before it acted (a file that is there is never added to; name another in {AUDIT_FILE}); a say-only run is no pass",
+            "say only ({AUDIT}): the run made no audit file {}; what it did before is not known (a file that is there is never added to; name another in {AUDIT_FILE}); a say-only run is no pass",
             file.display()
         ),
         Err(failed) => format!(
@@ -328,12 +347,17 @@ fn run_set(
             refuse_old_audit_file(&audit_file_of(base, at))?;
         }
     }
+    for (_, asked) in &runs {
+        if let Some(code) = prepare(context, asked, console)? {
+            return Ok(code);
+        }
+    }
     let mut came = Vec::new();
     for (at, (line, asked)) in runs.iter().enumerate() {
         writeln!(console.out, "== live {line}")?;
         // A say-only run makes its audit file as a new one of its own, so each run of a set has one.
         let file = audit.as_ref().map(|base| audit_file_of(base, at + 1));
-        let mut invoked = invocation(context, asked);
+        let mut invoked = started(context, asked);
         if let Some(file) = &file {
             invoked = invoked.var(AUDIT_FILE, file);
         }
@@ -509,6 +533,150 @@ fn invocation(context: &Context, asked: &Asked) -> Invocation {
     // The folders a run may write below are the ones it makes: the variable that hands them to a
     // program the run starts is never a person's to set (`cf_e2e::door::MADE_ROOTS`).
     invocation.without(MADE_ROOTS)
+}
+
+/// The variable that names the folder `cf` and the pane host were built in before the run
+/// (`cf_e2e::cf::BUILT`), the one that names where the test binaries the cases ask are
+/// (`cf_e2e::cf::HELPERS`), and the one that says a case builds nothing
+/// (`cf_e2e::cf::NO_BUILD`): a program that is missing is an error that names it, never a
+/// `cargo` the case starts.
+const BUILT: &str = "CF_E2E_BUILT";
+const HELPERS: &str = "CF_E2E_HELPERS";
+const NO_BUILD: &str = "CF_E2E_NO_BUILD";
+
+/// The programs a live case can need, each as `cf_e2e::cf` asks for it: its package, its binary
+/// and the cargo words after the rest. Built apart, one `cargo build` each, as the builder of
+/// the tests builds them (a build of two programs in one gives `cf` the features of both, and
+/// builds it again each time the other way follows). The shim is the terminal's command where the
+/// terminal's command is a program, which is Windows.
+fn programs() -> Vec<(&'static str, &'static str, Vec<&'static str>)> {
+    let shim: &[&str] = if cfg!(windows) {
+        &["--bin", "cf-shim"]
+    } else {
+        &[]
+    };
+    vec![
+        ("cf", "cf", shim.to_vec()),
+        ("cf-panes", "consensflow-bridge", Vec::new()),
+        (
+            "cf-harness",
+            "harness-ask",
+            vec!["--features", "test-support"],
+        ),
+        (
+            "cf-engine",
+            "engine-ask",
+            vec!["--features", "test-support"],
+        ),
+    ]
+}
+
+/// The folder the release builds of the checkout at `root` are in (`.cargo/config.toml` puts the
+/// build folder at `app/src-tauri/target`).
+fn built_in(root: &Path) -> std::path::PathBuf {
+    root.join("app")
+        .join("src-tauri")
+        .join("target")
+        .join("release")
+}
+
+/// The words of the caller that a build takes as they stand: cargo's own switches of the command
+/// (`--offline`, `--locked`, `--frozen`) and the number of jobs (`-j N`, `-jN`, `--jobs N`,
+/// `--jobs=N`). What else is cargo's for the test (a feature, a filter) is not the build's.
+fn build_words(cargo: &[OsString]) -> Vec<OsString> {
+    let mut words = Vec::new();
+    let mut at = cargo.iter();
+    while let Some(word) = at.next() {
+        let text = word.to_string_lossy();
+        if CARGO_FLAGS.contains(&text.as_ref()) {
+            if text != "--locked" {
+                words.push(word.clone());
+            }
+        } else if text == "-j" || text == "--jobs" {
+            words.push(word.clone());
+            if let Some(count) = at.next() {
+                words.push(count.clone());
+            }
+        } else if (text.starts_with("-j") && text.len() > 2) || text.starts_with("--jobs=") {
+            words.push(word.clone());
+        }
+    }
+    words
+}
+
+/// The builds of the programs a live case can need ([`programs`]), each in the checkout's own
+/// build folder as `cargo build` there makes them, with the caller's switches ([`build_words`]).
+fn builds(context: &Context, asked: &Asked) -> Vec<Invocation> {
+    let at = asked.rest.iter().position(|word| word == "--");
+    let cargo = &asked.rest[..at.unwrap_or(asked.rest.len())];
+    programs()
+        .into_iter()
+        .map(|(package, bin, more)| {
+            Invocation::new("cargo", &context.root)
+                .args([
+                    "build",
+                    "--release",
+                    "--locked",
+                    "-p",
+                    package,
+                    "--bin",
+                    bin,
+                ])
+                .args(more)
+                .args(build_words(cargo))
+        })
+        .collect()
+}
+
+/// Builds the programs the run's cases can need, before any case starts: a build is the
+/// checkout's own act, made here in its own build folder, where a case that builds could cut a
+/// program out from under another run of the same checkout; a case that finds a program missing
+/// stops and names it ([`BUILT`]). Where a build does not succeed, or leaves a program
+/// missing, its code (1 where there is none) and nothing is started.
+fn prepare(
+    context: &Context,
+    asked: &Asked,
+    console: &mut Console,
+) -> Result<Option<i32>, Failure> {
+    for build in builds(context, asked) {
+        writeln!(
+            console.err,
+            "live: preparing the programs of the run: {}",
+            build.display()
+        )?;
+        let code = process::run(&build, &context.env)?;
+        if code != 0 {
+            writeln!(
+                console.err,
+                "live: a program the run needs was not built (exit {code}); nothing is started"
+            )?;
+            return Ok(Some(code));
+        }
+    }
+    let folder = built_in(&context.root);
+    for (_, bin, _) in programs() {
+        let program = folder.join(format!("{bin}{}", std::env::consts::EXE_SUFFIX));
+        if !program.is_file() {
+            writeln!(
+                console.err,
+                "live: {} was built, and there is none at {}: is the build folder somewhere else than .cargo/config.toml says? nothing is started",
+                bin,
+                program.display()
+            )?;
+            return Ok(Some(1));
+        }
+    }
+    Ok(None)
+}
+
+/// [`invocation`] of a run whose programs are built ([`prepare`]): told where they are, and that
+/// a case builds none.
+fn started(context: &Context, asked: &Asked) -> Invocation {
+    let folder = built_in(&context.root);
+    invocation(context, asked)
+        .var(BUILT, &folder)
+        .var(HELPERS, &folder)
+        .var(NO_BUILD, "1")
 }
 
 #[cfg(test)]

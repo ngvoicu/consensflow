@@ -1726,6 +1726,33 @@ fn the_renewal_runs_pi_with_pi_offline_so_it_installs_nothing_in_the_owners_fold
 }
 
 #[test]
+fn a_say_only_run_never_renews_a_pi_login_on_a_test_machine_and_leaves_the_original_as_it_was() {
+    let run = Renewing::new();
+    let original = fs::read(run.owner.path(".pi/agent/auth.json")).unwrap();
+    let mut isolation = run.pi("openai/gpt-6-luna", Some(zeewin2()), &run.renews(), 0);
+    let audit_folder = crate::door::made("cf-test-").unwrap();
+    let audit = audit_folder.path().join("audit.txt");
+    let door = crate::door::Door::asked(Some("1".as_ref()), Some(audit.as_os_str()), None).unwrap();
+    isolation.renewal = isolation.renewal.take().map(|renewal| renewal.under(door));
+    let said = isolation.made_at(at(NOW)).unwrap_err().to_string();
+    let line = "say only: the login of Pi would be renewed here; a say-only run renews nothing";
+    assert!(said.contains(line), "{said}");
+    assert!(!said_anywhere(&said), "{said}");
+    assert!(run.started().is_none(), "the stand-in was started");
+    assert_eq!(
+        fs::read(run.owner.path(".pi/agent/auth.json")).unwrap(),
+        original,
+        "the original login changed"
+    );
+    assert_eq!(run.owner.made(), 0);
+    let text = fs::read_to_string(&audit).unwrap();
+    assert!(
+        text.lines().any(|said| said == format!("# {line}")),
+        "{text}"
+    );
+}
+
+#[test]
 fn a_renewal_that_fails_refuses_the_pi_run_in_words_that_say_so_and_makes_no_home() {
     let run = Renewing::new();
     let isolation = run.pi(
