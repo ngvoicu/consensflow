@@ -93,7 +93,8 @@ fn write_harnesses(bin: &Path, held: Option<u64>) {
              \x20 *\" --session-id \"*|*\" --resume \"*)\n\
              \x20   CLAUDE_CONFIG_DIR=\"$HOME/.claude\"\n\
              \x20   CF_TEST_ACCEPT_RESULTS=1\n\
-             \x20   export CLAUDE_CONFIG_DIR CF_TEST_ACCEPT_RESULTS\n\
+             \x20   CF_LIVE_MADE_ROOTS=\"$HOME${{CF_LIVE_MADE_ROOTS:+:$CF_LIVE_MADE_ROOTS}}\"\n\
+             \x20   export CLAUDE_CONFIG_DIR CF_TEST_ACCEPT_RESULTS CF_LIVE_MADE_ROOTS\n\
              {hold}\
              \x20   exec '{}' \"$@\" ;;\n\
              esac\n\
@@ -111,6 +112,8 @@ fn write_harnesses(bin: &Path, held: Option<u64>) {
              case \"$1\" in\n\
              \x20 version|--version) echo 'devin 3000.11.0 (stand-in)'; exit 0 ;;\n\
              esac\n\
+             CF_LIVE_MADE_ROOTS=\"$HOME${{CF_LIVE_MADE_ROOTS:+:$CF_LIVE_MADE_ROOTS}}\"\n\
+             export CF_LIVE_MADE_ROOTS\n\
              exec '{}' \"$@\"\n",
             stand_in("fake-devin").display()
         ),
