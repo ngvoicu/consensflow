@@ -1419,6 +1419,8 @@ export class ProjectSettingsDialog {
   #board = null
   /** The member whose removal waits for the human's yes, kept across redraws. */
   #removing = null
+  /** Refusals beside the member whose Vacation button was pressed. */
+  #vacationErrors = new Map()
   /** Each harness's models, read once while the dialog is open (T-1143). */
   #lists
   /** Add member and Edit member. */
@@ -1585,6 +1587,7 @@ export class ProjectSettingsDialog {
     this.#project = project
     this.#board = board
     this.#removing = null
+    this.#vacationErrors.clear()
     this.#missing = missing
     readEveryHarness(this.#lists, missing)
     this.#gone = new Map()
@@ -1733,25 +1736,41 @@ export class ProjectSettingsDialog {
   }
 
   #vacation(member) {
-    return vacationButton(
-      `@${member.handle}`,
-      Boolean(member.vacationSince),
-      () =>
-        void this.#page.act(async () => {
-          try {
-            await this.#page.daemon(
-              member.vacationSince ? 'member.vacation_back' : 'member.vacation',
-              {
-                project: this.#project,
-                member: member.handle,
-              },
-            )
-          } catch (refused) {
-            this.#member.say(refused instanceof Error ? refused.message : String(refused))
-            throw refused
-          }
-        }),
+    const project = this.#project
+    const controls = document.createDocumentFragment()
+    controls.append(
+      vacationButton(
+        `@${member.handle}`,
+        Boolean(member.vacationSince),
+        () =>
+          void this.#page.act(async () => {
+            try {
+              await this.#page.daemon(
+                member.vacationSince ? 'member.vacation_back' : 'member.vacation',
+                {
+                  project,
+                  member: member.handle,
+                },
+              )
+              this.#vacationErrors.delete(member.handle)
+            } catch (refused) {
+              if (this.#dialog.open && this.#project === project)
+                this.#vacationErrors.set(
+                  member.handle,
+                  refused instanceof Error ? refused.message : String(refused),
+                )
+              throw refused
+            }
+          }),
+      ),
     )
+    const refused = this.#vacationErrors.get(member.handle)
+    if (refused) {
+      const hint = element('span', 'staff-hint', refused)
+      hint.setAttribute('role', 'alert')
+      controls.append(hint)
+    }
+    return controls
   }
 
   /** A member as the project's board has it now, which a Remove kept across redraws acts on. */

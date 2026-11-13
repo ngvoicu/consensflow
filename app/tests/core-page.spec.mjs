@@ -15135,14 +15135,21 @@ test('BKV05 board names a resting member, its ready backup and an idle backup', 
 test('BKV05 settings says a Vacation refusal where it was pressed', async ({ page }) => {
   const data = model()
   data.vacationRefusal = 'This member cannot go on Vacation.'
+  data.boards[1].lanes.push({
+    participant: participant(11, 'hera', 'worker', { harness: 'codex', backupOf: 3 }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
   await open(page, data)
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
-  await dialog
-    .locator('tr[data-handle="zeus"]')
-    .getByText('Send on Vacation', { exact: true })
-    .click()
-  await expect(dialog).toContainText('This member cannot go on Vacation.')
+  const row = dialog.locator('tr[data-handle="zeus"]')
+  await row.getByText('Send on Vacation', { exact: true }).click()
+  await expect(row).toContainText('This member cannot go on Vacation.')
+  const backup = dialog.locator('tr[data-handle="hera"]')
+  await backup.getByText('Send on Vacation', { exact: true }).click()
+  await expect(backup).toContainText('This member cannot go on Vacation.')
 })
 
 test('BKV05 an image designer can go on Vacation in settings', async ({ page }) => {
