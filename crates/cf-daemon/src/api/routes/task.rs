@@ -444,7 +444,25 @@ fn moved(
                 .collect();
             ledger.cancel_task(project, number, by)?
         }
-        TaskAction::Pause => ledger.pause_task(project, number, Some(by), None)?,
+        TaskAction::Pause => {
+            // What its window's turn left running, which a pause does not end: said at
+            // once, as the task's line says it once the pause is paid (RS-25).
+            running = task
+                .task
+                .assignee
+                .as_deref()
+                .and_then(|assignee| {
+                    caller
+                        .project
+                        .participants
+                        .iter()
+                        .find(|p| p.handle == assignee)
+                })
+                .and_then(|assignee| (context.held)(assignee.id))
+                .filter(|held| held.0 == number)
+                .map_or((0, 0), |held| (held.1 as i64, held.2 as i64));
+            ledger.pause_task(project, number, Some(by), None)?
+        }
         TaskAction::Resume => ledger.resume_task(project, number, Some(by), words)?.task,
         // `reopen`; and what Node's last branch took any other word for, which
         // only `transcript` is, and only when it is posted.

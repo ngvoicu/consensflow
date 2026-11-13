@@ -62,7 +62,8 @@ pub use delivery::{HandOver, WITHDRAWN_AFTER_HANDED};
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub use holds::is_busy_note;
 pub(crate) use holds::{
-    note_hold, note_hold_busy, note_hold_moved, note_hold_unavailable, tell_goes_on,
+    note_hold, note_hold_busy, note_hold_moved, note_hold_unavailable, said as hold_said,
+    tell_goes_on,
 };
 pub(crate) use paused_answers::{
     given as paused_answer_given, note as note_paused_answer, put_back as put_back_paused_answers,
@@ -94,6 +95,30 @@ pub struct NewNote {
     pub to: String,
     pub body: String,
     pub task: Option<i64>,
+}
+
+/// A note of ConsensFlow's own that asks its reader no decision: to a chief it is shown,
+/// not typed (`queue`'s [`crate::queue::SHOWN`]), `aside` its words on the task's line;
+/// to anyone else it is queued as [`note`] queues one.
+pub(crate) fn show(
+    store: &mut Store,
+    project_id: i64,
+    note: &NewNote,
+    aside: &str,
+) -> Result<MessageView, LedgerError> {
+    send(
+        store,
+        project_id,
+        &Sent {
+            from: note.from.as_deref(),
+            to: &note.to,
+            body: &note.body,
+            task: note.task,
+            kind: "note",
+            shown: Some(aside),
+            ..Sent::default()
+        },
+    )
 }
 
 /// A question for a coordinator: who asks it and whom, about which task,

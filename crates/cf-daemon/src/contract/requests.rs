@@ -328,6 +328,7 @@ async fn zeus_at_work() -> (Rig, Rc<Context>, String, Value) {
                 ))
             })
         }),
+        held: Rc::new(|_| None),
         closing: Closing::new(),
         log: Rc::new(Log::new(home)),
         trace: Rc::new(Trace::new(home)),

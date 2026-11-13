@@ -66,6 +66,42 @@ fn a_pause_whose_window_stops_names_what_its_turn_left_running_once_and_ends_non
     context.close();
 }
 
+/// The note that a paused task's window stays open asks the chief nothing: it is shown on the
+/// task's line, never typed into the chief's window (RS-25), and the chief's inbox lists it.
+#[test]
+fn the_note_that_a_paused_window_stays_open_is_shown_on_its_line_and_never_typed() {
+    let context = Context::new();
+    context.background.leaves(Some(Background {
+        total: 1,
+        processes: vec![BackgroundProcess {
+            pid: 4711,
+            command: "bash retry-zeewin.sh".to_owned(),
+        }],
+        possibly_left: Vec::new(),
+    }));
+    let project = paused_at_rest(&context);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let note = context
+        .inbox(context.id(project, "chief"))
+        .into_iter()
+        .find(|message| message.body.starts_with("T-1's window stays open"))
+        .expect("the chief's inbox lists it");
+    assert_eq!(note.state, "read", "shown, not queued");
+    assert!(
+        crate::fixtures::given(&context, "chief")
+            .iter()
+            .all(|text| !text.contains("window stays open")),
+        "never typed"
+    );
+    assert_eq!(
+        context.task(project, 1).task.aside.as_deref(),
+        Some("window open, with background work its turn left running, which the pause does not end: process 4711")
+    );
+    context.close();
+}
+
 /// What a pause's note says of the work its turn left running is the program the list names and
 /// nothing after it (T-1178, alpha.3's known issue): no argument, no path, no token.
 #[test]

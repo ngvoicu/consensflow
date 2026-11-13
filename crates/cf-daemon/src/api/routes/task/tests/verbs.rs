@@ -1251,6 +1251,58 @@ async fn an_accept_says_how_many_jobs_and_agents_the_finish_counted_running() {
 }
 
 #[tokio::test]
+async fn a_pause_says_what_the_engine_holds_its_task_in_the_background_for() {
+    // RS-25: no note is typed of the work a pause leaves running; the pause says it at once.
+    let scene = scene();
+    let number = working_task(&scene);
+    let assignee = scene
+        .context
+        .ledger
+        .borrow()
+        .task(scene.project.id, number)
+        .unwrap()
+        .unwrap()
+        .task
+        .assignee
+        .unwrap();
+    let id = scene
+        .context
+        .ledger
+        .borrow()
+        .project(scene.project.id)
+        .unwrap()
+        .unwrap()
+        .participants
+        .into_iter()
+        .find(|participant| participant.handle == assignee)
+        .unwrap()
+        .id;
+    // Another task's hold of the same window says nothing of this one.
+    scene
+        .finishings
+        .held
+        .borrow_mut()
+        .push((id, number + 1, 4, 4));
+    let said = post(&scene, &scene.chief, &format!("{number}/pause"), "{}").await;
+    assert_eq!(said.0, 200, "{:?}", said.1);
+    assert!(said.1.get("running").is_none(), "{:?}", said.1);
+    post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/resume"),
+        r#"{"body":"Go on"}"#,
+    )
+    .await;
+
+    scene.finishings.held.borrow_mut().clear();
+    scene.finishings.held.borrow_mut().push((id, number, 1, 3));
+    let said = post(&scene, &scene.chief, &format!("{number}/pause"), "{}").await;
+    assert_eq!(said.0, 200, "{:?}", said.1);
+    assert_eq!(said.1["running"], json!({ "jobs": 1, "agents": 3 }));
+    assert_eq!(said.1["task"]["state"], "paused");
+}
+
+#[tokio::test]
 async fn an_accept_of_a_result_that_left_nothing_running_says_nothing_of_it() {
     let scene = scene();
     // The worker's own result waits for its work to end, so there is nothing to say.

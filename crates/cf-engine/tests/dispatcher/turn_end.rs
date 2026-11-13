@@ -97,11 +97,18 @@ fn a_turn_that_ends_with_its_job_running_keeps_its_task_working_and_its_progress
         "one note, in plain words (T-1181)"
     );
 
-    // The time that passes, and a window the host finds nothing left in, release nothing.
+    // The time that passes, and a window the host finds nothing left in, release nothing; an
+    // hour on with no turn of its own the chief is reminded, once (RS-25).
     context.advance(6 * 3_600_000);
     passes(&context, 3);
     assert_eq!(tiers.task(1).task.state, "working");
-    assert_eq!(tiers.notes("chief").len(), 1, "told once");
+    let told = tiers.notes("chief");
+    assert_eq!(told.len(), 2, "told once, and reminded once: {told:?}");
+    assert!(
+        told[1].starts_with("T-1 has been working in the background for 6 h 0 min"),
+        "{}",
+        told[1]
+    );
 
     // The build's end wakes the agent, whose report is the result, once.
     context.adapter.wake("zeus", ENDED);

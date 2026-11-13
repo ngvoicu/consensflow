@@ -1,0 +1,354 @@
+# Nothing is told to the chief that it need not decide (RS-25, T-1491; Gabriel, 2026-11-11: "if
+# you see issues with consensflow and interaction and many useless messages sent to the chief we
+# act"). Each note typed into the chief's window is a turn: one model call on its whole
+# conversation. A note of ConsensFlow's own that asks the chief no decision is shown, not typed:
+# it is a row of the ledger landed `read` with its receipt `{"shown": <words>}` (the ledger's
+# `queue::send`), its task's line says those words while the task holds (`aside`), and the
+# chief's inbox lists it as `[not typed]`.
+#
+# The rules: shown are a hold said again and a held task's going on (`holds.rs`), a window closed leaving work
+# (`background.rs`, `show_closed`), a paused window still open (`background.rs`), a task that
+# goes on in a new conversation (`ownership.rs`), a task still at work in the background unless
+# it cannot end by itself (`turn_end.rs`), a busy model's one note of a wait, shown again on
+# each try (`scheduler.rs`, `show_again`), and a task taken back with nothing bound to its window
+# (`giving.rs`). A hold is the exception: its first note to a chief is typed, once a task and
+# hold, and the same hold said again is shown (`holds.rs`, `told_this_hold`, read from the
+# ledger's notes: a withdrawn or shown note told nobody, and a note that the task went on ends
+# the hold). A task held in the background an hour with no turn of its own is told once,
+# typed (`STILL_WORKING_REMINDED_AFTER_MS`). A shown close still joins a typed failure of the
+# same window (`outage.rs`, `queued_closes`). Every note typed is its own paste, as before
+# RS-25. A hold is its window's: another window's first refusal is another hold (`hold_of`). A
+# chief that takes over is told in its handoff each task it gave that holds (`chief.rs`,
+# `held_tasks`), and a task paused with its member gone from the staff as that, never its hold
+# (`member_gone`), as its line says (`views.rs`, `member_left`); a task taken from its member
+# holds with nobody (`held_until`). A shown note whose line is over (its task moved on) is said
+# `over` in the inbox's list (the daemon's `MessageSummary`), which `cf inbox` prints
+# `[not typed · over]` (T-1556). A note that says a chief its role (`note_role`, read in parts
+# since T-1513) is never shown: it is typed, and its parts read make it no shown note (T-1556).
+#
+# Every name holds `chief-notes`, so `cargo xtask plants daemon chief-notes` runs them all.
+
+[run]
+chief-notes-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "shown_notes::", "waiting_notes::"]
+chief-notes-engine-busy = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "busy_models::"]
+chief-notes-engine-outage = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "outage_notes::"]
+chief-notes-engine-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::"]
+chief-notes-engine-paused-left = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paused_left::"]
+chief-notes-engine-waiting = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "waiting_notes::"]
+chief-notes-engine-holds = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts::", "moved_models::"]
+chief-notes-daemon-inbox = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::inbox::"]
+
+[[plant]]
+name = "chief-notes: a shown note is queued and typed as any note"
+meant = "shown_notes::the_first_note_of_a_hold_is_typed_to_the_chief_and_the_same_hold_said_again_is_shown"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/queue.rs"
+find = '''
+    } else if message.from_window || message.shown.is_some() {
+'''
+replace = '''
+    } else if message.from_window {
+'''
+
+[[plant]]
+name = "chief-notes: a task taken back is typed though nothing is bound to its window"
+meant = "shown_notes::a_task_taken_back_with_nothing_bound_to_it_is_shown_to_the_chief_not_typed"
+runs = ["chief-notes-ledger", "chief-notes-engine-waiting"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+                shown: (!asks)
+'''
+replace = '''
+                shown: (asks)
+'''
+
+[[plant]]
+name = "chief-notes: a task taken back with a follow-up bound is shown, not typed"
+meant = "shown_notes::a_task_taken_back_with_a_follow_up_bound_to_its_window_is_typed_to_the_chief"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+        let asks = !bound.is_empty() || carried.as_ref().is_some_and(|c| !c.gated.is_empty());
+'''
+replace = '''
+        let asks = carried.as_ref().is_some_and(|c| !c.gated.is_empty());
+'''
+
+[[plant]]
+name = "chief-notes: a task still at work in the background is typed"
+meant = "shown_notes::a_hold_that_ends_by_itself_is_shown_on_its_task_and_not_typed"
+runs = ["chief-notes-engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+        let aside = if held.stuck {
+            self.seams.ledger.borrow_mut().note(project.id, &note)?;
+'''
+replace = '''
+        let aside = if true {
+            self.seams.ledger.borrow_mut().note(project.id, &note)?;
+'''
+
+[[plant]]
+name = "chief-notes: a task held in the background an hour is never told"
+meant = "shown_notes::one_note_is_typed_when_a_task_is_held_an_hour_with_no_turn_of_its_own_and_one_only"
+runs = ["chief-notes-engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+        if now - since < STILL_WORKING_REMINDED_AFTER_MS {
+'''
+replace = '''
+        if now - since < STILL_WORKING_REMINDED_AFTER_MS * 1000 {
+'''
+
+[[plant]]
+name = "chief-notes: a busy model's note is not shown again on a try"
+meant = "busy_models::a_note_shown_to_the_chief_tells_while_its_hold_holds_and_the_next_try_shows_it_again"
+runs = ["chief-notes-engine-busy"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            if over {
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .show_again(project.id, note)?;
+            }
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "chief-notes: a shown close is not joined to its window's failure"
+meant = "outage_notes::the_closes_of_those_windows_are_a_line_each_of_the_note_and_no_note_of_their_own"
+runs = ["chief-notes-engine-outage"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/outage.rs"
+find = '''
+                   AND ({PENDING} OR (state = 'read' AND json_valid(receipt)
+'''
+replace = '''
+                   AND ({PENDING} OR (state = 'never' AND json_valid(receipt)
+'''
+
+[[plant]]
+name = "chief-notes: a paused window still open is typed"
+meant = "paused_left::the_note_that_a_paused_window_stays_open_is_shown_on_its_line_and_never_typed"
+runs = ["chief-notes-engine-paused-left"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''
+        self.seams.ledger.borrow_mut().show(
+            project.id,
+            &NewNote {
+                from: None,
+                to: thread.task.requester.clone(),
+                task: Some(number),
+                body,
+            },
+            &aside,
+        )?;
+'''
+replace = '''
+        let _ = &aside;
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: thread.task.requester.clone(),
+                task: Some(number),
+                body,
+            },
+        )?;
+'''
+
+[[plant]]
+name = "chief-notes: the first note of a hold is shown, not typed"
+meant = "shown_notes::the_first_note_of_a_hold_is_typed_to_the_chief_and_the_same_hold_said_again_is_shown"
+runs = ["chief-notes-ledger", "chief-notes-engine-shown", "chief-notes-engine-holds"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/holds.rs"
+find = '''
+            shown: words.as_deref().filter(|_| again),
+'''
+replace = '''
+            shown: words.as_deref().filter(|_| again || true),
+'''
+
+[[plant]]
+name = "chief-notes: the same hold said again is typed again"
+meant = "shown_notes::the_first_note_of_a_hold_is_typed_to_the_chief_and_the_same_hold_said_again_is_shown"
+runs = ["chief-notes-ledger", "chief-notes-engine-holds"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/holds.rs"
+find = '''
+        if *typed && hold_of(number, said).is_some_and(|told| told == hold) {
+            return Ok(true);
+'''
+replace = '''
+        if *typed && hold_of(number, said).is_some_and(|told| told == hold) {
+            return Ok(false);
+'''
+
+[[plant]]
+name = "chief-notes: a hold after its task went on is the same hold said again"
+meant = "shown_notes::a_hold_after_the_task_went_on_is_typed_again"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/holds.rs"
+find = '''
+        if *said == goes_on(number) || *said == goes_on_moved(number) {
+            return Ok(false);
+'''
+replace = '''
+        if *said == goes_on(number) || *said == goes_on_moved(number) {
+            continue;
+'''
+
+[[plant]]
+name = "chief-notes: a chief that takes over is told no held task"
+meant = "shown_notes::a_chief_switched_while_a_task_holds_is_told_the_hold_in_its_handoff"
+runs = ["chief-notes-ledger", "chief-notes-engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '''
+    let held = held_tasks(store, project_id, chief.id)?;
+'''
+replace = '''
+    let held = Vec::new();
+'''
+
+[[plant]]
+name = "chief-notes: a hold that became a busy model's wait is still named in a handoff"
+meant = "shown_notes::what_waits_on_a_chief_that_takes_over_names_each_task_it_gave_that_is_held_and_its_hold"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '''
+            if is_busy_note(task.number, body) {
+'''
+replace = '''
+            if is_busy_note(task.number, body) && body.is_empty() {
+'''
+
+[[plant]]
+name = "chief-notes: a task taken back to the board keeps its member's hold"
+meant = "shown_notes::a_held_task_taken_back_to_the_board_holds_with_nobody_and_its_line_says_no_hold"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''
+           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0, held_until = NULL
+'''
+replace = '''
+           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0
+'''
+
+[[plant]]
+name = "chief-notes: a held task resumed after its session ended keeps the session's hold"
+meant = "shown_notes::a_held_task_resumed_after_its_session_ended_holds_no_more_and_its_line_says_no_hold"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+             paused_with_project = 0, held_until = NULL
+'''
+replace = '''
+             paused_with_project = 0
+'''
+
+[[plant]]
+name = "chief-notes: a hold is the same hold whoever's window it is"
+meant = "shown_notes::a_hold_after_its_task_left_its_member_is_another_hold_and_is_typed"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/holds.rs"
+find = '''
+    Some(Hold { with, kind })
+'''
+replace = '''
+    Some(Hold {
+        with: &with[..0],
+        kind,
+    })
+'''
+
+[[plant]]
+name = "chief-notes: a handoff tells the hold of a member gone from the staff"
+meant = "shown_notes::a_held_task_whose_member_left_the_staff_is_told_to_a_new_chief_as_paused_and_not_held"
+runs = ["chief-notes-ledger", "chief-notes-engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/chief.rs"
+find = '''
+        if let Some(member) = member_gone(store, task.id)? {
+'''
+replace = '''
+        if let Some(member) = member_gone(store, task.id)?.filter(|_| false) {
+'''
+
+[[plant]]
+name = "chief-notes: a paused task's line says a hold with a member gone from the staff"
+meant = "shown_notes::a_held_task_whose_member_left_the_staff_says_on_its_line_it_is_paused_with_its_member_gone"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = '''
+              THEN coalesce(am.handle, a.handle) END AS member_left
+'''
+replace = '''
+              THEN NULL END AS member_left
+'''
+
+[[plant]]
+name = "chief-notes: the inbox's list says a shown note whose line is over as one that holds"
+meant = "api::routes::inbox::tests::a_shown_note_whose_line_a_take_over_ended_is_said_over_in_the_list"
+runs = ["chief-notes-daemon-inbox"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/views.rs"
+find = '''
+            over: message.receipt.get(cf_ledger::SHOWN).is_some()
+                && message.receipt.get(cf_ledger::OVER).is_some(),
+'''
+replace = '''
+            over: false,
+'''
+
+[[plant]]
+name = "chief-notes: a note that says the chief its role is shown, not typed"
+meant = "shown_notes::a_role_note_to_the_chief_is_typed_and_its_parts_read_make_it_no_shown_note"
+runs = ["chief-notes-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/roles.rs"
+find = '''
+            role: Some(role),
+            ..Sent::default()
+'''
+replace = '''
+            role: Some(role),
+            shown: Some(body),
+            ..Sent::default()
+'''

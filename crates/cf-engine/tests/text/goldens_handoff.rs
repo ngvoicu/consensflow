@@ -125,6 +125,7 @@ fn every_handoff_reads_as_node_wrote_it() {
         };
         let to = seat(row["to"]["harness"].as_str(), row["to"]["agent"].as_str());
         let open = ChiefOpenWork {
+            held: Vec::new(),
             questions: row["open"]["questions"]
                 .as_array()
                 .unwrap()

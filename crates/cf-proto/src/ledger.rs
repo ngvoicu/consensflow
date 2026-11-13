@@ -465,6 +465,11 @@ pub struct TaskView {
     pub deleted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// What ConsensFlow shows of the task instead of telling its chief, which asks no
+    /// decision: the words of its newest note that was shown, not typed, while it holds
+    /// (until the task moves on). None where none does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aside: Option<String>,
 }
 
 /// A message in an inbox.
@@ -657,6 +662,9 @@ pub struct TaskCard {
     pub created_at: String,
     pub updated_at: String,
     pub result: Option<String>,
+    /// What ConsensFlow shows of the task instead of telling its chief ([`TaskView::aside`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aside: Option<String>,
 }
 
 impl TaskCard {
@@ -682,6 +690,7 @@ impl TaskCard {
             created_at: task.created_at,
             updated_at: task.updated_at,
             result,
+            aside: task.aside,
         }
     }
 }
@@ -766,13 +775,18 @@ pub struct LatestMessages {
 }
 
 /// What waits on the chief, for a chief that takes over: members' questions
-/// to it without an answer, results it has not decided on, and its own
-/// unfinished tasks.
+/// to it without an answer, results it has not decided on, its own
+/// unfinished tasks, and the tasks it gave that are held (out of quota, an
+/// account unavailable, a model moved), each with what its line says of the
+/// hold (`aside`), or paused with their member gone from the staff, saying so.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ChiefOpenWork {
     pub questions: Vec<MessageView>,
     pub results: Vec<TaskView>,
     pub own: Vec<TaskView>,
+    /// Absent where none is held, as a ledger before RS-25 wrote it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub held: Vec<TaskView>,
 }
 
 #[cfg(test)]

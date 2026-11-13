@@ -725,6 +725,8 @@ pub(crate) fn release_inside(
         // One statement: the row is never without an assignee in a working
         // state. It remembers the member it was taken from (a session's member),
         // and is no pause of its project's suspension now, for a Resume to resume.
+        // A hold goes with the member it was taken from: the task waits on the board,
+        // held for nobody's quota, and its line says no hold (T-1500's finding 4).
         let body = match (&member, &carried) {
             (Some(_), Some(carried)) if untouched => format!("{}{}", task.body, carried.kept),
             (Some(member), Some(carried)) => format!(
@@ -736,7 +738,7 @@ pub(crate) fn release_inside(
         let at = store.at();
         store.db.execute(
             "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
-           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0
+           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0, held_until = NULL
          WHERE id = ?",
             params![
                 body,
@@ -745,6 +747,7 @@ pub(crate) fn release_inside(
                 task.id
             ],
         )?;
+        crate::tasks::end_asides(store, task.id, &at)?;
         store.log(
             project_id,
             "task.released",
@@ -796,6 +799,9 @@ pub(crate) fn release_inside(
                 .collect::<rusqlite::Result<_>>()?,
             None => Vec::new(),
         };
+        // It goes on by itself unless a follow-up stays bound or a message went with it: then
+        // the chief has a decision, and it is typed; else shown (RS-25).
+        let asks = !bound.is_empty() || carried.as_ref().is_some_and(|c| !c.gated.is_empty());
         let note = match (&member, bound.as_slice()) {
             (Some(member), [only]) => format!(
                 "{note} {only} stays bound to @{}, which no longer has T-{number}: cancel it, or add it again for a tier with --needs T-{number}.",
@@ -816,6 +822,9 @@ pub(crate) fn release_inside(
                 task: Some(number),
                 kind: "note",
                 body: &note,
+                shown: (!asks)
+                    .then(|| note.strip_prefix(&format!("T-{number} ")))
+                    .flatten(),
                 ..Sent::default()
             },
         )?;

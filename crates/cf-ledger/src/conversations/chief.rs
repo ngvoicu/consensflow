@@ -1,12 +1,14 @@
 //! The chief across a Switch chief: the switch itself, what it was switched
 //! from, and what a chief that takes over reads, its history and its open work.
 
-use cf_proto::ledger::{ChiefConversation, ChiefOpenWork, LastSwitch, ProjectView, SwitchedFrom};
-use rusqlite::params;
+use cf_proto::ledger::{
+    ChiefConversation, ChiefOpenWork, LastSwitch, ProjectView, SwitchedFrom, TaskView,
+};
+use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
 use super::transcripts::items_of;
-use crate::messages::has_standing_answer;
+use crate::messages::{has_standing_answer, hold_said, is_busy_note};
 use crate::model::{self, sql_list, LedgerError, FINISHED_TASK_STATES};
 use crate::projects::known_project;
 use crate::store::Store;
@@ -71,8 +73,8 @@ pub(crate) fn chief_history(
 }
 
 /// What waits on the chief now, for a chief that takes over: members'
-/// questions to it without an answer, results it has not decided on, and
-/// its own unfinished tasks. A question waits only while someone waits for
+/// questions to it without an answer, results it has not decided on, its
+/// own unfinished tasks, and the tasks it gave that are held ([`held_tasks`]). A question waits only while someone waits for
 /// its answer: one on a task that is over (accepted, cancelled or failed)
 /// does not, whatever became of its answer. Otherwise it waits when it has no
 /// answer that stands, by the rule that refuses a second answer
@@ -116,11 +118,82 @@ pub(crate) fn chief_open_work(
         ))?
         .query_map(params![project_id, chief.id], task_view)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    let held = held_tasks(store, project_id, chief.id)?;
     Ok(ChiefOpenWork {
         questions,
         results,
         own,
+        held,
     })
+}
+
+/// The tasks `chief` gave that are held now by a hold it is told of once (out of quota, an
+/// account unavailable, a model moved: `holds`), each with what its line says of the hold as
+/// its `aside`. The first note of a hold is typed to the chief once and its repeats are shown
+/// (RS-25), so a chief switched since, in a conversation of its own, would never be typed it:
+/// its handoff names them (T-1500's finding 2). The hold is read from its newest note to the
+/// chief; a model busy for a moment is tried again by itself and is not listed. A paused task
+/// whose member left the staff holds with nobody, whatever an older build left of its hold: it
+/// is listed as what it is, paused with its member gone (T-1514's finding A).
+fn held_tasks(store: &Store, project_id: i64, chief: i64) -> Result<Vec<TaskView>, LedgerError> {
+    let tasks = store
+        .db
+        .prepare(&format!(
+            "{TASK_SELECT} WHERE t.project_id = ? AND t.requester_id = ? AND t.state = 'paused'
+         ORDER BY t.number"
+        ))?
+        .query_map(params![project_id, chief], task_view)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut held = Vec::new();
+    for mut task in tasks {
+        if let Some(member) = member_gone(store, task.id)? {
+            task.aside = Some(format!(
+                "is paused, and its member @{member} has left the staff"
+            ));
+            held.push(task);
+            continue;
+        }
+        if task.held_until.is_none() {
+            continue;
+        }
+        let notes = store
+            .db
+            .prepare(
+                "SELECT body FROM message
+                  WHERE task_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'
+                  ORDER BY id DESC",
+            )?
+            .query_map(params![task.id, chief], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let hold = notes.iter().find_map(|body| {
+            if is_busy_note(task.number, body) {
+                Some(None)
+            } else {
+                hold_said(task.number, body).map(Some)
+            }
+        });
+        if let Some(Some(said)) = hold {
+            task.aside = Some(said);
+            held.push(task);
+        }
+    }
+    Ok(held)
+}
+
+/// The member that had task `task_id` (its session's member, or itself), when it has left the
+/// staff.
+fn member_gone(store: &Store, task_id: i64) -> Result<Option<String>, LedgerError> {
+    Ok(store
+        .db
+        .query_row(
+            "SELECT coalesce(m.handle, a.handle) FROM task t
+               JOIN participant a ON a.id = t.assignee_id
+               LEFT JOIN participant m ON m.id = a.member_id
+              WHERE t.id = ? AND coalesce(m.left_at, CASE WHEN a.member_id IS NULL THEN a.left_at END) IS NOT NULL",
+            [task_id],
+            |row| row.get(0),
+        )
+        .optional()?)
 }
 
 /// The human's Switch chief: the chief runs on the harness and the model picked from now

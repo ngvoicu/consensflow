@@ -356,6 +356,7 @@ fn names_the_switch_the_history_what_waits_and_the_last_word() {
     };
     let to = seat(Some("codex"), Some("gpt-6-luna"));
     let open = ChiefOpenWork {
+        held: Vec::new(),
         questions: vec![message(
             6,
             "question",
@@ -406,6 +407,7 @@ fn names_the_switch_the_history_what_waits_and_the_last_word() {
         },
         to: &seat(Some("claude-code"), None),
         open: &ChiefOpenWork {
+            held: Vec::new(),
             questions: Vec::new(),
             results: Vec::new(),
             own: Vec::new(),
@@ -432,6 +434,7 @@ fn the_first_message_of_a_switched_in_chief_starts_each_command_with_the_cf_of_i
     };
     let to = seat(Some("codex"), Some("astraeus"));
     let open = ChiefOpenWork {
+        held: Vec::new(),
         questions: vec![message(
             6,
             "question",

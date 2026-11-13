@@ -432,8 +432,8 @@ runs = ["tem-engine-pending"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '                    Some(told) if told.task == hold.task => stuck && !told.stuck,'
-replace = '                    Some(told) if told.task == hold.task => { let _ = told; true }'
+find = '                    Some(told) => told.aside.is_none(),'
+replace = '                    Some(_) => true,'
 
 [[plant]]
 name = "turn-end-min: the requester of a held task is never told it goes on"
@@ -442,8 +442,8 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '                self.tell_it_goes_on(project, &thread, &said, &words)?;'
-replace = '                let _ = (&thread, &words, &said);'
+find = '                let aside = self.tell_it_goes_on(project, &thread, &said, &words)?;'
+replace = '                let aside = { let _ = (&thread, &words, &said); None };'
 
 [[plant]]
 name = "turn-end-min: the note of a held task names no way out"
@@ -1027,8 +1027,8 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '                    Some(told) if told.task == hold.task => stuck && !told.stuck,'
-replace = '                    Some(told) if told.task == hold.task => (stuck && !told.stuck) || !monitors.is_empty(),'
+find = '                    Some(told) => told.aside.is_none(),'
+replace = '                    Some(told) => told.aside.is_none() || !monitors.is_empty(),'
 
 [[plant]]
 name = "turn-end-min reader: an answer settles its turn before the record of its stop hooks"
@@ -1227,8 +1227,8 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '                    Some(told) if told.task == hold.task => stuck && !told.stuck,'
-replace = '                    Some(told) if told.task == hold.task => (stuck && !told.stuck) || seen.is_some(),'
+find = '                    Some(told) => told.aside.is_none(),'
+replace = '                    Some(told) => told.aside.is_none() || seen.is_some(),'
 
 [[plant]]
 name = "turn-end-min engine: a paste proves no rest for the monitors of its turn"
@@ -1866,8 +1866,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '                    Some(told) if told.task == hold.task => stuck && !told.stuck,'
-replace = '                    Some(told) if told.task == hold.task => true,'
+find = '                    Some(told) => told.aside.is_none(),'
+replace = '                    Some(_) => true,'
 
 
 # T-906 (T-858's live `tell` on zeewin2): a Windows job has no groups, its host told no command, and

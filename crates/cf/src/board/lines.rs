@@ -64,10 +64,22 @@ pub fn task_line(task: &Value) -> String {
     format!(
         "T-{} [{}] {whose} ← @{}: {}",
         js::text(task.get("number")),
-        js::text(task.get("state")),
+        state_with_aside(task),
         js::text(task.get("requester")),
         js::text(task.get("title")),
     )
+}
+
+/// A task's state as its line says it, and what ConsensFlow shows of the task instead of
+/// telling its chief (`aside`, while it holds: a note that asks no decision is not typed into
+/// the chief's window): `paused · its window stays open …`.
+fn state_with_aside(task: &Value) -> String {
+    match task.get("aside").and_then(Value::as_str) {
+        Some(aside) if !aside.is_empty() => {
+            format!("{} · {aside}", js::text(task.get("state")))
+        }
+        _ => js::text(task.get("state")).into_owned(),
+    }
 }
 
 /// What `cf task get` heads a task with: its line, and when the human
@@ -118,9 +130,29 @@ pub fn message_line(message: &Value) -> String {
     format!(
         "m-{} [{}] {}{on_task} from {sender}{preview}",
         js::text(message.get("id")),
-        js::text(message.get("state")),
+        state_said(message),
         js::text(message.get("kind")),
     )
+}
+
+/// The state a message line says: its own, but `not typed` for a note of ConsensFlow's own
+/// that was shown and never typed into the window (it asks no decision; its task's line in
+/// `cf task list` says it), whose state is `read` though nobody read it; and `not typed · over`
+/// once its line is over, its task moved on and what it says no longer so (the list's `over`,
+/// the receipt's `over` in a message read whole).
+fn state_said(message: &Value) -> String {
+    let marked = |word: &str| {
+        message.get(word) == Some(&Value::Bool(true))
+            || message
+                .get("receipt")
+                .and_then(|receipt| receipt.get(word))
+                .is_some()
+    };
+    match (marked("shown"), marked("over")) {
+        (true, true) => "not typed · over".to_owned(),
+        (true, false) => "not typed".to_owned(),
+        _ => js::text(message.get("state")).into_owned(),
+    }
 }
 
 /// The numbers of the answers among `messages` that still wait in the queue
@@ -166,6 +198,34 @@ pub fn list(value: Option<&Value>) -> &[Value] {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_task_line_says_what_consensflow_shows_of_it_instead_of_telling_its_chief() {
+        let held = json!({ "number": 3, "state": "working", "assignee": "zeus",
+            "requester": "chief", "title": "Parser", "blockedBy": [], "pool": "worker",
+            "tier": "standard", "aside": "in the background: 1 command, running since 08:24 UTC, 3 agents" });
+        assert_eq!(
+            task_line(&held),
+            "T-3 [working · in the background: 1 command, running since 08:24 UTC, 3 agents] @zeus ← @chief: Parser"
+        );
+    }
+
+    #[test]
+    fn a_note_shown_and_not_typed_reads_so_in_the_inbox() {
+        let shown = json!({ "id": 9, "state": "read", "kind": "note", "task": 3, "sender": null,
+            "preview": "T-3 is still working in the background", "shown": true });
+        assert_eq!(
+            message_line(&shown),
+            "m-9 [not typed] note T-3 from ConsensFlow: T-3 is still working in the background"
+        );
+        let typed = json!({ "id": 10, "state": "read", "kind": "note", "task": 3, "sender": null,
+            "preview": "T-3 failed" });
+        assert!(
+            message_line(&typed).starts_with("m-10 [read] "),
+            "{}",
+            message_line(&typed)
+        );
+    }
 
     #[test]
     fn a_task_reads_as_whose_it_is_or_who_it_waits_for() {

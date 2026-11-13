@@ -13,7 +13,7 @@ mod outage;
 mod own_steps;
 mod pausing;
 
-use cf_proto::ledger::{TaskThread, TaskView};
+use cf_proto::ledger::{MessageView, TaskThread, TaskView};
 use rusqlite::{params, OptionalExtension};
 
 use crate::model::LedgerError;
@@ -31,7 +31,7 @@ pub use giving::{asked_role, NewTask};
 pub(crate) use giving::{
     assign_task, check_release, create_task, release_inside, release_task, retier_open_task,
 };
-pub(crate) use outage::{no_longer_failed, no_longer_waiting, tell_closed};
+pub(crate) use outage::{no_longer_failed, no_longer_waiting, show_closed, tell_closed};
 pub use outage::{window_closed, SAME_ERROR_WITHIN_MS};
 pub(crate) use own_steps::withdrawn_late;
 pub(crate) use pausing::{
@@ -93,6 +93,126 @@ fn m_list(ids: &[i64]) -> String {
         .map(|id| format!("m-{id}"))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// The asides of task `task_id` end, `at`: a note of ConsensFlow's own
+/// that was shown, not typed (`queue`'s `SHOWN`), says what its task's line says only while
+/// it holds, and it holds until the task moves on. The note stays, as it was given; its
+/// receipt says since when it is over.
+pub(crate) fn end_asides(store: &mut Store, task_id: i64, at: &str) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE message SET receipt = json_set(receipt, '$.over', ?1)
+         WHERE task_id = ?2 AND state = 'read' AND sender_id IS NULL AND kind = 'note'
+           AND json_valid(receipt) AND json_extract(receipt, '$.shown') IS NOT NULL
+           AND json_extract(receipt, '$.over') IS NULL",
+        params![at, task_id],
+    )?;
+    Ok(())
+}
+
+/// The note T-`number`'s line says now: its newest note shown, not typed, that holds (the
+/// one `TaskView::aside` is read from). None where it says none.
+pub(crate) fn aside_note(
+    store: &Store,
+    project_id: i64,
+    number: i64,
+) -> Result<Option<MessageView>, LedgerError> {
+    let task = store.task_row(project_id, number)?;
+    let id: Option<i64> = store
+        .db
+        .query_row(
+            "SELECT id FROM message
+             WHERE task_id = ? AND state = 'read' AND sender_id IS NULL AND kind = 'note'
+               AND json_valid(receipt) AND json_extract(receipt, '$.shown') IS NOT NULL
+               AND json_extract(receipt, '$.over') IS NULL
+             ORDER BY id DESC LIMIT 1",
+            [task.id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    match id {
+        Some(id) => store.message(id),
+        None => Ok(None),
+    }
+}
+
+/// Note `aside`, shown and not typed, says `said` on its task's line from now (`$.shown`),
+/// and counts its time from now (`$.since`), with no reminder sent of it since
+/// ([`remind_of_aside`]): what it tells of goes on, in new words, and nothing is typed. The
+/// note's body stays as it was written. False where it no longer holds (its task moved on).
+pub(crate) fn renew_aside(
+    store: &mut Store,
+    project_id: i64,
+    aside: i64,
+    said: &str,
+) -> Result<bool, LedgerError> {
+    store.write(|store| {
+        let at = store.at();
+        let renewed = store.db.execute(
+            "UPDATE message
+                SET receipt = json_remove(json_set(receipt, '$.shown', ?1, '$.since', ?2), '$.reminded')
+              WHERE id = ?3 AND project_id = ?4 AND state = 'read' AND json_valid(receipt)
+                AND json_extract(receipt, '$.shown') IS NOT NULL
+                AND json_extract(receipt, '$.over') IS NULL",
+            params![said, at, aside, project_id],
+        )?;
+        Ok(renewed == 1)
+    })
+}
+
+/// Note `aside`, shown and not typed, whose line a move of its task ended (`$.over`), holds
+/// again from now (`$.since`), with no reminder sent of it since: the task's line says it
+/// once more, and nothing is typed. False where it holds already or was never shown.
+pub(crate) fn show_again(
+    store: &mut Store,
+    project_id: i64,
+    aside: i64,
+) -> Result<bool, LedgerError> {
+    store.write(|store| {
+        let at = store.at();
+        let again = store.db.execute(
+            "UPDATE message
+                SET receipt = json_remove(json_set(receipt, '$.since', ?1), '$.over', '$.reminded')
+              WHERE id = ?2 AND project_id = ?3 AND state = 'read' AND sender_id IS NULL
+                AND kind = 'note' AND json_valid(receipt)
+                AND json_extract(receipt, '$.shown') IS NOT NULL
+                AND json_extract(receipt, '$.over') IS NOT NULL",
+            params![at, aside, project_id],
+        )?;
+        Ok(again == 1)
+    })
+}
+
+/// The one note sent (queued, and so typed) about what note `aside`, shown and not typed,
+/// says, where it has held too long to be left to the task's line: `note`, written once, as
+/// the receipt of `aside` remembers (`$.reminded`, the id of the note sent). None where it was
+/// sent already, or `aside` no longer holds.
+pub(crate) fn remind_of_aside(
+    store: &mut Store,
+    project_id: i64,
+    aside: i64,
+    note: &crate::NewNote,
+) -> Result<Option<MessageView>, LedgerError> {
+    store.write(|store| {
+        let holds: bool = store.db.query_row(
+            "SELECT EXISTS (SELECT 1 FROM message
+               WHERE id = ? AND project_id = ? AND state = 'read' AND json_valid(receipt)
+                 AND json_extract(receipt, '$.shown') IS NOT NULL
+                 AND json_extract(receipt, '$.over') IS NULL
+                 AND json_extract(receipt, '$.reminded') IS NULL)",
+            params![aside, project_id],
+            |row| row.get(0),
+        )?;
+        if !holds {
+            return Ok(None);
+        }
+        let sent = crate::messages::note(store, project_id, note)?;
+        store.db.execute(
+            "UPDATE message SET receipt = json_set(receipt, '$.reminded', ?) WHERE id = ?",
+            params![sent.id, aside],
+        )?;
+        Ok(Some(sent))
+    })
 }
 
 /// A task and its whole thread, oldest first; none when there is no such

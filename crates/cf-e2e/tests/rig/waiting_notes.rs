@@ -12,8 +12,12 @@
 //!   the chief it had reached believed the work stopped for five days.
 //!
 //! The note a task's wait left is withdrawn if the chief has not been given it
-//! when the task moves on, and the chief that was given the hold note is told
-//! the task goes on.
+//! when the task moves on, and the chief that was given the hold note is shown
+//! the task goes on. Since RS-25 (the brain's decision "Nothing is typed to the
+//! chief that it need not decide") a note that asks the chief no decision is
+//! shown, not typed: the note that a held task goes on, and the note that a
+//! task was taken back with nothing bound to its window, are `read` at once
+//! with their words on the task's line, and are never pasted.
 
 use std::path::PathBuf;
 use std::thread;
@@ -122,7 +126,7 @@ fn worker_tier(project: &Project) -> Result<String> {
 }
 
 #[test]
-fn the_note_that_a_task_was_taken_back_is_withdrawn_when_another_worker_takes_it_before_the_chief_is_given_the_note(
+fn the_note_that_a_task_was_taken_back_is_shown_never_typed_and_its_line_says_who_took_it_after(
 ) -> Outcome {
     let rig = Rig::start(config())?;
     write_staff(&rig)?;
@@ -160,24 +164,44 @@ fn the_note_that_a_task_was_taken_back_is_withdrawn_when_another_worker_takes_it
             .is_match(body),
         "{body}"
     );
-    // The second worker takes the task while the chief is still in its turn.
+    // With nothing bound to the window it was taken from, the note asks the chief nothing: it
+    // is shown, not typed (RS-25), `read` at once with its words in its receipt.
+    assert_eq!(taken["state"], "read", "{taken}");
+    assert!(taken["receipt"]["shown"].is_string(), "{taken}");
+    // The second worker takes the task while the chief is still in its turn: the task's line
+    // says who has it, and no longer that it waits.
     rig.wait_for("the second worker to take T-1", secs(30), || {
         Ok(p.task(1)?["assignee"]
             .as_str()
             .is_some_and(|assignee| assignee.starts_with("worker2-")))
     })?;
-    let withdrawn = notes(&p, &taken_back)?[0].clone();
+    let task = p.task(1)?;
+    assert!(
+        !task["aside"]
+            .as_str()
+            .is_some_and(|aside| aside.contains("taken back")),
+        "{task}"
+    );
+    let shown = notes(&p, &taken_back)?[0].clone();
     assert_eq!(
-        [
-            withdrawn["id"].clone(),
-            withdrawn["state"].clone(),
-            withdrawn["reason"].clone()
-        ],
-        [
-            taken["id"].clone(),
-            json!("cancelled"),
-            json!("T-1 was taken by @worker2")
-        ]
+        [shown["id"].clone(), shown["state"].clone()],
+        [taken["id"].clone(), json!("read")],
+        "a shown note is what it was: nothing withdraws it"
+    );
+    // What ends is its line: its receipt says since when it is over, and `cf inbox` in the
+    // chief's window says so beside `[not typed]` (T-1556).
+    assert!(shown["receipt"]["over"].is_string(), "{shown}");
+    let chief = rig.open_frame(&format!("p{}-chief", p.id()), OPEN)?;
+    let inbox = rig.cf_in_window(&chief, ["inbox"])?;
+    assert_eq!(inbox.code, Some(0), "{}", inbox.output());
+    let line = format!(
+        "m-{} [not typed · over] note T-1 from ConsensFlow: T-1 was taken back from @worker-",
+        taken["id"]
+    );
+    assert!(
+        inbox.stdout.lines().any(|said| said.starts_with(&line)),
+        "{}",
+        inbox.stdout
     );
 
     // The chief's turn ends and the worker's result reaches it; the note never does.
@@ -200,7 +224,7 @@ fn the_note_that_a_task_was_taken_back_is_withdrawn_when_another_worker_takes_it
 }
 
 #[test]
-fn a_chief_given_the_note_that_a_task_is_held_is_told_it_goes_on_when_the_account_is_switched(
+fn a_chief_given_the_note_that_a_task_is_held_is_shown_it_goes_on_when_the_account_is_switched(
 ) -> Outcome {
     let account = Account::new()?;
     let rig = refused_by(&account)?;
@@ -251,18 +275,22 @@ fn a_chief_given_the_note_that_a_task_is_held_is_told_it_goes_on_when_the_accoun
     rig.wait_for("the note that T-1 goes on", secs(30), || {
         Ok(notes(&p, &goes_on)?.len() == 1)
     })?;
+    // A held task's going on asks the chief nothing: it is shown, not typed (RS-25): `read`
+    // at once, with the words its task's line says in its receipt, and never pasted.
     let goes = notes(&p, &goes_on)?[0].clone();
     assert_eq!(goes["body"], "T-1 goes on: its account has quota again.");
     assert_eq!(goes["taskNumber"], 1);
+    assert_eq!(goes["state"], "read", "{goes}");
+    assert_eq!(
+        goes["receipt"]["shown"], "goes on: its account has quota again.",
+        "{goes}"
+    );
     until_the_chief_is_idle(&rig, &p, secs(90))?;
-    rig.wait_for(
-        "the chief to be given the note that T-1 goes on",
-        secs(30),
-        || Ok(notes(&p, &goes_on)?[0]["state"] == "delivered"),
-    )?;
-    assert!(rig
-        .transcript(&session)
-        .contains("T-1 goes on: its account has quota again."));
+    thread::sleep(Duration::from_secs(3));
+    assert!(
+        !rig.transcript(&session).contains("goes on:"),
+        "the note that T-1 goes on is not typed into the chief's window"
+    );
     let held: Vec<Value> = notes(&p, &waits)?
         .iter()
         .map(|note| note["state"].clone())
