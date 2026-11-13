@@ -15005,6 +15005,31 @@ test('BKV settings marks an unlisted backup model just as it marks a member', as
   )
 })
 
+test('BKV New project leaves out a backup on a missing harness and keeps its member', async ({
+  page,
+}) => {
+  const data = model()
+  data.missing = ['codex']
+  data.lastStaff = [
+    { ...lastMember('zeus', 'claude-code', ['worker']), id: 30 },
+    { ...lastMember('hera', 'codex', ['worker']), id: 31, backupOf: 30 },
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const rows = dialog.getByRole('table', { name: 'Members for the staff' }).locator('tbody tr')
+  await expect(rows).toHaveCount(1)
+  await expect(rows.first()).toContainText('claude-sonnet-5')
+  await expect(dialog.getByText('backup of claude-sonnet-5')).toHaveCount(0)
+  await pickChief(dialog, 'Claude Code', 'claude-opus-5-5')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(1)
+  const [member] = (await calls(page, 'project.open')).at(-1).staff
+  expect(member.model).toBe('claude-sonnet-5')
+  expect(member.roles).toEqual(['worker'])
+  expect(member.backupOf).toBeUndefined()
+})
+
 test('BKV New project leaves out a missing-harness member and its backup together', async ({
   page,
 }) => {

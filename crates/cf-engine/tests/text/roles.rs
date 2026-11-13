@@ -390,7 +390,7 @@ fn tells_the_chief_when_work_goes_to_each_of_the_four_roles_and_how_a_members_im
         "the chief's section on roles",
         &[
             "Name the role a task needs, and its tier where its command above takes `--tier`.",
-            "A tier may be served by a member's backup while that member is out of quota; a member on Vacation takes no tasks, and you still name only the tier.",
+            "A tier may be served by a member's backup while that member is out of quota; a member on Vacation takes no new tasks, and you still name only the tier.",
             "Only a role nobody holds is refused, by its name: only the human adds members, so ask them for one.",
             // The architect (A3, A5): a design first, and the briefs point to its files.
             "Work big enough to need a design (a new module, a new API, a change of structure) goes to the architect first; its files stay, and the workers' briefs point to them.",

@@ -1495,6 +1495,39 @@ async fn bkv_page_remove_backup_and_refuse_when_none() {
 }
 
 #[tokio::test]
+async fn bkv_page_open_without_staff_keeps_member_when_only_backup_harness_is_missing() {
+    LocalSet::new()
+        .run_until(async {
+            let s = staffing();
+            let owner = bkv_page_owner(&s).await;
+            bkv_page_backup(&s, &owner);
+            let missing = if cfg!(windows) { "codex.cmd" } else { "codex" };
+            std::fs::remove_file(s._home.path().join("bin").join(missing)).unwrap();
+            let harnesses = ask(&s.app, "harnesses.missing", json!({})).await;
+            assert!(harnesses["missing"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("codex")));
+            let opened = ask(
+                &s.app,
+                "project.open",
+                json!({
+                    "directory": "/work/bkv-missing-backup", "harness": "claude-code",
+                    "model": "claude-opus-5-5", "effort": "high"
+                }),
+            )
+            .await;
+            assert_eq!(opened["ok"], true, "{opened}");
+            let lanes = bkv_page_link(&s, opened["project"]["id"].as_i64().unwrap());
+            let staff: Vec<_> = lanes.iter().filter(|p| p["role"] == "worker").collect();
+            assert_eq!(staff.len(), 1, "{lanes:?}");
+            assert_eq!(staff[0]["model"], "claude-opus-5-5");
+            assert!(staff[0]["backupOf"].is_null());
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn bkv_page_open_from_last_staff_preserves_the_backup_link() {
     LocalSet::new().run_until(async {
         let s = staffing();

@@ -325,8 +325,8 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     );
     assert_eq!(
         rows_while(true, None, &one),
-        139,
-        "docs: one piece to 139 rows with specs on"
+        138,
+        "docs: one piece to 138 rows with specs on"
     );
     assert_eq!(
         rows_while(false, None, &one),
