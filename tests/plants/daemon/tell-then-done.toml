@@ -33,7 +33,7 @@ replace = ""
 
 [[plant]]
 name = "tell then done: the rig's window answers its tell and goes on, and its final answer reaches nobody"
-meant = "the_final_answer_a_worker_ends_the_turn_of_a_tell_with_reaches_the_chief_and_finish_makes_it_the_result"
+meant = "the_answer_is_typed_with_ways_on_and_the_distinct_final_words_are_shown_and_can_be_finished"
 runs = ["rig-regression-tell-then-done"]
 builds = true
 
