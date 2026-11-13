@@ -132,7 +132,7 @@ meant = "a_release_run_that_fails_says_to_rerun_it_and_a_run_again_says_the_same
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
 if ended.conclusion != "success" {'''
 replace = '''
@@ -144,7 +144,7 @@ meant = "an_older_release_run_of_the_same_commit_is_not_taken_for_the_new_one"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = "if newest.is_some() && newest != watched.before {"
 replace = "if newest.is_some() {"
 
@@ -154,7 +154,7 @@ meant = "an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_ser
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
 if status.status == "completed" {'''
 replace = "if !status.status.is_empty() {"
@@ -212,7 +212,7 @@ meant = "ci_that_ended_red_on_the_version_commit_stops_it_before_the_tag"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
                 let rerun = match run {
                     Some(id) => format!('''
@@ -226,7 +226,7 @@ meant = "ci_that_ended_red_on_the_version_commit_stops_it_before_the_tag"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = "                    finish_by_hand(tag, commit)"
 replace = "                    finish_by_hand(tag, branch)"
 
@@ -246,7 +246,7 @@ meant = "a_feed_alpha_that_never_serves_the_alpha_after_a_green_run_says_the_rel
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/feed.rs"
 find = "self.read_until(name, |served| served.as_str() == version)?"
 replace = "self.read_until(name, |_| true)?"
 
@@ -495,7 +495,7 @@ meant = "a_release_run_that_fails_says_to_rerun_it_and_a_run_again_says_the_same
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
 Some(_) => format!("{tag} stays on upstream; {}", rerun_advice(tag, run)),'''
 replace = '''
@@ -507,7 +507,7 @@ meant = "a_tag_whose_release_run_never_appears_says_what_to_do_with_the_tag"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
 None => format!("{tag} is on upstream; {}", rerun_advice(tag, None)),'''
 replace = '''
@@ -519,7 +519,7 @@ meant = "a_feed_that_answers_404_or_no_network_for_a_while_is_read_again_and_is_
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/feed.rs"
 find = '''
 code => Read::Unreachable(format!("curl ended {code}: {}", answered.stderr.trim())),'''
 replace = "code => return Err(Error::Program { command: invocation.display(), code, said: answered.stderr.trim().to_owned() }),"
@@ -530,7 +530,7 @@ meant = "a_feed_that_answers_404_or_no_network_for_a_while_is_read_again_and_is_
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/feed.rs"
 find = "for attempt in 0..self.pace.feed_attempts {"
 replace = "for attempt in 0..1 {"
 
@@ -540,7 +540,7 @@ meant = "a_feed_alpha_that_answers_no_release_is_an_outage_not_a_version_to_chan
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/feed.rs"
 find = "not a version to change; {}"
 replace = "set a later version; {}"
 
@@ -550,7 +550,7 @@ meant = "a_feed_alpha_that_never_serves_the_alpha_after_a_green_run_says_the_rel
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/feed.rs"
 find = '''
 "release run {run} ended green, its own check of the feeds with it, yet {name} \'''
 replace = '''
@@ -610,7 +610,7 @@ meant = "a_tested_alpha_is_promoted_from_a_branch_at_its_commit_and_main_is_neve
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
     /// The newest run of `workflow`, on `commit` and by `event` where they are named.
 '''
@@ -761,7 +761,7 @@ meant = "a_ci_run_still_going_is_waited_for_beside_a_red_one"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/ci.rs"
 find = '''
                     self.system.pause(self.pace.poll);
                 }
@@ -777,7 +777,7 @@ meant = "a_github_that_cannot_be_asked_of_ci_stops_it_with_what_gh_said"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/ci.rs"
 find = '''
                 Err(Refusal::Unasked(said)) => {
                     return Err(Error::Answer {'''
@@ -792,7 +792,7 @@ meant = "a_ci_run_github_does_not_list_yet_is_waited_for"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/ci.rs"
 find = "Err(Refusal::NeverRan(_)) if looks < self.pace.appear_attempts => {"
 replace = "Err(Refusal::NeverRan(_)) if looks > self.pace.appear_attempts => {"
 
@@ -843,7 +843,7 @@ meant = "an_alpha_is_trialled_by_hand_then_tagged_with_its_notes_watched_and_ser
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/trial.rs"
 find = '''
             "--ref",
             "main",'''
@@ -857,7 +857,7 @@ meant = "a_hand_run_that_gh_cannot_start_stops_it_with_what_gh_said_and_nothing_
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/trial.rs"
 find = '''
             "--ref",
             "main",
@@ -878,7 +878,7 @@ meant = "an_older_hand_run_of_the_same_commit_is_not_taken_for_the_trial"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/trial.rs"
 find = '''
         let before = self.newest_run("release.yml", Some(commit), Some("workflow_dispatch"))?;'''
 replace = "        let before = None;"
@@ -909,7 +909,7 @@ meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = "                .filter(|(_, conclusion)| !passed(conclusion))"
 replace = "                .filter(|_| false)"
 
@@ -919,7 +919,7 @@ meant = "a_trial_cancelled_with_no_step_to_name_is_refused_with_its_jobs"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = "        for job in self.jobs.iter().filter(|job| !passed(&job.conclusion)) {"
 replace = '''
         for job in self.jobs.iter().filter(|job| job.conclusion == "failure") {'''
@@ -930,7 +930,7 @@ meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
         let passed = |conclusion: &str| matches!(conclusion, "success" | "skipped" | "neutral");'''
 replace = '''
@@ -942,7 +942,7 @@ meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
                 format!("{}; {address}", failed.join(", "))'''
 replace = '''
@@ -956,7 +956,7 @@ meant = "a_hand_run_of_another_commit_is_not_taken_for_the_trial"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = ".newest_run(workflow, Some(watched.commit), watched.event)"
 replace = ".newest_run(workflow, None, watched.event)"
 
@@ -966,7 +966,7 @@ meant = "a_hand_run_of_another_commit_is_not_taken_for_the_trial"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
         if let Some(commit) = commit {
             args.extend(["--commit", commit]);
@@ -980,7 +980,7 @@ meant = "a_run_of_another_commit_that_gh_lists_anyway_is_refused_for_what_it_say
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = "            if status.head_sha != watched.commit {"
 replace = "            if status.head_sha.is_empty() {"
 
@@ -990,7 +990,7 @@ meant = "main_that_moved_between_the_check_and_the_dispatch_is_refused_at_once_w
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = "                self.main_moved(watched, head)?;"
 replace = "                let _ = head;"
 
@@ -1000,7 +1000,7 @@ meant = "a_hand_run_of_another_commit_is_not_taken_for_the_trial"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = "        if now == watched.commit {"
 replace = "        if now.is_empty() {"
 
@@ -1010,7 +1010,7 @@ meant = "a_main_that_moved_after_the_dispatch_does_not_stop_the_trial_of_the_com
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = "        if Some(id) == head.newest_before || sha == watched.commit {"
 replace = "        if Some(id) == head.newest_before {"
 
@@ -1020,7 +1020,7 @@ meant = "a_main_that_moved_after_the_dispatch_does_not_stop_the_trial_of_the_com
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = "        if Some(id) == head.newest_before || sha == watched.commit {"
 replace = "        if sha == watched.commit {"
 
@@ -1030,7 +1030,7 @@ meant = "a_main_that_moved_after_the_dispatch_does_not_stop_the_trial_of_the_com
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/trial.rs"
 find = '''
         let newest_before = self.newest_run("release.yml", None, Some("workflow_dispatch"))?;'''
 replace = "        let newest_before = None;"
@@ -1041,7 +1041,7 @@ meant = "a_gh_that_fails_while_the_trial_is_watched_is_a_refusal_naming_the_run_
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
                 .status(id)
                 .map_err(|error| watched.unasked(&error, Some(id)))?;'''
@@ -1054,7 +1054,7 @@ meant = "a_gh_that_fails_while_the_trial_is_watched_is_a_refusal_naming_the_run_
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
                 .newest_run(workflow, Some(watched.commit), watched.event)
                 .map_err(|error| watched.unasked(&error, None))?;'''
@@ -1067,7 +1067,7 @@ meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/trial.rs"
 find = '''
             left: Left::Trial,'''
 replace = '''
@@ -1079,7 +1079,7 @@ meant = "a_trial_that_ends_red_names_its_job_its_step_and_its_run_and_nothing_is
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/runs.rs"
 find = '''
                 Some(_) => "nothing was tagged. Read the failed step at the address; for a flake run the command \
                             again, which starts a new trial; for a real failure fix it on main so that CI runs \
@@ -1446,7 +1446,7 @@ meant = "the_trial_is_asked_for_with_the_notes_the_tag_will_carry"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/github.rs"
+file = "tools/xtask/src/release/github/trial.rs"
 find = '''        self.gh(&[
             "workflow",
             "run",
