@@ -66,8 +66,9 @@ pub(crate) use holds::{
     tell_goes_on,
 };
 pub(crate) use paused_answers::{
-    given as paused_answer_given, note as note_paused_answer, put_back as put_back_paused_answers,
-    queued as queued_paused_answers, tell_on_its_way, withdraw as withdraw_paused_answers,
+    answer_to_current_pause, given as paused_answer_given, note as note_paused_answer,
+    put_back as put_back_paused_answers, queued as queued_paused_answers, tell_on_its_way,
+    withdraw as withdraw_paused_answers,
 };
 pub(crate) use pauses::{
     join_pause_note, leave_pause_notes, note_held_for_context, note_pause, note_stall, say_again,
@@ -354,6 +355,11 @@ pub(crate) fn answer(
             "message.sent",
             json!({ "message": id, "kind": "answer", "from": answerer.handle, "to": question.sender }),
         )?;
+        // If the window's turn was observed first, its note may still be waiting
+        // for the chief. The answer and the change of that note are one write.
+        if let Some(task) = message_task(store, id)? {
+            paused_answers::show_answered(store, &task, question_id, false)?;
+        }
         // A question still gated is answered before the one asked saw it: it goes
         // no further. So is one still queued that the asker's own window answered.
         // One still queued that the one asked answered is theirs: they answered it.

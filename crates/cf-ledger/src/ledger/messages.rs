@@ -275,6 +275,12 @@ impl Ledger {
         )
     }
 
+    /// The task an answer's tell still has paused for the chief, if that can
+    /// be proved from the ledger. Used for the answer's delivery footer.
+    pub fn answer_to_current_pause(&self, answer: i64) -> Result<Option<i64>, LedgerError> {
+        messages::answer_to_current_pause(&self.store, answer)
+    }
+
     /// The newest note that gave T-`number`'s requester the answer of its window's turn on a
     /// tell, or is to give it, its words not taken as the result, since the task's last result
     /// to that requester before `result`: what `result`'s paste names. None where there is none.

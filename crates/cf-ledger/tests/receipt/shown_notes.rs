@@ -3,10 +3,10 @@
 //! no delivery ever takes it; what it says is its task's line (`aside`) until the task
 //! moves on. To anyone but a chief it is queued as any note.
 
-use cf_ledger::{MessageView, NewNote, SHOWN};
+use cf_ledger::{MessageView, NewNote, NewTask, SHOWN};
 use serde_json::json;
 
-use crate::fixture::{world, World};
+use crate::fixture::{frozen_world, world, World};
 
 /// The end of the hold the tests name.
 const UNTIL: &str = "2026-10-10T15:00:00.000Z";
@@ -88,6 +88,438 @@ fn said_of(hold: Hold, session: &str) -> String {
 }
 
 const HOLDS: [Hold; 3] = [Hold::Quota, Hold::Unavailable, Hold::Moved];
+
+/// A tell whose window has received it; the task is paused for this message.
+fn delivered_tell(w: &mut World) -> (i64, String, i64) {
+    let (task, session) = with_zeus(w);
+    let tell = w.tell(&session, task, "Where did you stop?");
+    w.deliver(tell.id);
+    (task, session, tell.id)
+}
+
+fn answer_tell(w: &mut World, session: &str, tell: i64) -> MessageView {
+    let member = w.id(session);
+    w.ledger
+        .answer(tell, member, Some(&json!("The parser is done.")), None)
+        .expect("the window answers the tell on the board")
+}
+
+fn note_of_tell(w: &mut World, task: i64, session: &str, tell: i64) -> MessageView {
+    w.ledger
+        .note_paused_answer(w.project, task, session, tell, None, "The parser is done.")
+        .expect("the ledger")
+        .expect("the turn's note")
+}
+
+fn assert_shown_tell_note(w: &World, task: i64, tell: i64, id: i64) {
+    let note = w.message(id);
+    assert_eq!(note.state, "read", "an answered tell's note is shown");
+    assert!(
+        note.receipt.get(SHOWN).is_some(),
+        "not typed: {:?}",
+        note.receipt
+    );
+    assert!(note.body.contains(&format!("(m-{tell})")));
+    assert!(note.body.contains("The parser is done."));
+    assert!(w
+        .ledger
+        .inbox(w.id("chief"), 100)
+        .expect("inbox")
+        .iter()
+        .any(|m| m.id == id));
+    assert!(w
+        .ledger
+        .task(w.project, task)
+        .expect("read")
+        .expect("task")
+        .messages
+        .iter()
+        .any(|m| m.id == id && m.body == note.body));
+    assert_ne!(
+        w.next("chief"),
+        Some(id),
+        "the note is not queued for the chief"
+    );
+}
+
+#[test]
+fn an_answered_tells_note_is_shown_before_and_after_the_chief_resumes() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    w.deliver(answer.id);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_shown_tell_note(&w, task, tell, note.id);
+    w.resume(task, "Go on");
+    assert_shown_tell_note(&w, task, tell, note.id);
+    assert_eq!(w.next("chief"), None);
+}
+
+#[test]
+fn an_answered_tells_note_is_shown_when_the_chief_resumed_before_the_turn_ended() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    w.deliver(answer.id);
+    w.resume(task, "Go on");
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_shown_tell_note(&w, task, tell, note.id);
+    assert!(note.body.contains("has moved on since"));
+    assert_eq!(w.next("chief"), None);
+}
+
+#[test]
+fn an_answered_tells_note_is_shown_while_the_task_stays_paused() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    w.deliver(answer.id);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_eq!(w.state(task), "paused");
+    assert!(note.body.contains("is paused"));
+    assert_shown_tell_note(&w, task, tell, note.id);
+    assert_eq!(w.next("chief"), None);
+}
+
+#[test]
+fn an_answer_on_its_way_to_the_chief_already_makes_the_tells_note_shown() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    assert_eq!(answer.state, "queued");
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_shown_tell_note(&w, task, tell, note.id);
+    assert_eq!(w.next("chief"), Some(answer.id));
+}
+
+#[test]
+fn an_answer_withdrawn_before_the_note_does_not_make_it_shown() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    w.ledger
+        .cancel_message(answer.id, "withdrawn")
+        .expect("withdrawn");
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_eq!(note.state, "queued");
+    assert_eq!(w.next("chief"), Some(note.id));
+}
+
+#[test]
+fn an_unanswered_tells_note_stays_queued_when_the_chief_resumes_after_the_turn_ended() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_eq!(w.next("chief"), Some(note.id));
+    w.resume(task, "Go on");
+    let note = w.message(note.id);
+    assert_eq!(note.state, "queued");
+    assert!(note.body.contains("has moved on since"));
+    assert_eq!(w.next("chief"), Some(note.id));
+}
+
+#[test]
+fn an_unanswered_tells_note_is_queued_when_the_chief_resumed_before_the_turn_ended() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    w.resume(task, "Go on");
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_eq!(note.state, "queued");
+    assert!(note.body.contains("has moved on since"));
+    assert_eq!(w.next("chief"), Some(note.id));
+}
+
+#[test]
+fn an_unanswered_tells_note_is_queued_with_both_ways_on_while_the_task_stays_paused() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_eq!(note.state, "queued");
+    assert!(note.body.contains("cf task finish T-1"));
+    assert!(note.body.contains("cf task resume T-1"));
+    assert_eq!(w.next("chief"), Some(note.id));
+}
+
+#[test]
+fn a_queued_note_is_shown_when_its_tell_is_answered_after_the_turn_ended_and_before_resume() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_eq!(note.state, "queued");
+    let answer = answer_tell(&mut w, &session, tell);
+    assert_eq!(answer.state, "queued");
+    w.resume(task, "Go on");
+    assert_shown_tell_note(&w, task, tell, note.id);
+    assert_eq!(w.next("chief"), Some(answer.id));
+}
+
+#[test]
+fn a_late_board_answer_shows_the_queued_note_even_if_the_task_stays_paused() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    let answer = answer_tell(&mut w, &session, tell);
+    assert_shown_tell_note(&w, task, tell, note.id);
+    assert_eq!(w.state(task), "paused");
+    assert_eq!(w.next("chief"), Some(answer.id));
+}
+
+#[test]
+fn a_late_board_answer_shows_a_note_written_and_rewritten_before_it_arrived() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    w.resume(task, "Go on");
+    assert_eq!(w.message(note.id).state, "queued");
+    let answer = answer_tell(&mut w, &session, tell);
+    assert_shown_tell_note(&w, task, tell, note.id);
+    assert_eq!(w.next("chief"), Some(answer.id));
+}
+
+#[test]
+fn an_answer_after_resume_but_before_the_turns_end_shows_the_moved_note() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    w.resume(task, "Go on");
+    let answer = answer_tell(&mut w, &session, tell);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_shown_tell_note(&w, task, tell, note.id);
+    assert!(note.body.contains("has moved on since"));
+    assert_eq!(w.next("chief"), Some(answer.id));
+}
+
+#[test]
+fn a_gated_answer_does_not_hide_the_note_until_the_human_passes_it_on() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    w.ledger.set_gate(w.project, true).expect("the gate");
+    let answer = answer_tell(&mut w, &session, tell);
+    assert_eq!(answer.state, "gated");
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_eq!(note.state, "queued");
+    w.ledger
+        .approve_message(answer.id, "human")
+        .expect("passed on");
+    assert_shown_tell_note(&w, task, tell, note.id);
+    assert_eq!(w.next("chief"), Some(answer.id));
+}
+
+#[test]
+fn an_answer_to_another_tell_does_not_hide_the_unanswered_tells_note() {
+    let mut w = world();
+    let (task, session, first) = delivered_tell(&mut w);
+    let next = w.tell(&session, task, "And the lexer?");
+    w.deliver(next.id);
+    let answer = answer_tell(&mut w, &session, next.id);
+    w.deliver(answer.id);
+    let note = note_of_tell(&mut w, task, &session, first);
+    assert_eq!(note.state, "queued");
+    assert_eq!(w.next("chief"), Some(note.id));
+}
+
+#[test]
+fn an_earlier_tell_answered_during_the_same_pause_is_still_shown() {
+    let mut w = world();
+    let (task, session, first) = delivered_tell(&mut w);
+    let next = w.tell(&session, task, "And the lexer?");
+    w.deliver(next.id);
+    let answer = answer_tell(&mut w, &session, first);
+    assert_eq!(
+        w.ledger.answer_to_current_pause(answer.id).expect("read"),
+        Some(task)
+    );
+    w.deliver(answer.id);
+    let note = note_of_tell(&mut w, task, &session, first);
+    assert_shown_tell_note(&w, task, first, note.id);
+}
+
+#[test]
+fn a_note_already_being_pasted_stays_typed_when_its_tell_is_answered() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    w.begin(note.id);
+    let answer = answer_tell(&mut w, &session, tell);
+    assert_eq!(w.message(note.id).state, "delivering");
+    w.resume(task, "Go on");
+    let pasted = w.confirm(note.id);
+    assert_eq!(pasted.state, "delivered");
+    assert_eq!(pasted.body, note.body);
+    assert!(pasted.receipt.get(SHOWN).is_none());
+    assert_eq!(w.next("chief"), Some(answer.id));
+}
+
+#[test]
+fn a_note_already_pasted_stays_typed_when_its_tell_is_answered() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    w.deliver(note.id);
+    answer_tell(&mut w, &session, tell);
+    w.resume(task, "Go on");
+    let pasted = w.message(note.id);
+    assert_eq!(pasted.state, "delivered");
+    assert_eq!(pasted.body, note.body);
+    assert!(pasted.receipt.get(SHOWN).is_none());
+}
+
+#[test]
+fn a_note_queued_again_after_an_attempt_stays_typed_when_its_tell_is_answered() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    w.begin(note.id);
+    w.ledger
+        .retry_delivery(note.id, "the window went before confirmation", true)
+        .expect("the note is queued again");
+    assert_eq!(w.message(note.id).state, "queued");
+    answer_tell(&mut w, &session, tell);
+    assert_eq!(w.message(note.id).state, "queued");
+    assert!(w.message(note.id).receipt.get(SHOWN).is_none());
+    w.resume(task, "Go on");
+    assert_eq!(w.message(note.id).state, "queued");
+    assert!(w.message(note.id).body.contains("has moved on since"));
+}
+
+#[test]
+fn an_answered_tells_note_to_a_human_requester_is_still_queued() {
+    let mut w = world();
+    let task = w
+        .ledger
+        .create_task(
+            w.project,
+            &NewTask {
+                from: "human".into(),
+                pool: Some("worker".into()),
+                tier: Some("standard".into()),
+                body: "Parser".into(),
+                ..NewTask::default()
+            },
+        )
+        .expect("the human's task")
+        .task
+        .number;
+    let moved = w.assign(task, "zeus");
+    let session = moved.task.assignee.expect("its session");
+    w.deliver(moved.message.expect("its brief").id);
+    let tell = w.tell(&session, task, "Where did you stop?");
+    w.deliver(tell.id);
+    let answer = answer_tell(&mut w, &session, tell.id);
+    w.deliver(answer.id);
+    let note = note_of_tell(&mut w, task, &session, tell.id);
+    assert_eq!(
+        (note.recipient.as_str(), note.state.as_str()),
+        ("human", "queued")
+    );
+    assert!(note.receipt.get(SHOWN).is_none());
+    assert!(note.body.contains("Finish it in the task's drawer"));
+}
+
+#[test]
+fn a_delivered_tell_answer_identifies_only_its_current_pause() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    assert_eq!(
+        w.ledger.answer_to_current_pause(answer.id).expect("read"),
+        Some(task)
+    );
+    w.resume(task, "Go on");
+    assert_eq!(
+        w.ledger.answer_to_current_pause(answer.id).expect("read"),
+        None
+    );
+    w.pause(task);
+    assert_eq!(
+        w.ledger.answer_to_current_pause(answer.id).expect("read"),
+        None
+    );
+}
+
+#[test]
+fn another_pause_in_the_same_millisecond_is_not_the_pause_of_an_earlier_tell() {
+    let mut w = frozen_world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    assert_eq!(
+        w.ledger.answer_to_current_pause(answer.id).expect("read"),
+        Some(task)
+    );
+    w.resume(task, "Go on");
+    w.pause(task);
+    assert_eq!(
+        w.ledger.answer_to_current_pause(answer.id).expect("read"),
+        None
+    );
+}
+
+#[test]
+fn an_answer_whose_tells_pause_cannot_be_proved_keeps_the_note_typed_until_the_task_moves() {
+    for note_first in [false, true] {
+        let mut w = world();
+        let (task, session, tell) = delivered_tell(&mut w);
+        // An old or incomplete event log does not say whether this tell came
+        // before the current pause. The answer's footer cannot claim it did.
+        w.edit(|db| {
+            db.execute(
+                "DELETE FROM event WHERE kind = 'message.sent' AND json_extract(data, '$.message') = ?",
+                [tell],
+            )
+            .expect("the old event is absent");
+        });
+        let earlier = note_first.then(|| note_of_tell(&mut w, task, &session, tell));
+        let answer = answer_tell(&mut w, &session, tell);
+        assert_eq!(
+            w.ledger.answer_to_current_pause(answer.id).expect("read"),
+            None
+        );
+        let note = earlier.unwrap_or_else(|| note_of_tell(&mut w, task, &session, tell));
+        assert_eq!(
+            w.message(note.id).state,
+            "queued",
+            "note first: {note_first}"
+        );
+        w.resume(task, "Go on");
+        assert_shown_tell_note(&w, task, tell, note.id);
+    }
+}
+
+#[test]
+fn a_shown_tells_note_stays_shown_when_the_task_is_released_failed_finished_or_cancelled() {
+    for ending in ["release", "failed", "finished", "cancelled"] {
+        let mut w = world();
+        let (task, session, tell) = delivered_tell(&mut w);
+        let answer = answer_tell(&mut w, &session, tell);
+        w.deliver(answer.id);
+        let note = note_of_tell(&mut w, task, &session, tell);
+        match ending {
+            "release" => {
+                w.ledger
+                    .release_task(w.project, task, "another worker")
+                    .expect("released");
+            }
+            "failed" => {
+                w.resume(task, "Go on");
+                w.ledger
+                    .fail_task(w.project, task, "the window failed")
+                    .expect("failed");
+            }
+            "finished" => {
+                w.ledger
+                    .record_finished(w.project, task, "Done", (0, 0))
+                    .expect("finished");
+            }
+            "cancelled" => {
+                w.ledger
+                    .cancel_task(w.project, task, "chief")
+                    .expect("cancelled");
+            }
+            _ => unreachable!(),
+        }
+        assert_shown_tell_note(&w, task, tell, note.id);
+        assert!(w.message(note.id).receipt.get("over").is_some(), "{ending}");
+    }
+}
 
 #[test]
 fn the_first_note_of_a_hold_is_typed_to_the_chief_and_the_same_hold_said_again_is_shown() {

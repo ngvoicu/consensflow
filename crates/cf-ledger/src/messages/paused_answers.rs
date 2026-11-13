@@ -11,6 +11,17 @@
 //! writes, and a turn that goes on (a tool call, then more text) leaves it behind the last
 //! words, in the transcript alone. What it wrote between its tools stays there.
 //!
+//! A chief that has the window's board answer to this tell, or has it on the way, is shown
+//! the note instead of being typed it again (CLN-71). The exact tell, window and recipient
+//! are matched by the question and answer rows, including `reply_to`; an answer still gated,
+//! withdrawn or failed does not count. This is decided when the note is made, when an answer
+//! arrives or passes the gate, and when an unread note is rewritten on a move. A note whose
+//! own paste or carrier may already have begun stays typed: an attempted paste is not proof
+//! that nothing reached the window. While the task is paused, a missing tell event leaves
+//! its note typed too: without it the answer cannot be proved to have the ways-on footer.
+//! Once the task moves, a note shown then is marked over at once. A human requester gets the
+//! queued note as before.
+//!
 //! It is a `note` of ConsensFlow's own, told by its words ([`read`]), which are written
 //! here and nowhere else: a kind of its own would be a migration, and the schema is held
 //! byte for byte by Node's. What the note says stays true as the task moves:
@@ -22,7 +33,8 @@
 //!   the note did; its words are written again for what is true then ([`keep_moved`]): the
 //!   task has moved on, its result will be its next complete answer, and this is what the
 //!   turn on the tell ended with. A note already pasted has been read, and stays as it was.
-//!   The same words are written at once where the task moved on before the window's turn
+//!   A shown note stays shown, as it was; its line is marked over on the move. The same
+//!   moved-on words are written at once where the task moved on before the window's turn
 //!   ended (the chief resumed while the window was still at work on its answer): its
 //!   resume is queued behind the turn, and the turn's end is told all the same.
 //! - **staying paused** (a Resume of a project that leaves one of a window's several tasks
@@ -32,16 +44,18 @@
 //!   back queued as it was, in the words of a task that has moved on, and is given to its
 //!   reader at its next rest like any note (the delivery of a note to a chief does not wait
 //!   for the task's state), before the note that the task failed. Nothing waits for the
-//!   reopen but the task.
+//!   reopen but the task. A shown note is read already and is never put back queued.
 //! - **finished** (`cf task finish`, the drawer's Finish): the note's words are the result,
-//!   and the note is moot: it is withdrawn if not yet pasted ([`withdraw`]).
-//! - **cancelled**: the task's messages on their way are withdrawn with it, as always.
+//!   and the note is moot: it is withdrawn if not yet pasted ([`withdraw`]); a shown note stays.
+//! - **cancelled**: the task's messages on their way are withdrawn with it, as always; a shown
+//!   note stays in its thread.
 
 use cf_proto::ledger::MessageView;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
+use serde_json::json;
 
 use crate::model::LedgerError;
-use crate::queue::{send, withdraw as withdraw_message, Sent};
+use crate::queue::{send, withdraw as withdraw_message, Sent, SHOWN};
 use crate::store::Store;
 use crate::views::TaskRow;
 
@@ -272,7 +286,9 @@ pub(crate) fn note(
             words: words.to_owned(),
             then,
         });
-        send(
+        let shown = show_for_answer(store, &task, handle, tell, false)?;
+        let aside = format!("the window answered tell m-{tell}");
+        let sent = send(
             store,
             project_id,
             &Sent {
@@ -280,11 +296,145 @@ pub(crate) fn note(
                 body: &body,
                 task: Some(number),
                 kind: "note",
+                shown: shown.then_some(aside.as_str()),
                 ..Sent::default()
             },
-        )
-        .map(Some)
+        )?;
+        // A note first written after the task moved on is already over: it must not
+        // put an obsolete pause on the task's line.
+        if shown && requester.role == "chief" && task.state != "paused" {
+            let at = store.at();
+            store.db.execute(
+                "UPDATE message SET receipt = json_set(receipt, '$.over', ?) WHERE id = ?",
+                params![at, sent.id],
+            )?;
+            return store.message(sent.id).map_err(Into::into);
+        }
+        Ok(Some(sent))
     })
+}
+
+/// A chief has, or is on its way to having, this window's answer to this exact
+/// tell. A gated, declined or failed answer has not been sent to it.
+fn answered_on_board(
+    store: &Store,
+    task: &TaskRow,
+    handle: &str,
+    tell: i64,
+) -> Result<Option<i64>, LedgerError> {
+    Ok(store
+        .db
+        .query_row(
+            "SELECT a.id FROM message q
+           JOIN participant member ON member.id = q.recipient_id
+           JOIN participant requester ON requester.id = q.sender_id
+           JOIN message a ON a.reply_to = q.id
+          WHERE q.id = ?1 AND q.project_id = ?2 AND q.task_id = ?3
+            AND q.kind = 'question' AND q.urgent = 1
+            AND q.sender_id = ?4 AND requester.role = 'chief' AND member.handle = ?5
+            AND a.project_id = q.project_id AND a.task_id = q.task_id
+            AND a.sender_id = q.recipient_id AND a.recipient_id = q.sender_id
+            AND a.kind = 'answer' AND a.state IN ('queued', 'delivering', 'delivered', 'read')
+          ORDER BY a.id DESC LIMIT 1",
+            params![tell, task.project_id, task.id, task.requester_id, handle],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+/// A paused task's answer must be able to tell the chief both ways on. If an
+/// old ledger cannot prove that this is the tell's pause, retain the typed note
+/// until the task moves. A move itself no longer needs that footer.
+fn show_for_answer(
+    store: &Store,
+    task: &TaskRow,
+    handle: &str,
+    tell: i64,
+    moving: bool,
+) -> Result<bool, LedgerError> {
+    let Some(answer) = answered_on_board(store, task, handle, tell)? else {
+        return Ok(false);
+    };
+    Ok(moving
+        || task.state != "paused"
+        || answer_to_current_pause(store, answer)? == Some(task.number))
+}
+
+/// The task whose tell this answer is for, when the chief is still deciding
+/// that very pause. Event ids, rather than clock times alone, distinguish a
+/// resume followed by another pause in the same millisecond.
+pub(crate) fn answer_to_current_pause(
+    store: &Store,
+    answer: i64,
+) -> Result<Option<i64>, LedgerError> {
+    Ok(store
+        .db
+        .query_row(
+            "SELECT t.number FROM message a
+           JOIN message q ON q.id = a.reply_to
+           JOIN task t ON t.id = q.task_id AND a.task_id = t.id
+           JOIN participant chief ON chief.id = a.recipient_id
+           JOIN event sent ON sent.project_id = q.project_id AND sent.kind = 'message.sent'
+              AND json_valid(sent.data)
+              AND json_extract(sent.data, '$.message') = q.id
+          WHERE a.id = ?1 AND a.kind = 'answer' AND chief.role = 'chief'
+            AND q.kind = 'question' AND q.urgent = 1
+            AND q.sender_id = a.recipient_id AND q.recipient_id = a.sender_id
+            AND t.state = 'paused' AND t.assignee_id = q.recipient_id
+            AND q.created_at >= t.paused_at
+            AND NOT EXISTS (SELECT 1 FROM event moved
+                  WHERE moved.project_id = t.project_id AND moved.id > sent.id
+                    AND moved.kind = 'task.state' AND json_valid(moved.data)
+                    AND json_extract(moved.data, '$.task') = t.number)
+          LIMIT 1",
+            [answer],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+/// A board answer may arrive after the turn's note. Show a note only while no
+/// paste containing it has begun: a queued row can ride in a carrier already on
+/// its way, and an attempted paste may already be in the chief's conversation.
+pub(super) fn show_answered(
+    store: &mut Store,
+    task: &TaskRow,
+    tell: i64,
+    moving: bool,
+) -> Result<(), LedgerError> {
+    for (id, said) in notes_of(store, task, Some("queued"))? {
+        if said.tell != tell || !show_for_answer(store, task, &said.handle, tell, moving)? {
+            continue;
+        }
+        let at = store.at();
+        let aside = format!("the window answered tell m-{tell}");
+        let receipt = if task.state == "paused" {
+            json!({ SHOWN: aside })
+        } else {
+            json!({ SHOWN: aside, "over": at })
+        };
+        let body = if task.state != "paused" && matches!(said.then, Then::Paused(_)) {
+            render(&Answered {
+                then: Then::Moved,
+                ..said
+            })
+        } else {
+            render(&said)
+        };
+        let changed = store.db.execute(
+            "UPDATE message SET state = 'read', receipt = ?1, delivered_at = ?2,
+                    body = ?3, carried_by = NULL
+              WHERE id = ?4 AND state = 'queued' AND attempts = 0
+                AND (carried_by IS NULL OR EXISTS
+                     (SELECT 1 FROM message c WHERE c.id = message.carried_by
+                       AND c.state IN ('queued', 'gated') AND c.attempts = 0))",
+            params![receipt.to_string(), at, body, id],
+        )?;
+        if changed > 0 {
+            store.log(task.project_id, "message.shown", json!({ "message": id }))?;
+        }
+    }
+    Ok(())
 }
 
 /// The notes of this kind that ConsensFlow wrote to `task`'s requester about it, with their
@@ -317,7 +467,8 @@ fn notes_of(
 /// the turn's report in the note and again in the result, and could not tell which to
 /// decide). None where there is none, where Finish took its words as the result and withdrew
 /// it, or where an earlier result came after it: that note was the earlier result's to name,
-/// and a result after a reopen names none of it (Calliope's T-987).
+/// and a result after a reopen names none of it (Calliope's T-987). A shown note was not
+/// typed, so the result does not say that the chief was given it.
 pub(crate) fn given(
     store: &Store,
     project_id: i64,
@@ -334,7 +485,10 @@ pub(crate) fn given(
     let mut given = None;
     for state in ["queued", "delivering", "delivered", "read"] {
         for (id, _) in notes_of(store, &task, Some(state))? {
-            if id < result && earlier.is_none_or(|earlier| id > earlier) {
+            let shown = store
+                .message(id)?
+                .is_some_and(|message| message.receipt.get(SHOWN).is_some());
+            if !shown && id < result && earlier.is_none_or(|earlier| id > earlier) {
                 given = given.max(Some(id));
             }
         }
@@ -364,8 +518,15 @@ pub(crate) fn tell_on_its_way(
 /// The task is paused no more, and goes on (a resume) or goes back to the board: the notes
 /// not yet pasted into their reader's window say so, and that what they hold is not the
 /// task's result.
-pub(crate) fn keep_moved(store: &Store, task: &TaskRow) -> Result<(), LedgerError> {
+pub(crate) fn keep_moved(store: &mut Store, task: &TaskRow) -> Result<(), LedgerError> {
     for (id, said) in notes_of(store, task, Some("queued"))? {
+        show_answered(store, task, said.tell, true)?;
+        if store
+            .message(id)?
+            .is_some_and(|note| note.state != "queued")
+        {
+            continue;
+        }
         if matches!(said.then, Then::Paused(_)) {
             let body = render(&Answered {
                 then: Then::Moved,

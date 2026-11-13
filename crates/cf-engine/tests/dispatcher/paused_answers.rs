@@ -81,6 +81,17 @@ fn answers_then_goes_on_to_the_end(context: &Context, told: &MessageView) {
     context.adapter.answer("zeus", FINAL);
 }
 
+/// A turn that uses a tool but sends no board answer: its note is the only
+/// carrier of its final words and keeps the original queued-note behaviour.
+fn unanswered_then_goes_on_to_the_end(context: &Context) {
+    context.adapter.with("zeus", |agent| {
+        agent
+            .items
+            .push(context.adapter.item(Role::Tool, "(Bash completed)"));
+    });
+    context.adapter.answer("zeus", FINAL);
+}
+
 /// The notes the chief was sent, oldest first, that are about T-1's paused turn.
 pub(crate) fn kept_notes(context: &Context, project: i64) -> Vec<String> {
     notes(context, context.id(project, "chief"))
@@ -159,6 +170,47 @@ fn the_final_answer_a_window_ends_the_turn_of_a_tell_with_is_put_to_the_chief_on
 }
 
 #[test]
+fn an_answered_tells_turn_is_shown_and_the_answer_tells_the_paused_chief_both_ways_on() {
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    answers_then_goes_on_to_the_end(&context, &told);
+    for _ in 0..5 {
+        context.pass().unwrap();
+    }
+    let note = kept_note(&context, project);
+    assert_eq!(note.state, "read");
+    assert!(note.receipt.get("shown").is_some());
+    let pastes = given(&context, "chief");
+    let answer = pastes
+        .iter()
+        .find(|text| text.contains(ANSWER))
+        .expect("the answer was typed");
+    assert!(answer.ends_with("T-1 is paused. If that is the result, take it: cf task finish T-1. To send it on: cf task resume T-1 \"…\"."), "{answer}");
+    assert!(
+        !pastes.iter().any(|text| text.contains(&note.body)),
+        "the note was not typed"
+    );
+}
+
+#[test]
+fn an_answer_typed_after_its_task_resumes_has_no_paused_task_guidance() {
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    context.adapter.busy("chief");
+    answers_and_goes_on(&context, &told);
+    context.resume_task(project, 1, "Go on");
+    for _ in 0..4 {
+        chief_ends_its_turn(&context);
+    }
+    let pastes = given(&context, "chief");
+    let answer = pastes
+        .iter()
+        .find(|text| text.contains(ANSWER))
+        .expect("the answer was typed");
+    assert!(!answer.contains("T-1 is paused."), "{answer}");
+}
+
+#[test]
 fn finish_takes_the_final_answer_of_a_paused_task_as_its_result() {
     let context = Context::new();
     let (project, told) = told_at_work(&context);
@@ -196,12 +248,12 @@ fn a_resume_before_the_chief_read_the_note_keeps_it_in_words_true_of_the_resumed
     let (project, told) = told_at_work(&context);
     // The chief is at work on a turn of its own: the note waits in its queue.
     context.adapter.busy("chief");
-    answers_then_goes_on_to_the_end(&context, &told);
+    unanswered_then_goes_on_to_the_end(&context);
     context.pass().unwrap();
     let note = kept_note(&context, project);
     assert_eq!(note.state, "queued");
 
-    // The chief resumes the task, as the answer it was given told it to, before the note.
+    // The chief resumes the task before the unanswered tell's note reaches it.
     context.resume_task(project, 1, "Go on, or say you finished");
     let kept = context.message(note.id);
     assert_eq!(kept.state, "queued", "the resume does not take it back");
@@ -233,9 +285,9 @@ fn a_resume_before_the_chief_read_the_note_keeps_it_in_words_true_of_the_resumed
 #[test]
 fn the_result_after_a_note_of_the_turn_on_a_tell_says_it_is_the_one_to_decide() {
     let context = Context::new();
-    let (project, told) = told_at_work(&context);
+    let (project, _) = told_at_work(&context);
     context.adapter.busy("chief");
-    answers_then_goes_on_to_the_end(&context, &told);
+    unanswered_then_goes_on_to_the_end(&context);
     context.pass().unwrap();
     let note = kept_note(&context, project);
     context.resume_task(project, 1, "Carry on with the brief");
@@ -278,9 +330,9 @@ fn the_result_after_a_note_of_the_turn_on_a_tell_says_it_is_the_one_to_decide() 
 #[test]
 fn a_result_after_a_reopen_names_no_note_of_an_earlier_round() {
     let context = Context::new();
-    let (project, told) = told_at_work(&context);
+    let (project, _) = told_at_work(&context);
     context.adapter.busy("chief");
-    answers_then_goes_on_to_the_end(&context, &told);
+    unanswered_then_goes_on_to_the_end(&context);
     context.pass().unwrap();
     let note = kept_note(&context, project);
     context.resume_task(project, 1, "Carry on with the brief");
@@ -353,10 +405,10 @@ fn a_result_with_no_note_of_a_turn_on_a_tell_says_only_how_to_decide() {
 fn a_resume_after_the_chief_read_the_note_leaves_it_as_it_was_read_and_the_resumed_turn_is_the_result(
 ) {
     let context = Context::new();
-    let (project, told) = told_at_work(&context);
-    answers_then_goes_on_to_the_end(&context, &told);
+    let (project, _) = told_at_work(&context);
+    unanswered_then_goes_on_to_the_end(&context);
     context.pass().unwrap();
-    // The chief ends its turn on the answer, and is given the note, and reads it.
+    // The chief ends its turn, and is given the unanswered tell's note, and reads it.
     for _ in 0..2 {
         chief_ends_its_turn(&context);
     }
@@ -434,7 +486,7 @@ fn a_task_taken_back_to_the_board_keeps_the_note_the_chief_has_not_read_in_the_w
     let window = tiers.assignee(1);
     let told = tell_working(&context, tiers.project.id, &window);
     context.adapter.busy("chief");
-    answers_then_goes_on_to_the_end(&context, &told);
+    unanswered_then_goes_on_to_the_end(&context);
     context.pass().unwrap();
     let note = kept_note(&context, tiers.project.id);
     assert_eq!(note.state, "queued");
@@ -454,9 +506,9 @@ fn a_task_taken_back_to_the_board_keeps_the_note_the_chief_has_not_read_in_the_w
 #[test]
 fn finishing_a_paused_task_withdraws_the_note_the_chief_has_not_read() {
     let context = Context::new();
-    let (project, told) = told_at_work(&context);
+    let (project, _) = told_at_work(&context);
     context.adapter.busy("chief");
-    answers_then_goes_on_to_the_end(&context, &told);
+    unanswered_then_goes_on_to_the_end(&context);
     context.pass().unwrap();
     let note = kept_note(&context, project);
     assert_eq!(note.state, "queued");
@@ -468,8 +520,8 @@ fn finishing_a_paused_task_withdraws_the_note_the_chief_has_not_read() {
 #[test]
 fn finishing_after_the_chief_read_the_note_leaves_the_note_as_it_was_read() {
     let context = Context::new();
-    let (project, told) = told_at_work(&context);
-    answers_then_goes_on_to_the_end(&context, &told);
+    let (project, _) = told_at_work(&context);
+    unanswered_then_goes_on_to_the_end(&context);
     context.pass().unwrap();
     for _ in 0..2 {
         chief_ends_its_turn(&context);
@@ -1019,11 +1071,6 @@ fn a_resumed_turn_that_fails_fails_the_task_and_leaves_the_note_of_the_tells_ans
     let context = Context::new();
     let (project, told) = told_at_work(&context);
     context.adapter.busy("chief");
-    context
-        .ledger
-        .borrow_mut()
-        .answer(told.id, told.recipient_id, Some(&json!(ANSWER)), None)
-        .unwrap();
     context.resume_task(project, 1, "Go on, or say you finished");
     context.adapter.answer("zeus", FINAL);
     for _ in 0..3 {
@@ -1377,7 +1424,7 @@ fn a_resume_before_the_chief_read_the_note_keeps_the_reply_in_the_words_of_a_tas
     let context = Context::new();
     let (project, told) = told_at_work(&context);
     context.adapter.busy("chief");
-    devin_turn(&context, &told, Some(FINAL));
+    devin_turn(&context, &told, None);
     context.pass().unwrap();
     let note = kept_note(&context, project);
     assert_eq!(note.state, "queued");
