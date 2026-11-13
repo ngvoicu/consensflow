@@ -103,8 +103,10 @@ impl Dispatcher {
             Vec::new()
         };
         for number in paused {
+            // The board answer can differ from the turn's last complete answer, which
+            // is what Finish takes from the window's record.
             text.push_str(&format!(
-                "\n\nT-{number} is paused. If that is the result, take it: {cf} task finish T-{number}. To send it on: {cf} task resume T-{number} \"…\"."
+                "\n\nT-{number} is paused. To take its window's last complete answer as the result: {cf} task finish T-{number}. To send it on: {cf} task resume T-{number} \"…\"."
             ));
         }
         Ok(text)
