@@ -615,7 +615,7 @@ find = '''
     /// The newest run of `workflow`, on `commit` and by `event` where they are named.
 '''
 replace = '''
-    pub(super) fn dispatch(&mut self, workflow: &str, reference: &str) -> Result<(), Error> {
+    pub(in crate::release) fn dispatch(&mut self, workflow: &str, reference: &str) -> Result<(), Error> {
         self.gh(&["workflow", "run", workflow, "--repo", REPOSITORY, "--ref", reference])?;
         Ok(())
     }
