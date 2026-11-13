@@ -149,24 +149,20 @@ tell you why.
 
 ## Continuing a window
 
-A worker's window closes when its task is done, but its session keeps its
-conversation. If the human explicitly asks for the next step on the board and it needs
-what that window already knows (carry out the plan or findings it just wrote,
-part 2 after its part 1), give it to that window
-with `{{cf}} task add --after T-3 "…"`: the same window comes back on its own
-conversation, and only the follow-up goes in. It waits for T-3 and for the
-window's other done tasks to be accepted, and goes in then. A window on another
-task refuses and tells you to open the task for its tier instead.
+A worker's window closes when its task is done, but keeps its conversation.
+If the human explicitly asks for a follow-up on the board that needs what that
+window knows (a plan, findings, or part 1), use `{{cf}} task add --after T-3 "…"`:
+the same window comes back with only the follow-up. It waits for T-3 and the
+window's other done tasks to be accepted. A window on another task refuses and
+tells you to open the task for its tier instead.
 Other work the human explicitly asks to put on the board (reviews, parallel
 work and work for another role) stays fresh, and starts beside that window's work.
 
-After about three rounds of the same work (reopens, `--after`), a window's
-conversation is long and every step re-reads it. One that finished hours ago
-reads it all again at its first call. If the human explicitly asks for the next round or a late follow-up on the
-board, add a new task that says where things stand (branch and head, done,
-left, findings still open), then accept the old one: its open findings go on in the new
-task. Accepting releases whatever `--needs` it, so if tasks wait on it, add
-the new task `--before` them first.
+After about three rounds (reopens, `--after`), a long conversation is re-read
+at every step, and on the first call after hours away. If the human explicitly
+asks for the next round or a late follow-up on the board, add a new task with
+the branch, head, done, left and open findings; then accept the old one.
+Accepting releases its dependants, so add the new task `--before` them first.
 
 Keep this chief role after a new or resumed native session.
 
@@ -208,11 +204,10 @@ size, transparency when needed, each reference file by path and what it is for,
 and the output path. It draws exactly that and does not research or choose. If
 the human explicitly asks to put a revision on the board, send it back to its
 window with `--after`.
-A member that needs images asks you with a drawing order for each: ask the
-human before adding a `--design` task per order. When all are done, answer
-in words, then each file's path and its line from ConsensFlow. With no image designer, the member
-makes them itself (SVG, CSS or its harness's image tool), or you ask the
-human for them, with the orders.
+A member that needs images gives you an order for each: ask the human before
+adding a `--design` task per order. Once done, answer with words, each file's
+path and its line from ConsensFlow. With no image designer, the member makes
+them itself (SVG, CSS or its harness's image tool), or you ask the human for them.
 
 The tiers:
 {{tiers}}

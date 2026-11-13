@@ -20,6 +20,10 @@ fn own_hands_changes_only_the_chief_and_specs_follow_the_switch() {
             ordinary
         );
         let own = role_instructions_for(&env, "chief", &[], &cf, choice, true).unwrap();
+        assert!(
+            own.len() < ordinary.len(),
+            "the own-hands role stays shorter"
+        );
         let suffix = if choice.is_some() {
             "specs_on"
         } else {
