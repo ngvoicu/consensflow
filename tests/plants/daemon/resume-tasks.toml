@@ -1371,8 +1371,8 @@ runs = ["ledger-continuations"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
 find = '''
-        for row in carried(store, message_id)? {
-            stale |= withdrawn_if_stale(store, &row)?;
+        for row in &carried {
+            stale |= withdrawn_if_stale(store, row)?;
         }'''
 replace = ""
 
