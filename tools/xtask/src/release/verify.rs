@@ -5,10 +5,11 @@
 //!
 //! It holds the release to what T-862 checked by hand on 3.0.6-alpha.3:
 //!
-//! 1. every file against the release's `SHA256SUMS`: each file it lists is in the
-//!    release and hashes as listed, and the release holds no file it does not list
-//!    but `SHA256SUMS` itself and `SHA256SUMS.sig`, the list's own signature, which
-//!    the list cannot name;
+//! 1. every file against the release's `SHA256SUMS`: each of its rows is as the
+//!    release writes it (`cf_publish::sums::listed_in`, the publisher's own rule),
+//!    each file it lists is in the release and hashes as listed, and the release
+//!    holds no file it does not list but `SHA256SUMS` itself and `SHA256SUMS.sig`,
+//!    the list's own signature, which the list cannot name;
 //! 2. `SHA256SUMS.sig` under the public key pinned in `app/src-tauri/tauri.conf.json`
 //!    **at the release's tag**, as the installers check a release's sums and
 //!    cf-publish checks the one it publishes: the list's signature and the trusted
@@ -28,10 +29,11 @@
 //!    is a problem.
 //!
 //! Every problem found is said, not the first alone: a release that does not verify
-//! is refused with all of them. A release that cannot be read at all (no such
-//! release, no `SHA256SUMS`, a tag nobody has) is refused as it is.
+//! is refused with all of them. A `SHA256SUMS` with rows that do not read is said
+//! row by row, and no file is held to it: the files are checked against a list
+//! that reads. A release that cannot be read at all (no such release, no
+//! `SHA256SUMS`, a tag nobody has) is refused as it is.
 
-use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Read};
@@ -40,7 +42,9 @@ use std::path::Path;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use cf_publish::digest::hex;
-use cf_publish::sums::{check_signature as check_signed_sums, signed_name, SIGNATURE, SUMS};
+use cf_publish::sums::{
+    check_signature as check_signed_sums, listed_in, signed_name, SIGNATURE, SUMS,
+};
 use cf_publish::version::{named_release, Version};
 use minisign_verify::{PublicKey, Signature};
 use serde_json::Value;
@@ -204,19 +208,23 @@ impl Release<'_> {
         names: &[String],
         report: &mut Report,
     ) -> Result<(), Error> {
-        let path = folder.join("SHA256SUMS");
-        let text = fs::read_to_string(&path).map_err(|source| Error::File {
+        let path = folder.join(SUMS);
+        let text = fs::read(&path).map_err(|source| Error::File {
             action: "read",
             path,
             source,
         })?;
-        let (listed, odd) = listed_in(&text);
+        let listed = match listed_in(&text) {
+            Ok(listed) => listed,
+            Err(rows) => {
+                // No file can be held to a list that does not read.
+                report
+                    .problems
+                    .extend(rows.into_iter().map(|row| format!("{SUMS} {row}")));
+                return Ok(());
+            }
+        };
         let before = report.problems.len();
-        for line in odd {
-            report.problems.push(format!(
-                "SHA256SUMS holds a line that is not \"<sha-256>  <name>\": \"{line}\""
-            ));
-        }
         for (name, hash) in &listed {
             if !names.contains(name) {
                 report.problems.push(format!(
@@ -570,28 +578,6 @@ fn names_in(folder: &Path) -> Result<Vec<String>, Error> {
     }
     names.sort();
     Ok(names)
-}
-
-/// The hashes a SHA256SUMS lists, by file name (lines of `<64 hex>`, a space, a
-/// space or `*`, and the name, as `sha256sum` writes them), and the lines that are
-/// no such thing.
-pub(super) fn listed_in(sums: &str) -> (BTreeMap<String, String>, Vec<String>) {
-    let mut listed = BTreeMap::new();
-    let mut odd = Vec::new();
-    for line in sums.lines().filter(|line| !line.trim().is_empty()) {
-        let parsed = line
-            .split_once(' ')
-            .filter(|(hash, _)| hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
-            .map(|(hash, rest)| (hash, rest.strip_prefix([' ', '*']).unwrap_or(rest)))
-            .filter(|(_, name)| !name.is_empty());
-        match parsed {
-            Some((hash, name)) => {
-                listed.insert(name.to_owned(), hash.to_ascii_lowercase());
-            }
-            None => odd.push(line.to_owned()),
-        }
-    }
-    (listed, odd)
 }
 
 /// The SHA-256 of the file at `path`, as `sha256sum` writes it.
