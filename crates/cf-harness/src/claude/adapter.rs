@@ -662,6 +662,8 @@ impl Window for ClaudeWindow {
         let closes_after_s = OFFERS_CLOSING
             .contains(&shown.dialog.question.as_str())
             .then_some(OFFER_CLOSES_AFTER_S);
+        let closes_after_s = closes_after_s
+            .or_else(|| super::dialog_identity::warning_seconds(&shown.dialog.detail, screen));
         Some(Dialog {
             prompt_below: self.shows_prompt(&shown.below),
             closes_after_s,

@@ -10,7 +10,7 @@
 
 use cf_engine::testing::{
     Context, DECLINED_OFFER, DECLINE_CHOICE, DIALOG_OPEN, HOOK_ASK_MS, HOOK_ASK_QUESTION,
-    HOOK_ASK_THEN, TRUST_PROMPT,
+    HOOK_ASK_THEN, SELF_ENDING_DIALOG, TRUST_PROMPT,
 };
 use cf_engine::ActivityState;
 use cf_harness::contract::Waiting;
@@ -104,6 +104,204 @@ fn of_dialogs(bodies: &[String]) -> Vec<String> {
         })
         .cloned()
         .collect()
+}
+
+/// The chief's inbox keeps both queued notes and the notes shown rather than typed.
+fn chief_dialog_inbox(context: &Context, tiers: &Tiers<'_>) -> Vec<cf_ledger::MessageView> {
+    context
+        .ledger
+        .borrow()
+        .inbox(tiers.id("chief"), 100)
+        .unwrap()
+        .into_iter()
+        .filter(|message| {
+            message.body.starts_with("@zeus") && message.body.contains("'s window shows a dialog")
+        })
+        .collect()
+}
+
+fn clear_screen_and_pass(context: &Context) {
+    context.host.set_snapshot(json!({ "tail": [TRUST_PROMPT] }));
+    passes(context, 12, 1_000);
+}
+
+#[test]
+fn cln75_a_self_ending_dialog_is_shown_in_the_chiefs_inbox_not_typed() {
+    let context = Context::new();
+    let screen = [SELF_ENDING_DIALOG, " ❯ 1. Yes", "   2. No"];
+    let tiers = at_work(&context, &screen);
+    let before = crate::fixtures::given(&context, "chief").len();
+    passes(&context, 12, 1_000);
+    let notes = chief_dialog_inbox(&context, &tiers);
+    assert_eq!(
+        notes.len(),
+        1,
+        "{notes:?}; all chief notes: {:?}",
+        tiers.notes("chief")
+    );
+    assert!(
+        notes[0]
+            .receipt
+            .get("shown")
+            .and_then(|v| v.as_str())
+            .is_some(),
+        "{:?}",
+        notes[0]
+    );
+    assert_eq!(notes[0].state, "read");
+    assert!(
+        notes[0].body.contains("closes it by itself 17 s"),
+        "{}",
+        notes[0].body
+    );
+    assert_eq!(
+        of_dialogs(&to_human(&context, tiers.project.id)),
+        [notes[0].body.clone()]
+    );
+    clear_screen_and_pass(&context);
+    assert!(crate::fixtures::given(&context, "chief")[before..]
+        .iter()
+        .all(|text| !text.contains(SELF_ENDING_DIALOG)));
+}
+
+#[test]
+fn cln75_a_dialog_consensflow_declines_is_shown_and_the_human_is_told_the_same_words() {
+    for screen in [&LSP[..], CU_PROMPT] {
+        let context = Context::new();
+        let tiers = at_work(&context, screen);
+        let before = crate::fixtures::given(&context, "chief").len();
+        passes(&context, 12, 1_000);
+        let notes = chief_dialog_inbox(&context, &tiers);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].receipt.get("shown").is_some(), "{:?}", notes[0]);
+        assert_eq!(notes[0].state, "read");
+        assert!(
+            notes[0].body.contains("ConsensFlow declines it"),
+            "{}",
+            notes[0].body
+        );
+        assert_eq!(
+            of_dialogs(&to_human(&context, tiers.project.id)),
+            [notes[0].body.clone()]
+        );
+        clear_screen_and_pass(&context);
+        assert!(crate::fixtures::given(&context, "chief")[before..]
+            .iter()
+            .all(|text| !text.contains(&notes[0].body)));
+    }
+}
+
+#[test]
+fn cln75_a_delayed_decline_is_shown_too() {
+    let context = Context::new();
+    let screen = [
+        " Hook test requires confirmation for this command:",
+        " Do you want to proceed?",
+        " ❯ 1. Yes",
+        "   2. No",
+    ];
+    let tiers = at_work(&context, &screen);
+    passes(&context, 12, 1_000);
+    let notes = chief_dialog_inbox(&context, &tiers);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(
+        notes[0].body.contains("if nobody does within 10 minutes"),
+        "{}",
+        notes[0].body
+    );
+    assert!(notes[0].receipt.get("shown").is_some(), "{:?}", notes[0]);
+    assert_eq!(
+        of_dialogs(&to_human(&context, tiers.project.id)),
+        [notes[0].body.clone()]
+    );
+    assert_eq!(
+        tiers.task(1).task.aside.as_deref(),
+        Some("dialog reported in @zeus-amber-pine's window")
+    );
+    // The pre-existing note that the decline actually happened asks no decision either.
+    context.advance(HOOK_ASK_MS);
+    context.pass().unwrap();
+    let inbox = context
+        .ledger
+        .borrow()
+        .inbox(tiers.id("chief"), 100)
+        .unwrap();
+    let completion: Vec<_> = inbox
+        .iter()
+        .filter(|note| note.body.starts_with("Nobody answered @zeus"))
+        .collect();
+    assert_eq!(completion.len(), 1, "{inbox:?}");
+    assert!(
+        completion[0].receipt.get("shown").is_some(),
+        "{:?}",
+        completion[0]
+    );
+    assert!(to_human(&context, tiers.project.id).contains(&completion[0].body));
+}
+
+#[test]
+fn cln75_a_dialog_nothing_ends_is_still_typed_and_the_human_told() {
+    let context = Context::new();
+    let tiers = at_work(&context, &PROMPT);
+    let before = crate::fixtures::given(&context, "chief").len();
+    passes(&context, 12, 1_000);
+    let notes = chief_dialog_inbox(&context, &tiers);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].receipt.get("shown").is_none(), "{:?}", notes[0]);
+    assert_eq!(
+        of_dialogs(&to_human(&context, tiers.project.id)),
+        [notes[0].body.clone()]
+    );
+    clear_screen_and_pass(&context);
+    assert!(crate::fixtures::given(&context, "chief")[before..]
+        .iter()
+        .any(|text| text.contains(&notes[0].body)));
+}
+
+#[test]
+fn cln75_a_decline_the_host_refuses_is_not_retried_or_escalated() {
+    let context = Context::new();
+    let tiers = at_work(&context, CU_PROMPT);
+    context.host.refuse_keys.set(true);
+    passes(&context, 50, 1_000);
+    let inbox = context
+        .ledger
+        .borrow()
+        .inbox(tiers.id("chief"), 100)
+        .unwrap();
+    let dialog_notes: Vec<_> = inbox
+        .iter()
+        .filter(|note| {
+            note.body.starts_with("@zeus") && note.body.contains("'s window shows a dialog")
+                || note.body.starts_with("ConsensFlow declined @zeus")
+        })
+        .collect();
+    assert_eq!(
+        dialog_notes.len(),
+        2,
+        "the original and the existing decline notice only: {inbox:?}"
+    );
+    assert!(
+        dialog_notes
+            .iter()
+            .all(|note| note.receipt.get("shown").is_some()),
+        "{dialog_notes:?}"
+    );
+    assert_eq!(
+        keys_to(&context, &tiers),
+        [escape_key()],
+        "one refused attempt"
+    );
+    assert_eq!(
+        context
+            .dispatcher
+            .activity(tiers.id(&tiers.assignee(1)))
+            .state,
+        ActivityState::Waiting
+    );
+    assert!(crate::fixtures::given(&context, "chief")
+        .iter()
+        .all(|text| !text.contains("Computer Use permission prompt")));
 }
 
 #[test]

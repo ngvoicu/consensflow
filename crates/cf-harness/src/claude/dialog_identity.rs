@@ -97,14 +97,10 @@ fn spelled_at(text: &str) -> Option<usize> {
     (digits > 0).then_some("about ".len() + digits + 1 + word.len())
 }
 
-/// `detail`, the rows a Claude Code dialog says above its question, with its own warning, where
-/// it is, as one row and its time blanked. The warning is the last block above the question: the
-/// rows from the nearest that begins with its words to the end, joined by the spaces a wrap broke
-/// them at, are its whole sentence and nothing else. Any other rows are returned as they were.
-fn blanked(detail: &[String]) -> Vec<String> {
-    let Some(start) = detail.iter().rposition(|row| row.starts_with(WARNING)) else {
-        return detail.to_vec();
-    };
+/// The warning is the whole last block above the question. Its time as read, without
+/// treating a command's or a hook's other words as Claude Code's warning.
+fn warning(detail: &[String]) -> Option<(usize, String)> {
+    let start = detail.iter().rposition(|row| row.starts_with(WARNING))?;
     let line = detail[start..].join(" ");
     let whole = line
         .strip_prefix(WARNING)
@@ -112,8 +108,47 @@ fn blanked(detail: &[String]) -> Vec<String> {
         .and_then(|rest| time_at(rest).map(|length| &rest[length..]))
         .is_some_and(|after| after == AFTER_TIME);
     if !whole {
-        return detail.to_vec();
+        return None;
     }
+    let rest = line.strip_prefix(WARNING)?.strip_prefix(' ')?;
+    let length = time_at(rest)?;
+    Some((start, rest[..length].to_owned()))
+}
+
+/// Seconds remaining in Claude Code's own warning, where the entire time can be read.
+pub(crate) fn warning_seconds(detail: &[String], screen: &[String]) -> Option<u32> {
+    let (_, time) = warning(detail)?;
+    // The shared reader drops a request's box frame. Keep the raw row's boundary here: a
+    // command or hook reason can quote the whole warning as its last line.
+    let raw = screen.iter().rfind(|row| row.contains(WARNING))?;
+    if !raw.trim_start().starts_with(WARNING) {
+        return None;
+    }
+    if let Some((minutes, seconds)) = time.split_once(':') {
+        let minutes: u32 = minutes.parse().ok()?;
+        let seconds: u32 = seconds.parse().ok()?;
+        if seconds >= 60 {
+            return None;
+        }
+        return minutes.checked_mul(60)?.checked_add(seconds);
+    }
+    let (amount, unit) = time.strip_prefix("about ")?.split_once(' ')?;
+    let amount: u32 = amount.parse().ok()?;
+    match unit {
+        "minute" | "minutes" => amount.checked_mul(60),
+        "second" | "seconds" => Some(amount),
+        _ => None,
+    }
+}
+
+/// `detail`, the rows a Claude Code dialog says above its question, with its own warning, where
+/// it is, as one row and its time blanked. The warning is the last block above the question: the
+/// rows from the nearest that begins with its words to the end, joined by the spaces a wrap broke
+/// them at, are its whole sentence and nothing else. Any other rows are returned as they were.
+fn blanked(detail: &[String]) -> Vec<String> {
+    let Some((start, _)) = warning(detail) else {
+        return detail.to_vec();
+    };
     let mut rows = detail[..start].to_vec();
     rows.push(format!("{WARNING} #{AFTER_TIME}"));
     rows
@@ -122,6 +157,7 @@ fn blanked(detail: &[String]) -> Vec<String> {
 /// `dialog` as Claude Code's own window tells it from another read of its screen: the time in its
 /// warning line blanked, and the offer to install an LSP plugin cut off above its title.
 pub(crate) fn identity(dialog: &Dialog) -> Dialog {
+    let warning = warning(&dialog.detail).is_some();
     let mut detail = blanked(&dialog.detail);
     if dialog.question == LSP_OFFER {
         // The title nearest the question is the offer's own.
@@ -136,6 +172,8 @@ pub(crate) fn identity(dialog: &Dialog) -> Dialog {
     }
     Dialog {
         detail,
+        // The countdown's numeric field changes with the same warning's words.
+        closes_after_s: if warning { None } else { dialog.closes_after_s },
         ..dialog.clone()
     }
 }
