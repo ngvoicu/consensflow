@@ -91,6 +91,12 @@ fn the_words_of_a_tell_at_work_go_in_at_the_first_rest_before_anything_is_the_re
         )),
         "{words:?}"
     );
+    assert!(
+        words[1].contains(
+            "T-1 goes on: take this in and carry on. Your final message is still the whole result; if you had finished, give it again in full. To say something back without stopping: "
+        ) && !words[1].contains("question still waits"),
+        "the footer of a told member: {words:?}"
+    );
     assert_eq!(context.message(told.id).state, "delivered");
     assert_eq!(
         tiers.task(1).task.state,
@@ -301,6 +307,13 @@ fn a_tell_to_a_waiting_task_goes_in_at_rest_and_the_members_question_still_waits
         context.pass().unwrap();
     }
     assert_eq!(context.message(told.id).state, "delivered", "in at rest");
+    let words = given(&context, &tiers.assignee(1));
+    assert!(
+        words.last().is_some_and(|words| words.contains(
+            "T-1 goes on: take this in and carry on. Your final message is still the whole result; if you had finished, give it again in full. Your question still waits for its answer."
+        )),
+        "a waiting task is told its question still waits: {words:?}"
+    );
     assert_eq!(
         tiers.task(1).task.state,
         "waiting",

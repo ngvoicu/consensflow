@@ -801,6 +801,46 @@ async fn a_tell_of_a_task_shown_working_for_the_words_that_resumed_it_is_kept_be
 }
 
 #[tokio::test]
+async fn a_pause_with_words_of_a_task_shown_working_for_the_words_that_resumed_it_keeps_them_behind_them(
+) {
+    // T-1153's F5: at work on the turn before the words that resumed it, the task is queued for
+    // them still. A pause here would withdraw them: the words are kept behind them, nothing
+    // is stopped.
+    let scene = scene();
+    let number = working_task(&scene);
+    let words = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        ledger.pause_task(1, number, Some("chief"), None).unwrap();
+        let resumed = ledger
+            .resume_task(1, number, Some("chief"), "Go on, or say you finished")
+            .unwrap();
+        ledger.work_while_resumed(1, number).unwrap();
+        resumed.message.unwrap().id
+    };
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/pause"),
+        r#"{"body":"Also check the lexer"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        [&said["message"]["kind"], &said["task"]["state"]],
+        [&json!("note"), &json!("working")],
+        "kept for the window, the task not stopped"
+    );
+    let words = scene
+        .context
+        .ledger
+        .borrow()
+        .message(words)
+        .unwrap()
+        .unwrap();
+    assert_eq!(words.state, "queued", "the resume's words stand");
+}
+
+#[tokio::test]
 async fn a_cancel_says_which_of_the_callers_words_its_window_never_had_went_with_it() {
     let scene = scene();
     let (number, _) = queued_task(&scene);
