@@ -183,13 +183,14 @@ struct Folders {
     made: Vec<PathBuf>,
     // Last, as every temporary folder goes in what owns it (Windows removes none from under
     // a file still open in it).
-    parent: tempfile::TempDir,
+    parent: cf_e2e::door::Made,
 }
 
 impl Folders {
     fn new() -> Result<Self> {
         Ok(Self {
-            parent: tempfile::tempdir().map_err(io("make a folder", Path::new("tmp")))?,
+            parent: cf_e2e::door::made("live-keychain-")
+                .map_err(io("make a folder", Path::new("tmp")))?,
             made: Vec::new(),
         })
     }
@@ -502,7 +503,8 @@ fn claude_code_leaves_no_keychain_item_for_a_throwaway_folder_when_the_kit_start
     }
 
     // 3. A probe that cannot take the flag.
-    let bare = tempfile::tempdir().map_err(io("make a folder", Path::new("tmp")))?;
+    let bare =
+        cf_e2e::door::made("live-keychain-").map_err(io("make a folder", Path::new("tmp")))?;
     let front = without_keychain(bare.path())?
         .ok_or_else(|| Error::Daemon("this machine has no Keychain to do without".to_owned()))?;
     let folder = folders.config("probe-no-keychain", &servers, false)?;

@@ -95,7 +95,8 @@ struct Came {
 /// A pretend owner, a rig on the incident's environment, a Claude window held on it, and what
 /// came of it: with the kit's switches (`told`), or with the case having taken them out.
 fn fake_owner(log: &Log, binary: &Path, told: bool) -> Result<Came> {
-    let owner = tempfile::tempdir().map_err(io("make a folder", Path::new("tmp")))?;
+    let owner =
+        cf_e2e::door::made("live-launcher-").map_err(io("make a folder", Path::new("tmp")))?;
     let home = owner.path();
     let name = binary
         .file_name()
@@ -106,14 +107,16 @@ fn fake_owner(log: &Log, binary: &Path, told: bool) -> Result<Came> {
     files::make_dir(link.parent().unwrap_or(home))?;
     symlink(&version, &link).map_err(io("link", &link))?;
     // The run's config folder: the onboarding answered, the live folders trusted, no login.
-    let config = tempfile::tempdir().map_err(io("make a folder", Path::new("tmp")))?;
+    let config =
+        cf_e2e::door::made("live-launcher-").map_err(io("make a folder", Path::new("tmp")))?;
     files::write(
         &config.path().join(".claude.json"),
         r#"{"hasCompletedOnboarding":true,"hasSeenAutoDefaultNotice":true}"#,
     )?;
     live::machine::seed_claude_trust(config.path(), home)?;
     // The XDG folder a seat for Muse gives every window of a rig.
-    let data = tempfile::tempdir().map_err(io("make a folder", Path::new("tmp")))?;
+    let data =
+        cf_e2e::door::made("live-launcher-").map_err(io("make a folder", Path::new("tmp")))?;
     let fake = Installed::at(Harness::Claude, &link, home);
     let mut rig =
         live::rig_with_claude_config(std::slice::from_ref(&fake), FAKE_AGENT, config.path())
@@ -169,7 +172,8 @@ fn owner_own(log: &Log, proved: &str) -> Result<(PathBuf, bool, Result)> {
         link.display(),
         was.display()
     ));
-    let data = tempfile::tempdir().map_err(io("make a folder", Path::new("tmp")))?;
+    let data =
+        cf_e2e::door::made("live-launcher-").map_err(io("make a folder", Path::new("tmp")))?;
     let rig = Rig::start(
         live::rig(std::slice::from_ref(&real), FAKE_AGENT)
             .var("XDG_DATA_HOME", data.path().to_string_lossy()),

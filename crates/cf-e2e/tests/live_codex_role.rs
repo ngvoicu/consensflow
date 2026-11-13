@@ -421,7 +421,7 @@ fn a_codex_window_follows_a_role_no_command_line_holds_fresh_resumed_and_changed
         words.own
     );
     log.say("Codex runs on a home of the run's own, holding a copy of the machine's login");
-    let cards = tempfile::tempdir().map_err(|source| Error::File {
+    let cards = cf_e2e::door::made("live-codex-role-").map_err(|source| Error::File {
         action: "make a folder in",
         path: std::env::temp_dir(),
         source,

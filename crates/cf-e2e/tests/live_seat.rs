@@ -170,7 +170,7 @@ fn muse_allowance() -> String {
     let read = || -> Result<String> {
         let install = muse::installed().map_err(Error::Daemon)?;
         let home = muse::real_home().map_err(Error::Daemon)?;
-        let folder = tempfile::tempdir().map_err(|source| Error::File {
+        let folder = cf_e2e::door::made("live-seat-").map_err(|source| Error::File {
             action: "make a folder in",
             path: std::env::temp_dir(),
             source,

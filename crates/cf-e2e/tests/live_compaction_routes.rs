@@ -92,8 +92,8 @@ fn notes(folder: &Path) -> Result {
 }
 
 /// A folder of the case's own, by the path it resolves to (Codex and Devin know a folder so).
-fn scratch_folder() -> Result<(tempfile::TempDir, PathBuf)> {
-    let scratch = tempfile::tempdir().map_err(|source| Error::File {
+fn scratch_folder() -> Result<(cf_e2e::door::Made, PathBuf)> {
+    let scratch = cf_e2e::door::made("live-compaction-routes-").map_err(|source| Error::File {
         action: "make a folder in",
         path: std::env::temp_dir(),
         source,
@@ -333,7 +333,7 @@ fn devin_compacts_at_the_thresholds_its_launch_gives() -> Result {
     let model = agents::model(Harness::Devin);
     let home = install.home_outside_a_rig()?;
     let devin = install.command().to_string_lossy().into_owned();
-    let turn = |thresholds: &str| -> Result<(tempfile::TempDir, PathBuf)> {
+    let turn = |thresholds: &str| -> Result<(cf_e2e::door::Made, PathBuf)> {
         let (scratch, folder) = scratch_folder()?;
         let args = vec![
             devin.clone(),

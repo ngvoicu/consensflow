@@ -111,10 +111,7 @@ fn a_command_a_muse_turn_leaves_running_holds_the_task_until_it_ends() -> Outcom
             "another test runs Muse now (pids {others:?}): one live session at a time"
         ));
     }
-    let root = tempfile::Builder::new()
-        .prefix("muse-rec-")
-        .tempdir()
-        .map_err(|error| error.to_string())?;
+    let mut root = cf_e2e::door::made("muse-rec-").map_err(|error| error.to_string())?;
     let root_path = root.path().to_path_buf();
     set_up(&root_path)?;
     let env = environment(&root_path);

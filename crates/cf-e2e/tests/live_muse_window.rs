@@ -118,7 +118,7 @@ impl Live {
 
     /// The allowance now, or the end of the run where it is spent past the stop.
     fn allowance(&self, log: &Log) -> Result<String> {
-        let folder = tempfile::tempdir().map_err(|source| Error::File {
+        let folder = cf_e2e::door::made("live-muse-window-").map_err(|source| Error::File {
             action: "make",
             path: PathBuf::from("a temporary folder"),
             source,
@@ -136,7 +136,7 @@ impl Live {
     /// near the end and run out midway, so a red an empty allowance caused is told from a
     /// bug (T-1123). Why it could not be asked, where it could not.
     fn allowance_after(&self) -> String {
-        let asked = tempfile::tempdir()
+        let asked = cf_e2e::door::made("live-muse-window-")
             .map_err(|source| Error::File {
                 action: "make",
                 path: PathBuf::from("a temporary folder"),
@@ -508,7 +508,7 @@ fn rest_case(live: &Live) -> Result<String> {
 }
 
 fn question_case(live: &Live) -> Result<String> {
-    let foreign = tempfile::tempdir().map_err(|source| Error::File {
+    let foreign = cf_e2e::door::made("live-muse-window-").map_err(|source| Error::File {
         action: "make",
         path: PathBuf::from("a temporary folder"),
         source,

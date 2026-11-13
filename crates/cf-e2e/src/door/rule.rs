@@ -15,7 +15,10 @@
 //! - a string that runs a program that ends processes (`kill`, `pkill`, `killall`, `taskkill`,
 //!   `tskill`, `Stop-Process`) or asks the pane host to end a pane (`pane.kill`);
 //! - `.kill()` in a file that holds a child program itself (names a type `Child`), but on
-//!   `self` (a type of the kit's own whose `kill` goes through the door).
+//!   `self` (a type of the kit's own whose `kill` goes through the door);
+//! - a path or an import of the `tempfile` crate: its folders and files are taken away when
+//!   they are dropped, past the door and in a say-only run too (the door's own are
+//!   [`super::made`] and [`super::made_in`]).
 //!
 //! A string compared (`==`, `!=`) is read, not run; documentation is not code.
 //!
@@ -31,8 +34,8 @@ use std::path::{Path, PathBuf};
 use proc_macro2::{TokenStream, TokenTree};
 use syn::visit::{self, Visit};
 use syn::{
-    Attribute, BinOp, Expr, ExprBinary, ExprCall, ExprMethodCall, ItemFn, ItemMod, LitStr, Macro,
-    Meta,
+    Attribute, BinOp, Expr, ExprBinary, ExprCall, ExprMethodCall, ItemFn, ItemMod, ItemUse, LitStr,
+    Macro, Meta, UseTree,
 };
 
 /// The calls that end, pause or signal a process, or take a file away.
@@ -235,6 +238,31 @@ impl<'ast> Visit<'ast> for Reader {
         visit::visit_expr_method_call(self, call);
     }
 
+    fn visit_path(&mut self, path: &'ast syn::Path) {
+        if path
+            .segments
+            .first()
+            .is_some_and(|segment| segment.ident == "tempfile")
+        {
+            let named: Vec<String> = path
+                .segments
+                .iter()
+                .map(|segment| segment.ident.to_string())
+                .collect();
+            self.flag(format!("{} (taken away when dropped)", named.join("::")));
+        }
+        visit::visit_path(self, path);
+    }
+
+    fn visit_item_use(&mut self, item: &'ast ItemUse) {
+        if for_tests_only(&item.attrs) {
+            return;
+        }
+        if matches!(&item.tree, UseTree::Path(path) if path.ident == "tempfile") {
+            self.flag("use tempfile::… (taken away when dropped)".into());
+        }
+    }
+
     fn visit_lit_str(&mut self, literal: &'ast LitStr) {
         if self.reading == 0 && ends_in_words(&literal.value()) {
             self.flag(format!("{:?}", literal.value()));
@@ -416,6 +444,9 @@ fn the_rule_finds_each_way_to_end_or_remove_and_not_what_only_reads_or_asks_the_
         "use std::process::Child;\nfn f(child: &mut Child) { let _ = child.kill(); }",
         "struct S { child: Box<dyn portable_pty::Child> }\nimpl S { fn f(&mut self) { let _ = self.child.kill(); } }",
         r#"fn f() { assert!(std::fs::remove_file(p).is_ok() == true); }"#,
+        "fn f() { let folder = tempfile::tempdir().unwrap(); }",
+        "struct S { folder: tempfile::TempDir }",
+        "use tempfile::TempDir;",
     ] {
         assert_eq!(found(text).len(), 1, "{text}");
     }
@@ -435,6 +466,8 @@ fn the_rule_finds_each_way_to_end_or_remove_and_not_what_only_reads_or_asks_the_
         "use std::process::Child;\nimpl S { fn drop(&mut self) { self.kill(); } }",
         "#[cfg(all(test, unix))]\nmod tests { fn f() { std::fs::remove_file(&p).unwrap(); } }",
         "// std::fs::remove_dir_all(&p)\nfn f() {}",
+        "fn f() { let folder = crate::door::made(\"x-\").unwrap(); }",
+        "#[cfg(test)]\nmod tests { fn f() { let folder = tempfile::tempdir().unwrap(); } }",
     ] {
         assert_eq!(found(text), Vec::new(), "{text}");
     }

@@ -300,14 +300,11 @@ fn a_pi_members_window_has_everything_bare_pi_has_in_the_same_folder() -> Result
     // The case is its own home: its windows' HOME holds the Pi folder it made, and none of the
     // owner's is read or written, so the kit's home (`PI_CODING_AGENT_DIR`) is none of its.
     let install = log.found(Harness::Pi)?.on_own_home();
-    let users = tempfile::Builder::new()
-        .prefix("cf-pi-parity-")
-        .tempdir()
-        .map_err(|source| Error::File {
-            action: "make",
-            path: std::env::temp_dir(),
-            source,
-        })?;
+    let users = cf_e2e::door::made("cf-pi-parity-").map_err(|source| Error::File {
+        action: "make",
+        path: std::env::temp_dir(),
+        source,
+    })?;
     let home = users.path().join("home");
     user_config(&home)?;
     let config = live::rig(std::slice::from_ref(&install), FAKE_AGENT)

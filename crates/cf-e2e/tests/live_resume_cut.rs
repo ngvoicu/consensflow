@@ -205,7 +205,7 @@ fn a_window_resumed_on_a_conversation_the_quit_cut_is_watched_and_takes_a_second
             install.home().display()
         ));
     }
-    let shims = tempfile::tempdir().map_err(|source| Error::File {
+    let shims = cf_e2e::door::made("live-resume-cut-").map_err(|source| Error::File {
         action: "make a folder in",
         path: std::env::temp_dir(),
         source,

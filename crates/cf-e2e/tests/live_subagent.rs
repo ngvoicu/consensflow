@@ -417,7 +417,7 @@ fn devin_children(members: &Members) -> Vec<(String, String)> {
     {
         // A copy, with the write-ahead log that holds Devin's latest rows (a read with
         // `immutable=1` passes over it): the store itself is never opened, nor locked.
-        let Ok(copy) = tempfile::tempdir() else {
+        let Ok(copy) = cf_e2e::door::made("live-subagent-") else {
             continue;
         };
         for suffix in ["", "-wal", "-shm"] {

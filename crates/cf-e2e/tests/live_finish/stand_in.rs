@@ -385,7 +385,7 @@ fn the_close_of_a_case_finds_what_its_window_left_says_so_and_ends_nothing_and_l
     // Another run's job: parent init's, the same words, a folder of its own. Told by the number
     // its shell printed, and ended by which process it is however the test ends: another tree
     // running this test has a `sleep 4713` of its own, which is none of this one's.
-    let elsewhere = tempfile::tempdir().unwrap();
+    let elsewhere = cf_e2e::door::made("live-finish-stand-in-").unwrap();
     let ran = cf_e2e::process::Run::new("/bin/sh")
         .args(["-c", "sleep 4713 > /dev/null 2>&1 & echo $!"])
         .cwd(elsewhere.path())
@@ -540,8 +540,8 @@ fn a_process_begun_before_the_run_that_holds_the_path_of_a_home_outside_the_runs
     use cf_e2e::live::members::Members;
 
     let log = Log::new("live finish test");
-    let home = tempfile::tempdir().unwrap();
-    let elsewhere = tempfile::tempdir().unwrap();
+    let home = cf_e2e::door::made("live-finish-stand-in-").unwrap();
+    let elsewhere = cf_e2e::door::made("live-finish-stand-in-").unwrap();
     let file = home.path().join("decoy");
     std::fs::write(&file, "").unwrap();
     let decoy = Decoy::start(&file, elsewhere.path())?;
@@ -579,7 +579,7 @@ fn a_process_begun_after_the_window_that_holds_a_path_under_the_runs_temp_root_i
 
     let log = Log::new("live finish test");
     let members = Members::open(&leaving::plan(Who::StandIn), Path::new(FAKE_AGENT), &log)?;
-    let elsewhere = tempfile::tempdir().unwrap();
+    let elsewhere = cf_e2e::door::made("live-finish-stand-in-").unwrap();
     let file = Path::new(members.rig().var("HOME").expect("the rig has a home")).join("decoy");
     std::fs::write(&file, "").unwrap();
     let decoy = Decoy::start(&file, elsewhere.path())?;

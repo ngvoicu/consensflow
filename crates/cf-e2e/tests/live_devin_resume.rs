@@ -292,7 +292,7 @@ fn a_member_window_opened_again_after_a_cut_is_asked_to_write_edit_and_run_cf_an
     let model = effort.map_or_else(|| name.clone(), |level| format!("{name}-{level}"));
     // The stand-in `cf` is first on the windows' PATH: the machine may have the real one
     // beside its harnesses.
-    let stand_in = tempfile::tempdir().map_err(|source| Error::File {
+    let stand_in = cf_e2e::door::made("live-devin-resume-").map_err(|source| Error::File {
         action: "make a folder in",
         path: std::env::temp_dir(),
         source,

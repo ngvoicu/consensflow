@@ -1241,7 +1241,8 @@ fn server_folder(target: &Path) -> Result<cf_e2e::door::Made> {
 #[test]
 fn two_set_ups_from_one_build_have_folders_of_their_own_and_the_close_of_one_leaves_the_others_files(
 ) -> Result {
-    let target = tempfile::tempdir().map_err(|error| Error::Daemon(error.to_string()))?;
+    let target = cf_e2e::door::made("live-monitor-wait-")
+        .map_err(|error| Error::Daemon(error.to_string()))?;
     let runtime = Runtime::of_machine()?;
     let first = server_folder(target.path())?;
     let first_server = Server::write_leaving_group(first.path(), &runtime)?;
