@@ -311,11 +311,11 @@ jobs:
               if (verdict === 'CAUGHT' && values[0].namedTest) executed++;
               else bad = true;
             }
-            lines.push(`Tests executed: at least ${executed} named tests (one proved by each caught plant; the driver does not report the total).`);
+            lines.push(`Plants named: ${selected.length}; caught: ${executed}. At least one test caught each caught plant.`);
           } else {
             lines.push(`Tests executed: ${executed}${suite === 'clippy-windows' ? ' (host clippy_windows driver tests; Windows binaries are not run)' : ''}.`);
           }
-          if (executed === 0) { lines.push('No tests executed for this suite.'); bad = true; }
+          if (executed === 0) { lines.push(suite === 'plants' ? 'No selected plant is proved caught by a named test.' : 'No tests executed for this suite.'); bad = true; }
           lines.push(`Suite command: ${process.env.SUITE_RESULT || 'unknown'}.`);
           fs.writeFileSync(path.join(folder, 'summary.txt'), lines.join('\n') + '\n');
           console.log(lines.join('\n'));
