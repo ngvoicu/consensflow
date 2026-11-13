@@ -18,6 +18,7 @@
 //! ([`signed_sums`]): a signature the installers would refuse never reaches a
 //! published release.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -55,6 +56,55 @@ pub fn sums_of(dir: &Path, version: &Version) -> Result<String, Failure> {
         sums.push_str(&format!("{}  {}\n", sha256_hex(&bytes), name_of(path)));
     }
     Ok(sums)
+}
+
+/// The hashes a SHA256SUMS lists, by file name, read by the one rule the
+/// publisher's checks and `cargo xtask release verify` both hold a release to:
+/// every row is `<64 lowercase hex>  <name>` (two spaces), as [`sums_of`] writes
+/// it and every release since the bridge has, rows ending in a line feed (the
+/// last may lack one), the name not empty and holding no whitespace or control
+/// character, and listed once. The installers read lowercase hex alone and take
+/// nothing from a name listed twice, so neither is a list a release may have.
+/// Any other row, a blank one or one ending in a carriage return among them, is
+/// an error that names it: `row <n> …`, one sentence for each such row.
+pub fn listed_in(sums: &[u8]) -> Result<BTreeMap<String, String>, Vec<String>> {
+    let mut listed = BTreeMap::new();
+    let mut wrong = Vec::new();
+    if sums.is_empty() {
+        return Ok(listed);
+    }
+    let body = sums.strip_suffix(b"\n").unwrap_or(sums);
+    for (at, row) in body.split(|byte| *byte == b'\n').enumerate() {
+        let number = at + 1;
+        match row_of(row) {
+            None => wrong.push(format!(
+                "row {number} is not \"<sha-256>  <name>\": {:?}",
+                String::from_utf8_lossy(row)
+            )),
+            Some((hash, name)) => {
+                if listed.insert(name.to_owned(), hash.to_owned()).is_some() {
+                    wrong.push(format!("row {number} lists {name} again"));
+                }
+            }
+        }
+    }
+    if wrong.is_empty() {
+        Ok(listed)
+    } else {
+        Err(wrong)
+    }
+}
+
+/// The hash and the name of one SHA256SUMS row, where it is one.
+fn row_of(row: &[u8]) -> Option<(&str, &str)> {
+    let row = std::str::from_utf8(row).ok()?;
+    let hash = row.get(..64)?;
+    let name = row.get(64..)?.strip_prefix("  ")?;
+    let hash_ok = hash
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+    let name_ok = !name.is_empty() && !name.chars().any(|c| c.is_whitespace() || c.is_control());
+    (hash_ok && name_ok).then_some((hash, name))
 }
 
 /// Writes SHA256SUMS for the release built in `dir`, and the copy of it the

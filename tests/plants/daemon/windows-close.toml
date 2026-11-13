@@ -2753,8 +2753,8 @@ runs = ["quote-less-codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/supervisor.rs"
-find = '''            | Self::Signals(_) => StartKind::NotSetUp,'''
-replace = '''            | Self::Signals(_) => StartKind::NotStarted,'''
+find = '''            | Self::Wait(_) => StartKind::NotSetUp,'''
+replace = '''            | Self::Wait(_) => StartKind::NotStarted,'''
 
 [[plant]]
 name = "windows close: quote less: a socket folder that could not go is a start that failed"

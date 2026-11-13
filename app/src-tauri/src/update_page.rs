@@ -128,7 +128,7 @@ fn open_system(page: &str) -> Result<(), String> {
 
 /// Opens `page` with `opener`, given the page as its one argument.
 #[cfg_attr(any(test, windows), allow(dead_code))]
-#[allow(clippy::disallowed_methods)] // The app starts the opener itself, older than cf-process's rule.
+#[allow(clippy::disallowed_methods)] // cf-process runs a program async, on an empty environment and under a time and size limit; the opener is waited for on the caller's thread, in this process's environment, and its exit status is not read.
 pub(crate) fn open_with(opener: &Path, page: &str) -> Result<(), String> {
     let mut command = Command::new(opener);
     // Started while the app's other threads open sockets and pipes.
