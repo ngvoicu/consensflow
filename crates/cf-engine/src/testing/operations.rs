@@ -304,7 +304,7 @@ impl Context {
         let marked = self
             .ledger
             .borrow_mut()
-            .mark_out(member, until, "model busy")
+            .mark_out_with_kind(member, until, "model busy", cf_ledger::HoldKind::Busy)
             .expect("the member marked out");
         self.dispatcher
             .marked_busy(member, marked.out_until.as_deref().unwrap_or_default());

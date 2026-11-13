@@ -32,7 +32,7 @@ use std::task::{Context, Poll, Waker};
 use cf_base::time::iso;
 use cf_harness::contract::{Observed, Pane};
 use cf_ledger::{
-    DeletedProject, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
+    DeletedProject, HoldKind, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
 };
 use cf_proto::panes::PaneExit;
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
@@ -1799,10 +1799,17 @@ impl Dispatcher {
         } else {
             self.reset_of(reported.as_deref())
         };
-        let marked = self.seams.ledger.borrow_mut().mark_out(
+        let kind = match unwell {
+            Some(Unwell::Account(_)) => HoldKind::Account,
+            Some(Unwell::Moved(_)) => HoldKind::Moved,
+            Some(Unwell::Busy(_)) => HoldKind::Busy,
+            None => HoldKind::Quota,
+        };
+        let marked = self.seams.ledger.borrow_mut().mark_out_with_kind(
             owner.id,
             &reset,
             unwell.map_or("out of quota", Unwell::hold),
+            kind,
         )?;
         let until = marked.out_until.clone().unwrap_or_default();
         if let Some(Unwell::Busy(_)) = unwell {
