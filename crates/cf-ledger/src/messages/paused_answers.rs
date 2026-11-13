@@ -308,7 +308,7 @@ pub(crate) fn note(
                 "UPDATE message SET receipt = json_set(receipt, '$.over', ?) WHERE id = ?",
                 params![at, sent.id],
             )?;
-            return store.message(sent.id).map_err(Into::into);
+            return store.message(sent.id);
         }
         Ok(Some(sent))
     })
