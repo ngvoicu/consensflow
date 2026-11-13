@@ -18,11 +18,34 @@ fn upgrading_main_keeps_projects_members_tasks_and_history_and_adds_the_marks() 
                    (50,20,'other','worker','[\"worker\"]','pi','light','2026-11-02','[]');
          INSERT INTO participant(id,project_id,handle,role,roles,harness,tier,created_at,member_id)
              VALUES(41,10,'worker-amber-pine','worker','[\"worker\"]','codex','standard','2026-11-01',40);
+         INSERT INTO participant(id,project_id,handle,role,roles,harness,tier,created_at,left_at,out_until,out_since,former_handles)
+             VALUES(51,10,'untiered','frontend','[\"frontend\"]','codex',NULL,'2026-10-01',NULL,NULL,NULL,'[]'),
+                   (52,10,'departed','worker','[\"worker\"]','pi','light','2026-10-01','2026-10-05',NULL,NULL,'[]'),
+                   (53,10,'rejoined','worker','[\"worker\"]','codex','standard','2026-10-01',NULL,NULL,NULL,'[\"old-rejoined\"]'),
+                   (54,10,'account','worker','[\"worker\"]','codex','standard','2026-10-01',NULL,'9999-12-31T23:59:59.998Z','2026-10-30','[]'),
+                   (55,10,'moved','worker','[\"worker\"]','pi','light','2026-10-01',NULL,'9999-12-31T23:59:59.999Z','2026-10-31','[]');
          INSERT INTO task(id,project_id,number,title,body,requester_id,assignee_id,state,pool,tier,created_at,updated_at)
              VALUES(60,10,1,'Work','Work',30,41,'working','worker','standard','2026-11-01','2026-11-01');
          INSERT INTO conversation(id,participant_id,harness,started_at) VALUES(70,41,'codex','2026-11-01');
-         INSERT INTO event(id,project_id,at,kind,data) VALUES(80,10,'2026-11-01','old','{\"kept\":true}');"
+         INSERT INTO event(id,project_id,at,kind,data) VALUES
+             (80,10,'2026-11-01','old','{\"kept\":true}'),
+             (81,10,'2026-10-05','member.left','{\"handle\":\"rejoined\",\"cancelled\":[]}'),
+             (82,10,'2026-10-06','member.added','{\"handle\":\"rejoined\",\"roles\":[\"worker\"],\"harness\":\"codex\",\"rejoined\":true}');"
     ).unwrap();
+    let legacy = |db: &Connection| -> Vec<(
+        i64,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+    )> {
+        db.prepare("SELECT id,handle,tier,left_at,out_until,out_since,former_handles FROM participant WHERE id BETWEEN 51 AND 55 ORDER BY id").unwrap()
+            .query_map([], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?))).unwrap()
+            .map(Result::unwrap).collect()
+    };
+    let old_rows = legacy(&db);
     let before: (i64, i64, i64, i64, String) = db.query_row(
         "SELECT p.id, t.id, c.id, e.id, p.former_handles FROM participant p JOIN task t ON t.assignee_id=41 JOIN conversation c ON c.participant_id=41 JOIN event e ON e.project_id=p.project_id WHERE p.id=40",
         [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))
@@ -40,6 +63,38 @@ fn upgrading_main_keeps_projects_members_tasks_and_history_and_adds_the_marks() 
         [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))
     ).unwrap();
     assert_eq!(before, after);
+    assert_eq!(
+        old_rows,
+        legacy(&db),
+        "all legacy fields survive 0038 unchanged"
+    );
+    let kinds: Vec<(i64, Option<String>)> = db
+        .prepare("SELECT id,out_kind FROM participant WHERE id BETWEEN 51 AND 55 ORDER BY id")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            (51, None),
+            (52, None),
+            (53, None),
+            (54, Some("account".into())),
+            (55, Some("moved".into()))
+        ]
+    );
+    let rejoin_history: i64 = db.query_row("SELECT COUNT(*) FROM event WHERE id IN (81,82) AND json_extract(data,'$.handle')='rejoined'", [], |r| r.get(0)).unwrap();
+    assert_eq!(rejoin_history, 2);
+    let rejoined: i64 = db
+        .query_row(
+            "SELECT json_extract(data,'$.rejoined') FROM event WHERE id=82 AND kind='member.added'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(rejoined, 1);
     let columns: Vec<String> = db
         .prepare("PRAGMA table_info(participant)")
         .unwrap()
@@ -1010,7 +1065,7 @@ fn copying_staff_rejects_a_link_to_an_absent_primary_atomically() {
 }
 
 #[test]
-fn changing_a_backup_leaves_its_sessions_and_tasks_on_the_old_row() {
+fn changing_a_backup_cancels_its_work_and_keeps_its_history_on_the_old_row() {
     let dir = tempfile::tempdir().unwrap();
     let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
     let p = project(&mut ledger, vec![member("alpha", "worker", "standard")]);
@@ -1047,7 +1102,7 @@ fn changing_a_backup_leaves_its_sessions_and_tasks_on_the_old_row() {
     assert_eq!(link, owner);
     let still = ledger.task(p.id, task.number).unwrap().unwrap().task;
     assert_eq!(still.assignee, assigned.assignee);
-    assert_eq!(still.state, assigned.state);
+    assert_eq!(still.state, "cancelled");
     let mut bad = member("invalid", "worker", "standard");
     bad.harness = "no-such-harness".into();
     assert!(ledger.change_backup(p.id, "alpha", &bad).is_err());
@@ -1063,7 +1118,7 @@ fn changing_a_backup_leaves_its_sessions_and_tasks_on_the_old_row() {
 }
 
 #[test]
-fn removing_a_backup_keeps_its_work_and_readding_does_not_reuse_its_row() {
+fn removing_a_backup_cancels_its_work_and_readding_does_not_reuse_its_row() {
     let dir = tempfile::tempdir().unwrap();
     let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
     let p = project(&mut ledger, vec![member("alpha", "worker", "standard")]);
@@ -1080,7 +1135,7 @@ fn removing_a_backup_keeps_its_work_and_readding_does_not_reuse_its_row() {
     let still = ledger.task(p.id, task.number).unwrap().unwrap().task;
     assert_eq!(
         (still.assignee, still.state),
-        (assigned.assignee, assigned.state)
+        (assigned.assignee, "cancelled".to_string())
     );
     let new = ledger
         .add_backup(p.id, "alpha", &member("beta", "worker", "standard"))
@@ -1181,4 +1236,412 @@ fn a_new_project_can_copy_the_last_staffs_backup_and_vacation_without_copying_ol
             .count(),
         2
     );
+}
+
+// T-1619: the review's regressions use public ledger operations and inspect the
+// resulting work and history, including a delivery that was given back.
+fn image_member(model: &str) -> NewMember {
+    let mut image = member(model, "designer", "light");
+    image.designer = true;
+    image
+}
+
+#[test]
+fn review_a_designer_refuses_a_non_image_backup() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let p = project(&mut ledger, vec![image_member("alpha")]);
+    let error = ledger
+        .add_backup(p.id, "alpha", &member("beta", "worker", "standard"))
+        .expect_err("a non-image agent must not back an image designer");
+    assert_eq!(error.code(), Some("invalid-role"));
+    assert_eq!(
+        error.to_string(),
+        "only an image agent can be an image designer, and beta is not one"
+    );
+    let image = ledger
+        .add_backup(p.id, "alpha", &image_member("gamma"))
+        .unwrap();
+    let task = ledger
+        .create_task(
+            p.id,
+            &NewTask {
+                from: "chief".into(),
+                pool: Some("designer".into()),
+                body: "Draw".into(),
+                ..NewTask::default()
+            },
+        )
+        .unwrap()
+        .task;
+    let assigned = ledger
+        .assign_task(p.id, task.number, image.id)
+        .unwrap()
+        .task;
+    let session = id(
+        &ledger.project(p.id).unwrap().unwrap(),
+        assigned.assignee.as_deref().unwrap(),
+    );
+    let designer: i64 = ledger
+        .sqlite()
+        .query_row(
+            "SELECT designer FROM participant WHERE id=?",
+            [session],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(designer, 1, "the image backup's window is an image agent");
+
+    let worker = project(&mut ledger, vec![member("delta", "worker", "standard")]);
+    let error = ledger
+        .add_backup(worker.id, "delta", &image_member("epsilon"))
+        .expect_err("an image agent cannot back a worker");
+    assert_eq!(error.code(), Some("invalid-role"));
+    assert_eq!(
+        error.to_string(),
+        "epsilon is an image agent, which can only be an image designer"
+    );
+}
+
+#[test]
+fn review_changing_a_designer_backup_refuses_a_non_image_backup_atomically() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let p = project(&mut ledger, vec![image_member("alpha")]);
+    let old = ledger
+        .add_backup(p.id, "alpha", &image_member("gamma"))
+        .unwrap();
+    let error = ledger
+        .change_backup(p.id, "alpha", &member("beta", "worker", "standard"))
+        .expect_err("a non-image replacement cannot take a designer's work");
+    assert_eq!(error.code(), Some("invalid-role"));
+    assert_eq!(
+        error.to_string(),
+        "only an image agent can be an image designer, and beta is not one"
+    );
+    let left: Option<String> = ledger
+        .sqlite()
+        .query_row(
+            "SELECT left_at FROM participant WHERE id=?",
+            [old.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        left, None,
+        "the failed replacement leaves the old backup in place"
+    );
+}
+
+#[test]
+fn review_copying_staff_refuses_a_non_image_backup_of_a_designer() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let before = ledger.projects().unwrap().len();
+    let result = ledger.create_project_with_staff(&json!({
+        "directory": "/work/image-copy", "name": "copy", "chief": {"harness": "codex"},
+        "staff": [
+            {"id": 1, "harness": "codex", "model": "alpha", "designer": true, "roles": ["designer"], "tier": "light"},
+            {"id": 2, "backupOf": 1, "harness": "codex", "model": "beta", "designer": false, "roles": ["worker"], "tier": "light"}
+        ]
+    }));
+    let error = result.expect_err("a copied non-image backup cannot cover an image designer");
+    assert_eq!(error.code(), Some("invalid-role"));
+    assert_eq!(
+        error.to_string(),
+        "only an image agent can be an image designer, and beta is not one"
+    );
+    assert_eq!(
+        ledger.projects().unwrap().len(),
+        before,
+        "the failed copy is atomic"
+    );
+}
+
+fn review_assigned(ledger: &mut Ledger, project_id: i64, member_id: i64) -> (i64, i64, i64) {
+    let number = ledger
+        .create_task(project_id, &work("worker", "standard"))
+        .unwrap()
+        .task
+        .number;
+    let moved = ledger.assign_task(project_id, number, member_id).unwrap();
+    let session = id(
+        &ledger.project(project_id).unwrap().unwrap(),
+        moved.task.assignee.as_deref().unwrap(),
+    );
+    (number, session, moved.message.unwrap().id)
+}
+
+#[test]
+fn review_member_leaving_cancels_its_backups_work_and_notifies_together() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let p = project(&mut ledger, vec![member("alpha", "worker", "standard")]);
+    let owner = id(&p, "alpha");
+    let chief = id(&p, "chief");
+    ledger.start_conversation(chief, "codex").unwrap();
+    let backup = ledger
+        .add_backup(p.id, "alpha", &member("beta", "worker", "standard"))
+        .unwrap();
+    let mut assigned = vec![review_assigned(&mut ledger, p.id, owner)];
+    for state in ["open", "queued", "working", "waiting"] {
+        let item = review_assigned(&mut ledger, p.id, backup.id);
+        ledger
+            .sqlite()
+            .execute(
+                "UPDATE task SET state=? WHERE project_id=? AND number=?",
+                rusqlite::params![state, p.id, item.0],
+            )
+            .unwrap();
+        ledger.start_conversation(item.1, "codex").unwrap();
+        assigned.push(item);
+    }
+    let removed = ledger.remove_member(p.id, "alpha").unwrap();
+    let numbers: Vec<i64> = assigned.iter().map(|item| item.0).collect();
+    assert_eq!(
+        removed.cancelled, numbers,
+        "both members' work is in one removal"
+    );
+    assert!(removed.departed.contains(&owner));
+    assert!(removed.departed.contains(&backup.id));
+    for (number, session, message) in &assigned {
+        assert!(
+            removed.departed.contains(session),
+            "session {session} is returned for the engine to forget"
+        );
+        assert_eq!(
+            ledger.task(p.id, *number).unwrap().unwrap().task.state,
+            "cancelled"
+        );
+        let left: Option<String> = ledger
+            .sqlite()
+            .query_row(
+                "SELECT left_at FROM participant WHERE id=?",
+                [session],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(left.is_some(), "session {session} is closed");
+        assert_eq!(
+            ledger.message(*message).unwrap().unwrap().state,
+            "cancelled"
+        );
+        let reason: String = ledger.sqlite().query_row("SELECT json_extract(data,'$.reason') FROM event WHERE project_id=? AND kind='task.state' AND json_extract(data,'$.task')=? AND json_extract(data,'$.to')='cancelled' ORDER BY id DESC LIMIT 1", rusqlite::params![p.id,number], |r| r.get(0)).unwrap();
+        assert_eq!(reason, "@alpha left the staff");
+    }
+    let notes: Vec<String> = ledger.sqlite().prepare("SELECT body FROM message WHERE recipient_id=? AND kind='note' AND body LIKE '%Cancelled with it:%'").unwrap()
+        .query_map([chief], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+    assert_eq!(notes.len(), 1, "one note names both sets of work");
+    for number in &numbers {
+        assert!(notes[0].contains(&format!("T-{number}")));
+    }
+    let event = ledger
+        .events(p.id, 0, 500)
+        .unwrap()
+        .into_iter()
+        .find(|e| e.kind == "member.left" && e.data["handle"] == "alpha")
+        .unwrap();
+    assert_eq!(event.data["cancelled"], json!(numbers));
+}
+
+#[test]
+fn review_removing_backup_cancels_its_window_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let p = project(&mut ledger, vec![member("alpha", "worker", "standard")]);
+    let backup = ledger
+        .add_backup(p.id, "alpha", &member("beta", "worker", "standard"))
+        .unwrap();
+    let (number, session, message) = review_assigned(&mut ledger, p.id, backup.id);
+    ledger.remove_backup(p.id, "alpha").unwrap();
+    assert_eq!(
+        ledger.task(p.id, number).unwrap().unwrap().task.state,
+        "cancelled"
+    );
+    assert_eq!(ledger.message(message).unwrap().unwrap().state, "cancelled");
+    let left: Option<String> = ledger
+        .sqlite()
+        .query_row(
+            "SELECT left_at FROM participant WHERE id=?",
+            [session],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(left.is_some(), "the old backup's session leaves");
+}
+
+#[test]
+fn review_changing_backup_cancels_its_old_window_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let p = project(&mut ledger, vec![member("alpha", "worker", "standard")]);
+    let backup = ledger
+        .add_backup(p.id, "alpha", &member("beta", "worker", "standard"))
+        .unwrap();
+    let (number, session, message) = review_assigned(&mut ledger, p.id, backup.id);
+    let mut invalid = member("broken", "worker", "standard");
+    invalid.harness = "not-a-harness".into();
+    assert!(ledger.change_backup(p.id, "alpha", &invalid).is_err());
+    assert_eq!(
+        ledger.task(p.id, number).unwrap().unwrap().task.state,
+        "queued",
+        "a refused replacement rolls back cancellation"
+    );
+    assert_eq!(ledger.message(message).unwrap().unwrap().state, "queued");
+    let still_open: Option<String> = ledger
+        .sqlite()
+        .query_row(
+            "SELECT left_at FROM participant WHERE id=?",
+            [session],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(still_open, None);
+    ledger
+        .change_backup(p.id, "alpha", &member("gamma", "worker", "standard"))
+        .unwrap();
+    assert_eq!(
+        ledger.task(p.id, number).unwrap().unwrap().task.state,
+        "cancelled"
+    );
+    assert_eq!(ledger.message(message).unwrap().unwrap().state, "cancelled");
+    let left: Option<String> = ledger
+        .sqlite()
+        .query_row(
+            "SELECT left_at FROM participant WHERE id=?",
+            [session],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(left.is_some(), "the replaced backup's session leaves");
+}
+
+#[test]
+fn review_real_backup_work_and_a_waiting_follow_up_leave_together() {
+    use cf_ledger::NewQuestion;
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let p = project(&mut ledger, vec![member("alpha", "worker", "standard")]);
+    let backup = ledger
+        .add_backup(p.id, "alpha", &member("beta", "worker", "standard"))
+        .unwrap();
+    let (working, working_session, working_message) = review_assigned(&mut ledger, p.id, backup.id);
+    ledger.start_conversation(working_session, "codex").unwrap();
+    ledger.begin_delivery(working_message).unwrap();
+    ledger
+        .confirm_delivery(working_message, Some(&json!({"item":"working"})))
+        .unwrap();
+    assert_eq!(
+        ledger.task(p.id, working).unwrap().unwrap().task.state,
+        "working"
+    );
+    let follow = ledger
+        .create_task(
+            p.id,
+            &NewTask {
+                from: "chief".into(),
+                after: Some(working),
+                body: "Follow up".into(),
+                ..NewTask::default()
+            },
+        )
+        .unwrap()
+        .task;
+    assert_eq!(follow.state, "open");
+    let (waiting, waiting_session, waiting_message) = review_assigned(&mut ledger, p.id, backup.id);
+    ledger.start_conversation(waiting_session, "codex").unwrap();
+    ledger.begin_delivery(waiting_message).unwrap();
+    ledger
+        .confirm_delivery(waiting_message, Some(&json!({"item":"waiting"})))
+        .unwrap();
+    let from = ledger
+        .project(p.id)
+        .unwrap()
+        .unwrap()
+        .participants
+        .into_iter()
+        .find(|p| p.id == waiting_session)
+        .unwrap()
+        .handle;
+    let question = ledger
+        .ask(
+            p.id,
+            &NewQuestion {
+                from: Some(from),
+                to: "chief".into(),
+                body: Some("Which?".into()),
+                task: Some(waiting),
+                ..NewQuestion::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        ledger.task(p.id, waiting).unwrap().unwrap().task.state,
+        "waiting"
+    );
+    let removed = ledger.remove_member(p.id, "alpha").unwrap();
+    assert_eq!(removed.cancelled, vec![working, follow.number, waiting]);
+    for number in [working, follow.number, waiting] {
+        assert_eq!(
+            ledger.task(p.id, number).unwrap().unwrap().task.state,
+            "cancelled"
+        );
+    }
+    assert_eq!(
+        ledger.message(question.id).unwrap().unwrap().state,
+        "cancelled"
+    );
+    for session in [working_session, waiting_session] {
+        assert!(removed.departed.contains(&session));
+        let ended: Option<String> = ledger
+            .sqlite()
+            .query_row(
+                "SELECT ended_at FROM conversation WHERE participant_id=?",
+                [session],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(ended.is_some(), "the backup's conversation closes");
+    }
+}
+
+#[test]
+fn review_vacation_keeps_a_task_after_its_brief_began_and_was_retried() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let p = project(&mut ledger, vec![member("alpha", "worker", "standard")]);
+    let (number, session, message) = review_assigned(&mut ledger, p.id, id(&p, "alpha"));
+    let assignee = ledger.task(p.id, number).unwrap().unwrap().task.assignee;
+    ledger.begin_delivery(message).unwrap();
+    ledger
+        .retry_delivery(message, "the window did not confirm it", true)
+        .unwrap();
+    assert_eq!(ledger.message(message).unwrap().unwrap().state, "queued");
+    ledger.send_on_vacation(p.id, "alpha", &[session]).unwrap();
+    let task = ledger.task(p.id, number).unwrap().unwrap().task;
+    assert_eq!((task.state.as_str(), task.assignee), ("queued", assignee));
+    assert_eq!(ledger.message(message).unwrap().unwrap().state, "queued");
+}
+
+#[test]
+fn review_participant_view_exposes_its_backup_link_and_vacation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let p = project(&mut ledger, vec![member("alpha", "worker", "standard")]);
+    let owner = id(&p, "alpha");
+    let backup = ledger
+        .add_backup(p.id, "alpha", &member("beta", "worker", "standard"))
+        .unwrap();
+    ledger.send_on_vacation(p.id, &backup.handle, &[]).unwrap();
+    let current = ledger.project(p.id).unwrap().unwrap();
+    let viewed = current
+        .participants
+        .iter()
+        .find(|p| p.id == backup.id)
+        .unwrap();
+    assert_eq!(viewed.backup_of, Some(owner));
+    assert!(viewed.vacation_since.is_some());
+    let json = serde_json::to_value(viewed).unwrap();
+    assert_eq!(json["backupOf"], owner);
+    assert!(json["vacationSince"].is_string());
 }

@@ -173,8 +173,8 @@ meant = "a_member_leaves_with_its_backup"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_member_leaves_with_its_backup"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff.rs"
-find = "if let Some((id, backup_handle)) = backup {"
-replace = "if let Some((id, backup_handle)) = backup.filter(|_| false) {"
+find = "if let Some((id, backup_handle)) = &backup {"
+replace = "if let Some((id, backup_handle)) = backup.as_ref().filter(|_| false) {"
 
 [[plant]]
 name = "bkv ledger: Vacation never marks the member"
@@ -479,3 +479,101 @@ runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher"
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''            Some(Unwell::Busy(_)) => HoldKind::Busy,'''
 replace = '''            Some(Unwell::Busy(_)) => HoldKind::Quota,'''
+
+name = "bkv review: a non-image backup is accepted for a designer"
+meant = "review_a_designer_refuses_a_non_image_backup"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "review_a_designer_refuses_a_non_image_backup"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/backup.rs"
+find = "config.roles = held;"
+replace = "config.roles = vec![if config.designer { \"designer\" } else { \"worker\" }.to_owned()];"
+
+[[plant]]
+name = "bkv review: a designer can switch to a non-image backup"
+meant = "review_changing_a_designer_backup_refuses_a_non_image_backup_atomically"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "review_changing_a_designer_backup_refuses_a_non_image_backup_atomically"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/backup.rs"
+find = "config.roles = held;"
+replace = "config.roles = vec![if config.designer { \"designer\" } else { \"worker\" }.to_owned()];"
+
+[[plant]]
+name = "bkv review: a copied designer can have a non-image backup"
+meant = "review_copying_staff_refuses_a_non_image_backup_of_a_designer"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "review_copying_staff_refuses_a_non_image_backup_of_a_designer"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/backup.rs"
+find = "config.roles = held;"
+replace = "config.roles = vec![if config.designer { \"designer\" } else { \"worker\" }.to_owned()];"
+
+[[plant]]
+name = "bkv review: member removal leaves the backup work behind"
+meant = "review_member_leaving_cancels_its_backups_work_and_notifies_together"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "review_member_leaving_cancels_its_backups_work_and_notifies_together"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "members.push(*id);"
+replace = "if false { members.push(*id); }"
+
+[[plant]]
+name = "bkv review: removing a backup leaves its work behind"
+meant = "review_removing_backup_cancels_its_window_work"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "review_removing_backup_cancels_its_window_work"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/backup.rs"
+find = "let removed = remove_member(store, project, &backup.handle)?;"
+replace = "let at = store.at();\n        store.db.execute(\"UPDATE participant SET left_at = ? WHERE id = ?\", rusqlite::params![at, id])?;\n        let removed = cf_proto::ledger::RemovedMember {\n            member: crate::views::participant_view(&store.participant_row(id)?)?,\n            cancelled: Vec::new(),\n            departed: Vec::new(),\n        };"
+
+[[plant]]
+name = "bkv review: changing a backup leaves its work behind"
+meant = "review_changing_backup_cancels_its_old_window_work"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "review_changing_backup_cancels_its_old_window_work"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/backup.rs"
+find = "let removed = remove_member(store, project, &backup.handle)?;"
+replace = "let at = store.at();\n        store.db.execute(\"UPDATE participant SET left_at = ? WHERE id = ?\", rusqlite::params![at, id])?;\n        let removed = cf_proto::ledger::RemovedMember {\n            member: crate::views::participant_view(&store.participant_row(id)?)?,\n            cancelled: Vec::new(),\n            departed: Vec::new(),\n        };"
+
+[[plant]]
+name = "bkv review: Vacation releases a brief after a retried delivery"
+meant = "review_vacation_keeps_a_task_after_its_brief_began_and_was_retried"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "review_vacation_keeps_a_task_after_its_brief_began_and_was_retried"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/vacation.rs"
+find = "               AND NOT EXISTS (SELECT 1 FROM message m JOIN event e\n                               ON e.project_id = m.project_id AND e.kind = 'delivery.begun'\n                                  AND json_extract(e.data, '$.message') = m.id\n                               WHERE m.task_id = t.id AND m.kind = 'task' AND m.recipient_id = s.id)\n"
+replace = ""
+
+[[plant]]
+name = "bkv review: member removal omits departed backup sessions"
+meant = "review_member_leaving_cancels_its_backups_work_and_notifies_together"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "review_member_leaving_cancels_its_backups_work_and_notifies_together"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "departed: windows,"
+replace = "departed: vec![member.id],"
+
+[[plant]]
+name = "bkv review: participant view hides the backup link"
+meant = "review_participant_view_exposes_its_backup_link_and_vacation"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "review_participant_view_exposes_its_backup_link_and_vacation"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = "backup_of: row.backup_of,"
+replace = "backup_of: None,"
+
+[[plant]]
+name = "bkv review: participant view hides Vacation"
+meant = "review_participant_view_exposes_its_backup_link_and_vacation"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "review_participant_view_exposes_its_backup_link_and_vacation"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/views.rs"
+find = "vacation_since: row.vacation_since.clone(),"
+replace = "vacation_since: None,"
+
+[[plant]]
+name = "bkv review: migration loses the account hold kind"
+meant = "upgrading_main_keeps_projects_members_tasks_and_history_and_adds_the_marks"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "upgrading_main_keeps_projects_members_tasks_and_history_and_adds_the_marks"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0038.sql"
+find = "WHEN '9999-12-31T23:59:59.998Z' THEN 'account'"
+replace = "WHEN '9999-12-31T23:59:59.998Z' THEN 'quota'"

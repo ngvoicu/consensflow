@@ -1,13 +1,15 @@
 //! A dedicated backup row for a member, independent of its sessions and quota.
 
-use rusqlite::{params, OptionalExtension};
+use rusqlite::OptionalExtension;
 use serde_json::json;
 
-use super::{add_participant, require_member_row, require_staff_role, NewParticipant};
+use super::{
+    add_participant, remove_member, require_member_row, require_staff_role, NewParticipant,
+};
 use crate::model::{self, LedgerError};
 use crate::projects::NewMember;
 use crate::store::Store;
-use crate::views::{participant_view, ParticipantRow};
+use crate::views::ParticipantRow;
 use crate::ParticipantView;
 
 fn primary(store: &Store, project: i64, handle: &str) -> Result<ParticipantRow, LedgerError> {
@@ -51,16 +53,9 @@ pub(crate) fn add_backup(
         }
         let held: Vec<String> = serde_json::from_str(&owner.roles)?;
         let roles = model::require_roles(&held, || model::printed(Some(&json!(held))))?;
-        // Validate the backup's own harness, model and effort without treating it
-        // as an independent holder of the owner's roles. This also lets a backup
-        // of an image designer run on another harness, as the staff rule permits.
+        // A backup takes its owner's roles, so its agent must fit those roles.
         let mut config = backup.clone();
-        config.roles = vec![if config.designer {
-            "designer"
-        } else {
-            "worker"
-        }
-        .to_owned()];
+        config.roles = held;
         config.tier = owner.tier.clone().unwrap_or_else(|| "light".to_owned());
         config.check()?;
         let backup_handle = config.handle(store, project)?;
@@ -77,7 +72,7 @@ pub(crate) fn add_backup(
     })
 }
 
-/// Stop using a backup without rewriting its sessions or tasks.
+/// A backup leaves like a member: its open work is cancelled and its sessions close.
 pub(crate) fn remove_backup(
     store: &mut Store,
     project: i64,
@@ -96,18 +91,14 @@ pub(crate) fn remove_backup(
         let id = backup.ok_or_else(|| {
             LedgerError::refused_with("no-backup", format!("@{handle} has no backup"), 409)
         })?;
-        let at = store.at();
-        store.db.execute(
-            "UPDATE participant SET left_at = ? WHERE id = ?",
-            params![at, id],
-        )?;
         let backup = store.participant_row(id)?;
+        let removed = remove_member(store, project, &backup.handle)?;
         store.log(
             project,
             "backup.left",
-            json!({ "handle": backup.handle, "member": handle }),
+            json!({ "handle": backup.handle, "member": handle, "cancelled": removed.cancelled }),
         )?;
-        participant_view(&backup)
+        Ok(removed.member)
     })
 }
 

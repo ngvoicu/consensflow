@@ -71,6 +71,12 @@ pub struct ParticipantView {
     pub roles: Vec<String>,
     pub out_until: Option<String>,
     pub out_since: Option<String>,
+    /// The member this staff row backs, if it is a backup.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup_of: Option<i64>,
+    /// When this staff row went on Vacation, if it has not returned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vacation_since: Option<String>,
     pub member_id: Option<i64>,
     /// The member a session belongs to.
     pub member: Option<String>,
@@ -170,6 +176,10 @@ pub struct EventView {
 pub struct RemovedMember {
     pub member: ParticipantView,
     pub cancelled: Vec<i64>,
+    /// The member, its backup, and every session closed with them, for the engine to forget.
+    /// Internal to the engine; the existing removal response stays as it was.
+    #[serde(skip_serializing)]
+    pub departed: Vec<i64>,
 }
 
 /// A member of the newest project's staff, as a new project starts from it: the harness,
@@ -818,6 +828,8 @@ mod tests {
             roles: vec!["worker".into()],
             out_until: None,
             out_since: None,
+            backup_of: None,
+            vacation_since: None,
             member_id: Some(1),
             member: Some("zeus".into()),
             session: Some("amber-pine".into()),
@@ -856,6 +868,8 @@ mod tests {
             roles: Vec::new(),
             out_until: None,
             out_since: None,
+            backup_of: None,
+            vacation_since: None,
             member_id: None,
             member: None,
             session: None,
