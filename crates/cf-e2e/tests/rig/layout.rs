@@ -187,6 +187,8 @@ fn the_program_a_case_of_the_layout_runs() -> Outcome {
 /// makes the audit file, and starts a program (the child) as a run does. The child says what it
 /// was given, and takes away a status file of its own through its door, which is a line in the file
 /// the parent made.
+// The parent and the child say what they saw on their output, which the test that started them reads.
+#[allow(clippy::print_stdout)]
 fn audit_case(case: &str, signals: &Path) -> Outcome {
     if case == "audit-parent" {
         let audit = cf_e2e::door::Door::of_run()
@@ -229,7 +231,10 @@ fn audit_case(case: &str, signals: &Path) -> Outcome {
 
 /// The layout the cases run in, made.
 fn layout() -> Layout {
-    Layout::new().expect("the layout is made")
+    match Layout::new() {
+        Ok(layout) => layout,
+        Err(wrong) => panic!("the layout is not made: {wrong}"),
+    }
 }
 
 #[test]
@@ -454,7 +459,7 @@ fn sweep(
 }
 
 /// The lines of `listing` that belong to `folder`: its own line and the indented ones after it.
-fn about<'a>(listing: &'a str, folder: &Path) -> String {
+fn about(listing: &str, folder: &Path) -> String {
     let name = folder.display().to_string();
     let mut lines = listing.lines().skip_while(|line| !line.starts_with(&name));
     let mut found: Vec<&str> = lines.next().into_iter().collect();

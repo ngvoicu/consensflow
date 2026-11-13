@@ -695,7 +695,8 @@ mod tests {
 
     #[test]
     fn the_case_removes_its_own_tick_files_by_their_names_and_no_other_file() {
-        let folder = tempfile::tempdir().unwrap();
+        // A folder of the door's own: a file is taken only below a folder this run made.
+        let folder = cf_e2e::door::made("tick-files-").unwrap();
         let command = Command::after_background();
         let own = [
             command.ticks.clone().unwrap(),

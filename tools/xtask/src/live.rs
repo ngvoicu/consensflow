@@ -77,6 +77,7 @@
 //! - keys the run types into the rig's own panes (an Escape, a Ctrl-C, /exit, a dialog's answer, a paste) are typed
 //! - a terminal the run opened itself (a pane of its own test, Muse's window) is hung up by the system when the run's process ends, with what runs in it
 //! - the run starts its rig and the programs the case names, and makes the folders and writes the files of its own below the shared folders (a project folder of its own in the live folder, its rig's folder in the temp folder)
+//!
 //! Such a run is never a pass: this names the file and leaves with a code that is not 0, whatever
 //! the run came to; so does `--set` (each run of the set with a file of its own, `<name>-<n>`) and
 //! `sweep`.

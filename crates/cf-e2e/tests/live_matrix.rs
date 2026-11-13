@@ -210,7 +210,7 @@ mod tests {
     /// each window's last screen, the records, the ledger, the events and the daemon's last lines
     /// of the run that went red. Two reds of the field6 pair on GitHub's Windows runner kept
     /// nothing of their windows (CI runs 41787972093 and 41792519144, T-1226).
-    struct Reports(tempfile::TempDir, PathBuf);
+    struct Reports(PathBuf, tempfile::TempDir);
 
     impl Reports {
         fn new() -> Self {
@@ -219,19 +219,19 @@ mod tests {
 
         /// Reports whose evidence is kept in `kept` where the case fails.
         fn keeping_in(kept: PathBuf) -> Self {
-            Self(tempfile::tempdir().unwrap(), kept)
+            Self(kept, tempfile::tempdir().unwrap())
         }
 
         fn path(&self) -> &Path {
-            self.0.path()
+            self.1.path()
         }
     }
 
     impl Drop for Reports {
         fn drop(&mut self) {
             if std::thread::panicking() {
-                let kept = self.1.clone();
-                match copied_below(self.0.path(), &kept) {
+                let kept = self.0.clone();
+                match copied_below(self.1.path(), &kept) {
                     Ok(names) => eprintln!(
                         "--- the failed case's evidence is kept in {}: {}",
                         kept.display(),

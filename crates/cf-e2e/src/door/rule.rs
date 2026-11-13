@@ -10,8 +10,8 @@
 //! suites) and fails on any other way to do either:
 //!
 //! - a call of `remove_file`, `remove_dir`, `remove_dir_all`, the descent's `end_chosen` /
-//!   `pause_chosen` (and their `_by`), `signal`, `stall`, `end_all`, libc's or nix's `kill`,
-//!   the descent's `.hold(pid)` of a process to end, or Windows' `TerminateProcess` /
+//!   `pause_chosen` (and their `_by`), `signal`, `stall`, `end_all`, libc's or nix's `kill` and
+//!   `killpg`, the descent's `.hold(pid)` of a process to end, or Windows' `TerminateProcess` /
 //!   `TerminateJobObject`;
 //! - a string that runs a program that ends processes (`kill`, `pkill`, `killall`, `taskkill`,
 //!   `tskill`, `Stop-Process`) or asks the pane host to end a pane (`pane.kill`);
