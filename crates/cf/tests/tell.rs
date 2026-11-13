@@ -61,7 +61,10 @@ fn told(kind: &str, state: &str) -> Value {
 
 #[test]
 fn a_tell_to_a_queued_task_says_the_words_wait_for_its_window_and_nothing_is_paused() {
-    let api = scripted(vec![reply(200, told("note", "queued"))]);
+    let api = scripted(vec![
+        reply(200, json!({ "participant": { "role": "chief" } })),
+        reply(200, told("note", "queued")),
+    ]);
     let (code, printed) = window(&api, &["tell", "T-3", "Use the v2 grammar"]);
     assert_eq!(code, Some(0));
     assert_eq!(
@@ -70,10 +73,13 @@ fn a_tell_to_a_queued_task_says_the_words_wait_for_its_window_and_nothing_is_pau
     );
     assert_eq!(
         asked(&api),
-        [(
-            "/api/tasks/3/tell".to_owned(),
-            Some(json!({ "body": "Use the v2 grammar" }))
-        )]
+        [
+            ("/api/whoami".to_owned(), None),
+            (
+                "/api/tasks/3/tell".to_owned(),
+                Some(json!({ "body": "Use the v2 grammar" }))
+            )
+        ]
     );
 }
 
@@ -85,7 +91,10 @@ fn a_tell_to_an_open_task_says_the_words_are_added_to_its_brief_for_whichever_wi
         "number": 3, "state": "open", "assignee": null, "requester": "chief",
         "title": "Parser", "blockedBy": [2], "pool": "worker", "tier": "standard",
     });
-    let api = scripted(vec![reply(200, json!({ "task": open }))]);
+    let api = scripted(vec![
+        reply(200, json!({ "participant": { "role": "chief" } })),
+        reply(200, json!({ "task": open })),
+    ]);
     let (code, printed) = window(&api, &["tell", "T-3", "Use the v2 grammar"]);
     assert_eq!(code, Some(0));
     assert_eq!(
@@ -96,7 +105,10 @@ fn a_tell_to_an_open_task_says_the_words_are_added_to_its_brief_for_whichever_wi
 
 #[test]
 fn a_tell_to_a_task_in_its_window_says_it_is_paused_as_it_always_did() {
-    let api = scripted(vec![reply(200, told("question", "paused"))]);
+    let api = scripted(vec![
+        reply(200, json!({ "participant": { "role": "chief" } })),
+        reply(200, told("question", "paused")),
+    ]);
     let (code, printed) = window(&api, &["tell", "T-3", "Stop: use v2"]);
     assert_eq!(code, Some(0));
     assert_eq!(
