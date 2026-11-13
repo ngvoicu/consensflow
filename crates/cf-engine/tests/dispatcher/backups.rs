@@ -403,3 +403,30 @@ fn a_task_released_and_taken_again_by_a_backup_is_told_to_its_giver_once() {
     assert_eq!(taker(&tiers, 1), backup.handle);
     assert_eq!(told_of_a_backup(&tiers).len(), 1, "{:?}", told_of_a_backup(&tiers));
 }
+
+#[test]
+fn a_busy_refusal_of_its_window_keeps_its_backup_from_the_next_task_after_a_restart_too() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    backed(&context, tiers.project.id, "zeus", "claude-code", "gaia");
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    context.adapter.refuse(
+        &session,
+        cf_harness::records::Quota::Busy {
+            at: Some(now(&context)),
+            because: "Selected model is at capacity.".to_owned(),
+        },
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(tiers.out_until("zeus").is_some(), "its model is marked busy");
+    let restarted = context.make();
+    tiers.open_body("Lexer");
+    restarted.pass().unwrap();
+    restarted.pass().unwrap();
+    assert_eq!(tiers.task(2).task.assignee, None);
+    assert_eq!(told_of_a_backup(&tiers), Vec::<String>::new());
+}
