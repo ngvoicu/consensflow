@@ -26,7 +26,7 @@ impl Ledger {
         staff::add_backup(&mut self.store, project, member, backup)
     }
 
-    /// Replace a member's backup, leaving the old one's sessions and tasks in place.
+    /// Replace a member's backup; the old one's work is cancelled as it leaves.
     pub fn change_backup(
         &mut self,
         project: i64,

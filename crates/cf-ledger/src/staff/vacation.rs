@@ -48,6 +48,10 @@ pub(crate) fn send(
                AND NOT EXISTS (SELECT 1 FROM conversation c WHERE c.participant_id = s.id)
                AND NOT EXISTS (SELECT 1 FROM message m WHERE m.task_id = t.id AND m.kind = 'task'
                                AND m.state IN ('delivering', 'delivered', 'read'))
+               AND NOT EXISTS (SELECT 1 FROM message m JOIN event e
+                               ON e.project_id = m.project_id AND e.kind = 'delivery.begun'
+                                  AND json_extract(e.data, '$.message') = m.id
+                               WHERE m.task_id = t.id AND m.kind = 'task' AND m.recipient_id = s.id)
                AND COALESCE((SELECT MAX(e.id) FROM event e WHERE e.project_id = t.project_id
                              AND e.kind = 'task.assigned' AND json_extract(e.data, '$.task') = t.number), 0)
                  > COALESCE((SELECT MAX(e.id) FROM event e WHERE e.project_id = t.project_id

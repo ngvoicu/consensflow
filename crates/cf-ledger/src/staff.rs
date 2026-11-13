@@ -467,15 +467,16 @@ pub(crate) fn remove_member(
         let member = store.participant_by_handle(project_id, handle)?;
         require_member_row(store, member.id, "leaves the staff")?;
         require_staff_role(handle, &member)?;
-        // A backup leaves with its member, but its sessions and their history stay
-        // with the participant that ran them.  Do this before the owner leaves so
-        // the active relationship is never left dangling.
+        // A backup leaves with its member. Its history stays on its own row;
+        // its active work and sessions leave together with the member's.
         let backup: Option<(i64, String)> = store.db.query_row(
             "SELECT id, handle FROM participant WHERE backup_of = ? AND left_at IS NULL",
             [member.id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         ).optional()?;
-        if let Some((id, backup_handle)) = backup {
+        let mut members = vec![member.id];
+        if let Some((id, backup_handle)) = &backup {
+            members.push(*id);
             let at = store.at();
             store.db.execute("UPDATE participant SET left_at = ? WHERE id = ?", params![at, id])?;
             store.log(project_id, "backup.left", json!({ "handle": backup_handle, "member": handle }))?;
@@ -483,11 +484,12 @@ pub(crate) fn remove_member(
         let sessions = store
             .db
             .prepare(&format!(
-                "{PARTICIPANT_SELECT} WHERE p.member_id = ? AND p.left_at IS NULL ORDER BY p.id"
+                "{PARTICIPANT_SELECT} WHERE p.member_id IN ({}) AND p.left_at IS NULL ORDER BY p.id",
+                vec!["?"; members.len()].join(", ")
             ))?
-            .query_map([member.id], ParticipantRow::read)?
+            .query_map(params_from_iter(&members), ParticipantRow::read)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        let windows: Vec<i64> = std::iter::once(member.id)
+        let windows: Vec<i64> = members.iter().copied()
             .chain(sessions.iter().map(|session| session.id))
             .collect();
         let open = store
@@ -558,6 +560,7 @@ pub(crate) fn remove_member(
         // After that word, which names the tasks and never the words: each teller
         // hears of its own, the requester too, but the windows that left.
         let leaving: Vec<&str> = std::iter::once(handle)
+            .chain(backup.iter().map(|(_, handle)| handle.as_str()))
             .chain(sessions.iter().map(|session| session.handle.as_str()))
             .collect();
         for ((task, _), dropped) in open.iter().zip(&dropped) {
@@ -573,6 +576,7 @@ pub(crate) fn remove_member(
         Ok(RemovedMember {
             member: participant_view(&store.participant_row(member.id)?)?,
             cancelled,
+            departed: windows,
         })
     })
 }
