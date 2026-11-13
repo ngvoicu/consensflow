@@ -1,0 +1,58 @@
+# A hold's stretch begins after a task exchange; re-holding counts but does not
+# restart it. The chief is typed at an hour, then every three hours (CLN-76, T-1598).
+
+[run]
+first-hour = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_worker_who_holds_again_after_forty_minutes_is_typed_at_the_first_hour", "--", "--test-threads=2"]
+four-hours = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_worker_who_keeps_holding_every_forty_minutes_is_typed_again_at_four_hours", "--", "--test-threads=2"]
+own-note = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_worker_who_sends_its_own_note_starts_a_new_stretch_at_its_next_hold", "--", "--test-threads=2"]
+ledger-receipt = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "shown_notes::the_newest_aside_holds_until_the_task_moves_and_is_said_anew_in_place", "--", "--test-threads=2"]
+
+[[plant]]
+name = "cln76: a re-hold starts the hour again"
+meant = "shown_notes::a_worker_who_holds_again_after_forty_minutes_is_typed_at_the_first_hour"
+runs = ["first-hour"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''.renew_aside(project.id, aside, &said_now)?;'''
+replace = '''.restart_aside(project.id, aside, &said_now)?;'''
+
+[[plant]]
+name = "cln76: a reminder does not recur at three hours"
+meant = "shown_notes::a_worker_who_keeps_holding_every_forty_minutes_is_typed_again_at_four_hours"
+runs = ["four-hours"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''const STILL_WORKING_REMIND_AGAIN_AFTER_MS: i64 = 3 * 60 * 60_000;'''
+replace = '''const STILL_WORKING_REMIND_AGAIN_AFTER_MS: i64 = 30 * 60 * 60_000;'''
+
+[[plant]]
+name = "cln76: a worker's note does not start a new stretch"
+meant = "shown_notes::a_worker_who_sends_its_own_note_starts_a_new_stretch_at_its_next_hold"
+runs = ["own-note"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''let new_exchange = exchanged.iter().any(|id| !told.exchanges.contains(id));'''
+replace = '''let new_exchange = false && exchanged.iter().any(|id| !told.exchanges.contains(id));'''
+
+[[plant]]
+name = "cln76: re-holds are not counted"
+meant = "shown_notes::a_worker_who_holds_again_after_forty_minutes_is_typed_at_the_first_hour"
+runs = ["first-hour"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks.rs"
+find = '''COALESCE(json_extract(receipt, '$.reholds'), 0) + 1)'''
+replace = '''COALESCE(json_extract(receipt, '$.reholds'), 0) + 0)'''
+
+[[plant]]
+name = "cln76: a stale reminder crosses into a new stretch"
+meant = "shown_notes::the_newest_aside_holds_until_the_task_moves_and_is_said_anew_in_place"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks.rs"
+find = '''AND COALESCE(json_extract(receipt, '$.stretch'), 0) = ?'''
+replace = '''AND (COALESCE(json_extract(receipt, '$.stretch'), 0) = ? OR 1 = 1)'''

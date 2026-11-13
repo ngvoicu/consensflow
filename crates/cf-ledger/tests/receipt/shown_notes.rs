@@ -236,10 +236,10 @@ fn the_newest_aside_holds_until_the_task_moves_and_is_said_anew_in_place() {
         body: "T-1 has been working in the background for 60 minutes.".into(),
         task: Some(task),
     };
-    // One reminder, until the note is said anew.
+    // The caller compares the last reminder so repeated looks cannot send it twice.
     let sent = w
         .ledger
-        .remind_of_aside(w.project, first.id, &note(&w))
+        .remind_of_aside(w.project, first.id, 0, None, &note(&w))
         .expect("a write");
     assert_eq!(
         sent.as_ref().map(|sent| sent.state.as_str()),
@@ -247,7 +247,7 @@ fn the_newest_aside_holds_until_the_task_moves_and_is_said_anew_in_place() {
     );
     assert_eq!(
         w.ledger
-            .remind_of_aside(w.project, first.id, &note(&w))
+            .remind_of_aside(w.project, first.id, 0, None, &note(&w))
             .expect("a write"),
         None
     );
@@ -255,10 +255,39 @@ fn the_newest_aside_holds_until_the_task_moves_and_is_said_anew_in_place() {
         .ledger
         .renew_aside(w.project, first.id, "in the background: 1 command")
         .expect("renewed"));
+    assert_eq!(w.message(first.id).receipt["reholds"], 2);
+    assert_eq!(
+        w.message(first.id).receipt["reminded"],
+        sent.as_ref().unwrap().id
+    );
     assert!(w
         .ledger
-        .remind_of_aside(w.project, first.id, &note(&w))
+        .remind_of_aside(w.project, first.id, 0, None, &note(&w))
         .expect("a write")
+        .is_none());
+    assert!(w
+        .ledger
+        .remind_of_aside(w.project, first.id, 0, Some(sent.unwrap().id), &note(&w))
+        .expect("a write")
+        .is_some());
+    assert!(w
+        .ledger
+        .restart_aside(w.project, first.id, "in the background: 1 command")
+        .unwrap());
+    assert_eq!(w.message(first.id).receipt["reholds"], 0);
+    assert!(w.message(first.id).receipt.get("reminded").is_none());
+    assert_eq!(w.message(first.id).receipt["stretch"], 1);
+    assert!(
+        w.ledger
+            .remind_of_aside(w.project, first.id, 0, None, &note(&w))
+            .unwrap()
+            .is_none(),
+        "an old look cannot remind the new stretch"
+    );
+    assert!(w
+        .ledger
+        .remind_of_aside(w.project, first.id, 1, None, &note(&w))
+        .unwrap()
         .is_some());
     // A move ends it, and it is neither said anew nor reminded of after.
     w.pause(task);
@@ -273,7 +302,7 @@ fn the_newest_aside_holds_until_the_task_moves_and_is_said_anew_in_place() {
         .expect("a write");
     assert!(w
         .ledger
-        .remind_of_aside(w.project, first.id, &note(&w))
+        .remind_of_aside(w.project, first.id, 1, None, &note(&w))
         .expect("a write")
         .is_none());
 }

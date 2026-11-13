@@ -2,11 +2,13 @@
 //! Gabriel on 2026-11-11: "many useless messages sent to the chief we act"). A task held in
 //! the background by work that ends by itself is the most of them (T-1410: 10 of the chief's
 //! last 20 notes): its task's line says it, `cf task get` holds the note, and the chief's
-//! window is given nothing of it. One note is typed after a task has been held so for an hour
-//! with no turn of its worker's own; a hold that nothing but Finish ends is typed as it was.
+//! window is given nothing of it. A note is typed after an hour in one stretch and every
+//! three hours after that, however many times the worker holds again. An exchange starts a
+//! new stretch; a hold that nothing but Finish ends is typed as it was.
 
 use cf_engine::testing::Context;
 use cf_engine::SwitchWhen;
+use cf_ledger::NewNote;
 
 use crate::chiefs::{to, with_codex};
 use crate::fixtures::{after, exhausted, given, now, Tiers};
@@ -18,6 +20,7 @@ const ENDED: &str =
 
 /// `STILL_WORKING_REMINDED_AFTER_MS`: an hour.
 const AN_HOUR: i64 = 60 * 60_000;
+const FORTY_MINUTES: i64 = 40 * 60_000;
 
 /// A project of zeus and diana, and T-1 given to zeus by name, at work in its window.
 fn zeus_at_work(context: &Context) -> Tiers<'_> {
@@ -38,11 +41,23 @@ fn typed(context: &Context, tiers: &Tiers<'_>) -> Vec<String> {
         .inbox(tiers.id("chief"), 100)
         .unwrap()
         .into_iter()
-        .filter(|message| message.kind == "note" && message.receipt.get("shown").is_none())
+        .filter(|message| {
+            message.kind == "note"
+                && message.sender.is_none()
+                && message.receipt.get("shown").is_none()
+        })
         .map(|message| message.body)
         .collect();
     notes.reverse();
     notes
+}
+
+/// Reminder pastes the chief's window has actually been given.
+fn pasted_reminders(context: &Context) -> Vec<String> {
+    given(context, "chief")
+        .into_iter()
+        .filter(|paste| paste.contains("has been working in the background for"))
+        .collect()
 }
 
 /// What T-1's line says beside its state.
@@ -56,6 +71,202 @@ fn held(context: &Context, words: &str, jobs: usize) {
         .adapter
         .answer_leaving("zeus", words, pending(jobs, 0));
     context.pass().unwrap();
+}
+
+/// A background job ends, wakes its worker, and the worker starts another.
+fn held_again(context: &Context, jobs: usize) {
+    context.adapter.wake("zeus", ENDED);
+    context.pass().unwrap();
+    held(context, "Still queued", jobs);
+}
+
+#[test]
+fn a_worker_who_holds_again_after_forty_minutes_is_typed_at_the_first_hour() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    held(&context, "The wait starts", 1);
+    context.advance(FORTY_MINUTES);
+    held_again(&context, 2);
+    assert!(typed(&context, &tiers).is_empty());
+    context.advance(AN_HOUR - FORTY_MINUTES - 1_000);
+    context.pass().unwrap();
+    assert!(
+        typed(&context, &tiers).is_empty(),
+        "not before the first hour"
+    );
+    context.advance(1_000);
+    context.pass().unwrap();
+    assert_eq!(
+        typed(&context, &tiers),
+        ["T-1 has been working in the background for 60 minutes, holding again 1 time (2 commands). Its result comes when that ends; `cf task finish T-1` takes what it said last now."]
+    );
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    let pastes = pasted_reminders(&context);
+    assert_eq!(pastes.len(), 1, "{pastes:?}");
+    assert!(pastes[0].contains(&typed(&context, &tiers)[0]));
+}
+
+#[test]
+fn a_worker_who_keeps_holding_every_forty_minutes_is_typed_again_at_four_hours() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    held(&context, "The wait starts", 1);
+    context.advance(FORTY_MINUTES);
+    held_again(&context, 1);
+    context.advance(AN_HOUR - FORTY_MINUTES);
+    context.pass().unwrap();
+    assert_eq!(typed(&context, &tiers).len(), 1);
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted_reminders(&context).len(), 1);
+    context.adapter.answer("chief", "Noted.");
+    context.pass().unwrap();
+    // The worker wakes at 80, 120, 160, 200 and 240 minutes.
+    context.advance(FORTY_MINUTES / 2);
+    for repeat in 2..=6 {
+        held_again(&context, repeat);
+        if repeat < 6 {
+            assert_eq!(typed(&context, &tiers).len(), 1, "repeat {repeat}");
+            context.advance(FORTY_MINUTES);
+        }
+    }
+    assert_eq!(
+        typed(&context, &tiers),
+        [
+            "T-1 has been working in the background for 60 minutes, holding again 1 time (1 command). Its result comes when that ends; `cf task finish T-1` takes what it said last now.",
+            "T-1 has been working in the background for 4 h 0 min, holding again 6 times (6 commands). Its result comes when that ends; `cf task finish T-1` takes what it said last now."
+        ]
+    );
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        typed(&context, &tiers).len(),
+        2,
+        "no duplicate at four hours"
+    );
+    let pastes = pasted_reminders(&context);
+    assert_eq!(pastes.len(), 2, "{pastes:?}");
+    assert!(pastes[1].contains(&typed(&context, &tiers)[1]));
+}
+
+#[test]
+fn a_worker_who_sends_its_own_note_starts_a_new_stretch_at_its_next_hold() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    held(&context, "The wait starts", 1);
+    context.advance(FORTY_MINUTES);
+    context.adapter.wake("zeus", ENDED);
+    context.pass().unwrap();
+    let assignee = tiers.assignee(1);
+    context
+        .ledger
+        .borrow_mut()
+        .note(
+            tiers.project.id,
+            &NewNote {
+                from: Some(assignee),
+                to: "chief".into(),
+                task: Some(1),
+                body: "A finding for the chief".into(),
+            },
+        )
+        .unwrap();
+    held(&context, "The next wait starts", 2);
+    context.advance(AN_HOUR - FORTY_MINUTES);
+    context.pass().unwrap();
+    assert!(typed(&context, &tiers).is_empty(), "the old hour is over");
+    context.advance(FORTY_MINUTES);
+    context.pass().unwrap();
+    assert_eq!(typed(&context, &tiers), ["T-1 has been working in the background for 60 minutes, holding again 0 times (2 commands). Its result comes when that ends; `cf task finish T-1` takes what it said last now."]);
+}
+
+#[test]
+fn a_worker_who_asks_and_is_answered_starts_a_new_stretch() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    held(&context, "The wait starts", 1);
+    context.advance(FORTY_MINUTES);
+    context.adapter.wake("zeus", ENDED);
+    context.pass().unwrap();
+    context
+        .adapter
+        .answer("zeus", "Should I continue? I'm waiting for your answer.");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "waiting");
+    let question = tiers
+        .task(1)
+        .messages
+        .into_iter()
+        .find(|m| m.kind == "question")
+        .unwrap();
+    context.answer(tiers.project.id, question.id, "Continue");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    held(&context, "The next wait starts", 1);
+    context.advance(AN_HOUR - FORTY_MINUTES);
+    context.pass().unwrap();
+    assert!(typed(&context, &tiers).is_empty(), "the old hour is over");
+    context.advance(FORTY_MINUTES);
+    context.pass().unwrap();
+    assert_eq!(typed(&context, &tiers), ["T-1 has been working in the background for 60 minutes, holding again 0 times (1 command). Its result comes when that ends; `cf task finish T-1` takes what it said last now."]);
+}
+
+#[test]
+fn a_worker_given_a_question_while_held_starts_a_new_stretch_when_it_holds_again() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    held(&context, "The wait starts", 1);
+    context.advance(FORTY_MINUTES);
+    let question = context.ask(
+        tiers.project.id,
+        "chief",
+        &tiers.assignee(1),
+        1,
+        "Check another host",
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.message(question.id).state, "delivered");
+    held(&context, "The other wait starts", 1);
+    context.advance(AN_HOUR - FORTY_MINUTES);
+    context.pass().unwrap();
+    assert!(typed(&context, &tiers).is_empty(), "the old hour is over");
+    context.advance(FORTY_MINUTES);
+    context.pass().unwrap();
+    assert_eq!(typed(&context, &tiers), ["T-1 has been working in the background for 60 minutes, holding again 0 times (1 command). Its result comes when that ends; `cf task finish T-1` takes what it said last now."]);
+}
+
+#[test]
+fn a_worker_whose_result_is_followed_by_more_work_starts_a_new_stretch() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    held(&context, "The wait starts", 1);
+    context.advance(FORTY_MINUTES);
+    context.adapter.wake("zeus", ENDED);
+    context.pass().unwrap();
+    context.adapter.answer("zeus", "First result");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    context
+        .ledger
+        .borrow_mut()
+        .reopen_task(tiers.project.id, 1, "chief", "Do more")
+        .unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    held(&context, "The next wait starts", 1);
+    context.advance(AN_HOUR - FORTY_MINUTES);
+    context.pass().unwrap();
+    assert!(typed(&context, &tiers).is_empty(), "the old hour is over");
+    context.advance(FORTY_MINUTES);
+    context.pass().unwrap();
+    assert_eq!(typed(&context, &tiers), ["T-1 has been working in the background for 60 minutes, holding again 0 times (1 command). Its result comes when that ends; `cf task finish T-1` takes what it said last now."]);
 }
 
 #[test]
@@ -153,7 +364,7 @@ fn a_turn_of_the_workers_own_that_leaves_it_held_again_says_what_runs_now_and_wr
 }
 
 #[test]
-fn one_note_is_typed_when_a_task_is_held_an_hour_with_no_turn_of_its_own_and_one_only() {
+fn a_single_long_hold_is_typed_at_one_hour_and_again_at_four_hours() {
     let context = Context::new();
     let tiers = zeus_at_work(&context);
     held(&context, "The soak test starts", 1);
@@ -168,7 +379,7 @@ fn one_note_is_typed_when_a_task_is_held_an_hour_with_no_turn_of_its_own_and_one
 
     context.advance(1_000);
     context.pass().unwrap();
-    let reminder = "T-1 has been working in the background for 60 minutes with no turn of its own (1 command). Its result comes when that ends; `cf task finish T-1` takes what it said last now.";
+    let reminder = "T-1 has been working in the background for 60 minutes, holding again 0 times (1 command). Its result comes when that ends; `cf task finish T-1` takes what it said last now.";
     assert_eq!(typed(&context, &tiers), [reminder]);
     assert_eq!(
         aside(&tiers).as_deref(),
@@ -176,26 +387,19 @@ fn one_note_is_typed_when_a_task_is_held_an_hour_with_no_turn_of_its_own_and_one
         "the line still says it"
     );
 
-    for _ in 0..3 {
+    for _ in 0..2 {
         context.advance(AN_HOUR);
         context.pass().unwrap();
     }
-    assert_eq!(typed(&context, &tiers), [reminder], "once for the hold");
-
-    // A turn of its own counts the hour again from the hold it leaves.
-    context.adapter.wake("zeus", ENDED);
-    context.pass().unwrap();
-    held(&context, "The soak test goes on", 1);
+    assert_eq!(typed(&context, &tiers), [reminder]);
     context.advance(AN_HOUR - 1_000);
     context.pass().unwrap();
     assert_eq!(typed(&context, &tiers).len(), 1);
     context.advance(1_000);
     context.pass().unwrap();
     assert_eq!(
-        typed(&context, &tiers).len(),
-        2,
-        "{:?}",
-        typed(&context, &tiers)
+        typed(&context, &tiers),
+        [reminder, "T-1 has been working in the background for 4 h 0 min, holding again 0 times (1 command). Its result comes when that ends; `cf task finish T-1` takes what it said last now."]
     );
 }
 

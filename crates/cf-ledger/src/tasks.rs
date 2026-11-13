@@ -136,10 +136,8 @@ pub(crate) fn aside_note(
     }
 }
 
-/// Note `aside`, shown and not typed, says `said` on its task's line from now (`$.shown`),
-/// and counts its time from now (`$.since`), with no reminder sent of it since
-/// ([`remind_of_aside`]): what it tells of goes on, in new words, and nothing is typed. The
-/// note's body stays as it was written. False where it no longer holds (its task moved on).
+/// A worker held again: update the line and count the re-hold without restarting the
+/// stretch or its reminder. The shown note's body stays as it was written.
 pub(crate) fn renew_aside(
     store: &mut Store,
     project_id: i64,
@@ -147,16 +145,40 @@ pub(crate) fn renew_aside(
     said: &str,
 ) -> Result<bool, LedgerError> {
     store.write(|store| {
-        let at = store.at();
         let renewed = store.db.execute(
             "UPDATE message
-                SET receipt = json_remove(json_set(receipt, '$.shown', ?1, '$.since', ?2), '$.reminded')
+                SET receipt = json_set(receipt, '$.shown', ?1, '$.reholds',
+                    COALESCE(json_extract(receipt, '$.reholds'), 0) + 1)
+              WHERE id = ?2 AND project_id = ?3 AND state = 'read' AND json_valid(receipt)
+                AND json_extract(receipt, '$.shown') IS NOT NULL
+                AND json_extract(receipt, '$.over') IS NULL",
+            params![said, aside, project_id],
+        )?;
+        Ok(renewed == 1)
+    })
+}
+
+/// The task exchanged a message, then held: the same shown note says the line, but
+/// this is the first hold of a new stretch. A previous reminder belongs to the old one.
+pub(crate) fn restart_aside(
+    store: &mut Store,
+    project_id: i64,
+    aside: i64,
+    said: &str,
+) -> Result<bool, LedgerError> {
+    store.write(|store| {
+        let at = store.at();
+        let restarted = store.db.execute(
+            "UPDATE message
+                SET receipt = json_remove(json_set(receipt, '$.shown', ?1, '$.since', ?2,
+                    '$.reholds', 0, '$.stretch', COALESCE(json_extract(receipt, '$.stretch'), 0) + 1),
+                    '$.reminded', '$.reminded_at')
               WHERE id = ?3 AND project_id = ?4 AND state = 'read' AND json_valid(receipt)
                 AND json_extract(receipt, '$.shown') IS NOT NULL
                 AND json_extract(receipt, '$.over') IS NULL",
             params![said, at, aside, project_id],
         )?;
-        Ok(renewed == 1)
+        Ok(restarted == 1)
     })
 }
 
@@ -172,7 +194,8 @@ pub(crate) fn show_again(
         let at = store.at();
         let again = store.db.execute(
             "UPDATE message
-                SET receipt = json_remove(json_set(receipt, '$.since', ?1), '$.over', '$.reminded')
+                SET receipt = json_remove(json_set(receipt, '$.since', ?1), '$.over',
+                    '$.reminded', '$.reminded_at', '$.reholds')
               WHERE id = ?2 AND project_id = ?3 AND state = 'read' AND sender_id IS NULL
                 AND kind = 'note' AND json_valid(receipt)
                 AND json_extract(receipt, '$.shown') IS NOT NULL
@@ -183,14 +206,16 @@ pub(crate) fn show_again(
     })
 }
 
-/// The one note sent (queued, and so typed) about what note `aside`, shown and not typed,
-/// says, where it has held too long to be left to the task's line: `note`, written once, as
-/// the receipt of `aside` remembers (`$.reminded`, the id of the note sent). None where it was
-/// sent already, or `aside` no longer holds.
+/// Send a due reminder of `aside`, provided the last reminder is still `previous` and
+/// the stretch is still `stretch`.
+/// The comparison and write are one ledger transaction, so two looks cannot send the
+/// same reminder. Its time and id stay in the receipt for the next interval.
 pub(crate) fn remind_of_aside(
     store: &mut Store,
     project_id: i64,
     aside: i64,
+    stretch: i64,
+    previous: Option<i64>,
     note: &crate::NewNote,
 ) -> Result<Option<MessageView>, LedgerError> {
     store.write(|store| {
@@ -199,8 +224,9 @@ pub(crate) fn remind_of_aside(
                WHERE id = ? AND project_id = ? AND state = 'read' AND json_valid(receipt)
                  AND json_extract(receipt, '$.shown') IS NOT NULL
                  AND json_extract(receipt, '$.over') IS NULL
-                 AND json_extract(receipt, '$.reminded') IS NULL)",
-            params![aside, project_id],
+                 AND COALESCE(json_extract(receipt, '$.stretch'), 0) = ?
+                 AND json_extract(receipt, '$.reminded') IS ?)",
+            params![aside, project_id, stretch, previous],
             |row| row.get(0),
         )?;
         if !holds {
@@ -208,8 +234,9 @@ pub(crate) fn remind_of_aside(
         }
         let sent = crate::messages::note(store, project_id, note)?;
         store.db.execute(
-            "UPDATE message SET receipt = json_set(receipt, '$.reminded', ?) WHERE id = ?",
-            params![sent.id, aside],
+            "UPDATE message SET receipt = json_set(receipt, '$.reminded', ?, '$.reminded_at', ?)
+             WHERE id = ?",
+            params![sent.id, sent.created_at, aside],
         )?;
         Ok(Some(sent))
     })

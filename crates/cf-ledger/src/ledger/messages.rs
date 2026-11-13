@@ -57,8 +57,8 @@ impl Ledger {
         crate::tasks::aside_note(&self.store, project_id, number)
     }
 
-    /// The shown note `aside` says `said` on its task's line from now, counted from now:
-    /// what it tells of goes on in new words, nothing typed. False where it no longer holds.
+    /// A worker held again: update the shown line and count the re-hold, without
+    /// restarting its stretch. False where the shown note no longer holds.
     pub fn renew_aside(
         &mut self,
         project_id: i64,
@@ -68,6 +68,17 @@ impl Ledger {
         crate::tasks::renew_aside(&mut self.store, project_id, aside, said)
     }
 
+    /// The worker exchanged a message and held: start a new stretch on the same line.
+    /// False where the shown note no longer holds.
+    pub fn restart_aside(
+        &mut self,
+        project_id: i64,
+        aside: i64,
+        said: &str,
+    ) -> Result<bool, LedgerError> {
+        crate::tasks::restart_aside(&mut self.store, project_id, aside, said)
+    }
+
     /// The shown note `aside`, whose line a move of its task ended, says it again on the
     /// task's line from now, nothing typed and no row more (a wait of many tries, told
     /// once). False where it holds already, or it was never shown.
@@ -75,18 +86,19 @@ impl Ledger {
         crate::tasks::show_again(&mut self.store, project_id, aside)
     }
 
-    /// `note`, sent once (queued, and so typed) about the shown note `aside` that has held
-    /// too long to be left to its task's line; none where it was sent already or `aside` no
-    /// longer holds.
+    /// Send a due reminder if `stretch` and `previous` still match the shown note.
+    /// None if a new stretch began, another look sent one, or the aside no longer holds.
     pub fn remind_of_aside(
         &mut self,
         project_id: i64,
         aside: i64,
+        stretch: i64,
+        previous: Option<i64>,
         note: &NewNote,
     ) -> Result<Option<MessageView>, LedgerError> {
         #[cfg(feature = "test-support")]
         self.watched("note", None)?;
-        crate::tasks::remind_of_aside(&mut self.store, project_id, aside, note)
+        crate::tasks::remind_of_aside(&mut self.store, project_id, aside, stretch, previous, note)
     }
 
     /// [`Ledger::tell_closed`], shown and not typed to a chief, `aside` its words on the
