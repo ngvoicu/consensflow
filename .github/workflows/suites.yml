@@ -24,7 +24,69 @@ jobs:
         name: Validate the suite request
         run: |
           python3 - <<'PY'
-          import json, os, re
+          import json, os, re, tomllib
+          from pathlib import Path
+
+          def plant_command_allowed(command):
+              # Plant tables can name commands as data. Keep this narrower than
+              # the plant runner: in particular no live, updater, release tool,
+              # ignored smoke, arbitrary script, or shell/eval command.
+              if not isinstance(command, list) or not command or not all(isinstance(w, str) and w for w in command):
+                  return False
+              if any(w in ('--ignored', '--include-ignored', '--run-ignored') for w in command):
+                  return False
+              if command[:2] == ['cargo', 'test']:
+                  return True
+              if command[:3] == ['cargo', 'nextest', 'run']:
+                  return True
+              if command[:4] == ['cargo', 'xtask', 'app', 'test']:
+                  return True
+              if command[:4] == ['cargo', 'xtask', 'test', 'clis']:
+                  return command[4:] in ([], ['--offline'])
+              if command[:3] == ['cargo', 'xtask', 'build-cf']:
+                  return command[3:] in ([], ['--offline'])
+              if command[:2] == ['node', '--test']:
+                  return not any(w in ('-e', '--eval', '-p', '--print') or w.startswith(('--eval=', '--print=')) for w in command[2:])
+              return command in ([ 'node', 'app/scripts/bundle-ui.mjs' ], [ 'node', 'app/node_modules/@playwright/test/cli.js', 'test' ]) or (
+                  command[:3] == ['node', 'app/node_modules/@playwright/test/cli.js', 'test']
+                  and not any(w.startswith('--config') for w in command[3:])
+              )
+
+          def validate_plants(family, names):
+              # Match the driver's OR-by-substring semantics, resolve aliases
+              # from the table and kit, and check prepare and rebuild too.
+              folder = Path('tests/plants') / family
+              try:
+                  kit = tomllib.loads((folder / 'kit.toml').read_text(encoding='utf-8'))
+                  tables, shared = kit['tables'], kit.get('run', {})
+                  if not isinstance(tables, list) or not tables or not isinstance(shared, dict):
+                      raise ValueError('invalid plant kit')
+                  if kit.get('rebuild') is not None and not plant_command_allowed(kit['rebuild']):
+                      raise ValueError('unsafe plant rebuild')
+                  matches = set()
+                  for table in tables:
+                      if not isinstance(table, str) or not re.fullmatch(r'[A-Za-z0-9_-]+', table):
+                          raise ValueError('invalid plant table')
+                      data = tomllib.loads((folder / (table + '.toml')).read_text(encoding='utf-8'))
+                      own = data.get('run', {})
+                      if not isinstance(own, dict) or set(own) & set(shared):
+                          raise ValueError('invalid plant run aliases')
+                      for plant in data['plant']:
+                          title = plant['name']
+                          found = [name for name in names if name in title]
+                          if not found:
+                              continue
+                          matches.update(found)
+                          commands = list(plant.get('prepare', []))
+                          for ref in plant['runs']:
+                              run = own.get(ref, shared.get(ref)) if isinstance(ref, str) else ref
+                              commands.append(run.get('command') if isinstance(run, dict) else run)
+                          if not commands or any(not plant_command_allowed(c) for c in commands):
+                              raise ValueError('unsafe plant command in ' + title)
+                  if matches != set(names):
+                      raise ValueError('a plant selector matched nothing')
+              except (OSError, KeyError, TypeError, ValueError, tomllib.TOMLDecodeError) as e:
+                  raise SystemExit('refusing plants: ' + str(e))
           with open('.ci-suite.json', encoding='utf-8') as f:
               request = json.load(f)
           if not isinstance(request, list) or not 1 <= len(request) <= 3:
@@ -52,6 +114,7 @@ jobs:
                       raise SystemExit('plants need a known family and one or more names')
                   if any(not isinstance(n, str) or not n.strip() or len(n) > 500 or n.startswith('-') or not n.isprintable() for n in names):
                       raise SystemExit('invalid plant name')
+                  validate_plants(family, names)
               elif family != '' or names != []:
                   raise SystemExit('only plants take a family or names')
               matrix.append(dict(suite=suite, runner=runner, family=family, names=json.dumps(names, ensure_ascii=True, separators=(',', ':')), id=i))
@@ -114,7 +177,7 @@ jobs:
           rustup target add x86_64-pc-windows-msvc
           cargo fetch --target x86_64-pc-windows-msvc
       - name: Install Chromium
-        if: matrix.suite == 'page-chromium'
+        if: contains(fromJSON('["page-chromium","plants"]'), matrix.suite)
         working-directory: app
         run: npx playwright install chromium
       - name: Install WebKit
