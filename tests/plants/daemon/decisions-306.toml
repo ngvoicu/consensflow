@@ -173,8 +173,8 @@ runs = ["cf-brief-file"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = "    let sent = if briefed && !text.is_empty() {"
-replace = "    let sent = if false && briefed && !text.is_empty() {"
+find = "    let sent = if (briefed || action == \"pause\") && !text.is_empty() {"
+replace = "    let sent = if false && (briefed || action == \"pause\") && !text.is_empty() {"
 
 [[plant]]
 name = "briefs: a last word longer than the reply shows is shown whole"

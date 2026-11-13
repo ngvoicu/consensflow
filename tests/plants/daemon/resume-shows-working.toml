@@ -38,7 +38,7 @@
 [run]
 engine-dispatcher-resumed-at-work = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resumed_at_work"]
 engine-lib-stops = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "stops::"]
-daemon-routes-verbs = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "a_tell_of_a_task_shown_working"]
+daemon-routes-verbs = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "a_pause_with_words_of_a_task_shown_working"]
 rig-regression-resumed-after-tell = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_resumed_after_a_tell_read_queued_while_its_window_worked_on_it::"], builds = true }
 
 [[plant]]
@@ -380,34 +380,19 @@ find = '        "working" | "waiting" => crate::tasks::resume_words_not_in(store
 replace = '        "working" => crate::tasks::resume_words_not_in(store, task)?.is_some(),'
 
 [[plant]]
-name = "resume shows working: a second tell pauses a task shown working and withdraws its words"
-meant = "a_tell_of_a_task_shown_working_for_the_words_that_resumed_it_is_kept_behind_them"
+name = "resume shows working: a second pause with words pauses a task shown working and withdraws its words"
+meant = "a_pause_with_words_of_a_task_shown_working_for_the_words_that_resumed_it_keeps_them_behind_them"
 runs = ["daemon-routes-verbs"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "            .resume_words_not_in(caller.project.id, number)?"
-replace = "            .resume_words_not_in(caller.project.id, number)?\n            .filter(|_| false)"
+find = "        .resume_words_not_in(caller.project.id, number)?"
+replace = "        .resume_words_not_in(caller.project.id, number)?\n        .filter(|_| false)"
 
-[[plant]]
-name = "resume shows working: the ledger keeps no tell for a task shown working"
-meant = "a_second_tell_keeps_the_resume_words_queued_and_rides_in_their_paste"
-runs = ["engine-dispatcher-resumed-at-work"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/told.rs"
-find = "        if crate::tasks::resume_words_not_in(store, &task)?.is_none() {"
-replace = "        if true {"
-
-[[plant]]
-name = "resume shows working: the ledger keeps a tell for any task"
-meant = "words_cannot_be_kept_for_a_window_that_has_the_words_that_resumed_its_task"
-runs = ["engine-dispatcher-resumed-at-work"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/told.rs"
-find = "        if crate::tasks::resume_words_not_in(store, &task)?.is_none() {"
-replace = "        if false {"
+# "the ledger keeps no tell for a task shown working" and "the ledger keeps a tell for any task" are
+# retired at T-1616: `tell_queued` keeps words for a task at work or waiting as for a queued one, so
+# there is no longer a refusal for one that has the words that resumed it for these plants to take
+# out or put in (the refusal for a task that is over is held by queued_tells.rs).
 
 [[plant]]
 name = "resume shows working: the window's own cf task done goes through for a waiting task"

@@ -169,8 +169,8 @@ runs = ["cf-tell"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = """    let text = if js::text(message.get("kind")) == "note" {"""
-replace = """    let text = if js::text(message.get("kind")) == "kept" {"""
+find = """"T-{number} is queued: m-{id} waits for @{window}'s window and goes in after its brief. Nothing is paused, and nothing waits for an answer.\""""
+replace = """"T-{number} is paused and m-{id} put to @{window}; its answer arrives as a message.\""""
 
 [[plant]]
 name = "tell queued: cf task cancel says nothing of the told words that went with it"
