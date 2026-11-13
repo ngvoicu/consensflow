@@ -595,6 +595,114 @@ fn the_human_cannot_be_a_backup_or_have_one() {
 }
 
 #[test]
+fn a_departed_link_still_cannot_name_itself_a_nonmember_or_another_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let first = project(
+        &mut ledger,
+        vec![
+            member("alpha", "worker", "standard"),
+            member("beta", "worker", "standard"),
+        ],
+    );
+    let second = project(&mut ledger, vec![member("other", "worker", "standard")]);
+    let alpha = id(&first, "alpha");
+    let beta = id(&first, "beta");
+    let left = "2026-11-13T00:00:00.000Z";
+    for (owner, backup) in [
+        (alpha, alpha),
+        (id(&first, "chief"), beta),
+        (id(&first, "human"), beta),
+        (id(&second, "other"), beta),
+        (alpha, id(&first, "human")),
+    ] {
+        let changed = ledger.sqlite().execute(
+            "UPDATE participant SET backup_of=?1, left_at=?2 WHERE id=?3",
+            rusqlite::params![owner, left, backup],
+        );
+        assert!(
+            changed.is_err(),
+            "a departed row cannot hold an invalid link"
+        );
+    }
+}
+
+#[test]
+fn an_inserted_departed_link_must_still_name_a_member_in_its_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let first = project(&mut ledger, vec![member("alpha", "worker", "standard")]);
+    let second = project(&mut ledger, vec![member("other", "worker", "standard")]);
+    let sql = "INSERT INTO participant(project_id,handle,role,roles,harness,tier,created_at,left_at,backup_of)
+               VALUES(?1,'rogue','worker','[\"worker\"]','codex','standard','2026-11-13','2026-11-13',?2)";
+    for owner in [
+        id(&first, "chief"),
+        id(&first, "human"),
+        id(&second, "other"),
+    ] {
+        assert!(ledger.sqlite().execute(sql, [first.id, owner]).is_err());
+    }
+}
+
+#[test]
+fn a_former_owner_cannot_become_a_backup_while_its_history_links_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let p = project(
+        &mut ledger,
+        vec![
+            member("alpha", "worker", "standard"),
+            member("gamma", "worker", "standard"),
+        ],
+    );
+    ledger
+        .add_backup(p.id, "alpha", &member("beta", "worker", "standard"))
+        .unwrap();
+    ledger.remove_backup(p.id, "alpha").unwrap();
+    let (alpha, gamma) = (id(&p, "alpha"), id(&p, "gamma"));
+    let make_backup = |ledger: &Ledger| {
+        ledger.sqlite().execute(
+            "UPDATE participant SET backup_of=? WHERE id=?",
+            [gamma, alpha],
+        )
+    };
+    assert!(
+        make_backup(&ledger).is_err(),
+        "an owner cannot also be a backup"
+    );
+    ledger.remove_member(p.id, "alpha").unwrap();
+    assert!(
+        make_backup(&ledger).is_err(),
+        "the same is true after it leaves"
+    );
+}
+
+#[test]
+fn a_former_owner_stays_a_member_in_its_project_while_history_links_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let first = project(&mut ledger, vec![member("alpha", "worker", "standard")]);
+    let second = project(&mut ledger, vec![member("other", "worker", "standard")]);
+    ledger
+        .add_backup(first.id, "alpha", &member("beta", "worker", "standard"))
+        .unwrap();
+    ledger.remove_backup(first.id, "alpha").unwrap();
+    let alpha = id(&first, "alpha");
+    let chief = ledger
+        .sqlite()
+        .execute("UPDATE participant SET role='chief' WHERE id=?", [alpha]);
+    assert!(chief.is_err(), "the historical owner cannot become a chief");
+    let moved = ledger.sqlite().execute(
+        "UPDATE participant SET project_id=? WHERE id=?",
+        [second.id, alpha],
+    );
+    assert!(
+        moved.is_err(),
+        "the historical owner cannot change projects"
+    );
+}
+
+#[test]
 fn a_backup_must_belong_to_the_same_project_as_a_live_member() {
     let dir = tempfile::tempdir().unwrap();
     let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();

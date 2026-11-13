@@ -11,9 +11,9 @@ runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vaca
 [[plant.edit]]
 file = "crates/cf-ledger/migrations/0038.sql"
 find = '''CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL'''
+WHEN NEW.backup_of IS NOT NULL'''
 replace = '''CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL AND 0'''
+WHEN NEW.backup_of IS NOT NULL AND 0'''
 
 [[plant]]
 name = "bkv ledger: a member can have two live backups"
@@ -32,7 +32,7 @@ runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vaca
 file = "crates/cf-ledger/migrations/0038.sql"
 find = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
     OR NEW.id = NEW.backup_of
@@ -41,7 +41,7 @@ BEGIN
         AND owner.project_id = NEW.project_id AND owner.member_id IS NULL'''
 replace = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
     OR NEW.id = NEW.backup_of
@@ -57,13 +57,13 @@ runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vaca
 file = "crates/cf-ledger/migrations/0038.sql"
 find = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
     OR NEW.id = NEW.backup_of'''
 replace = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')'''
 
@@ -75,25 +75,27 @@ runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vaca
 file = "crates/cf-ledger/migrations/0038.sql"
 find = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
     OR NEW.id = NEW.backup_of
     OR NOT EXISTS (
       SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
         AND owner.project_id = NEW.project_id AND owner.member_id IS NULL
-        AND owner.role NOT IN ('human', 'chief') AND owner.left_at IS NULL
+        AND owner.role NOT IN ('human', 'chief')
+        AND (NEW.left_at IS NOT NULL OR owner.left_at IS NULL)
         AND owner.backup_of IS NULL'''
 replace = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
     OR NEW.id = NEW.backup_of
     OR NOT EXISTS (
       SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
         AND owner.project_id = NEW.project_id AND owner.member_id IS NULL
-        AND owner.role NOT IN ('human', 'chief') AND owner.left_at IS NULL'''
+        AND owner.role NOT IN ('human', 'chief')
+        AND (NEW.left_at IS NOT NULL OR owner.left_at IS NULL)'''
 
 [[plant]]
 name = "bkv ledger: a chief can have a backup"
@@ -103,17 +105,18 @@ runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vaca
 file = "crates/cf-ledger/migrations/0038.sql"
 find = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
     OR NEW.id = NEW.backup_of
     OR NOT EXISTS (
       SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
         AND owner.project_id = NEW.project_id AND owner.member_id IS NULL
-        AND owner.role NOT IN ('human', 'chief') AND owner.left_at IS NULL'''
+        AND owner.role NOT IN ('human', 'chief')
+        AND (NEW.left_at IS NOT NULL OR owner.left_at IS NULL)'''
 replace = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
     OR NEW.id = NEW.backup_of
@@ -130,12 +133,12 @@ runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vaca
 file = "crates/cf-ledger/migrations/0038.sql"
 find = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')'''
 replace = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.role IN ('human', 'chief')'''
 
@@ -210,24 +213,26 @@ runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vaca
 file = "crates/cf-ledger/migrations/0038.sql"
 find = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
     OR NEW.id = NEW.backup_of
     OR NOT EXISTS (
       SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
         AND owner.project_id = NEW.project_id AND owner.member_id IS NULL
-        AND owner.role NOT IN ('human', 'chief') AND owner.left_at IS NULL'''
+        AND owner.role NOT IN ('human', 'chief')
+        AND (NEW.left_at IS NOT NULL OR owner.left_at IS NULL)'''
 replace = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
     OR NEW.id = NEW.backup_of
     OR NOT EXISTS (
       SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
         AND owner.project_id = NEW.project_id AND owner.member_id IS NULL
-        AND owner.role NOT IN ('chief') AND owner.left_at IS NULL'''
+        AND owner.role NOT IN ('chief')
+        AND (NEW.left_at IS NOT NULL OR owner.left_at IS NULL)'''
 
 [[plant]]
 name = "bkv ledger: a human can be a backup"
@@ -237,11 +242,67 @@ runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vaca
 file = "crates/cf-ledger/migrations/0038.sql"
 find = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')'''
 replace = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('chief')'''
+
+[[plant]]
+name = "bkv ledger: a departed row can acquire an invalid link"
+meant = "a_departed_link_still_cannot_name_itself_a_nonmember_or_another_project"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_departed_link_still_cannot_name_itself_a_nonmember_or_another_project"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0038.sql"
+find = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL'''
+replace = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL'''
+
+[[plant]]
+name = "bkv ledger: an inserted departed row can acquire an invalid link"
+meant = "an_inserted_departed_link_must_still_name_a_member_in_its_project"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "an_inserted_departed_link_must_still_name_a_member_in_its_project"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0038.sql"
+find = '''CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant
+WHEN NEW.backup_of IS NOT NULL'''
+replace = '''CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL'''
+
+[[plant]]
+name = "bkv ledger: an owner in history can cease to be a member"
+meant = "a_former_owner_stays_a_member_in_its_project_while_history_links_it"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_former_owner_stays_a_member_in_its_project_while_history_links_it"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0038.sql"
+find = "WHEN EXISTS (SELECT 1 FROM participant child WHERE child.backup_of = OLD.id)"
+replace = "WHEN EXISTS (SELECT 1 FROM participant child WHERE child.backup_of = OLD.id AND child.left_at IS NULL)"
+
+[[plant]]
+name = "bkv ledger: an owner in history can become a backup"
+meant = "a_former_owner_cannot_become_a_backup_while_its_history_links_it"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_former_owner_cannot_become_a_backup_while_its_history_links_it"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0038.sql"
+find = "WHEN EXISTS (SELECT 1 FROM participant child WHERE child.backup_of = OLD.id)"
+replace = "WHEN EXISTS (SELECT 1 FROM participant child WHERE child.backup_of = OLD.id AND child.left_at IS NULL)"
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0038.sql"
+find = '''    OR EXISTS (SELECT 1 FROM participant child
+      WHERE child.backup_of = NEW.id)
+  THEN RAISE(ABORT, 'invalid backup relationship') END;
+END;
+
+-- A historical owner'''
+replace = '''    OR EXISTS (SELECT 1 FROM participant child
+      WHERE child.backup_of = NEW.id AND child.left_at IS NULL)
+  THEN RAISE(ABORT, 'invalid backup relationship') END;
+END;
+
+-- A historical owner'''

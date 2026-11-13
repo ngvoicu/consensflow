@@ -21,48 +21,52 @@ WHERE out_until IS NOT NULL;
 CREATE UNIQUE INDEX participant_one_live_backup ON participant(backup_of)
   WHERE backup_of IS NOT NULL AND left_at IS NULL;
 
--- Protect the relationship wherever a row is written, including a rejoin.
--- Departed rows keep their old links for history; only a live link is checked.
+-- Protect every relationship, including one kept by a departed row for history.
+-- A live backup additionally needs its owner to be live.
 CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
     OR NEW.id = NEW.backup_of
     OR NOT EXISTS (
       SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
         AND owner.project_id = NEW.project_id AND owner.member_id IS NULL
-        AND owner.role NOT IN ('human', 'chief') AND owner.left_at IS NULL
+        AND owner.role NOT IN ('human', 'chief')
+        AND (NEW.left_at IS NOT NULL OR owner.left_at IS NULL)
         AND owner.backup_of IS NULL
     )
     OR EXISTS (SELECT 1 FROM participant child
-      WHERE child.backup_of = NEW.id AND child.left_at IS NULL)
+      WHERE child.backup_of = NEW.id)
   THEN RAISE(ABORT, 'invalid backup relationship') END;
 END;
 
 CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+WHEN NEW.backup_of IS NOT NULL
 BEGIN
   SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
     OR NEW.id = NEW.backup_of
     OR NOT EXISTS (
       SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
         AND owner.project_id = NEW.project_id AND owner.member_id IS NULL
-        AND owner.role NOT IN ('human', 'chief') AND owner.left_at IS NULL
+        AND owner.role NOT IN ('human', 'chief')
+        AND (NEW.left_at IS NOT NULL OR owner.left_at IS NULL)
         AND owner.backup_of IS NULL
     )
     OR EXISTS (SELECT 1 FROM participant child
-      WHERE child.backup_of = NEW.id AND child.left_at IS NULL)
+      WHERE child.backup_of = NEW.id)
   THEN RAISE(ABORT, 'invalid backup relationship') END;
 END;
 
--- A live primary cannot leave, become a backup or cease to be a member while
--- a live backup still names it.  The ledger takes the backup away first.
+-- A historical owner remains a member in its project and cannot become a
+-- backup. It can leave only after its live backup has left.
 CREATE TRIGGER participant_backup_owner_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
-WHEN EXISTS (SELECT 1 FROM participant child WHERE child.backup_of = OLD.id AND child.left_at IS NULL)
-  AND (NEW.left_at IS NOT NULL OR NEW.backup_of IS NOT NULL OR NEW.member_id IS NOT NULL
-       OR NEW.role IN ('human', 'chief') OR NEW.project_id != OLD.project_id)
+WHEN EXISTS (SELECT 1 FROM participant child WHERE child.backup_of = OLD.id)
+  AND (NEW.backup_of IS NOT NULL OR NEW.member_id IS NOT NULL
+       OR NEW.role IN ('human', 'chief') OR NEW.project_id != OLD.project_id
+       OR (NEW.left_at IS NOT NULL AND EXISTS (SELECT 1 FROM participant child
+            WHERE child.backup_of = OLD.id AND child.left_at IS NULL)))
 BEGIN
   SELECT RAISE(ABORT, 'member still has a backup');
 END;
