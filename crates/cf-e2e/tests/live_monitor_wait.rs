@@ -1245,6 +1245,10 @@ mod tests {
         claim_fixture(None).unwrap();
         // A second claim of the name the first made is refused as well.
         assert!(claim_fixture(Some(&new.display().to_string())).is_err());
+        cf_e2e::door::again_under_audit(
+            "tests::a_fixture_file_a_caller_names_is_made_new_and_refused_where_anything_is_there",
+        )
+        .unwrap();
     }
 
     #[test]

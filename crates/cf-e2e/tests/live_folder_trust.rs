@@ -1536,6 +1536,7 @@ mod tests {
             .any(|project| project["hasTrustDialogAccepted"] == true));
         pre_approve(own.path()).unwrap();
         assert!(own.path().join(".claude/settings.json").is_file());
+        cf_e2e::door::again_under_audit("tests::the_yes_and_the_grants_of_a_case_are_written_in_what_the_run_made_and_a_callers_config_is_not").unwrap();
     }
 
     #[test]

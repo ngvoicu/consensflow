@@ -309,6 +309,7 @@ mod tests {
             assert!(kept.starts_with(&parent), "{kept:?}");
         }
         layout.untouched().unwrap();
+        cf_e2e::door::again_under_audit("tests::two_runs_keep_their_image_each_in_a_folder_of_its_own_and_an_earlier_one_is_as_it_was").unwrap();
     }
 
     #[test]

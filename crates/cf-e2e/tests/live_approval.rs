@@ -250,7 +250,13 @@ mod tests {
         // Taken away with the run, the earlier run's left.
         let (a, b) = (first.path().to_path_buf(), second.path().to_path_buf());
         drop((first, second));
-        assert!(!a.exists() && !b.exists());
+        if cf_e2e::door::Door::audit_asked() {
+            // A say-only run takes nothing away: its folders stay, and the earlier run's are as they were.
+            assert!(a.is_dir() && b.is_dir());
+        } else {
+            assert!(!a.exists() && !b.exists());
+        }
         layout.untouched().unwrap();
+        cf_e2e::door::again_under_audit("tests::two_runs_each_make_the_folder_of_their_wrapper_new_and_an_earlier_ones_is_as_it_was").unwrap();
     }
 }

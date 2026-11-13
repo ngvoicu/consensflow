@@ -421,6 +421,7 @@ fn a_login_copied_from_a_folder_the_caller_made_is_read_there_and_the_folder_is_
     // What the run held the login to when it ended: as it was.
     login.finish().unwrap();
     assert_untouched(&kept);
+    crate::door::again_under_audit("live::login::tests::a_login_copied_from_a_folder_the_caller_made_is_read_there_and_the_folder_is_never_written").unwrap();
 }
 
 #[test]
@@ -445,6 +446,7 @@ fn the_callers_folder_is_held_to_what_it_was_and_a_login_of_it_that_moved_fails_
     let said = login.finish().unwrap_err().to_string();
     assert!(said.contains(".credentials.json"), "{said}");
     assert!(!said_anywhere(&said), "{said}");
+    crate::door::again_under_audit("live::login::tests::the_callers_folder_is_held_to_what_it_was_and_a_login_of_it_that_moved_fails_the_run").unwrap();
 }
 
 #[test]
@@ -499,6 +501,7 @@ fn a_callers_copy_without_a_refresh_token_is_used_and_one_with_no_login_or_no_fi
     )
     .unwrap();
     assert!(login.folder_at(at(NOW)).is_err());
+    crate::door::again_under_audit("live::login::tests::a_callers_copy_without_a_refresh_token_is_used_and_one_with_no_login_or_no_file_is_refused").unwrap();
 }
 
 #[test]

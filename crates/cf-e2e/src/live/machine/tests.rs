@@ -663,6 +663,7 @@ fn a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed()
         assert!(seed_claude_trust(made.path(), home.path()).is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), "{}");
     }
+    crate::door::again_under_audit("live::machine::tests::a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed").unwrap();
 }
 
 #[test]

@@ -834,3 +834,26 @@ fn a_set_of_processes_is_grounded_only_by_the_descent() {
     both.add(Grounded::stand_in_job(&job, "/rig/jobs/7.job", 300).unwrap());
     assert_eq!(both.len(), 3, "a process is held once");
 }
+
+/// A test that is run again as a say-only run, as the fixture tests are: in the run it starts the
+/// door only says, and it said so in the file the run was given.
+#[test]
+fn a_test_run_again_under_audit_is_run_by_a_say_only_door_and_held_to_a_pass() {
+    const THIS: &str =
+        "door::tests::a_test_run_again_under_audit_is_run_by_a_say_only_door_and_held_to_a_pass";
+    if Door::audit_asked() {
+        // The run that was started: its door is the one that only says.
+        assert!(Door::of_run().says_only());
+        assert!(Door::of_run().says_in().is_some_and(Path::is_file));
+        assert!(again_under_audit(THIS).is_ok());
+        return;
+    }
+    assert!(!Door::of_run().says_only());
+    again_under_audit(THIS).unwrap();
+    // A name no test has is run as no test: it passes nothing, and that is said.
+    let failed = again_under_audit("door::tests::there_is_no_such_test").unwrap_err();
+    assert!(
+        failed.to_string().contains("did not pass"),
+        "a name that is no test passed: {failed}"
+    );
+}

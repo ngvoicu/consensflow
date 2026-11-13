@@ -1121,6 +1121,7 @@ fn a_pi_run_is_set_in_its_own_folder_and_the_owners_pi_settings_and_the_one_a_ca
         "a file of the owner's or a caller's was written"
     );
     assert!(isolation.finish().is_ok());
+    crate::door::again_under_audit("live::isolation::tests::a_pi_run_is_set_in_its_own_folder_and_the_owners_pi_settings_and_the_one_a_caller_names_are_as_they_were").unwrap();
 }
 
 #[cfg(unix)]

@@ -514,4 +514,5 @@ fn what_a_caller_names_for_an_export_gets_a_new_folder_of_the_runs_own_and_is_ne
     let file = theirs.join("notes.txt");
     assert!(export_folder(Some(&file.display().to_string()), "x").is_err());
     layout.untouched().unwrap();
+    crate::door::again_under_audit("live::tests::what_a_caller_names_for_an_export_gets_a_new_folder_of_the_runs_own_and_is_never_written_into").unwrap();
 }

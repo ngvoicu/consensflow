@@ -481,6 +481,7 @@ mod tests {
             children, 3,
             "the earlier run's folder and one for each of two runs"
         );
+        cf_e2e::door::again_under_audit("tests::the_records_a_run_keeps_go_in_a_new_folder_of_its_own_and_an_earlier_runs_are_as_they_were").unwrap();
     }
 
     #[test]

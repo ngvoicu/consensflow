@@ -409,6 +409,7 @@ mod tests {
         assert!(known.contains(MARKETPLACE), "{known}");
         // The owner's marketplace is as it was, byte for byte.
         layout.untouched().unwrap();
+        cf_e2e::door::again_under_audit("tests::the_marketplace_is_copied_into_the_config_the_run_made_and_the_owners_is_read_only").unwrap();
     }
 
     #[test]
@@ -432,5 +433,9 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(&record).unwrap(), "{\"projects\":{}}");
         layout.untouched().unwrap();
+        cf_e2e::door::again_under_audit(
+            "tests::a_claude_config_a_caller_named_is_never_the_one_the_marketplace_is_written_in",
+        )
+        .unwrap();
     }
 }

@@ -349,6 +349,37 @@ mod tests {
     }
 
     #[test]
+    fn a_reports_folder_that_holds_an_earlier_runs_evidence_is_never_written_into() {
+        // `CF_EVIDENCE` names a folder an earlier run kept its evidence in, as CI reuses one.
+        let mut layout = crate::live::layout::Layout::new().unwrap();
+        let reports = layout.home().join("evidence");
+        layout
+            .plant_tree(
+                &reports,
+                &[
+                    ("r1/verdict.txt", "an earlier run's verdict"),
+                    ("r1/checks.json", "[]"),
+                    ("notes.txt", "a person's note"),
+                ],
+            )
+            .unwrap();
+        // A run id that is there is refused before a file is written, and the folder is as it was.
+        assert!(Evidence::under(&reports, "r1").is_err());
+        layout.untouched().unwrap();
+        // A new id is made as a folder of the run's own, and the run writes below it only.
+        let evidence = Evidence::under(&reports, "r2").unwrap();
+        evidence
+            .json("manifest.json", &json!({ "board": 0 }))
+            .unwrap();
+        assert!(reports.join("r2/manifest.json").is_file());
+        layout.untouched().unwrap();
+        crate::door::again_under_audit(
+            "matrix::evidence::tests::a_reports_folder_that_holds_an_earlier_runs_evidence_is_never_written_into",
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn the_evidence_is_written_in_a_folder_of_the_runs_own_with_a_verdict_a_person_reads() {
         let reports = crate::door::made("cf-test-").unwrap();
         let evidence = Evidence::under(reports.path(), "r1").unwrap();

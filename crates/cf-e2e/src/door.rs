@@ -45,7 +45,8 @@
 //! made or written stops before it acts. The programs the run starts are given the same file
 //! ([`Door::child_vars`]) and add to it. A case that needs an ending to have happened stops there
 //! and fails, so that no say-only run passes. The tests make a door of their own
-//! ([`Door::asked`]) and never set the variable.
+//! ([`Door::asked`]) and never set the variable in their own process: a test of what a caller names
+//! for the run to write is run again in a process that has it set ([`again_under_audit`]).
 //!
 //! This is the kit's door. The product's door (`live::members::door`, what a member's lane
 //! shows) is another thing.
@@ -61,8 +62,10 @@ use crate::live::members::{
     Machine, Pause, RunFolder, Running, ThisMachine,
 };
 
+mod again;
 mod writes;
 
+pub use again::again_under_audit;
 #[cfg(unix)]
 pub use writes::symlink;
 pub use writes::{
