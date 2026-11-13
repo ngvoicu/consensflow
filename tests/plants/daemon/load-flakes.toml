@@ -117,9 +117,9 @@ find = '''
 replace = '''
         {
             let file = self.beside("pid");
-            fs::write(&file, "").map_err(|failed| failed.to_string())?;
+            cf_e2e::door::write(&file, "").map_err(|failed| failed.to_string())?;
             std::thread::sleep(std::time::Duration::from_millis(300));
-            fs::write(&file, std::process::id().to_string()).map_err(|failed| failed.to_string())?;
+            cf_e2e::door::write(&file, std::process::id().to_string()).map_err(|failed| failed.to_string())?;
         }
 '''
 

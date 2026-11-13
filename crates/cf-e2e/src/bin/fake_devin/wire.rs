@@ -455,7 +455,7 @@ mod tests {
 
     #[test]
     fn a_turn_is_said_as_the_daemon_reads_one_from_the_prompt_to_the_cause_that_ends_it() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let path = folder.path().join("wire.jsonl");
         let mut wire = Wire::open(&path, "calm-river").unwrap();
         wire.announce("bypass").unwrap();
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn a_turn_ended_in_a_model_request_names_it_as_devin_3000_11_does() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let path = folder.path().join("wire.jsonl");
         let mut wire = Wire::open(&path, "calm-river").unwrap();
         wire.ended_in("complete", "client-1", "request-9").unwrap();
@@ -518,7 +518,7 @@ mod tests {
 
     #[test]
     fn a_stamped_turn_is_said_as_devin_3000_11_says_it_and_a_replay_with_no_stream_and_no_end() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let path = folder.path().join("wire.jsonl");
         let mut wire = Wire::open(&path, "calm-river").unwrap().stamped(true);
         wire.prompt(2, "hello", "client-1").unwrap();
@@ -577,7 +577,7 @@ mod tests {
         // Devin 3000.12.43's lines of a turn (T-1417, run 2, 2026-11-11): the message said
         // back with its client message, stamped; streamed thought and words; the end. No
         // `session_info_update` with a `statusEnum`, before the turn or at its end.
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let path = folder.path().join("wire.jsonl");
         let mut wire = Wire::open(&path, "calm-river")
             .unwrap()
@@ -640,7 +640,7 @@ mod tests {
 
     #[test]
     fn a_cancel_is_a_request_of_the_tui_and_the_turn_it_ends_says_so() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let path = folder.path().join("wire.jsonl");
         let mut wire = Wire::open(&path, "calm-river").unwrap();
         wire.cancel().unwrap();
@@ -652,7 +652,7 @@ mod tests {
 
     #[test]
     fn a_cancel_of_devin_3000_12_is_the_turn_named_and_its_cause_with_no_request_of_the_tui() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let path = folder.path().join("wire.jsonl");
         let mut wire = Wire::open(&path, "calm-river")
             .unwrap()
@@ -681,7 +681,7 @@ mod tests {
 
     #[test]
     fn a_command_the_turn_left_goes_on_reporting_in_records_of_a_tool_after_the_turn_ended() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let path = folder.path().join("wire.jsonl");
         let mut wire = Wire::open(&path, "calm-river").unwrap();
         wire.called("sleep 600", "client-1").unwrap();
@@ -704,7 +704,7 @@ mod tests {
 
     #[test]
     fn a_change_of_mode_and_a_refused_call_are_said_as_devin_says_them() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let path = folder.path().join("wire.jsonl");
         let mut wire = Wire::open(&path, "calm-river").unwrap();
         wire.mode_changed("bypass").unwrap();
@@ -736,7 +736,7 @@ mod tests {
 
     #[test]
     fn a_log_that_is_there_is_gone_on_with_and_not_written_over() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let path = folder.path().join("wire.jsonl");
         Wire::open(&path, "calm-river")
             .unwrap()

@@ -561,7 +561,7 @@ mod tests {
 
     #[test]
     fn two_windows_that_append_at_once_leave_two_whole_lines() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let start = std::sync::Arc::new(std::sync::Barrier::new(2));
         let writers: Vec<_> = ["/work/first", "/work/second"]
             .into_iter()
@@ -590,8 +590,8 @@ mod tests {
     /// it, or on Windows its name in capitals.
     #[test]
     fn a_folder_trusted_under_one_spelling_is_trusted_under_another() {
-        let config = tempfile::tempdir().unwrap();
-        let place = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
+        let place = cf_e2e::door::made("cf-test-").unwrap();
         let folder = place.path().join("a-repository");
         fs::create_dir(&folder).unwrap();
         #[cfg(unix)]

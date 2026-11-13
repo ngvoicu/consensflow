@@ -88,11 +88,11 @@ mod tests {
         wire: Wire,
         store: Store,
         screen: Vec<u8>,
-        folder: tempfile::TempDir,
+        folder: cf_e2e::door::Made,
     }
 
     fn parts(bypass: bool) -> Parts {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let wire = Wire::open(&folder.path().join("wire.jsonl"), "calm-river").unwrap();
         let store = Store::open(&folder.path().join("sessions.db"), "calm-river").unwrap();
         Parts {

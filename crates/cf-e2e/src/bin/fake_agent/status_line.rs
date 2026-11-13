@@ -225,9 +225,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_run_says_how_long_it_lived_beside_its_pid_once_it_has_ended() {
-        let home = tempfile::tempdir().unwrap();
+        let home = cf_e2e::door::made("cf-test-").unwrap();
         let jobs = Jobs::new(&home.path().join("consensflow"), 7);
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let script = StatusLine::InAGroupOfItsOwn.install(config.path()).unwrap();
         StatusLine::InAGroupOfItsOwn.run(&script, &jobs).unwrap();
         let folder = home.path().join("jobs");
@@ -257,11 +257,11 @@ mod tests {
     {
         use std::os::unix::fs::PermissionsExt;
 
-        let machine = tempfile::tempdir().unwrap();
+        let machine = cf_e2e::door::made("cf-test-").unwrap();
         let slow = machine.path().join("git");
         fs::write(&slow, "#!/bin/sh\n/bin/sleep 3\necho machine\n").unwrap();
         fs::set_permissions(&slow, fs::Permissions::from_mode(0o755)).unwrap();
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let script = StatusLine::InAGroupOfItsOwn.install(config.path()).unwrap();
         let ran = Run::new("/bin/bash")
             .arg(&script)

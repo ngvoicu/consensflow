@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn a_record_has_the_session_the_version_the_time_and_a_uuid_before_its_own_fields() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "sess-1", 4242).unwrap();
         records
             .append(
@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn a_conversation_cut_in_a_turn_is_resumed_waiting_and_closes_it_just_before_the_next_message()
     {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let file = config.path().join("projects/integration/sess-1.jsonl");
         let mut cut = Records::new(config.path(), "sess-1", 11).unwrap();
         cut.append(11, user("first")).unwrap();
@@ -377,7 +377,7 @@ mod tests {
     /// of the record before it, closes no turn of it, and writes what it is given from there.
     #[test]
     fn a_window_that_begins_its_record_anew_keeps_only_what_it_is_given_after() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let file = config.path().join("projects/integration/s.jsonl");
         let mut first = Records::new(config.path(), "s", 1).unwrap();
         first.append(1, user("first")).unwrap();
@@ -393,7 +393,7 @@ mod tests {
 
     #[test]
     fn a_conversation_that_ended_in_an_answer_or_in_an_interrupt_has_no_turn_to_close() {
-        let answered = tempfile::tempdir().unwrap();
+        let answered = cf_e2e::door::made("cf-test-").unwrap();
         let mut first = Records::new(answered.path(), "s", 1).unwrap();
         first.append(1, user("first")).unwrap();
         first
@@ -409,7 +409,7 @@ mod tests {
             ["user", "assistant", "user"]
         );
 
-        let interrupted = tempfile::tempdir().unwrap();
+        let interrupted = cf_e2e::door::made("cf-test-").unwrap();
         let mut first = Records::new(interrupted.path(), "s", 1).unwrap();
         first.append(1, user("first")).unwrap();
         first
@@ -426,7 +426,7 @@ mod tests {
         );
 
         // A conversation with nothing in it has nothing cut either.
-        let fresh = tempfile::tempdir().unwrap();
+        let fresh = cf_e2e::door::made("cf-test-").unwrap();
         let mut window = Records::new(fresh.path(), "s", 1).unwrap();
         window.append(1, user("first")).unwrap();
         assert_eq!(
@@ -452,7 +452,7 @@ mod tests {
 
     #[test]
     fn a_record_cut_short_and_the_next_appended_to_it_are_one_line_that_is_not_json() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "sess-1", 4242).unwrap();
         let said =
             |text: &str| json!({ "type": "user", "message": { "role": "user", "content": text } });
@@ -494,7 +494,7 @@ mod tests {
 
     #[test]
     fn the_status_is_the_pid_the_session_and_what_the_window_is_doing_and_is_written_over() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let records = Records::new(config.path(), "sess-1", 4242).unwrap();
         assert_eq!(
             records.status_file(),
@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn a_window_whose_folders_were_taken_makes_them_again_where_it_writes_as_claude_does() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "sess-1", 4242).unwrap();
         // The folder of the conversations goes with a rig of another run that ends, and the
         // folder of the status files with whoever tidies the machine's Claude folder.
@@ -529,7 +529,7 @@ mod tests {
 
     #[test]
     fn the_processes_a_window_writes_down_go_to_the_files_beside_the_home_in_order() {
-        let root = tempfile::tempdir().unwrap();
+        let root = cf_e2e::door::made("cf-test-").unwrap();
         note_process(root.path(), 11, "a", Some("when-a")).unwrap();
         note_process(root.path(), 22, "b", Some("when-b")).unwrap();
         note_process(root.path(), 33, "c", None).unwrap();

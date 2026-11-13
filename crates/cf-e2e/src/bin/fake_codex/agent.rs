@@ -1002,7 +1002,7 @@ mod tests {
 
     #[test]
     fn a_thread_begins_with_the_developer_instructions_its_server_has_and_writes_them_once() {
-        let home = tempfile::tempdir().unwrap();
+        let home = cf_e2e::door::made("cf-test-").unwrap();
         let agent = server(home.path(), "thread-1", "the role as it was");
         agent.turn("first");
         agent.turn("second");
@@ -1026,7 +1026,7 @@ mod tests {
     #[test]
     fn a_thread_whose_start_names_developer_instructions_begins_with_them_in_place_of_its_servers()
     {
-        let home = tempfile::tempdir().unwrap();
+        let home = cf_e2e::door::made("cf-test-").unwrap();
         let agent = server(
             home.path(),
             "thread-1",
@@ -1039,7 +1039,7 @@ mod tests {
             ["the role its start names"]
         );
         // A start that names none, or names them as null, begins with the server's.
-        let other = tempfile::tempdir().unwrap();
+        let other = cf_e2e::door::made("cf-test-").unwrap();
         let agent = server(
             other.path(),
             "thread-2",
@@ -1056,7 +1056,7 @@ mod tests {
     #[test]
     fn a_resumed_thread_goes_on_in_its_rollout_with_the_instructions_it_began_with_whatever_its_server_has_now(
     ) {
-        let home = tempfile::tempdir().unwrap();
+        let home = cf_e2e::door::made("cf-test-").unwrap();
         let before = server(home.path(), "thread-1", "the role as it was");
         before.turn("first");
         let began = records(home.path(), "thread-1").len();
@@ -1124,7 +1124,7 @@ mod tests {
     fn a_compaction_rebuilds_the_developer_message_from_the_instructions_of_the_session_that_compacts(
     ) {
         // A first window: its thread began with the role, and a compaction keeps it once.
-        let home = tempfile::tempdir().unwrap();
+        let home = cf_e2e::door::made("cf-test-").unwrap();
         let first = server(home.path(), "thread-1", "the configured");
         first.started(&json!({ "developerInstructions": ROLE }));
         first.turn("Reply with exactly: ONE");
@@ -1206,7 +1206,7 @@ mod tests {
 
     #[test]
     fn a_thread_that_had_no_turn_has_no_rollout_and_no_instructions_yet_and_cannot_be_resumed() {
-        let home = tempfile::tempdir().unwrap();
+        let home = cf_e2e::door::made("cf-test-").unwrap();
         let before = server(home.path(), "thread-1", "the role as it was");
         // Nothing was said in it: its server has written no rollout of it, and the
         // server of another window finds nothing to go on in.

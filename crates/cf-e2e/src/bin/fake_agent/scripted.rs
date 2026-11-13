@@ -149,8 +149,8 @@ mod tests {
     const BRIEF_TWO: &str = "[ConsensFlow m-9 · T-3 · task from @chief]\nReview T-1 again.";
 
     /// A folder of a run with the results `results`.
-    fn run(results: &[&str]) -> tempfile::TempDir {
-        let folder = tempfile::tempdir().unwrap();
+    fn run(results: &[&str]) -> cf_e2e::door::Made {
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         fs::write(folder.path().join(MARKER), "").unwrap();
         for (at, result) in results.iter().enumerate() {
             fs::write(folder.path().join(format!("{}.md", at + 1)), result).unwrap();
@@ -246,7 +246,7 @@ mod tests {
     }
 
     /// A folder of a run with the results `results`, the third of which has files.
-    fn work() -> (tempfile::TempDir, tempfile::TempDir) {
+    fn work() -> (cf_e2e::door::Made, cf_e2e::door::Made) {
         let folder = run(&["page one", "page two", "pages three"]);
         for (number, files) in [
             (1, vec![("site/en/assessment.html", "<p>0 to 100</p>")]),
@@ -265,7 +265,7 @@ mod tests {
                 fs::write(at, text).unwrap();
             }
         }
-        (folder, tempfile::tempdir().unwrap())
+        (folder, cf_e2e::door::made("cf-test-").unwrap())
     }
 
     #[test]
@@ -296,7 +296,7 @@ mod tests {
     #[test]
     fn a_result_without_files_writes_none_and_a_message_that_is_no_brief_writes_none() {
         let folder = run(&["a review"]);
-        let window = tempfile::tempdir().unwrap();
+        let window = cf_e2e::door::made("cf-test-").unwrap();
         answer(folder.path(), BRIEF_ONE, window.path()).unwrap();
         answer(folder.path(), "hello", window.path()).unwrap();
         assert_eq!(fs::read_dir(window.path()).unwrap().count(), 0);
