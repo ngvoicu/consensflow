@@ -420,8 +420,12 @@ meant = "a_member_who_leaves_takes_its_backup_and_the_backups_work_with_it"
 runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backups::"]]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''                left.extend(this.rows_of(&found, backup));'''
-replace = '''                let _ = backup;'''
+find = '''            left.extend(this.backup_rows(&found, member.id));'''
+replace = '''            let _ = this.backup_rows(&found, member.id);'''
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''            left.extend(removed.departed.iter().copied());'''
+replace = '''            let _ = &removed.departed;'''
 
 [[plant]]
 name = "bkv engine: a backup taken off the staff keeps its window"
@@ -438,8 +442,8 @@ meant = "a_backup_replaced_closes_the_old_ones_window_and_the_new_one_takes_work
 runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backups::"]]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''            self.forget(&self.rows_of(&before, old)).await?;'''
-replace = '''            let _ = old;'''
+find = '''        self.forget(&old).await?;'''
+replace = '''        let _ = &old;'''
 
 [[plant]]
 name = "bkv engine: a busy mark forgets its kind"
@@ -459,6 +463,7 @@ file = "crates/cf-engine/src/dispatcher.rs"
 find = '''            Some(Unwell::Busy(_)) => HoldKind::Busy,'''
 replace = '''            Some(Unwell::Busy(_)) => HoldKind::Quota,'''
 
+[[plant]]
 name = "bkv review: a non-image backup is accepted for a designer"
 meant = "review_a_designer_refuses_a_non_image_backup"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "review_a_designer_refuses_a_non_image_backup"]]
