@@ -79,6 +79,18 @@ impl Ledger {
         crate::tasks::restart_aside(&mut self.store, project_id, aside, said)
     }
 
+    /// Carry an existing hold stretch into a newly shown note after a typed hold.
+    pub fn carry_aside(
+        &mut self,
+        project_id: i64,
+        aside: i64,
+        since: &str,
+        reholds: i64,
+        previous: Option<(i64, &str)>,
+    ) -> Result<bool, LedgerError> {
+        crate::tasks::carry_aside(&mut self.store, project_id, aside, since, reholds, previous)
+    }
+
     /// The shown note `aside`, whose line a move of its task ended, says it again on the
     /// task's line from now, nothing typed and no row more (a wait of many tries, told
     /// once). False where it holds already, or it was never shown.

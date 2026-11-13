@@ -182,6 +182,31 @@ pub(crate) fn restart_aside(
     })
 }
 
+/// A newly shown hold continues a stretch that began in an immediately typed hold.
+/// Carry its time, count and last reminder without changing the new note's line.
+pub(crate) fn carry_aside(
+    store: &mut Store,
+    project_id: i64,
+    aside: i64,
+    since: &str,
+    reholds: i64,
+    previous: Option<(i64, &str)>,
+) -> Result<bool, LedgerError> {
+    store.write(|store| {
+        let (id, at) = previous.map_or((None, None), |(id, at)| (Some(id), Some(at)));
+        let carried = store.db.execute(
+            "UPDATE message
+                SET receipt = json_set(receipt, '$.since', ?1, '$.reholds', ?2,
+                    '$.reminded', ?3, '$.reminded_at', ?4)
+              WHERE id = ?5 AND project_id = ?6 AND state = 'read' AND json_valid(receipt)
+                AND json_extract(receipt, '$.shown') IS NOT NULL
+                AND json_extract(receipt, '$.over') IS NULL",
+            params![since, reholds, id, at, aside, project_id],
+        )?;
+        Ok(carried == 1)
+    })
+}
+
 /// Note `aside`, shown and not typed, whose line a move of its task ended (`$.over`), holds
 /// again from now (`$.since`), with no reminder sent of it since: the task's line says it
 /// once more, and nothing is typed. False where it holds already or was never shown.

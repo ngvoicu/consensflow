@@ -236,6 +236,9 @@ struct Told {
     turn: Option<Arc<str>>,
     aside: Option<i64>,
     exchanges: HashSet<i64>,
+    since: i64,
+    reholds: i64,
+    previous: Option<(i64, i64)>,
 }
 
 /// How long a task has held since its first hold after an exchange before the chief is
@@ -459,26 +462,57 @@ impl Dispatcher {
                 commands: observed.commands(),
                 stuck,
             };
+            // A change between a shown hold and one requiring Finish is not an exchange.
+            // Keep the stretch across it, including when the first hold was typed.
+            let new_exchange = told
+                .as_ref()
+                .is_some_and(|told| exchanged.iter().any(|id| !told.exchanges.contains(id)));
+            let new_turn = told.as_ref().is_some_and(|told| told.turn != turn);
+            let continuing = told.is_some();
+            let mut next = told.unwrap_or_else(|| Told {
+                task: hold.task,
+                stuck,
+                turn: turn.clone(),
+                aside: None,
+                exchanges: exchanged.clone(),
+                since: self.now(),
+                reholds: 0,
+                previous: None,
+            });
+            if new_exchange {
+                next.since = self.now();
+                next.reholds = 0;
+                next.previous = None;
+            } else if new_turn {
+                next.reholds = next.reholds.saturating_add(1);
+            }
+            next.turn = turn;
+            next.exchanges = exchanged;
+            next.stuck = stuck;
             // Where a look decides, the requester is told once it was made (Calliope on
             // 472b1d96).
             if to_tell && watching != Watching::Waiting {
-                let aside = self.tell_it_goes_on(project, &thread, &said, &words)?;
+                next.aside = self.tell_it_goes_on(project, &thread, &said, &words)?;
+                if let Some(aside) = next.aside.filter(|_| continuing) {
+                    let since = time::iso(next.since);
+                    let previous_at = next.previous.map(|(_, at)| time::iso(at));
+                    let previous = next
+                        .previous
+                        .zip(previous_at.as_deref())
+                        .map(|((id, _), at)| (id, at));
+                    self.seams.ledger.borrow_mut().carry_aside(
+                        project.id,
+                        aside,
+                        &since,
+                        next.reholds,
+                        previous,
+                    )?;
+                }
                 let mut held = record.held.borrow_mut();
-                held.told = Some(Told {
-                    task: hold.task,
-                    stuck,
-                    turn,
-                    aside,
-                    exchanges: exchanged,
-                });
+                held.told = Some(next.clone());
                 held.lost_said = held.lost_said.or(lost);
-            } else if let Some((aside, told)) = told
-                .filter(|_| !to_tell && !stuck)
-                .and_then(|told| told.aside.map(|aside| (aside, told)))
-            {
-                // Not told now, and not stuck: the hold was shown (`to_tell` else).
-                let new_exchange = exchanged.iter().any(|id| !told.exchanges.contains(id));
-                if new_exchange || told.turn != turn {
+            } else if !to_tell {
+                if let Some(aside) = next.aside.filter(|_| new_exchange || new_turn) {
                     let said_now =
                         format!("in the background: {}", running_said(&said, self.now()));
                     if new_exchange {
@@ -493,12 +527,15 @@ impl Dispatcher {
                             .renew_aside(project.id, aside, &said_now)?;
                     }
                     self.changed();
-                    if let Some(told) = record.held.borrow_mut().told.as_mut() {
-                        told.turn = turn;
-                        told.exchanges = exchanged;
-                    }
                 }
-                self.remind_held(project, &thread, &said, aside)?;
+                record.held.borrow_mut().told = Some(next.clone());
+            } else {
+                return Ok(Turn::Held);
+            }
+            if let Some(previous) = self.remind_held(project, &thread, &said, &next)? {
+                if let Some(told) = record.held.borrow_mut().told.as_mut() {
+                    told.previous = Some(previous);
+                }
             }
             return Ok(Turn::Held);
         }
@@ -976,35 +1013,52 @@ impl Dispatcher {
         project: &ProjectView,
         thread: &TaskThread,
         held: &Held,
-        aside: i64,
-    ) -> Result<(), EngineError> {
-        let Some(shown) = self.seams.ledger.borrow().message(aside)? else {
-            return Ok(());
+        told: &Told,
+    ) -> Result<Option<(i64, i64)>, EngineError> {
+        let shown = if let Some(aside) = told.aside {
+            let Some(shown) = self.seams.ledger.borrow().message(aside)? else {
+                return Ok(None);
+            };
+            let shown_aside = shown
+                .receipt
+                .get(cf_ledger::SHOWN)
+                .is_some_and(|said| said.is_string());
+            if !shown_aside || shown.receipt.get("over").is_some() {
+                return Ok(None);
+            }
+            Some(shown)
+        } else {
+            None
         };
-        let shown_aside = shown
-            .receipt
-            .get(cf_ledger::SHOWN)
-            .is_some_and(|said| said.is_string());
-        if !shown_aside || shown.receipt.get("over").is_some() {
-            return Ok(());
-        }
-        // From the first hold after the last exchange, else from the shown note itself.
-        let since = shown
-            .receipt
-            .get("since")
-            .and_then(Value::as_str)
-            .unwrap_or(&shown.created_at);
-        let Some(since) = time::parse(since) else {
-            return Ok(());
+        // A typed Finish note has no stable receipt: delivery may replace it. The window
+        // keeps this stretch while it is held, and carries it to the next shown note.
+        let since = shown.as_ref().map_or(Some(told.since), |shown| {
+            let since = shown
+                .receipt
+                .get("since")
+                .and_then(Value::as_str)
+                .unwrap_or(&shown.created_at);
+            time::parse(since)
+        });
+        let Some(since) = since else {
+            return Ok(None);
         };
         let now = self.now();
-        let previous = shown.receipt.get("reminded").and_then(Value::as_i64);
+        let previous = shown
+            .as_ref()
+            .map_or(told.previous.map(|(id, _)| id), |shown| {
+                shown.receipt.get("reminded").and_then(Value::as_i64)
+            });
         let due_from = if let Some(id) = previous {
             let mut reminded_at = shown
-                .receipt
-                .get("reminded_at")
-                .and_then(Value::as_str)
-                .and_then(time::parse);
+                .as_ref()
+                .map_or(told.previous.map(|(_, at)| at), |shown| {
+                    shown
+                        .receipt
+                        .get("reminded_at")
+                        .and_then(Value::as_str)
+                        .and_then(time::parse)
+                });
             if reminded_at.is_none() {
                 reminded_at = self
                     .seams
@@ -1014,14 +1068,14 @@ impl Dispatcher {
                     .and_then(|message| time::parse(&message.created_at));
             }
             let Some(reminded_at) = reminded_at else {
-                return Ok(());
+                return Ok(None);
             };
             reminded_at + STILL_WORKING_REMIND_AGAIN_AFTER_MS
         } else {
             since + STILL_WORKING_REMINDED_AFTER_MS
         };
         if now < due_from {
-            return Ok(());
+            return Ok(None);
         }
         let number = thread.task.number;
         let minutes = (now - since) / 60_000;
@@ -1032,35 +1086,48 @@ impl Dispatcher {
         };
         let running = running_said(held, now);
         let finish = finish_with(thread);
-        let reholds = shown
-            .receipt
-            .get("reholds")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let times = if reholds == 1 { "time" } else { "times" };
-        let body = format!(
-            "T-{number} has been working in the background for {long}, holding again {reholds} {times} ({running}). Its result comes when that ends; {finish} takes what it said last now."
-        );
-        let sent = self.seams.ledger.borrow_mut().remind_of_aside(
-            project.id,
-            aside,
+        let reholds = shown.as_ref().map_or(told.reholds, |shown| {
             shown
                 .receipt
-                .get("stretch")
+                .get("reholds")
                 .and_then(Value::as_i64)
-                .unwrap_or(0),
-            previous,
-            &NewNote {
-                from: None,
-                to: thread.task.requester.clone(),
-                task: Some(number),
-                body,
-            },
-        )?;
-        if sent.is_some() {
+                .unwrap_or(0)
+        });
+        let times = if reholds == 1 { "time" } else { "times" };
+        let end = if held.stuck {
+            format!("Its result will not come by itself; {finish} takes what it said last.")
+        } else {
+            format!("Its result comes when that ends; {finish} takes what it said last now.")
+        };
+        let note = NewNote {
+            from: None,
+            to: thread.task.requester.clone(),
+            task: Some(number),
+            body: format!("T-{number} has been working in the background for {long}, holding again {reholds} {times} ({running}). {end}"),
+        };
+        let sent = if let Some(shown) = shown {
+            self.seams.ledger.borrow_mut().remind_of_aside(
+                project.id,
+                shown.id,
+                shown
+                    .receipt
+                    .get("stretch")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0),
+                previous,
+                &note,
+            )?
+        } else {
+            Some(self.seams.ledger.borrow_mut().note(project.id, &note)?)
+        };
+        if let Some(sent) = sent {
             self.changed();
+            return Ok(Some((
+                sent.id,
+                time::parse(&sent.created_at).unwrap_or(now),
+            )));
         }
-        Ok(())
+        Ok(None)
     }
 
     /// Whoever gave the task is told, once, that a line of the window's record was lost in a

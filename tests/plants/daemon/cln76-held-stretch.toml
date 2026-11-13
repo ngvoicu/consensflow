@@ -6,6 +6,9 @@ first-hour = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispat
 four-hours = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_worker_who_keeps_holding_every_forty_minutes_is_typed_again_at_four_hours", "--", "--test-threads=2"]
 own-note = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_worker_who_sends_its_own_note_starts_a_new_stretch_at_its_next_hold", "--", "--test-threads=2"]
 ledger-receipt = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "shown_notes::the_newest_aside_holds_until_the_task_moves_and_is_said_anew_in_place", "--", "--test-threads=2"]
+finish-transition = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_hold_keeps_its_stretch_when_it_needs_finish_then_can_end_again", "--", "--test-threads=2"]
+finish-reminder = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_hold_that_keeps_needing_finish_is_reminded_without_promising_a_result", "--", "--test-threads=2"]
+carry-reminder = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_reminder_before_a_finish_hold_can_end_is_carried_into_the_shown_hold", "--", "--test-threads=2"]
 
 [[plant]]
 name = "cln76: a re-hold starts the hour again"
@@ -34,8 +37,8 @@ runs = ["own-note"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '''let new_exchange = exchanged.iter().any(|id| !told.exchanges.contains(id));'''
-replace = '''let new_exchange = false && exchanged.iter().any(|id| !told.exchanges.contains(id));'''
+find = '''.is_some_and(|told| exchanged.iter().any(|id| !told.exchanges.contains(id)));'''
+replace = '''.is_some_and(|told| false && exchanged.iter().any(|id| !told.exchanges.contains(id)));'''
 
 [[plant]]
 name = "cln76: re-holds are not counted"
@@ -56,3 +59,33 @@ runs = ["ledger-receipt"]
 file = "crates/cf-ledger/src/tasks.rs"
 find = '''AND COALESCE(json_extract(receipt, '$.stretch'), 0) = ?'''
 replace = '''AND (COALESCE(json_extract(receipt, '$.stretch'), 0) = ? OR 1 = 1)'''
+
+[[plant]]
+name = "cln76: a change to Finish restarts a stretch"
+meant = "shown_notes::a_hold_keeps_its_stretch_when_it_needs_finish_then_can_end_again"
+runs = ["finish-transition"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''if let Some(aside) = next.aside.filter(|_| continuing) {'''
+replace = '''if let Some(aside) = next.aside.filter(|_| false && continuing) {'''
+
+[[plant]]
+name = "cln76: a hold requiring Finish is never reminded"
+meant = "shown_notes::a_hold_that_keeps_needing_finish_is_reminded_without_promising_a_result"
+runs = ["finish-reminder"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''Some(self.seams.ledger.borrow_mut().note(project.id, &note)?)'''
+replace = '''None'''
+
+[[plant]]
+name = "cln76: a reminder is forgotten when Finish stops being needed"
+meant = "shown_notes::a_reminder_before_a_finish_hold_can_end_is_carried_into_the_shown_hold"
+runs = ["carry-reminder"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks.rs"
+find = ''''$.reminded', ?3, '$.reminded_at', ?4)'''
+replace = ''''$.reminded', NULL, '$.reminded_at', ?4)'''

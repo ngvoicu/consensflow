@@ -8,11 +8,12 @@
 
 use cf_engine::testing::Context;
 use cf_engine::SwitchWhen;
+use cf_harness::records::{End, Source};
 use cf_ledger::NewNote;
 
 use crate::chiefs::{to, with_codex};
 use crate::fixtures::{after, exhausted, given, now, Tiers};
-use crate::turn_end::pending;
+use crate::turn_end::{monitor, pending};
 
 /// The notification Claude Code begins a turn with when a job of its ends.
 const ENDED: &str =
@@ -78,6 +79,147 @@ fn held_again(context: &Context, jobs: usize) {
     context.adapter.wake("zeus", ENDED);
     context.pass().unwrap();
     held(context, "Still queued", jobs);
+}
+
+/// An ended socket monitor holds a task for which Finish is required.
+fn held_for_finish(context: &Context) {
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        "The feed closed",
+        pending(1, 1),
+        vec![monitor("feed", Source::Socket, Some(End::Closed))],
+    );
+    context.pass().unwrap();
+}
+
+#[test]
+fn a_hold_keeps_its_stretch_when_it_needs_finish_then_can_end_again() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    held(&context, "Watching", 1);
+    context.advance(FORTY_MINUTES);
+    context.adapter.wake("zeus", ENDED);
+    context.pass().unwrap();
+    held_for_finish(&context);
+    assert_eq!(typed(&context, &tiers).len(), 1, "Finish is told at once");
+    context.advance(10 * 60_000);
+    held_again(&context, 2);
+    context.advance(10 * 60_000);
+    context.pass().unwrap();
+    let notes = typed(&context, &tiers);
+    assert_eq!(notes.len(), 2, "the first hour still counts: {notes:?}");
+    assert!(
+        notes[1].contains("60 minutes, holding again 2 times (2 commands)"),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn a_hold_that_first_needs_finish_keeps_its_stretch_when_it_can_end() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    held_for_finish(&context);
+    assert_eq!(typed(&context, &tiers).len(), 1, "Finish is told at once");
+    context.advance(FORTY_MINUTES);
+    held_again(&context, 1);
+    context.advance(AN_HOUR - FORTY_MINUTES);
+    context.pass().unwrap();
+    let notes = typed(&context, &tiers);
+    assert_eq!(notes.len(), 2, "the first hour still counts: {notes:?}");
+    assert!(
+        notes[1].contains("60 minutes, holding again 1 time (1 command)"),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn a_hold_that_keeps_needing_finish_is_reminded_without_promising_a_result() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    held_for_finish(&context);
+    assert_eq!(typed(&context, &tiers).len(), 1, "Finish is told at once");
+    context.advance(AN_HOUR);
+    context.pass().unwrap();
+    let notes = typed(&context, &tiers);
+    assert_eq!(notes.len(), 2, "remind after an hour: {notes:?}");
+    assert!(
+        notes[1].contains("60 minutes, holding again 0 times"),
+        "{notes:?}"
+    );
+    assert!(
+        notes[1].contains("result will not come by itself"),
+        "{notes:?}"
+    );
+    context.advance(3 * AN_HOUR);
+    context.pass().unwrap();
+    assert_eq!(
+        typed(&context, &tiers).len(),
+        3,
+        "remind after three more hours"
+    );
+}
+
+#[test]
+fn a_reminder_before_a_finish_hold_can_end_is_carried_into_the_shown_hold() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    held_for_finish(&context);
+    context.advance(AN_HOUR);
+    context.pass().unwrap();
+    assert_eq!(typed(&context, &tiers).len(), 2);
+    context.advance(20 * 60_000);
+    held_again(&context, 1);
+    context.advance(AN_HOUR);
+    context.pass().unwrap();
+    assert_eq!(
+        typed(&context, &tiers).len(),
+        2,
+        "no new hour for a shown hold"
+    );
+    context.advance(100 * 60_000);
+    context.pass().unwrap();
+    let notes = typed(&context, &tiers);
+    assert_eq!(notes.len(), 3, "three hours after the reminder: {notes:?}");
+    assert!(
+        notes[2].contains("4 h 0 min, holding again 1 time (1 command)"),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn an_exchange_during_a_finish_hold_starts_a_new_stretch() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    held_for_finish(&context);
+    context.advance(FORTY_MINUTES);
+    context.adapter.wake("zeus", ENDED);
+    context.pass().unwrap();
+    let assignee = tiers.assignee(1);
+    context
+        .ledger
+        .borrow_mut()
+        .note(
+            tiers.project.id,
+            &NewNote {
+                from: Some(assignee),
+                to: "chief".into(),
+                task: Some(1),
+                body: "A finding for the chief".into(),
+            },
+        )
+        .unwrap();
+    held_for_finish(&context);
+    context.advance(AN_HOUR - FORTY_MINUTES);
+    context.pass().unwrap();
+    assert_eq!(typed(&context, &tiers).len(), 1, "the earlier hour is over");
+    context.advance(FORTY_MINUTES);
+    context.pass().unwrap();
+    let notes = typed(&context, &tiers);
+    assert_eq!(notes.len(), 2, "the new hour is over: {notes:?}");
+    assert!(
+        notes[1].contains("60 minutes, holding again 0 times"),
+        "{notes:?}"
+    );
 }
 
 #[test]

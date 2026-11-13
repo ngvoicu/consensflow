@@ -308,6 +308,46 @@ fn the_newest_aside_holds_until_the_task_moves_and_is_said_anew_in_place() {
 }
 
 #[test]
+fn a_new_shown_hold_can_carry_a_typed_holds_stretch_and_reminder() {
+    let mut w = world();
+    let (task, _) = with_zeus(&mut w);
+    let reminder = w
+        .ledger
+        .note(
+            w.project,
+            &NewNote {
+                from: None,
+                to: "chief".into(),
+                body: "An earlier reminder".into(),
+                task: Some(task),
+            },
+        )
+        .unwrap();
+    let next = shown(&mut w, "chief", task, "Still held", "1 command");
+    assert!(w
+        .ledger
+        .carry_aside(
+            w.project,
+            next.id,
+            "2026-10-21T20:00:00.000Z",
+            3,
+            Some((reminder.id, &reminder.created_at)),
+        )
+        .unwrap());
+    let receipt = w.message(next.id).receipt;
+    assert_eq!(receipt["since"], "2026-10-21T20:00:00.000Z");
+    assert_eq!(receipt["reholds"], 3);
+    assert_eq!(receipt["reminded"], reminder.id);
+    assert_eq!(receipt["reminded_at"], reminder.created_at);
+    assert_eq!(aside(&w, task).as_deref(), Some("1 command"));
+    w.pause(task);
+    assert!(!w
+        .ledger
+        .carry_aside(w.project, next.id, "2026-10-21T21:00:00.000Z", 0, None)
+        .unwrap());
+}
+
+#[test]
 fn a_note_whose_line_ended_with_a_move_is_shown_again_with_no_row_more() {
     // A busy model's wait: one note for the whole wait, each try a move of its own.
     let mut w = world();
