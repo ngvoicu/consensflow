@@ -136,7 +136,7 @@ fn copy_tree(from: &Path, to: &Path) -> Result {
     if !from.is_dir() {
         return Ok(());
     }
-    files::make_dir(to)?;
+    cf_e2e::door::make_dir(to)?;
     for entry in fs::read_dir(from).map_err(|source| Error::File {
         action: "read",
         path: from.to_owned(),
@@ -151,7 +151,7 @@ fn copy_tree(from: &Path, to: &Path) -> Result {
         if source.is_dir() {
             copy_tree(&source, &target)?;
         } else if source.is_file() {
-            files::copy(&source, &target)?;
+            cf_e2e::door::copy(&source, &target)?;
         }
     }
     Ok(())
@@ -169,16 +169,16 @@ fn throwaway_config(
     login: &Value,
     folder: &Path,
 ) -> Result {
-    files::make_dir(throwaway)?;
-    files::write(
+    cf_e2e::door::make_dir(throwaway)?;
+    cf_e2e::door::write(
         &throwaway.join(".credentials.json"),
         json!({ "claudeAiOauth": login }).to_string(),
     )?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(throwaway, fs::Permissions::from_mode(0o700));
-        let _ = fs::set_permissions(
+        let _ = cf_e2e::door::set_permissions(throwaway, fs::Permissions::from_mode(0o700));
+        let _ = cf_e2e::door::set_permissions(
             throwaway.join(".credentials.json"),
             fs::Permissions::from_mode(0o600),
         );
@@ -187,7 +187,7 @@ fn throwaway_config(
         if let Ok(Value::Object(mut settings)) = serde_json::from_str::<Value>(&text) {
             settings.remove("hooks");
             settings.remove("statusLine");
-            files::write(
+            cf_e2e::door::write(
                 &throwaway.join("settings.json"),
                 Value::Object(settings).to_string(),
             )?;
@@ -213,7 +213,7 @@ fn throwaway_config(
     projects.insert(name, entry);
     configuration.insert("projects".to_owned(), Value::Object(projects));
     configuration.insert("hasCompletedOnboarding".to_owned(), Value::Bool(true));
-    files::write(
+    cf_e2e::door::write(
         &throwaway.join(".claude.json"),
         Value::Object(configuration).to_string(),
     )
@@ -245,7 +245,7 @@ fn rename_in_json_under(folder: &Path, from: &str, to: &str) -> Result {
         {
             let text = files::read_string(&path)?;
             if text.contains(&from_json) {
-                files::write(&path, text.replace(&from_json, &to_json))?;
+                cf_e2e::door::write(&path, text.replace(&from_json, &to_json))?;
             }
         }
     }
@@ -262,8 +262,8 @@ fn member_words(made: &Path) -> Result<Vec<String>> {
         .join("skills")
         .join("consensflow-worker")
         .join("SKILL.md");
-    files::make_dir(skill.parent().unwrap_or(&role))?;
-    files::write(
+    cf_e2e::door::make_dir(skill.parent().unwrap_or(&role))?;
+    cf_e2e::door::write(
         &skill,
         "# ConsensFlow worker\n\nThe live parity check's role.\n",
     )?;
@@ -499,7 +499,7 @@ pub fn run(log: &Log) -> Result {
     let own = home()?.join(".claude");
     let own_json = home()?.join(".claude.json");
     let folder = live_folder("parity-claude")?;
-    files::make_dir(Path::new(env!("CARGO_TARGET_TMPDIR")))?;
+    cf_e2e::door::make_dir(Path::new(env!("CARGO_TARGET_TMPDIR")))?;
     let made_here = cf_e2e::door::made_in(
         Path::new(env!("CARGO_TARGET_TMPDIR")),
         "live-parity-claude-",

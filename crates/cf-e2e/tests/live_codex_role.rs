@@ -56,7 +56,7 @@ use cf_e2e::live::members::{
 };
 use cf_e2e::live::{Harness, Log};
 use cf_e2e::rollout;
-use cf_e2e::{files, Error, Result};
+use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
 
 /// The stand-in for the windows the run plays itself: none here, but the rig asks.
@@ -385,7 +385,7 @@ fn check(config: &str, card_file: &Path, words: &Words, log: &Log) -> Result {
         }
 
         log.say("3. the role changed, and the thread opened again");
-        files::write(card_file, card(&words.changed, true))?;
+        cf_e2e::door::write(card_file, card(&words.changed, true))?;
         closed_and_resumed(&members, log)?;
         let said = ask(&members, home, 3, log)?;
         names(&said, &[&words.changed], "the role changed")?;
@@ -427,9 +427,10 @@ fn a_codex_window_follows_a_role_no_command_line_holds_fresh_resumed_and_changed
         source,
     })?;
     let card_file: PathBuf = cards.path().join("chief.md");
-    files::write(&card_file, card(&words.role, false))?;
+    cf_e2e::door::write(&card_file, card(&words.role, false))?;
     check(&config, &card_file, &words, &log)?;
     log.say("ok: the Codex chief followed its role, fresh, resumed and changed, and no command line held it");
+    log.passed();
     Ok(())
 }
 

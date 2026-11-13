@@ -537,7 +537,7 @@ pub(super) fn with_hooks(settings: &[String], hooks: &Value) -> Result<Vec<Strin
         .map_err(|failed| Error::Daemon(format!("the launch's settings are no JSON: {failed}")))?;
     add_hooks(&mut config, hooks);
     let written = Path::new(file).with_extension("hooks.json");
-    files::write(&written, config.to_string())?;
+    crate::door::write(&written, config.to_string())?;
     Ok(vec![flag.clone(), written.to_string_lossy().into_owned()])
 }
 
@@ -596,7 +596,7 @@ fn keep_only_consensflows_hooks(args: &[String], cf: &Path) -> Result<()> {
     let mut config: Value = serde_json::from_str(&files::read_string(path)?)
         .map_err(|failed| Error::Daemon(format!("the launch's config is no JSON: {failed}")))?;
     consensflows_hooks_of(&mut config, &ask::devin_hooks(cf, true)?);
-    files::write(path, config.to_string())
+    crate::door::write(path, config.to_string())
 }
 
 /// The program a window of `harness` opened here starts on: the one the kit found (`found`),

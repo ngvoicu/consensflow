@@ -74,9 +74,12 @@
 //! a file that cannot be made or written stops the run before anything acts); the programs the run
 //! starts say into the same file. It says what it still does, as its first lines do:
 //! - the product's own shutdown at the rig's close still runs: the daemon ends, the pane host ends, and every pane of the rig and what descends from it (a Codex session's children among them) is ended by the product's own code, not the kit's door
+//! - the product's own operations while the case runs go on, each by the product's own code and not the kit's door: the daemon closes a window at a task's end, ends a pane it restarts or kills, and moves what it is asked to
+//! - the product's own clean-up of files goes on: a Codex session removes the private socket folder it made, and the daemon takes the files it wrote
 //! - keys the run types into the rig's own panes (an Escape, a Ctrl-C, /exit, a dialog's answer, a paste) are typed
 //! - a terminal the run opened itself (a pane of its own test, Muse's window) is hung up by the system when the run's process ends, with what runs in it
-//! - the run starts its rig and the programs the case names, and makes the folders and writes the files of its own below the shared folders (a project folder of its own in the live folder, its rig's folder in the temp folder)
+//! - the programs the run starts (a harness's window and what it runs, its tools, git, a stand-in) run, and what they do or end is theirs, not the kit's door
+//! - the files and folders the run writes below its own folders (its rig's folder in the temp folder, a project folder of its own in the live folder, the config folder of its login copy, its wrappers, what it exports into a new folder of its own in a folder a caller names) are written
 //!
 //! Such a run is never a pass: this names the file and leaves with a code that is not 0, whatever
 //! the run came to; so does `--set` (each run of the set with a file of its own, `<name>-<n>`) and
@@ -95,7 +98,7 @@ use crate::process::{self, Invocation};
 pub const COMMANDS: &[Command] = &[Command {
     words: &["live"],
     about: "Run a live test of cf-e2e (the tests/live_<name>.rs files): it runs real harnesses on the machine's own logins and spends real quota, so it is ignored unless asked for and is no part of check",
-    usage: "<name> [harness ...] | sweep [--in <folder>] [--home <folder>] [--older-than <days>] (lists what earlier runs left; takes none) | --set <set> (each run of the set, one after another: windows) [--keep] [--models harness=model[:effort],...] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; --keep leaves the run's home and project where they are (the Claude Code config folder goes, for it holds a copy of a login: its conversations and sessions are copied into the kept home); --models runs each harness it names on that model, and that effort where one is given, the others on their cheap one (--claude-model M is --models claude=M, and --models wins where both name Claude); words that are no flags name harnesses; run it with no name to list the tests) | with CF_LIVE_AUDIT=1 the run is say-only: the kit's door ends no process, closes no window and takes no file away, and writes down instead what it would have, in CF_LIVE_AUDIT_FILE (a new file of the run's own, whole command lines; one that cannot be made or written stops the run before anything acts), and the run is no pass (exit is never 0; --set gives each run a file of its own; sweep exits 1). What it still does: the product's own shutdown at the rig's close still runs: the daemon ends, the pane host ends, and every pane of the rig and what descends from it (a Codex session's children among them) is ended by the product's own code, not the kit's door; keys the run types into the rig's own panes (an Escape, a Ctrl-C, /exit, a dialog's answer, a paste) are typed; a terminal the run opened itself (a pane of its own test, Muse's window) is hung up by the system when the run's process ends, with what runs in it; the run starts its rig and the programs the case names, and makes the folders and writes the files of its own below the shared folders (a project folder of its own in the live folder, its rig's folder in the temp folder)",
+    usage: "<name> [harness ...] | sweep [--in <folder>] [--home <folder>] [--older-than <days>] (lists what earlier runs left; takes none) | --set <set> (each run of the set, one after another: windows) [--keep] [--models harness=model[:effort],...] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; a folder or file a flag names to be read (--claude-config) is read and never written, and one it names for the run to write (--fixture, --transcripts, CF_EVIDENCE) is made new, or a new child of it, and refused where it is there; a run that came to a pass takes the project folders it made in the live folder away when it is done, and one that did not, or --keep, leaves them marked kept; --keep leaves the run's home and project where they are (the Claude Code config folder goes, for it holds a copy of a login: its conversations and sessions are copied into the kept home); --models runs each harness it names on that model, and that effort where one is given, the others on their cheap one (--claude-model M is --models claude=M, and --models wins where both name Claude); words that are no flags name harnesses; run it with no name to list the tests) | with CF_LIVE_AUDIT=1 the run is say-only: the kit's door ends no process, closes no window and takes no file away, and writes down instead what it would have, in CF_LIVE_AUDIT_FILE (a new file of the run's own, whole command lines; one that cannot be made or written stops the run before anything acts), and the run is no pass (exit is never 0; --set gives each run a file of its own; sweep exits 1). What it still does (the first lines of the audit file say the same, word for word): the product's own shutdown at the rig's close still runs: the daemon ends, the pane host ends, and every pane of the rig and what descends from it (a Codex session's children among them) is ended by the product's own code, not the kit's door; the product's own operations while the case runs go on, each by the product's own code and not the kit's door: the daemon closes a window at a task's end, ends a pane it restarts or kills, and moves what it is asked to; the product's own clean-up of files goes on: a Codex session removes the private socket folder it made, and the daemon takes the files it wrote; keys the run types into the rig's own panes (an Escape, a Ctrl-C, /exit, a dialog's answer, a paste) are typed; a terminal the run opened itself (a pane of its own test, Muse's window) is hung up by the system when the run's process ends, with what runs in it; the programs the run starts (a harness's window and what it runs, its tools, git, a stand-in) run, and what they do or end is theirs, not the kit's door; the files and folders the run writes below its own folders (its rig's folder in the temp folder, a project folder of its own in the live folder, the config folder of its login copy, its wrappers, what it exports into a new folder of its own in a folder a caller names) are written",
     run: Run::Native(live),
 }];
 
@@ -203,8 +206,14 @@ fn audit_report(file: &Path) -> String {
                 file.display()
             )
         }
-        Err(_) => format!(
+        // A file that is not there is a run that stopped before it acted; any other failure is a
+        // file the run made that this cannot read, and then what the run did is not known.
+        Err(failed) if failed.kind() == std::io::ErrorKind::NotFound => format!(
             "say only ({AUDIT}): the run made no audit file {}: it stopped before it acted (a file that is there is never added to; name another in {AUDIT_FILE}); a say-only run is no pass",
+            file.display()
+        ),
+        Err(failed) => format!(
+            "say only ({AUDIT}): the audit could not be read; what the run did is not known ({}: {failed}); a say-only run is no pass",
             file.display()
         ),
     }
@@ -238,6 +247,8 @@ const SWEEP: &str = "sweep";
 /// (`cf_e2e::door::AUDIT`, `cf_e2e::door::AUDIT_FILE`).
 const AUDIT: &str = "CF_LIVE_AUDIT";
 const AUDIT_FILE: &str = "CF_LIVE_AUDIT_FILE";
+/// The variable the run hands the folders it made to a program it starts by (`cf_e2e::door::MADE_ROOTS`).
+const MADE_ROOTS: &str = "CF_LIVE_MADE_ROOTS";
 
 /// Where a say-only run says what it would have done: the file `CF_LIVE_AUDIT_FILE` names, or
 /// one of this run's own in the temp folder. None where the run is not say-only.
@@ -327,10 +338,7 @@ fn run_set(
             invoked = invoked.var(AUDIT_FILE, file);
         }
         let status = process::run(&invoked, &context.env)?;
-        came.push(format!(
-            "{} live {line}",
-            if status == 0 { "ok    " } else { "FAILED" }
-        ));
+        came.push(set_line(status, line, file.is_some()));
         if let Some(file) = &file {
             writeln!(console.err, "{}", audit_report(file))?;
         }
@@ -346,6 +354,18 @@ fn run_set(
     Ok(i32::from(
         came.iter().any(|line| line.starts_with("FAILED")),
     ))
+}
+
+/// The line of a run in the end of a set: `ok` or `FAILED` by what the run left with; a say-only
+/// run (its exit code is 1 whatever it came to) is `said`, which reads one way only: it is no
+/// pass, so no line of a say-only set says `ok`.
+fn set_line(status: i32, line: &str, say_only: bool) -> String {
+    let word = match (say_only, status) {
+        (true, _) => "said  ",
+        (false, 0) => "ok    ",
+        (false, _) => "FAILED",
+    };
+    format!("{word} live {line}")
 }
 
 /// Whether the words ask for help: `--help` or `-h` among the words that are live's
@@ -486,7 +506,9 @@ fn invocation(context: &Context, asked: &Asked) -> Invocation {
     for (name, value) in &asked.vars {
         invocation = invocation.var(name, value);
     }
-    invocation
+    // The folders a run may write below are the ones it makes: the variable that hands them to a
+    // program the run starts is never a person's to set (`cf_e2e::door::MADE_ROOTS`).
+    invocation.without(MADE_ROOTS)
 }
 
 #[cfg(test)]

@@ -89,7 +89,7 @@ fn env(scratch: &Path) -> Value {
 #[ignore = "opt-in: reads Muse's model list and usage, no model turn; cargo xtask live muse-reads (npm run live:muse-reads)"]
 fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() -> Result {
     // No window runs here, and no model: a `--models` would be read by nothing.
-    let _log = Log::own_agents("live muse-reads", "it reads what Muse says of itself")?;
+    let log = Log::own_agents("live muse-reads", "it reads what Muse says of itself")?;
     ask::prepare()?;
     let home = machine::home()?;
     let config = home.join(".config/muse");
@@ -178,5 +178,6 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
         changed.is_empty(),
         "a read changed ~/.config/muse: {changed:?}"
     );
+    log.passed();
     Ok(())
 }

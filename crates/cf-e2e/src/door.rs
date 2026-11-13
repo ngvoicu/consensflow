@@ -22,10 +22,11 @@
 //! - **A window** ([`Door::close_pane`]): a pane of the rig's own pane host; a terminal the test
 //!   opened itself ([`Door::close_own_terminal`], [`Door::quit_own_terminal`]).
 //! - **A folder the door made** ([`made_in`], [`Made`], [`Door::remove_made`]), and **a path under
-//!   one** ([`Door::remove_in_made`]): a folder of a random name made by this process, in the
-//!   registry here with its real path. No removal is grounded on a name alone.
-//! - **A stand-in's own status file** ([`Door::remove_status_of_this_process`]): `sessions/<its
-//!   own process id>.json`.
+//!   one** ([`Door::remove_in_made`]): a folder of a random name made by this process, or handed
+//!   down to it by the process that started it ([`MADE_ROOTS`]), in the registry here with its real
+//!   path. A stand-in takes away its own status file (`sessions/<its process id>.json` in the
+//!   config folder of the run) on this ground: the folder is the run's. No removal is grounded on
+//!   a name alone.
 //! - **A record of the renewal's** ([`Door::remove_record`]): in the harness's records folder,
 //!   the one entry named for the renewal's own folder, by its whole name.
 //!
@@ -42,7 +43,7 @@
 //! makes that file as a new one of its own, with first lines (`# …`) that say what the run still
 //! does ([`STILL_ACTS`]); a file that is there is never added to, and a run whose file cannot be
 //! made or written stops before it acts. The programs the run starts are given the same file
-//! ([`Door::audit_vars`]) and add to it. A case that needs an ending to have happened stops there
+//! ([`Door::child_vars`]) and add to it. A case that needs an ending to have happened stops there
 //! and fails, so that no say-only run passes. The tests make a door of their own
 //! ([`Door::asked`]) and never set the variable.
 //!
@@ -60,6 +61,16 @@ use crate::live::members::{
     Machine, Pause, RunFolder, Running, ThisMachine,
 };
 
+mod writes;
+
+#[cfg(unix)]
+pub use writes::symlink;
+pub use writes::{
+    append, copy, copy_cloning, copy_keeping_mode, copy_tree, create, create_new,
+    create_new_private, made_dir, made_file, make_dir, make_dir_private, rename, say_its_process,
+    set_modified, set_permissions, write, write_executable, write_whole,
+};
+
 /// The variable that makes the door say only.
 pub const AUDIT: &str = "CF_LIVE_AUDIT";
 
@@ -74,9 +85,12 @@ pub const AUDIT_MADE: &str = "CF_LIVE_AUDIT_MADE";
 /// says what the kit would end or take away, and these are what the kit does not do through it.
 pub const STILL_ACTS: &[&str] = &[
     "the product's own shutdown at the rig's close still runs: the daemon ends, the pane host ends, and every pane of the rig and what descends from it (a Codex session's children among them) is ended by the product's own code, not the kit's door",
+    "the product's own operations while the case runs go on, each by the product's own code and not the kit's door: the daemon closes a window at a task's end, ends a pane it restarts or kills, and moves what it is asked to",
+    "the product's own clean-up of files goes on: a Codex session removes the private socket folder it made, and the daemon takes the files it wrote",
     "keys the run types into the rig's own panes (an Escape, a Ctrl-C, /exit, a dialog's answer, a paste) are typed",
-    "the run starts its rig and the programs the case names, and makes the folders and writes the files of its own below the shared folders (a project folder of its own in the live folder, its rig's folder in the temp folder)",
     "a terminal the run opened itself (a pane of its own test, Muse's window) is hung up by the system when the run's process ends, with what runs in it",
+    "the programs the run starts (a harness's window and what it runs, its tools, git, a stand-in) run, and what they do or end is theirs, not the kit's door",
+    "the files and folders the run writes below its own folders (its rig's folder in the temp folder, a project folder of its own in the live folder, the config folder of its login copy, its wrappers, what it exports into a new folder of its own in a folder a caller names) are written",
 ];
 
 /// The file a folder kept for a person holds: an older rig folder that holds it is never swept.
@@ -195,6 +209,17 @@ impl Door {
             ],
             None => Vec::new(),
         }
+    }
+
+    /// What a program this run starts is given of the door: the variables that make it say only
+    /// into the same file as this run does where this run says only ([`Door::audit_vars`]), and the
+    /// folders this run made so far, which it may write below ([`handed_down`]). The second is what
+    /// a program that is a stand-in for a harness (it writes its status file, its records and its
+    /// sockets) is given of the run's folders: it writes nowhere else.
+    pub fn child_vars() -> Vec<(String, String)> {
+        let mut vars = Door::audit_vars();
+        vars.extend(handed_down());
+        vars
     }
 
     /// A door that acts.
@@ -368,40 +393,6 @@ impl Door {
         true
     }
 
-    /// Takes away `file`, the status file of this very process (`sessions/<its process id>.json`
-    /// in a config folder, which a stand-in window writes as Claude Code does and takes away as
-    /// it ends): left, and said, where it is any other file.
-    pub fn remove_status_of_this_process(&self, file: &Path) -> Removed {
-        let own = file
-            .extension()
-            .is_some_and(|extension| extension == "json")
-            && file
-                .file_stem()
-                .is_some_and(|stem| *stem == *std::process::id().to_string())
-            && file
-                .parent()
-                .and_then(Path::file_name)
-                .is_some_and(|folder| folder == "sessions");
-        if !own {
-            return Removed::Left(
-                file.to_path_buf(),
-                "it is no status file of this process".into(),
-            );
-        }
-        if fs::symlink_metadata(file).is_err() {
-            return Removed::Absent(file.to_path_buf());
-        }
-        if self.says_only() {
-            self.say(
-                "remove",
-                &said_path(file),
-                "the status file of this stand-in's own process",
-            );
-            return Removed::Said(file.to_path_buf());
-        }
-        remove_whole(file)
-    }
-
     /// Stops `child`, a program this process started and holds (`name` says which), where it is,
     /// and lets it go on after `span` ([`crate::process::stall`]): whether it was stopped (a
     /// say-only door says it and stops nothing).
@@ -463,6 +454,15 @@ impl Door {
         let removed = remove_whole(path);
         forget_made(path);
         removed
+    }
+
+    /// Marks `path`, a folder this process made through the door ([`made_in`]), kept for a person
+    /// to look at ([`KEPT`]): no sweep takes it. Whether it is one, and was marked.
+    pub fn keep_made(&self, path: &Path) -> bool {
+        if !is_made(path) {
+            return false;
+        }
+        fs::write(path.join(KEPT), "kept for a person to look at\n").is_ok()
     }
 
     /// Takes away `path`, under a folder this process made through the door: left, and said,
@@ -618,20 +618,68 @@ impl fmt::Display for Removed {
 /// it (a command line a member is given) shows this command's. It is a name and no ground: a
 /// file of it is taken only where it is below a folder the run made ([`Door::remove_in_made`]).
 pub fn own_name(stem: &str, extension: &str) -> String {
+    format!("{}.{extension}", own_stem(stem))
+}
+
+/// [`own_name`] with no extension: `<stem>-<pid>-<ms>-<n>`, the name of a folder.
+pub fn own_stem(stem: &str) -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNT: AtomicU64 = AtomicU64::new(0);
     let millis = jiff::Timestamp::now().as_millisecond();
     format!(
-        "{stem}-{}-{millis}-{}.{extension}",
+        "{stem}-{}-{millis}-{}",
         std::process::id(),
         COUNT.fetch_add(1, Ordering::Relaxed)
     )
 }
 
-/// The folders this process made through the door, by their real paths.
+/// The variable that hands the folders this run made to a program it starts, which is another
+/// process with a registry of its own: the real paths, joined as a `PATH` is. Never set by a
+/// person; a program that does not find it has made nothing and may write nowhere. `cargo xtask
+/// live`, the rig's start ([`crate::rig`]) and the kit's own program starts clear it before they
+/// set their own; a person who sets it by hand and runs a test with `cargo test` alone gives that
+/// run those folders to write below, which is that person's own act (a known limit: the first
+/// process of a run cannot tell a person's value from its parent's).
+pub const MADE_ROOTS: &str = "CF_LIVE_MADE_ROOTS";
+
+/// The folders and files this process made through the door, by their real paths, and those its
+/// parent handed to it ([`MADE_ROOTS`]).
 fn registry() -> std::sync::MutexGuard<'static, Vec<PathBuf>> {
-    static MADE: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
-    MADE.lock().unwrap_or_else(PoisonError::into_inner)
+    static MADE: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
+    MADE.get_or_init(|| Mutex::new(roots_handed_down(std::env::var_os(MADE_ROOTS).as_deref())))
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The paths `value` hands down ([`MADE_ROOTS`]).
+fn roots_handed_down(value: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
+    value
+        .map(|value| std::env::split_paths(value).collect())
+        .unwrap_or_default()
+}
+
+/// The variable that hands this run's folders to a program it starts: none where it made none.
+/// The program's own writers ask the same registry as this process's ([`writable`]); what it
+/// makes itself it cannot hand back, and what this process makes after it started it is not
+/// there.
+pub fn handed_down() -> Vec<(String, String)> {
+    let roots = registry().clone();
+    if roots.is_empty() {
+        return Vec::new();
+    }
+    match std::env::join_paths(roots) {
+        Ok(joined) => vec![(MADE_ROOTS.to_owned(), joined.to_string_lossy().into_owned())],
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Registers the file or folder `path` as one this run made.
+fn register(path: &Path) {
+    let real = canonical(path).unwrap_or_else(|| path.to_path_buf());
+    let mut made = registry();
+    if !made.contains(&real) {
+        made.push(real);
+    }
 }
 
 /// Forgets `path` as a folder this process made.
@@ -691,24 +739,26 @@ pub fn in_live_zone(path: &Path) -> bool {
     zone(path) || real_beneath(path).is_some_and(|real| zone(&real))
 }
 
-/// Whether a file or folder may be made at `path`: where it is in the live zone ([`in_live_zone`]),
-/// only below a folder this process made through the door ([`made_in`]), by the real path, and
-/// never as a link that leads elsewhere; where it is none, always. A zone is shared by every run
-/// on the machine, and a write that is not below this run's own folder there is another's. A
-/// folder (`folder`) may also be the run's own folder itself, made again.
+/// Whether a file or folder may be made at `path`: only below a folder this run made through the
+/// door ([`made_in`]) or handed down to this program ([`MADE_ROOTS`]), or as a file this run made
+/// ([`made_file`]), by the real path, and never as a link that leads elsewhere. Everywhere else is
+/// another run's, a person's, or nobody's: the live folder, the temp folder, a config folder a caller
+/// named. A folder (`folder`) may also be the run's own folder itself, made again.
 pub fn writable(path: &Path, folder: bool) -> Result<(), String> {
-    if !in_live_zone(path) {
-        return Ok(());
-    }
     let Some(real) = real_beneath(path) else {
         return Err("it leads up out of the folder it names".into());
     };
-    if !registry()
-        .iter()
-        .any(|made| real.starts_with(made) && (folder || real != *made))
-    {
+    let allowed = registry().iter().any(|made| {
+        if real == *made {
+            // The folder itself may be made again; a file this run made may be written.
+            folder == made.is_dir()
+        } else {
+            real.starts_with(made) && made.is_dir()
+        }
+    });
+    if !allowed {
         return Err(format!(
-            "it is in the live folder, but below no folder this run made: {} is another run's or nobody's",
+            "{} is below no folder this run made, so it is another run's, a person's, or nobody's",
             real.display()
         ));
     }
@@ -718,11 +768,23 @@ pub fn writable(path: &Path, folder: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// Makes the place an allocation is made in where it is not there (the live folder of a machine
+/// nobody has run on, the folder of a build's reports before a first run): folders made empty,
+/// and none that is there is changed. It is the one thing the door makes that is no allocation of
+/// the run's, and it is no place to write: [`writable`] says no to it until a folder is made in it.
+pub fn make_place(place: &Path) -> io::Result<()> {
+    if place.is_dir() {
+        return Ok(());
+    }
+    fs::create_dir_all(place)
+}
+
 /// A folder of a random name this process made through the door, in `parent`, its name begun
 /// with `prefix`: taken away through the door when it is dropped, unless it is kept.
 pub fn made_in(parent: &Path, prefix: &str) -> io::Result<Made> {
     // A say-only run whose audit file cannot be used stops before it makes a folder.
     Door::init();
+    make_place(parent)?;
     let folder = tempfile::Builder::new()
         .prefix(prefix)
         .tempdir_in(parent)?

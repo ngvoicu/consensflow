@@ -60,20 +60,10 @@ impl Scratch {
 /// in folders only the owner enters.
 pub fn copy_kept(from: &Path, to: &Path) -> io::Result<()> {
     if let Some(folder) = to.parent() {
-        owner_only_folders(folder)?;
+        crate::door::make_dir_private(folder)?;
     }
-    // `std::fs::copy` opens the target with the source's mode and copies its permission bits.
-    std::fs::copy(from, to).map(|_| ())
-}
-
-/// `folder` and the folders above it that are not there yet made, readable by their owner alone
-/// (where the system has modes).
-fn owner_only_folders(folder: &Path) -> io::Result<()> {
-    let mut made = std::fs::DirBuilder::new();
-    made.recursive(true);
-    #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut made, 0o700);
-    made.create(folder)
+    // `fs::copy` opens the target with the source's mode and copies its permission bits.
+    Ok(crate::door::copy_keeping_mode(from, to)?)
 }
 
 /// The folder `from` copied to `to` the same way, the files under it too.
@@ -158,7 +148,7 @@ mod tests {
     fn a_file_is_copied_with_the_mode_it_had_into_folders_only_its_owner_enters() {
         use std::os::unix::fs::PermissionsExt;
         let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-test-").unwrap();
         let source = root.path().join("auth.json");
         std::fs::write(&source, "{}").unwrap();
         std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
@@ -187,7 +177,7 @@ mod tests {
 
     #[test]
     fn a_run_of_muse_copies_the_login_file_and_the_model_catalog_and_nothing_else_of_the_config() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-test-").unwrap();
         let (home, scratch) = (root.path().join("home"), root.path().join("scratch"));
         let config = home.join(".config/muse");
         let catalog = home.join(".local/share/muse/model-catalog");

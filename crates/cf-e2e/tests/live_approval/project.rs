@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use cf_e2e::live::{self, text};
 use cf_e2e::rig::{Project, Rig};
-use cf_e2e::{files, Error, Result};
+use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
 
 use crate::agents::{self, DESIGNER};
@@ -29,7 +29,7 @@ pub fn folder(rig: &Rig, planned: &Planned) -> Result<PathBuf> {
         planned.seats.chief.name()
     ));
     live::git_repository(&folder)?;
-    files::write(
+    cf_e2e::door::write(
         &folder.join("README.md"),
         format!(
             "# Approval bench, project {}\n\nA demo project: its chief is {}.\n",
@@ -38,7 +38,7 @@ pub fn folder(rig: &Rig, planned: &Planned) -> Result<PathBuf> {
         ),
     )?;
     for name in ["AGENTS.md", "CLAUDE.md"] {
-        files::write(&folder.join(name), BRIEF)?;
+        cf_e2e::door::write(&folder.join(name), BRIEF)?;
     }
     Ok(folder)
 }

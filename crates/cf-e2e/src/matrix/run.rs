@@ -161,7 +161,7 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
     }
     let scenario = &scenario;
     let id = run_id(&seating.label(), scenario.name);
-    let evidence = Evidence::under(reports, &id);
+    let evidence = Evidence::under(reports, &id)?;
     let mut manifest = json!({
         "run": id,
         "replayOf": replay_of,

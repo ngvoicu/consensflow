@@ -29,8 +29,14 @@ use crate::{secs, Outcome, FAKE_AGENT};
 const CASE: &str = "CF_LAYOUT_CASE";
 /// The folder the cases and their programs talk in.
 const SIGNALS: &str = "CF_LAYOUT_SIGNALS";
+/// The folder of the run's own that the audit case's parent makes through the door for its child.
+const CHILD_ROOT: &str = "CF_LAYOUT_CHILD_ROOT";
 /// What a program says of a folder it made, one a line.
 const FOLDER: &str = "LAYOUT-FOLDER ";
+/// The folder a caller named for the exports case, and the file it named as a fixture: both are
+/// the caller's own, with files in them, which the run is to leave as they are.
+const EXPORT_INTO: &str = "CF_LAYOUT_EXPORT_INTO";
+const FIXTURE_THERE: &str = "CF_LAYOUT_FIXTURE_THERE";
 
 /// The program of a case: this test binary, run again for `case` in the layout's home, with
 /// `more` set over it.
@@ -65,7 +71,12 @@ fn program(
     }
     // The program says only where the case asks it to, whatever this test run's own variables are
     // (a `without` removes after every `var`, so it is made for the names the case does not set).
-    for name in ["CF_LIVE_AUDIT", "CF_LIVE_AUDIT_FILE", "CF_LIVE_AUDIT_MADE"] {
+    for name in [
+        "CF_LIVE_AUDIT",
+        "CF_LIVE_AUDIT_FILE",
+        "CF_LIVE_AUDIT_MADE",
+        cf_e2e::door::MADE_ROOTS,
+    ] {
         if !more.iter().any(|(set, _)| *set == name) {
             run = run.without(name);
         }
@@ -87,7 +98,14 @@ fn folders_of(output: &str) -> Vec<PathBuf> {
 
 /// Whether `folder` is in the live folder of the layout, and none of another run's.
 fn is_a_folder_of_its_own(layout: &Layout, folder: &Path) -> bool {
-    let real = |path: &Path| std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    // A folder that is gone (a run that passed took it) is read through the folder it was in.
+    let real = |path: &Path| {
+        std::fs::canonicalize(path).unwrap_or_else(|_| match (path.parent(), path.file_name()) {
+            (Some(parent), Some(name)) => std::fs::canonicalize(parent)
+                .map_or_else(|_| path.to_path_buf(), |parent| parent.join(name)),
+            _ => path.to_path_buf(),
+        })
+    };
     let folder = real(folder);
     folder.starts_with(real(&layout.live()))
         && OTHER_RUNS_PROJECTS
@@ -118,6 +136,9 @@ fn the_program_a_case_of_the_layout_runs() -> Outcome {
     let signals = PathBuf::from(own_var(SIGNALS).ok_or("a case of the layout has no signals")?);
     if case == "audit-parent" || case == "audit-child" {
         return audit_case(&case, &signals);
+    }
+    if case == "exports" {
+        return exports_case();
     }
     let home = own_var("HOME").ok_or("a case of the layout has no home")?;
     let log = Log::new("layout case");
@@ -180,6 +201,10 @@ fn the_program_a_case_of_the_layout_runs() -> Outcome {
         assert!(released.is_some(), "the case was never released");
     }
     members.close()?;
+    // Only a case that says it came to a pass takes its project folder with it.
+    if case == "pass" {
+        log.passed();
+    }
     Ok(())
 }
 
@@ -198,6 +223,9 @@ fn audit_case(case: &str, signals: &Path) -> Outcome {
             "AUDIT-FILE {}",
             audit.map_or_else(String::new, |file| file.display().to_string())
         );
+        // A folder of the run's own for the child to write below: made through the door, so the
+        // run hands it down to the program it starts (the test's own folder takes it away).
+        let root = cf_e2e::door::made_in(signals, "child-")?.hand_on();
         let ran = Run::new(std::env::current_exe()?)
             .args([
                 "--exact",
@@ -207,25 +235,52 @@ fn audit_case(case: &str, signals: &Path) -> Outcome {
             ])
             .var(CASE, "audit-child")
             .var(SIGNALS, signals)
+            .var(CHILD_ROOT, &root)
             .limit(Duration::from_secs(120))
             .run()?;
         assert_eq!(ran.code, Some(0), "{ran}");
         print!("{}", ran.stdout);
         return Ok(());
     }
-    for name in ["CF_LIVE_AUDIT", "CF_LIVE_AUDIT_FILE", "CF_LIVE_AUDIT_MADE"] {
+    for name in [
+        "CF_LIVE_AUDIT",
+        "CF_LIVE_AUDIT_FILE",
+        "CF_LIVE_AUDIT_MADE",
+        cf_e2e::door::MADE_ROOTS,
+    ] {
         println!("CHILD-ENV {name}={}", own_var(name).unwrap_or_default());
     }
-    let sessions = signals.join("child-config").join("sessions");
+    let root = own_var(CHILD_ROOT).ok_or("the child was given no folder of the run's own")?;
+    let sessions = Path::new(&root).join("child-config").join("sessions");
     std::fs::create_dir_all(&sessions)?;
     let status = sessions.join(format!("{}.json", std::process::id()));
     std::fs::write(&status, "{}")?;
     let door = cf_e2e::door::Door::of_run();
-    println!(
-        "CHILD-REMOVED {}",
-        door.remove_status_of_this_process(&status)
-    );
+    println!("CHILD-REMOVED {}", door.remove_in_made(&status));
     println!("CHILD-STATUS-LEFT {}", status.is_file());
+    Ok(())
+}
+
+/// What a run does with what a caller names for it to write: a folder it exports into, which gets
+/// a new child of the run's own each time, and a fixture file, which is made new where it is not
+/// there and refused where anything is. It says what came of each.
+// The program says what it saw on its output, which the test that started it reads.
+#[allow(clippy::print_stdout)]
+fn exports_case() -> Outcome {
+    let into = own_var(EXPORT_INTO).ok_or("the exports case has no folder to export into")?;
+    let there = own_var(FIXTURE_THERE).ok_or("the exports case has no fixture file")?;
+    for _ in 0..2 {
+        let child = cf_e2e::live::export_folder(Some(&into), "evidence")?
+            .ok_or("no folder was made to export into")?;
+        cf_e2e::door::write(child.join("evidence.txt"), "this run's evidence")?;
+        println!("EXPORT {}", child.display());
+    }
+    let refused = cf_e2e::door::made_file(Path::new(&there)).is_err();
+    println!("FIXTURE-REFUSED {refused}");
+    let new = Path::new(&there).with_extension("new");
+    cf_e2e::door::made_file(&new)?;
+    cf_e2e::door::write(&new, "this run's record")?;
+    println!("FIXTURE-NEW {}", new.display());
     Ok(())
 }
 
@@ -306,6 +361,51 @@ fn a_second_invocation_of_the_same_case_beside_the_first_has_folders_of_its_own_
     Ok(())
 }
 
+#[test]
+fn a_run_that_came_to_a_pass_takes_the_project_folder_it_made_and_any_other_leaves_it_marked_kept(
+) -> Outcome {
+    let layout = layout();
+    let marked = |folder: &Path| folder.join(cf_e2e::door::KEPT).is_file();
+    // A pass takes the folder the run made, and no file of what other runs left.
+    let output = passes(&layout, "pass", &[])?;
+    let made = folders_of(&output);
+    assert_eq!(made.len(), 1, "{output}");
+    assert!(is_a_folder_of_its_own(&layout, &made[0]));
+    assert!(
+        !made[0].exists(),
+        "a run that passed left {}",
+        made[0].display()
+    );
+    layout.untouched()?;
+    // A run that said nothing of a pass, `--keep` and a say-only run each leave it, marked.
+    let said_only = layout.signals().join("said-only.txt");
+    let audit = said_only.to_string_lossy().into_owned();
+    for (what, case, more) in [
+        ("a run that came to no pass", "bench", Vec::new()),
+        ("--keep", "pass", vec![("CONSENSFLOW_LIVE_KEEP", "1")]),
+        (
+            "a say-only run",
+            "pass",
+            vec![
+                ("CF_LIVE_AUDIT", "1"),
+                ("CF_LIVE_AUDIT_FILE", audit.as_str()),
+            ],
+        ),
+    ] {
+        let output = passes(&layout, case, &more)?;
+        let made = folders_of(&output);
+        assert_eq!(made.len(), 1, "{what}: {output}");
+        assert!(made[0].is_dir(), "{what} took {}", made[0].display());
+        assert!(
+            marked(&made[0]),
+            "{what} left {} unmarked",
+            made[0].display()
+        );
+        layout.untouched()?;
+    }
+    Ok(())
+}
+
 /// The acts of an audit file: its lines but the first lines of the run's own.
 fn acts(text: &str) -> Vec<&str> {
     text.lines().filter(|line| !line.starts_with('#')).collect()
@@ -347,7 +447,8 @@ fn the_programs_a_say_only_run_starts_say_into_the_same_file_whole() -> Outcome 
         "audit-parent",
         &[("CF_LIVE_AUDIT", "1"), ("CF_LIVE_AUDIT_FILE", &audit_name)],
     )?;
-    // The child, started with a cleared environment, was given the run's three variables.
+    // The child, started with a cleared environment, was given the run's three variables and the
+    // folder the run made for it, which it may write below.
     for want in [
         "CHILD-ENV CF_LIVE_AUDIT=1".to_owned(),
         format!("CHILD-ENV CF_LIVE_AUDIT_FILE={audit_name}"),
@@ -355,6 +456,12 @@ fn the_programs_a_say_only_run_starts_say_into_the_same_file_whole() -> Outcome 
     ] {
         assert!(output.contains(&want), "{want} is not in {output}");
     }
+    // The folder the run made for it is the one it was handed.
+    assert!(
+        output.contains(&format!("CHILD-ENV {}=", cf_e2e::door::MADE_ROOTS))
+            && !output.contains(&format!("CHILD-ENV {}=\n", cf_e2e::door::MADE_ROOTS)),
+        "{output}"
+    );
     // It said its removal in the parent's file, and left the file where it was.
     assert!(output.contains("CHILD-STATUS-LEFT true"), "{output}");
     assert!(output.contains("said, not taken"), "{output}");
@@ -440,6 +547,77 @@ fn a_say_only_run_that_cannot_make_its_file_stops_before_it_does_anything() -> O
     );
     layout.untouched()?;
     layout.unchanged()?;
+    Ok(())
+}
+
+#[test]
+fn what_a_caller_names_for_the_run_to_write_is_made_new_and_what_is_there_is_left_as_it_is(
+) -> Outcome {
+    // A caller's evidence folder with an earlier run's child and a note of a person's in it, and
+    // a fixture file of theirs: the run acts, then says only, and each leaves them byte for byte.
+    for (mode, extra) in [
+        ("acting", Vec::new()),
+        ("say-only", vec![("CF_LIVE_AUDIT", "1")]),
+    ] {
+        let mut layout = layout();
+        let into = layout.home().join("evidence");
+        layout
+            .plant_tree(
+                &into,
+                &[
+                    ("evidence-1-2-0/evidence.txt", "an earlier run's evidence"),
+                    ("notes.txt", "a person's note"),
+                    ("monitor-wait.jsonl", "a record a person kept"),
+                ],
+            )
+            .map_err(|failed| format!("{mode}: {failed}"))?;
+        let (into_name, there) = (
+            into.to_string_lossy().into_owned(),
+            into.join("monitor-wait.jsonl")
+                .to_string_lossy()
+                .into_owned(),
+        );
+        let audit = layout.signals().join("exports-audit.txt");
+        let audit_name = audit.to_string_lossy().into_owned();
+        let mut more = vec![
+            (EXPORT_INTO, into_name.as_str()),
+            (FIXTURE_THERE, there.as_str()),
+        ];
+        more.extend(extra);
+        if mode == "say-only" {
+            more.push(("CF_LIVE_AUDIT_FILE", audit_name.as_str()));
+        }
+        let output = passes(&layout, "exports", &more)?;
+        let exports: Vec<&str> = output
+            .lines()
+            .filter_map(|line| line.split_once("EXPORT ").map(|(_, folder)| folder))
+            .collect();
+        assert_eq!(exports.len(), 2, "{mode}: {output}");
+        assert_ne!(
+            exports[0], exports[1],
+            "{mode}: two exports into one folder"
+        );
+        for child in &exports {
+            let child = Path::new(child.trim_end());
+            assert_eq!(
+                child.parent().map(Path::to_path_buf),
+                Some(into.clone()),
+                "{mode}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(child.join("evidence.txt"))?,
+                "this run's evidence",
+                "{mode}"
+            );
+        }
+        // The fixture that was there was refused; a new name was made and written.
+        assert!(output.contains("FIXTURE-REFUSED true"), "{mode}: {output}");
+        assert!(output.contains("FIXTURE-NEW "), "{mode}: {output}");
+        // Everything of the caller's is as it was, a say-only run included.
+        layout
+            .untouched()
+            .map_err(|failed| format!("{mode}: {failed}"))?;
+    }
     Ok(())
 }
 

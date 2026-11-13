@@ -93,7 +93,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::agents;
-use super::login::{private_folder, write_private};
+use super::login::{private_folder, write_private_bytes};
 use super::machine::Harness;
 use super::renew::{Kept, Renewal, Renewed, TestMachine};
 use crate::process::own_var;
@@ -687,7 +687,7 @@ impl Isolation {
                 })?;
         private_folder(folder.path())?;
         for relative in &self.plan.folders {
-            files::make_dir(&folder.path().join(relative))?;
+            crate::door::make_dir(&folder.path().join(relative))?;
         }
         let mut copied = Vec::new();
         for seed in seeds.into_iter().flatten() {
@@ -940,7 +940,7 @@ impl Isolation {
                     self.harness.name()
                 ))
             })?;
-        files::write(&home.join(below).join(name), text)
+        crate::door::write(&home.join(below).join(name), text)
     }
 
     /// What a run that left the owner's setup as it was says it checked: the files, each with the
@@ -1022,7 +1022,7 @@ impl Placed {
             Self::File { to, bytes, login } => {
                 let file = home.join(to);
                 if let Some(folder) = file.parent() {
-                    files::make_dir(folder)?;
+                    crate::door::make_dir(folder)?;
                 }
                 write_bytes(&file, &bytes)?;
                 Ok(login.then_some(Copied { file, was: bytes }))
@@ -1037,42 +1037,13 @@ impl Placed {
 
 /// `bytes` in `file`, readable by its owner alone.
 fn write_bytes(file: &Path, bytes: &[u8]) -> Result {
-    match std::str::from_utf8(bytes) {
-        Ok(text) => write_private(file, text),
-        Err(_) => {
-            // A login is text; a file that is not is copied as it is.
-            files::guard(file)?;
-            let mut made = fs::File::create(file).map_err(Error::file("write", file))?;
-            made.write_all(bytes).map_err(Error::file("write", file))
-        }
-    }
+    write_private_bytes(file, bytes)
 }
 
 /// The folder `from` copied under `to`, its folders and files; the package's own perms are
-/// kept on the entries where the copy can have them.
+/// kept on the entries where the copy can have them (T-1373: an executable it bundles still runs).
 fn copy_tree(from: &Path, to: &Path) -> Result {
-    files::make_dir(to)?;
-    for entry in fs::read_dir(from)
-        .map_err(Error::file("read", from))?
-        .flatten()
-    {
-        let (entry_from, entry_to) = (entry.path(), to.join(entry.file_name()));
-        if entry
-            .file_type()
-            .map_err(Error::file("read", &entry_from))?
-            .is_dir()
-        {
-            copy_tree(&entry_from, &entry_to)?;
-        } else {
-            files::copy(&entry_from, &entry_to)?;
-            // With its mode: an executable the package bundles still runs (T-1373).
-            let permissions = fs::metadata(&entry_from)
-                .map_err(Error::file("read", &entry_from))?
-                .permissions();
-            fs::set_permissions(&entry_to, permissions).map_err(Error::file("write", &entry_to))?;
-        }
-    }
-    Ok(())
+    crate::door::copy_tree(from, to, &|_| false)
 }
 
 impl fmt::Debug for Isolation {

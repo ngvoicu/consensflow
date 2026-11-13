@@ -71,7 +71,7 @@ fn listening_on(server: &Spawned) -> u16 {
 fn the_stand_in_codexs_server_on_loopback_lets_in_only_the_token_whose_hash_it_was_given() -> Outcome
 {
     let _turn = cf_e2e::serial::turn();
-    let root = tempfile::tempdir()?;
+    let root = cf_e2e::door::made("cf-stand-in-")?;
     let log = root.path().join("codex.jsonl");
     let server = Run::new(FAKE_CODEX)
         .args(["app-server", "--listen", "ws://127.0.0.1:0"])
@@ -164,7 +164,7 @@ fn the_stand_in_codexs_plugin_server_leads_a_group_of_its_own_and_starts_its_wor
 ) -> Outcome {
     use cf_e2e::process::{group_of, is_alive};
 
-    let folder = tempfile::tempdir()?;
+    let folder = cf_e2e::door::made("cf-stand-in-")?;
     let file = folder.path().join("plugin-1-1");
     let mut server = Run::new(FAKE_CODEX)
         .arg("--server")
@@ -226,7 +226,7 @@ fn the_stand_in_codexs_plugin_server_leads_a_group_of_its_own_and_starts_its_wor
 #[test]
 fn the_stand_in_codexs_plugin_server_and_worker_write_their_process_whole_or_not_at_all() -> Outcome
 {
-    let folder = tempfile::tempdir()?;
+    let folder = cf_e2e::door::made("cf-stand-in-")?;
     let (server, worker) = (
         folder.path().join("server-1"),
         folder.path().join("worker-1"),
@@ -270,7 +270,7 @@ fn the_stand_in_codexs_plugin_server_and_worker_write_their_process_whole_or_not
 fn the_stand_in_codexs_server_takes_a_turn_and_writes_its_rollout_where_the_daemon_reads_it(
 ) -> Outcome {
     let _turn = cf_e2e::serial::turn();
-    let root = tempfile::tempdir()?;
+    let root = cf_e2e::door::made("cf-stand-in-")?;
     let server = server_in(root.path())?;
     let mut client = Client::connect(listening_on(&server))?;
     let thread = client.start_thread()?;
@@ -339,7 +339,7 @@ fn the_stand_in_codexs_server_takes_a_turn_and_writes_its_rollout_where_the_daem
 fn the_stand_in_codexs_thread_has_no_rollout_before_its_first_turn_and_another_server_resumes_it_once_it_has_one(
 ) -> Outcome {
     let _turn = cf_e2e::serial::turn();
-    let root = tempfile::tempdir()?;
+    let root = cf_e2e::door::made("cf-stand-in-")?;
     let mut first = server_in(root.path())?;
     let mut client = Client::connect(listening_on(&first))?;
     let thread = client.start_thread()?;

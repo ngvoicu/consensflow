@@ -66,7 +66,9 @@ impl Rig {
             Some(root) => (root.clone(), None),
             None => {
                 let folder = config.homes.clone().unwrap_or_else(std::env::temp_dir);
-                files::make_dir(&folder)?;
+                // The place the rig's own folder is made in is made where it is not there, and
+                // is no folder of the run's: only the rig's root below it is.
+                crate::door::make_place(&folder).map_err(Error::file("make", &folder))?;
                 super::sweep::homes(&folder);
                 let scratch =
                     crate::door::made_in(&folder, crate::door::RIG_PREFIX).map_err(|source| {
@@ -80,7 +82,7 @@ impl Rig {
             }
         };
         let workspace = root.join("workspace");
-        files::make_dir(&workspace)?;
+        crate::door::make_dir(&workspace)?;
         let fake_bin = write_fake_install(&root, &config)?;
         let muse_launcher = matches!(config.muse, Some((_, crate::muse::Run::Live { .. })))
             .then(|| own_commands(&root, &config).join("muse"));

@@ -150,8 +150,8 @@ fn work_tree(root: &Path) -> Result<(), String> {
     if !removed.is_gone() {
         return Err(removed.to_string());
     }
-    fs::create_dir_all(&main).map_err(|error| error.to_string())?;
-    fs::write(main.join("README.md"), "A throwaway project.\n")
+    cf_e2e::door::make_dir(&main).map_err(|error| error.to_string())?;
+    cf_e2e::door::write(main.join("README.md"), "A throwaway project.\n")
         .map_err(|error| error.to_string())?;
     let who = [
         "-c",
@@ -211,11 +211,11 @@ fn run(name: &str, posture: &[&str], under: &Path, log: &Log) -> Result<Done, St
     set_up(&root_path)?;
     work_tree(&root_path)?;
     let outside = root_path.join("outside");
-    fs::create_dir_all(&outside).map_err(|error| error.to_string())?;
+    cf_e2e::door::make_dir(&outside).map_err(|error| error.to_string())?;
     let (port, heard) = listen()?;
     let work = root_path.join("work");
     let cf = cf::binary().map_err(|failed| failed.to_string())?;
-    fs::write(work.join("probe.sh"), script(port, cf, &outside))
+    cf_e2e::door::write(work.join("probe.sh"), script(port, cf, &outside))
         .map_err(|error| error.to_string())?;
     let env = environment(&root_path);
     let (spent, _) = usage(&binary, &env, &root_path, log)?;
@@ -340,5 +340,6 @@ fn only_full_permission_lets_a_muse_member_reach_the_daemon_commit_and_write_out
             "a softer posture did all three: the member's posture is due another look: {said}"
         ));
     }
+    log.passed();
     Ok(())
 }

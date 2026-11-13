@@ -421,7 +421,7 @@ fn every_harness_sits_in_a_seat_of_one_rig_takes_a_short_task_and_returns_its_re
         checks.push(Check::new(harness.name(), CHECKED, account.held(), version));
     }
     log.report("what each seat came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::verdict_of(&log, &checks)
 }
 
 #[cfg(test)]

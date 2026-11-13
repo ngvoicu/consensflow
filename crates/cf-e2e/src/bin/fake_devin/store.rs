@@ -102,7 +102,7 @@ impl Store {
     /// where its chain ends.
     pub fn open(file: &Path, session: &str) -> Result<Self, String> {
         if let Some(folder) = file.parent() {
-            std::fs::create_dir_all(folder).map_err(|failed| format!("{folder:?}: {failed}"))?;
+            cf_e2e::door::make_dir(folder).map_err(|failed| format!("{folder:?}: {failed}"))?;
         }
         let db = Connection::open(file).map_err(said)?;
         db.busy_timeout(Duration::from_secs(5)).map_err(said)?;

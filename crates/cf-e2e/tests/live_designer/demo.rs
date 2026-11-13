@@ -12,7 +12,7 @@ use crate::{report, IMAGE};
 /// The demo project: a folder with a git repository in it and a README.
 pub fn project(folder: &Path) -> Result {
     live::git_repository(folder)?;
-    files::write(
+    cf_e2e::door::write(
         &folder.join("README.md"),
         "# Honey shop\n\nA demo project: the image designer draws its pictures here.\n",
     )

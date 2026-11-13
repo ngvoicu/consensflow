@@ -321,42 +321,28 @@ fn an_acting_door_ends_the_group_a_child_leads_and_types_the_quit_it_is_given() 
 }
 
 #[test]
-fn a_stand_ins_own_status_file_is_taken_and_no_other_file_is() {
-    let parent = tempfile::tempdir().unwrap();
-    let sessions = parent.path().join("sessions");
+fn a_stand_ins_status_file_is_taken_below_a_folder_of_the_run_and_a_file_elsewhere_is_left() {
+    let run = made("door-status-test-").unwrap();
+    let sessions = run.path().join("sessions");
     fs::create_dir_all(&sessions).unwrap();
     let own = sessions.join(format!("{}.json", std::process::id()));
-    let another = sessions.join(format!("{}.json", std::process::id() ^ 1));
-    let elsewhere = parent.path().join(format!("{}.json", std::process::id()));
-    for file in [&own, &another, &elsewhere] {
+    let elsewhere = tempfile::tempdir().unwrap();
+    let theirs = elsewhere
+        .path()
+        .join(format!("{}.json", std::process::id()));
+    for file in [&own, &theirs] {
         fs::write(file, "{}").unwrap();
     }
     let acting = Door::acting();
-    assert!(matches!(
-        acting.remove_status_of_this_process(&another),
-        Removed::Left(..)
-    ));
-    assert!(matches!(
-        acting.remove_status_of_this_process(&elsewhere),
-        Removed::Left(..)
-    ));
-    assert!(another.is_file() && elsewhere.is_file());
-    assert!(matches!(
-        acting.remove_status_of_this_process(&own),
-        Removed::Removed(_)
-    ));
+    assert!(matches!(acting.remove_in_made(&theirs), Removed::Left(..)));
+    assert!(theirs.is_file());
+    assert!(matches!(acting.remove_in_made(&own), Removed::Removed(_)));
     assert!(!own.exists());
-    assert!(matches!(
-        acting.remove_status_of_this_process(&own),
-        Removed::Absent(_)
-    ));
+    assert!(matches!(acting.remove_in_made(&own), Removed::Absent(_)));
     // A say-only door says it and leaves it.
     fs::write(&own, "{}").unwrap();
-    let (door, file) = saying_in(parent.path());
-    assert!(matches!(
-        door.remove_status_of_this_process(&own),
-        Removed::Said(_)
-    ));
+    let (door, file) = saying_in(elsewhere.path());
+    assert!(matches!(door.remove_in_made(&own), Removed::Said(_)));
     assert!(own.is_file());
     assert!(acts(&file)[0].starts_with("remove\t"), "{:?}", acts(&file));
 }
@@ -436,6 +422,227 @@ fn a_write_in_the_live_zone_goes_only_below_a_folder_this_run_made() {
     // Outside the zone nothing changes.
     let elsewhere = tempfile::tempdir().unwrap();
     crate::files::write(&elsewhere.path().join("a").join("b"), "x").unwrap();
+}
+
+/// A folder of a person's, which this run made none of, with a file of theirs in it.
+fn a_persons_folder() -> (tempfile::TempDir, PathBuf) {
+    let theirs = tempfile::tempdir().unwrap();
+    let kept = theirs.path().join("kept.txt");
+    fs::write(&kept, "theirs").unwrap();
+    (theirs, kept)
+}
+
+#[test]
+fn the_door_writes_only_below_a_folder_this_run_made_wherever_the_folder_is() {
+    let (theirs, kept) = a_persons_folder();
+    let nothing = |path: &Path| assert!(!path.exists(), "{} was made", path.display());
+
+    // Every way to write, copy onto, rename onto, cut or add to a place that is none of this run's
+    // folders is refused, in a folder of the temp folder as in the live folder.
+    assert!(write(&kept, "mine").is_err());
+    assert!(write(&theirs.path().join("new.txt"), "mine").is_err());
+    assert!(write_executable(&theirs.path().join("run.sh"), "#!/bin/sh").is_err());
+    assert!(copy(&kept, &theirs.path().join("copy.txt")).is_err());
+    assert!(rename(&kept, &theirs.path().join("moved.txt")).is_err());
+    assert!(create(&kept).is_err());
+    assert!(append(&kept).is_err());
+    assert!(create_new(&theirs.path().join("fresh")).is_err());
+    assert!(create_new_private(&theirs.path().join("private")).is_err());
+    assert!(make_dir(&theirs.path().join("folder").join("deeper")).is_err());
+    assert!(make_dir(theirs.path()).is_err());
+    assert!(set_permissions(&kept, fs::metadata(&kept).unwrap().permissions()).is_err());
+    assert!(set_modified(&kept, std::time::SystemTime::now()).is_err());
+    assert!(write_whole(&theirs.path().join("said"), "x").is_err());
+    assert!(say_its_process(&theirs.path().join("job")).is_err());
+    assert_eq!(fs::read_to_string(&kept).unwrap(), "theirs");
+    for name in [
+        "new.txt",
+        "run.sh",
+        "copy.txt",
+        "moved.txt",
+        "fresh",
+        "private",
+        "folder",
+        "said",
+        "said.writing",
+        "job.pid",
+    ] {
+        nothing(&theirs.path().join(name));
+    }
+
+    // A folder this run made: its own, what is below it, and each way to write there.
+    let mine = made("own-").unwrap();
+    let file = mine.path().join("sub").join("note.txt");
+    write(&file, "mine").unwrap();
+    copy(&file, &mine.path().join("copy.txt")).unwrap();
+    rename(
+        &mine.path().join("copy.txt"),
+        &mine.path().join("moved.txt"),
+    )
+    .unwrap();
+    write_executable(&mine.path().join("bin").join("run.sh"), "#!/bin/sh").unwrap();
+    create(&mine.path().join("cut.txt")).unwrap();
+    append(&mine.path().join("log.txt")).unwrap();
+    create_new(&mine.path().join("fresh.txt")).unwrap();
+    create_new_private(&mine.path().join("private.txt")).unwrap();
+    make_dir(&mine.path().join("a").join("b")).unwrap();
+    make_dir(mine.path()).unwrap();
+    write_whole(&mine.path().join("said"), "x").unwrap();
+    say_its_process(&mine.path().join("job")).unwrap();
+    set_modified(&file, std::time::SystemTime::now()).unwrap();
+    assert_eq!(fs::read_to_string(&file).unwrap(), "mine");
+    assert_eq!(fs::read_to_string(mine.path().join("said")).unwrap(), "x");
+    // A file made new is not made over, and the folder itself is no place for a file of its own.
+    assert!(create_new(&mine.path().join("fresh.txt")).is_err());
+    assert!(write(mine.path(), "text").is_err());
+    // What is taken from a place that is none of this run's is not the run's to move, even into its own.
+    assert!(rename(&kept, &mine.path().join("taken.txt")).is_err());
+    assert_eq!(fs::read_to_string(&kept).unwrap(), "theirs");
+    nothing(&mine.path().join("taken.txt"));
+    // A copy reads from anywhere: what is read is not changed.
+    copy(&kept, &mine.path().join("from-theirs.txt")).unwrap();
+    assert_eq!(
+        fs::read_to_string(mine.path().join("from-theirs.txt")).unwrap(),
+        "theirs"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_in_a_folder_this_run_made_leads_no_write_out_of_it() {
+    let (theirs, kept) = a_persons_folder();
+    let mine = made("own-").unwrap();
+    let link = mine.path().join("link");
+    std::os::unix::fs::symlink(&kept, &link).unwrap();
+    assert!(write(&link, "through").is_err());
+    assert!(append(&link).is_err());
+    assert!(copy(&kept, &link).is_err());
+    let up = mine.path().join("up");
+    std::os::unix::fs::symlink(theirs.path(), &up).unwrap();
+    assert!(write(&up.join("kept.txt"), "through").is_err());
+    assert!(write(&up.join("new.txt"), "through").is_err());
+    assert!(make_dir(&up.join("deeper")).is_err());
+    assert_eq!(fs::read_to_string(&kept).unwrap(), "theirs");
+    assert!(!theirs.path().join("new.txt").exists());
+}
+
+#[test]
+fn a_file_a_caller_names_is_made_new_and_refused_where_it_is_there_and_is_then_this_runs() {
+    let (theirs, kept) = a_persons_folder();
+    // A name that is taken is refused before anything is written, and what is there stays.
+    let refusal = made_file(&kept).unwrap_err().to_string();
+    assert!(refusal.contains("it is there already"), "{refusal}");
+    assert_eq!(fs::read_to_string(&kept).unwrap(), "theirs");
+    // A new name is made, is the run's, and what the run writes there is written; its neighbours are not.
+    let fixture = theirs.path().join("fixture.json");
+    drop(made_file(&fixture).unwrap());
+    write(&fixture, "{}").unwrap();
+    append(&fixture).unwrap();
+    assert_eq!(fs::read_to_string(&fixture).unwrap(), "{}");
+    assert!(write(&theirs.path().join("neighbour.json"), "{}").is_err());
+    assert!(make_dir(&fixture).is_err());
+    assert!(made_file(&fixture).is_err());
+}
+
+#[test]
+fn the_place_an_allocation_is_made_in_is_made_where_it_is_not_there_and_is_no_place_to_write() {
+    let home = tempfile::tempdir().unwrap();
+    let live = home.path().join(".consensflow-candidate").join("live");
+    let mine = made_in(&live, "case-").unwrap();
+    assert!(live.is_dir() && mine.path().starts_with(&live));
+    assert!(write(&live.join("another.txt"), "x").is_err());
+    assert!(make_dir(&live.join("another")).is_err());
+    write(&mine.path().join("brief.md"), "mine").unwrap();
+    // What was there is not changed by a second allocation.
+    fs::write(live.join("older"), "an older run's").unwrap();
+    let again = made_in(&live, "case-").unwrap();
+    assert_ne!(again.path(), mine.path());
+    assert_eq!(
+        fs::read_to_string(live.join("older")).unwrap(),
+        "an older run's"
+    );
+}
+
+#[test]
+fn what_a_run_made_is_handed_to_a_program_it_starts_and_a_program_that_was_handed_none_may_write_nowhere(
+) {
+    let mine = made("own-").unwrap();
+    let handed = handed_down();
+    assert_eq!(handed.len(), 1);
+    assert_eq!(handed[0].0, MADE_ROOTS);
+    // The registry holds the real path as the door reads it: Windows' `\\?\` taken off.
+    let real = canonical(mine.path()).unwrap();
+    assert!(std::env::split_paths(&handed[0].1).any(|root| root == real));
+    // The paths it hands down, read as a program reads them.
+    let other = std::env::temp_dir().join("a-root-of-another-run");
+    let joined = std::env::join_paths([&real, &other]).unwrap();
+    assert_eq!(roots_handed_down(Some(&joined)), [real, other]);
+    assert_eq!(roots_handed_down(None), Vec::<PathBuf>::new());
+}
+
+/// What the program a run starts does with what it was handed: this test program again, which
+/// writes where it was handed and not elsewhere, and says what came of each in a file.
+#[test]
+fn a_program_a_run_starts_writes_below_what_was_handed_down_to_it_and_nowhere_else() {
+    const TEST: &str =
+        "door::tests::a_program_a_run_starts_writes_below_what_was_handed_down_to_it_and_nowhere_else";
+    let Some(verdict) = std::env::var_os("CF_E2E_DOOR_WRITE_CHILD") else {
+        // The run: it makes a folder, starts the program, and reads what the program says.
+        let mine = made("own-").unwrap();
+        let (theirs, kept) = a_persons_folder();
+        let start = |said: &Path, handed: Vec<(String, String)>| {
+            let out = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", TEST, "--test-threads=1"])
+                .env_remove(MADE_ROOTS)
+                .env("CF_E2E_DOOR_WRITE_CHILD", said)
+                .env("CF_E2E_DOOR_WRITE_CHILD_HOME", mine.path())
+                .env("CF_E2E_DOOR_WRITE_CHILD_THEIRS", &kept)
+                .envs(handed)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+            fs::read_to_string(said).unwrap()
+        };
+        assert_eq!(
+            start(&theirs.path().join("handed.txt"), handed_down()),
+            "own: written; theirs: refused"
+        );
+        assert_eq!(
+            fs::read_to_string(mine.path().join("by-the-program.txt")).unwrap(),
+            "handed down"
+        );
+        // A program that was handed nothing has made nothing, and writes nowhere.
+        fs::remove_file(mine.path().join("by-the-program.txt")).unwrap();
+        assert_eq!(
+            start(&theirs.path().join("none.txt"), Vec::new()),
+            "own: refused; theirs: refused"
+        );
+        assert!(!mine.path().join("by-the-program.txt").exists());
+        assert_eq!(fs::read_to_string(&kept).unwrap(), "theirs");
+        return;
+    };
+    let own = PathBuf::from(std::env::var_os("CF_E2E_DOOR_WRITE_CHILD_HOME").unwrap());
+    let theirs = PathBuf::from(std::env::var_os("CF_E2E_DOOR_WRITE_CHILD_THEIRS").unwrap());
+    let said = |written: crate::Result| {
+        if written.is_ok() {
+            "written"
+        } else {
+            "refused"
+        }
+    };
+    fs::write(
+        verdict,
+        format!(
+            "own: {}; theirs: {}",
+            said(write(&own.join("by-the-program.txt"), "handed down")),
+            said(write(&theirs, "over"))
+        ),
+    )
+    .unwrap();
 }
 
 /// What the door's child runs: this test program again, which waits a minute where the test

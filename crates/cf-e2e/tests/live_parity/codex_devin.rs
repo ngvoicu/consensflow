@@ -172,7 +172,7 @@ fn folder(prefix: &str) -> Result<Made> {
 fn server_folder() -> Result<(Made, PathBuf)> {
     let folder = folder("cf-parity-server-")?;
     let program = folder.path().join("server.cjs");
-    files::write(&program, SERVER)?;
+    cf_e2e::door::write(&program, SERVER)?;
     Ok((folder, program))
 }
 
@@ -279,7 +279,7 @@ fn devin_case() -> Result<Case> {
 fn muse_case() -> Result<Case> {
     let (server, program) = server_folder()?;
     let hook = server.path().join("hook.sh");
-    files::write(
+    cf_e2e::door::write(
         &hook,
         format!(
             "#!/bin/sh\nprintf '%s' '{{\"hookSpecificOutput\":{{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"The parity word of the human hook is {HOOK_WORD}.\"}}}}'\n"
@@ -521,7 +521,7 @@ fn check(harness: Harness, log: &Log) -> Result {
     let daemons = members.rig().home();
     let home = files::real_path(&daemons.parent().unwrap_or(&daemons).join("home"));
     for (name, text) in &case.rig_files {
-        files::write(&home.join(name), text)?;
+        cf_e2e::door::write(&home.join(name), text)?;
         log.say(format!(
             "the human's own {name} is written in the rig's home"
         ));

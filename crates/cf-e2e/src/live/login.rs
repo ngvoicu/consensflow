@@ -181,12 +181,20 @@ fn keychain_args(user: &str) -> Vec<String> {
         .into()
 }
 
+/// The fields of `claudeAiOauth` the machine's login must hold to be copied.
+const MACHINES: [&str; 2] = ["accessToken", "refreshToken"];
+
 /// The part of `text`, the login as the machine keeps it, that a run's folder is given:
 /// `claudeAiOauth` and nothing else of it (the OAuth tokens of the person's MCP servers
 /// are in the same text). An error says why the machine's login cannot be used, or that
 /// the access token lasts less than `left` from `now` (milliseconds since the epoch);
 /// never what the text held.
-fn oauth(text: &str, now: i64, left: Duration) -> Result<Value> {
+///
+/// It asks the login for the fields `required` of its `claudeAiOauth`: both tokens
+/// ([`MACHINES`]) where the machine keeps it, and the access token alone in a folder the run's caller
+/// copied the login into, which may hold it without its refresh token (the run's own copy holds
+/// none).
+fn oauth_with(text: &str, now: i64, left: Duration, required: &[&str]) -> Result<Value> {
     let not_usable =
         |why: &str| Error::Daemon(format!("Claude Code's login cannot be used: {why}"));
     let login: Value = serde_json::from_str(text).map_err(|_| not_usable("it is not JSON"))?;
@@ -198,8 +206,11 @@ fn oauth(text: &str, now: i64, left: Duration) -> Result<Value> {
                 "it holds no `claudeAiOauth`; Claude Code is not logged in with a Claude account",
             )
         })?;
-    for field in ["accessToken", "refreshToken"] {
-        if !oauth[field].as_str().is_some_and(|token| !token.is_empty()) {
+    for field in required {
+        if !oauth[*field]
+            .as_str()
+            .is_some_and(|token| !token.is_empty())
+        {
             return Err(not_usable(&format!("its `claudeAiOauth` has no `{field}`")));
         }
     }
@@ -612,6 +623,10 @@ pub struct Login {
     /// Claude Code run once as the owner to renew a login that has run short: only on a test
     /// machine ([`TestMachine::detect`]); none elsewhere, where such a login is refused.
     renewal: Option<Renewal>,
+    /// The fields of the login's `claudeAiOauth` the source must hold: both tokens where it is the
+    /// machine's, the access token alone where it is a copy the run's caller made
+    /// ([`Login::of_folder`]).
+    required: &'static [&'static str],
     made: Mutex<Option<Made>>,
 }
 
@@ -646,15 +661,60 @@ impl Login {
             parent,
             left,
             renewal: None,
+            required: &MACHINES,
             made: Mutex::new(None),
         }
+    }
+
+    /// The login in the Claude config folder `folder` that a run's caller made and copied a login
+    /// into (`--claude-config <folder>`), for a run that takes `left` at the most. The folder is
+    /// **read and never written**: its `.credentials.json` is the source, and the run's windows run
+    /// on a folder of the run's own, made like the machine's copy is (no refresh token, the live
+    /// folders trusted as a person's own config trusts them), which is removed with the run. The
+    /// folder's own `.claude.json`, settings and records are not carried over: a config the run made
+    /// is what its cases are written for. Held to what the machine's copy is held to: the source is
+    /// compared with what was copied when the run is over. An error where the run has no home for
+    /// the owner's setup, or the folder holds no `.credentials.json` (on a Mac a Claude Code that
+    /// ran on a folder keeps its login in the Keychain, not in it).
+    pub fn of_folder(folder: &Path, left: Duration) -> Result<Self> {
+        let home = machine_home().ok_or_else(|| {
+            Error::Daemon(
+                "--claude-config: this run has no home to say the live folders below, which the \
+                 run's copy of the login trusts"
+                    .to_owned(),
+            )
+        })?;
+        Self::of_folder_in(folder, home, std::env::temp_dir(), left)
+    }
+
+    /// [`Login::of_folder`] for the owner whose home is `owner_home`, the run's folder made in
+    /// `parent`.
+    fn of_folder_in(
+        folder: &Path,
+        owner_home: PathBuf,
+        parent: PathBuf,
+        left: Duration,
+    ) -> Result<Self> {
+        let file = folder.join(".credentials.json");
+        if !file.is_file() {
+            return Err(Error::Daemon(format!(
+                "--claude-config {}: the folder holds no .credentials.json to copy the login from \
+                 (a Claude Code that ran on a folder on a Mac keeps its login in the Keychain, not \
+                 in it): give a folder the login was copied into, or let the run use its own copy \
+                 of the machine's login (no flag)",
+                folder.display()
+            )));
+        }
+        let mut login = Self::new(Source::File(file), owner_home, parent, left);
+        login.required = &["accessToken"];
+        Ok(login)
     }
 
     /// The login of the machine in `text` as a run may start on it at `now`: renewed first, once,
     /// where it has run short on a test machine. The login and what the renewal came to; or why the
     /// run is refused, with the renewal's part in it said.
     fn usable(&self, text: String, now: i64) -> Result<(Value, Option<Renewed>)> {
-        let refused = match oauth(&text, now, self.left) {
+        let refused = match oauth_with(&text, now, self.left, self.required) {
             Ok(oauth) => return Ok((oauth, None)),
             Err(refused) => refused,
         };
@@ -676,7 +736,7 @@ impl Login {
             .map_err(|why| Error::Daemon(format!("{refused}. {why}")))?;
         // What the renewal did is said as it is done, for a run that does not get so far.
         let _ = writeln!(io::stderr(), "note: {}", renewed.said(renewal.machine()));
-        match oauth(&fresh, now, self.left) {
+        match oauth_with(&fresh, now, self.left, self.required) {
             Ok(oauth) => Ok((oauth, Some(renewed))),
             Err(still) => Err(Error::Daemon(format!(
                 "{still}. {}",
@@ -763,8 +823,7 @@ pub(super) fn private_folder(path: &Path) -> Result {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-            .map_err(Error::file("make private", path))?;
+        crate::door::set_permissions(path, fs::Permissions::from_mode(0o700))?;
     }
     #[cfg(not(unix))]
     let _ = path;
@@ -773,25 +832,15 @@ pub(super) fn private_folder(path: &Path) -> Result {
 
 /// Makes `path` hold `text`, readable by the user alone (mode 600).
 pub(super) fn write_private(path: &Path, text: &str) -> Result {
-    files::guard(path)?;
-    private(path, text).map_err(Error::file("write", path))
+    write_private_bytes(path, text.as_bytes())
 }
 
-#[cfg(unix)]
-fn private(path: &Path, text: &str) -> io::Result<()> {
-    use std::os::unix::fs::OpenOptionsExt;
-
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)?;
-    file.write_all(text.as_bytes())
-}
-
-#[cfg(not(unix))]
-fn private(path: &Path, text: &str) -> io::Result<()> {
-    fs::write(path, text)
+/// Makes `path` hold `bytes`, readable by the user alone (mode 600): a new file, below a folder this
+/// run made.
+pub(super) fn write_private_bytes(path: &Path, bytes: &[u8]) -> Result {
+    crate::door::create_new_private(path)?
+        .write_all(bytes)
+        .map_err(Error::file("write", path))
 }
 
 /// What Claude Code keeps in its config folder that a kept home keeps of a run: the conversations
@@ -811,22 +860,14 @@ fn copy_records(from: &Path, into: &Path) -> Result {
 /// none. A link is not followed, and a `.key` (the secret of a session's socket, of no use once its
 /// process is gone) is not copied.
 fn copy_tree(from: &Path, to: &Path) -> Result {
-    let Ok(entries) = fs::read_dir(from) else {
+    if !from.is_dir() {
         return Ok(());
-    };
-    files::make_dir(to)?;
-    for entry in entries.flatten() {
-        let (source, name) = (entry.path(), entry.file_name());
-        let Ok(kind) = entry.file_type() else {
-            continue;
-        };
-        if kind.is_dir() {
-            copy_tree(&source, &to.join(&name))?;
-        } else if kind.is_file() && source.extension().is_none_or(|ext| ext != "key") {
-            files::copy(&source, &to.join(&name))?;
-        }
     }
-    Ok(())
+    let not_copied = |source: &Path| {
+        source.extension().is_some_and(|ext| ext == "key")
+            || fs::symlink_metadata(source).is_ok_and(|found| found.file_type().is_symlink())
+    };
+    crate::door::copy_tree(from, to, &not_copied)
 }
 
 impl fmt::Debug for Login {

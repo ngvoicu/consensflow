@@ -148,9 +148,9 @@ fn a_command_a_muse_turn_leaves_running_holds_the_task_until_it_ends() -> Outcom
         ));
     }
     log.say(format!("usage after: {after:?}"));
-    outcome.map_err(|failed| {
+    log.passing(outcome.map_err(|failed| {
         format!("{failed}\nMuse allowance after the run: {spent_after}\nthe window's last bytes:\n{tail}")
-    })
+    }))
 }
 
 /// Pastes the turn's words and reads the record until what holds the task and lets it

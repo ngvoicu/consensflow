@@ -370,7 +370,7 @@ mod tests {
 
     #[test]
     fn the_stand_in_cf_is_found_as_cf_writes_down_each_call_and_says_it_is_a_stand_in() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let cf = calls::install(folder.path(), Path::new(FAKE_CF)).unwrap();
         // As a window's shell runs it: by the name `cf`, with the words of the call.
         let asked = Program::new(&cf).args(["ask", "which-ab12"]).run().unwrap();

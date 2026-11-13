@@ -363,23 +363,27 @@ fn said_yes_once(record: &Path, directory: &Path) -> Result {
         held["projects"] = json!({});
     }
     held["projects"][&folder]["hasTrustDialogAccepted"] = json!(true);
-    fs::write(record, held.to_string()).map_err(|source| Error::File {
-        action: "write",
-        path: record.to_path_buf(),
-        source,
-    })
+    cf_e2e::door::write(record, held.to_string())
+        .map_err(std::io::Error::from)
+        .map_err(|source| Error::File {
+            action: "write",
+            path: record.to_path_buf(),
+            source,
+        })
 }
 
 /// Writes the `.claude/settings.json` of `directory`, which pre-approves a tool.
 fn pre_approve(directory: &Path) -> Result {
     let settings = directory.join(".claude");
-    cf_e2e::files::make_dir(&settings)?;
+    cf_e2e::door::make_dir(&settings)?;
     let granted = json!({ "permissions": { "allow": ["Bash(ls:*)"] } });
-    fs::write(settings.join("settings.json"), granted.to_string()).map_err(|source| Error::File {
-        action: "write",
-        path: settings.join("settings.json"),
-        source,
-    })
+    cf_e2e::door::write(settings.join("settings.json"), granted.to_string())
+        .map_err(std::io::Error::from)
+        .map_err(|source| Error::File {
+            action: "write",
+            path: settings.join("settings.json"),
+            source,
+        })
 }
 
 /// Whether a screen speaks of trust at all: the word, whatever reads it.
@@ -654,11 +658,13 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
         } else {
             directory.clone()
         };
-        fs::write(names.join(".mcp.json"), servers).map_err(|source| Error::File {
-            action: "write",
-            path: names.join(".mcp.json"),
-            source,
-        })?;
+        cf_e2e::door::write(names.join(".mcp.json"), servers)
+            .map_err(std::io::Error::from)
+            .map_err(|source| Error::File {
+                action: "write",
+                path: names.join(".mcp.json"),
+                source,
+            })?;
     }
     if let (Some(repository), false) = (repository, matches!(case, Case::Again | Case::ServerAgain))
     {
@@ -1011,10 +1017,8 @@ fn to_report(report: &Path, text: &str) -> Result {
         path: report.to_path_buf(),
         source,
     };
-    fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(report)
+    cf_e2e::door::append(report)
+        .map_err(std::io::Error::from)
         .and_then(|mut file| file.write_all(format!("{text}\n").as_bytes()))
         .map_err(written)
 }
@@ -1037,7 +1041,11 @@ fn write_conversation(
         path: file.to_path_buf(),
         source,
     };
-    let mut out = std::io::BufWriter::new(fs::File::create(file).map_err(written)?);
+    let mut out = std::io::BufWriter::new(
+        cf_e2e::door::create(file)
+            .map_err(std::io::Error::from)
+            .map_err(written)?,
+    );
     let mut parent: Option<String> = None;
     let mut line = |entry: serde_json::Value, parent: &mut Option<String>| -> Result {
         let mut entry = entry;
@@ -1128,7 +1136,7 @@ fn resumed(install: &Installed, stamp: &str, log: &Log, report: &Path) -> Result
         let session = uuid::Uuid::new_v4().to_string();
         let real = fs::canonicalize(&workspace).unwrap_or_else(|_| workspace.clone());
         let records = claude_project_folder(&claude_config(&rig, install), &real);
-        cf_e2e::files::make_dir(&records)?;
+        cf_e2e::door::make_dir(&records)?;
         // Taken away at the end of this window's turn of the loop, or as the run unwinds.
         let _written = Written(records.clone());
         let size = write_conversation(
@@ -1494,6 +1502,40 @@ mod tests {
             trust_notes_in(&[mac_note], mac, &|folder| folder.to_path_buf()),
             [mac_note]
         );
+    }
+
+    #[test]
+    fn the_yes_and_the_grants_of_a_case_are_written_in_what_the_run_made_and_a_callers_config_is_not(
+    ) {
+        // A Claude config folder a caller named (`--claude-config`), with files in it, that no
+        // run made: a person's own. Neither the yes a person said once nor a folder's grants
+        // reach it, and every file of it is as it was.
+        let callers = tempfile::tempdir().unwrap();
+        let record = callers.path().join(".claude.json");
+        let kept = r#"{"projects":{"/mine":{"hasTrustDialogAccepted":false}}}"#;
+        fs::write(&record, kept).unwrap();
+        fs::write(callers.path().join("settings.json"), "{\"theme\":\"dark\"}").unwrap();
+        assert!(said_yes_once(&record, callers.path()).is_err());
+        assert_eq!(fs::read_to_string(&record).unwrap(), kept);
+        assert!(pre_approve(callers.path()).is_err());
+        assert!(!callers.path().join(".claude").exists());
+        assert_eq!(
+            fs::read_to_string(callers.path().join("settings.json")).unwrap(),
+            "{\"theme\":\"dark\"}"
+        );
+        // What the run made takes both.
+        let own = cf_e2e::door::made("live-folder-trust-test-").unwrap();
+        let own_record = own.path().join(".claude.json");
+        said_yes_once(&own_record, own.path()).unwrap();
+        let held: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&own_record).unwrap()).unwrap();
+        assert!(held["projects"]
+            .as_object()
+            .unwrap()
+            .values()
+            .any(|project| project["hasTrustDialogAccepted"] == true));
+        pre_approve(own.path()).unwrap();
+        assert!(own.path().join(".claude/settings.json").is_file());
     }
 
     #[test]

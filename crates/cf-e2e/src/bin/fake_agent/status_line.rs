@@ -118,13 +118,14 @@ impl StatusLine {
     /// The user's script and the `git` it runs written in `config`: the script's path.
     fn install(self, config: &Path) -> Result<std::path::PathBuf, String> {
         let (script, git) = (config.join(SCRIPT), config.join(GIT));
-        fs::write(&script, self.script())
+        cf_e2e::door::write(&script, self.script())
             .map_err(|failed| format!("{}: {failed}", script.display()))?;
-        fs::write(&git, GIT_SCRIPT).map_err(|failed| format!("{}: {failed}", git.display()))?;
+        cf_e2e::door::write(&git, GIT_SCRIPT)
+            .map_err(|failed| format!("{}: {failed}", git.display()))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&git, fs::Permissions::from_mode(0o755))
+            cf_e2e::door::set_permissions(&git, fs::Permissions::from_mode(0o755))
                 .map_err(|failed| format!("{}: {failed}", git.display()))?;
         }
         Ok(script)
@@ -165,8 +166,7 @@ impl StatusLine {
                 thread::sleep(LOOK);
             }
             let lived = began.elapsed().as_millis();
-            let _ =
-                cf_e2e::files::write_whole(&file.with_extension("lived"), &format!("{lived}\n"));
+            let _ = cf_e2e::door::write_whole(&file.with_extension("lived"), &format!("{lived}\n"));
         });
         Ok(())
     }

@@ -81,7 +81,7 @@
 //! cargo xtask live stops --case midtool devin
 //! cargo xtask live stops --case midwsl claude                (Windows, with WSL's Ubuntu)
 //! cargo xtask live stops --case slowhook --hook prompt
-//! cargo xtask live stops --case early --transcripts /tmp/stops    each Claude transcript is copied there
+//! cargo xtask live stops --case early --transcripts /tmp/stops    each Claude transcript is copied into a new folder in it
 //! ```
 //!
 //! The run fails when a case showed what the design says it must not.
@@ -117,7 +117,7 @@ use cf_e2e::live::members::{
 };
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, Harness, Log};
-use cf_e2e::{files, Result};
+use cf_e2e::Result;
 
 use midturn::tool::Command;
 use options::{options, plan_of, runs_on, Case, Options};
@@ -184,7 +184,7 @@ fn keep_transcripts(members: &Members, agent: &str, folder: &Path) -> Result<Vec
         }
         if let Some(file) = live::claude::transcript_file(&members.claude_config(), &session) {
             let to = folder.join(format!("{label}-{session}.jsonl"));
-            files::copy(&file, &to)?;
+            cf_e2e::door::copy(&file, &to)?;
             kept.push(to);
         }
         sessions.push(session);
@@ -240,11 +240,20 @@ fn run(case: Case, harness: Harness, options: &Options, log: &Log) -> Result<Acc
 fn a_stop_the_daemon_presses_is_paid_at_rest_and_never_said_to_be_ignored_where_the_window_stopped(
 ) -> Result {
     let log = Log::begin("live stops")?;
-    let options = options(
+    let mut options = options(
         &live::list("case"),
         live::option("hook").as_deref(),
         &live::list("harness"),
         live::option("transcripts"),
+    )?;
+    // A folder `--transcripts` names is its caller's: the run copies into a new child of it.
+    options.transcripts = live::export_folder(
+        options
+            .transcripts
+            .as_deref()
+            .map(Path::to_string_lossy)
+            .as_deref(),
+        "stops",
     )?;
     let mut checks = Vec::new();
     let mut tally = Tally::default();

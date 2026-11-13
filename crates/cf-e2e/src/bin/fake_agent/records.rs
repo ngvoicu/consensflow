@@ -10,7 +10,7 @@
 //! with a message of its own when the next one comes (`No response requested.`,
 //! no model behind it, written just before that message).
 
-use std::fs::{self, OpenOptions};
+use std::fs::{self};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -71,7 +71,7 @@ impl Records {
         let status_file = config.join("sessions").join(format!("{pid}.json"));
         for file in [&transcript, &status_file] {
             if let Some(folder) = file.parent() {
-                fs::create_dir_all(folder)?;
+                cf_e2e::door::make_dir(folder)?;
             }
         }
         let kept = fs::read_to_string(&transcript).unwrap_or_default();
@@ -111,7 +111,7 @@ impl Records {
     /// that writes it anew, holding only what is said from then on, as a harness may (T-1118,
     /// the owner's other board: the copy ConsensFlow kept is then longer than the record).
     pub fn begin_anew(&mut self) -> io::Result<()> {
-        fs::write(&self.transcript, "")?;
+        cf_e2e::door::write(&self.transcript, "")?;
         self.cut = false;
         self.said = false;
         Ok(())
@@ -219,31 +219,28 @@ impl Records {
     /// The transcript, open to be appended to.
     fn open(&self) -> io::Result<fs::File> {
         make_folder_of(&self.transcript)?;
-        OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(&self.transcript)
+        cf_e2e::door::append(&self.transcript).map_err(std::io::Error::from)
     }
 
     /// Writes that the window waits on a dialog of its own, and why, as Claude Code 2.1.317
     /// says it (`waiting`, `waitingFor`).
     pub fn waiting(&self, pid: u32, why: &str) -> io::Result<()> {
         make_folder_of(&self.status_file)?;
-        fs::write(
+        Ok(cf_e2e::door::write(
             &self.status_file,
             json!({ "pid": pid, "sessionId": self.session, "kind": "interactive", "status": "waiting", "waitingFor": why })
                 .to_string(),
-        )
+        )?)
     }
 
     /// Writes the status the window is in: `idle` or `busy`.
     pub fn status(&self, pid: u32, value: &str) -> io::Result<()> {
         make_folder_of(&self.status_file)?;
-        fs::write(
+        Ok(cf_e2e::door::write(
             &self.status_file,
             json!({ "pid": pid, "sessionId": self.session, "kind": "interactive", "status": value })
                 .to_string(),
-        )
+        )?)
     }
 }
 
@@ -253,7 +250,8 @@ impl Records {
 /// as it is for a chief that has heard nothing yet: a window that did not make it again ended
 /// itself with the first thing it was told.
 fn make_folder_of(file: &Path) -> io::Result<()> {
-    file.parent().map_or(Ok(()), fs::create_dir_all)
+    file.parent()
+        .map_or(Ok(()), |folder| Ok(cf_e2e::door::make_dir(folder)?))
 }
 
 /// Writes `record` and its line break to `out`. `writeln!` of a value writes it
@@ -275,17 +273,12 @@ pub fn note_process(beside: &Path, pid: u32, session: &str, began: Option<&str>)
         ("pids.jsonl", format!("{pid}\n")),
         ("processes.jsonl", format!("{pid}\t{session}\n")),
     ] {
-        let mut file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(beside.join(name))?;
+        let mut file = cf_e2e::door::append(beside.join(name)).map_err(std::io::Error::from)?;
         file.write_all(line.as_bytes())?;
     }
     if let Some(began) = began.filter(|began| !began.is_empty()) {
-        let mut file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(beside.join("began.jsonl"))?;
+        let mut file =
+            cf_e2e::door::append(beside.join("began.jsonl")).map_err(std::io::Error::from)?;
         file.write_all(format!("{pid}\t{began}\n").as_bytes())?;
     }
     Ok(())

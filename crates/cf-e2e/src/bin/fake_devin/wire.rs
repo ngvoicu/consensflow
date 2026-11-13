@@ -20,7 +20,7 @@
 //! TUI's client message) to its agent's first streamed thought, nothing on the wire says
 //! the turn is at work.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{self, Write};
 use std::path::Path;
 
@@ -83,7 +83,7 @@ impl Wire {
     /// The log in `path`, made where it is not there, of the conversation `session`.
     pub fn open(path: &Path, session: &str) -> io::Result<Self> {
         Ok(Self {
-            file: OpenOptions::new().create(true).append(true).open(path)?,
+            file: cf_e2e::door::append(path).map_err(std::io::Error::from)?,
             session: session.to_owned(),
             shape: Shape::Requests,
             steps: Vec::new(),

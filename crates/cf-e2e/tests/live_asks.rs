@@ -26,7 +26,7 @@ use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window};
 use cf_e2e::live::{self, ask, last_lines, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
-use cf_e2e::{files, Result};
+use cf_e2e::Result;
 
 /// The stand-in for Claude, which the rig puts first on the `PATH` of its windows:
 /// no window of this test runs it (each is opened on the real harness's own
@@ -91,7 +91,7 @@ fn why(flat: &str) -> Option<String> {
 /// `work`.
 fn make_labs(work: &Path) -> Result {
     for lab in LABS {
-        files::make_dir(&work.join(lab).join("deep"))?;
+        cf_e2e::door::make_dir(&work.join(lab).join("deep"))?;
     }
     Ok(())
 }

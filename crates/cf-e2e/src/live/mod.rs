@@ -93,6 +93,7 @@ pub mod ask;
 pub mod calls;
 pub mod claude;
 pub mod codex;
+pub mod folders;
 pub mod guard;
 pub mod human;
 pub mod isolation;
@@ -124,7 +125,7 @@ use serde_json::Value;
 
 use crate::process::{own_var, Run};
 use crate::rig::{HarnessHome, Rig};
-use crate::{files, Error, Result};
+use crate::{Error, Result};
 
 pub use machine::{
     claude_project_key, codex, command, installed, installed_for, isolated_claude, lacks, rig,
@@ -211,6 +212,21 @@ fn kept(value: Option<&str>) -> bool {
     value.is_some_and(|value| !value.is_empty() && value != "0")
 }
 
+/// The folder a run copies what a person is to have into (a case's `--transcripts`, the evidence
+/// a compaction case copies out), where its caller named a folder `named`: the caller's folder
+/// is where the run's own is made, a new child called `<stem>-<pid>-<ms>-<n>` of it
+/// ([`crate::door::made_dir`]), so that nothing of the caller's is written into, and a second run
+/// into the same folder has a child of its own. `None` where the caller named none (or an empty
+/// word). The folder it is in is made empty where it is not there.
+pub fn export_folder(named: Option<&str>, stem: &str) -> Result<Option<std::path::PathBuf>> {
+    let Some(named) = named.filter(|named| !named.is_empty()) else {
+        return Ok(None);
+    };
+    let child = Path::new(named).join(crate::door::own_stem(stem));
+    crate::door::made_dir(&child)?;
+    Ok(Some(child))
+}
+
 /// What a live run says as it goes, on the error output (which a test's
 /// capture does not hold back), with the seconds since it began.
 pub struct Log {
@@ -228,6 +244,10 @@ pub struct Log {
     /// How long the run is planned to take: what the logins of the harnesses it finds
     /// ([`Log::found`]) must last, with [`isolation::MARGIN`].
     planned: Duration,
+    /// The run's hold on the project folders its cases make in the live folder
+    /// ([`folders`]): the run and every scope of it share it, and the folders go, or stay,
+    /// when the last of them ends.
+    lease: Arc<folders::Lease>,
 }
 
 impl Log {
@@ -242,7 +262,30 @@ impl Log {
             launches: Arc::default(),
             left_out: Arc::default(),
             planned: PLANNED,
+            lease: Arc::new(machine::POOL.lease()),
         }
+    }
+
+    /// Says that the run came to a pass: the project folders its cases made in the live folder
+    /// are taken away when the last run of the process is done, and stay where one did not pass
+    /// or `--keep` is given ([`folders`]). A run that ends by [`report::conclude`] says it there.
+    pub fn passed(&self) {
+        self.lease.passed();
+    }
+
+    /// Whether this run said that it came to a pass, as a test reads it.
+    #[cfg(test)]
+    pub fn lease_has_passed(&self) -> bool {
+        self.lease.has_passed()
+    }
+
+    /// `result`, as it is, after [`Log::passed`] where it is `Ok`: how a case that ends with
+    /// what it returns says that it came to a pass.
+    pub fn passing<T, E>(&self, result: std::result::Result<T, E>) -> std::result::Result<T, E> {
+        if result.is_ok() {
+            self.passed();
+        }
+        result
     }
 
     /// The same run, planned to take `planned` (a case that is longer than [`PLANNED`] says
@@ -299,6 +342,7 @@ impl Log {
             launches: Arc::clone(&self.launches),
             left_out: Arc::clone(&self.left_out),
             planned: self.planned,
+            lease: Arc::clone(&self.lease),
         }
     }
 
@@ -618,7 +662,7 @@ pub fn until<T>(
 /// Makes `folder` a git repository, as `git init` does, in the folders made for
 /// it: what a live test's demo project begins as.
 pub fn git_repository(folder: &Path) -> Result {
-    files::make_dir(folder)?;
+    crate::door::make_dir(folder)?;
     let ran = Run::new(command("git")?)
         .args(["init", "--quiet"])
         .cwd(folder)

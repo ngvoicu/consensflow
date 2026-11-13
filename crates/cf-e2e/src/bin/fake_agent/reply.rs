@@ -634,7 +634,7 @@ fn saved_in(folder: &Path, names: &str, words: &str) -> Result<String, String> {
     let mut lines = Vec::new();
     for name in names.split(',') {
         let path = folder.join(name);
-        std::fs::write(&path, cf_e2e::png::SMALL)
+        cf_e2e::door::write(&path, cf_e2e::png::SMALL)
             .map_err(|failed| format!("SAVED {name}: {failed}"))?;
         lines.push(path.display().to_string());
     }
@@ -657,7 +657,7 @@ fn written_in(folder: &Path, name: &str, text: &str) -> Result<String, String> {
         ));
     }
     let path = folder.join(relative);
-    std::fs::write(&path, format!("{}\n", text.replace("\\n", "\n")))
+    cf_e2e::door::write(&path, format!("{}\n", text.replace("\\n", "\n")))
         .map_err(|failed| format!("WRITE {name}: {failed}"))?;
     Ok(format!("wrote {name}"))
 }

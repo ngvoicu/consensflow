@@ -543,7 +543,7 @@ fn a_process_begun_before_the_run_that_holds_the_path_of_a_home_outside_the_runs
     let home = cf_e2e::door::made("live-finish-stand-in-").unwrap();
     let elsewhere = cf_e2e::door::made("live-finish-stand-in-").unwrap();
     let file = home.path().join("decoy");
-    std::fs::write(&file, "").unwrap();
+    cf_e2e::door::write(&file, "").unwrap();
     let decoy = Decoy::start(&file, elsewhere.path())?;
     let mut plan = leaving::plan(Who::StandIn);
     plan.vars
@@ -581,7 +581,7 @@ fn a_process_begun_after_the_window_that_holds_a_path_under_the_runs_temp_root_i
     let members = Members::open(&leaving::plan(Who::StandIn), Path::new(FAKE_AGENT), &log)?;
     let elsewhere = cf_e2e::door::made("live-finish-stand-in-").unwrap();
     let file = Path::new(members.rig().var("HOME").expect("the rig has a home")).join("decoy");
-    std::fs::write(&file, "").unwrap();
+    cf_e2e::door::write(&file, "").unwrap();
     let decoy = Decoy::start(&file, elsewhere.path())?;
     let (closed, swept) = members.close_and_sweep(Duration::from_secs(20));
     std::thread::sleep(Duration::from_secs(1));

@@ -69,7 +69,7 @@ impl<W: Write> Said<'_, W> {
     pub fn make(&mut self, folder: &Path, name: &str) -> Result<(), String> {
         let what = format!("write {name}");
         self.wire.called(&what, self.client).map_err(said)?;
-        std::fs::write(folder.join(name), MADE).map_err(said)?;
+        cf_e2e::door::write(folder.join(name), MADE).map_err(said)?;
         self.store
             .tool(&format!("File created successfully at: {name}"))?;
         self.show(&format!("⏺ Wrote {name}\n"))

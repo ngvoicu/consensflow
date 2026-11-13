@@ -34,16 +34,14 @@
 #![cfg(unix)]
 
 use std::fs;
-use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::Open;
 use cf_e2e::live::{self, ask, Harness, Installed, Log};
-use cf_e2e::process::Run;
 use cf_e2e::rig::Rig;
-use cf_e2e::{files, Error, Result};
+use cf_e2e::{Error, Result};
 
 /// The stand-in for Claude, which the rig puts first on the `PATH` of its windows: no window
 /// of this test runs it, but a rig has one.
@@ -69,17 +67,7 @@ fn points(link: &Path) -> Result<PathBuf> {
 /// A copy of the file `from` at `to`, a clone where the system makes one (a Claude Code is
 /// three hundred megabytes).
 fn copy(from: &Path, to: &Path) -> Result {
-    files::make_dir(to.parent().unwrap_or(Path::new(".")))?;
-    let cloned = Run::new("/bin/cp")
-        .arg("-c")
-        .arg(from)
-        .arg(to)
-        .run()
-        .is_ok_and(|ran| ran.code == Some(0));
-    if !cloned {
-        fs::copy(from, to).map_err(io("copy", from))?;
-    }
-    Ok(())
+    cf_e2e::door::copy_cloning(from, to)
 }
 
 /// What a stage of the pretend owner came to.
@@ -104,12 +92,12 @@ fn fake_owner(log: &Log, binary: &Path, told: bool) -> Result<Came> {
     let version = home.join(".local/share/claude/versions").join(name);
     copy(binary, &version)?;
     let link = home.join(".local/bin/claude");
-    files::make_dir(link.parent().unwrap_or(home))?;
-    symlink(&version, &link).map_err(io("link", &link))?;
+    cf_e2e::door::make_dir(link.parent().unwrap_or(home))?;
+    cf_e2e::door::symlink(&version, &link)?;
     // The run's config folder: the onboarding answered, the live folders trusted, no login.
     let config =
         cf_e2e::door::made("live-launcher-").map_err(io("make a folder", Path::new("tmp")))?;
-    files::write(
+    cf_e2e::door::write(
         &config.path().join(".claude.json"),
         r#"{"hasCompletedOnboarding":true,"hasSeenAutoDefaultNotice":true}"#,
     )?;

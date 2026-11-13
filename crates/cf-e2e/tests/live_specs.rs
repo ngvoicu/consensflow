@@ -95,10 +95,20 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 /// meant to be somewhere else.
 const FOLDER: &str = "docs/specs";
 
-/// Where the run keeps what it makes outside its rigs' homes: the shim that starts
-/// Claude Code.
-fn kept() -> PathBuf {
-    Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-specs")
+/// Where the run keeps what it makes outside its rigs' homes: the shim that starts Claude Code,
+/// in a new folder of the run's own in the build's temp folder (a folder of a run before, at the
+/// same place, is never written into), taken away with the run.
+fn kept() -> Result<cf_e2e::door::Made> {
+    kept_in(Path::new(env!("CARGO_TARGET_TMPDIR")))
+}
+
+/// [`kept`] in the folder `parent`, which every run makes its own in.
+fn kept_in(parent: &Path) -> Result<cf_e2e::door::Made> {
+    cf_e2e::door::made_in(parent, "live-specs-").map_err(|source| Error::File {
+        action: "make a folder in",
+        path: parent.to_path_buf(),
+        source,
+    })
 }
 
 /// What the run is limited to and asked for: the words of the variables the command
@@ -137,7 +147,7 @@ fn machine(plan: &[plan::Planned], log: &Log) -> Result<Machine> {
     Ok(Machine {
         installed,
         stand_in: PathBuf::from(FAKE_AGENT),
-        shims: kept(),
+        shims: kept()?,
     })
 }
 
@@ -179,4 +189,40 @@ fn a_chief_of_every_harness_is_told_of_specs_where_they_are_on_plans_one_and_car
         checks.extend(run::project(planned, &machine, &options, &log));
     }
     report::conclude(&log, "what each check came to", &checks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cf_e2e::live::layout::Layout;
+
+    #[test]
+    fn two_runs_each_make_the_folder_of_their_shim_new_and_an_earlier_ones_is_as_it_was() {
+        // The build's temp folder holds an earlier run's folder of the same kind, which is no
+        // run of this one's to write into.
+        let mut layout = Layout::new().unwrap();
+        let parent = layout.home().join("target-tmp");
+        layout
+            .plant_tree(
+                &parent.join("live-specs-Earlier"),
+                &[("claude-isolated", "an earlier run's wrapper\n")],
+            )
+            .unwrap();
+        let first = kept_in(&parent).unwrap();
+        let second = kept_in(&parent).unwrap();
+        assert_ne!(first.path(), second.path());
+        for kept in [&first, &second] {
+            assert!(kept.path().starts_with(&parent), "{:?}", kept.path());
+            // The shim that starts Claude Code is written there through the door, for the run's own windows.
+            let program = live::isolated_claude(kept.path(), Path::new("/the/claude")).unwrap();
+            assert!(program.starts_with(kept.path()), "{program:?}");
+            assert!(program.exists(), "{program:?}");
+        }
+        layout.untouched().unwrap();
+        // Taken away with the run, the earlier run's left.
+        let (a, b) = (first.path().to_path_buf(), second.path().to_path_buf());
+        drop((first, second));
+        assert!(!a.exists() && !b.exists());
+        layout.untouched().unwrap();
+    }
 }

@@ -64,7 +64,9 @@ fn a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversati
 ) -> Outcome {
     // Built before the first question, which a run asks for first of all.
     ask::prepare()?;
-    let stand_in = tempfile::tempdir()?;
+    // A folder the run made through the door: the stand-in `cf` is written there and its log kept
+    // beside it.
+    let stand_in = cf_e2e::door::made("cf-stand-in-")?;
     calls::install(stand_in.path(), Path::new(FAKE_CF))?;
     let rig = Rig::start(devin_config(FAKE_DEVIN).first_on_path(stand_in.path()))?;
     let home = rig.var("HOME").unwrap_or_default().to_owned();

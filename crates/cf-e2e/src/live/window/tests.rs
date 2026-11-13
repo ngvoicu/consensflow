@@ -320,7 +320,7 @@ fn a_probes_hooks_go_after_consensflows_own_in_the_launchs_one_settings_file() {
     assert_eq!(bare, json!({ "hooks": { "PostCompact": [printing] } }));
 
     // The file the launch loads is written beside the app's, which stays as it was.
-    let folder = tempfile::tempdir().unwrap();
+    let folder = crate::door::made("cf-test-").unwrap();
     let file = folder.path().join("settings.json");
     crate::files::write(&file, config.to_string()).unwrap();
     let words = vec!["--settings".to_owned(), file.to_string_lossy().into_owned()];

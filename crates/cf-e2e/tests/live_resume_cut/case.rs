@@ -18,7 +18,7 @@ use cf_e2e::live::window::{drawn, raw_end};
 use cf_e2e::live::window::{Open, Window, ANSWER, READY};
 use cf_e2e::live::{seconds, until, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
-use cf_e2e::{files, Result};
+use cf_e2e::Result;
 use serde_json::Value;
 
 use crate::read::{answer_to, before_answer, change, ended, reading, tail, unanswered};
@@ -84,7 +84,7 @@ fn keep(run: &Run, window: &Window, (case, when): (Case, &str), session: &str) -
         return Ok(());
     };
     if let Some(file) = transcript_file(&window.claude_config(), session) {
-        files::copy(&file, &folder.join(kept_name(case, when, session)))?;
+        cf_e2e::door::copy(&file, &folder.join(kept_name(case, when, session)))?;
     }
     Ok(())
 }

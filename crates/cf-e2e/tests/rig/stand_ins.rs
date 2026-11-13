@@ -164,7 +164,7 @@ pub(crate) fn pid_in(file: &Path) -> Result<u32, String> {
 
 #[test]
 fn the_stand_in_agents_job_writes_its_process_runs_its_seconds_and_says_it_finished() -> Outcome {
-    let folder = tempfile::tempdir()?;
+    let folder = cf_e2e::door::made("cf-stand-in-")?;
     let file = folder.path().join("job-1-1");
     let mut job = start_job("1", &file, false)?;
 
@@ -188,7 +188,7 @@ fn the_stand_in_agents_job_writes_its_process_runs_its_seconds_and_says_it_finis
 /// (`fake_codex/servers.rs`).
 #[test]
 fn the_stand_in_agents_job_writes_its_process_whole_or_not_at_all() -> Outcome {
-    let folder = tempfile::tempdir()?;
+    let folder = cf_e2e::door::made("cf-stand-in-")?;
     let file = folder.path().join("job-1-1");
     let _job = start_job("1", &file, false)?;
     let started = Instant::now();
@@ -215,7 +215,7 @@ fn the_stand_in_agents_job_asked_to_end_says_so_and_goes_and_a_deaf_one_is_only_
 {
     use cf_e2e::process::Signal;
 
-    let folder = tempfile::tempdir()?;
+    let folder = cf_e2e::door::made("cf-stand-in-")?;
     // Asked to end: it writes that it was, and goes with the code 0.
     let file = folder.path().join("job-1-1");
     let mut job = start_job("60", &file, false)?;
@@ -254,7 +254,7 @@ fn the_stand_in_agents_job_leaves_the_group_of_its_window_and_its_server_stays_i
     let group_of = |program: &Spawned| -> Result<Pid, Box<dyn std::error::Error>> {
         Ok(getpgid(Some(Pid::from_raw(i32::try_from(program.id())?)))?)
     };
-    let folder = tempfile::tempdir()?;
+    let folder = cf_e2e::door::made("cf-stand-in-")?;
     let (job_file, server_file) = (
         folder.path().join("job-1-1"),
         folder.path().join("server-1-1"),
@@ -299,7 +299,7 @@ fn the_stand_in_agents_server_launches_a_browser_that_is_its_child_in_a_group_of
 {
     use cf_e2e::process::group_of;
 
-    let folder = tempfile::tempdir()?;
+    let folder = cf_e2e::door::made("cf-stand-in-")?;
     let (server_file, browser_file) = (
         folder.path().join("server-1-1"),
         folder.path().join("browser-1-1"),

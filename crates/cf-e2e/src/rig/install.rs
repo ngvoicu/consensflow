@@ -28,10 +28,14 @@ pub(super) fn tool_folder(root: &Path) -> PathBuf {
 }
 
 /// A say-only run's rig says only too: the stand-ins and what the kit's own programs ask the door
-/// say into the run's audit file, whatever a case sets or unsets (`audit` is none where the run
-/// acts).
-fn says_only_as_the_run_does(env: &mut Vec<(String, String)>, audit: Vec<(String, String)>) {
-    for (name, value) in audit {
+/// say into the run's audit file, whatever a case sets or unsets; and every program of the rig is
+/// told the folders the run made (`handed` is the door's [`crate::door::Door::child_vars`]: no
+/// audit where the run acts, and no folder where it made none).
+fn as_the_run_does(env: &mut Vec<(String, String)>, handed: Vec<(String, String)>) {
+    // The folders a rig writes below are the run's own, as the registry holds them, and none a case
+    // names: a run that made none hands none.
+    env.retain(|(name, _)| name != crate::door::MADE_ROOTS);
+    for (name, value) in handed {
         env.retain(|(held, _)| *held != name);
         env.push((name, value));
     }
@@ -129,7 +133,7 @@ pub(super) fn environment(
     );
     env.extend(config.vars.iter().cloned());
     env.retain(|(name, _)| !config.unset.contains(name));
-    says_only_as_the_run_does(&mut env, crate::door::Door::audit_vars());
+    as_the_run_does(&mut env, crate::door::Door::child_vars());
     // A stand-in Devin keeps its store and settings in the rig's own home, whatever folders of
     // the machine's a caller passed: Devin's are under `APPDATA` on Windows, and the live kit
     // gives the machine's own, which put the stand-in's store in the machine owner's (zeewin2,
@@ -215,11 +219,11 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
     let fake_bin = root.join("fake-bin");
     let home = root.join("home");
     let projects = home.join(".claude").join("projects").join("integration");
-    files::make_dir(&projects)?;
+    crate::door::make_dir(&projects)?;
     let own = own_commands(root, config);
     let system = if config.finder {
         // There, as Homebrew's is on a Mac, for what a case puts in it.
-        files::make_dir(&tool_folder(root))?;
+        crate::door::make_dir(&tool_folder(root))?;
         tool_folder(root)
     } else {
         fake_bin.clone()
@@ -310,11 +314,11 @@ pub(super) fn give_muse_its_folders(
             continue;
         };
         let target = own.join(below).join("muse");
-        files::make_dir(&target)?;
+        crate::door::make_dir(&target)?;
         if files::real_path(&moved) == own.join(below) {
             continue;
         }
-        files::make_dir(&moved)?;
+        crate::door::make_dir(&moved)?;
         let link = moved.join("muse");
         match std::fs::symlink_metadata(&link) {
             Ok(meta) if meta.file_type().is_symlink() => {
@@ -332,7 +336,7 @@ pub(super) fn give_muse_its_folders(
             }
             Err(_) => {}
         }
-        std::os::unix::fs::symlink(&target, &link).map_err(Error::file("link", &link))?;
+        crate::door::symlink(&target, &link)?;
     }
     Ok(())
 }
@@ -342,9 +346,9 @@ pub(super) fn give_muse_its_folders(
 fn write_shim(dir: &Path, name: &str, var: &str, program: &Path) -> Result {
     let shim = dir.join(stand_in::program_name(name));
     if cfg!(windows) {
-        files::write_executable(&shim, stand_in::window_command(program)?)
+        crate::door::write_executable(&shim, stand_in::window_command(program)?)
     } else {
-        files::write_executable(&shim, format!("#!/bin/sh\nexec \"${var}\" \"$@\"\n"))
+        crate::door::write_executable(&shim, format!("#!/bin/sh\nexec \"${var}\" \"$@\"\n"))
     }
 }
 
@@ -364,7 +368,7 @@ pub(super) fn write_stand_ins(root: &Path) -> Result<()> {
         text: roster.to_string(),
         source,
     })?;
-    files::write(&root.join(STAND_INS), format!("{text}\n"))
+    crate::door::write(&root.join(STAND_INS), format!("{text}\n"))
 }
 
 #[cfg(test)]
@@ -416,7 +420,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_rig_that_runs_muse_names_its_data_folder_by_its_real_path() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-test-").unwrap();
         let real = folder.path().join("real");
         std::fs::create_dir_all(real.join("home").join(".local").join("share")).unwrap();
         let linked = folder.path().join("linked");
@@ -484,7 +488,7 @@ mod tests {
         let mut env = environment(root, &root.join("fake-bin"), &given, &[]);
         // A run that acts gives its rig none of the three.
         assert!(!env.iter().any(|(name, _)| name == "CF_LIVE_AUDIT_MADE"));
-        says_only_as_the_run_does(
+        as_the_run_does(
             &mut env,
             vec![
                 ("CF_LIVE_AUDIT".to_owned(), "1".to_owned()),
@@ -501,6 +505,33 @@ mod tests {
                 .count(),
             3
         );
+    }
+
+    #[test]
+    fn the_folders_a_run_made_are_what_its_rig_is_told_to_write_below_whatever_a_case_sets() {
+        let root = Path::new("root");
+        // A case that names folders of its own to write in (a person's, the owner's home) is
+        // not believed: the run's own folders replace the value, and a run that made none leaves
+        // the rig with the case's value taken out.
+        let given = config().var(crate::door::MADE_ROOTS, "/the/owners/home");
+        let mut env = environment(root, &root.join("fake-bin"), &given, &[]);
+        as_the_run_does(
+            &mut env,
+            vec![(
+                crate::door::MADE_ROOTS.to_owned(),
+                "/the/runs/folder".to_owned(),
+            )],
+        );
+        assert_eq!(var(&env, crate::door::MADE_ROOTS), "/the/runs/folder");
+        assert_eq!(
+            env.iter()
+                .filter(|(name, _)| name == crate::door::MADE_ROOTS)
+                .count(),
+            1
+        );
+        // A run that made none hands none, and the case's own value is not left in its place.
+        as_the_run_does(&mut env, Vec::new());
+        assert!(!env.iter().any(|(name, _)| name == crate::door::MADE_ROOTS));
     }
 
     #[test]
@@ -640,7 +671,7 @@ mod tests {
     #[test]
     fn a_rig_given_a_devin_has_its_stand_in_found_as_devin_beside_claudes_and_named_in_the_environment(
     ) {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-test-").unwrap();
         let devin = Path::new("/the/stand-in-devin");
         let given = Config::new("/the/stand-in").devin(devin);
         let fake_bin = write_fake_install(root.path(), &given).unwrap();
@@ -664,7 +695,7 @@ mod tests {
 
     #[test]
     fn the_stand_in_claude_runs_the_program_the_environment_names_and_the_roster_has_two_agents() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-test-").unwrap();
         let fake_bin = write_fake_install(root.path(), &Config::new("/the/stand-in")).unwrap();
         assert_eq!(fake_bin, root.path().join("fake-bin"));
         assert!(
@@ -760,7 +791,7 @@ mod tests {
 
     #[test]
     fn the_stand_in_codex_runs_the_program_the_environment_names() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-test-").unwrap();
         let fake_bin = write_fake_install(root.path(), &config().codex("/the/fake-codex")).unwrap();
         let script = files::read_string(&fake_bin.join(stand_in::program_name("codex"))).unwrap();
         if cfg!(windows) {
@@ -806,13 +837,13 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_live_muse_s_launcher_is_in_the_rigs_own_commands_and_the_persons_folder_is_only_read() {
-        let person = tempfile::tempdir().unwrap();
+        let person = crate::door::made("cf-test-").unwrap();
         let theirs = person.path().join(".config").join("muse");
         files::make_dir(&theirs).unwrap();
         files::write(&theirs.join("auth.json"), "{\"login\":\"metadata\"}\n").unwrap();
         // The rig asks a live Muse its allowance as it writes the launcher (T-1076): this
         // one answers it, at half the week.
-        let bin = tempfile::tempdir().unwrap();
+        let bin = crate::door::made("cf-test-").unwrap();
         let install = muse_in(bin.path(), 50);
         for given in [
             config().muse_live(install.clone(), person.path()),
@@ -820,7 +851,7 @@ mod tests {
                 .muse_live(install.clone(), person.path())
                 .as_the_finder_starts_it(),
         ] {
-            let root = tempfile::tempdir().unwrap();
+            let root = crate::door::made("cf-test-").unwrap();
             write_fake_install(root.path(), &given).unwrap();
             let launcher = own_commands(root.path(), &given).join("muse");
             assert!(launcher.is_file(), "{}", launcher.display());
@@ -835,7 +866,7 @@ mod tests {
     #[test]
     fn as_the_finder_starts_it_the_path_is_the_systems_and_each_stand_in_is_where_it_installs_itself(
     ) {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-test-").unwrap();
         let given = config()
             .codex("/the/fake-codex")
             .devin("/the/fake-devin")
@@ -846,7 +877,7 @@ mod tests {
         let own = root.path().join("home").join(".local").join("bin");
         assert!(own.join("claude").is_file() && own.join("devin").is_file());
         // The system's folder is there with no Codex in it too, as Homebrew's is.
-        let bare = tempfile::tempdir().unwrap();
+        let bare = crate::door::made("cf-test-").unwrap();
         write_fake_install(bare.path(), &config().as_the_finder_starts_it()).unwrap();
         assert!(bare.path().join("system-bin").is_dir());
         let system = root.path().join("system-bin");
@@ -912,9 +943,9 @@ mod tests {
     ) {
         use crate::rig::HarnessHome;
         let (bin, person, root) = (
-            tempfile::tempdir().unwrap(),
-            tempfile::tempdir().unwrap(),
-            tempfile::tempdir().unwrap(),
+            crate::door::made("cf-test-").unwrap(),
+            crate::door::made("cf-test-").unwrap(),
+            crate::door::made("cf-test-").unwrap(),
         );
         let (config_home, data_home) = (
             person.path().join(".config"),
@@ -993,9 +1024,9 @@ mod tests {
     fn a_live_rig_that_seats_muse_is_refused_on_an_allowance_used_up_and_runs_under_it() {
         for (weekly, runs) in [(100, false), (99, true)] {
             let (bin, real, root) = (
-                tempfile::tempdir().unwrap(),
-                tempfile::tempdir().unwrap(),
-                tempfile::tempdir().unwrap(),
+                crate::door::made("cf-test-").unwrap(),
+                crate::door::made("cf-test-").unwrap(),
+                crate::door::made("cf-test-").unwrap(),
             );
             let install = muse_at(bin.path(), real.path(), weekly);
             let config = Config::new("/the/stand-in").muse_live(install, real.path());

@@ -73,13 +73,17 @@
 //! began before the first monitor's call, less the margin, as the engine's do in a worker's
 //! first turn: it leaves out no more than the engine's.
 //!
-//! The run is given a Claude config folder of its own where its caller made one
+//! The run takes its login from a Claude config folder its caller made where it is given one
 //! (`--claude-config`, with a copy of the login in it): the owner's is then not touched.
 //!
-//! A config folder given with `--claude-config` is its caller's, and the run writes nothing in it
-//! (T-1592): it must trust the live folders' root already (`.claude.json` holds
-//! `projects["<home>/.consensflow-candidate/live"].hasTrustDialogAccepted`), or the run stops
-//! before it acts. Without the flag the run uses a copy of the login it made for itself, which it seeds.
+//! A config folder given with `--claude-config` is its caller's and is **read, never written**
+//! (T-1592): the run takes the login from the folder's `.credentials.json` (the access token is
+//! enough; a refresh token is never copied on), makes a config folder of its own with that copy
+//! of the login, and seeds it with the trust a person's own config has for the live folders, as
+//! it does for the machine's login. The folder's own `.claude.json`, settings and records are not
+//! carried over, and the run holds the folder's login to what it was when the run is over. A folder
+//! with no `.credentials.json` (on a Mac a Claude Code that ran on it keeps its login in the
+//! Keychain) stops the run before it acts.
 //!
 //! ```text
 //! cargo xtask live monitor-wait
@@ -714,10 +718,21 @@ fn report_lines(looks: &[Look], entries: &[Entry]) -> String {
     lines.join("\n")
 }
 
+/// The file `--fixture` names, made new before anything is spent: refused where anything is there,
+/// so that a record a person kept is never written over, and the file the run then writes.
+fn claim_fixture(file: Option<&str>) -> Result {
+    if let Some(file) = file {
+        cf_e2e::door::made_file(Path::new(file))
+            .map_err(|error| Error::Daemon(format!("--fixture {file}: {error}")))?;
+    }
+    Ok(())
+}
+
 #[test]
 #[ignore = "opt-in: spends the machine's quota on a window of Claude Code; cargo xtask live monitor-wait (npm run live:monitor-wait)"]
 fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_each_is_over(
 ) -> Result {
+    claim_fixture(live::option("fixture").as_deref())?;
     let log = Log::begin("live monitor-wait")?;
     // What a window is opened on is the harness code's to say: built before anything is spent.
     ask::prepare()?;
@@ -1058,7 +1073,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     ));
     if let Some(file) = live::option("fixture") {
         let lines = fixture(&raw, &session, &folders(&window));
-        fs::write(Path::new(&file), format!("{}\n", lines.join("\n")))
+        cf_e2e::door::write(Path::new(&file), format!("{}\n", lines.join("\n")))
             .map_err(|error| Error::Daemon(format!("the fixture was not written: {error}")))?;
         log.say(format!("the fixture, {} records: {file}", lines.len()));
     }
@@ -1202,6 +1217,37 @@ mod tests {
     }
 
     #[test]
+    fn a_fixture_file_a_caller_names_is_made_new_and_refused_where_anything_is_there() {
+        use cf_e2e::live::layout::Layout;
+        let mut layout = Layout::new().unwrap();
+        let folder = layout.home().join("kept-records");
+        layout
+            .plant_tree(
+                &folder,
+                &[("monitor-wait.jsonl", "a record a person kept\n")],
+            )
+            .unwrap();
+        let there = folder.join("monitor-wait.jsonl");
+        let refused = claim_fixture(Some(&there.display().to_string())).unwrap_err();
+        assert!(
+            refused.to_string().contains("--fixture")
+                && refused.to_string().contains("there already"),
+            "{refused}"
+        );
+        // Refused before anything runs, and the record is as the person left it.
+        layout.untouched().unwrap();
+        // A name that is not there is made new, and the run goes on to write it.
+        let new = folder.join("new.jsonl");
+        claim_fixture(Some(&new.display().to_string())).unwrap();
+        cf_e2e::door::write(&new, "the run's record\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&new).unwrap(), "the run's record\n");
+        // None asked: nothing is made.
+        claim_fixture(None).unwrap();
+        // A second claim of the name the first made is refused as well.
+        assert!(claim_fixture(Some(&new.display().to_string())).is_err());
+    }
+
+    #[test]
     fn the_fixture_keeps_what_the_reader_reads_and_nothing_of_the_machine() {
         let raw = [
             json!({ "type": "user", "sessionId": "s-1", "cwd": "/Users/me/work", "uuid": "u1", "timestamp": "t", "message": { "role": "user", "content": "/Users/me/work/x" }, "toolUseResult": { "taskId": "b1", "timeoutMs": 40000, "persistent": false, "stdout": "secret" } }),
@@ -1232,8 +1278,6 @@ mod tests {
 /// path. A fixed name there was every invocation's of one built tree: a later one took away an
 /// earlier one's process file and wrote over its configuration while its server ran (T-1557).
 fn server_folder(target: &Path) -> Result<cf_e2e::door::Made> {
-    fs::create_dir_all(target)
-        .map_err(|error| Error::Daemon(format!("{}: {error}", target.display())))?;
     cf_e2e::door::made_in(target, "live-monitor-wait-")
         .map_err(|error| Error::Daemon(format!("{}: {error}", target.display())))
 }
@@ -1252,7 +1296,7 @@ fn two_set_ups_from_one_build_have_folders_of_their_own_and_the_close_of_one_lea
     let first = server_folder(target.path())?;
     let first_server = Server::write_leaving_group(first.path(), &runtime)?;
     // Its server has started and written its process.
-    fs::write(first.path().join(format!("{STEM}.pid")), "4242\n")
+    cf_e2e::door::write(first.path().join(format!("{STEM}.pid")), "4242\n")
         .map_err(|error| Error::Daemon(error.to_string()))?;
     let second = server_folder(target.path())?;
     let _second_server = Server::write_leaving_group(second.path(), &runtime)?;

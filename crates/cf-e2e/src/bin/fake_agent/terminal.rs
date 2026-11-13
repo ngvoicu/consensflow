@@ -326,11 +326,7 @@ fn noted(trace: &std::path::Path, chunk: &[u8]) {
         "pasteEnd": holds(b"\x1b[201~"),
         "enter": chunk.contains(&b'\r'),
     });
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(trace)
-    {
+    if let Ok(mut file) = cf_e2e::door::append(trace).map_err(std::io::Error::from) {
         let _ = writeln!(file, "{line}");
     }
 }

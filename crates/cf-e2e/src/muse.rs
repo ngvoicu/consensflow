@@ -35,10 +35,10 @@ pub enum Run {
 /// it, `credential_backend: file`). The person's file is read, never written.
 pub fn seed_live_home(rig_home: &Path, real_home: &Path) -> Result {
     let config = rig_home.join(".config").join("muse");
-    files::write(&config.join("settings.json"), "{\"schema_version\":1}\n")?;
+    crate::door::write(&config.join("settings.json"), "{\"schema_version\":1}\n")?;
     let auth = real_home.join(".config").join("muse").join("auth.json");
     let text = files::read_string(&auth)?;
-    files::write(&config.join("auth.json"), login_copy(&text)?)
+    crate::door::write(&config.join("auth.json"), login_copy(&text)?)
 }
 
 /// The person's login as a live rig's home is given it: `text` as JSON, with every key whose
@@ -232,20 +232,14 @@ impl StandIn {
     /// Writes down the command line `words`, as the Mac's stand-in writes it.
     pub fn note(&self, words: &[String]) -> std::io::Result<()> {
         use std::io::Write as _;
-        fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.argv)?
+        crate::door::append(&self.argv)?
             .write_all(format!("{}\u{1e}", words.join("\u{1f}")).as_bytes())
     }
 
     /// Writes down the window's process, this program's, and Muse's, its child's.
     pub fn note_pids(&self, window: u32, muse: u32) -> std::io::Result<()> {
         use std::io::Write as _;
-        fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(pids_beside(&self.argv))?
+        crate::door::append(&pids_beside(&self.argv))?
             .write_all(format!("{window} {muse}\n").as_bytes())
     }
 
@@ -321,10 +315,10 @@ fn write_windows(
         Error::Daemon("the rig's Muse on Windows is the muse-stand-in program, which the case names (Installed::through)".to_owned())
     })?;
     let pinned = dir.join(format!("muse-bin-{}.exe", install.version));
-    files::make_dir(dir)?;
-    fs::copy(program, &pinned).map_err(Error::file("copy", &pinned))?;
-    files::write(&dir.join(".muse-version"), format!("{}\n", install.version))?;
-    files::write(
+    crate::door::make_dir(dir)?;
+    crate::door::copy_keeping_mode(program, &pinned)?;
+    crate::door::write(&dir.join(".muse-version"), format!("{}\n", install.version))?;
+    crate::door::write(
         &dir.join("muse.cmd"),
         format!("@\"{}\" %*\r\n", pinned.display()),
     )?;
@@ -334,7 +328,7 @@ fn write_windows(
         run,
         rig_home: rig_home.to_owned(),
     };
-    files::write(&StandIn::file_of(&pinned), stand_in.to_json().to_string())
+    crate::door::write(&StandIn::file_of(&pinned), stand_in.to_json().to_string())
 }
 
 /// The models the rig's echo Muse lists when the daemon reads them as a dialog opens (A4-28,
@@ -423,8 +417,8 @@ pub fn write_stand_in(
         return write_windows(dir, install, run, argv, rig_home);
     }
     let pinned = dir.join(format!("muse-bin-{}", install.version));
-    files::write(&dir.join(".muse-version"), format!("{}\n", install.version))?;
-    files::write_executable(
+    crate::door::write(&dir.join(".muse-version"), format!("{}\n", install.version))?;
+    crate::door::write_executable(
         &dir.join("muse"),
         format!("#!/bin/sh\nexec '{}' \"$@\"\n", pinned.display()),
     )?;
@@ -452,7 +446,7 @@ exec '{binary}' --provider echo --echo-delay-ms "${{CF_TEST_MUSE_DELAY_MS:-{dela
         binary = install.binary.display(),
         repaint = REPAINT_AT_REST,
     );
-    files::write_executable(&pinned, script)
+    crate::door::write_executable(&pinned, script)
 }
 
 /// The part of the rig's Muse that repaints at rest when a case asks
@@ -489,8 +483,8 @@ pub fn write_live_stand_in(
         return write_windows(dir, install, run, argv, rig_home);
     }
     let pinned = dir.join(format!("muse-bin-{}", install.version));
-    files::write(&dir.join(".muse-version"), format!("{}\n", install.version))?;
-    files::write_executable(
+    crate::door::write(&dir.join(".muse-version"), format!("{}\n", install.version))?;
+    crate::door::write_executable(
         &dir.join("muse"),
         format!("#!/bin/sh\nexec '{}' \"$@\"\n", pinned.display()),
     )?;
@@ -515,7 +509,7 @@ exec '{binary}' "$@"
         rig = rig_home.display(),
         binary = install.binary.display(),
     );
-    files::write_executable(&pinned, script)
+    crate::door::write_executable(&pinned, script)
 }
 
 /// The file beside the rig's Muse's `argv` log in which each of its windows writes its
@@ -1089,11 +1083,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_kit_runs_the_first_muse_on_the_path_and_the_home_s_only_where_the_path_has_none() {
-        let home = tempfile::tempdir().unwrap();
+        let home = crate::door::made("cf-test-").unwrap();
         install(&home.path().join(".local").join("bin"), "1.4.13-R6996.1");
-        let scratch = tempfile::tempdir().unwrap();
+        let scratch = crate::door::made("cf-test-").unwrap();
         install(scratch.path(), "1.4.14-R7309.1");
-        let empty = tempfile::tempdir().unwrap();
+        let empty = crate::door::made("cf-test-").unwrap();
         let place = home.path().join(".local").join("bin");
         let home_of = Some(place.as_path());
         let path = std::env::join_paths([empty.path(), scratch.path()]).unwrap();
@@ -1115,9 +1109,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_muse_on_the_path_that_is_a_link_is_read_beside_the_launcher_it_names() {
-        let real = tempfile::tempdir().unwrap();
+        let real = crate::door::made("cf-test-").unwrap();
         install(real.path(), "1.4.14-R7309.1");
-        let linked = tempfile::tempdir().unwrap();
+        let linked = crate::door::made("cf-test-").unwrap();
         std::os::unix::fs::symlink(real.path().join("muse"), linked.path().join("muse")).unwrap();
         let found = installed_on(linked.path().to_str().unwrap(), None).unwrap();
         assert_eq!(found.version, "1.4.14-R7309.1");
@@ -1134,7 +1128,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_rigs_muse_on_echo_keeps_its_folders_in_the_rigs_home_as_the_live_one_does() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-test-").unwrap();
         let said = folder.path().join("said");
         let binary = folder.path().join("real-muse");
         files::write_executable(
@@ -1176,7 +1170,7 @@ mod tests {
     /// 0.6 s at 30 ms, CI run 41925722174).
     #[cfg(unix)]
     fn the_rigs_muse_run(repaint_ms: Option<&str>) -> crate::process::Ran {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = crate::door::made("cf-test-").unwrap();
         let install = super::Installed {
             binary: dir.path().join("program"),
             version: "9.9.9".to_owned(),
@@ -1443,8 +1437,8 @@ mod tests {
     /// person's file is left as it was.
     #[test]
     fn a_live_rig_s_home_is_given_settings_and_the_login_copied_without_a_refresh_token() {
-        let person = tempfile::tempdir().unwrap();
-        let rig = tempfile::tempdir().unwrap();
+        let person = crate::door::made("cf-test-").unwrap();
+        let rig = crate::door::made("cf-test-").unwrap();
         let theirs = person.path().join(".config").join("muse").join("auth.json");
         std::fs::create_dir_all(theirs.parent().unwrap()).unwrap();
         let login = json!({ "providers": { "meta": { "access_token": "a-SECRET", "refresh_token": "r-SECRET" } } });

@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use cf_e2e::live::calls;
 use cf_e2e::live::machine::live_folder;
-use cf_e2e::{files, Result};
+use cf_e2e::Result;
 
 /// The files an earlier version of the home wrote and this one does not, taken away by their
 /// own paths when the home is made: `.zshenv`, which every zsh reads, a plain `zsh -c` too, and
@@ -130,7 +130,7 @@ pub fn make(program: &Path) -> Result<Home> {
         }
     }
     for (name, text) in profiles(&decoys, windows) {
-        files::write(&root.join(name), text)?;
+        cf_e2e::door::write(&root.join(name), text)?;
     }
     for name in STALE {
         let stale = root.join(name);

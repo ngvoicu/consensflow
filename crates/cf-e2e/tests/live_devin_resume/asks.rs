@@ -105,7 +105,7 @@ impl Ask {
     /// What the ask needs in the folder: the file the edit changes.
     pub fn prepare(self, place: &Place) -> Result<()> {
         if self == Ask::Edit {
-            files::write(
+            cf_e2e::door::write(
                 &place.folder.join(format!("edit-{}.txt", place.tag)),
                 "alpha beta gamma\n",
             )?;

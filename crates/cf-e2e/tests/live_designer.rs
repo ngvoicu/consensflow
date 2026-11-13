@@ -23,9 +23,11 @@
 //! rig's own report.
 //!
 //! Every run that passes keeps the image it drew where cargo keeps the scratch
-//! of integration tests (`app/src-tauri/target/tmp/live-designer/honey.png`), the
-//! last over the one before, for a look. `CONSENSFLOW_LIVE_KEEP=1` (`cargo xtask
-//! live designer --keep`) leaves the home and the project where they are.
+//! of integration tests, in a folder of the run's own
+//! (`app/src-tauri/target/tmp/live-designer/image-<random>/honey.png`, said at the end of
+//! the run): no run writes over the image of an earlier one, and a clean of the build folder
+//! takes the folders away. `CONSENSFLOW_LIVE_KEEP=1` (`cargo xtask live
+//! designer --keep`) leaves the home and the project where they are.
 
 // The parts are in `live_designer/`: cargo looks for the modules of a test's
 // root file beside it, where each would be a suite of its own.
@@ -95,13 +97,27 @@ fn image_in(folder: &Path) -> PathBuf {
         .fold(folder.to_path_buf(), |path, part| path.join(part))
 }
 
-/// Where the image a run drew is kept for a look, in the scratch folder cargo
-/// gives the integration tests: the run's own home goes with the run, and the
-/// last image drawn is the one here.
-fn kept_image() -> PathBuf {
-    Path::new(env!("CARGO_TARGET_TMPDIR"))
-        .join("live-designer")
-        .join("honey.png")
+/// Keeps the image `from`, which a run drew, for a look: copied into a folder of this run's own,
+/// made new in the scratch folder cargo gives the integration tests (the run's own home goes with
+/// the run). A fixed name there was every run's, and a later run wrote over the image of an earlier
+/// one (T-1594); where the image is kept is said.
+fn keep_image(from: &Path) -> Result<PathBuf> {
+    keep_image_in(
+        &Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-designer"),
+        from,
+    )
+}
+
+/// [`keep_image`] in the folder `parent`, which every run keeps its images in.
+fn keep_image_in(parent: &Path, from: &Path) -> Result<PathBuf> {
+    let mut folder = cf_e2e::door::made_in(parent, "image-").map_err(|source| Error::File {
+        action: "make a folder in",
+        path: parent.to_path_buf(),
+        source,
+    })?;
+    let kept = folder.keep().join("honey.png");
+    cf_e2e::door::copy(from, &kept)?;
+    Ok(kept)
 }
 
 /// What came of the run, for the line that ends it.
@@ -244,7 +260,7 @@ fn a_real_codex_draws_the_image_a_chief_asks_the_image_designer_for() -> Result 
         &report::screen(&rig, &project),
     );
     demo::notes(&rig.log(), &folder, &log);
-    files::copy(&image_in(&folder), &kept_image())?;
+    let kept = keep_image(&image_in(&folder))?;
     let naming = match drawn.naming {
         Named::Whole => "its whole path",
         _ => "only the path the task gave, not the whole path the role text asks for",
@@ -256,17 +272,44 @@ fn a_real_codex_draws_the_image_a_chief_asks_the_image_designer_for() -> Result 
         drawn.made.picture.width,
         drawn.made.picture.height,
         drawn.made.bytes,
-        kept_image().display(),
+        kept.display(),
         drawn.exit["exitCode"],
         drawn.exit["signal"],
     ));
     rig.close()?;
+    log.passed();
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cf_e2e::live::layout::Layout;
+
+    #[test]
+    fn two_runs_keep_their_image_each_in_a_folder_of_its_own_and_an_earlier_one_is_as_it_was() {
+        // The scratch folder every run keeps its image in holds an earlier run's, which is no
+        // run of this one's to write over.
+        let mut layout = Layout::new().unwrap();
+        let parent = layout.home().join("scratch").join("live-designer");
+        layout
+            .plant_tree(
+                &parent.join("image-Earlier"),
+                &[("honey.png", "an earlier run's image")],
+            )
+            .unwrap();
+        let drawn = cf_e2e::door::made("live-designer-test-").unwrap();
+        let from = drawn.path().join("honey.png");
+        cf_e2e::door::write(&from, "this run's image").unwrap();
+        let first = keep_image_in(&parent, &from).unwrap();
+        let second = keep_image_in(&parent, &from).unwrap();
+        assert_ne!(first, second, "two runs kept their image in one place");
+        for kept in [&first, &second] {
+            assert_eq!(std::fs::read_to_string(kept).unwrap(), "this run's image");
+            assert!(kept.starts_with(&parent), "{kept:?}");
+        }
+        layout.untouched().unwrap();
+    }
 
     #[test]
     fn the_task_put_on_the_board_for_a_designer_is_the_one_the_chief_is_told() {

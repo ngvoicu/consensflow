@@ -192,12 +192,12 @@ impl Server {
         let script = folder.join(file);
         let config = folder.join("mcp.json");
         let pid_file = folder.join(format!("{}.pid", servers[0].1));
-        files::write(&script, source)?;
+        crate::door::write(&script, source)?;
         let entries: Vec<(&str, PathBuf, bool)> = servers
             .iter()
             .map(|(name, stem, leaves)| (*name, folder.join(format!("{stem}.pid")), *leaves))
             .collect();
-        files::write(
+        crate::door::write(
             &config,
             format!("{}\n", configuration(runtime.program(), &script, &entries)),
         )?;

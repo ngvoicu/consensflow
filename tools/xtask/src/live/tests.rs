@@ -544,4 +544,78 @@ fn what_a_say_only_run_left_is_told_as_acts_without_its_first_lines_and_never_as
         "{none}"
     );
     assert!(none.contains("no pass"), "{none}");
+    // A file the run made that cannot be read says that what the run did is not known, and not
+    // that it stopped before it acted.
+    let unreadable = folder.path().join("unreadable.txt");
+    fs::write(&unreadable, [0xff, 0xfe, b'\n']).unwrap();
+    let told = audit_report(&unreadable);
+    assert!(
+        told.contains("the audit could not be read; what the run did is not known"),
+        "{told}"
+    );
+    assert!(
+        !told.contains("stopped before it acted") && !told.contains("ending"),
+        "{told}"
+    );
+    assert!(told.contains("no pass"), "{told}");
+}
+
+#[test]
+fn no_line_of_a_say_only_set_says_ok_and_the_line_of_any_other_is_ok_or_failed() {
+    // A say-only run leaves with 1 whatever it came to, and the line of its set reads one way.
+    for status in [0, 1, 101] {
+        let line = set_line(status, "parity claude", true);
+        assert_eq!(line, "said   live parity claude", "{status}");
+        assert!(!line.contains("ok") && !line.contains("FAILED"), "{line}");
+    }
+    assert_eq!(
+        set_line(0, "parity claude", false),
+        "ok     live parity claude"
+    );
+    assert_eq!(
+        set_line(1, "parity claude", false),
+        "FAILED live parity claude"
+    );
+}
+
+#[test]
+fn the_help_says_what_a_say_only_run_still_does_in_the_words_the_audit_file_does() {
+    // One reading: the sentences of `cf_e2e::door::STILL_ACTS`, which are the first lines of
+    // every audit file, are the ones the help gives (xtask does not link cf-e2e, so the test
+    // reads them from its source).
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/cf-e2e/src/door.rs"),
+    )
+    .unwrap();
+    let list = source
+        .split("pub const STILL_ACTS: &[&str] = &[")
+        .nth(1)
+        .and_then(|rest| rest.split("\n];").next())
+        .expect("STILL_ACTS in door.rs");
+    let sentences: Vec<&str> = list
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix('"')?.strip_suffix("\","))
+        .collect();
+    assert!(sentences.len() >= 7, "{sentences:?}");
+    let help = dispatch::command_help(&COMMANDS[0]);
+    for sentence in &sentences {
+        assert!(
+            help.contains(sentence),
+            "the help lacks: {sentence}\n{help}"
+        );
+    }
+}
+
+#[test]
+fn a_variable_that_hands_the_made_folders_on_is_never_a_persons_to_set_for_the_test_it_runs() {
+    let (_, vars) = {
+        let asked = parse(&words("paste"), &names()).unwrap();
+        let invocation = invocation(&context(), &asked);
+        (invocation.display(), invocation.vars)
+    };
+    assert!(
+        vars.iter()
+            .any(|(name, value)| name == "CF_LIVE_MADE_ROOTS" && value.is_none()),
+        "{vars:?}"
+    );
 }

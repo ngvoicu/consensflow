@@ -17,6 +17,9 @@ pub fn guard(path: &Path) -> Result {
 }
 
 fn guarded(path: &Path, folder: bool) -> Result {
+    if !crate::door::in_live_zone(path) {
+        return Ok(());
+    }
     crate::door::writable(path, folder).map_err(|why| {
         Error::file("write", path)(io::Error::new(io::ErrorKind::PermissionDenied, why))
     })

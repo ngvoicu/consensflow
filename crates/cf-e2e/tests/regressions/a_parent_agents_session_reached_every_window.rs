@@ -149,7 +149,7 @@ fn no_window_is_given_the_session_of_an_agent_the_app_was_started_from() -> Outc
 #[test]
 fn no_program_the_daemon_starts_of_its_own_is_given_the_session_cf_ui_was_started_in() -> Outcome {
     let marked = marked();
-    let folder = tempfile::tempdir()?;
+    let folder = cf_e2e::door::made("cf-regression-")?;
     let names_log = folder.path().join("codex-names.jsonl");
     let mut config = crate::config_with_codex();
     for name in &marked {

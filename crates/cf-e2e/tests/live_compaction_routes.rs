@@ -88,7 +88,7 @@ const LONG_ASK: &str = "Run these shell commands one at a time, each only after 
 /// A file whose words are some 12,000 tokens.
 fn notes(folder: &Path) -> Result {
     let line = "These are the notes of the compaction check, a line of filler words to read.\n";
-    files::write(&folder.join("notes.txt"), line.repeat(600))
+    cf_e2e::door::write(&folder.join("notes.txt"), line.repeat(600))
 }
 
 /// A folder of the case's own, by the path it resolves to (Codex and Devin know a folder so).
@@ -238,6 +238,7 @@ fn codex_compacts_a_thread_past_the_limit_its_launch_gives() -> Result {
         resumed.compacted.is_some(),
         "the resumed turn was not compacted at its start: {resumed:?}"
     );
+    log.passed();
     Ok(())
 }
 
@@ -246,7 +247,7 @@ fn copy_tree(from: &Path, to: &Path, left: &[&str]) {
     let Ok(entries) = std::fs::read_dir(from) else {
         return;
     };
-    let _ = std::fs::create_dir_all(to);
+    let _ = cf_e2e::door::make_dir(to);
     for entry in entries.flatten() {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -259,7 +260,7 @@ fn copy_tree(from: &Path, to: &Path, left: &[&str]) {
         if kind.is_dir() {
             copy_tree(&path, &to.join(&name), left);
         } else {
-            let _ = std::fs::copy(&path, to.join(&name));
+            let _ = cf_e2e::door::copy_keeping_mode(&path, to.join(&name));
         }
     }
 }
@@ -396,18 +397,26 @@ fn devin_compacts_at_the_thresholds_its_launch_gives() -> Result {
     let compacted = summaries;
     let before = 0;
     // What Devin wrote in the run's home, copied out where `CF_EVIDENCE` names a folder: its
-    // store and logs, never its login.
-    if let Some(evidence) = own_var("CF_EVIDENCE") {
+    // store and logs, never its login. The folder is its caller's: the copy is made in a new
+    // folder of the run's own in it, and a folder of a run before is never written into.
+    if let Some(evidence) =
+        cf_e2e::live::export_folder(own_var("CF_EVIDENCE").as_deref(), "compaction-routes-devin")?
+    {
+        log.say(format!(
+            "what Devin wrote is copied into {}",
+            evidence.display()
+        ));
         for (at, root) in devin_folders(&home).iter().enumerate() {
             copy_tree(
                 root,
-                &Path::new(&evidence).join(format!("devin-{at}")),
+                &evidence.join(format!("devin-{at}")),
                 &["credentials"],
             );
         }
     }
     install.finish_homes()?;
     assert!(compacted > before, "Devin never compacted at {thresholds}");
+    log.passed();
     Ok(())
 }
 
@@ -589,6 +598,7 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
         "the run changed a file of the owner's ~/.config/muse"
     );
     assert!(failed.is_empty(), "{}", failed.join("; "));
+    log.passed();
     Ok(())
 }
 
@@ -726,5 +736,6 @@ fn pi_member_whose_task_ends_past_the_size_has_its_window_kept_open_for_the_comp
         "the window was closed before Pi wrote the compaction"
     );
     assert!(closed, "the window was kept past the compaction");
+    log.passed();
     Ok(())
 }

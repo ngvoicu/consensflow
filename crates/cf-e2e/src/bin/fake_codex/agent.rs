@@ -68,7 +68,7 @@
 //! `CF_TEST_CODEX_WORKERS` processes of its own when the first turn's tools are
 //! called ([`crate::servers`]).
 
-use std::fs::{self, OpenOptions};
+use std::fs::{self};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -318,7 +318,7 @@ impl Agent {
             return;
         }
         let folder = home.join("memories");
-        let _ = fs::create_dir_all(&folder);
+        let _ = cf_e2e::door::make_dir(&folder);
         let thread = uuid::Uuid::new_v4().to_string();
         let window_env = held(&self.window_env).clone();
         let ran = cf_e2e::process::Run::new(cf_e2e::process::as_a_shell_finds("cf"))
@@ -414,7 +414,7 @@ impl Agent {
             return true;
         };
         let locks = home.join("thread-locks");
-        let _ = fs::create_dir_all(&locks);
+        let _ = cf_e2e::door::make_dir(&locks);
         let lock = locks.join(self.thread());
         let ours = ThisMachine.identity(std::process::id()).ok().flatten();
         let holder = fs::read_to_string(&lock).ok().and_then(|text| {
@@ -430,7 +430,7 @@ impl Agent {
             }
         }
         if let Some(ours) = ours {
-            let _ = fs::write(&lock, format!("{} {}\n", ours.pid, ours.started));
+            let _ = cf_e2e::door::write(&lock, format!("{} {}\n", ours.pid, ours.started));
         }
         true
     }
@@ -446,7 +446,7 @@ impl Agent {
             };
             let path = rollout_of(home, &thread);
             if let Some(folder) = path.parent() {
-                let _ = fs::create_dir_all(folder);
+                let _ = cf_e2e::door::make_dir(folder);
             }
             *rollout = Some(path);
         }
@@ -673,10 +673,8 @@ impl Agent {
             "payload": payload,
         });
         let line = format!("{record}\n");
-        let _ = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
+        let _ = cf_e2e::door::append(&path)
+            .map_err(std::io::Error::from)
             .and_then(|mut file| file.write_all(line.as_bytes()));
     }
 }

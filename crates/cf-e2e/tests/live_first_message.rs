@@ -22,7 +22,7 @@
 //!
 //! 1. `fresh`: a brief of about 16,000 characters, filler around one ask, in a window
 //!    opened afresh (on a Claude config made for the run, its notices and dialogs
-//!    included, where the run is given one: `--claude-config`);
+//!    included);
 //! 2. `resumed`: once that task is done and its window closed, a follow-up (`cf task
 //!    reopen`), which opens a window on the worker's conversation.
 //!
@@ -36,15 +36,17 @@
 //! cargo xtask live first-message                       every harness, one after the other
 //! cargo xtask live first-message claude                one harness
 //! cargo xtask live first-message claude --claude-config <folder>
-//!                                                      Claude on a config of the run's own
-//! cargo xtask live first-message pi --pi-agent-dir <folder>
-//!                                                      Pi on an agent folder of the run's own
+//!                                                      the login copied from that folder
 //! ```
 //!
-//! A config folder given with `--claude-config` is its caller's, and the run writes nothing in it
-//! (T-1592): it must trust the live folders' root already (`.claude.json` holds
-//! `projects["<home>/.consensflow-candidate/live"].hasTrustDialogAccepted`), or the run stops
-//! before it acts. Without the flag the run uses a copy of the login it made for itself, which it seeds.
+//! A config folder given with `--claude-config` is its caller's and is **read, never written**
+//! (T-1592): the run takes the login from the folder's `.credentials.json` (the access token is
+//! enough; a refresh token is never copied on), makes a config folder of its own with that copy
+//! of the login, and seeds it with the trust a person's own config has for the live folders, as
+//! it does for the machine's login. The folder's own `.claude.json`, settings and records are not
+//! carried over, and the run holds the folder's login to what it was when the run is over. A folder
+//! with no `.credentials.json` (on a Mac a Claude Code that ran on it keeps its login in the
+//! Keychain) stops the run before it acts.
 //!
 //! Codex reads its login from `CODEX_HOME`, which the run's caller points at a home of
 //! the run's own.
@@ -504,7 +506,7 @@ fn every_harness_is_given_its_first_message_once_up_and_no_command_line_holds_it
         checks.push(Check::new(harness.name(), CHECKED, account.held(), version));
     }
     log.report("what each worker came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::verdict_of(&log, &checks)
 }
 
 #[cfg(test)]

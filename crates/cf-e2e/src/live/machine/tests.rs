@@ -80,7 +80,7 @@ fn a_harness_whose_version_leaves_a_process_holding_its_output_says_it_and_holds
     use std::os::unix::fs::PermissionsExt;
     // A wrapper that says its version and leaves an updater in the background, which
     // holds its output for twenty seconds.
-    let folder = tempfile::tempdir().unwrap();
+    let folder = crate::door::made("cf-test-").unwrap();
     let wrapper = folder.path().join("pi");
     std::fs::write(&wrapper, "#!/bin/sh\necho 0.71.2\nsleep 20 &\n").unwrap();
     std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -115,7 +115,7 @@ fn held(harness: Harness, home: &Path, appdata: Option<&str>, windows: bool) -> 
 
 #[test]
 fn a_home_holds_a_login_when_it_holds_the_place_the_harness_keeps_it() {
-    let home = tempfile::tempdir().unwrap();
+    let home = crate::door::made("cf-test-").unwrap();
     let held = |harness, home: &Path| held(harness, home, None, false);
     for harness in Harness::ALL.into_iter().filter(|h| *h != Harness::Codex) {
         assert!(!held(harness, home.path()), "{harness:?}");
@@ -134,13 +134,13 @@ fn a_home_holds_a_login_when_it_holds_the_place_the_harness_keeps_it() {
 fn devin_keeps_its_login_in_devin_under_appdata_on_windows_and_in_the_xdg_places_elsewhere() {
     // A Windows profile as zeewin has it: Devin's login, config and sessions are in
     // `AppData\Roaming\devin`, and `.config` and `.local` are not there at all.
-    let windows = tempfile::tempdir().unwrap();
+    let windows = crate::door::made("cf-test-").unwrap();
     fs::create_dir_all(windows.path().join("AppData/Roaming/devin/cli")).unwrap();
     assert!(held(Harness::Devin, windows.path(), None, true));
     assert!(!held(Harness::Devin, windows.path(), None, false));
     // A Mac's or Linux's: the XDG places, either of them.
     for place in [".config/devin", ".local/share/devin"] {
-        let unix = tempfile::tempdir().unwrap();
+        let unix = crate::door::made("cf-test-").unwrap();
         assert!(!held(Harness::Devin, unix.path(), None, false), "{place}");
         fs::create_dir_all(unix.path().join(place)).unwrap();
         assert!(held(Harness::Devin, unix.path(), None, false), "{place}");
@@ -150,8 +150,8 @@ fn devin_keeps_its_login_in_devin_under_appdata_on_windows_and_in_the_xdg_places
 
 #[test]
 fn where_windows_names_its_appdata_devin_is_looked_for_there_and_not_in_the_profile() {
-    let profile = tempfile::tempdir().unwrap();
-    let redirected = tempfile::tempdir().unwrap();
+    let profile = crate::door::made("cf-test-").unwrap();
+    let redirected = crate::door::made("cf-test-").unwrap();
     let appdata = redirected.path().to_string_lossy().into_owned();
     let own = profile.path().join("AppData").join("Roaming").join("devin");
     fs::create_dir_all(&own).unwrap();
@@ -507,7 +507,7 @@ fn a_windows_window_has_the_machines_folders_for_settings_and_programs_that_it_h
 #[test]
 fn a_rig_of_stand_ins_and_the_real_claude_starts_claude_through_the_shim_and_has_them_write_where_the_real_one_does(
 ) {
-    let folder = tempfile::tempdir().unwrap();
+    let folder = crate::door::made("cf-test-").unwrap();
     let claude = Installed::at(Harness::Claude, "/opt/bin/claude", "/machine")
         .with_claude_config(Arc::new(Kept));
     let made = rig_with_stand_ins(
@@ -532,7 +532,7 @@ fn a_rig_of_stand_ins_and_the_real_claude_starts_claude_through_the_shim_and_has
 
 #[test]
 fn a_rig_of_stand_ins_and_the_real_claude_needs_the_real_claude() {
-    let folder = tempfile::tempdir().unwrap();
+    let folder = crate::door::made("cf-test-").unwrap();
     let pi = Installed::at(Harness::Pi, "/opt/bin/pi", "/machine");
     let failed =
         rig_with_stand_ins(&[pi], folder.path(), Path::new("/the/fake-agent")).unwrap_err();
@@ -558,7 +558,7 @@ fn the_machines_home_is_the_one_this_run_has_and_a_run_that_has_none_is_an_error
 #[test]
 fn a_live_test_has_a_folder_of_its_own_below_the_candidates_live_folder_one_name_one_folder_in_a_process(
 ) {
-    let home = tempfile::tempdir().unwrap();
+    let home = crate::door::made("cf-test-").unwrap();
     // Another run's folder of the name the case asks for: it is not this case's.
     let live = live_root(home.path());
     fs::create_dir_all(live.join("paste")).unwrap();
@@ -598,7 +598,7 @@ fn a_live_test_has_a_folder_of_its_own_below_the_candidates_live_folder_one_name
     assert!(!folder.join("other").exists());
     // Another name is another folder; another home is another live folder.
     assert_ne!(live_folder_in(home.path(), "other").unwrap(), folder);
-    let elsewhere = tempfile::tempdir().unwrap();
+    let elsewhere = crate::door::made("cf-test-").unwrap();
     assert!(live_folder_in(elsewhere.path(), "paste")
         .unwrap()
         .starts_with(live_root(elsewhere.path())));
@@ -611,7 +611,7 @@ fn a_live_test_has_a_folder_of_its_own_below_the_candidates_live_folder_one_name
 #[test]
 fn a_claude_config_of_the_runs_own_is_seeded_with_the_live_folders_trusted_and_keeps_what_it_held()
 {
-    let home = tempfile::tempdir().unwrap();
+    let home = crate::door::made("cf-test-").unwrap();
     let config = crate::door::made("consensflow-seed-test-").unwrap();
     fs::write(
         config.path().join(".claude.json"),
@@ -642,9 +642,10 @@ fn a_claude_config_of_the_runs_own_is_seeded_with_the_live_folders_trusted_and_k
 }
 
 #[test]
-fn a_claude_config_this_run_did_not_make_is_not_written_and_one_it_was_given_must_trust_already() {
-    let home = tempfile::tempdir().unwrap();
-    // A folder a person made (or another run): nothing is written in it.
+fn a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed() {
+    let home = crate::door::made("cf-test-").unwrap();
+    // A folder a person made (or another run): nothing is written in it. (A folder this test made
+    // by `tempfile`, which the run's registry does not hold, as the caller's is.)
     let given = tempfile::tempdir().unwrap();
     fs::write(given.path().join(".claude.json"), r#"{"projects":{}}"#).unwrap();
     assert!(seed_claude_trust(given.path(), home.path()).is_err());
@@ -652,14 +653,6 @@ fn a_claude_config_this_run_did_not_make_is_not_written_and_one_it_was_given_mus
         fs::read_to_string(given.path().join(".claude.json")).unwrap(),
         r#"{"projects":{}}"#
     );
-    assert!(!claude_trust_is_seeded(given.path(), home.path()));
-    let root = claude_project_key(&live_root(home.path()).to_string_lossy());
-    fs::write(
-        given.path().join(".claude.json"),
-        format!(r#"{{"projects":{{"{root}":{{"hasTrustDialogAccepted":true}}}}}}"#),
-    )
-    .unwrap();
-    assert!(claude_trust_is_seeded(given.path(), home.path()));
     // A folder this run made, whose .claude.json is a link, is not written through.
     #[cfg(unix)]
     {
@@ -674,7 +667,7 @@ fn a_claude_config_this_run_did_not_make_is_not_written_and_one_it_was_given_mus
 
 #[test]
 fn a_config_seeded_in_an_empty_folder_holds_the_trust_alone() {
-    let home = tempfile::tempdir().unwrap();
+    let home = crate::door::made("cf-test-").unwrap();
     let config = crate::door::made("consensflow-seed-test-").unwrap();
     seed_claude_trust(config.path(), home.path()).unwrap();
     let held: serde_json::Value =
@@ -726,7 +719,7 @@ fn the_live_root_is_trusted_on_windows_by_the_key_claude_code_looks_it_up_by() {
 
 #[test]
 fn the_owners_own_claude_config_is_never_seeded() {
-    let home = tempfile::tempdir().unwrap();
+    let home = crate::door::made("cf-test-").unwrap();
     let owners = home.path().join(".claude");
     fs::create_dir_all(&owners).unwrap();
     for config in [home.path().to_path_buf(), owners.clone()] {
@@ -773,7 +766,7 @@ fn a_harness_the_machine_lacks_is_left_out_of_every_seat_with_why_unless_it_was_
 fn a_harness_with_no_home_to_log_in_at_is_one_the_machine_lacks() {
     let why = login_lacks(Harness::Muse, None, None, false).expect("lacking");
     assert!(why.contains("home"), "{why}");
-    let home = tempfile::tempdir().unwrap();
+    let home = crate::door::made("cf-test-").unwrap();
     std::fs::create_dir_all(home.path().join(".config").join("muse")).unwrap();
     assert_eq!(
         login_lacks(Harness::Muse, Some(home.path().to_path_buf()), None, false),
@@ -787,7 +780,7 @@ fn a_harness_with_no_home_to_log_in_at_is_one_the_machine_lacks() {
 #[cfg(unix)]
 #[test]
 fn a_rig_that_seats_muse_runs_it_through_the_rigs_own_launcher() {
-    let bin = tempfile::tempdir().unwrap();
+    let bin = crate::door::made("cf-test-").unwrap();
     crate::files::write_executable(&bin.path().join("muse"), "#!/bin/sh\n").unwrap();
     crate::files::write(&bin.path().join(".muse-version"), "1.4.14-R7309.1\n").unwrap();
     crate::files::write_executable(&bin.path().join("muse-bin-1.4.14-R7309.1"), "#!/bin/sh\n")
@@ -805,7 +798,7 @@ fn a_rig_that_seats_muse_runs_it_through_the_rigs_own_launcher() {
 /// home is refused it.
 #[test]
 fn a_program_started_outside_a_rig_is_given_the_runs_own_home_and_never_the_persons() {
-    let person = tempfile::tempdir().unwrap();
+    let person = crate::door::made("cf-test-").unwrap();
     let theirs = person.path().join(".codex");
     fs::create_dir_all(&theirs).unwrap();
     fs::write(theirs.join("auth.json"), "{\"OPENAI_API_KEY\":\"a key\"}\n").unwrap();

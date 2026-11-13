@@ -329,7 +329,7 @@ pub fn window_life() -> Vec<Scenario> {
             vec![
                 human(
                     "the worker's account is out",
-                    |members| crate::files::write(&members.folder().join(SPENT), ""),
+                    |members| crate::door::write(&members.folder().join(SPENT), ""),
                     |_, _| true,
                 ),
                 run!(
@@ -374,7 +374,7 @@ pub fn window_life() -> Vec<Scenario> {
                 ),
                 human(
                     "the account the chief and the worker share runs out",
-                    |members| crate::files::write(&members.folder().join(SPENT), ""),
+                    |members| crate::door::write(&members.folder().join(SPENT), ""),
                     |snapshot, bindings| is(snapshot, bindings, "A", 0, &["paused"]),
                 ),
                 human(

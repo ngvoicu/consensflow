@@ -418,7 +418,7 @@ impl Run {
     /// The program's command, with everything but its streams.
     fn command(&self) -> Command {
         // A say-only run whose audit file cannot be used stops before it starts a program.
-        let audit = crate::door::Door::audit_vars();
+        let audit = crate::door::Door::child_vars();
         let mut command = Command::new(&self.program);
         // Daemons, hosts and stand-ins run for a whole case while other cases open sockets and
         // pipes: one left another's would hold it to its end.
@@ -432,7 +432,9 @@ impl Run {
         for name in &self.removed {
             command.env_remove(name);
         }
-        // A program of a say-only run says only, into the same file, whatever its environment.
+        // A program of a say-only run says only, into the same file, whatever its environment; and
+        // every program is told the folders the run made so far, the only ones it writes below.
+        command.env_remove(crate::door::MADE_ROOTS);
         command.envs(audit);
         for arg in &self.args {
             arg.add_to(&mut command);

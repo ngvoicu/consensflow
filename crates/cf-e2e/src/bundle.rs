@@ -28,9 +28,9 @@ pub(crate) const COPY_WAIT: std::time::Duration = std::time::Duration::from_secs
 pub(crate) fn copy_of(program: &Path, folder: &Path) -> Result<PathBuf> {
     use std::time::{Duration, Instant};
 
-    use crate::{files, Error};
+    use crate::Error;
 
-    files::make_dir(folder)?;
+    crate::door::make_dir(folder)?;
     let name = program
         .file_name()
         .ok_or_else(|| Error::Build(format!("{} names no file", program.display())))?;
@@ -41,20 +41,14 @@ pub(crate) fn copy_of(program: &Path, folder: &Path) -> Result<PathBuf> {
     // The program may be missing as it is copied, a build having taken it for a moment.
     let until = Instant::now() + COPY_WAIT;
     loop {
-        match std::fs::copy(program, &own) {
+        match crate::door::copy_keeping_mode(program, &own) {
             Ok(_) => return Ok(own),
-            Err(source)
+            Err(Error::File { source, .. })
                 if source.kind() == std::io::ErrorKind::NotFound && Instant::now() < until =>
             {
                 std::thread::sleep(Duration::from_millis(10));
             }
-            Err(source) => {
-                return Err(Error::File {
-                    action: "copy",
-                    path: program.to_path_buf(),
-                    source,
-                })
-            }
+            Err(failed) => return Err(failed),
         }
     }
 }

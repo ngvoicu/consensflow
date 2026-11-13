@@ -1,13 +1,19 @@
-//! The rule that the live kit ends a process, closes a window and takes a file away only
-//! through its door ([`super::Door`]), read from the kit's Rust as syntax.
+//! The rule that the live kit ends a process, closes a window, takes a file away and writes a file
+//! only through its door ([`super::Door`], and the writers of [`crate::door`]), read from the
+//! kit's Rust as syntax.
 //!
 //! On 2026-11-12 a live run of a kit branch ended 22 processes that were none of its own, and
 //! its review (T-1557) found a rig's start taking other runs' folders and a renewal taking the
-//! owner's records by the end of their names. Every ending and every removal of the live kit
-//! now asks the door, which acts only on its grounds and, in a say-only run, says instead
-//! ([`super::AUDIT`]). This rule reads the live kit's code (`src/live`, `src/rig`, `src/matrix`,
-//! `src/bin` (the stand-in programs), `src/process*`, `src/daemon.rs` and the `tests/live_*`
-//! suites) and fails on any other way to do either:
+//! owner's records by the end of their names; the reviews after it found writes reaching other
+//! runs' files as well (T-1594). Every ending and every removal of the live kit now asks the
+//! door, which acts only on its grounds and, in a say-only run, says instead
+//! ([`super::AUDIT`]); every write asks one of its writers, which allow a path only below a
+//! folder this run made (by its real path, never through a link) or a file it made new
+//! ([`super::writable`]). What a caller hands the kit (`--claude-config`, `--fixture`, a
+//! folder it names for an export) is read, never written. This rule reads the live kit's code
+//! (`src/live`, `src/rig`, `src/matrix`, `src/bin` (the stand-in programs), `src/process*`,
+//! `src/daemon.rs` and the `tests/live_*` suites: all of `src` but what the door is made of, and
+//! the folders of tests that are none of a live run's) and fails on any other way to do either:
 //!
 //! - a call of `remove_file`, `remove_dir`, `remove_dir_all`, the descent's `end_chosen` /
 //!   `pause_chosen` (and their `_by`), `signal`, `stall`, `end_all`, libc's or nix's `kill` and
@@ -19,26 +25,41 @@
 //!   `self` (a type of the kit's own whose `kill` goes through the door);
 //! - a path or an import of the `tempfile` crate: its folders and files are taken away when
 //!   they are dropped, past the door and in a say-only run too (the door's own are
-//!   [`super::made`] and [`super::made_in`]).
+//!   [`super::made`] and [`super::made_in`]);
+//! - a write that does not ask the door's writers: `std::fs::write`, `copy`, `rename`,
+//!   `hard_link`, `create_dir[_all]`, `set_permissions`, a symlink, `File::create[_new]`, an
+//!   `OpenOptions` opened for writing, `set_len`, `set_modified` or `set_times`, the plain writers
+//!   of [`crate::files`], and a program named in a call that starts one to write or move
+//!   (`cp`, `mv`, `tee`, `mkdir`, …), including through an import (`use std::fs::{write, …}`).
 //!
 //! A string compared (`==`, `!=`) is read, not run; documentation is not code.
 //!
-//! The door's own code, the descent's (which ends one process it has read again, for the door)
-//! and the process primitives (`src/process/pid.rs`) are what the door is made of, and are not
-//! read; nor is code only a unit test builds (`#[cfg(test)]`, and the module files such an
-//! attribute gates), which runs on folders and programs it made. What a closure given to the door does is the door's to allow.
-//! Macros are read token by token: a call named above, followed by its arguments, is one.
+//! The door's own code (`src/door*`), `src/files.rs`, the descent's (which ends one process it has
+//! read again, for the door) and the process primitives (`src/process/pid.rs`) are what the door is
+//! made of, and are not read; nor is code only a unit test builds (`#[cfg(test)]`, and the module
+//! files such an attribute gates), which runs on folders and programs it made, nor the builder of
+//! the programs a suite starts (`src/cf.rs`: it runs `cargo build` in the checkout and keeps a lock
+//! and a stamp in the folder the builds share, which no run of the live kit makes; `cargo xtask
+//! live` builds first). What a closure given to the door does is the door's to allow. Macros are
+//! read token by token: a call named above, followed by its arguments, is one.
 //!
-//! What it cannot see, and what the kit's guards do not stand for either (T-1592): a program or a
+//! What it cannot see, and what the door's guards do not stand for either (T-1592): a program or a
 //! file named in a string that is built (a shell line made from parts, `format!`ed into a
-//! command), a call made through a function value, a trait object or another crate's wrapper, an
-//! ending or a removal that a destructor does (a dropped terminal hangs its program up, a
-//! dropped `tempfile` folder is taken, a dropped child of another crate may be killed), the
-//! folders the rule does not read (`src/files.rs`, `tools/xtask`, the product's own crates), and
-//! a raw `std::fs` write: the write guard ([`crate::files::guard`]) stands where the kit's own
-//! writers ([`crate::files`]) are called, and a raw `std::fs::write` or `File::create` in a
-//! suite is none of its business. The kit's tests say what a run did by running it
-//! (`tests/rig/layout.rs`); this reads the code for the ways that are plain.
+//! command), a call made through a function value, a trait object or another crate's wrapper
+//! (a write another crate does for the kit), a raw system call, an ending or a removal that a
+//! destructor does (a dropped terminal hangs its program up, a dropped `tempfile` folder is
+//! taken, a dropped child of another crate may be killed), the folders the rule does not read
+//! (`src/files.rs`, `src/cf.rs`, `tools/xtask`, the product's own crates, `crates/cf-evals` (the
+//! evals' runner: it runs real harnesses on a home and a Claude config of its own, made with
+//! `tempfile` and the plain writers of [`crate::files`], and takes its own folders away; it is no
+//! run of the live kit, and its `watch` only reads the folders it is handed), the tests that are no
+//! `live_*`: those that start the kit's stand-ins run on folders they make through the door
+//! as well, and the programs the run starts, harnesses and `git` among them, write as they
+//! write: what they may reach is the isolation's (`live::isolation`, `live::login`) to hold, with
+//! the check at the end that the owner's own files are as they were. The door's writers refuse a
+//! path outside the run's allocations, so a mistake the syntax rule cannot see is an error at the
+//! write, and the kit's tests say what a run did by running it (`tests/rig/layout.rs`); this
+//! reads the code for the ways that are plain.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -66,6 +87,92 @@ const CALLS: &[&str] = &[
     "TerminateProcess",
     "TerminateJobObject",
 ];
+
+/// The functions of `std::fs` (and `std::os::*::fs`) that write, copy, rename, link, make or set
+/// something in the file system: what only the door's writers ([`crate::door`]) may do in the
+/// kit's code, as they refuse a path that is no part of this run's allocations.
+const FS_WRITES: &[&str] = &[
+    "write",
+    "copy",
+    "rename",
+    "hard_link",
+    "soft_link",
+    "create_dir",
+    "create_dir_all",
+    "set_permissions",
+    "symlink",
+    "symlink_file",
+    "symlink_dir",
+];
+
+/// The constructors of `File` and `OpenOptions` that open for writing: an `OpenOptions` is read as
+/// one, but for a chain that is made and opened at once and says nothing of writing
+/// ([`OPENS_FOR_WRITING`]), which only reads.
+const FILE_WRITES: &[&str] = &["create", "create_new", "options"];
+
+/// What an `OpenOptions` chain says to open for writing: without one of these it opens to read.
+const OPENS_FOR_WRITING: &[&str] = &["write", "append", "create", "create_new", "truncate"];
+
+/// The plain helpers of [`crate::files`] that write, which do not ask the door
+/// (they are for the tests and the tools that are none of a live run); the door's own are
+/// `crate::door::write` and its kin.
+const PLAIN_WRITES: &[&str] = &[
+    "write",
+    "copy",
+    "make_dir",
+    "write_executable",
+    "write_whole",
+    "say_its_process",
+];
+
+/// The methods that change a file or its folder's entry by a handle or a path.
+const METHOD_WRITES: &[&str] = &["set_len", "set_modified", "set_times", "set_permissions"];
+
+/// The programs that write, copy, move or make in the file system, named in a call that starts one.
+const WRITING_PROGRAMS: &[&str] = &[
+    "cp", "mv", "install", "rsync", "tee", "dd", "ln", "touch", "mkdir", "truncate", "ditto",
+    "robocopy", "xcopy", "copy", "move", "mklink",
+];
+
+/// Whether the path `segments` is one that writes in the file system other than through the door.
+fn writes_raw(segments: &[String]) -> bool {
+    let last = segments.last().map(String::as_str).unwrap_or_default();
+    let before = segments.iter().rev().nth(1).map(String::as_str);
+    match before {
+        Some("fs") => FS_WRITES.contains(&last),
+        Some("File") => FILE_WRITES.contains(&last),
+        Some("OpenOptions") => last == "new",
+        Some("files") => PLAIN_WRITES.contains(&last),
+        _ => false,
+    }
+}
+
+/// The `OpenOptions::new()` (or `File::options()`) a chain that ends in `.open(…)` begins with, and
+/// the names it calls between.
+fn open_chain(call: &ExprMethodCall) -> Option<(&ExprCall, Vec<String>)> {
+    let mut names = Vec::new();
+    let mut at: &Expr = &call.receiver;
+    while let Expr::MethodCall(inner) = at {
+        names.push(inner.method.to_string());
+        at = &inner.receiver;
+    }
+    let Expr::Call(root) = at else { return None };
+    let Expr::Path(path) = &*root.func else {
+        return None;
+    };
+    let named: Vec<String> = path
+        .path
+        .segments
+        .iter()
+        .map(|part| part.ident.to_string())
+        .collect();
+    let tail: Vec<&str> = named.iter().rev().take(2).map(String::as_str).collect();
+    matches!(
+        tail.as_slice(),
+        ["new", "OpenOptions"] | ["options", "File"]
+    )
+    .then_some((root, names))
+}
 
 /// The door's methods that are handed what to do, done only where the door allows it.
 const DOOR_CLOSURES: &[&str] = &["close_pane", "close_own_terminal", "quit_own_terminal"];
@@ -124,6 +231,8 @@ struct Reader {
     in_door: usize,
     /// How deep in a comparison this is, where a string is read.
     reading: usize,
+    /// The `OpenOptions::new()` calls that a chain opens to read, which write nothing.
+    read_opens: std::collections::HashSet<usize>,
     found: Vec<Found>,
 }
 
@@ -154,6 +263,25 @@ impl Reader {
                     );
                     if called && CALLS.contains(&name.as_str()) {
                         self.flag(format!("{name}(…) in a macro"));
+                    }
+                    if called && METHOD_WRITES.contains(&name.as_str()) {
+                        self.flag(format!("{name}(…) in a macro"));
+                    }
+                    // `fs :: write (`: the two names before the call, with their `::`.
+                    let before = at
+                        .checked_sub(3)
+                        .filter(|from| {
+                            matches!(&trees[*from + 1], TokenTree::Punct(first) if first.as_char() == ':')
+                                && matches!(&trees[*from + 2], TokenTree::Punct(second) if second.as_char() == ':')
+                        })
+                        .and_then(|from| match &trees[from] {
+                            TokenTree::Ident(before) => Some(before.to_string()),
+                            _ => None,
+                        });
+                    if let (true, Some(before)) = (called, before) {
+                        if writes_raw(&[before.clone(), name.clone()]) {
+                            self.flag(format!("{before}::{name}(…) in a macro"));
+                        }
                     }
                 }
                 TokenTree::Literal(literal) => {
@@ -222,6 +350,15 @@ impl<'ast> Visit<'ast> for Reader {
     }
 
     fn visit_expr_call(&mut self, call: &'ast ExprCall) {
+        if self
+            .read_opens
+            .contains(&(std::ptr::from_ref(call) as usize))
+        {
+            for arg in &call.args {
+                self.visit_expr(arg);
+            }
+            return;
+        }
         if let Expr::Path(path) = &*call.func {
             let segments: Vec<String> = path
                 .path
@@ -237,6 +374,19 @@ impl<'ast> Visit<'ast> for Reader {
             if (CALLS.contains(&last) && !read) || libc_kill {
                 self.flag(format!("{}(…)", segments.join("::")));
             }
+            // A program that writes, started by name: `Run::new("cp")`, `Command::new("mv")`.
+            if last == "new" && matches!(before, Some("Run" | "Command")) {
+                if let Some(Expr::Lit(literal)) = call.args.first() {
+                    if let syn::Lit::Str(text) = &literal.lit {
+                        let value = text.value();
+                        let program = value.rsplit(['/', '\\']).next().unwrap_or(&value);
+                        let program = program.strip_suffix(".exe").unwrap_or(program);
+                        if WRITING_PROGRAMS.contains(&program) {
+                            self.flag(format!("{value:?} started as a program that writes"));
+                        }
+                    }
+                }
+            }
         }
         visit::visit_expr_call(self, call);
     }
@@ -246,6 +396,21 @@ impl<'ast> Visit<'ast> for Reader {
         let on_self = matches!(&*call.receiver, Expr::Path(path) if path.path.is_ident("self"));
         if method == "kill" && call.args.is_empty() && self.holds_children && !on_self {
             self.flag(".kill() in a file that holds a child program".into());
+        }
+        if method == "open" {
+            if let Some((root, names)) = open_chain(call) {
+                if !names
+                    .iter()
+                    .any(|name| OPENS_FOR_WRITING.contains(&name.as_str()))
+                {
+                    self.read_opens.insert(std::ptr::from_ref(root) as usize);
+                }
+            }
+        }
+        if METHOD_WRITES.contains(&method.as_str()) {
+            self.flag(format!(
+                ".{method}(…) (a change made by a path or a handle)"
+            ));
         }
         // The descent's hold of a process, which it ends: the descent's own.
         if method == "hold" && call.args.len() == 1 {
@@ -276,6 +441,17 @@ impl<'ast> Visit<'ast> for Reader {
                 .collect();
             self.flag(format!("{} (taken away when dropped)", named.join("::")));
         }
+        let named: Vec<String> = path
+            .segments
+            .iter()
+            .map(|segment| segment.ident.to_string())
+            .collect();
+        if writes_raw(&named) {
+            self.flag(format!(
+                "{} (a write that does not ask the door's writers)",
+                named.join("::")
+            ));
+        }
         visit::visit_path(self, path);
     }
 
@@ -285,6 +461,21 @@ impl<'ast> Visit<'ast> for Reader {
         }
         if matches!(&item.tree, UseTree::Path(path) if path.ident == "tempfile") {
             self.flag("use tempfile::… (taken away when dropped)".into());
+        }
+        for imported in imports(&item.tree, Vec::new()) {
+            if writes_raw(&imported)
+                || (imported.last().is_some_and(|last| last == "*")
+                    && imported
+                        .iter()
+                        .rev()
+                        .nth(1)
+                        .is_some_and(|before| before == "fs"))
+            {
+                self.flag(format!(
+                    "use {} (a write that does not ask the door's writers)",
+                    imported.join("::")
+                ));
+            }
         }
     }
 
@@ -296,6 +487,34 @@ impl<'ast> Visit<'ast> for Reader {
 
     fn visit_macro(&mut self, mac: &'ast Macro) {
         self.tokens(mac.tokens.clone());
+    }
+}
+
+/// Every path a `use` brings in, as its names (`use std::fs::{write, File}` is `std::fs::write`
+/// and `std::fs::File`; a glob ends in `*`).
+fn imports(tree: &UseTree, mut above: Vec<String>) -> Vec<Vec<String>> {
+    match tree {
+        UseTree::Path(path) => {
+            above.push(path.ident.to_string());
+            imports(&path.tree, above)
+        }
+        UseTree::Name(name) => {
+            above.push(name.ident.to_string());
+            vec![above]
+        }
+        UseTree::Rename(rename) => {
+            above.push(rename.ident.to_string());
+            vec![above]
+        }
+        UseTree::Glob(_) => {
+            above.push("*".to_owned());
+            vec![above]
+        }
+        UseTree::Group(group) => group
+            .items
+            .iter()
+            .flat_map(|item| imports(item, above.clone()))
+            .collect(),
     }
 }
 
@@ -369,6 +588,7 @@ fn read(name: &str, text: &str) -> Vec<Found> {
         file: name.to_owned(),
         item: Vec::new(),
         holds_children: holds_children(text),
+        read_opens: std::collections::HashSet::new(),
         in_door: 0,
         reading: 0,
         found: Vec::new(),
@@ -398,22 +618,15 @@ fn rust_files(path: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// The live kit's files the rule reads, and the root they are named from.
+/// The kit's files the rule reads, and the root they are named from: all of `src` but what the
+/// door is made of (`src/door*`, `src/files.rs`, the descent's files and the process primitives
+/// `src/process/pid.rs`) and the code only a test build has, and the `tests/live_*` suites. A
+/// folder of tests that is none of a live run's (`tests/rig`, `tests/regressions`, `tests/cli`,
+/// `tests/smoke`, `tests/daemon`, …) is left out by its folder: it runs on folders it makes itself.
 fn live_files() -> (PathBuf, Vec<PathBuf>) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let src = root.join("src");
-    let mut files = Vec::new();
-    for part in [
-        "live",
-        "rig",
-        "matrix",
-        "bin",
-        "process",
-        "process.rs",
-        "daemon.rs",
-    ] {
-        files.extend(rust_files(&src.join(part)));
-    }
+    let mut files = rust_files(&src);
     for entry in fs::read_dir(root.join("tests")).unwrap().flatten() {
         let live = entry
             .file_name()
@@ -425,6 +638,7 @@ fn live_files() -> (PathBuf, Vec<PathBuf>) {
     }
     // What the door is made of, and what only a test build has.
     let descent = src.join("live").join("members").join("descent");
+    let door = src.join("door");
     let mut gated: Vec<PathBuf> = Vec::new();
     for file in rust_files(&src)
         .iter()
@@ -438,7 +652,16 @@ fn live_files() -> (PathBuf, Vec<PathBuf>) {
     files.retain(|file| {
         let own = file.starts_with(&descent)
             || *file == descent.with_extension("rs")
-            || *file == src.join("process").join("pid.rs");
+            || file.starts_with(&door)
+            || *file == door.with_extension("rs")
+            || *file == src.join("files.rs")
+            || *file == src.join("process").join("pid.rs")
+            // The builder of the programs a suite starts: it runs `cargo build` in the checkout and
+            // keeps a lock and a stamp in the folder the builds share (`cf-e2e-builds` below the
+            // checkout's target folder), which no run of the live kit makes: `cargo xtask live`
+            // builds first and names the folder (`CF_E2E_BUILT`), and the builder then takes the
+            // programs from it and writes nothing.
+            || *file == src.join("cf.rs");
         let unit_test = gated.iter().any(|gate| file.starts_with(gate));
         !own && !unit_test
     });
@@ -446,7 +669,7 @@ fn live_files() -> (PathBuf, Vec<PathBuf>) {
 }
 
 #[test]
-fn the_live_kit_ends_and_removes_only_through_its_door() {
+fn the_live_kit_ends_removes_and_writes_only_through_its_door() {
     let (root, files) = live_files();
     for suite in [
         "tests/live_finish/leaving.rs",
@@ -513,6 +736,33 @@ fn the_rule_finds_each_way_to_end_or_remove_and_not_what_only_reads_or_asks_the_
         "fn f() { let folder = tempfile::tempdir().unwrap(); }",
         "struct S { folder: tempfile::TempDir }",
         "use tempfile::TempDir;",
+        // Writes that do not ask the door's writers.
+        "fn f() { std::fs::write(p, b\"x\").unwrap(); }",
+        "fn f() { fs::copy(a, b).unwrap(); }",
+        "fn f() { let _ = fs::rename(a, b); }",
+        "fn f() { fs::create_dir_all(p).unwrap(); }",
+        "fn f() { std::fs::create_dir(p).unwrap(); }",
+        "fn f() { let file = File::create(p).unwrap(); }",
+        "fn f() { let file = std::fs::File::create_new(p).unwrap(); }",
+        "fn f() { let file = OpenOptions::new().append(true).open(p); }",
+        "fn f() { let file = OpenOptions::new().read(true).write(true).open(p); }",
+        "fn f() { let mut open = OpenOptions::new(); open.read(true); }",
+        "fn f() { let file = std::fs::OpenOptions::new().write(true).open(p); }",
+        "fn f() { let file = File::options().write(true).open(p); }",
+        "fn f() { files::write(p, \"x\").unwrap(); }",
+        "fn f() { crate::files::copy(a, b).unwrap(); }",
+        "fn f() { crate::files::make_dir(p).unwrap(); }",
+        "fn f() { crate::files::write_executable(p, \"\").unwrap(); }",
+        "fn f() { file.set_len(0).unwrap(); }",
+        "fn f() { file.set_permissions(mode).unwrap(); }",
+        "fn f() { std::os::unix::fs::symlink(a, b).unwrap(); }",
+        "fn f() { let write = fs::write; }",
+        "use std::fs::{write, File};",
+        "use std::fs::*;",
+        "fn f() { let _ = Run::new(\"cp\").args([a, b]); }",
+        "fn f() { let _ = std::process::Command::new(\"/bin/mv\"); }",
+        "fn f() { assert!(fs::write(p, \"x\").is_ok()); }",
+        "fn f() { paths.iter().for_each(|p| { let _ = fs::write(p, \"\"); }); }",
     ] {
         assert_eq!(found(text).len(), 1, "{text}");
     }
@@ -536,6 +786,18 @@ fn the_rule_finds_each_way_to_end_or_remove_and_not_what_only_reads_or_asks_the_
         "fn f() { let folder = crate::door::made(\"x-\").unwrap(); }",
         r#"fn f() { let s = "kill -0 \"$PPID\" 2>/dev/null || exit 0"; }"#,
         "#[cfg(test)]\nmod tests { fn f() { let folder = tempfile::tempdir().unwrap(); } }",
+        // What reads, and what asks the door's writers.
+        "fn f() { let _ = crate::door::write(p, \"x\"); }",
+        "fn f() { let _ = std::fs::read_to_string(p); let _ = File::open(p); let _ = fs::metadata(p); }",
+        "fn f() { let _ = fs::read_dir(p); let _ = fs::canonicalize(p); }",
+        "#[cfg(test)]\nmod tests { fn f() { fs::write(p, \"x\").unwrap(); } }",
+        "use std::fs::{self, File, OpenOptions};",
+        "fn f() { let _ = Run::new(\"ls\"); let _ = Command::new(\"copier\"); }",
+        "fn f() { let file = OpenOptions::new().read(true).custom_flags(1).open(p); }",
+        "fn f() { let file = File::options().read(true).open(p); }",
+        "fn f() { writer.write(b\"x\"); }",
+        "fn f() { let _ = files::read(p); let _ = files::read_string(p); }",
+        "// fs::write(p, \"x\")\nfn f() {}",
     ] {
         assert_eq!(found(text), Vec::new(), "{text}");
     }

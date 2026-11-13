@@ -49,7 +49,7 @@ use cf_e2e::muse::{
 };
 use cf_e2e::process::own_var;
 use cf_e2e::rig::{Config, Project, Rig};
-use cf_e2e::{checkout, files, Error, Result};
+use cf_e2e::{checkout, Error, Result};
 use serde_json::{json, Value};
 
 /// The stand-in for the chief's window, built for these tests.
@@ -513,7 +513,7 @@ fn question_case(live: &Live) -> Result<String> {
         path: PathBuf::from("a temporary folder"),
         source,
     })?;
-    files::write(&foreign.path().join("AGENTS.md"), FOREIGN_RULES)?;
+    cf_e2e::door::write(&foreign.path().join("AGENTS.md"), FOREIGN_RULES)?;
     let config = live
         .config()
         .var("CODEX_HOME", foreign.path().display().to_string());

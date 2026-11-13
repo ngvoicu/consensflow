@@ -1078,6 +1078,51 @@ fn a_codex_run_is_given_the_login_alone_and_what_it_configures_goes_in_its_own_h
     assert!(isolation.finish().is_ok());
 }
 
+#[test]
+fn a_pi_run_is_set_in_its_own_folder_and_the_owners_pi_settings_and_the_one_a_caller_names_are_as_they_were(
+) {
+    // `live compaction-screens`: Pi is told to keep one token (`settings.json`). It used to be a
+    // flag naming a Pi folder; no flag names one now, and the settings go in the folder the kit
+    // made for the run, whatever the owner's shell or a caller's folder holds.
+    let owner = Owner::new();
+    let caller = tempfile::tempdir().unwrap();
+    let callers = caller.path().join("agent");
+    write(&callers.join("settings.json"), "{\"theirs\":true}");
+    write(&callers.join("sessions/a.jsonl"), "a session of theirs");
+    let before = (
+        fs::read(callers.join("settings.json")).unwrap(),
+        fs::read(callers.join("sessions/a.jsonl")).unwrap(),
+        fs::read(owner.path(".pi/agent/settings.json")).unwrap(),
+    );
+    let isolation = owner.pi("openrouter/x", hours(1));
+    let home = isolation.made_at(at(NOW)).unwrap();
+    let settings = "{\"compaction\":{\"keepRecentTokens\":1}}\n";
+    isolation
+        .write("PI_CODING_AGENT_DIR", "settings.json", settings)
+        .unwrap();
+    let vars = isolation.vars_in(&home);
+    let folder = vars
+        .iter()
+        .find(|(name, _)| name == "PI_CODING_AGENT_DIR")
+        .map(|(_, folder)| PathBuf::from(folder))
+        .unwrap();
+    assert!(folder.starts_with(&home), "{folder:?} is not in {home:?}");
+    assert_eq!(
+        fs::read_to_string(folder.join("settings.json")).unwrap(),
+        settings
+    );
+    assert_eq!(
+        before,
+        (
+            fs::read(callers.join("settings.json")).unwrap(),
+            fs::read(callers.join("sessions/a.jsonl")).unwrap(),
+            fs::read(owner.path(".pi/agent/settings.json")).unwrap(),
+        ),
+        "a file of the owner's or a caller's was written"
+    );
+    assert!(isolation.finish().is_ok());
+}
+
 #[cfg(unix)]
 #[test]
 fn a_home_made_in_a_folder_reached_through_a_link_is_named_through_the_link() {

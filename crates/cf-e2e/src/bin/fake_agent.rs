@@ -270,9 +270,9 @@ fn fail(failed: &str) -> ExitCode {
 }
 
 /// Ends the window with `code`, after taking its status file away, through the door (the file
-/// is this very process's, named for its process id).
+/// is below a folder of the run's own, which the rig handed down to the stand-in).
 fn leave(status_file: &Path, code: i32) -> ! {
-    let _ = cf_e2e::door::Door::of_run().remove_status_of_this_process(status_file);
+    let _ = cf_e2e::door::Door::of_run().remove_in_made(status_file);
     std::process::exit(code)
 }
 

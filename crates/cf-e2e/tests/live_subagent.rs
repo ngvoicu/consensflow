@@ -423,7 +423,10 @@ fn devin_children(members: &Members) -> Vec<(String, String)> {
         for suffix in ["", "-wal", "-shm"] {
             let from = PathBuf::from(format!("{}{suffix}", store.display()));
             if from.is_file() {
-                let _ = fs::copy(&from, copy.path().join(format!("sessions.db{suffix}")));
+                let _ = cf_e2e::door::copy_keeping_mode(
+                    &from,
+                    copy.path().join(format!("sessions.db{suffix}")),
+                );
             }
         }
         let Ok(db) = rusqlite::Connection::open(copy.path().join("sessions.db")) else {
@@ -631,8 +634,8 @@ fn child(
                 let name = path
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned());
-                if fs::create_dir_all(&kept).is_ok() {
-                    let _ = fs::copy(
+                if cf_e2e::door::make_dir(&kept).is_ok() {
+                    let _ = cf_e2e::door::copy_keeping_mode(
                         path,
                         kept.join(format!("{number}-{}", name.unwrap_or_default())),
                     );
@@ -856,7 +859,7 @@ fn a_members_sub_agents_keep_no_role_and_ask_the_board_nothing_as_the_member() -
         "what each harness's sub-agents came to",
         &report::table(&checks),
     );
-    report::verdict(&checks)
+    report::verdict_of(&log, &checks)
 }
 
 #[cfg(test)]

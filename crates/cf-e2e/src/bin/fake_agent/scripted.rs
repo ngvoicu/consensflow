@@ -17,7 +17,7 @@
 //! down in `journal.jsonl` of the folder, whole, with the number it was given and the files
 //! written, so that a report can say what the script was asked and what it held.
 
-use std::fs::{self, OpenOptions};
+use std::fs::{self};
 use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::OnceLock;
@@ -98,10 +98,10 @@ fn copy_below(root: &Path, at: &Path, into: &Path, wrote: &mut Vec<String>) -> R
         };
         let target = into.join(relative);
         if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent)
+            cf_e2e::door::make_dir(parent)
                 .map_err(|cause| format!("could not make {}: {cause}", parent.display()))?;
         }
-        fs::copy(&source, &target)
+        cf_e2e::door::copy_keeping_mode(&source, &target)
             .map_err(|cause| format!("could not write {}: {cause}", target.display()))?;
         wrote.push(
             relative
@@ -120,10 +120,8 @@ fn note(folder: &Path, taken: u32, given: u32, text: &str, wrote: &[String]) -> 
     use std::io::Write;
     let line = serde_json::json!({ "taken": taken, "given": given, "brief": text, "wrote": wrote });
     let file = folder.join(JOURNAL);
-    let mut journal = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&file)
+    let mut journal = cf_e2e::door::append(&file)
+        .map_err(std::io::Error::from)
         .map_err(|cause| format!("could not open {}: {cause}", file.display()))?;
     writeln!(journal, "{line}")
         .map_err(|cause| format!("could not write {}: {cause}", file.display()))
@@ -134,7 +132,7 @@ fn note(folder: &Path, taken: u32, given: u32, text: &str, wrote: &[String]) -> 
 fn take(folder: &Path) -> Result<u32, String> {
     for number in 1.. {
         let file = folder.join(format!(".taken-{number}"));
-        match OpenOptions::new().write(true).create_new(true).open(&file) {
+        match cf_e2e::door::create_new(&file).map_err(std::io::Error::from) {
             Ok(_) => return Ok(number),
             Err(cause) if cause.kind() == ErrorKind::AlreadyExists => {}
             Err(cause) => return Err(format!("could not make {}: {cause}", file.display())),

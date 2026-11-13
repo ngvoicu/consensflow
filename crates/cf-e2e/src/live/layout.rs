@@ -58,7 +58,7 @@ impl Layout {
             before: BTreeMap::new(),
         };
         for folder in [layout.live(), layout.temp(), layout.signals()] {
-            fs::create_dir_all(folder)?;
+            door::make_dir(&folder)?;
         }
         layout.plant()?;
         layout.before = snapshot(&layout.planted);
@@ -141,6 +141,19 @@ impl Layout {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Plants another run's, or a caller's, files below `root` (a place below the layout): each
+    /// of `files` as its path below `root` and the text it holds. What is planted is held by
+    /// [`Layout::untouched`] and [`Layout::unchanged`] with the rest.
+    pub fn plant_tree(&mut self, root: &Path, files: &[(&str, &str)]) -> io::Result<()> {
+        door::make_dir(root)?;
+        for (name, text) in files {
+            write(&root.join(name), text)?;
+        }
+        self.planted.push(root.to_path_buf());
+        self.before = snapshot(&self.planted);
+        Ok(())
     }
 
     fn plant(&mut self) -> io::Result<()> {
@@ -243,10 +256,7 @@ fn verdict(wrong: Vec<String>) -> Result<(), String> {
 }
 
 fn write(path: &Path, text: &str) -> io::Result<()> {
-    if let Some(folder) = path.parent() {
-        fs::create_dir_all(folder)?;
-    }
-    fs::write(path, text)
+    Ok(door::write(path, text)?)
 }
 
 /// Stamps the folder `folder` as last changed `ago` ago. Windows opens a folder only with the
@@ -254,15 +264,7 @@ fn write(path: &Path, text: &str) -> io::Result<()> {
 // A layout stamps its folders by the clock a sweep reads their ages against.
 #[allow(clippy::disallowed_methods)]
 fn aged(folder: &Path, ago: Duration) -> io::Result<()> {
-    let mut open = fs::OpenOptions::new();
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        open.write(true).custom_flags(0x0200_0000);
-    }
-    #[cfg(not(windows))]
-    open.read(true);
-    open.open(folder)?.set_modified(SystemTime::now() - ago)
+    Ok(door::set_modified(folder, SystemTime::now() - ago)?)
 }
 
 /// Everything in `roots`, by path, as it is now.

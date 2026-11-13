@@ -29,7 +29,8 @@ const HOMES: [&str; 8] = [
 ];
 
 /// What else makes a home by hand: a type of a test's that copied a login, and the flag that
-/// hands the rig a Claude folder of the caller's.
+/// names a Claude folder of the caller's, which only the kit reads, for its login, and never
+/// writes in (`Login::of_folder`: the run's windows run on a folder of the kit's own).
 const COPIES: [&str; 3] = [
     "CodexHome",
     "Throwaway::holding",

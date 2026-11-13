@@ -51,7 +51,7 @@ use super::window::trust_claude;
 use super::{agents, last_lines, rig, rig_with_stand_ins, Log};
 use crate::process::Run;
 use crate::rig::{Config, Project, Rig};
-use crate::{files, Error, Result};
+use crate::{Error, Result};
 
 use board::task_number;
 
@@ -645,10 +645,10 @@ fn prepare(rig: &Rig, plan: &Plan) -> Result<PathBuf> {
         .ok_or_else(|| Error::Daemon("the rig gives its windows no home".to_owned()))?;
     let folder = live_folder_in(Path::new(home), &plan.folder)?;
     for name in ["AGENTS.md", "CLAUDE.md"] {
-        files::write(&folder.join(name), plan.brief)?;
+        crate::door::write(&folder.join(name), plan.brief)?;
     }
     for (path, text) in &plan.files {
-        files::write(&folder.join(path), text)?;
+        crate::door::write(&folder.join(path), text)?;
     }
     if plan.repository {
         let made = Run::new(Path::new("git"))

@@ -392,7 +392,7 @@ fn a_claude_the_human_starts_on_a_workers_conversation_has_none_of_its_turns_tak
         version,
     )];
     log.report("what the case came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::verdict_of(&log, &checks)
 }
 
 #[cfg(test)]
