@@ -50,11 +50,11 @@ jobs:
               if suite == 'plants':
                   if family not in ('cli', 'daemon', 'release') or not isinstance(names, list) or not names:
                       raise SystemExit('plants need a known family and one or more names')
-                  if any(not isinstance(n, str) or not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.:-]*', n) for n in names):
+                  if any(not isinstance(n, str) or not n.strip() or len(n) > 500 or n.startswith('-') or not n.isprintable() for n in names):
                       raise SystemExit('invalid plant name')
               elif family != '' or names != []:
                   raise SystemExit('only plants take a family or names')
-              matrix.append(dict(suite=suite, runner=runner, family=family, names=','.join(names), id=i))
+              matrix.append(dict(suite=suite, runner=runner, family=family, names=json.dumps(names, ensure_ascii=True, separators=(',', ':')), id=i))
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
               f.write('matrix=' + json.dumps({'include': matrix}, separators=(',', ':')) + '\n')
           PY
@@ -155,7 +155,13 @@ jobs:
                 doc_rc=$?
                 [ "$other_rc" -eq 0 ] && [ "$dispatcher_rc" -eq 0 ] && [ "$doc_rc" -eq 0 ] ;;
               plants)
-                IFS=, read -r -a names <<< "$PLANT_NAMES"
+                # JSON is data from the validated matrix; preserve spaces,
+                # commas, quotes and shell metacharacters as individual args.
+                node -e 'for (const n of JSON.parse(process.env.PLANT_NAMES)) console.log(n)' > "$RUNNER_TEMP/plant-names"
+                names_rc=$?
+                if [ "$names_rc" -ne 0 ]; then exit "$names_rc"; fi
+                names=()
+                while IFS= read -r name; do [ -n "$name" ] && names+=("$name"); done < "$RUNNER_TEMP/plant-names"
                 [ -n "$FAMILY" ] && [ "${#names[@]}" -gt 0 ] && [ -n "${names[0]}" ] || exit 2
                 cargo xtask plants "$FAMILY" "${names[@]}" --test-threads 4 ;;
               clippy-windows) cargo xtask clippy-windows ;;
