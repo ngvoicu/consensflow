@@ -253,3 +253,20 @@ fn a_task_given_with_no_pass_since_is_released_and_no_pass_after_opens_a_window_
         .iter()
         .all(|launch| launch["participant"]["handle"] == "chief"));
 }
+
+#[test]
+fn a_window_the_human_opened_for_a_task_given_is_opened_and_the_task_stays() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    let zeus = tiers.id("zeus");
+    context
+        .ledger
+        .borrow_mut()
+        .assign_task(tiers.project.id, 1, zeus)
+        .unwrap();
+    let session = tiers.assignee(1);
+    context.open_window(tiers.project.id, &session).unwrap();
+    context.send_on_vacation(tiers.project.id, "zeus").unwrap();
+    assert_eq!(tiers.assignee(1), session);
+}

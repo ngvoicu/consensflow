@@ -306,9 +306,8 @@ fn a_member_who_leaves_takes_its_backup_and_the_backups_work_with_it() {
 }
 
 /// The ledger's half of the same removal (T-1619): the backup's task is cancelled with the
-/// member's own, and the requester told in the same note. Run it once the ledger has it.
+/// member's own, and the requester told in the same note.
 #[test]
-#[ignore = "waits for the ledger's mend of a backup's tasks on a member's removal (T-1619)"]
 fn a_member_who_leaves_has_its_backups_task_cancelled_with_its_own() {
     let context = Context::new();
     let (tiers, _backup, _pane) = backup_at_work(&context);
@@ -327,7 +326,6 @@ fn a_backup_taken_off_the_staff_closes_its_window() {
 
 /// The ledger's half (T-1619): a removed backup's task is cancelled as a member's own.
 #[test]
-#[ignore = "waits for the ledger's mend of a removed backup's tasks (T-1619)"]
 fn a_backup_taken_off_the_staff_has_its_task_cancelled() {
     let context = Context::new();
     let (tiers, _backup, _pane) = backup_at_work(&context);
@@ -465,4 +463,33 @@ fn a_busy_refusal_of_its_window_keeps_its_backup_from_the_next_task_after_a_rest
     restarted.pass().unwrap();
     assert_eq!(tiers.task(2).task.assignee, None);
     assert_eq!(told_of_a_backup(&tiers), Vec::<String>::new());
+}
+
+#[test]
+fn a_backups_window_still_opening_is_waited_for_before_it_is_closed_for_a_member_who_leaves() {
+    // A member's own in-flight launch is waited for by `forget`, which closes each leaving
+    // record under that record's own hold; the backup's is forgotten the same way.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    backed(&context, tiers.project.id, "zeus", "claude-code", "gaia");
+    out(&context, &tiers, "zeus", &soon(&context, 3));
+    tiers.open();
+    let gate = cf_engine::testing::Gate::default();
+    *context.host.hold.borrow_mut() = Some(gate.clone());
+    let passing = context.begin_pass();
+    let removing = context.begin_remove_member(tiers.project.id, "zeus");
+    context.settle();
+    assert!(
+        context.host.killed().is_empty(),
+        "the launch is still in progress"
+    );
+    gate.open();
+    context.finish(passing).unwrap();
+    context.finish(removing).unwrap();
+    let session = tiers.assignee(1);
+    let pane = context.host.last(&session).expect("its window").pane;
+    assert!(
+        context.host.killed().contains(&pane),
+        "its window closed once opened"
+    );
 }

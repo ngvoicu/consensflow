@@ -507,19 +507,14 @@ impl Dispatcher {
             .collect()
     }
 
-    /// The id of the backup `member` has now, if it has one.
-    fn backup_of(&self, project: i64, member: i64) -> Result<Option<i64>, EngineError> {
-        let board = self.seams.ledger.borrow().board(project)?;
-        let board = serde_json::to_value(&board)
-            .map_err(|cause| EngineError::said("board-unreadable", cause.to_string()))?;
-        Ok(board["lanes"].as_array().and_then(|lanes| {
-            lanes.iter().find_map(|lane| {
-                let participant = &lane["participant"];
-                (participant["backupOf"].as_i64() == Some(member))
-                    .then(|| participant["id"].as_i64())
-                    .flatten()
-            })
-        }))
+    /// The rows of the backup `member` has now, with its sessions: what leaves with it.
+    fn backup_rows(&self, found: &ProjectView, member: i64) -> Vec<i64> {
+        found
+            .participants
+            .iter()
+            .filter(|p| p.backup_of == Some(member) && p.left_at.is_none())
+            .flat_map(|backup| self.rows_of(found, backup.id))
+            .collect()
     }
 
     /// A member's backup is taken off the staff, and its sessions and the tasks in them go as
@@ -548,18 +543,18 @@ impl Dispatcher {
         backup: &NewMember,
     ) -> Result<ParticipantView, EngineError> {
         let before = self.known_project(project)?;
-        let old = match before.participants.iter().find(|p| p.handle == handle) {
-            Some(member) => self.backup_of(project, member.id)?,
-            None => None,
-        };
+        let old = before
+            .participants
+            .iter()
+            .find(|p| p.handle == handle)
+            .map(|member| self.backup_rows(&before, member.id))
+            .unwrap_or_default();
         let added = self
             .seams
             .ledger
             .borrow_mut()
             .change_backup(project, handle, backup)?;
-        if let Some(old) = old {
-            self.forget(&self.rows_of(&before, old)).await?;
-        }
+        self.forget(&old).await?;
         self.changed();
         Ok(added)
     }
@@ -809,23 +804,18 @@ impl Dispatcher {
                 ));
             }
             let found = this.known_project(project)?;
-            let mut left = vec![member.id];
-            left.extend(
-                found
-                    .participants
-                    .iter()
-                    .filter(|p| p.member_id == Some(member.id))
-                    .map(|p| p.id),
-            );
+            let mut left = this.rows_of(&found, member.id);
             // A backup leaves with its member, and so do its sessions.
-            if let Some(backup) = this.backup_of(project, member.id)? {
-                left.extend(this.rows_of(&found, backup));
-            }
+            left.extend(this.backup_rows(&found, member.id));
             let removed = this
                 .seams
                 .ledger
                 .borrow_mut()
                 .remove_member(project, &handle)?;
+            // What the ledger says departed is what is forgotten, with what was seen before.
+            left.extend(removed.departed.iter().copied());
+            left.sort_unstable();
+            left.dedup();
             Ok((removed, left))
         };
         let (removed, left) = self.exclusive(&record, work).await.await?;

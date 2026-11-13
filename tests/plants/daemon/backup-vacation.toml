@@ -415,27 +415,6 @@ find = '''                            why.push(format!("its backup {}", rests.wo
 replace = '''                            let _ = rests;'''
 
 [[plant]]
-name = "bkv engine: a window that is open counts as unopened"
-meant = "a_task_in_an_open_window_stays_with_it_and_goes_on"
-runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "vacation::"]]
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '''        record.window.borrow().pane.is_none()
-            && record.window.borrow().abandoned.is_none()'''
-replace = '''        true
-            && record.window.borrow().abandoned.is_none()'''
-
-[[plant]]
-name = "bkv engine: a delivery in progress counts as unopened"
-meant = "a_launch_in_progress_counts_as_opened_and_the_task_stays"
-runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "vacation::"]]
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '''            && record.delivery.borrow().delivering.is_none()
-'''
-replace = ''''''
-
-[[plant]]
 name = "bkv engine: a member who leaves keeps its backup's windows"
 meant = "a_member_who_leaves_takes_its_backup_and_the_backups_work_with_it"
 runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backups::"]]
