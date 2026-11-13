@@ -3321,6 +3321,28 @@ test('Do with your own hands shows an operation failure and keeps the saved stat
   await expect(control).toHaveAttribute('aria-checked', 'false')
 })
 
+for (const harness of ['claude-code', 'codex', 'pi', 'devin', 'muse']) {
+  test(`Do with your own hands is available on a ${harness} chief with and without a window`, async ({
+    page,
+  }) => {
+    const data = model()
+    const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+    chief.participant.harness = harness
+    chief.pane.harness = harness
+    await open(page, data)
+    const card = page.locator('#stage .terminal-card[data-handle="chief"]')
+    await expect(card.getByRole('switch', { name: 'Do with your own hands' })).toBeVisible()
+    await changed(page, () => {
+      const chief = window.__model.boards[1].lanes.find(
+        (lane) => lane.participant.handle === 'chief',
+      )
+      chief.activity = { state: 'closed' }
+      chief.pane = null
+    })
+    await expect(card.getByRole('switch', { name: 'Do with your own hands' })).toBeVisible()
+  })
+}
+
 test("keeps the chief's card in the dock while its window is down, and Switch chief is the way on", async ({
   page,
 }) => {
