@@ -571,6 +571,30 @@ fn the_chief_and_a_session_cannot_be_backups_or_have_backups() {
 }
 
 #[test]
+fn the_human_cannot_be_a_backup_or_have_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let p = project(
+        &mut ledger,
+        vec![
+            member("alpha", "worker", "standard"),
+            member("beta", "worker", "standard"),
+        ],
+    );
+    let (primary, backup, human) = (id(&p, "alpha"), id(&p, "beta"), id(&p, "human"));
+    let human_has = ledger.sqlite().execute(
+        "UPDATE participant SET backup_of=? WHERE id=?",
+        [human, backup],
+    );
+    assert!(human_has.is_err(), "the human cannot have a backup");
+    let human_is = ledger.sqlite().execute(
+        "UPDATE participant SET backup_of=? WHERE id=?",
+        [primary, human],
+    );
+    assert!(human_is.is_err(), "the human cannot be a backup");
+}
+
+#[test]
 fn a_backup_must_belong_to_the_same_project_as_a_live_member() {
     let dir = tempfile::tempdir().unwrap();
     let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();

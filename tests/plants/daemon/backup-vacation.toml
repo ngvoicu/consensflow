@@ -201,3 +201,47 @@ runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vaca
 file = "crates/cf-ledger/src/staff/quota.rs"
 find = "params![until, since, kind.map(HoldKind::as_str), member.id],"
 replace = "params![until, since, None::<&str>, member.id],"
+
+[[plant]]
+name = "bkv ledger: a human can have a backup"
+meant = "the_human_cannot_be_a_backup_or_have_one"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "the_human_cannot_be_a_backup_or_have_one"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0038.sql"
+find = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+BEGIN
+  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
+    OR NEW.id = NEW.backup_of
+    OR NOT EXISTS (
+      SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
+        AND owner.project_id = NEW.project_id AND owner.member_id IS NULL
+        AND owner.role NOT IN ('human', 'chief') AND owner.left_at IS NULL'''
+replace = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+BEGIN
+  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
+    OR NEW.id = NEW.backup_of
+    OR NOT EXISTS (
+      SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
+        AND owner.project_id = NEW.project_id AND owner.member_id IS NULL
+        AND owner.role NOT IN ('chief') AND owner.left_at IS NULL'''
+
+[[plant]]
+name = "bkv ledger: a human can be a backup"
+meant = "the_human_cannot_be_a_backup_or_have_one"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "the_human_cannot_be_a_backup_or_have_one"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0038.sql"
+find = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+BEGIN
+  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')'''
+replace = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+BEGIN
+  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('chief')'''
