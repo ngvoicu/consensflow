@@ -382,6 +382,7 @@ impl Dispatcher {
         let lost = lost_in_turn(record, observed, Some(start));
         if !observed.settled {
             self.tell_lost(project, participant, record, &thread, lost)?;
+            self.remind_during_turn(project, participant, record, &thread, observed, watching)?;
             self.looks_finished(
                 project,
                 participant,
@@ -1003,6 +1004,57 @@ impl Dispatcher {
         };
         self.changed();
         Ok(aside)
+    }
+
+    /// An earlier hold's stretch continues through a wake-up. If background work is
+    /// still pending, the hour can fall while the worker's own turn is under way.
+    /// A real exchange ends the old stretch; its next hold will start another.
+    fn remind_during_turn(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Record,
+        thread: &TaskThread,
+        observed: &Observed,
+        watching: Watching,
+    ) -> Result<(), EngineError> {
+        let Some(told) = record
+            .held
+            .borrow()
+            .told
+            .clone()
+            .filter(|told| told.task == thread.task.number)
+        else {
+            return Ok(());
+        };
+        if exchanges(thread, &participant.handle)
+            .iter()
+            .any(|id| !told.exchanges.contains(id))
+            || watching == Watching::Waiting
+        {
+            return Ok(());
+        }
+        let pending = pending_after_look(observed, watching);
+        if pending.total() == 0 {
+            return Ok(());
+        }
+        let seen = match watching {
+            Watching::Seen(seen) => Some(seen),
+            Watching::Undecided | Watching::Waiting => None,
+        };
+        let monitors = observed.monitors();
+        let said = Held {
+            pending,
+            stuck: cannot_end_by_itself(pending, &monitors, seen),
+            monitors,
+            commands: observed.commands(),
+        };
+        if let Some(previous) = self.remind_held(project, thread, &said, &told)? {
+            if let Some(told) = record.held.borrow_mut().told.as_mut() {
+                told.previous = Some(previous);
+            }
+        }
+        Ok(())
     }
 
     /// Remind of the stretch after an hour and every three hours after that. The receipt

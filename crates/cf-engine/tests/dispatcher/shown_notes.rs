@@ -102,6 +102,81 @@ fn chief_reads(context: &Context) {
 }
 
 #[test]
+fn a_worker_awake_with_background_work_is_reminded_at_the_first_hour() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    held(&context, "The wait starts", 1);
+    context.advance(FORTY_MINUTES);
+    context.adapter.wake("zeus", ENDED);
+    context
+        .adapter
+        .with("zeus", |agent| agent.pending = pending(2, 0));
+    context.pass().unwrap();
+    context.advance(AN_HOUR - FORTY_MINUTES);
+    context.pass().unwrap();
+    assert_eq!(typed(&context, &tiers), ["T-1 has been working in the background for 60 minutes, holding again 0 times (2 commands). Its result comes when that ends; `cf task finish T-1` takes what it said last now."]);
+}
+
+#[test]
+fn an_exchange_in_an_awake_turn_ends_the_old_stretch_before_it_holds_again() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    held(&context, "The wait starts", 1);
+    context.advance(FORTY_MINUTES);
+    context.adapter.wake("zeus", ENDED);
+    context
+        .adapter
+        .with("zeus", |agent| agent.pending = pending(2, 0));
+    let assignee = tiers.assignee(1);
+    context
+        .ledger
+        .borrow_mut()
+        .note(
+            tiers.project.id,
+            &NewNote {
+                from: Some(assignee),
+                to: "chief".into(),
+                task: Some(1),
+                body: "A finding".into(),
+            },
+        )
+        .unwrap();
+    context.pass().unwrap();
+    context.advance(AN_HOUR - FORTY_MINUTES);
+    context.pass().unwrap();
+    assert!(typed(&context, &tiers).is_empty(), "the old stretch ended");
+    held(&context, "The next wait starts", 2);
+    context.advance(AN_HOUR);
+    context.pass().unwrap();
+    assert_eq!(
+        typed(&context, &tiers).len(),
+        1,
+        "the new stretch is an hour old"
+    );
+}
+
+#[test]
+fn an_awake_worker_with_nothing_pending_is_not_said_to_have_a_background_hold() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    held(&context, "The wait starts", 1);
+    context.advance(FORTY_MINUTES);
+    context.adapter.wake("zeus", ENDED);
+    context.pass().unwrap();
+    context.advance(AN_HOUR - FORTY_MINUTES);
+    context.pass().unwrap();
+    assert!(typed(&context, &tiers).is_empty());
+    context.advance(10 * 60_000);
+    context
+        .adapter
+        .with("zeus", |agent| agent.pending = pending(1, 0));
+    context.pass().unwrap();
+    let notes = typed(&context, &tiers);
+    assert_eq!(notes.len(), 1, "the background hold is overdue: {notes:?}");
+    assert!(notes[0].contains("70 minutes, holding again 0 times (1 command)"));
+}
+
+#[test]
 fn a_busy_chief_is_not_queued_repeated_reminders_before_the_first_is_delivered() {
     let context = Context::new();
     let tiers = zeus_at_work(&context);

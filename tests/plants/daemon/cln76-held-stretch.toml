@@ -10,6 +10,7 @@ finish-transition = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", 
 finish-reminder = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_hold_that_keeps_needing_finish_is_reminded_without_promising_a_result", "--", "--test-threads=2"]
 carry-reminder = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_reminder_before_a_finish_hold_can_end_is_carried_into_the_shown_hold", "--", "--test-threads=2"]
 busy-chief = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_busy_chief_is_not_queued_repeated_reminders_before_the_first_is_delivered", "--", "--test-threads=2"]
+awake-worker = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_worker_awake_with_background_work_is_reminded_at_the_first_hour", "--", "--test-threads=2"]
 
 [[plant]]
 name = "cln76: a re-hold starts the hour again"
@@ -100,3 +101,13 @@ runs = ["busy-chief"]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''if matches!(prior.state.as_str(), "queued" | "gated" | "delivering") {'''
 replace = '''if false && matches!(prior.state.as_str(), "queued" | "gated" | "delivering") {'''
+
+[[plant]]
+name = "cln76: an awake worker defers a due reminder"
+meant = "shown_notes::a_worker_awake_with_background_work_is_reminded_at_the_first_hour"
+runs = ["awake-worker"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''            self.remind_during_turn(project, participant, record, &thread, observed, watching)?;'''
+replace = ''''''
