@@ -214,6 +214,70 @@ fn an_older_delivered_answer_with_no_proof_of_ways_on_keeps_the_note_typed_until
 }
 
 #[test]
+fn an_older_carrier_already_pasting_an_answer_without_ways_on_keeps_the_note_typed() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    let carrier = w.note(&session, "chief", task, "More for the chief");
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET carried_by = ?1 WHERE id = ?2",
+            [carrier.id, answer.id],
+        )
+        .expect("the answer rides in the carrier");
+    });
+    w.begin(carrier.id);
+    assert_eq!(w.message(answer.id).state, "queued");
+    w.edit(|db| {
+        db.execute(
+            "UPDATE event SET data = json_remove(data, '$.tellPauseWaysOn')
+             WHERE kind = 'delivery.begun' AND json_extract(data, '$.message') = ?",
+            [carrier.id],
+        )
+        .expect("the older carrier has no footer proof");
+    });
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_eq!(note.state, "queued", "the chief still needs the ways on");
+    w.resume(task, "Go on");
+    assert_shown_tell_note(&w, task, tell, note.id);
+}
+
+#[test]
+fn an_answer_in_a_queued_carrier_makes_the_note_shown() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    let carrier = w.note(&session, "chief", task, "More for the chief");
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET carried_by = ?1 WHERE id = ?2",
+            [carrier.id, answer.id],
+        )
+        .expect("the answer rides in the carrier");
+    });
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_shown_tell_note(&w, task, tell, note.id);
+}
+
+#[test]
+fn an_answer_in_a_begun_carrier_with_ways_on_makes_the_note_shown() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    let carrier = w.note(&session, "chief", task, "More for the chief");
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET carried_by = ?1 WHERE id = ?2",
+            [carrier.id, answer.id],
+        )
+        .expect("the answer rides in the carrier");
+    });
+    w.begin(carrier.id);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_shown_tell_note(&w, task, tell, note.id);
+}
+
+#[test]
 fn an_answer_the_chief_read_in_the_inbox_still_makes_its_tells_note_shown() {
     let mut w = world();
     let (task, session, tell) = delivered_tell(&mut w);

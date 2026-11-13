@@ -371,7 +371,7 @@ fn show_for_answer(
     let Some(row) = store.message(answer)? else {
         return Ok(false);
     };
-    if row.state == "queued" || (row.state == "read" && row.receipt.get("read").is_some()) {
+    if row.state == "read" && row.receipt.get("read").is_some() {
         return Ok(true);
     }
     let paste: i64 = store.db.query_row(
@@ -379,6 +379,17 @@ fn show_for_answer(
         [answer],
         |row| row.get(0),
     )?;
+    // A carried answer remains queued even after its carrier begins. Only an
+    // answer whose own paste has not begun can rely on a future footer; an
+    // already-begun carrier needs the same evidence as a begun answer.
+    if row.state == "queued"
+        && (paste == answer
+            || store
+                .message(paste)?
+                .is_some_and(|carrier| matches!(carrier.state.as_str(), "queued" | "gated")))
+    {
+        return Ok(true);
+    }
     Ok(tell_pause_ways_on(store, paste)?.contains(&task.number))
 }
 
