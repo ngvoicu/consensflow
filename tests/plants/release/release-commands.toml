@@ -1152,24 +1152,27 @@ find = '''        match check_signed_sums(key, &read(SIGNATURE)?, &read(SUMS)?, 
 replace = '''        match Result::<(), String>::Ok(()) {'''
 
 [[plant]]
-name = "release: a line of SHA256SUMS that is no hash and name is let by"
-meant = "the_lines_of_sha256sums_are_read_as_sha256sum_writes_them_and_any_other_is_told"
+name = "release: a row of SHA256SUMS that is no hash and name is let by"
+meant = "a_release_whose_signed_sums_hold_a_row_that_is_no_hash_and_name_fails_naming_the_row"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/verify.rs"
-find = "            None => odd.push(line.to_owned()),"
-replace = "            None => {}"
+file = "tools/cf-publish/src/sums.rs"
+find = "        match row_of(row) {"
+replace = """        if row_of(row).is_none() {
+            continue;
+        }
+        match row_of(row) {"""
 
 [[plant]]
-name = "release: a name written in binary mode keeps its star"
-meant = "the_lines_of_sha256sums_are_read_as_sha256sum_writes_them_and_any_other_is_told"
+name = "release: a hash of SHA256SUMS in capitals is read"
+meant = "a_release_whose_signed_sums_list_a_hash_in_capitals_fails_naming_the_row"
 runs = ["release-commands"]
 
 [[plant.edit]]
-file = "tools/xtask/src/release/verify.rs"
-find = "rest.strip_prefix([' ', '*'])"
-replace = "rest.strip_prefix(' ')"
+file = "tools/cf-publish/src/sums.rs"
+find = ".all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));"
+replace = ".all(|byte| byte.is_ascii_hexdigit());"
 
 [[plant]]
 name = "release: the archive's signature is not checked"
