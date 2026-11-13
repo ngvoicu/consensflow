@@ -235,7 +235,7 @@ find = "restart_swept(|| -> Value { app.restart() })"
 replace = "app.restart()"
 
 [[plant.edit]]
-file = "app/src-tauri/src/updates.rs"
+file = "app/src-tauri/src/updates/relaunch.rs"
 find = """
     command.args(args);
     cf_process::hold_only_the_streams(&mut command);"""
@@ -255,7 +255,7 @@ builds = true
 requires = ["app/src-tauri/target/updater-smoke-sweep/update/ConsensFlow.app"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/updates.rs"
+file = "app/src-tauri/src/updates/relaunch.rs"
 find = "        || std::process::exit(0),"
 replace = "        || {},"
 

@@ -179,7 +179,7 @@ fn refuses_a_cache_another_run_holds_and_says_so_before_it_makes_anything() {
     let world = World::new();
     let cache = world.folder.path().join("cache");
     fs::create_dir_all(&cache).unwrap();
-    let first = cache::hold(&cache).unwrap();
+    let first = cache::hold(&cache, &Say::channel().0).unwrap();
     let (status, out, err) = world.smoke(&["--only", "no case has this word"]);
     assert_eq!(status.unwrap(), 1, "{out}");
     assert_eq!(out, "");

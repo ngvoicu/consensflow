@@ -267,7 +267,7 @@ impl Drop for Ran {
 pub fn hold_when_free(cache: &Path) -> super::cache::Hold {
     let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
-        match super::cache::hold(cache) {
+        match super::cache::hold(cache, &super::say::Say::channel().0) {
             Ok(hold) => return hold,
             Err(held) if std::time::Instant::now() > until => {
                 panic!("the cache is still held: {held}")

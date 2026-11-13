@@ -247,7 +247,7 @@ meant = "the_app_restarts_with_every_descriptor_close_on_exec"
 runs = ["app-restart-descriptors"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/updates.rs"
+file = "app/src-tauri/src/updates/relaunch.rs"
 find = '''
     if let Err(failed) = cf_process::close_all_on_exec() {
 '''
