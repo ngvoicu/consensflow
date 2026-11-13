@@ -62,7 +62,7 @@ meant = "a_run_tells_its_command_which_machine_it_is_on_before_the_steps_and_the
 runs = ["renew-windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
+file = "tools/xtask/src/windows/script/templates.rs"
 find = '''$env:«test_machine» = «machine»
 '''
 replace = '''$env:«test_machine» = ''
