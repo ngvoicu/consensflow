@@ -245,6 +245,15 @@ fn own_hands_role_is_printed_in_one_piece_when_a_session_resumes() {
                 true,
             )
             .unwrap();
+            let ordinary = role_instructions(
+                &Env::default(),
+                "chief",
+                &staff,
+                &cf,
+                specs_on.then_some(&specs),
+            )
+            .unwrap();
+            assert!(role.len() < ordinary.len(), "{cf}, specs on: {specs_on}");
             assert!(role.contains("project's own folder"));
             let replacement = note(None, "note", body_of(&role, &cf));
             assert!(read_in_one(&replacement, &cf), "{cf}, specs on: {specs_on}");
