@@ -13,8 +13,8 @@
 //! The note still holds the final words, even if they differ from the answer to the tell.
 //! When that tell was answered on the board, the chief gets the answer in its window and
 //! the note is shown, not typed; while still paused, the answer gives the two ways on.
-//! A resume before the answer reaches the chief keeps the shown note and makes it say the
-//! task has moved on. When there is no board answer, the note remains the typed carrier of
+//! A resume before the answer reaches the chief keeps the shown note as it was and marks it
+//! over. When there is no board answer, the note remains the typed carrier of
 //! the final words, including if the chief resumes before the note is delivered.
 //!
 //! The stand-in writes the shape: its record holds the question, then the final text after
@@ -251,12 +251,9 @@ fn an_answered_tells_note_stays_shown_when_the_chief_resumes_before_the_answer_i
     );
     assert!(!kept["receipt"]["shown"].is_null(), "{kept}");
     assert!(!kept["receipt"]["over"].is_null(), "{kept}");
-    let body = kept["body"].as_str().unwrap_or_default();
-    assert!(
-        body.starts_with("T-1, paused when @")
-            && body.contains("has moved on since")
-            && body.ends_with(REPORT),
-        "{kept}"
+    assert_eq!(
+        kept["body"], waiting["body"],
+        "the shown note stays as it was"
     );
 
     // The chief gets the board answer, not a second typed message for the note.
@@ -271,7 +268,7 @@ fn an_answered_tells_note_stays_shown_when_the_chief_resumes_before_the_answer_i
         "{record}"
     );
     assert!(
-        !record.contains("T-1, paused when @"),
+        !record.contains(REPORT),
         "the note was carried into the chief's window: {record}"
     );
     assert!(
