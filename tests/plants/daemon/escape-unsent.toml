@@ -51,7 +51,7 @@ meant = "a_paste_read_empty_at_the_last_key_goes_in_over_the_count_and_clears_it
 runs = ["escape-unsent-arbiter"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
+file = "crates/cf-panes/src/arbiter/keys.rs"
 find = '''            0x1b => {
                 classes.with("escape");
                 at += match rest.get(1) {'''
@@ -338,7 +338,7 @@ runs = ["escape-unsent-rig"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
+file = "crates/cf-panes/src/arbiter/keys.rs"
 find = '''            0x1b => {
                 classes.with("escape");
                 at += match rest.get(1) {'''
