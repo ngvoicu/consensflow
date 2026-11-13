@@ -5,7 +5,7 @@
 first-hour = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_worker_who_holds_again_after_forty_minutes_is_typed_at_the_first_hour", "--", "--test-threads=2"]
 four-hours = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_worker_who_keeps_holding_every_forty_minutes_is_typed_again_at_four_hours", "--", "--test-threads=2"]
 own-note = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_worker_who_sends_its_own_note_starts_a_new_stretch_at_its_next_hold", "--", "--test-threads=2"]
-ledger-receipt = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "shown_notes::the_newest_aside_holds_until_the_task_moves_and_is_said_anew_in_place", "--", "--test-threads=2"]
+cln76-ledger-receipt = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "shown_notes::the_newest_aside_holds_until_the_task_moves_and_is_said_anew_in_place", "--", "--test-threads=2"]
 finish-transition = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_hold_keeps_its_stretch_when_it_needs_finish_then_can_end_again", "--", "--test-threads=2"]
 finish-reminder = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_hold_that_keeps_needing_finish_is_reminded_without_promising_a_result", "--", "--test-threads=2"]
 carry-reminder = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_reminder_before_a_finish_hold_can_end_is_carried_into_the_shown_hold", "--", "--test-threads=2"]
@@ -55,7 +55,7 @@ replace = '''COALESCE(json_extract(receipt, '$.reholds'), 0) + 0)'''
 [[plant]]
 name = "cln76: a stale reminder crosses into a new stretch"
 meant = "shown_notes::the_newest_aside_holds_until_the_task_moves_and_is_said_anew_in_place"
-runs = ["ledger-receipt"]
+runs = ["cln76-ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks.rs"
