@@ -527,8 +527,28 @@ runs = ["engine-paused-answers"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "            if !already_handed\n                && paused_answers_in(store, &message, &carried)?\n                    != super::paused_answers::tell_pause_ways_on(store, message_id)?\n            {"
-replace = "            if !already_handed && false {"
+find = "        if !again\n            && message.recipient_role == \"chief\""
+replace = "        if false\n            && message.recipient_role == \"chief\""
+
+[[plant]]
+name = "answered tell: an older handover mark exempts a new paste"
+meant = "an_older_handover_mark_does_not_exempt_a_new_carrier_paste_from_the_pause_check"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        if !again\n            && message.recipient_role == \"chief\""
+replace = "        if !again\n            && !store.db.query_row(\"SELECT handed_at IS NOT NULL FROM message WHERE id = ?\", [message_id], |row| row.get::<_, bool>(0))?\n            && message.recipient_role == \"chief\""
+
+[[plant]]
+name = "answered tell: Enter checks the pause as if the paste were new"
+meant = "a_paste_already_handed_over_may_be_sent_after_its_tells_pause_ends"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "        messages::admit(&mut self.store, message_id, carried, true)"
+replace = "        messages::admit(&mut self.store, message_id, carried, false)"
 
 [[plant]]
 name = "answered tell: a retry takes the earlier attempt's ways on"
