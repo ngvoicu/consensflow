@@ -14926,3 +14926,46 @@ test('BKV New project shows the backup following its member to the newly chosen 
   const backup = dialog.locator('tr', { hasText: 'backup of claude-sonnet-5' })
   await expect(backup.locator('.member-meta').first()).toContainText('critical')
 })
+
+test('BKV settings marks an unlisted backup model just as it marks a member', async ({ page }) => {
+  const data = model()
+  data.boards[1].lanes.push({
+    participant: participant(11, 'hera', 'worker', {
+      harness: 'codex',
+      backupOf: 3,
+      model: 'retired-model',
+      modelName: 'retired-model',
+    }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const row = page
+    .getByRole('dialog', { name: 'Project settings' })
+    .locator('tr[data-handle="hera"]')
+  await expect(row).toContainText(
+    'Codex no longer lists retired-model: edit it to a model it lists.',
+  )
+})
+
+test('BKV New project leaves out a missing-harness member and its backup together', async ({
+  page,
+}) => {
+  const data = model()
+  data.missing = ['codex']
+  data.lastStaff = [
+    { ...lastMember('hera', 'codex', ['worker']), id: 30 },
+    { ...lastMember('zeus', 'claude-code', ['worker']), id: 31, backupOf: 30 },
+    lastMember('zeus', 'claude-code', ['reviewer']),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await expect(dialog.getByText('backup of gpt-6-astra')).toHaveCount(0)
+  await pickChief(dialog, 'Claude Code', 'claude-opus-5-5')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(1)
+  expect((await calls(page, 'project.open')).at(-1).staff[0].roles).toEqual(['reviewer'])
+})

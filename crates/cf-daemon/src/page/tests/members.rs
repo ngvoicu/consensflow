@@ -1627,3 +1627,18 @@ async fn bkv_page_open_without_staff_copies_a_designers_backup_on_another_harnes
         assert_eq!(backup["roles"], json!(["designer"]));
     }).await;
 }
+
+#[tokio::test]
+async fn bkv_page_the_chief_has_no_backup_and_bad_changes_keep_the_old_one() {
+    LocalSet::new().run_until(async {
+        let s = staffing();
+        let chief = ask(&s.app, "backup.add", json!({"project": s.project, "member": "chief", "harness": "codex", "model": "gpt-6.1-sol", "effort": "high"})).await;
+        assert_eq!(chief["ok"], false, "{chief}");
+        let owner = bkv_page_owner(&s).await;
+        let backup = bkv_page_backup(&s, &owner);
+        let refused = ask(&s.app, "backup.change", json!({"project": s.project, "member": owner, "harness": "codex", "model": "not-listed", "effort": "high"})).await;
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert!(refused["error"].as_str().unwrap().contains("does not list"), "{refused}");
+        assert!(bkv_page_link(&s, s.project).iter().any(|p| p["handle"] == backup && !p["backupOf"].is_null()));
+    }).await;
+}
