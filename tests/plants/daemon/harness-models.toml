@@ -284,10 +284,18 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''      const key = `${harness} ${model} ${effort ?? ''} ${isImageAgentRole(role)}`
-'''
-replace = '''      const key = `${harness} ${model} ${effort ?? ''} ${role}`
-'''
+find = '''      if (!staff.has(_id))'''
+replace = '''      if (!staff.has(`${_id}-${role}`))'''
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''        staff.set(_id, {'''
+replace = '''        staff.set(`${_id}-${role}`, {'''
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''      const member = staff.get(_id)'''
+replace = '''      const member = staff.get(`${_id}-${role}`)'''
 
 [[plant]]
 name = "harness models: a member's row says its model's id, not the name its harness gives it"
