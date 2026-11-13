@@ -5,10 +5,9 @@
 //! that takes nothing; a task already in a window of a member that goes out stays held there.
 
 use cf_engine::testing::{Context, Made};
-use cf_harness::records::Quota;
 use cf_ledger::{HoldKind, NewMember, ParticipantView};
 
-use crate::fixtures::{after, exhausted, now, participant, soon, Tiers};
+use crate::fixtures::{after, exhausted, now, soon, Tiers};
 
 /// The time a member out for its account is marked until, and the one for a moved model.
 const NEVER: &str = "9999-12-31T23:59:59.998Z";
@@ -265,4 +264,142 @@ fn a_wait_after_a_restart_still_says_the_model_is_busy_and_not_that_the_quota_is
         "{:?}",
         tiers.notes("chief")
     );
+}
+
+/// A project whose only member `zeus` is out for its quota, with a backup that has taken T-1 and
+/// whose window is open.
+fn backup_at_work(context: &Context) -> (Tiers<'_>, ParticipantView, cf_harness::contract::Pane) {
+    let tiers = Tiers::new(context, &["zeus"]);
+    let backup = backed(context, tiers.project.id, "zeus", "claude-code", "gaia");
+    out(context, &tiers, "zeus", &soon(context, 3));
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    assert_eq!(taker(&tiers, 1), backup.handle);
+    let pane = context.host.last(&session).expect("its window").pane;
+    (tiers, backup, pane)
+}
+
+#[test]
+fn a_member_who_leaves_takes_its_backup_and_the_backups_work_with_it() {
+    let context = Context::new();
+    let (tiers, backup, pane) = backup_at_work(&context);
+    let removed = context.remove_member(tiers.project.id, "zeus").unwrap();
+    assert!(context.host.killed().contains(&pane), "its window closed");
+    let staff = context.project(tiers.project.id).participants;
+    assert!(
+        staff.iter().all(|p| p.handle != backup.handle),
+        "the backup left with it"
+    );
+    // The ledger (T-1619) cancels the backup's task with the member's own.
+    assert_eq!(removed.cancelled, [1]);
+    assert_eq!(tiers.task(1).task.state, "cancelled");
+}
+
+#[test]
+fn a_backup_taken_off_the_staff_closes_its_window() {
+    let context = Context::new();
+    let (tiers, _backup, pane) = backup_at_work(&context);
+    context.remove_backup(tiers.project.id, "zeus").unwrap();
+    assert!(context.host.killed().contains(&pane), "its window closed");
+    // The ledger (T-1619) cancels the removed backup's task as a member's own.
+    assert_eq!(tiers.task(1).task.state, "cancelled");
+}
+
+#[test]
+fn a_backup_replaced_closes_the_old_ones_window_and_the_new_one_takes_work() {
+    let context = Context::new();
+    let (tiers, old, pane) = backup_at_work(&context);
+    let config = NewMember {
+        harness: "claude-code".to_owned(),
+        model: Some("rhea".to_owned()),
+        effort: None,
+        model_name: None,
+        designer: false,
+        roles: vec!["worker".to_owned()],
+        tier: "standard".to_owned(),
+    };
+    let new = context
+        .change_backup(tiers.project.id, "zeus", config)
+        .unwrap();
+    assert_ne!(new.handle, old.handle);
+    assert!(context.host.killed().contains(&pane), "its window closed");
+    tiers.open_body("Lexer");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(taker(&tiers, 2), new.handle);
+}
+
+#[test]
+fn the_member_back_takes_the_next_task_and_the_backup_finishes_what_it_has() {
+    let context = Context::new();
+    let (tiers, backup, _pane) = backup_at_work(&context);
+    context.advance(4 * 3_600_000);
+    tiers.open_body("Lexer");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(taker(&tiers, 2), "zeus");
+    // The backup's task goes on in its own window, to its end.
+    assert_eq!(taker(&tiers, 1), backup.handle);
+    assert_eq!(tiers.task(1).task.state, "working");
+}
+
+#[test]
+fn a_busy_task_in_a_window_is_not_released_onto_a_backup() {
+    // A member out for its quota whose own task is held with its window: the backup, free, is
+    // not "someone else" for the release (T-1356 keeps the work where it is).
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let backup = backed(&context, tiers.project.id, "zeus", "claude-code", "gaia");
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.refuse(
+        "zeus",
+        exhausted(Some(&now(&context)), Some(&after(&context, 20 * 60_000))),
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(taker(&tiers, 1), "zeus", "held with its window");
+    assert_ne!(taker(&tiers, 1), backup.handle);
+}
+
+#[test]
+fn each_harness_works_as_a_backup_and_as_a_member() {
+    for harness in ["claude-code", "codex", "pi", "devin", "muse"] {
+        let context = Context::made(Made {
+            harnesses: vec!["claude-code", "codex", "pi", "devin", "muse"],
+            codex: true,
+            ..Made::default()
+        });
+        let tiers = Tiers::new(&context, &["zeus"]);
+        let backup = backed(&context, tiers.project.id, "zeus", harness, "gaia");
+        out(&context, &tiers, "zeus", &soon(&context, 3));
+        tiers.open();
+        context.pass().unwrap();
+        context.pass().unwrap();
+        assert_eq!(taker(&tiers, 1), backup.handle, "{harness} as a backup");
+    }
+}
+
+#[test]
+fn a_task_released_and_taken_again_by_a_backup_is_told_to_its_giver_once() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let backup = backed(&context, tiers.project.id, "zeus", "claude-code", "gaia");
+    out(&context, &tiers, "zeus", &soon(&context, 3));
+    tiers.open();
+    context.pass().unwrap();
+    assert_eq!(taker(&tiers, 1), backup.handle);
+    // The task is taken back before its window opened, and goes to the backup again.
+    context
+        .ledger
+        .borrow_mut()
+        .release_task(tiers.project.id, 1, "by @human")
+        .unwrap();
+    assert_eq!(tiers.task(1).task.assignee, None);
+    context.pass().unwrap();
+    assert_eq!(taker(&tiers, 1), backup.handle);
+    assert_eq!(told_of_a_backup(&tiers).len(), 1, "{:?}", told_of_a_backup(&tiers));
 }

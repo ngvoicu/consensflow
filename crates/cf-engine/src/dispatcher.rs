@@ -32,7 +32,7 @@ use std::task::{Context, Poll, Waker};
 use cf_base::time::iso;
 use cf_harness::contract::{Observed, Pane};
 use cf_ledger::{
-    DeletedProject, HoldKind, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
+    DeletedProject, HoldKind, NewMember, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
 };
 use cf_proto::panes::PaneExit;
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
@@ -493,6 +493,152 @@ impl Dispatcher {
         }
     }
 
+    /// The member and the sessions of `member` in `found`: what leaves when it does.
+    fn rows_of(&self, found: &ProjectView, member: i64) -> Vec<i64> {
+        std::iter::once(member)
+            .chain(
+                found
+                    .participants
+                    .iter()
+                    .filter(|p| p.member_id == Some(member))
+                    .map(|p| p.id),
+            )
+            .collect()
+    }
+
+    /// The id of the backup `member` has now, if it has one.
+    fn backup_of(&self, project: i64, member: i64) -> Result<Option<i64>, EngineError> {
+        let board = self.seams.ledger.borrow().board(project)?;
+        let board = serde_json::to_value(&board)
+            .map_err(|cause| EngineError::said("board-unreadable", cause.to_string()))?;
+        Ok(board["lanes"].as_array().and_then(|lanes| {
+            lanes.iter().find_map(|lane| {
+                let participant = &lane["participant"];
+                (participant["backupOf"].as_i64() == Some(member))
+                    .then(|| participant["id"].as_i64())
+                    .flatten()
+            })
+        }))
+    }
+
+    /// A member's backup is taken off the staff, and its sessions and the tasks in them go as
+    /// a member's own do: their windows close.
+    pub async fn remove_backup(
+        self: &Rc<Self>,
+        project: i64,
+        handle: &str,
+    ) -> Result<ParticipantView, EngineError> {
+        let before = self.known_project(project)?;
+        let removed = self
+            .seams
+            .ledger
+            .borrow_mut()
+            .remove_backup(project, handle)?;
+        self.forget(&self.rows_of(&before, removed.id)).await?;
+        self.changed();
+        Ok(removed)
+    }
+
+    /// A member's backup is replaced by another: the old one's windows close as it leaves.
+    pub async fn change_backup(
+        self: &Rc<Self>,
+        project: i64,
+        handle: &str,
+        backup: &NewMember,
+    ) -> Result<ParticipantView, EngineError> {
+        let before = self.known_project(project)?;
+        let old = match before.participants.iter().find(|p| p.handle == handle) {
+            Some(member) => self.backup_of(project, member.id)?,
+            None => None,
+        };
+        let added = self
+            .seams
+            .ledger
+            .borrow_mut()
+            .change_backup(project, handle, backup)?;
+        if let Some(old) = old {
+            self.forget(&self.rows_of(&before, old)).await?;
+        }
+        self.changed();
+        Ok(added)
+    }
+
+    /// The human sends a member, or a backup, on Vacation: it takes no task from now on. A task
+    /// it was given whose window never opened goes back to the board for another member; one in
+    /// a window it has, or was named for it, stays where it is. A session whose window may be
+    /// opening is proved unopened only while its step is held, so a launch that began is never
+    /// taken from under its window.
+    pub async fn send_on_vacation(
+        self: &Rc<Self>,
+        project: i64,
+        handle: &str,
+    ) -> Result<ParticipantView, EngineError> {
+        let found = self.known_project(project)?;
+        let member = found
+            .participants
+            .iter()
+            .find(|p| p.handle == handle && p.role != "human")
+            .ok_or_else(|| {
+                EngineError::said(
+                    "no-participant",
+                    format!("no @{handle} in project {project}"),
+                )
+            })?;
+        // The mark first: nothing is given it from here on, and the sessions are looked at one
+        // by one while their steps are held.
+        let sent = self
+            .seams
+            .ledger
+            .borrow_mut()
+            .send_on_vacation(project, handle, &[])?;
+        for session in found
+            .participants
+            .iter()
+            .filter(|p| p.member_id == Some(member.id))
+            .map(|p| p.id)
+        {
+            let record = self.record_of(session);
+            let (this, held, handle) = (Rc::clone(self), Rc::clone(&record), handle.to_owned());
+            let work = async move {
+                if this.forgotten(&held) || !this.unopened(&held) {
+                    return Ok(());
+                }
+                this.seams
+                    .ledger
+                    .borrow_mut()
+                    .send_on_vacation(project, &handle, &[session])?;
+                Ok::<(), EngineError>(())
+            };
+            self.exclusive(&record, work).await.await?;
+        }
+        self.changed();
+        Ok(self
+            .project_now(project)?
+            .and_then(|now| now.participants.into_iter().find(|p| p.id == sent.id))
+            .unwrap_or(sent))
+    }
+
+    /// Whether a session has never had a window: none open, none being opened or ended, and no
+    /// message on its way. Asked only while its step is held.
+    fn unopened(&self, record: &Record) -> bool {
+        record.window.borrow().pane.is_none()
+            && record.window.borrow().abandoned.is_none()
+            && record.delivery.borrow().delivering.is_none()
+    }
+
+    /// The human brings a member, or a backup, back from Vacation: its quota hold is as it
+    /// was, and the next pass gives it tasks again.
+    pub fn bring_back_from_vacation(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Result<ParticipantView, EngineError> {
+        let back = self.seams.ledger.borrow_mut().bring_back(project, handle)?;
+        self.changed();
+        Ok(back)
+    }
+
+
     /// The human gives a task in a window to another member of its tier. Its
     /// window is stopped first, even one the human opened; one that would
     /// not stop keeps the task, and the human is told.
@@ -662,14 +808,19 @@ impl Dispatcher {
                     format!("@{handle} left the staff"),
                 ));
             }
+            let found = this.known_project(project)?;
             let mut left = vec![member.id];
             left.extend(
-                this.known_project(project)?
+                found
                     .participants
                     .iter()
                     .filter(|p| p.member_id == Some(member.id))
                     .map(|p| p.id),
             );
+            // A backup leaves with its member, and so do its sessions.
+            if let Some(backup) = this.backup_of(project, member.id)? {
+                left.extend(this.rows_of(&found, backup));
+            }
             let removed = this
                 .seams
                 .ledger

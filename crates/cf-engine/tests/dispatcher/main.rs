@@ -167,6 +167,7 @@ mod unknown_looks;
 mod unproven;
 mod unsent;
 mod unstarted;
+mod vacation;
 mod waiting_notes;
 mod wake_ups;
 mod window_cf;
