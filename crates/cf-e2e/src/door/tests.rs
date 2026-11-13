@@ -592,7 +592,7 @@ fn a_root_handed_down_through_a_link_is_the_folder_it_leads_to() {
     let absent = theirs.path().join("not-made-yet");
     assert_eq!(
         roots_handed_down(Some(absent.as_os_str())),
-        [absent.clone()]
+        std::slice::from_ref(&absent)
     );
 }
 
