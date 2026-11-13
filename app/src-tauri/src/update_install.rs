@@ -24,7 +24,7 @@ impl Tools<'static> {
 
 /// The command that runs `program`, one of the [`Tools`]. It is started while
 /// the app's other threads open sockets and pipes, and holds none of them.
-#[allow(clippy::disallowed_methods)] // The app starts plutil and codesign itself, holding only their streams: older than cf-process's rule.
+#[allow(clippy::disallowed_methods)] // cf-process runs a program async, on an empty environment and under a time and size limit; plutil and codesign run to their end on the install's blocking thread, in this process's environment.
 fn tool(program: &Path) -> Command {
     let mut command = Command::new(program);
     cf_process::hold_only_the_streams(&mut command);
@@ -140,6 +140,10 @@ pub(crate) fn install_archive(
     let new = CString::new(candidate.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
     // RENAME_SWAP is atomic on the same filesystem; cross-volume installs
     // fail without changing either path or staging outside ConsensFlow home.
+    // SAFETY: `old` and `new` are NUL-terminated `CString`s that live until the
+    // end of this function, so the pointers are valid for the whole call, which
+    // only reads them; `AT_FDCWD` makes both paths as given, and `RENAME_SWAP`
+    // is the flag `renameatx_np` defines for exchanging them.
     if unsafe {
         libc::renameatx_np(
             libc::AT_FDCWD,

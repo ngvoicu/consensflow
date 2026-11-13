@@ -237,40 +237,76 @@ fn a_file_the_release_holds_that_sha256sums_does_not_list_fails() {
 }
 
 #[test]
-fn the_lines_of_sha256sums_are_read_as_sha256sum_writes_them_and_any_other_is_told() {
-    let hash = "a".repeat(64);
-    let upper = "B".repeat(64);
-    let text = format!(
-        "{hash}  plain.bin\n{upper} *binary.bin\n\nnot a hash  nor.bin\n{hash}\n{hash}  \n"
-    );
-    let (listed, odd) = verify::listed_in(&text);
-    assert_eq!(
-        listed.into_iter().collect::<Vec<_>>(),
-        [
-            ("binary.bin".to_owned(), "b".repeat(64)),
-            ("plain.bin".to_owned(), hash)
-        ]
-    );
-    assert_eq!(
-        odd,
-        [
-            "not a hash  nor.bin",
-            &"a".repeat(64),
-            &format!("{}  ", "a".repeat(64))
-        ]
-    );
-    // And a release whose SHA256SUMS holds such a line is told so.
+fn a_release_whose_signed_sums_hold_a_row_that_is_no_hash_and_name_fails_naming_the_row() {
     let (world, mut fake) = published();
     let files = files_of(&mut fake);
     let mut sums = String::from_utf8(files["SHA256SUMS"].clone()).unwrap();
+    let rows = sums.lines().count();
     sums += "garbage\n";
     files.insert("SHA256SUMS".to_owned(), sums.clone().into_bytes());
     files.insert("SHA256SUMS.sig".to_owned(), signature_of(&sums, VERSION));
     assert_eq!(
         refusal(verified(&world, &mut fake, VERSION).0),
-        does_not_verify(&[
-            "SHA256SUMS holds a line that is not \"<sha-256>  <name>\": \"garbage\"".to_owned()
-        ])
+        does_not_verify(&[format!(
+            "SHA256SUMS row {} is not \"<sha-256>  <name>\": \"garbage\"",
+            rows + 1
+        )])
+    );
+}
+
+/// The refusal of the release whose SHA256SUMS rows `edit` changed (and signed
+/// again, so the list's signature holds), the rows it then has, and the row of
+/// the DMG among them, counted from one.
+fn resigned(edit: &dyn Fn(Vec<String>) -> Vec<String>) -> (String, Vec<String>, usize) {
+    let dmg = format!("ConsensFlow_{VERSION}_aarch64.dmg");
+    let (world, mut fake) = published();
+    let files = files_of(&mut fake);
+    let sums = String::from_utf8(files["SHA256SUMS"].clone()).unwrap();
+    let rows = edit(sums.lines().map(str::to_owned).collect());
+    let at = rows.iter().position(|row| row.ends_with(&dmg)).unwrap() + 1;
+    let sums: String = rows.iter().map(|row| format!("{row}\n")).collect();
+    files.insert("SHA256SUMS".to_owned(), sums.clone().into_bytes());
+    files.insert("SHA256SUMS.sig".to_owned(), signature_of(&sums, VERSION));
+    (refusal(verified(&world, &mut fake, VERSION).0), rows, at)
+}
+
+#[test]
+fn a_release_whose_signed_sums_list_a_hash_in_capitals_fails_naming_the_row() {
+    // The installers read lowercase hex alone, so the DMG's row in capitals is
+    // a DMG they would not install.
+    let dmg = format!("ConsensFlow_{VERSION}_aarch64.dmg");
+    let (refused, rows, at) = resigned(&|rows| {
+        rows.into_iter()
+            .map(|row| {
+                if row.ends_with(&dmg) {
+                    format!("{}{}", row[..64].to_ascii_uppercase(), &row[64..])
+                } else {
+                    row
+                }
+            })
+            .collect()
+    });
+    assert_eq!(
+        refused,
+        does_not_verify(&[format!(
+            "SHA256SUMS row {at} is not \"<sha-256>  <name>\": {:?}",
+            rows[at - 1]
+        )])
+    );
+}
+
+#[test]
+fn a_release_whose_signed_sums_list_a_name_twice_fails_naming_the_row() {
+    // The installers refuse a name listed twice, even with the same hash.
+    let dmg = format!("ConsensFlow_{VERSION}_aarch64.dmg");
+    let (refused, rows, _) = resigned(&|mut rows| {
+        let again = rows.iter().find(|row| row.ends_with(&dmg)).unwrap().clone();
+        rows.push(again);
+        rows
+    });
+    assert_eq!(
+        refused,
+        does_not_verify(&[format!("SHA256SUMS row {} lists {dmg} again", rows.len())])
     );
 }
 

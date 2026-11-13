@@ -29,18 +29,36 @@ use super::transport::{
 use super::Shared;
 use crate::questions::{Asked, REQUEST_USER_INPUT};
 
-/// What the TUI said before the connection to Codex's server opened.
-struct Waiting {
+/// Frames held in the order they came, up to [`MAX_FRAME`] bytes.
+#[derive(Default)]
+struct Bounded {
     frames: Vec<Utf8Bytes>,
     bytes: usize,
 }
 
+impl Bounded {
+    /// Keeps `text` unless it takes the held bytes past the cap: then it is not kept.
+    fn push(&mut self, text: Utf8Bytes) -> bool {
+        self.bytes += text.len();
+        if self.bytes > MAX_FRAME {
+            return false;
+        }
+        self.frames.push(text);
+        true
+    }
+
+    /// The frames, first to last.
+    fn into_frames(self) -> Vec<Utf8Bytes> {
+        self.frames
+    }
+}
+
+/// What the TUI said before the connection to Codex's server opened.
+struct Waiting(Bounded);
+
 /// What the TUI said after a resume or fork the broker holds while Codex says whether its
 /// thread is top-level: it goes on, in order, once that one has.
-struct Deciding {
-    frames: Vec<Utf8Bytes>,
-    bytes: usize,
-}
+struct Deciding(Bounded);
 
 /// What became of a frame the TUI said.
 enum Said {
@@ -128,10 +146,7 @@ impl Pair {
             id: shared.next_client(),
             shared: Rc::clone(shared),
             requests: RefCell::new(Requests::default()),
-            waiting: RefCell::new(Some(Waiting {
-                frames: Vec::new(),
-                bytes: 0,
-            })),
+            waiting: RefCell::new(Some(Waiting(Bounded::default()))),
             deciding: RefCell::new(None),
             tui,
             native,
@@ -220,7 +235,10 @@ impl Pair {
             this.retire();
         });
         let waiting = self.waiting.borrow_mut().take();
-        for text in waiting.into_iter().flat_map(|waiting| waiting.frames) {
+        for text in waiting
+            .into_iter()
+            .flat_map(|waiting| waiting.0.into_frames())
+        {
             if self.retired.get() {
                 return;
             }
@@ -234,12 +252,10 @@ impl Pair {
         let said = match self.waiting.borrow_mut().as_mut() {
             None => Said::Pass(text),
             Some(waiting) => {
-                waiting.bytes += text.len();
-                if waiting.bytes > MAX_FRAME {
-                    Said::TooMuch
-                } else {
-                    waiting.frames.push(text);
+                if waiting.0.push(text) {
                     Said::Held
+                } else {
+                    Said::TooMuch
                 }
             }
         };
@@ -258,22 +274,16 @@ impl Pair {
     /// role waits for Codex to say whether its thread is top-level, and is given the
     /// role if it is ([`Pair::decide`]); what the TUI says meanwhile waits behind it.
     fn process_tui(self: &Rc<Self>, text: Utf8Bytes) {
-        let held = match self.deciding.borrow_mut().as_mut() {
-            None => None,
-            Some(deciding) => {
-                deciding.bytes += text.len();
-                Some(deciding.bytes > MAX_FRAME)
+        if self.deciding.borrow().is_some() {
+            let kept = self
+                .deciding
+                .borrow_mut()
+                .as_mut()
+                .is_some_and(|deciding| deciding.0.push(text));
+            if !kept {
+                self.retire();
             }
-        };
-        match held {
-            None => {}
-            Some(true) => return self.retire(),
-            Some(false) => {
-                if let Some(deciding) = self.deciding.borrow_mut().as_mut() {
-                    deciding.frames.push(text);
-                }
-                return;
-            }
+            return;
         }
         let message = match reading(&text) {
             Reading::Message(message) => message,
@@ -305,10 +315,7 @@ impl Pair {
     /// is, as it is if not, and what the TUI said meanwhile follows it in order. The window
     /// shows no thread meanwhile, so no delivery is taken.
     fn decide(self: &Rc<Self>, message: Value, thread: String) {
-        *self.deciding.borrow_mut() = Some(Deciding {
-            frames: Vec::new(),
-            bytes: 0,
-        });
+        *self.deciding.borrow_mut() = Some(Deciding(Bounded::default()));
         let this = Rc::clone(self);
         self.spawn(async move {
             let verdict = this.shared.top_level(&thread).await;
@@ -327,7 +334,10 @@ impl Pair {
             };
             this.forward(&this.native, Utf8Bytes::from(out.to_string()));
             let deciding = this.deciding.borrow_mut().take();
-            for text in deciding.into_iter().flat_map(|deciding| deciding.frames) {
+            for text in deciding
+                .into_iter()
+                .flat_map(|deciding| deciding.0.into_frames())
+            {
                 if this.retired.get() {
                     return;
                 }

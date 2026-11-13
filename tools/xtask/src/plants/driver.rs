@@ -503,6 +503,9 @@ fn tried(
     // Every test a run's report said it ran, where any run's report said.
     let mut tests_ran: Option<Vec<String>> = None;
     for run in &plant.runs {
+        // The table's own run command: where the driver's threads have no effect on
+        // it (a Node or Playwright run, a script), that is said, at most once.
+        runner.say_no_effect(&run.command);
         if let Some(said) = clean.fails(&run.command, unplanted) {
             told.push(Told::sure(Trial::not_run(said)));
             continue;
