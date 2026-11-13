@@ -427,8 +427,8 @@ runs = ["engine-paused-answers"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
-find = "            if let Some(number) = self.seams.ledger.borrow().answer_to_current_pause(row.id)? {"
-replace = "            if let Some(number) = None::<i64> {"
+find = "            self.seams.ledger.borrow().tell_pause_ways_on(message.id)?"
+replace = "            Vec::<i64>::new()"
 
 [[plant]]
 name = "answered tell: a refunded note attempt is forgotten"
@@ -479,3 +479,53 @@ runs = ["ledger-receipt"]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = "        recover_after_lost_answer(store, &task, None, true)?;\n"
 replace = ""
+
+[[plant]]
+name = "answered tell: the delivery forgets its ways-on footer"
+meant = "an_answered_tells_turn_is_shown_and_the_answer_tells_the_paused_chief_both_ways_on"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        if !paused.is_empty() {\n            begun[\"tellPauseWaysOn\"] = json!(paused);\n        }\n"
+replace = ""
+
+[[plant]]
+name = "answered tell: an older delivery is assumed to have the ways on"
+meant = "an_older_delivered_answer_with_no_proof_of_ways_on_keeps_the_note_typed_until_a_move"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "    Ok(tell_pause_ways_on(store, paste)?.contains(&task.number))"
+replace = "    let _ = paste;\n    Ok(true)"
+
+[[plant]]
+name = "answered tell: a resumed task changes the guidance of an earlier paste"
+meant = "an_answer_s_paused_task_guidance_stays_part_of_the_paste_after_a_resume"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = "        let paused = if message.kind == \"answer\" || carried.iter().any(|row| row.kind == \"answer\") {\n            self.seams.ledger.borrow().tell_pause_ways_on(message.id)?\n        } else {\n            Vec::new()\n        };\n"
+replace = "        let paused: Vec<i64> = std::iter::once(message).chain(carried).filter_map(|row| self.seams.ledger.borrow().answer_to_current_pause(row.id).ok().flatten()).collect();\n"
+
+[[plant]]
+name = "answered tell: the carrier forgets its answer's ways on"
+meant = "the_ways_on_of_an_answer_in_a_carrier_stay_with_that_paste_after_resume"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "            for row in std::iter::once(&message).chain(&carried) {"
+replace = "            for row in std::iter::once(&message) {"
+
+[[plant]]
+name = "answered tell: a retry takes the earlier attempt's ways on"
+meant = "a_retry_records_the_ways_on_of_the_new_attempt_not_the_earlier_one"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "            \"SELECT data FROM event WHERE kind = 'delivery.begun'\n              AND CASE WHEN json_valid(data) THEN json_extract(data, '$.message') END = ?\n              ORDER BY id DESC LIMIT 1\","
+replace = "            \"SELECT data FROM event WHERE kind = 'delivery.begun'\n              AND CASE WHEN json_valid(data) THEN json_extract(data, '$.message') END = ?\n              ORDER BY id ASC LIMIT 1\","
