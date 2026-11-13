@@ -392,7 +392,7 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/run.rs"
-find = "        Ended::WrongTree(said) => {\n            let ended = end_there(context, machine, &plan)?;\n"
+find = "        Ended::WrongTree(said) => {\n            let ended = end_there(context, machine, plan)?;\n"
 replace = "        Ended::WrongTree(said) => {\n            let ended = Ending::Ended;\n"
 
 [[plant]]
@@ -630,8 +630,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/run.rs"
-find = "            let ended = end_there(context, machine, &plan)?;\n            Err(Error::WrongTree {"
-replace = "            end_there(context, machine, &plan)?;\n            let ended = Ending::Ended;\n            Err(Error::WrongTree {"
+find = "            let ended = end_there(context, machine, plan)?;\n            Err(Error::WrongTree {"
+replace = "            end_there(context, machine, plan)?;\n            let ended = Ending::Ended;\n            Err(Error::WrongTree {"
 
 # The files unpacked are the tree (T-263).
 
@@ -1745,8 +1745,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/queue.rs"
-find = "        let _ = touch_if_gone(&self.path, &self.text, now_ms);\n        let Some(folder)"
-replace = "        if now_ms > 0 {\n            return Vec::new();\n        }\n        let _ = touch_if_gone(&self.path, &self.text, now_ms);\n        let Some(folder)"
+find = "        touch_if_gone(&self.path, &self.text, now_ms)\n            .map_err(|cause| kept(\"make again the queue ticket\", cause))?;\n        let Some(folder)"
+replace = "        if now_ms > 0 {\n            return Ok(Vec::new());\n        }\n        touch_if_gone(&self.path, &self.text, now_ms)\n            .map_err(|cause| kept(\"make again the queue ticket\", cause))?;\n        let Some(folder)"
 
 [[plant]]
 name = "windows runner: the ticket of a run that was killed holds the runs behind it"
@@ -1799,14 +1799,14 @@ find = "        if queued > 0 {"
 replace = "        if queued > 1000 {"
 
 [[plant]]
-name = "windows runner: a queue that cannot be kept stops the run"
-meant = "a_queue_that_cannot_be_kept_is_said_and_the_run_waits_for_the_machine_alone"
+name = "windows runner: a queue that cannot be joined is ignored and the run goes alone"
+meant = "a_queue_folder_that_cannot_be_made_ends_the_run_with_the_cause"
 runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/queue.rs"
-find = "waiting for the machine alone\"\n                ))\n                .map_err(Error::Output)?;\n                None"
-replace = "waiting for the machine alone\"\n                ))\n                .map_err(Error::Output)?;\n                return Err(Error::Output(cause));"
+find = "        Some(queues) => Some(take_ticket(queues, machine, who, began)?),"
+replace = "        Some(queues) => take_ticket(queues, machine, who, began).ok(),"
 
 # T-778: Calliope's review of T-701 (T-777).
 
@@ -1837,8 +1837,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/queue.rs"
-find = "        if queued > 0 {\n            return Ok(Waited::Refused("
-replace = "        if queued > 1_000_000 {\n            return Ok(Waited::Refused("
+find = "    Ok((queued > 0).then(|| format!(\"{machine} is busy: {}\", queued_words(queued))))"
+replace = "    Ok((queued > 1_000_000).then(|| format!(\"{machine} is busy: {}\", queued_words(queued))))"
 
 [[plant]]
 name = "windows runner: a run told not to wait is sent ahead of the runs queued for the machine"
@@ -1847,8 +1847,8 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/queue.rs"
-find = "        if queued > 0 {\n            return Ok(Waited::Refused("
-replace = "        if queued > 1_000_000 {\n            return Ok(Waited::Refused("
+find = "    Ok((queued > 0).then(|| format!(\"{machine} is busy: {}\", queued_words(queued))))"
+replace = "    Ok((queued > 1_000_000).then(|| format!(\"{machine} is busy: {}\", queued_words(queued))))"
 
 [[plant]]
 name = "windows runner: the seconds the run ahead has been there are news at every look"
@@ -2109,7 +2109,7 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/run.rs"
-find = '''            let ended = end_there(context, machine, &plan)?;
+find = '''            let ended = end_there(context, machine, plan)?;
             Err(Error::Silent(format!('''
 replace = '''            let ended = Ending::Ended;
             Err(Error::Silent(format!('''
@@ -2182,19 +2182,19 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/run.rs"
-find = "    let _turn = match waited {"
-replace = "    let _turn = std::mem::ManuallyDrop::new(match waited {"
+find = "    let turn = match waited {"
+replace = "    let turn = std::mem::ManuallyDrop::new(match waited {"
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/run.rs"
 find = '''            turn
         }
     };
-    let scratch'''
+    let ended = send_and_stream'''
 replace = '''            turn
         }
     });
-    let scratch'''
+    let ended = send_and_stream'''
 
 
 # T-804, second round: the script rule reads an ssh or scp called by a path, named for a program that runs
