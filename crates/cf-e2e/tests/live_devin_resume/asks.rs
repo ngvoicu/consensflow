@@ -311,8 +311,8 @@ mod tests {
     #[test]
     fn a_file_proves_the_call_that_made_it_and_a_file_that_is_not_there_or_not_changed_proves_none()
     {
-        let folder = tempfile::tempdir().unwrap();
-        let calls = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
+        let calls = cf_e2e::door::made("cf-test-").unwrap();
         let place = place(folder.path(), calls.path());
         assert_eq!(
             Ask::Shell.proof(&place, &[]),
@@ -381,8 +381,8 @@ mod tests {
 
     #[test]
     fn the_stand_in_cf_proves_a_call_by_its_log_and_a_call_of_other_words_proves_none() {
-        let folder = tempfile::tempdir().unwrap();
-        let calls = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
+        let calls = cf_e2e::door::made("cf-test-").unwrap();
         let place = place(folder.path(), calls.path());
         assert!(!Ask::Cf.proof(&place, &[]).ran);
         files::write(
@@ -411,8 +411,8 @@ mod tests {
     #[test]
     fn a_cf_the_shell_found_before_the_stand_in_is_a_call_that_ran_and_a_call_that_was_refused_is_not(
     ) {
-        let folder = tempfile::tempdir().unwrap();
-        let calls = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
+        let calls = cf_e2e::door::made("cf-test-").unwrap();
         let place = place(folder.path(), calls.path());
         // The stand-in has no line, and Devin's record has the call answered.
         let ran = recorded("cf ask which-ab12", "no daemon: not in a window");

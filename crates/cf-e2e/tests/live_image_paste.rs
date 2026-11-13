@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn the_files_the_shapes_name_are_written_whole_but_for_the_image_that_is_not_there() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         write_files(folder.path()).unwrap();
         for image in IMAGES.iter().chain(&[SPACED]) {
             let bytes = std::fs::read(at_path(folder.path(), image)).unwrap();

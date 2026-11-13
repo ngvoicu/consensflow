@@ -122,7 +122,7 @@ mod tests {
         let Ok(perl) = live::command("perl") else {
             return;
         };
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         write(folder.path()).unwrap();
         let started = Instant::now();
         let ran = cf_e2e::process::Run::new(perl)
