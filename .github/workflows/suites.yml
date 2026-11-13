@@ -64,6 +64,7 @@ jobs:
                   if kit.get('rebuild') is not None and not plant_command_allowed(kit['rebuild']):
                       raise ValueError('unsafe plant rebuild')
                   matches = set()
+                  selected = []
                   for table in tables:
                       if not isinstance(table, str) or not re.fullmatch(r'[A-Za-z0-9_-]+', table):
                           raise ValueError('invalid plant table')
@@ -76,6 +77,9 @@ jobs:
                           found = [name for name in names if name in title]
                           if not found:
                               continue
+                          if not isinstance(title, str) or not title.isprintable() or title in selected:
+                              raise ValueError('invalid or duplicate selected plant name')
+                          selected.append(title)
                           matches.update(found)
                           commands = list(plant.get('prepare', []))
                           for ref in plant['runs']:
@@ -85,6 +89,7 @@ jobs:
                               raise ValueError('unsafe plant command in ' + title)
                   if matches != set(names):
                       raise ValueError('a plant selector matched nothing')
+                  return selected
               except (OSError, KeyError, TypeError, ValueError, tomllib.TOMLDecodeError) as e:
                   raise SystemExit('refusing plants: ' + str(e))
           with open('.ci-suite.json', encoding='utf-8') as f:
@@ -109,15 +114,16 @@ jobs:
               suite, runner, family, names = (item[k] for k in ('suite', 'runner', 'family', 'names'))
               if not isinstance(suite, str) or suite not in allowed or runner not in allowed[suite]:
                   raise SystemExit('suite or runner is not allowed')
+              selected = []
               if suite == 'plants':
                   if family not in ('cli', 'daemon', 'release') or not isinstance(names, list) or not names:
                       raise SystemExit('plants need a known family and one or more names')
                   if any(not isinstance(n, str) or not n.strip() or len(n) > 500 or n.startswith('-') or not n.isprintable() for n in names):
                       raise SystemExit('invalid plant name')
-                  validate_plants(family, names)
+                  selected = validate_plants(family, names)
               elif family != '' or names != []:
                   raise SystemExit('only plants take a family or names')
-              matrix.append(dict(suite=suite, runner=runner, family=family, names=json.dumps(names, ensure_ascii=True, separators=(',', ':')), id=i))
+              matrix.append(dict(suite=suite, runner=runner, family=family, names=json.dumps(names, ensure_ascii=True, separators=(',', ':')), selected=json.dumps(selected, ensure_ascii=True, separators=(',', ':')), id=i))
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
               f.write('matrix=' + json.dumps({'include': matrix}, separators=(',', ':')) + '\n')
           PY
@@ -135,6 +141,7 @@ jobs:
       SUITE: ${{ matrix.suite }}
       FAMILY: ${{ matrix.family }}
       PLANT_NAMES: ${{ matrix.names }}
+      PLANT_SELECTED: ${{ matrix.selected }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -188,11 +195,15 @@ jobs:
         working-directory: app
         run: npx playwright install webkit
       - name: Run the named suite
+        id: run_suite
         run: |
           set +e
           {
             case "$SUITE" in
-              rig|regressions|daemon)
+              rig|regressions)
+                # Passing cases hide their skip notices unless libtest shows output.
+                cargo test -p cf-e2e --test "$SUITE" --no-fail-fast -j 4 -- --test-threads=4 --show-output ;;
+              daemon)
                 cargo test -p cf-e2e --test "$SUITE" --no-fail-fast -j 4 -- --test-threads=4 ;;
               ledger)
                 cargo test -p cf-ledger --no-fail-fast -j 4 -- --test-threads=4 ;;
@@ -230,16 +241,86 @@ jobs:
                 while IFS= read -r name; do [ -n "$name" ] && names+=("$name"); done < "$RUNNER_TEMP/plant-names"
                 [ -n "$FAMILY" ] && [ "${#names[@]}" -gt 0 ] && [ -n "${names[0]}" ] || exit 2
                 cargo xtask plants "$FAMILY" "${names[@]}" --test-threads 4 ;;
-              clippy-windows) cargo xtask clippy-windows ;;
+              clippy-windows)
+                cargo xtask clippy-windows
+                lint_rc=$?
+                # Cross-clippy cannot run Windows binaries on the host. Its
+                # own driver tests do run here and prove the check's setup.
+                cargo test -p xtask --lib clippy_windows::tests --no-fail-fast -j 4 -- --test-threads=4
+                driver_rc=$?
+                [ "$lint_rc" -eq 0 ] && [ "$driver_rc" -eq 0 ] ;;
               page-chromium) (cd app && npm run test:ui) ;;
               page-webkit) (cd app && npm run test:ui:webkit) ;;
               *) echo 'Refusing unknown suite'; exit 2 ;;
             esac
           } 2>&1 | tee "$RUNNER_TEMP/suite-logs/test.log"
           result=${PIPESTATUS[0]}
-          printf 'Suite %s finished with exit %s\n' "$SUITE" "$result" > "$RUNNER_TEMP/suite-logs/summary.txt"
-          grep -E 'test result:|[0-9]+ (passed|failed|skipped)|^failures:|\.\.\. FAILED|^ *FAIL |^(MISSED|DOES NOT COMPILE|NOT BUILT|HUNG|DOES NOT APPLY|NOT RUN|UNSTABLE|BROKEN) ' "$RUNNER_TEMP/suite-logs/test.log" >> "$RUNNER_TEMP/suite-logs/summary.txt" || true
           exit "$result"
+      - name: Assess suite results
+        if: always() && steps.run_suite.outcome != 'skipped'
+        env:
+          SUITE_RESULT: ${{ steps.run_suite.outcome }}
+        run: |
+          node - <<'JS'
+          const fs = require('fs'), path = require('path');
+          const folder = path.join(process.env.RUNNER_TEMP, 'suite-logs');
+          const suite = process.env.SUITE;
+          let log = '';
+          try { log = fs.readFileSync(path.join(folder, 'test.log'), 'utf8'); } catch (_) {}
+          log = log.replace(/\x1b\[[0-9;]*m/g, '');
+          const lines = [], rust = [...log.matchAll(/^test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed;/gm)];
+          let executed = rust.reduce((n, m) => n + Number(m[1]) + Number(m[2]), 0), bad = false;
+          if (suite === 'rig' || suite === 'regressions') {
+            const reported = [...log.matchAll(/skipped:\s*Muse Code(?: is not installed|'s binary[^\n]*is not on this machine)/gi)].length;
+            const named = [...log.matchAll(/^test ([^\s]*muse_[^\s]*) \.\.\. (?:ok|FAILED)\s*$/gm)].length;
+            const missing = reported || named;
+            lines.push(reported
+              ? `Muse Code is not installed on hosted runners: ${reported} cases returned early (from the log).`
+              : `Muse Code cases do not run on hosted runners: ${named} cases named muse_* (from test names).`);
+            executed = Math.max(0, executed - missing);
+          }
+          if (suite === 'page-chromium' || suite === 'page-webkit') {
+            executed = [...log.matchAll(/^\s*(\d+)\s+(?:passed|failed|flaky)\b/gm)].reduce((n, m) => n + Number(m[1]), 0);
+          }
+          if (suite === 'plants') {
+            let selected;
+            try { selected = JSON.parse(process.env.PLANT_SELECTED || '[]'); } catch (_) { selected = []; }
+            if (!Array.isArray(selected) || !selected.length || selected.some(n => typeof n !== 'string') || new Set(selected).size !== selected.length) {
+              selected = []; bad = true; lines.push('No valid selected plant list.');
+            }
+            const verdicts = new Map(selected.map(n => [n, []]));
+            const labels = /^(CAUGHT|MISSED(?:-BY-MEANT)?|DOES NOT COMPILE|NOT BUILT|HUNG|DOES NOT APPLY|NOT RUN|UNSTABLE|BROKEN|SKIPPED \(platform\)|SKIPPED \(absent\))\s+(.+)$/;
+            for (const line of log.split(/\r?\n/)) {
+              const match = line.match(labels);
+              if (!match) continue;
+              const body = match[2];
+              const name = selected.find(n => body.startsWith(n) && (
+                match[1] === 'SKIPPED (platform)' ? body.slice(n.length).startsWith(': for ') :
+                match[1] === 'SKIPPED (absent)' ? body.slice(n.length).startsWith(': not run: ') :
+                /^ \(\d+ s\)(?:\s|$)/.test(body.slice(n.length))));
+              if (name !== undefined) {
+                const by = body.slice(name.length).match(/^ \(\d+ s\) by (.+)$/);
+                const namedTest = !!by && !/: (?:ended with \d+|was ended by a signal)$/.test(by[1]);
+                verdicts.get(name).push({label: match[1], namedTest});
+              }
+            }
+            executed = 0;
+            for (const [name, values] of verdicts) {
+              const verdict = values.length === 1 ? values[0].label : values.length ? 'DUPLICATE' : 'MISSING';
+              lines.push(`${verdict} ${name}${verdict === 'CAUGHT' && !values[0].namedTest ? ' (no named test in report)' : ''}`);
+              if (verdict === 'CAUGHT' && values[0].namedTest) executed++;
+              else bad = true;
+            }
+            lines.push(`Tests executed: at least ${executed} named tests (one proved by each caught plant; the driver does not report the total).`);
+          } else {
+            lines.push(`Tests executed: ${executed}${suite === 'clippy-windows' ? ' (host clippy_windows driver tests; Windows binaries are not run)' : ''}.`);
+          }
+          if (executed === 0) { lines.push('No tests executed for this suite.'); bad = true; }
+          lines.push(`Suite command: ${process.env.SUITE_RESULT || 'unknown'}.`);
+          fs.writeFileSync(path.join(folder, 'summary.txt'), lines.join('\n') + '\n');
+          console.log(lines.join('\n'));
+          if (bad) process.exitCode = 1;
+          JS
       - name: Write the summary
         if: always()
         run: |
