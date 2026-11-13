@@ -149,8 +149,10 @@ const BOARD: [(&[&str], &str); 19] = [
     (
         &["task", "pause"],
         concat!(
-            "  cf task pause T-3                 stop a worker's task: the agent stops and its window waits;\n",
-            "                                    what it left running in the background runs on\n",
+            "  cf task pause T-3 [\"…\"]           stop a worker's task: the agent stops and its window waits;\n",
+            "                                    background work runs on; with words, they go to its window\n",
+            "                                    as a question and its answer arrives as a message; then\n",
+            "                                    cf task resume T-3 \"…\" or cf task finish T-3\n",
         ),
     ),
     (
@@ -171,8 +173,8 @@ const BOARD: [(&[&str], &str); 19] = [
     (
         &["tell"],
         concat!(
-            "  cf tell T-3 \"…\"                   stop T-3 and put this to its window: its answer arrives as\n",
-            "                                    a message; then cf task resume T-3 \"…\"\n",
+            "  cf tell T-3 \"…\"                   say this to T-3's window without stopping it; it reads your\n",
+            "                                    words before its result is taken, and owes no answer\n",
             "                                    (queued or open: kept for its window, to go in with or after its brief)\n",
             "  cf tell \"…\"                       a member tells whoever gave its task; nothing waits\n",
         ),
@@ -233,7 +235,7 @@ fn every_board_command_answers_help_with_its_usage_and_asks_the_board_nothing() 
 
 #[test]
 fn the_word_may_stand_after_the_number_a_command_takes_first_or_beside_its_flags() {
-    let cases: [(&[&str], &[&str]); 12] = [
+    let cases: [(&[&str], &[&str]); 13] = [
         (&["task", "get", "T-3", "--help"], &["task", "get"]),
         (
             &["task", "get", "T-3", "--transcript", "-h"],
@@ -242,6 +244,7 @@ fn the_word_may_stand_after_the_number_a_command_takes_first_or_beside_its_flags
         (&["task", "get", "--transcript", "--help"], &["task", "get"]),
         (&["task", "done", "T-3", "-h"], &["task", "done"]),
         (&["task", "accept", "T-3", "--help"], &["task", "accept"]),
+        (&["task", "pause", "T-3", "--help"], &["task", "pause"]),
         (&["task", "resume", "T-3", "-h"], &["task", "resume"]),
         (
             &["task", "add", "--tier", "light", "--help"],

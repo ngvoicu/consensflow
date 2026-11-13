@@ -84,7 +84,7 @@ impl Window {
 
 /// Every command that changes the board, written right: the board's write verbs, `cf task`'s
 /// moves among them.
-const WRITES: [&[&str]; 16] = [
+const WRITES: [&[&str]; 17] = [
     &[
         "task",
         "add",
@@ -102,22 +102,24 @@ const WRITES: [&[&str]; 16] = [
     &["task", "reopen", "T-3", "a follow-up"],
     &["task", "edit", "T-3", "a new brief"],
     &["task", "pause", "T-3"],
+    &["task", "pause", "T-3", "Which one?"],
     &["task", "resume", "T-3", "go on"],
     &["note", "to the chief"],
     &["note", "--human", "to the human"],
     &["ask", "which one?"],
-    &["tell", "T-3", "wait"],
+    &["tell", "T-3", "use the v2 grammar"],
     &["tell", "to the chief"],
     &["answer", "m-12", "this one"],
 ];
 
 /// The usage of the commands above, which `--help` and `-h` answer.
-const HELPS: [&[&str]; 9] = [
+const HELPS: [&[&str]; 10] = [
     &["--help"],
     &["task", "--help"],
     &["task", "add", "--help"],
     &["task", "accept", "-h"],
     &["task", "finish", "--help"],
+    &["task", "pause", "--help"],
     &["note", "--help"],
     &["ask", "-h"],
     &["tell", "--help"],

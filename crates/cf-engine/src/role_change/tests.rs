@@ -220,10 +220,9 @@ fn read_in_one(note: &MessageView, cf: &CfWord) -> bool {
 /// The real text of a chief with specs on is told whatever its staff and its rules: it is
 /// longer than a message goes in whole at since the chief's rules for smaller contexts
 /// (T-1009), so its window is given the opening, which says to read the rest now, and the
-/// command that prints it; and that command prints it in one piece read whole, or, past
-/// that (T-1513, review T-1510: the most rules and a staff of 6 since the ban on a task for
-/// a member by name came back, 8 before it), in parts, each read whole, which the opening
-/// says how many of. A Mac's and a Windows window's (PowerShell's) both.
+/// command that prints it; and that command prints it in one piece read whole or in parts,
+/// each read whole, which the opening says how many of. With the most rules and specs on,
+/// even a chief with no staff needs parts. A Mac's and a Windows window's (PowerShell's) both.
 #[test]
 fn the_real_text_of_a_chief_with_specs_any_staff_and_the_most_rules_is_told_whole_or_read_in_every_part(
 ) {
@@ -313,6 +312,14 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     let whole = |note: &MessageView| goes_whole(note, &[], &cf);
     let one = |note: &MessageView| read_in_one(note, &cf);
     let most = the_most_rules();
+    assert!(
+        !one(&note(
+            None,
+            "note",
+            body_of(&a_chiefs_role_with(0, true, Some(&most)), &cf),
+        )),
+        "even an empty staff needs parts with specs and the most rules"
+    );
     assert_eq!(
         rows_while(true, None, &whole),
         0,
@@ -323,25 +330,21 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
         0,
         "docs: never whole without specs either"
     );
-    assert_eq!(
-        rows_while(true, None, &one),
-        139,
-        "docs: one piece to 139 rows with specs on"
-    );
+    assert_eq!(rows_while(true, None, &one), 135, "one piece with specs");
     assert_eq!(
         rows_while(false, None, &one),
-        163,
-        "docs: one piece to 163 rows without"
+        160,
+        "one piece without specs"
     );
     assert_eq!(
         rows_while(true, Some(&most), &one),
-        2,
-        "docs: one piece to 2 rows with specs on and the most rules"
+        0,
+        "no staff row fits with specs and the most rules"
     );
     assert_eq!(
         rows_while(false, Some(&most), &one),
-        27,
-        "docs: one piece to 27 rows without specs and the most rules"
+        24,
+        "one piece without specs and with the most rules"
     );
     let parts = |rows| {
         printed_by_cf(
@@ -1180,17 +1183,17 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
     // A case: its name, the window's `cf`, the staff's rows, specs on or off, the rules, and the
     // lines the part after the first begins with.
     type Case<'a> = (&'a str, CfWord, usize, bool, Option<&'a str>, &'a [&'a str]);
-    // The image designer's paragraph in the chief's section on roles (T-1480).
-    const IMAGES: &str = "An image comes from the image designer (`--design`). Give it";
+    // The integrator's paragraph in the chief's section on roles.
+    const INTEGRATOR: &str = "Where the staff has an integrator, it lands accepted work; a";
     let cases: [Case; 4] = [
-        ("a Mac, no staff", a_mac(), 0, false, None, &[IMAGES]),
+        ("a Mac, no staff", a_mac(), 0, false, None, &[INTEGRATOR]),
         (
             "a Mac, the largest chief",
             a_mac(),
             25,
             true,
             Some(&utf8),
-            &[IMAGES],
+            &[INTEGRATOR],
         ),
         (
             "Windows, the largest chief",
@@ -1206,7 +1209,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&escaped),
-            &[IMAGES],
+            &[INTEGRATOR],
         ),
     ];
     for (name, cf, rows, specs, rules, expected) in cases {
