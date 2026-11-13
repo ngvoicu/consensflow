@@ -173,3 +173,58 @@ fn the_answer_a_window_gave_the_chiefs_tell_is_withdrawn_when_the_chiefs_task_is
     rig.close()?;
     Ok(())
 }
+
+/// A tell to a task at work stops nothing (T-1616): no key is pressed into the window, T-1 stays
+/// working, and the words go in once the turn has ended, before the result is taken, as a note
+/// that says the task goes on.
+#[test]
+fn a_tell_to_a_task_at_work_presses_no_key_keeps_it_working_and_its_words_go_in_when_the_turn_ends(
+) -> Outcome {
+    let rig = rig()?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    rig.tell(
+        project.id(),
+        &format!(
+            "DISPATCH --tier {} SLEEP 15 Reply with exactly: ONE",
+            added["member"]["tier"].as_str().unwrap_or_default()
+        ),
+    )?;
+    rig.wait_for("T-1 to be working", secs(30), || {
+        Ok(project.task(1)?["state"] == "working")
+    })?;
+    let brief = thread(&project, "task")?[0].clone();
+    let pane = format!(
+        "p{}-{}",
+        project.id(),
+        brief["recipient"].as_str().unwrap_or_default()
+    );
+    rig.tell(project.id(), "CF tell T-1 :: Also say TOLD_OK")?;
+    rig.wait_for("the tell to be kept for the window", secs(30), || {
+        Ok(thread(&project, "note")?
+            .iter()
+            .any(|note| note["body"].as_str().is_some_and(|b| b.contains("TOLD_OK"))))
+    })?;
+    assert_eq!(
+        project.task(1)?["state"],
+        "working",
+        "the tell moved nothing"
+    );
+    assert_eq!(rig.keys_pressed(&pane, &[27]), 0, "the tell pressed no key");
+    rig.wait_for("the words to go in", secs(90), || {
+        Ok(thread(&project, "note")?.iter().any(|note| {
+            note["body"].as_str().is_some_and(|b| b.contains("TOLD_OK"))
+                && note["state"] == "delivered"
+        }))
+    })?;
+    assert_eq!(rig.keys_pressed(&pane, &[27]), 0, "still no key");
+    // The footer is put to the window with the words, not kept in the note.
+    let frame = rig.open_frame(&pane, secs(60))?;
+    let window = rig.transcript(&crate::session_of(&frame));
+    assert!(
+        window.contains("T-1 goes on: take this in and carry on"),
+        "the window was not told its task goes on"
+    );
+    rig.close()?;
+    Ok(())
+}
