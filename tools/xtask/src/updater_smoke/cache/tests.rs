@@ -200,9 +200,11 @@ fn the_holder_is_written_by_the_real_recorder_and_its_failure_is_the_writes_own(
     let cache = tempfile::tempdir().unwrap();
     let lock = cache.path().join(LOCK);
     let (say, lines) = Say::channel();
-    let _held = hold(cache.path(), &say).unwrap();
+    let held = hold(cache.path(), &say).unwrap();
     drop(say);
     assert_eq!(lines.iter().count(), 0);
+    // Windows prevents another handle from reading the file while the lock is held.
+    drop(held);
     assert_eq!(
         fs::read_to_string(&lock).unwrap(),
         format!("{}\n", std::process::id())
