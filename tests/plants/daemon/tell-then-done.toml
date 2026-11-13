@@ -529,3 +529,13 @@ runs = ["ledger-receipt"]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
 find = "            \"SELECT data FROM event WHERE kind = 'delivery.begun'\n              AND CASE WHEN json_valid(data) THEN json_extract(data, '$.message') END = ?\n              ORDER BY id DESC LIMIT 1\","
 replace = "            \"SELECT data FROM event WHERE kind = 'delivery.begun'\n              AND CASE WHEN json_valid(data) THEN json_extract(data, '$.message') END = ?\n              ORDER BY id ASC LIMIT 1\","
+
+[[plant]]
+name = "answered tell: an older begun carrier is assumed to have the ways on"
+meant = "an_older_carrier_already_pasting_an_answer_without_ways_on_keeps_the_note_typed"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "    if row.state == \"queued\"\n        && (paste == answer\n            || store\n                .message(paste)?\n                .is_some_and(|carrier| matches!(carrier.state.as_str(), \"queued\" | \"gated\")))\n    {"
+replace = "    if row.state == \"queued\" {"
