@@ -22,22 +22,20 @@ rig-decided-result = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "r
 rig-codex-session = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "codex_session::"]
 
 # m-1668: "T-357 was taken back from @ullr … waits for another standard
-# worker" reached the chief after another worker had taken T-357.
+# worker" reached the chief after another worker had taken T-357. Since RS-25
+# that note is shown, not typed, and nothing withdraws it: what a take-over
+# ends is its line, which says the task waits (T-1519).
 [[plant]]
-name = "rig: a take-over leaves the note that the task was taken back for the chief to be given"
-meant = "the_note_that_a_task_was_taken_back_is_withdrawn_when_another_worker_takes_it_before_the_chief_is_given_the_note"
+name = "rig: a take-over leaves the line saying the task was taken back and waits"
+meant = "the_note_that_a_task_was_taken_back_is_shown_never_typed_and_its_line_says_who_took_it_after"
 runs = ["rig-waiting-notes"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/tasks/giving.rs"
+file = "crates/cf-ledger/src/store.rs"
 find = '''
-        leave_pause_notes(
-            store,
-            &task,
-            &format!("was taken by @{}", member.handle),
-            Afterwards::MovesOn,
-        )?;
+        // What its task's line said of it, a note shown and not typed, held until now.
+        crate::tasks::end_asides(self, task.id, &at)?;
 '''
 replace = ""
 
@@ -57,7 +55,7 @@ replace = ""
 
 [[plant]]
 name = "rig: a held task goes on and the chief given the note is told nothing"
-meant = "a_chief_given_the_note_that_a_task_is_held_is_told_it_goes_on_when_the_account_is_switched"
+meant = "a_chief_given_the_note_that_a_task_is_held_is_shown_it_goes_on_when_the_account_is_switched"
 runs = ["rig-waiting-notes"]
 builds = true
 

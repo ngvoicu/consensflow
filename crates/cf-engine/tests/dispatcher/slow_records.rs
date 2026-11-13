@@ -650,7 +650,9 @@ fn hands_over_each_of_two_notes_once_that_come_together_after_a_cancel_to_a_chie
     context.adapter.with("chief", |agent| agent.arrive = false);
 
     // The human cancels T-1: the chief is told of it, and, as the worker's
-    // window closes, of the work it left. Both are on their way to it together.
+    // window closes, of the work it left, which asks nothing and is shown on
+    // T-1's line, not typed (RS-25). A note that is typed comes after the
+    // first: both are on their way to it together.
     context
         .ledger
         .borrow_mut()
@@ -665,13 +667,28 @@ fn hands_over_each_of_two_notes_once_that_come_together_after_a_cancel_to_a_chie
         .filter(|message| message.kind == "note")
         .collect();
     assert_eq!(notes.len(), 2, "the cancel's note and the closed window's");
-    let (cancelled, closed) = (&notes[0], &notes[1]);
+    let (cancelled, window) = (&notes[0], &notes[1]);
     assert!(
         cancelled.body.contains("cancelled T-1"),
         "{}",
         cancelled.body
     );
-    assert!(closed.body.contains("background work"), "{}", closed.body);
+    assert!(window.body.contains("background work"), "{}", window.body);
+    assert_eq!(context.message(window.id).state, "read", "shown, not typed");
+    let closed = &context
+        .ledger
+        .borrow_mut()
+        .note(
+            tiers.project.id,
+            &cf_ledger::NewNote {
+                from: None,
+                to: "chief".to_owned(),
+                task: Some(1),
+                body: "T-1's window closed; the lock it held is free again.".to_owned(),
+            },
+        )
+        .unwrap();
+    context.pass().unwrap();
     assert_eq!(context.message(cancelled.id).state, "delivering");
     assert_eq!(
         pasted.get(),
@@ -719,6 +736,12 @@ fn hands_over_each_of_two_notes_once_that_come_together_after_a_cancel_to_a_chie
     }
     assert_eq!(pasted.get(), 2);
     let items = given(&context, "chief");
+    assert!(
+        items
+            .iter()
+            .all(|text| !text.contains(&marker_of(window.id))),
+        "the closed window's note is never pasted"
+    );
     for note in [cancelled, closed] {
         let id = marker_of(note.id);
         let shown = items.iter().filter(|text| text.contains(&id)).count();

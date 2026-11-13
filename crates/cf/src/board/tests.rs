@@ -758,6 +758,65 @@ fn printed_in_part(out: &str) -> (&str, &str, &str) {
     (head, words, line)
 }
 
+/// The two branches' marks in one inbox (T-1556): a role read in parts (T-1513) and notes
+/// shown, not typed (RS-25), one of them over. The list says each by its own state, a role
+/// by its state as any note, a shown note `[not typed]` or `[not typed · over]`; `cf inbox
+/// read` prints the role in parts with its part's line, and a shown note whole with its mark
+/// and no part's line, and has no part 2 of it.
+#[test]
+fn an_inbox_that_holds_a_role_in_parts_and_shown_notes_prints_each_with_its_own_marks() {
+    let list = json!({ "messages": [
+        { "id": 21, "kind": "note", "state": "read", "task": 3, "sender": null,
+          "preview": "T-3 is still working in the background: 1 command.", "shown": true },
+        { "id": 20, "kind": "note", "state": "read", "task": 3, "sender": null,
+          "preview": "T-3 was taken back from @zeus (ran out of quota) and waits for another standard worker.",
+          "shown": true, "over": true },
+        { "id": 12, "kind": "note", "state": "delivered", "task": null, "sender": null,
+          "preview": "Your role." },
+    ] });
+    let ran = cf(&["inbox"], vec![reply(200, list)]);
+    assert_eq!(ran.code.unwrap(), 0);
+    assert_eq!(
+        ran.out.lines().collect::<Vec<_>>(),
+        [
+            "m-21 [not typed] note T-3 from ConsensFlow: T-3 is still working in the background: 1 command.",
+            "m-20 [not typed · over] note T-3 from ConsensFlow: T-3 was taken back from @zeus (ran out of quota) and waits for another standard worker.",
+            "m-12 [delivered] note from ConsensFlow: Your role.",
+        ]
+    );
+    let ran = cf(
+        &["inbox", "read", "m-12"],
+        vec![
+            reply(200, a_role_note("delivered", &a_role_over_the_bound())),
+            reply(200, json!({})),
+        ],
+    );
+    assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
+    let (head, _, line) = printed_in_part(&ran.out);
+    assert_eq!(head, "m-12 [delivered] note from ConsensFlow");
+    assert!(line.starts_with("(Part 1 of 2 of m-12."), "{line}");
+    let over = json!({ "message": { "id": 20, "kind": "note", "state": "read", "taskNumber": 3,
+        "sender": null, "body": "T-3 was taken back from @zeus (ran out of quota) and waits for another standard worker.",
+        "receipt": { "shown": "was taken back from @zeus", "over": "2026-11-13T08:00:00.000Z" } } });
+    let ran = cf(&["inbox", "read", "m-20"], vec![reply(200, over.clone())]);
+    assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
+    assert_eq!(
+        ran.out,
+        "m-20 [not typed · over] note T-3 from ConsensFlow\n\nT-3 was taken back from @zeus (ran out of quota) and waits for another standard worker.\n"
+    );
+    assert_eq!(
+        asked(&ran),
+        [("GET", "/api/inbox/20")],
+        "a shown note read is nothing to receive"
+    );
+    let ran = cf(
+        &["inbox", "read", "m-20", "--part", "2"],
+        vec![reply(200, over)],
+    );
+    assert_eq!(ran.code.unwrap(), 2);
+    assert!(ran.err.contains("--part"), "{}", ran.err);
+}
+
 /// T-1513 (review T-1510): `cf inbox read` prints a role over the bound a role is read
 /// whole at (`role_read_whole`) in parts, each within it, the command the paste gives
 /// printing the first, `--part N` the others. Each but the last ends with a line that says
@@ -945,6 +1004,59 @@ fn a_list_of_the_inbox_prints_first_lines_and_says_nothing_of_the_answers_in_it(
         assert_eq!(ran.code.unwrap(), 0);
         assert_eq!(asked(&ran), [("GET", "/api/inbox")], "json: {json}");
     }
+}
+
+/// A note of ConsensFlow's own shown, not typed, whose line is over (its task moved on: another
+/// worker took the task it said was taken back and waits) reads so wherever `cf` prints its line:
+/// `[not typed · over]`, where one that still holds reads `[not typed]`. The list has the
+/// summary's `over`; `cf inbox read` and `cf task get` have the receipt's (RS-25, T-1556).
+#[test]
+fn a_shown_note_whose_line_is_over_reads_so_in_the_inbox_its_read_and_its_tasks_thread() {
+    let taken_back =
+        "T-3 was taken back from @zeus (ran out of quota) and waits for another standard worker.";
+    let list = json!({ "messages": [
+        { "id": 21, "kind": "note", "state": "read", "task": 3, "sender": null,
+          "preview": "T-3 waits with @diana: out of quota until noon", "shown": true },
+        { "id": 20, "kind": "note", "state": "read", "task": 3, "sender": null,
+          "preview": taken_back, "shown": true, "over": true },
+    ] });
+    let ran = cf(&["inbox"], vec![reply(200, list)]);
+    assert_eq!(ran.code.unwrap(), 0);
+    assert_eq!(
+        ran.out.lines().collect::<Vec<_>>(),
+        [
+            "m-21 [not typed] note T-3 from ConsensFlow: T-3 waits with @diana: out of quota until noon",
+            &format!("m-20 [not typed · over] note T-3 from ConsensFlow: {taken_back}"),
+        ]
+    );
+    let over = json!({ "id": 20, "kind": "note", "state": "read", "taskNumber": 3, "sender": null,
+        "body": taken_back,
+        "receipt": { "shown": "was taken back from @zeus", "over": "2026-11-13T08:00:00.000Z" } });
+    let ran = cf(
+        &["inbox", "read", "m-20"],
+        vec![reply(200, json!({ "message": over.clone() }))],
+    );
+    assert_eq!(ran.code.unwrap(), 0);
+    assert!(
+        ran.out
+            .starts_with("m-20 [not typed · over] note T-3 from ConsensFlow\n"),
+        "{}",
+        ran.out
+    );
+    let mut task = thread();
+    task["task"]["messages"][3] = over;
+    let ran = cf(
+        &["task", "get", "T-3"],
+        vec![reply(200, task), reply(200, json!({}))],
+    );
+    assert_eq!(ran.code.unwrap(), 0);
+    assert!(
+        ran.out.contains(&format!(
+            "m-20 [not typed · over] note T-3 from ConsensFlow\n{taken_back}"
+        )),
+        "{}",
+        ran.out
+    );
 }
 
 /// `cf words…` run in the window whose `cf` is `word`, the board answering with `replies`.

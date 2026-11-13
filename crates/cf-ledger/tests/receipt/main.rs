@@ -42,6 +42,7 @@ mod queued_tells;
 mod read_in_the_inbox;
 mod self_steps;
 mod sessions;
+mod shown_notes;
 mod suspended;
 mod taken_back;
 mod told;

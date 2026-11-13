@@ -291,6 +291,7 @@ async fn run(
         credentials: Rc::clone(&credentials),
         kick: Rc::clone(&kick),
         finish: finishing::of(&engine, &spawn),
+        held: finishing::held(&engine),
         closing: crate::api::context::Closing::new(),
         log: Rc::clone(&log),
         trace: Rc::clone(&trace),

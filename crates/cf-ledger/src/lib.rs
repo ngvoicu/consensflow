@@ -74,6 +74,7 @@ pub use projects::{
     COMPACTION_DEFAULT, COMPACTION_MAX, COMPACTION_MIN, STAFF_RULES_MAX_BYTES,
     STAFF_RULES_MAX_LINES,
 };
+pub use queue::{OVER, SHOWN};
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
 pub use specs::SpecsChange;
 pub use staff::MemberEdit;

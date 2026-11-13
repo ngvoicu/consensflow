@@ -19,6 +19,28 @@ fn unavailable(context: &Context) -> Quota {
     }
 }
 
+/// The chief's notes that T-1 waits, oldest first, each typed or shown, counted in runs.
+fn hold_notes(context: &Context, tiers: &Tiers) -> Vec<(&'static str, usize)> {
+    let mut notes = context.inbox(tiers.id("chief"));
+    notes.reverse();
+    let mut runs: Vec<(&'static str, usize)> = Vec::new();
+    for note in notes
+        .iter()
+        .filter(|note| note.body.starts_with("T-1 waits"))
+    {
+        let how = if note.receipt.get(cf_ledger::SHOWN).is_some() {
+            "shown"
+        } else {
+            "typed"
+        };
+        match runs.last_mut() {
+            Some((last, count)) if *last == how => *count += 1,
+            _ => runs.push((how, 1)),
+        }
+    }
+    runs
+}
+
 /// The notes the human was sent, oldest first.
 fn human_notes(tiers: &Tiers) -> Vec<String> {
     crate::fixtures::notes(tiers.context, tiers.context.id(tiers.project.id, "human"))
@@ -58,6 +80,18 @@ fn holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_h
     assert_match(
         tiers.notes("chief").last().unwrap(),
         r"^T-1 waits with @zeus-amber-pine: its account is unavailable \(Muse refused: the account has no allowance; set up billing at accountscenter\.meta\.com/muse_code\), and nothing resets that; it goes on when the human says the account works again\.$",
+    );
+    // The first note of a hold is typed (RS-25), and T-1's line says the hold as well.
+    assert_eq!(
+        hold_notes(&context, &tiers),
+        [("typed", 1)],
+        "the first note of the hold is typed"
+    );
+    assert_eq!(
+        tiers.task(1).task.aside,
+        Some(format!(
+            "waits with @zeus-amber-pine: its account is unavailable ({BECAUSE}) until the human says it works"
+        ))
     );
     let told = human_notes(&tiers);
     assert_eq!(told.len(), 1, "{told:?}");
@@ -177,6 +211,18 @@ fn the_human_saying_the_account_works_again_brings_the_member_back_and_its_task_
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "paused");
     assert_eq!(human_notes(&tiers).len(), 2);
+    // No turn got through between: the requester's note is the same hold said again,
+    // shown on T-1's line, not typed (RS-25).
+    assert_eq!(hold_notes(&context, &tiers), [("typed", 1), ("shown", 1)]);
+    assert!(
+        tiers
+            .task(1)
+            .task
+            .aside
+            .is_some_and(|aside| aside.ends_with("until the human says it works")),
+        "{:?}",
+        tiers.task(1).task.aside
+    );
 }
 
 #[test]

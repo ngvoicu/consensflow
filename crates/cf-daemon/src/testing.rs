@@ -111,6 +111,9 @@ pub struct Finishings {
     pub refusal: RefCell<Option<Refusal>>,
     pub jobs: Cell<usize>,
     pub agents: Cell<usize>,
+    /// What the scene's engine holds in the background, by participant: the task, its jobs
+    /// and its agents.
+    pub held: RefCell<Vec<(i64, i64, usize, usize)>>,
 }
 
 /// A project of two windows and a question waiting.
@@ -308,6 +311,17 @@ pub fn scene() -> Scene {
                 })
             })
         }),
+        held: {
+            let finishings = Rc::clone(&finishings);
+            Rc::new(move |participant| {
+                finishings
+                    .held
+                    .borrow()
+                    .iter()
+                    .find(|held| held.0 == participant)
+                    .map(|held| (held.1, held.2, held.3))
+            })
+        },
         closing: Closing::new(),
         log: Rc::new(Log::new(home.path())),
         trace: Rc::new(Trace::new(home.path())),

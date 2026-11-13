@@ -211,6 +211,7 @@ fn tooling(scene: &Scene, on: bool) -> Rc<context::Context> {
         credentials: Rc::clone(&given.credentials),
         kick: Rc::clone(&given.kick),
         finish: Rc::clone(&given.finish),
+        held: Rc::clone(&given.held),
         closing: given.closing.clone(),
         log: Rc::clone(&given.log),
         trace: Rc::clone(&given.trace),

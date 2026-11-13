@@ -38,8 +38,13 @@
 //! and its wire as it reads Devin's.
 //!
 //! The case is the shape of the report: the human types to the chief and cancels at
-//! once, and the two notes are those of a cancel: the cancel's own, and the closing of
-//! the worker's window with a job still running. The daemon's arrival window is 15 s
+//! once, and two notes come together. Since RS-25 (the brain's decision "Nothing is
+//! typed to the chief that it need not decide") the second note of the report, a window
+//! closed with work still running, asks the chief nothing and is shown, not typed; the
+//! cancel's own note is still typed, as a task called off by another is. So the human
+//! cancels two tasks, each a worker's, one right after the other: two cancel notes, both
+//! typed, sent together into the chief's turn, as the report's two were. The daemon's
+//! arrival window is 15 s
 //! here, not the minute it gives a person's ([`ARRIVAL_MS`]), so the notes' turns are
 //! 28 s: a note whose record waits for the turn before it shows later than the window.
 //! Without the fix the second note is pasted into the first's turn, which has said
@@ -88,13 +93,14 @@ pub(crate) fn work_ms() -> String {
 const FIRST_WORD_MS: &str = "3000";
 
 /// The roster of the case: a Devin (the stand-in) is the chief, and the stand-in
-/// Claude is the worker.
+/// Claude is each of the two workers.
 fn write_roster(rig: &Rig) -> cf_e2e::Result {
     let roster = json!({
         "schemaVersion": 1,
         "agents": [
             { "id": "chief", "kind": "devin", "model": "fake" },
             { "id": "worker", "kind": "claude-code", "model": "fake" },
+            { "id": "worker2", "kind": "claude-code", "model": "fake" },
         ],
     });
     rig.stand_ins(&roster)
@@ -158,8 +164,8 @@ fn delivered(project: &Project, id: i64) -> cf_e2e::Result<bool> {
 }
 
 #[test]
-fn two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_once_each() -> Outcome
-{
+fn two_notes_that_come_together_after_two_cancels_go_into_a_devin_chief_s_window_once_each(
+) -> Outcome {
     once_each(None)
 }
 
@@ -168,7 +174,7 @@ fn two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_on
 /// being given a note, so the rule that waits for Devin's record holds here by itself
 /// (T-842's P3: the early-rest plant was caught only with the settle taken out too).
 #[test]
-fn two_notes_that_come_together_after_a_cancel_go_in_once_each_with_no_settle() -> Outcome {
+fn two_notes_that_come_together_after_two_cancels_go_in_once_each_with_no_settle() -> Outcome {
     once_each(Some("0"))
 }
 
@@ -184,42 +190,47 @@ fn once_each(settle: Option<&str>) -> Outcome {
     write_roster(&rig)?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
+    project.add_member("worker2")?;
     let tier = added["member"]["tier"]
         .as_str()
         .ok_or("the worker has no tier")?
         .to_owned();
 
-    // The chief gives T-1 to the worker, as `cf` does in its window, and the worker
-    // starts a job its turn goes on working beside: it is working still, with a job
-    // running, and the cancel closes its window in the turn. (A turn that ended with
-    // its answer is the task's result, and ends the job: nothing is left to cancel.)
+    // The chief gives T-1 and T-2 to the two workers, as `cf` does in its window, each a
+    // turn of two minutes: both are working when the human cancels them.
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), secs(30))?;
-    let given = rig.cf_in_window(
-        &chief,
-        [
-            "task",
-            "add",
-            "--tier",
-            tier.as_str(),
-            "JOB 120 SLEEP 120 Reply with exactly: WORKER_OK",
-        ],
-    )?;
-    assert_eq!(given.code, Some(0), "{}", given.output());
-    rig.wait_for("the worker's job to run", secs(60), || {
-        Ok(rig.jobs("job").len() == 1)
+    for _ in 0..2 {
+        let given = rig.cf_in_window(
+            &chief,
+            [
+                "task",
+                "add",
+                "--tier",
+                tier.as_str(),
+                "SLEEP 120 Reply with exactly: WORKER_OK",
+            ],
+        )?;
+        assert_eq!(given.code, Some(0), "{}", given.output());
+    }
+    rig.wait_for("both workers to take their tasks", secs(60), || {
+        Ok(project.task(1)?["state"] == "working" && project.task(2)?["state"] == "working")
     })?;
-    assert_eq!(project.task(1)?["state"], "working");
 
-    // The human types to the chief, a turn of a few seconds, and cancels T-1 in its
-    // first: the notes of the cancel are the chief's, and it is in a turn.
+    // The human types to the chief, a turn of a few seconds, and cancels T-1 and T-2 in its
+    // first: the notes of the cancels are the chief's, and it is in a turn.
     rig.tell(project.id(), "SLEEP 2 Reply with exactly: BUSY")?;
-    let cancelled = rig.page("task.cancel", json!({ "project": project.id(), "task": 1 }))?;
-    assert_eq!(cancelled["ok"], true, "{cancelled}");
+    for task in [1, 2] {
+        let cancelled = rig.page(
+            "task.cancel",
+            json!({ "project": project.id(), "task": task }),
+        )?;
+        assert_eq!(cancelled["ok"], true, "{cancelled}");
+    }
 
-    // The two notes of the cancel: the cancel's own, and the closing of the window.
+    // The two notes of the cancels, each typed (a task called off by another).
     rig.wait_for("both notes to be sent to the chief", secs(60), || {
-        Ok(note(&project, "cancelled T-1")?.is_some()
-            && note(&project, "window closed with background work")?.is_some())
+        Ok(note(&project, "cancelled T-1 (")?.is_some()
+            && note(&project, "cancelled T-2 (")?.is_some())
     })?;
     let id_of = |words: &str| -> Result<i64, Error> {
         note(&project, words)?
@@ -227,11 +238,8 @@ fn once_each(settle: Option<&str>) -> Outcome {
             .ok_or_else(|| Error::Daemon(format!("no note says {words}")))
     };
     let notes = [
-        (id_of("cancelled T-1")?, "the cancel's note"),
-        (
-            id_of("window closed with background work")?,
-            "the closed window's note",
-        ),
+        (id_of("cancelled T-1 (")?, "the note of T-1's cancel"),
+        (id_of("cancelled T-2 (")?, "the note of T-2's cancel"),
     ];
     rig.wait_for("the chief to be given both notes", secs(300), || {
         Ok(delivered(&project, notes[0].0)? && delivered(&project, notes[1].0)?)
@@ -287,17 +295,17 @@ fn once_each(settle: Option<&str>) -> Outcome {
 // it is, the stand-in's shape chosen here and not by the environment.
 
 #[test]
-fn two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_once_each_on_devin_3000_12(
+fn two_notes_that_come_together_after_two_cancels_go_into_a_devin_chief_s_window_once_each_on_devin_3000_12(
 ) -> Outcome {
     crate::on_the_installed_devin(
-        two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_once_each,
+        two_notes_that_come_together_after_two_cancels_go_into_a_devin_chief_s_window_once_each,
     )
 }
 
 #[test]
-fn two_notes_that_come_together_after_a_cancel_go_in_once_each_with_no_settle_on_devin_3000_12(
+fn two_notes_that_come_together_after_two_cancels_go_in_once_each_with_no_settle_on_devin_3000_12(
 ) -> Outcome {
     crate::on_the_installed_devin(
-        two_notes_that_come_together_after_a_cancel_go_in_once_each_with_no_settle,
+        two_notes_that_come_together_after_two_cancels_go_in_once_each_with_no_settle,
     )
 }

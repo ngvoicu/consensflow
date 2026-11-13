@@ -33,7 +33,21 @@ pub(crate) struct Queued<'a> {
     pub(crate) choices: Option<&'a [Vec<String>]>,
     pub(crate) urgent: bool,
     pub(crate) role: Option<&'a str>,
+    /// What a note of ConsensFlow's own to a chief that asks it no decision says on its
+    /// task's line ([`SHOWN`]): it is never typed into the chief's window.
+    pub(crate) shown: Option<&'a str>,
 }
+
+/// The receipt word of a note of ConsensFlow's own that is shown, not typed: it asks its
+/// chief no decision, so it lands `read`, its words where the chief looks when it acts (its
+/// task's line in `cf task list` and `cf task get`, until the task moves on, `aside`), and
+/// on the page as any note (RS-25, "nothing is told to the chief that it need not decide").
+pub const SHOWN: &str = "shown";
+
+/// The receipt word, beside [`SHOWN`], of a shown note whose line is over: its task moved on
+/// (`end_asides`), and the note no longer says what its task's line says. It holds the time it
+/// ended; the note stays as it was given, never withdrawn.
+pub const OVER: &str = "over";
 
 /// Writes a message on its way: queued for its recipient, read at once when
 /// the asker's own window gave it (its receipt says so), or waiting for the
@@ -46,7 +60,7 @@ pub(crate) fn queue(
 ) -> Result<i64, LedgerError> {
     let landing = if gate_holds(store, project_id, message.from, message.to)? {
         "gated"
-    } else if message.from_window {
+    } else if message.from_window || message.shown.is_some() {
         "read"
     } else {
         "queued"
@@ -54,7 +68,16 @@ pub(crate) fn queue(
     let questions = message.questions.map(serde_json::to_string).transpose()?;
     let choices = message.choices.map(serde_json::to_string).transpose()?;
     let at = store.at();
-    let received = (landing == "read").then(|| (at.clone(), r#"{"window":true}"#));
+    let shown = message
+        .shown
+        .filter(|_| landing == "read")
+        .map(|aside| json!({ SHOWN: aside }).to_string());
+    let received = (landing == "read").then(|| {
+        (
+            at.clone(),
+            shown.unwrap_or_else(|| r#"{"window":true}"#.to_owned()),
+        )
+    });
     store.db.execute(
         "INSERT INTO message (project_id, recipient_id, sender_id, kind, task_id, reply_to, body,
                             state, questions, choices, urgent, created_at, delivered_at, receipt,
@@ -119,6 +142,9 @@ pub(crate) struct Sent<'a> {
     pub(crate) urgent: bool,
     pub(crate) door_closed: bool,
     pub(crate) role: Option<&'a str>,
+    /// What a note of ConsensFlow's own says on its task's line where it is shown, not
+    /// typed: to a chief only ([`SHOWN`]); to anyone else it is queued as any note.
+    pub(crate) shown: Option<&'a str>,
 }
 
 /// Queues a message by handle, and logs it.
@@ -134,6 +160,9 @@ pub(crate) fn send(
             .map(|from| store.participant_by_handle(project_id, from))
             .transpose()?;
         let recipient = store.participant_by_handle(project_id, message.to)?;
+        let shown = message
+            .shown
+            .filter(|_| message.from.is_none() && recipient.role == "chief");
         let task_id = message
             .task
             .map(|task| store.task_row(project_id, task).map(|row| row.id))
@@ -151,19 +180,20 @@ pub(crate) fn send(
                 urgent: message.urgent,
                 door_closed: message.door_closed,
                 role: message.role,
+                shown,
                 ..Queued::default()
             },
         )?;
-        store.log(
-            project_id,
-            "message.sent",
-            json!({
-                "message": id,
-                "kind": message.kind,
-                "from": sender.map(|sender| sender.handle),
-                "to": recipient.handle,
-            }),
-        )?;
+        let mut sent = json!({
+            "message": id,
+            "kind": message.kind,
+            "from": sender.map(|sender| sender.handle),
+            "to": recipient.handle,
+        });
+        if shown.is_some() {
+            sent[SHOWN] = json!(true);
+        }
+        store.log(project_id, "message.sent", sent)?;
         store.message(id)?.ok_or_else(|| {
             LedgerError::refused_with("unknown-message", format!("no message {id}"), 404)
         })

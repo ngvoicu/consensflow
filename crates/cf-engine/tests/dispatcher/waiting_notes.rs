@@ -73,8 +73,7 @@ fn switches_account(context: &Context, tiers: &Tiers) {
 }
 
 #[test]
-fn withdraws_the_note_that_says_a_task_was_taken_back_when_another_member_takes_it_before_its_reader_is_given_it(
-) {
+fn shows_the_note_that_says_a_task_was_taken_back_and_never_types_it_whoever_takes_the_task() {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus", "diana"]);
     tiers.open();
@@ -99,7 +98,8 @@ fn withdraws_the_note_that_says_a_task_was_taken_back_when_another_member_takes_
         1,
         "the chief is told the task waits for another"
     );
-    assert_eq!(notes[0].state, "queued", "its window has not been given it");
+    // It asks the chief nothing: shown on the task's line, never typed (RS-25).
+    assert_eq!(notes[0].state, "read", "shown, not queued");
 
     context.pass().unwrap();
     assert_eq!(
@@ -109,13 +109,11 @@ fn withdraws_the_note_that_says_a_task_was_taken_back_when_another_member_takes_
     );
     assert_eq!(
         fate(&context, &notes[0]),
-        (
-            "cancelled".to_owned(),
-            Some("T-1 was taken by @diana".to_owned())
-        )
+        ("read".to_owned(), None),
+        "a shown note is not withdrawn"
     );
 
-    // The chief's turn ends: it is never told the task waits.
+    // The chief's turn ends: the note is never typed.
     context.adapter.answer("chief", "Done.");
     for _ in 0..3 {
         context.pass().unwrap();
@@ -158,8 +156,8 @@ fn leaves_the_note_that_says_a_task_was_taken_back_once_its_reader_has_been_give
     }
     assert_eq!(
         context.message(notes[0].id).state,
-        "delivered",
-        "the chief was given it"
+        "read",
+        "shown to the chief, not typed (RS-25)"
     );
     context.back_from_quota(tiers.project.id, "diana").unwrap();
     context.pass().unwrap();
@@ -221,7 +219,14 @@ fn withdraws_the_note_that_says_a_task_is_held_when_the_account_is_switched_and_
     );
     let notes = notes_saying(&context, &tiers, "waits with");
     assert_eq!(notes.len(), 1);
+    // The first note of a hold is typed (RS-25), and T-1's line says the hold as well.
     assert_eq!(notes[0].state, "queued");
+    assert_eq!(
+        tiers.task(1).task.aside,
+        Some(format!(
+            "waits with @zeus-amber-pine: out of quota until {resets_at}"
+        ))
+    );
 
     // The human logs the harness into another account; the daemon goes on.
     switches_account(&context, &tiers);
@@ -229,6 +234,11 @@ fn withdraws_the_note_that_says_a_task_is_held_when_the_account_is_switched_and_
     assert_eq!(
         fate(&context, &notes[0]),
         ("cancelled".to_owned(), Some("T-1 resumed".to_owned()))
+    );
+    assert_eq!(
+        tiers.task(1).task.aside,
+        None,
+        "the resume ends what the line said"
     );
     assert!(
         notes_saying(&context, &tiers, GOES_ON).is_empty(),
@@ -292,11 +302,12 @@ fn tells_a_requester_it_was_told_a_task_waits_that_the_task_goes_on_when_the_acc
     );
     assert_eq!(told[0].task_number, Some(1));
 
-    // The correction reaches the chief, once, and the task goes on no more times.
+    // The correction asks the chief nothing: it is shown on T-1's line, once, not typed
+    // (RS-25), and the task goes on no more times.
     for _ in 0..3 {
         context.pass().unwrap();
     }
-    assert_eq!(context.message(told[0].id).state, "delivered");
+    assert_eq!(context.message(told[0].id).state, "read");
     assert_eq!(notes_saying(&context, &tiers, GOES_ON).len(), 1);
 }
 

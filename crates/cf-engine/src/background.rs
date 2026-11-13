@@ -112,7 +112,8 @@ impl Dispatcher {
             return Ok(());
         };
         let number = thread.task.number;
-        self.seams.ledger.borrow_mut().tell_closed(
+        // It asks nothing: shown on the task's line, not typed, to a chief (RS-25).
+        self.seams.ledger.borrow_mut().show_closed(
             project.id,
             &NewNote {
                 from: None,
@@ -120,6 +121,7 @@ impl Dispatcher {
                 task: Some(number),
                 body: closed_leaving(&window_closed(number), left, possibly),
             },
+            &closed_leaving("window closed", left, possibly),
         )?;
         Ok(())
     }
@@ -150,14 +152,22 @@ impl Dispatcher {
         let Some(thread) = task.filter(|thread| thread.task.state == "paused") else {
             return Ok(());
         };
-        self.seams.ledger.borrow_mut().note(
+        // It asks nothing: shown on the task's line, not typed, to a chief (RS-25).
+        let body = paused_leaving(number, &left);
+        let opening = format!("T-{number}'s window stays open while T-{number} is paused");
+        let aside = format!(
+            "window open{}",
+            body.strip_prefix(opening.as_str()).unwrap_or_default()
+        );
+        self.seams.ledger.borrow_mut().show(
             project.id,
             &NewNote {
                 from: None,
                 to: thread.task.requester.clone(),
                 task: Some(number),
-                body: paused_leaving(number, &left),
+                body,
             },
+            &aside,
         )?;
         self.changed();
         Ok(())

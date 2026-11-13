@@ -248,9 +248,10 @@ impl Dispatcher {
             return Ok(Kept::Held);
         }
         // A conversation the harness lost is told nothing of, as it never was; one whose
-        // program was not proved gone is told once.
+        // program was not proved gone is told once, and asks nothing: shown on the task's
+        // line, not typed, to a chief (RS-25).
         if found.is_some() {
-            self.seams.ledger.borrow_mut().note(
+            self.seams.ledger.borrow_mut().show(
                 project.id,
                 &NewNote {
                     from: None,
@@ -260,6 +261,9 @@ impl Dispatcher {
                         "T-{number} goes to @{handle} in a new conversation: its window that worked on T-{earlier} closed with no proof its program was gone, which may still write to that conversation, so T-{number} does not go on in it."
                     ),
                 },
+                &format!(
+                    "in a new conversation: the window that worked on T-{earlier} closed with no proof its program was gone"
+                ),
             )?;
         }
         Ok(Kept::On(None))

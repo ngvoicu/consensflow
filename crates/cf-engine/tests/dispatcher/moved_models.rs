@@ -230,6 +230,20 @@ fn the_requester_and_the_human_are_told_why_once_in_words_of_the_move_not_of_a_b
         waits[0]
     );
     assert!(!waits[0].contains("account"), "{}", waits[0]);
+    // The first note of a hold is typed (RS-25), and T-1's line says the hold as well.
+    let note = context
+        .inbox(tiers.id("chief"))
+        .into_iter()
+        .find(|note| note.body.starts_with("T-1 waits with @"))
+        .expect("the note of the hold");
+    assert!(note.receipt.get(cf_ledger::SHOWN).is_none(), "{note:?}");
+    assert!(
+        tiers.task(1).task.aside.is_some_and(|aside| aside
+            .starts_with(&format!("waits with @{zeus}: its model moved"))
+            && aside.ends_with(", until the human says it may go on")),
+        "{:?}",
+        tiers.task(1).task.aside
+    );
     let told = human_notes(&tiers);
     assert_eq!(told.len(), 1, "{told:?}");
     assert!(told[0].contains("a model nobody chose"), "{}", told[0]);

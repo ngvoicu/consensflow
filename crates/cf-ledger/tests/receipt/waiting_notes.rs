@@ -96,14 +96,19 @@ fn a_task_another_member_takes_withdraws_the_notes_of_its_wait_its_requester_has
             "T-1 was taken back from @{session} (ran out of quota after starting) and waits for another standard worker."
         )
     );
-    assert_eq!(w.states(&[taken_back.id, waits.id]), ["queued", "queued"]);
+    // The note of the release asks the chief nothing: it is shown, so given (RS-25).
+    assert_eq!(w.states(&[taken_back.id, waits.id]), ["read", "queued"]);
 
     w.assign(task, "diana");
     let withdrawn = (
         "cancelled".to_owned(),
         Some("T-1 was taken by @diana".to_owned()),
     );
-    assert_eq!(fate(&w, taken_back.id), withdrawn);
+    assert_eq!(
+        fate(&w, taken_back.id),
+        ("read".to_owned(), None),
+        "it was given"
+    );
     assert_eq!(fate(&w, waits.id), withdrawn);
 }
 
@@ -115,8 +120,8 @@ fn a_task_another_member_takes_leaves_what_was_given_what_others_wrote_and_what_
     w.ledger
         .release_task(w.project, task, "ran out of quota after starting")
         .expect("released");
+    // The note of the release is shown, so given (RS-25).
     let given = told_chief(&w).remove(0);
-    w.deliver(given.id);
     let chiefs = w.note("chief", "chief", task, "A reminder from the chief.");
     let for_the_human = consensflow_notes(&mut w, "human", Some(task), "T-1 is back on the board.");
     let of_another = consensflow_notes(
@@ -135,7 +140,7 @@ fn a_task_another_member_takes_leaves_what_was_given_what_others_wrote_and_what_
     w.assign(task, "diana");
     assert_eq!(
         fate(&w, given.id),
-        ("delivered".to_owned(), None),
+        ("read".to_owned(), None),
         "a note its reader has been given"
     );
     for (kept, why) in [
@@ -197,6 +202,7 @@ fn a_task_taken_back_withdraws_the_notes_of_the_wait_it_leaves_and_keeps_its_own
         Some(task),
         &format!("T-1 is paused: @{session}'s window is gone."),
     );
+    // The first note of a hold is typed (RS-25): queued, as the stall's.
     assert_eq!(w.states(&[hold.id, stall.id]), ["queued", "queued"]);
 
     // The human gives it to another member while it is held.
@@ -211,6 +217,71 @@ fn a_task_taken_back_withdraws_the_notes_of_the_wait_it_leaves_and_keeps_its_own
     assert_eq!(fate(&w, stall.id), withdrawn);
     let told = told_chief(&w);
     let release = told.last().expect("the note of the release");
+    assert_eq!(
+        (release.state.as_str(), release.body.as_str()),
+        (
+            "read",
+            format!(
+                "T-1 was taken back from @{session} (by @human) and waits for another standard worker."
+            )
+            .as_str()
+        ),
+        "what the release says of itself stays, shown: it asks the chief nothing (RS-25)"
+    );
+}
+
+#[test]
+fn a_task_a_human_asked_for_taken_back_withdraws_the_notes_of_its_wait_and_keeps_its_own() {
+    // To anyone but a chief the note of the release is queued, not shown (RS-25): the
+    // release must leave it while it withdraws the notes of the wait.
+    let mut w = world();
+    let task = w
+        .ledger
+        .create_task(
+            w.project,
+            &cf_ledger::NewTask {
+                from: "human".into(),
+                pool: Some("worker".into()),
+                tier: Some("standard".into()),
+                body: "Parser".into(),
+                ..Default::default()
+            },
+        )
+        .expect("a task")
+        .task
+        .number;
+    let moved = w.assign(task, "zeus");
+    let session = moved.task.assignee.clone().expect("a session");
+    w.deliver(moved.message.expect("its brief").id);
+    w.hold(task);
+    let hold = w
+        .ledger
+        .note_hold(w.project, "human", task, &session, UNTIL)
+        .expect("the human is told");
+    let stall = consensflow_notes(
+        &mut w,
+        "human",
+        Some(task),
+        &format!("T-1 is paused: @{session}'s window is gone."),
+    );
+    assert_eq!(w.states(&[hold.id, stall.id]), ["queued", "queued"]);
+
+    w.ledger
+        .release_task(w.project, task, "by @human")
+        .expect("released");
+    let withdrawn = (
+        "cancelled".to_owned(),
+        Some("T-1 was taken back".to_owned()),
+    );
+    assert_eq!(fate(&w, hold.id), withdrawn);
+    assert_eq!(fate(&w, stall.id), withdrawn);
+    let release = w
+        .ledger
+        .inbox(w.id("human"), 100)
+        .expect("the human's inbox")
+        .into_iter()
+        .find(|message| message.body.starts_with("T-1 was taken back from"))
+        .expect("the human is told of the release");
     assert_eq!(
         (release.state.as_str(), release.body.as_str()),
         (
@@ -255,7 +326,8 @@ fn a_requester_given_the_note_that_a_task_is_held_is_told_when_its_resumed_turn_
             correction.sender.as_deref(),
             correction.recipient.as_str()
         ),
-        ("queued", Some(task), None, "chief")
+        ("read", Some(task), None, "chief"),
+        "the news asks nothing either: shown, not typed"
     );
     assert_eq!(
         fate(&w, hold.id),
@@ -280,9 +352,11 @@ fn a_requester_being_given_the_hold_note_is_told_too_but_one_not_given_it_is_tol
         "it reaches the chief's window, and the chief is told it goes on"
     );
 
-    // Another hold: the note is still queued when the daemon resumes the task.
+    // Another hold, after the task went on, is typed again (RS-25): its note is still
+    // queued when the daemon resumes the task.
     w.confirm(hold.id);
     let again = held(&mut w, task, &session);
+    assert_eq!(again.state, "queued");
     let before = told_chief(&w).len();
     w.daemon_resumes(task);
     w.went_on(task);
@@ -345,9 +419,8 @@ fn the_news_that_a_held_task_went_on_is_not_taken_back_by_a_hold_that_comes_afte
     let news = told_chief(&w).last().expect("the chief is told").id;
     assert_eq!(w.message(news).body, GOES_ON);
 
-    // The new account runs into its limit before the chief is given the news:
-    // the note of this hold goes when the daemon resumes the task again, and
-    // the news does not, or the chief would keep the promise it corrects.
+    // The new account runs into its limit before the chief is given the hold's note: it
+    // goes when the daemon resumes the task again, and the news, shown (RS-25), stays.
     let again = held(&mut w, task, &session);
     w.daemon_resumes(task);
     w.went_on(task);
@@ -355,13 +428,57 @@ fn the_news_that_a_held_task_went_on_is_not_taken_back_by_a_hold_that_comes_afte
         fate(&w, again.id),
         ("cancelled".to_owned(), Some("T-1 resumed".to_owned()))
     );
-    assert_eq!(fate(&w, news), ("queued".to_owned(), None));
-
-    // A task called off is no more news for anyone.
+    assert_eq!(fate(&w, news), ("read".to_owned(), None));
     w.ledger
         .cancel_task(w.project, task, "chief")
         .expect("called off");
-    assert_eq!(w.message(news).state, "cancelled");
+    assert_eq!(w.message(news).state, "read", "what was given stays");
+}
+
+#[test]
+fn the_news_a_human_requester_waits_for_is_not_taken_back_by_a_hold_that_comes_after_it() {
+    // To anyone but a chief the news is queued, not shown: a hold after it must still leave it.
+    let mut w = world();
+    let task = w
+        .ledger
+        .create_task(
+            w.project,
+            &cf_ledger::NewTask {
+                from: "human".into(),
+                pool: Some("worker".into()),
+                tier: Some("standard".into()),
+                body: "Parser".into(),
+                ..Default::default()
+            },
+        )
+        .expect("a task")
+        .task
+        .number;
+    let moved = w.assign(task, "zeus");
+    let session = moved.task.assignee.clone().expect("a session");
+    w.deliver(moved.message.expect("its brief").id);
+    w.hold(task);
+    let first = w
+        .ledger
+        .note_hold(w.project, "human", task, &session, UNTIL)
+        .expect("the human is told");
+    w.ledger.mark_read(first.id).expect("the human reads it");
+    w.daemon_resumes(task);
+    w.went_on(task);
+    let news = w
+        .ledger
+        .inbox(w.id("human"), 100)
+        .expect("the human's inbox")
+        .into_iter()
+        .find(|message| message.body == GOES_ON)
+        .expect("the human is told it goes on");
+    assert_eq!(news.state, "queued");
+    w.hold(task);
+    w.ledger
+        .note_hold(w.project, "human", task, &session, UNTIL)
+        .expect("told again");
+    w.daemon_resumes(task);
+    assert_eq!(fate(&w, news.id), ("queued".to_owned(), None));
 }
 
 #[test]
@@ -386,13 +503,8 @@ fn a_hold_note_of_an_older_build_counts_and_one_that_failed_or_is_not_one_does_n
         "a hold an older build told is corrected too"
     );
 
-    // A hold note that never reached the chief, and notes that are none.
+    // A note that is none (a hold note to the chief is always given now: shown, not typed).
     w.hold(task);
-    let failed = held_note(&mut w, task, &session);
-    w.begin(failed.id);
-    w.ledger
-        .fail_delivery(failed.id, "the window went away")
-        .expect("failed");
     let other = consensflow_notes(&mut w, "chief", Some(task), "T-1 is paused: only so.");
     w.deliver(other.id);
     let before = told_chief(&w).len();
