@@ -193,6 +193,95 @@ fn an_answer_on_its_way_to_the_chief_already_makes_the_tells_note_shown() {
 }
 
 #[test]
+fn an_older_delivered_answer_with_no_proof_of_ways_on_keeps_the_note_typed_until_a_move() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    w.deliver(answer.id);
+    // An older build's event did not say whether the answer had the ways-on footer.
+    w.edit(|db| {
+        db.execute(
+            "UPDATE event SET data = json_remove(data, '$.tellPauseWaysOn')
+             WHERE kind = 'delivery.begun' AND json_extract(data, '$.message') = ?",
+            [answer.id],
+        )
+        .expect("the older event has no footer proof");
+    });
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_eq!(note.state, "queued", "the chief still needs the ways on");
+    w.resume(task, "Go on");
+    assert_shown_tell_note(&w, task, tell, note.id);
+}
+
+#[test]
+fn an_answer_the_chief_read_in_the_inbox_still_makes_its_tells_note_shown() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    let chief = w.id("chief");
+    w.ledger
+        .receive_read(
+            chief,
+            &[answer.id],
+            cf_ledger::Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
+        .expect("the chief read the answer");
+    assert_eq!(w.message(answer.id).state, "read");
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_shown_tell_note(&w, task, tell, note.id);
+}
+
+#[test]
+fn the_ways_on_of_an_answer_in_a_carrier_stay_with_that_paste_after_resume() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    let carrier = w.note(&session, "chief", task, "More for the chief");
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET carried_by = ?1 WHERE id = ?2",
+            [carrier.id, answer.id],
+        )
+        .expect("the answer rides in the carrier");
+    });
+    let begun = w.begin(carrier.id);
+    assert!(begun.carried.iter().any(|row| row.id == answer.id));
+    assert_eq!(
+        w.ledger.tell_pause_ways_on(carrier.id).expect("the paste"),
+        [task]
+    );
+    w.resume(task, "Go on");
+    assert_eq!(
+        w.ledger.tell_pause_ways_on(carrier.id).expect("the paste"),
+        [task],
+        "the already-begun paste does not change with the task"
+    );
+}
+
+#[test]
+fn a_retry_records_the_ways_on_of_the_new_attempt_not_the_earlier_one() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    w.begin(answer.id);
+    assert_eq!(
+        w.ledger.tell_pause_ways_on(answer.id).expect("the paste"),
+        [task]
+    );
+    w.ledger
+        .retry_delivery(answer.id, "the first attempt went back", true)
+        .expect("queued again");
+    w.resume(task, "Go on");
+    w.begin(answer.id);
+    assert!(w
+        .ledger
+        .tell_pause_ways_on(answer.id)
+        .expect("the new paste")
+        .is_empty());
+}
+
+#[test]
 fn an_answer_withdrawn_before_the_note_does_not_make_it_shown() {
     let mut w = world();
     let (task, session, tell) = delivered_tell(&mut w);

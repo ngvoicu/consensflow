@@ -68,7 +68,8 @@ pub(crate) use holds::{
 pub(crate) use paused_answers::{
     answer_to_current_pause, given as paused_answer_given, note as note_paused_answer,
     put_back as put_back_paused_answers, queued as queued_paused_answers,
-    recover_after_lost_answer, tell_on_its_way, withdraw as withdraw_paused_answers,
+    recover_after_lost_answer, tell_on_its_way, tell_pause_ways_on,
+    withdraw as withdraw_paused_answers,
 };
 pub(crate) use pauses::{
     join_pause_note, leave_pause_notes, note_held_for_context, note_pause, note_stall, say_again,

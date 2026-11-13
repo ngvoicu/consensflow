@@ -281,6 +281,12 @@ impl Ledger {
         messages::answer_to_current_pause(&self.store, answer)
     }
 
+    /// The tasks whose tell-answer ways on were included when this paste began. This stays
+    /// true after those tasks move, so the paste can be recognised on its window's screen.
+    pub fn tell_pause_ways_on(&self, paste: i64) -> Result<Vec<i64>, LedgerError> {
+        messages::tell_pause_ways_on(&self.store, paste)
+    }
+
     /// The newest note that gave T-`number`'s requester the answer of its window's turn on a
     /// tell, or is to give it, its words not taken as the result, since the task's last result
     /// to that requester before `result`: what `result`'s paste names. None where there is none.

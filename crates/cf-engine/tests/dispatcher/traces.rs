@@ -269,7 +269,7 @@ const NOTE_TURNS_AND_NO_CAUSE: &str = "the engine asks the pane host what the wi
 const DEPARTED: &[(&str, &str)] = &[
     (
         "leaves the window alone once the chief's tell reaches it, answered or not, until the task goes on",
-        "an answer to a tell while its task is still paused tells the chief both ways on, which Node's answer did not",
+        "an answer to a tell while its task is still paused tells the chief both ways on, and its delivery records that footer so it can be recognised after the task moves; Node's answer did neither",
     ),
     (
         "tells the human why a session's window they opened did not start",

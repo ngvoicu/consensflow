@@ -19,8 +19,9 @@
 //! own paste or carrier may already have begun stays typed: an attempted paste is not proof
 //! that nothing reached the window. If the answer on its way later fails or is withdrawn,
 //! a new typed note keeps the turn's words; the shown note stays shown. While the task is
-//! paused, a missing tell event leaves
-//! its note typed too: without it the answer cannot be proved to have the ways-on footer.
+//! paused, a missing tell event leaves its note typed too: without it the answer cannot be
+//! proved to have the ways-on footer. An older delivered answer with no record that its
+//! paste had the footer leaves the note typed until the task moves.
 //! Once the task moves, a note shown then is marked over at once. A human requester gets the
 //! queued note as before.
 //!
@@ -347,8 +348,10 @@ fn answered_on_board(
 }
 
 /// A paused task's answer must be able to tell the chief both ways on. If an
-/// old ledger cannot prove that this is the tell's pause, retain the typed note
-/// until the task moves. A move itself no longer needs that footer.
+/// old ledger cannot prove that this is the tell's pause, or that an answer delivered by
+/// an older build had the ways on, retain the typed note until the task moves. An answer
+/// explicitly read by the chief in the inbox or thread has reached it on its own terms.
+/// A move itself no longer needs the footer.
 fn show_for_answer(
     store: &Store,
     task: &TaskRow,
@@ -359,9 +362,51 @@ fn show_for_answer(
     let Some(answer) = answered_on_board(store, task, handle, tell)? else {
         return Ok(false);
     };
-    Ok(moving
-        || task.state != "paused"
-        || answer_to_current_pause(store, answer)? == Some(task.number))
+    if moving || task.state != "paused" {
+        return Ok(true);
+    }
+    if answer_to_current_pause(store, answer)? != Some(task.number) {
+        return Ok(false);
+    }
+    let Some(row) = store.message(answer)? else {
+        return Ok(false);
+    };
+    if row.state == "queued" || (row.state == "read" && row.receipt.get("read").is_some()) {
+        return Ok(true);
+    }
+    let paste: i64 = store.db.query_row(
+        "SELECT COALESCE(carried_by, id) FROM message WHERE id = ?",
+        [answer],
+        |row| row.get(0),
+    )?;
+    Ok(tell_pause_ways_on(store, paste)?.contains(&task.number))
+}
+
+/// The tasks whose ways on were appended to this paste when it began. The event belongs to
+/// the carrier when an answer rode in another message. An old event, or one that cannot be
+/// read, proves no footer: do not infer one from the task's state now.
+pub(crate) fn tell_pause_ways_on(store: &Store, paste: i64) -> Result<Vec<i64>, LedgerError> {
+    let data: Option<String> = store
+        .db
+        .query_row(
+            "SELECT data FROM event WHERE kind = 'delivery.begun'
+              AND CASE WHEN json_valid(data) THEN json_extract(data, '$.message') END = ?
+              ORDER BY id DESC LIMIT 1",
+            [paste],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(data
+        .and_then(|data| serde_json::from_str::<serde_json::Value>(&data).ok())
+        .and_then(|data| {
+            data.get("tellPauseWaysOn")
+                .and_then(|v| v.as_array())
+                .cloned()
+        })
+        .unwrap_or_default()
+        .iter()
+        .filter_map(serde_json::Value::as_i64)
+        .collect())
 }
 
 /// The task whose tell this answer is for, when the chief is still deciding

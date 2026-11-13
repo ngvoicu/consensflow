@@ -329,11 +329,29 @@ pub(crate) fn begin_delivery(
          WHERE id = ?",
             [message_id],
         )?;
-        let begun = json!({ "message": message_id, "attempt": message.attempts + 1 });
+        let carried = carried(store, message_id)?;
+        let mut paused = Vec::new();
+        if message.recipient_role == "chief" {
+            for row in std::iter::once(&message).chain(&carried) {
+                if row.kind != "answer" {
+                    continue;
+                }
+                if let Some(number) = super::paused_answers::answer_to_current_pause(store, row.id)?
+                {
+                    if !paused.contains(&number) {
+                        paused.push(number);
+                    }
+                }
+            }
+        }
+        let mut begun = json!({ "message": message_id, "attempt": message.attempts + 1 });
+        if !paused.is_empty() {
+            begun["tellPauseWaysOn"] = json!(paused);
+        }
         store.log(message.project_id, "delivery.begun", looked(begun, look))?;
         Ok(Begun {
             message: known_message(store, message_id)?,
-            carried: carried(store, message_id)?,
+            carried,
         })
     })
 }

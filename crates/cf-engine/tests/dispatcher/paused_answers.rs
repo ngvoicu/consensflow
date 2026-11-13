@@ -211,6 +211,42 @@ fn an_answer_typed_after_its_task_resumes_has_no_paused_task_guidance() {
 }
 
 #[test]
+fn an_answer_s_paused_task_guidance_stays_part_of_the_paste_after_a_resume() {
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    answers_then_goes_on_to_the_end(&context, &told);
+    for _ in 0..5 {
+        context.pass().unwrap();
+    }
+    let pastes = given(&context, "chief");
+    let answer = pastes
+        .iter()
+        .find(|text| text.contains(ANSWER))
+        .expect("the answer was typed");
+    assert!(answer.contains("T-1 is paused."));
+
+    context.resume_task(project, 1, "Go on");
+    context
+        .host
+        .set_snapshot(json!({ "tail": answer.lines().collect::<Vec<_>>() }));
+    context.adapter.with("chief", |agent| agent.failed = true);
+    context.adapter.answer("chief", "Looking at the board");
+    for _ in 0..5 {
+        context.pass().unwrap();
+    }
+    let human = context.id(project, "human");
+    let notices = notes(&context, human);
+    let failure = notices
+        .iter()
+        .find(|notice| notice.starts_with("The chief's turn failed"))
+        .expect("the human is told of the failed turn");
+    assert!(
+        failure.contains("its screen showed nothing of its own"),
+        "the guidance was part of the paste, not the screen's reason: {failure}"
+    );
+}
+
+#[test]
 fn finish_takes_the_final_answer_of_a_paused_task_as_its_result() {
     let context = Context::new();
     let (project, told) = told_at_work(&context);

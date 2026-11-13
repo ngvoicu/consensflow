@@ -97,17 +97,11 @@ impl Dispatcher {
         };
         let cf = self.cf_for(message)?;
         let mut text = delivery_text_beside(message, carried, &cf, again, told_in);
-        let mut paused = Vec::new();
-        for row in std::iter::once(message).chain(carried) {
-            if row.kind != "answer" || row.recipient_role != "chief" {
-                continue;
-            }
-            if let Some(number) = self.seams.ledger.borrow().answer_to_current_pause(row.id)? {
-                if !paused.contains(&number) {
-                    paused.push(number);
-                }
-            }
-        }
+        let paused = if message.kind == "answer" || carried.iter().any(|row| row.kind == "answer") {
+            self.seams.ledger.borrow().tell_pause_ways_on(message.id)?
+        } else {
+            Vec::new()
+        };
         for number in paused {
             text.push_str(&format!(
                 "\n\nT-{number} is paused. If that is the result, take it: {cf} task finish T-{number}. To send it on: {cf} task resume T-{number} \"…\"."
