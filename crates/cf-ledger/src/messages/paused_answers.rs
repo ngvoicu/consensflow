@@ -22,6 +22,8 @@
 //! paused, a missing tell event leaves its note typed too: without it the answer cannot be
 //! proved to have the ways-on footer. An older delivered answer with no record that its
 //! paste had the footer leaves the note typed until the task moves.
+//! If the event order proves the tell's pause ended, a later pause does not hold the old
+//! note back: it is shown as moved on, with its aside already over.
 //! Once the task moves, a note shown then is marked over at once. A human requester gets the
 //! queued note as before.
 //!
@@ -277,8 +279,12 @@ pub(crate) fn note(
         } else {
             Next::Chief
         };
-        // Paused still, or resumed meanwhile with the resume queued behind the window's turn.
-        let then = if task.state == "paused" {
+        let shown = show_for_answer(store, &task, handle, tell, false)?;
+        // An answered tell can belong to a pause that ended before this task was paused
+        // again. Its shown note is over even though the task's current state is paused.
+        // Without an answer, keep the original wording and delivery behavior.
+        let moved = task.state != "paused" || (shown && tell_moved_after(store, &task, tell)?);
+        let then = if !moved {
             Then::Paused(next)
         } else {
             Then::Moved
@@ -291,7 +297,6 @@ pub(crate) fn note(
             words: words.to_owned(),
             then,
         });
-        let shown = show_for_answer(store, &task, handle, tell, false)?;
         let aside = format!("the window answered tell m-{tell}");
         let sent = send(
             store,
@@ -307,7 +312,7 @@ pub(crate) fn note(
         )?;
         // A note first written after the task moved on is already over: it must not
         // put an obsolete pause on the task's line.
-        if shown && requester.role == "chief" && task.state != "paused" {
+        if shown && requester.role == "chief" && moved {
             let at = store.at();
             store.db.execute(
                 "UPDATE message SET receipt = json_set(receipt, '$.over', ?) WHERE id = ?",
@@ -366,7 +371,9 @@ fn show_for_answer(
         return Ok(true);
     }
     if answer_to_current_pause(store, answer)? != Some(task.number) {
-        return Ok(false);
+        // A later pause does not need the ways on for this tell. If the event
+        // history cannot prove the earlier pause ended, keep the typed note.
+        return tell_moved_after(store, task, tell);
     }
     let Some(row) = store.message(answer)? else {
         return Ok(false);
@@ -391,6 +398,23 @@ fn show_for_answer(
         return Ok(true);
     }
     Ok(tell_pause_ways_on(store, paste)?.contains(&task.number))
+}
+
+/// Whether this tell's pause ended, even if the task is paused again now. Event
+/// order distinguishes the two pauses when their timestamps are the same.
+fn tell_moved_after(store: &Store, task: &TaskRow, tell: i64) -> Result<bool, LedgerError> {
+    Ok(store.db.query_row(
+        "SELECT EXISTS (SELECT 1 FROM event sent JOIN event moved
+           ON moved.project_id = sent.project_id AND moved.id > sent.id
+         WHERE sent.project_id = ?1 AND sent.kind = 'message.sent'
+           AND CASE WHEN json_valid(sent.data) THEN json_extract(sent.data, '$.message') END = ?2
+           AND moved.kind IN ('task.state', 'task.assigned')
+           AND CASE WHEN json_valid(moved.data) THEN json_extract(moved.data, '$.task') END = ?3
+           AND CASE WHEN json_valid(moved.data) THEN json_extract(moved.data, '$.from') END = 'paused'
+           AND CASE WHEN json_valid(moved.data) THEN json_extract(moved.data, '$.to') END != 'paused')",
+        params![task.project_id, tell, task.number],
+        |row| row.get(0),
+    )?)
 }
 
 /// The tasks whose ways on were appended to this paste when it began. The event belongs to
@@ -468,12 +492,13 @@ pub(super) fn show_answered(
         }
         let at = store.at();
         let aside = format!("the window answered tell m-{tell}");
-        let receipt = if task.state == "paused" {
+        let moved = moving || task.state != "paused" || tell_moved_after(store, task, tell)?;
+        let receipt = if !moved {
             json!({ SHOWN: aside })
         } else {
             json!({ SHOWN: aside, "over": at })
         };
-        let body = if task.state != "paused" && matches!(said.then, Then::Paused(_)) {
+        let body = if moved && matches!(said.then, Then::Paused(_)) {
             render(&Answered {
                 then: Then::Moved,
                 ..said

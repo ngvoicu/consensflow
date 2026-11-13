@@ -753,6 +753,36 @@ fn another_pause_in_the_same_millisecond_is_not_the_pause_of_an_earlier_tell() {
 }
 
 #[test]
+fn an_answered_tell_from_a_previous_pause_is_shown_even_if_the_task_paused_again() {
+    for answer_first in [false, true] {
+        let mut w = frozen_world();
+        let (task, session, tell) = delivered_tell(&mut w);
+        w.resume(task, "Go on");
+        w.pause(task);
+        let earlier_answer = answer_first.then(|| answer_tell(&mut w, &session, tell));
+        let note = note_of_tell(&mut w, task, &session, tell);
+        if earlier_answer.is_none() {
+            answer_tell(&mut w, &session, tell);
+        }
+        assert_shown_tell_note(&w, task, tell, note.id);
+        let shown = w.message(note.id);
+        assert!(shown.body.contains("has moved on since"), "{shown:?}");
+        assert!(shown.receipt.get("over").is_some(), "{shown:?}");
+    }
+}
+
+#[test]
+fn an_unanswered_tell_from_a_previous_pause_is_still_queued_when_the_task_paused_again() {
+    let mut w = frozen_world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    w.resume(task, "Go on");
+    w.pause(task);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    assert_eq!(note.state, "queued");
+    assert!(note.receipt.get(SHOWN).is_none());
+}
+
+#[test]
 fn an_answer_whose_tells_pause_cannot_be_proved_keeps_the_note_typed_until_the_task_moves() {
     for note_first in [false, true] {
         let mut w = world();
