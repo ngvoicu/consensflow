@@ -2,11 +2,71 @@
 
 use super::Ledger;
 use crate::{
-    staff, Candidate, LedgerError, MemberEdit, MemberView, NewMember, ParticipantView, ProjectView,
-    RemovedMember, StaffMember,
+    staff, Candidate, HoldKind, LedgerError, MemberEdit, MemberView, NewMember, ParticipantView,
+    ProjectView, RemovedMember, StaffMember,
 };
 
 impl Ledger {
+    /// Add a dedicated backup for a member.
+    pub fn add_backup(
+        &mut self,
+        project: i64,
+        member: &str,
+        backup: &NewMember,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::add_backup(&mut self.store, project, member, backup)
+    }
+
+    /// Replace a member's backup, leaving the old one's sessions and tasks in place.
+    pub fn change_backup(
+        &mut self,
+        project: i64,
+        member: &str,
+        backup: &NewMember,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::change_backup(&mut self.store, project, member, backup)
+    }
+
+    /// Remove a member's backup.
+    pub fn remove_backup(
+        &mut self,
+        project: i64,
+        member: &str,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::remove_backup(&mut self.store, project, member)
+    }
+
+    /// Put a staff row on Vacation. `unopened` identifies its sessions the caller
+    /// has proved have no window or open in flight, while holding its engine step.
+    pub fn send_on_vacation(
+        &mut self,
+        project: i64,
+        member: &str,
+        unopened: &[i64],
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::send_on_vacation(&mut self.store, project, member, unopened)
+    }
+
+    /// Bring a staff row back from Vacation without changing its quota hold.
+    pub fn bring_back(
+        &mut self,
+        project: i64,
+        member: &str,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::return_from_vacation(&mut self.store, project, member)
+    }
+
+    /// Mark a member out for a typed reason, kept with its reset.
+    pub fn mark_out_with_kind(
+        &mut self,
+        participant: i64,
+        until: &str,
+        reason: &str,
+        kind: HoldKind,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::mark_out_kind(&mut self.store, participant, until, reason, Some(kind))
+    }
+
     /// A member joins the staff, named by its model, or one that left on the same
     /// harness, model and effort rejoins it in the roles and tier given now.
     pub fn add_member(

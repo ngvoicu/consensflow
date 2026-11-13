@@ -531,14 +531,14 @@ replace = '''
 [[plant]]
 name = "harness models: Switch chief leaves the mark on a chief that needs an edit"
 meant = "a_chief_that_needs_an_edit_with_no_record_waits_closed_for_switch_chief"
-runs = ["hm-engine-chief-models"]
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "chief_models::a_chief_that_needs_an_edit_with_no_record_waits_closed_for_switch_chief"]]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/chief.rs"
 find = '''
-           gone_model = NULL, out_until = NULL, needs_edit = 0,'''
+           gone_model = NULL, out_until = NULL, out_kind = NULL, needs_edit = 0,'''
 replace = '''
-           gone_model = NULL, out_until = NULL,'''
+           gone_model = NULL, out_until = NULL, out_kind = NULL,'''
 
 [[plant]]
 name = "harness models: a chief's card says nothing of the model it needs"

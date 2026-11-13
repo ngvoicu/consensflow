@@ -5,6 +5,7 @@ use cf_proto::ledger::ParticipantView;
 use rusqlite::params;
 use serde_json::json;
 
+use super::HoldKind;
 use crate::model::{self, quoted, LedgerError};
 use crate::store::Store;
 use crate::views::participant_view;
@@ -19,6 +20,27 @@ pub(crate) fn mark_out(
     participant_id: i64,
     until: &str,
     reason: &str,
+) -> Result<ParticipantView, LedgerError> {
+    // Compatibility with the current engine, whose four fixed reasons are its
+    // existing interface. An unfamiliar reason is not guessed to be quota.
+    let kind = match reason {
+        "out of quota" => Some(HoldKind::Quota),
+        "account unavailable" => Some(HoldKind::Account),
+        "model busy" => Some(HoldKind::Busy),
+        "model moved" => Some(HoldKind::Moved),
+        _ => None,
+    };
+    mark_out_kind(store, participant_id, until, reason, kind)
+}
+
+/// Keep the kind with the end which wins; a shorter, later report must not
+/// relabel the hold that is still in force.
+pub(crate) fn mark_out_kind(
+    store: &mut Store,
+    participant_id: i64,
+    until: &str,
+    reason: &str,
+    kind: Option<HoldKind>,
 ) -> Result<ParticipantView, LedgerError> {
     // Kept as a store keeps a time, however it was written.
     let (Some(reset), Some(until)) = (time::parse(until), time::canonical(until)) else {
@@ -35,6 +57,13 @@ pub(crate) fn mark_out(
         let out_until = member.out_until.as_deref().and_then(time::parse);
         let out = matches!((out_until, time::parse(&now)), (Some(until), Some(now)) if until > now);
         if out && out_until.is_some_and(|until| until >= reset) {
+            if out_until == Some(reset) && member.out_kind.is_none() && kind.is_some() {
+                store.db.execute(
+                    "UPDATE participant SET out_kind = ? WHERE id = ?",
+                    params![kind.map(HoldKind::as_str), member.id],
+                )?;
+                return participant_view(&store.participant_row(member.id)?);
+            }
             return participant_view(&member);
         }
         let since = if out {
@@ -43,8 +72,8 @@ pub(crate) fn mark_out(
             Some(now)
         };
         store.db.execute(
-            "UPDATE participant SET out_until = ?, out_since = ? WHERE id = ?",
-            params![until, since, member.id],
+            "UPDATE participant SET out_until = ?, out_since = ?, out_kind = ? WHERE id = ?",
+            params![until, since, kind.map(HoldKind::as_str), member.id],
         )?;
         store.log(
             member.project_id,
@@ -76,7 +105,7 @@ pub(crate) fn mark_back(
             return participant_view(&member);
         }
         store.db.execute(
-            "UPDATE participant SET out_until = NULL, out_since = ? WHERE id = ?",
+            "UPDATE participant SET out_until = NULL, out_since = ?, out_kind = NULL WHERE id = ?",
             params![now, member.id],
         )?;
         store.db.execute(

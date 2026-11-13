@@ -1,0 +1,203 @@
+# BKV-02: the ledger protects backup links and Vacation independently of the picker.
+# Every name contains `bkv ledger`, so one turn runs this table.
+
+[run]
+bkv-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation"]
+
+[[plant]]
+name = "bkv ledger: inserting a backup skips link validation"
+meant = "a_backup_insert_cannot_link_across_projects_or_to_a_chief"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_backup_insert_cannot_link_across_projects_or_to_a_chief"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0038.sql"
+find = '''CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL'''
+replace = '''CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL AND 0'''
+
+[[plant]]
+name = "bkv ledger: a member can have two live backups"
+meant = "a_live_member_cannot_have_two_live_backups"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_live_member_cannot_have_two_live_backups"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0038.sql"
+find = "CREATE UNIQUE INDEX participant_one_live_backup"
+replace = "CREATE INDEX participant_one_live_backup"
+
+[[plant]]
+name = "bkv ledger: a backup can cross projects"
+meant = "a_backup_must_belong_to_the_same_project_as_a_live_member"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_backup_must_belong_to_the_same_project_as_a_live_member"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0038.sql"
+find = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+BEGIN
+  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
+    OR NEW.id = NEW.backup_of
+    OR NOT EXISTS (
+      SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
+        AND owner.project_id = NEW.project_id AND owner.member_id IS NULL'''
+replace = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+BEGIN
+  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
+    OR NEW.id = NEW.backup_of
+    OR NOT EXISTS (
+      SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
+        AND owner.member_id IS NULL'''
+
+[[plant]]
+name = "bkv ledger: a member can back itself"
+meant = "a_backup_cannot_back_itself_another_backup_or_form_a_ring"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_backup_cannot_back_itself_another_backup_or_form_a_ring"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0038.sql"
+find = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+BEGIN
+  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
+    OR NEW.id = NEW.backup_of'''
+replace = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+BEGIN
+  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')'''
+
+[[plant]]
+name = "bkv ledger: a backup can have a backup"
+meant = "a_backup_cannot_back_itself_another_backup_or_form_a_ring"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_backup_cannot_back_itself_another_backup_or_form_a_ring"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0038.sql"
+find = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+BEGIN
+  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
+    OR NEW.id = NEW.backup_of
+    OR NOT EXISTS (
+      SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
+        AND owner.project_id = NEW.project_id AND owner.member_id IS NULL
+        AND owner.role NOT IN ('human', 'chief') AND owner.left_at IS NULL
+        AND owner.backup_of IS NULL'''
+replace = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+BEGIN
+  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
+    OR NEW.id = NEW.backup_of
+    OR NOT EXISTS (
+      SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
+        AND owner.project_id = NEW.project_id AND owner.member_id IS NULL
+        AND owner.role NOT IN ('human', 'chief') AND owner.left_at IS NULL'''
+
+[[plant]]
+name = "bkv ledger: a chief can have a backup"
+meant = "the_chief_and_a_session_cannot_be_backups_or_have_backups"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "the_chief_and_a_session_cannot_be_backups_or_have_backups"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0038.sql"
+find = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+BEGIN
+  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
+    OR NEW.id = NEW.backup_of
+    OR NOT EXISTS (
+      SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
+        AND owner.project_id = NEW.project_id AND owner.member_id IS NULL
+        AND owner.role NOT IN ('human', 'chief') AND owner.left_at IS NULL'''
+replace = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+BEGIN
+  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')
+    OR NEW.id = NEW.backup_of
+    OR NOT EXISTS (
+      SELECT 1 FROM participant owner WHERE owner.id = NEW.backup_of
+        AND owner.project_id = NEW.project_id AND owner.member_id IS NULL
+        AND owner.left_at IS NULL'''
+
+[[plant]]
+name = "bkv ledger: a session can be a backup"
+meant = "the_chief_and_a_session_cannot_be_backups_or_have_backups"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "the_chief_and_a_session_cannot_be_backups_or_have_backups"]]
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0038.sql"
+find = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+BEGIN
+  SELECT CASE WHEN NEW.member_id IS NOT NULL OR NEW.role IN ('human', 'chief')'''
+replace = '''CREATE TRIGGER participant_backup_update
+BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
+WHEN NEW.backup_of IS NOT NULL AND NEW.left_at IS NULL
+BEGIN
+  SELECT CASE WHEN NEW.role IN ('human', 'chief')'''
+
+[[plant]]
+name = "bkv ledger: adding a backup creates an independent member"
+meant = "add_backup_keeps_a_separate_row_even_when_it_runs_the_same_model"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "add_backup_keeps_a_separate_row_even_when_it_runs_the_same_model"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/backup.rs"
+find = "joining.backup_of = Some(owner.id);"
+replace = "joining.backup_of = None;"
+
+[[plant]]
+name = "bkv ledger: a backup holds its tier by itself"
+meant = "a_backup_does_not_create_a_tier_but_a_primary_on_vacation_still_holds_its_tier"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_backup_does_not_create_a_tier_but_a_primary_on_vacation_still_holds_its_tier"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/pools.rs"
+find = "         AND p.backup_of IS NULL\n         AND EXISTS"
+replace = "         AND EXISTS"
+
+[[plant]]
+name = "bkv ledger: a member leaves its backup behind"
+meant = "a_member_leaves_with_its_backup"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_member_leaves_with_its_backup"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "if let Some((id, backup_handle)) = backup {"
+replace = "if let Some((id, backup_handle)) = backup.filter(|_| false) {"
+
+[[plant]]
+name = "bkv ledger: Vacation never marks the member"
+meant = "vacation_and_return_do_not_clear_or_shorten_a_quota_hold"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "vacation_and_return_do_not_clear_or_shorten_a_quota_hold"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/vacation.rs"
+find = '"UPDATE participant SET vacation_since = ? WHERE id = ?"'
+replace = '"UPDATE participant SET vacation_since = NULL WHERE id = ? AND ? IS NOT NULL"'
+
+[[plant]]
+name = "bkv ledger: Vacation accepts fresh assignments"
+meant = "vacation_refuses_a_new_assignment_without_changing_the_open_task"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "vacation_refuses_a_new_assignment_without_changing_the_open_task"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = "if member.vacation_since.is_some() {"
+replace = "if member.vacation_since.is_some() && false {"
+
+[[plant]]
+name = "bkv ledger: Vacation leaves an unopened fresh task assigned"
+meant = "vacation_returns_only_a_confirmed_unopened_windows_new_task_to_the_board"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "vacation_returns_only_a_confirmed_unopened_windows_new_task_to_the_board"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/vacation.rs"
+find = "if sessions.contains(&session) {"
+replace = "if sessions.contains(&session) && false {"
+
+[[plant]]
+name = "bkv ledger: a busy hold loses its kind across restart"
+meant = "a_typed_busy_hold_survives_reopening_and_is_cleared_only_with_the_hold"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_typed_busy_hold_survives_reopening_and_is_cleared_only_with_the_hold"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = "params![until, since, kind.map(HoldKind::as_str), member.id],"
+replace = "params![until, since, None::<&str>, member.id],"

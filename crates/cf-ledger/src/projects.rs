@@ -11,6 +11,7 @@ mod advisor_tool;
 mod compaction;
 mod describing;
 mod prompt_suggestion;
+mod staff_copy;
 mod staff_rules;
 
 use cf_base::json::from_slice_lossy;
@@ -29,6 +30,7 @@ pub use describing::parse_description;
 pub(crate) use describing::{describe_project, rename_project};
 pub use prompt_suggestion::parse_prompt_suggestion;
 pub(crate) use prompt_suggestion::set_prompt_suggestion;
+pub(crate) use staff_copy::create_project_with_staff;
 pub(crate) use staff_rules::set_staff_rules;
 pub use staff_rules::{parse_staff_rules, STAFF_RULES_MAX_BYTES, STAFF_RULES_MAX_LINES};
 

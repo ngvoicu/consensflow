@@ -8,18 +8,20 @@ use std::collections::{HashMap, HashSet};
 
 use cf_base::text::utf16_len;
 use cf_proto::ledger::{
-    Board, Cut, Lane, LatestMessages, LatestTranscript, MessageView, Resume, TaskCard,
-    TaskThatFits, TaskView, TranscriptItem,
+    Cut, Lane, LatestMessages, LatestTranscript, MessageView, Resume, TaskCard, TaskThatFits,
+    TaskView, TranscriptItem,
 };
 use rusqlite::params;
 use serde::Serialize;
 
+use crate::board::StaffMark;
 use crate::conversations::{transcript, TRANSCRIPT_ITEM_MAX};
 use crate::model::{cut, title_of, LedgerError, FINISHED_TASK_STATES};
 use crate::projects::project;
 use crate::store::Store;
 use crate::tasks::task;
 use crate::views::{message_view, task_view, MESSAGE_SELECT, TASK_SELECT};
+use crate::{Board, HoldKind};
 
 /// How much of a list the page reads at once (the human's notes, what a
 /// window wrote), as JSON: half the 1 MiB frame the app's bridge carries
@@ -222,6 +224,25 @@ pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError
     } else {
         None
     };
+    let marks = store
+        .db
+        .prepare(
+            "SELECT id, backup_of, vacation_since, out_kind FROM participant
+         WHERE project_id = ? AND left_at IS NULL
+           AND (backup_of IS NOT NULL OR vacation_since IS NOT NULL OR out_kind IS NOT NULL)",
+        )?
+        .query_map([project_id], |row| {
+            let kind: Option<String> = row.get("out_kind")?;
+            Ok((
+                row.get("id")?,
+                StaffMark {
+                    backup_of: row.get("backup_of")?,
+                    vacation_since: row.get("vacation_since")?,
+                    out_kind: HoldKind::read(kind.as_deref()),
+                },
+            ))
+        })?
+        .collect::<rusqlite::Result<HashMap<_, _>>>()?;
     Ok(Board {
         // Every task no lane has; one given by name waits in its own lane.
         open: cards
@@ -245,6 +266,7 @@ pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError
         gated,
         held,
         resume,
+        marks,
     })
 }
 

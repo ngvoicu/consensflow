@@ -7,6 +7,14 @@ use crate::{
 };
 
 impl Ledger {
+    /// Open from a JSON staff carrying source row ids, backup links and Vacation.
+    pub fn create_project_with_staff(
+        &mut self,
+        request: &serde_json::Value,
+    ) -> Result<ProjectView, LedgerError> {
+        projects::create_project_with_staff(&mut self.store, request)
+    }
+
     /// A project with its human, its chief and its staff.
     pub fn create_project(&mut self, request: &NewProject) -> Result<ProjectView, LedgerError> {
         projects::create_project(&mut self.store, request)
