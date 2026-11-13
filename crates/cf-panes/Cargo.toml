@@ -15,7 +15,7 @@ publish = false
 # test's own panics and is not sent). The app turns it on for its tests alone:
 # it must stay off in what ships.
 [features]
-test-support = ["dep:cf-process"]
+test-support = ["dep:cf-process", "cf-base/test-support"]
 
 # The helper's own tests (tests/headless.rs) start a sentinel too, and start the helper holding
 # only its streams.
