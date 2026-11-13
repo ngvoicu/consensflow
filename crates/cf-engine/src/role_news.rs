@@ -290,11 +290,17 @@ impl Dispatcher {
             change.note()
         };
         let body = if told.parts.own_hands != wanted.own_hands {
-            let first = crate::roles::news::own_hands_said(
+            let first = match crate::roles::news::own_hands_said(
                 wanted.own_hands,
-                &role.instructions,
+                &self.seams.roles.cf(participant),
                 now.as_ref(),
-            );
+            ) {
+                Ok(first) => first,
+                Err(cause) => {
+                    let cause = EngineError::said("no-role-text", cause.to_string());
+                    return self.news_refused(project, participant, record, wanted, &cause);
+                }
+            };
             format!(
                 "{first}\n\n{}",
                 other.unwrap_or_else(|| crate::roles::news::CONTEXT.to_owned())

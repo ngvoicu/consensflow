@@ -14,6 +14,7 @@
 //! staff's rules change is told in a note of the section that changed (`news`, and
 //! `role_news` for when).
 
+mod chief;
 mod member;
 pub(crate) mod news;
 mod shells;
@@ -30,10 +31,6 @@ use cf_proto::ledger::ProjectView;
 
 pub use skill::{team_table, work_tier_list};
 pub use specs::ProjectSpecs;
-
-/// `skill/core/chief.md`.
-const CHIEF: &str = include_str!("../../../skill/core/chief.md");
-const CHIEF_OWN_HANDS: &str = include_str!("../../../skill/core/chief-own-hands.md");
 
 /// Evals only: a chief measured without ConsensFlow's card gets this file's
 /// text instead of all of it (tiers, staff and its cf too), so nothing tells
@@ -65,6 +62,8 @@ pub enum RoleError {
     MissingSlot { role: String, slot: String },
     #[error("shells.md has no {slot} for the {shell} shell")]
     MissingShell { shell: String, slot: String },
+    #[error("the chief's role has no marked part {0}")]
+    MissingChiefPart(String),
     /// Node threw a TypeError reading a tier that is none of the four.
     #[error("{member} has no work tier to name in the staff table")]
     NoWorkTier { member: String },
@@ -153,22 +152,14 @@ pub fn role_instructions_for(
         return Ok(String::from_utf8_lossy(&read_file_sync(&card)?).into_owned());
     }
     // The `cf` goes in last, so nothing in a path is read as a slot.
-    let chief = if own_hands { CHIEF_OWN_HANDS } else { CHIEF }
+    let chief = chief::text(own_hands)?
         .replacen(
             "{{chief_input}}",
             shells::paragraph(cf.shell(), "chief_input")?,
             1,
         )
         .replacen("{{tiers}}", &work_tier_list(), 1)
-        .replacen(
-            "{{staff}}",
-            &if own_hands && staff.is_empty() {
-                "Nobody is on the staff yet: only the human adds members, in the app.".to_owned()
-            } else {
-                team_table(staff)?
-            },
-            1,
-        )
+        .replacen("{{staff}}", &team_table(staff)?, 1)
         .replace("{{cf}}", cf.as_str());
     let specs = specs.map_or_else(String::new, |specs| {
         if own_hands {

@@ -12,9 +12,10 @@
 //! ([`OPENING`](crate::role_change::OPENING)): the window says in one line that it has
 //! it, and waits for the next message.
 
+use cf_proto::cf_word::CfWord;
 use cf_proto::specs::SpecsSetting;
 
-use super::{with_staff_rules, ProjectSpecs};
+use super::{chief, with_staff_rules, ProjectSpecs, RoleError};
 
 /// What a note that tells a running chief of a change ends with.
 pub(crate) const CONTEXT: &str = "This is context, not a task: say in one short line that you have it, and wait for the next message.";
@@ -109,32 +110,23 @@ fn specs_said(
 /// The changed parts of the role, without the staff table or the person's rules.
 pub(crate) fn own_hands_said(
     on: bool,
-    instructions: &str,
+    cf: &CfWord,
     specs: Option<&ProjectSpecs<'_>>,
-) -> String {
+) -> Result<String, RoleError> {
     let intro = if on {
         "The person turned \"Do with your own hands\" on: do the work yourself in the project's folder; put work on the board only when the person explicitly asks."
     } else {
         "The person turned \"Do with your own hands\" off: return to your ordinary chief role and put work on the board as your instructions say."
     };
-    let duty = instructions
-        .split_once("## What you do\n")
-        .and_then(|(_, after)| {
-            after
-                .split_once("\n## What you never do\n")
-                .map(|(before, _)| before)
-        })
-        .unwrap_or("");
-    let board = instructions
-        .split_once("## What you never do\n")
-        .and_then(|(_, after)| {
-            after
-                .split_once("\n## The staff\n")
-                .map(|(before, _)| before)
-        })
-        .unwrap_or("");
-    let specs = specs.map_or_else(String::new, |specs| specs.section_for(on));
-    format!("{intro}\n\nThis replaces the earlier directions on how you work and use the board:\n\n## What you do\n{duty}\n\n## What you never do\n{board}\n{specs}")
+    let part = |name| Ok::<_, RoleError>(chief::part(on, name)?.replace("{{cf}}", cf.as_str()));
+    let description = part("description")?;
+    let opening = part("opening")?;
+    let duty = part("duty")?;
+    let never = part("never")?;
+    let specs = specs.map_or_else(String::new, |specs| {
+        format!("\n\n## This project's specs\n\n{}", specs.work_for(on))
+    });
+    Ok(format!("{intro}\n\nThese replace the earlier directions on how you work and use the board:\n\n{description}\n\n{opening}\n\n## What you do\n\n{duty}\n\n## What you never do\n\n{never}{specs}"))
 }
 
 /// What the human changed of the project's rules for its staff.

@@ -173,7 +173,10 @@ fn own_hands_selects_the_chiefs_text_and_keeps_the_members_text() {
     let member = texts.instructions(&worker, &project, None).unwrap();
     project.own_hands = true;
     let own = texts.instructions(&chief, &project, None).unwrap();
-    assert!(own.contains("only when the human explicitly asks"), "{own}");
+    assert!(
+        own.contains("is for work the human explicitly asks you to put there"),
+        "{own}"
+    );
     assert!(own.contains("project's own folder"), "{own}");
     assert!(
         !own.contains("You do not change the project yourself"),

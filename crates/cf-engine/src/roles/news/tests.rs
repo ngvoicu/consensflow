@@ -22,6 +22,55 @@ fn given<'a>(folder: &'a str, variant: Variant, skill: &'a str) -> ProjectSpecs<
 const SKILL: &str = "/home/me/.consensflow/integrations/specmint/claude/core-0123abcd/.claude/skills/specmint-core/SKILL.md";
 
 #[test]
+fn own_hands_notice_gives_only_the_changed_parts() {
+    use cf_base::env::Env;
+    use cf_proto::cf_word::CfWord;
+    let specs = given("plans", Variant::Core, SKILL);
+    for on in [true, false] {
+        for chosen in [None, Some(&specs)] {
+            let instructions = crate::roles::role_instructions_for(
+                &Env::default(),
+                "chief",
+                &[],
+                &CfWord::bare(),
+                chosen,
+                on,
+            )
+            .unwrap();
+            let note = own_hands_said(on, &CfWord::bare(), chosen).unwrap();
+            let description = instructions
+                .lines()
+                .find(|line| line.starts_with("description: "))
+                .unwrap();
+            let opening = instructions
+                .split_once("# ConsensFlow Chief of Staff\n\n")
+                .unwrap()
+                .1
+                .split_once("\n\n")
+                .unwrap()
+                .0;
+            let never = instructions
+                .split_once("## What you never do\n\n")
+                .unwrap()
+                .1
+                .split_once("\n## ")
+                .unwrap()
+                .0;
+            assert!(note.contains(description));
+            assert!(note.contains(opening));
+            assert!(note.contains(never.trim_end()));
+            assert!(note.contains("## What you do"));
+            assert!(note.contains("## What you never do"));
+            assert_eq!(note.contains("## This project's specs"), chosen.is_some());
+            assert!(!note.contains("1. The human works with you here"));
+            assert!(!note.contains("## Reviews"));
+            assert!(!note.contains("## The staff"));
+            assert!(note.lines().count() < 80, "{} lines", note.lines().count());
+        }
+    }
+}
+
+#[test]
 fn own_hands_news_has_each_changed_section_and_fits_in_one_piece() {
     use cf_base::env::Env;
     use cf_proto::cf_word::{CfWord, Shell};
@@ -47,7 +96,7 @@ fn own_hands_news_has_each_changed_section_and_fits_in_one_piece() {
                 on,
             )
             .unwrap();
-            let note = own_hands_said(on, &instructions, Some(&specs));
+            let note = own_hands_said(on, &cf, Some(&specs)).unwrap();
             assert!(note.starts_with(if on {
                 "The person turned \"Do with your own hands\" on:"
             } else {
@@ -58,15 +107,16 @@ fn own_hands_news_has_each_changed_section_and_fits_in_one_piece() {
                 .split_once("## What you do\n")
                 .unwrap()
                 .1
-                .split_once("\n## What you never do\n")
+                .split_once("\n1. ")
                 .unwrap()
                 .0;
             assert!(
-                note.contains(whole_duty),
-                "the whole changed duty replaces the earlier one"
+                note.contains(whole_duty.trim_end()),
+                "the changed duty replaces the earlier one"
             );
-            assert!(note.contains("## Reviews"));
+            assert!(!note.contains("## Reviews"));
             assert!(note.contains("## This project's specs"));
+            assert!(note.contains(&specs.work_for(on)));
             assert!(!note.contains("## The staff"));
             assert!(!note.contains("## The project's rules for the staff"));
             let complete = format!("{note}\n\n{CONTEXT}");

@@ -5,6 +5,73 @@ use cf_proto::{cf_word::CfWord, specs::Variant};
 use super::support::{assert_same_text, GOLDEN};
 
 #[test]
+fn own_hands_shares_the_commands_and_board_instructions_word_for_word() {
+    let env = Env::default();
+    let cf = CfWord::bare();
+    let off = role_instructions_for(&env, "chief", &[], &cf, None, false).unwrap();
+    let on = role_instructions_for(&env, "chief", &[], &cf, None, true).unwrap();
+    for (start, end) in [
+        ("## Your commands\n", "## What you do\n"),
+        ("1. The human works with you here", "## What you never do\n"),
+        ("## Choose the role, not the member\n", "## The staff\n"),
+    ] {
+        let section = |text: &str| {
+            text.split_once(start)
+                .unwrap()
+                .1
+                .split_once(end)
+                .unwrap()
+                .0
+                .to_owned()
+        };
+        assert_eq!(section(&on), section(&off), "shared: {start}");
+    }
+    let continuation = "## The one exception: continuing a window\n";
+    assert_eq!(
+        on.split_once(continuation).unwrap().1,
+        off.split_once(continuation).unwrap().1,
+        "the continuation, reviews, tiers and staff stay shared"
+    );
+    assert!(on.contains("Everything below about the board (tasks, tiers, reviews, follow-ups) is for work the human explicitly asks you to put there: add no task, review or follow-up otherwise."));
+}
+
+#[test]
+fn own_hands_shares_the_specs_section_except_for_who_does_the_work() {
+    let specs = ProjectSpecs {
+        variant: Variant::Core,
+        folder: "plans",
+        skill: "/skills/specmint/SKILL.md",
+    };
+    let role = |on| {
+        role_instructions_for(
+            &Env::default(),
+            "chief",
+            &[],
+            &CfWord::bare(),
+            Some(&specs),
+            on,
+        )
+        .unwrap()
+    };
+    let off = role(false);
+    let on = role(true);
+    let section = |text: &str| {
+        text.split_once("## This project's specs\n\n")
+            .unwrap()
+            .1
+            .split("\n\n")
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let off = section(&off);
+    let on = section(&on);
+    assert_eq!(off.len(), 4);
+    assert_eq!(on.len(), off.len());
+    assert_eq!((&on[0], &on[1], &on[3]), (&off[0], &off[1], &off[3]));
+    assert_ne!(on[2], off[2]);
+}
+
+#[test]
 fn small_board_work_does_not_require_a_spec_with_own_hands() {
     let specs = ProjectSpecs {
         variant: Variant::Core,
@@ -20,12 +87,14 @@ fn small_board_work_does_not_require_a_spec_with_own_hands() {
         true,
     )
     .unwrap();
+    assert!(role.contains("Everything below about the board (tasks, tiers, reviews, follow-ups) is for work the human explicitly asks you to put there: add no task, review or follow-up otherwise."));
     let section = role.split_once("## This project's specs").unwrap().1;
     assert!(
         section.contains("Use a spec when the human asks for one, or when an ask is big enough")
     );
-    assert!(section.contains("For work with a spec that the human asks to put on the board"));
-    assert!(!section.contains("For work the human asks to put on the board, write the spec first"));
+    assert!(section.contains("A small ask is no spec"));
+    assert!(section
+        .contains("What Specmint calls research, a subagent or implementation you do yourself"));
 }
 
 #[test]
@@ -58,7 +127,7 @@ fn own_hands_changes_only_the_chief_and_specs_follow_the_switch() {
             assert_same_text(text, GOLDEN["ownHandsChief"][&key].as_str().unwrap(), &key);
         }
         for words in [
-            "only when the human explicitly asks",
+            "is for work the human explicitly asks you to put there",
             "project's own folder",
             "no worktree or new branch",
             "Commit or push when",
@@ -71,7 +140,6 @@ fn own_hands_changes_only_the_chief_and_specs_follow_the_switch() {
         }
         assert!(!own.contains("You do not change the project yourself"));
         assert!(!own.contains("Every change is a task"));
-        assert!(!own.contains("Ask them here in your terminal for the members your work needs"));
         if choice.is_some() {
             assert!(own.contains(
                 "What Specmint calls research, a subagent or implementation you do yourself"
