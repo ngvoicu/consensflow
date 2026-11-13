@@ -746,6 +746,9 @@ pub(crate) fn cancel_message(
         )?;
         if let Some(task) = message_task(store, message_id)? {
             release_carried(store, task.id)?;
+            if let ("answer", Some(tell)) = (message.kind.as_str(), message.reply_to) {
+                super::paused_answers::recover_after_lost_answer(store, &task, Some(tell), false)?;
+            }
         }
         known_message(store, message_id)
     })
@@ -931,6 +934,14 @@ pub(crate) fn give_up_delivery(
             fail_for(store, &message, &task)?;
             if message.kind == "answer" {
                 tell_failed_answer(store, &message, &task, reason)?;
+                if let Some(tell) = message.reply_to {
+                    super::paused_answers::recover_after_lost_answer(
+                        store,
+                        &task,
+                        Some(tell),
+                        false,
+                    )?;
+                }
             }
         }
         Ok((known_message(store, message_id)?, GivenUp::Failed))

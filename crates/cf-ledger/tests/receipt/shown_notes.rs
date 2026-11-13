@@ -206,6 +206,118 @@ fn an_answer_withdrawn_before_the_note_does_not_make_it_shown() {
 }
 
 #[test]
+fn a_shown_note_has_a_typed_fallback_if_its_board_answers_delivery_fails() {
+    for moved in [false, true] {
+        let mut w = world();
+        let (task, session, tell) = delivered_tell(&mut w);
+        let answer = answer_tell(&mut w, &session, tell);
+        let note = note_of_tell(&mut w, task, &session, tell);
+        assert_shown_tell_note(&w, task, tell, note.id);
+        if moved {
+            w.resume(task, "Go on");
+        }
+        w.begin(answer.id);
+        w.ledger
+            .give_up_delivery(answer.id, "the chief's window could not receive it")
+            .expect("the answer failed");
+        assert_eq!(w.message(answer.id).state, "failed");
+        assert_shown_tell_note(&w, task, tell, note.id);
+        let fallback = w.next("chief").expect("the chief gets the turn's words");
+        assert_ne!(fallback, note.id, "the shown note stays shown");
+        let fallback = w.message(fallback);
+        assert!(fallback.body.contains("The parser is done."));
+        if moved {
+            assert!(fallback.body.contains("has moved on since"));
+        } else {
+            assert!(fallback.body.contains("cf task finish T-1"));
+            assert!(fallback.body.contains("cf task resume T-1"));
+        }
+    }
+}
+
+#[test]
+fn a_shown_note_has_a_typed_fallback_if_its_queued_board_answer_is_withdrawn() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    w.ledger
+        .cancel_message(answer.id, "the answer was withdrawn")
+        .expect("withdrawn");
+    assert_shown_tell_note(&w, task, tell, note.id);
+    let fallback = w.next("chief").expect("the chief gets the turn's words");
+    assert_ne!(fallback, note.id);
+    assert!(w.message(fallback).body.contains("The parser is done."));
+}
+
+#[test]
+fn a_task_failing_after_its_answer_was_shown_keeps_a_typed_fallback() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    w.resume(task, "Go on");
+    w.ledger
+        .fail_task(w.project, task, "the resumed turn failed")
+        .expect("the task failed");
+    assert_eq!(w.message(answer.id).state, "cancelled");
+    assert_shown_tell_note(&w, task, tell, note.id);
+    let fallback = w.next("chief").expect("the chief gets the turn's words");
+    assert_ne!(fallback, note.id);
+    let fallback = w.message(fallback);
+    assert!(fallback.body.contains("The parser is done."));
+    assert!(fallback.body.contains("has moved on since"));
+}
+
+#[test]
+fn another_board_answer_shows_an_unpasted_fallback_and_another_failure_recovers_it() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let first = answer_tell(&mut w, &session, tell);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    w.ledger
+        .cancel_message(first.id, "the answer was withdrawn")
+        .expect("withdrawn");
+    let fallback = w.next("chief").expect("the first fallback");
+    let second = answer_tell(&mut w, &session, tell);
+    assert_shown_tell_note(&w, task, tell, note.id);
+    assert_shown_tell_note(&w, task, tell, fallback);
+    assert_eq!(w.next("chief"), Some(second.id));
+    w.ledger
+        .cancel_message(second.id, "the other answer was withdrawn")
+        .expect("withdrawn");
+    let next = w.next("chief").expect("another typed fallback");
+    assert_ne!(next, fallback);
+    assert!(w.message(next).body.contains("The parser is done."));
+    assert_shown_tell_note(&w, task, tell, fallback);
+}
+
+#[test]
+fn a_finish_that_took_the_shown_words_needs_no_fallback_for_a_lost_answer() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    let note = note_of_tell(&mut w, task, &session, tell);
+    w.ledger
+        .record_finished(w.project, task, "The parser is done.", (0, 0))
+        .expect("the chief took its words");
+    w.ledger
+        .cancel_message(answer.id, "the answer was withdrawn")
+        .expect("withdrawn");
+    assert_shown_tell_note(&w, task, tell, note.id);
+    let thread = w.ledger.task(w.project, task).expect("read").expect("task");
+    assert_eq!(
+        thread
+            .messages
+            .iter()
+            .filter(|message| message.kind == "note" && message.body.contains("The parser is done."))
+            .count(),
+        1,
+        "the finished words need no new note"
+    );
+}
+
+#[test]
 fn an_unanswered_tells_note_stays_queued_when_the_chief_resumes_after_the_turn_ended() {
     let mut w = world();
     let (task, session, tell) = delivered_tell(&mut w);

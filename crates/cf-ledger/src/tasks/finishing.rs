@@ -36,8 +36,9 @@ use super::{
 };
 use crate::messages::{
     drop_queued_but_told, fold, leave_pause_notes, notes_waiting, put_back_paused_answers,
-    queued_paused_answers, release_carried, say_again, tell_sent_back, warnings_on_their_way,
-    warnings_queued, withdraw_open_questions, withdraw_paused_answers, Afterwards, Dropped,
+    queued_paused_answers, recover_after_lost_answer, release_carried, say_again, tell_sent_back,
+    warnings_on_their_way, warnings_queued, withdraw_open_questions, withdraw_paused_answers,
+    Afterwards, Dropped,
 };
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES, MAX_BODY,
@@ -1090,6 +1091,7 @@ fn fail(
             drop_queued(store, task.id)?;
         }
         put_back_paused_answers(store, &answers)?;
+        recover_after_lost_answer(store, &task, None, true)?;
         store.move_task(&task, "failed", json!({ "reason": reason }))?;
         release_ready(store, project_id)?;
         let requester = store.participant_row(task.requester_id)?;

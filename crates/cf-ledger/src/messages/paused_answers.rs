@@ -17,7 +17,9 @@
 //! withdrawn or failed does not count. This is decided when the note is made, when an answer
 //! arrives or passes the gate, and when an unread note is rewritten on a move. A note whose
 //! own paste or carrier may already have begun stays typed: an attempted paste is not proof
-//! that nothing reached the window. While the task is paused, a missing tell event leaves
+//! that nothing reached the window. If the answer on its way later fails or is withdrawn,
+//! a new typed note keeps the turn's words; the shown note stays shown. While the task is
+//! paused, a missing tell event leaves
 //! its note typed too: without it the answer cannot be proved to have the ways-on footer.
 //! Once the task moves, a note shown then is marked over at once. A human requester gets the
 //! queued note as before.
@@ -250,7 +252,9 @@ pub(super) fn prefixes(number: i64) -> [String; 2] {
 /// first, before its first tool call, where that is other words (T-1151); the task is paused, or
 /// has been resumed since (its resume waits for the turn's end). A note for each tell,
 /// however often it is asked: none is written where the task's thread has one for this tell
-/// already, whatever became of it. The note, or none where there is one.
+/// already, whatever became of it. If a board answer made that note shown and then failed,
+/// a separate typed fallback may be written by [`recover_after_lost_answer`]. The note, or
+/// none where there is one.
 pub(crate) fn note(
     store: &mut Store,
     project_id: i64,
@@ -469,6 +473,99 @@ fn notes_of(
         .into_iter()
         .filter_map(|(id, body)| read(&body).map(|said| (id, said)))
         .collect())
+}
+
+/// An answer on its way made its tell's note shown, but is no longer on its way. Keep the
+/// original shown and write a typed copy when the chief has no other carrier of those words.
+/// A task failing drops its queued answers before it moves, so `moving` makes that copy say
+/// what is true after the failure. A cancelled task, or one finished from its pause, needs no
+/// new copy.
+pub(crate) fn recover_after_lost_answer(
+    store: &mut Store,
+    task: &TaskRow,
+    tell: Option<i64>,
+    moving: bool,
+) -> Result<(), LedgerError> {
+    if matches!(task.state.as_str(), "accepted" | "cancelled") {
+        return Ok(());
+    }
+    let finished_from_pause = task.state == "done"
+        && store.db.query_row(
+            "SELECT COALESCE((SELECT json_extract(data, '$.from') = 'paused'
+               FROM event WHERE project_id = ?1 AND kind = 'task.state' AND json_valid(data)
+               AND CASE WHEN json_valid(data) THEN json_extract(data, '$.task') END = ?2
+               AND CASE WHEN json_valid(data) THEN json_extract(data, '$.to') END = 'done'
+               ORDER BY id DESC LIMIT 1), 0)",
+            params![task.project_id, task.number],
+            |row| row.get::<_, bool>(0),
+        )?;
+    if finished_from_pause {
+        return Ok(());
+    }
+    let notes = notes_of(store, task, None)?;
+    if notes.is_empty() {
+        return Ok(());
+    }
+    let requester = store.participant_row(task.requester_id)?;
+    let mut recovered = Vec::new();
+    for (id, said) in &notes {
+        if tell.is_some_and(|tell| tell != said.tell) || recovered.contains(&said.tell) {
+            continue;
+        }
+        let Some(note) = store.message(*id)? else {
+            continue;
+        };
+        if note.receipt.get(SHOWN).is_none()
+            || answered_on_board(store, task, &said.handle, said.tell)?.is_some()
+        {
+            continue;
+        }
+        let mut already_typed = false;
+        for (other, other_said) in &notes {
+            if other_said.tell != said.tell {
+                continue;
+            }
+            if let Some(other) = store.message(*other)? {
+                if matches!(
+                    other.state.as_str(),
+                    "queued" | "delivering" | "delivered" | "read"
+                ) && other.receipt.get(SHOWN).is_none()
+                {
+                    already_typed = true;
+                    break;
+                }
+            }
+        }
+        if already_typed {
+            continue;
+        }
+        let then = if moving || task.state != "paused" {
+            Then::Moved
+        } else {
+            said.then
+        };
+        let body = render(&Answered {
+            number: said.number,
+            handle: said.handle.clone(),
+            tell: said.tell,
+            reply: said.reply.clone(),
+            words: said.words.clone(),
+            then,
+        });
+        send(
+            store,
+            task.project_id,
+            &Sent {
+                to: &requester.handle,
+                body: &body,
+                task: Some(task.number),
+                kind: "note",
+                ..Sent::default()
+            },
+        )?;
+        recovered.push(said.tell);
+    }
+    Ok(())
 }
 
 /// The newest note that gave T-`number`'s requester the answer of its window's turn on a
