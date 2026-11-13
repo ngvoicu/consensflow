@@ -7,6 +7,15 @@ use crate::{
 };
 
 impl Ledger {
+    /// Whether this staff row is a backup rather than an independent member.
+    pub fn is_backup(&self, project: i64, handle: &str) -> Result<bool, LedgerError> {
+        Ok(self
+            .store
+            .participant_by_handle(project, handle)?
+            .backup_of
+            .is_some())
+    }
+
     /// Add a dedicated backup for a member.
     pub fn add_backup(
         &mut self,

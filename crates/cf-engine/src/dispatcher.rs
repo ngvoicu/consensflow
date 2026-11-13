@@ -265,6 +265,27 @@ impl Dispatcher {
         self.project_now(project.id)
     }
 
+    /// Open a project's validated staff while preserving its source backup links.
+    pub async fn open_project_with_staff(
+        self: &Rc<Self>,
+        request: NewProject,
+        source: serde_json::Value,
+    ) -> Result<Option<ProjectView>, EngineError> {
+        self.require_chief(&request.chief.harness, request.chief.model.as_deref())?;
+        for member in &request.staff {
+            self.require_adapter(&member.harness)?;
+        }
+        let project = self
+            .seams
+            .ledger
+            .borrow_mut()
+            .create_project_with_staff(&source)?;
+        if let Some(chief) = project.participants.iter().find(|p| p.handle == "chief") {
+            self.open_soon(chief.id, None).await;
+        }
+        self.project_now(project.id)
+    }
+
     /// The human's Close: the project is suspended and every window of it goes. It is the
     /// human's own shutdown, no pause: a window kept because it ignored a pause's rounds goes
     /// with the rest (T-1199: a pause never closes a window, and the Close and the app's quit

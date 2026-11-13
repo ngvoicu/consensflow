@@ -1,0 +1,19 @@
+# BKV-04: the page's copy and same-model merge must preserve backup identity.
+
+[[plant]]
+name = "bkv page: opening the last staff loses its backup link"
+meant = "bkv_page_open_from_last_staff_preserves_the_backup_link"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "bkv_page_open_from_last_staff_preserves_the_backup_link"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = ".create_project_with_staff(&source)?;"
+replace = ".create_project(&request)?;"
+
+[[plant]]
+name = "bkv page: a new member merges into its model's backup"
+meant = "bkv_page_adding_a_primary_does_not_merge_into_the_same_model_backup"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "bkv_page_adding_a_primary_does_not_merge_into_the_same_model_backup"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = "            && !ledger.is_backup(project, &member.handle)?"
+replace = "            && true"

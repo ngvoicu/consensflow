@@ -111,12 +111,16 @@ pub enum PageOperation {
     /// Edit member: a member runs on another harness, model and effort from its next window,
     /// in the tier the human chose (T-1143).
     MemberEdit,
+    /// Add, replace or remove the backup of a staff member.
+    BackupAdd,
+    BackupChange,
+    BackupRemove,
 }
 
 impl PageOperation {
     /// Every operation, in the order Node's page listed them, then those this
     /// build added, in the order it added them.
-    pub const ALL: [PageOperation; 51] = [
+    pub const ALL: [PageOperation; 54] = [
         Self::ProjectsList,
         Self::ProjectOpen,
         Self::ProjectResume,
@@ -168,6 +172,9 @@ impl PageOperation {
         Self::ProjectPromptSuggestion,
         Self::ModelsGet,
         Self::MemberEdit,
+        Self::BackupAdd,
+        Self::BackupChange,
+        Self::BackupRemove,
     ];
 
     /// The name the page, the app and the bridge say it by (`project.open`).
@@ -224,6 +231,9 @@ impl PageOperation {
             Self::ProjectPromptSuggestion => "project.prompt_suggestion",
             Self::ModelsGet => "models.get",
             Self::MemberEdit => "member.edit",
+            Self::BackupAdd => "backup.add",
+            Self::BackupChange => "backup.change",
+            Self::BackupRemove => "backup.remove",
         }
     }
 
@@ -343,7 +353,7 @@ mod tests {
             "message.approve",
             "message.decline",
         ];
-        const ADDED: [&str; 23] = [
+        const ADDED: [&str; 26] = [
             "wakeup.get",
             "wakeup.set",
             "project.specs",
@@ -367,6 +377,9 @@ mod tests {
             "project.prompt_suggestion",
             "models.get",
             "member.edit",
+            "backup.add",
+            "backup.change",
+            "backup.remove",
         ];
         let listed: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
         assert_eq!(listed[..RECORDED.len()], RECORDED);

@@ -79,6 +79,9 @@ pub(super) async fn serve(page: &Page, operation: PageOperation, body: Value) ->
         // The models a harness lists, for the chief's picker and the chains' editor.
         PageOperation::ModelsGet => models::get(page, body).await,
         PageOperation::MemberEdit => staff::edit(page, body).await,
+        PageOperation::BackupAdd => staff::add_backup(page, body).await,
+        PageOperation::BackupChange => staff::change_backup(page, body).await,
+        PageOperation::BackupRemove => staff::remove_backup(page, body).await,
     };
     served.map_err(|said| said.0)
 }

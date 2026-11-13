@@ -38,6 +38,15 @@ pub trait Engine {
         request: NewProject,
     ) -> Work<'_, Result<Option<ProjectView>, EngineError>>;
 
+    /// A project whose source staff may contain backup links.
+    fn open_project_with_staff(
+        &self,
+        request: NewProject,
+        _source: Value,
+    ) -> Work<'_, Result<Option<ProjectView>, EngineError>> {
+        self.open_project(request)
+    }
+
     /// The human's Resume (`resumeProject`).
     fn resume_project(&self, project: i64) -> Work<'_, Result<Option<ProjectView>, EngineError>>;
 
@@ -184,6 +193,14 @@ impl Engine for Rc<Dispatcher> {
         request: NewProject,
     ) -> Work<'_, Result<Option<ProjectView>, EngineError>> {
         Box::pin(Dispatcher::open_project(self, request))
+    }
+
+    fn open_project_with_staff(
+        &self,
+        request: NewProject,
+        source: Value,
+    ) -> Work<'_, Result<Option<ProjectView>, EngineError>> {
+        Box::pin(Dispatcher::open_project_with_staff(self, request, source))
     }
 
     fn resume_project(&self, project: i64) -> Work<'_, Result<Option<ProjectView>, EngineError>> {
