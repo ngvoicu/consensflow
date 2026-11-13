@@ -156,6 +156,9 @@ pub(crate) enum SessionError {
     Tui { program: String, cause: io::Error },
     #[error("could not watch for the signals that close a window: {0}")]
     Signals(io::Error),
+    /// The system could not say whether one of Codex's programs had ended.
+    #[error("could not wait for Codex's program to end: {0}")]
+    Wait(io::Error),
 }
 
 impl SessionError {
@@ -196,7 +199,8 @@ impl SessionError {
             | Self::NoAgentType(_)
             | Self::Endpoint(_)
             | Self::Broker(_)
-            | Self::Signals(_) => StartKind::NotSetUp,
+            | Self::Signals(_)
+            | Self::Wait(_) => StartKind::NotSetUp,
         }
     }
 }
@@ -389,8 +393,7 @@ impl Session {
                 () = signals.recv() => self.stop(),
             }
         };
-        // Ended by a signal, there is no code: the window was closed, not failed.
-        let code = status.ok().and_then(|status| status.code()).unwrap_or(0);
+        let code = exit_code(status)?;
         // The statuses this program ends with for a start that failed are its own: a Codex that
         // ended with one is reported as a failure, 1, and the window says so (T-1328).
         let reported = harness_exit(code);
@@ -450,10 +453,7 @@ impl Session {
             if let Some(upstream) = plan.endpoint.upstream(tail.borrow().text()) {
                 return Ok(upstream);
             }
-            let ended = self
-                .backend
-                .as_mut()
-                .and_then(|backend| backend.try_wait().ok().flatten());
+            let ended = ended_of(self.backend.as_mut().map(Owned::try_wait))?;
             if ended.is_some() || Instant::now() > deadline {
                 // What a program that ended wrote last may still be in the pipe.
                 let _ = tokio::time::timeout(LAST_WORDS, drain).await;
@@ -617,6 +617,24 @@ async fn exit_of(child: &mut Option<Owned>) -> io::Result<ExitStatus> {
         Some(child) => child.wait().await,
         None => pending().await,
     }
+}
+
+/// The code `status` carries: none for a program ended by a signal, which is a window closed and
+/// not failed, so 0. A wait that failed is no status at all: the window did not learn how its
+/// program ended.
+fn exit_code(status: io::Result<ExitStatus>) -> Result<i32, SessionError> {
+    Ok(status.map_err(SessionError::Wait)?.code().unwrap_or(0))
+}
+
+/// How a poll of the server ended, where it ran at all: its status once it has ended, and the
+/// failure of the poll as it is, which is not "still running".
+fn ended_of(
+    polled: Option<io::Result<Option<ExitStatus>>>,
+) -> Result<Option<ExitStatus>, SessionError> {
+    polled
+        .transpose()
+        .map(Option::flatten)
+        .map_err(SessionError::Wait)
 }
 
 /// Reads `stderr` to its end into `tail`.
