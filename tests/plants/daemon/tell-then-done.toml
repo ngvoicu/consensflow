@@ -449,3 +449,33 @@ runs = ["ledger-receipt"]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
 find = "                       AND NOT EXISTS\n                           (SELECT 1 FROM event e WHERE e.project_id = c.project_id\n                              AND e.kind = 'delivery.begun'\n                              AND CASE WHEN json_valid(e.data)\n                                       THEN json_extract(e.data, '$.message') END = c.id)"
 replace = ""
+
+[[plant]]
+name = "answered tell: a failed answer leaves no typed fallback"
+meant = "a_shown_note_has_a_typed_fallback_if_its_board_answers_delivery_fails"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "                if let Some(tell) = message.reply_to {\n                    super::paused_answers::recover_after_lost_answer(\n                        store,\n                        &task,\n                        Some(tell),\n                        false,\n                    )?;\n                }\n"
+replace = ""
+
+[[plant]]
+name = "answered tell: a withdrawn answer leaves no typed fallback"
+meant = "a_shown_note_has_a_typed_fallback_if_its_queued_board_answer_is_withdrawn"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "            if let (\"answer\", Some(tell)) = (message.kind.as_str(), message.reply_to) {\n                super::paused_answers::recover_after_lost_answer(store, &task, Some(tell), false)?;\n            }\n"
+replace = ""
+
+[[plant]]
+name = "answered tell: a failed task loses its shown answer"
+meant = "a_task_failing_after_its_answer_was_shown_keeps_a_typed_fallback"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        recover_after_lost_answer(store, &task, None, true)?;\n"
+replace = ""

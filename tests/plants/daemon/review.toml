@@ -42,10 +42,7 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''
-            if message.kind == "answer" {
-                tell_failed_answer(store, &message, &task, reason)?;
-            }'''
+find = "                tell_failed_answer(store, &message, &task, reason)?;\n"
 replace = ""
 
 [[plant]]
