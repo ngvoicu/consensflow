@@ -1,0 +1,165 @@
+# One to three explicitly named offline suites on a suite/* push. The request is
+# data, never shell: the validation job checks the whole file and the suite job
+# maps each name to a fixed command. No gate, release, live harness or secrets.
+name: Branch suites
+on:
+  push:
+    branches: ['suite/**']
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.request.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: request
+        name: Validate the suite request
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          with open('.ci-suite.json', encoding='utf-8') as f:
+              request = json.load(f)
+          if not isinstance(request, list) or not 1 <= len(request) <= 3:
+              raise SystemExit('request must name one to three suites')
+          allowed = {
+              'rig': {'macos-latest', 'windows-latest'},
+              'regressions': {'macos-latest', 'windows-latest'},
+              'daemon': {'macos-latest', 'windows-latest'},
+              'engine': {'ubuntu-latest', 'macos-latest', 'windows-latest'},
+              'ledger': {'ubuntu-latest', 'macos-latest', 'windows-latest'},
+              'page-chromium': {'ubuntu-latest', 'macos-latest', 'windows-latest'},
+              'page-webkit': {'macos-latest'},
+              'clippy-windows': {'ubuntu-latest', 'macos-latest'},
+              'plants': {'ubuntu-latest', 'macos-latest', 'windows-latest'},
+          }
+          matrix = []
+          for i, item in enumerate(request, 1):
+              if not isinstance(item, dict) or set(item) != {'suite', 'runner', 'family', 'names'}:
+                  raise SystemExit('invalid request fields')
+              suite, runner, family, names = (item[k] for k in ('suite', 'runner', 'family', 'names'))
+              if not isinstance(suite, str) or suite not in allowed or runner not in allowed[suite]:
+                  raise SystemExit('suite or runner is not allowed')
+              if suite == 'plants':
+                  if family not in ('cli', 'daemon', 'release') or not isinstance(names, list) or not names:
+                      raise SystemExit('plants need a known family and one or more names')
+                  if any(not isinstance(n, str) or not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.:-]*', n) for n in names):
+                      raise SystemExit('invalid plant name')
+              elif family != '' or names != []:
+                  raise SystemExit('only plants take a family or names')
+              matrix.append(dict(suite=suite, runner=runner, family=family, names=','.join(names), id=i))
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write('matrix=' + json.dumps({'include': matrix}, separators=(',', ':')) + '\n')
+          PY
+  suite:
+    needs: request
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.request.outputs.matrix) }}
+    name: "${{ matrix.suite }} (${{ matrix.runner }}) #${{ matrix.id }}"
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      CARGO_BUILD_JOBS: 4
+      SUITE: ${{ matrix.suite }}
+      FAMILY: ${{ matrix.family }}
+      PLANT_NAMES: ${{ matrix.names }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Start the log
+        run: |
+          mkdir -p "$RUNNER_TEMP/suite-logs"
+          echo "Suite $SUITE: setup started; see the job log for setup output." > "$RUNNER_TEMP/suite-logs/summary.txt"
+      - uses: ./.github/actions/setup
+      - name: Stage the page and native cf, as the gate does
+        if: contains(fromJSON('["rig","regressions","daemon","page-chromium","page-webkit","plants"]'), matrix.suite)
+        run: |
+          npm --prefix app run bundle:ui
+          npm --prefix app run prepare-sidecar
+      - name: Warm the Mac git shim, as the daemons job does
+        if: runner.os == 'macOS' && contains(fromJSON('["rig","regressions","daemon"]'), matrix.suite)
+        run: time /usr/bin/git --version && time /usr/bin/git --version
+      - name: Install nextest for plants
+        if: matrix.suite == 'plants'
+        run: cargo install cargo-nextest --version 0.9.148 --locked
+      - name: Prepare Windows cross-clippy
+        if: matrix.suite == 'clippy-windows'
+        run: |
+          rustup target add x86_64-pc-windows-msvc
+          cargo fetch --target x86_64-pc-windows-msvc
+      - name: Install Chromium
+        if: matrix.suite == 'page-chromium'
+        working-directory: app
+        run: npx playwright install chromium
+      - name: Install WebKit
+        if: matrix.suite == 'page-webkit'
+        working-directory: app
+        run: npx playwright install webkit
+      - name: Run the named suite
+        run: |
+          set +e
+          {
+            case "$SUITE" in
+              rig|regressions|daemon)
+                cargo test -p cf-e2e --test "$SUITE" --no-fail-fast -j 4 -- --test-threads=4 ;;
+              ledger)
+                cargo test -p cf-ledger --no-fail-fast -j 4 -- --test-threads=4 ;;
+              engine)
+                # Run every integration target except dispatcher with four threads,
+                # then dispatcher with two. The metadata check refuses an empty list.
+                cargo metadata --no-deps --format-version 1 > "$RUNNER_TEMP/metadata.json"
+                metadata_rc=$?
+                if [ "$metadata_rc" -ne 0 ]; then exit "$metadata_rc"; fi
+                node - "$RUNNER_TEMP/metadata.json" > "$RUNNER_TEMP/engine-targets" <<'JS'
+          const m = require(process.argv[2]);
+          const p = m.packages.find(p => p.name === 'cf-engine');
+          const names = p.targets.filter(t => t.kind.includes('test')).map(t => t.name);
+          if (!names.includes('dispatcher') || names.some(n => !/^[A-Za-z0-9_-]+$/.test(n))) process.exit(1);
+          for (const n of names.filter(n => n !== 'dispatcher')) console.log(n);
+          JS
+                metadata_rc=$?
+                if [ "$metadata_rc" -ne 0 ]; then exit "$metadata_rc"; fi
+                targets=()
+                while IFS= read -r name; do [ -n "$name" ] && targets+=(--test "$name"); done < "$RUNNER_TEMP/engine-targets"
+                cargo test -p cf-engine --no-fail-fast -j 4 --lib --bins "${targets[@]}" -- --test-threads=4
+                other_rc=$?
+                cargo test -p cf-engine --test dispatcher --no-fail-fast -j 4 -- --test-threads=2
+                dispatcher_rc=$?
+                [ "$other_rc" -eq 0 ] && [ "$dispatcher_rc" -eq 0 ] ;;
+              plants)
+                IFS=, read -r -a names <<< "$PLANT_NAMES"
+                [ -n "$FAMILY" ] && [ "${#names[@]}" -gt 0 ] && [ -n "${names[0]}" ] || exit 2
+                cargo xtask plants "$FAMILY" "${names[@]}" --test-threads 4 ;;
+              clippy-windows) cargo xtask clippy-windows ;;
+              page-chromium) (cd app && npm run test:ui) ;;
+              page-webkit) (cd app && npm run test:ui:webkit) ;;
+              *) echo 'Refusing unknown suite'; exit 2 ;;
+            esac
+          } 2>&1 | tee "$RUNNER_TEMP/suite-logs/test.log"
+          result=${PIPESTATUS[0]}
+          printf 'Suite %s finished with exit %s\n' "$SUITE" "$result" > "$RUNNER_TEMP/suite-logs/summary.txt"
+          grep -E 'test result:|[0-9]+ (passed|failed|skipped)|^failures:|\.\.\. FAILED|^ *FAIL ' "$RUNNER_TEMP/suite-logs/test.log" >> "$RUNNER_TEMP/suite-logs/summary.txt" || true
+          exit "$result"
+      - name: Write the summary
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/suite-logs/summary.txt" ]; then
+            cat "$RUNNER_TEMP/suite-logs/summary.txt" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: suite-${{ matrix.id }}-${{ matrix.suite }}-${{ matrix.runner }}
+          path: ${{ runner.temp }}/suite-logs/
+          if-no-files-found: warn
+          retention-days: 3
