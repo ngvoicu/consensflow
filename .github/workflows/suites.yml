@@ -38,7 +38,7 @@ jobs:
               'page-chromium': {'ubuntu-latest', 'macos-latest', 'windows-latest'},
               'page-webkit': {'macos-latest'},
               'clippy-windows': {'ubuntu-latest', 'macos-latest'},
-              'plants': {'ubuntu-latest', 'macos-latest', 'windows-latest'},
+              'plants': {'ubuntu-latest', 'windows-latest'},
           }
           matrix = []
           for i, item in enumerate(request, 1):
@@ -81,11 +81,27 @@ jobs:
           mkdir -p "$RUNNER_TEMP/suite-logs"
           echo "Suite $SUITE: setup started; see the job log for setup output." > "$RUNNER_TEMP/suite-logs/summary.txt"
       - uses: ./.github/actions/setup
-      - name: Stage the page and native cf, as the gate does
+      # The gate stages cf with xtask, which explicitly ad-hoc signs it on a
+      # Mac. This workflow must not sign: build the same cf and copy it for the
+      # page and plants instead. Rig suites build their own cf and pane host.
+      - name: Bundle the page
         if: contains(fromJSON('["rig","regressions","daemon","page-chromium","page-webkit","plants"]'), matrix.suite)
+        run: npm --prefix app run bundle:ui
+      - name: Build the native cf without signing
+        if: contains(fromJSON('["page-chromium","page-webkit","plants"]'), matrix.suite)
         run: |
-          npm --prefix app run bundle:ui
-          npm --prefix app run prepare-sidecar
+          mkdir -p bin
+          if [ "$RUNNER_OS" = Windows ]; then
+            cargo build --release --locked -p cf --bin cf --bin cf-shim -j 4
+            cp app/src-tauri/target/release/cf.exe bin/cf.exe
+            cp app/src-tauri/target/release/cf-shim.exe bin/cf-shim.exe
+          else
+            cargo build --release --locked -p cf --bin cf -j 4
+            cp app/src-tauri/target/release/cf bin/cf
+          fi
+      - name: Prepare the Windows console host
+        if: runner.os == 'Windows' && contains(fromJSON('["rig","regressions","daemon","plants"]'), matrix.suite)
+        run: cargo xtask conpty --into app/src-tauri/target/release
       - name: Warm the Mac git shim, as the daemons job does
         if: runner.os == 'macOS' && contains(fromJSON('["rig","regressions","daemon"]'), matrix.suite)
         run: time /usr/bin/git --version && time /usr/bin/git --version
