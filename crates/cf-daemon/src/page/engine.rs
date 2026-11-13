@@ -19,6 +19,7 @@
 //! dispatcher's does (the scenario of `corners-page-002` gives `since`, a pane
 //! `title` and `size`) is then held to the byte too.
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use cf_engine::seams::EngineError;
@@ -110,6 +111,28 @@ pub trait Engine {
         project: i64,
         handle: &'a str,
     ) -> Work<'a, Result<ParticipantView, EngineError>>;
+
+    /// Send a member on Vacation, returning its unopened pool work to the board.
+    fn send_on_vacation<'a>(
+        &'a self,
+        project: i64,
+        handle: &'a str,
+    ) -> Work<'a, Result<ParticipantView, EngineError>>;
+
+    /// Bring a member back from Vacation.
+    fn bring_back_from_vacation(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Result<ParticipantView, EngineError>;
+
+    /// The scheduler's currently eligible backup for each affected role.
+    fn backup_ready(
+        &self,
+        _project: &ProjectView,
+    ) -> Result<BTreeMap<i64, BTreeMap<String, String>>, EngineError> {
+        Ok(BTreeMap::new())
+    }
 
     /// A task given to another member of its tier (`reassignTask`).
     fn reassign_task(
@@ -288,6 +311,29 @@ impl Engine for Rc<Dispatcher> {
         handle: &'a str,
     ) -> Work<'a, Result<ParticipantView, EngineError>> {
         Box::pin(Dispatcher::remove_backup(self, project, handle))
+    }
+
+    fn send_on_vacation<'a>(
+        &'a self,
+        project: i64,
+        handle: &'a str,
+    ) -> Work<'a, Result<ParticipantView, EngineError>> {
+        Box::pin(Dispatcher::send_on_vacation(self, project, handle))
+    }
+
+    fn bring_back_from_vacation(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Result<ParticipantView, EngineError> {
+        Dispatcher::bring_back_from_vacation(self, project, handle)
+    }
+
+    fn backup_ready(
+        &self,
+        project: &ProjectView,
+    ) -> Result<BTreeMap<i64, BTreeMap<String, String>>, EngineError> {
+        Dispatcher::backup_ready(self, project)
     }
 
     fn reassign_task(

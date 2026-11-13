@@ -26,7 +26,7 @@ pub(super) async fn handle(
                 && member.member_id.is_none()
         })
         .map(|member| {
-            json!({
+            let mut row = json!({
                 "handle": member.handle,
                 "role": member.role,
                 "roles": member.roles,
@@ -51,7 +51,20 @@ pub(super) async fn handle(
                     )
                 },
                 "effort": said(member.effort.as_deref()),
-            })
+            });
+            if let Some(owner) = member.backup_of.and_then(|id| {
+                caller
+                    .project
+                    .participants
+                    .iter()
+                    .find(|other| other.id == id)
+            }) {
+                row["backupOf"] = json!(owner.handle);
+            }
+            if let Some(since) = &member.vacation_since {
+                row["vacationSince"] = json!(since);
+            }
+            row
         })
         .collect();
     Ok(Answer::ok(json!({ "members": members })))

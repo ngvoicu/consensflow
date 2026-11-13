@@ -262,6 +262,8 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "backup.add",
     "backup.change",
     "backup.remove",
+    "member.vacation",
+    "member.vacation_back",
 ];
 
 #[tauri::command]

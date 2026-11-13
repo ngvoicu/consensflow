@@ -1801,3 +1801,297 @@ async fn bkv_page_last_staff_carries_each_rows_out_kind_and_vacation() {
         })
         .await;
 }
+
+async fn bkv05_ask(s: &Staffing, operation: &str, body: Value) -> Value {
+    let answer = ask(&s.app, operation, body);
+    tokio::pin!(answer);
+    loop {
+        tokio::select! {
+            answer = &mut answer => break answer,
+            () = tokio::task::yield_now() => s.rig.kit.settle(),
+        }
+    }
+}
+
+#[tokio::test]
+async fn bkv05_vacation_route_releases_unopened_pool_work_but_keeps_named_work() {
+    LocalSet::new()
+        .run_until(async {
+            let s = staffing();
+            let owner = bkv_page_owner(&s).await;
+            let id = s.member(&owner).id;
+            let pooled = s.rig.kit.create_task(
+                s.project,
+                cf_ledger::NewTask {
+                    from: "chief".into(),
+                    pool: Some("worker".into()),
+                    tier: Some("standard".into()),
+                    body: "Pool work".into(),
+                    ..cf_ledger::NewTask::default()
+                },
+            );
+            s.rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .assign_task(s.project, pooled.task.number, id)
+                .unwrap();
+            let named = s.rig.kit.give(s.project, &owner, "Named work");
+            let named_assignee = named.task.assignee.clone();
+            let changed = Rc::new(Cell::new(0));
+            let heard = Rc::clone(&changed);
+            s.rig
+                .kit
+                .dispatcher
+                .on_change(Rc::new(move || heard.set(heard.get() + 1)));
+            let answer = bkv05_ask(
+                &s,
+                "member.vacation",
+                json!({"project": s.project, "member": owner}),
+            )
+            .await;
+            assert_eq!(answer["ok"], true, "{answer}");
+            assert!(changed.get() > 0, "engine change was announced");
+            assert_eq!(
+                s.rig.kit.task(s.project, pooled.task.number).task.assignee,
+                None
+            );
+            assert_eq!(
+                s.rig.kit.task(s.project, named.task.number).task.assignee,
+                named_assignee
+            );
+            s.rig.kit.pass().unwrap();
+            s.rig.kit.pass().unwrap();
+            assert!(
+                s.rig
+                    .kit
+                    .host
+                    .last(named_assignee.as_deref().unwrap())
+                    .is_some(),
+                "the named task opens its window"
+            );
+            assert!(s.member(&owner).vacation_since.is_some());
+            let refused = s.rig.kit.ledger.borrow_mut().create_task(
+                s.project,
+                &cf_ledger::NewTask {
+                    from: "chief".into(),
+                    to: Some(owner),
+                    body: "New named work".into(),
+                    ..cf_ledger::NewTask::default()
+                },
+            );
+            assert!(refused.is_err(), "a new named task is refused");
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn bkv05_vacation_route_keeps_work_in_an_open_window() {
+    LocalSet::new()
+        .run_until(async {
+            let s = staffing();
+            let owner = bkv_page_owner(&s).await;
+            let task = s.rig.kit.create_task(
+                s.project,
+                cf_ledger::NewTask {
+                    from: "chief".into(),
+                    pool: Some("worker".into()),
+                    tier: Some("standard".into()),
+                    body: "Open work".into(),
+                    ..cf_ledger::NewTask::default()
+                },
+            );
+            s.rig.kit.pass().unwrap();
+            s.rig.kit.pass().unwrap();
+            let assigned = s
+                .rig
+                .kit
+                .task(s.project, task.task.number)
+                .task
+                .assignee
+                .unwrap();
+            assert!(s.rig.kit.host.last(&assigned).is_some());
+            let answer = bkv05_ask(
+                &s,
+                "member.vacation",
+                json!({"project": s.project, "member": owner}),
+            )
+            .await;
+            assert_eq!(answer["ok"], true, "{answer}");
+            assert_eq!(
+                s.rig
+                    .kit
+                    .task(s.project, task.task.number)
+                    .task
+                    .assignee
+                    .as_deref(),
+                Some(assigned.as_str())
+            );
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn bkv05_return_route_uses_engine_and_chief_is_refused() {
+    LocalSet::new()
+        .run_until(async {
+            let s = staffing();
+            let owner = bkv_page_owner(&s).await;
+            s.rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .send_on_vacation(s.project, &owner, &[])
+                .unwrap();
+            let changed = Rc::new(Cell::new(0));
+            let heard = Rc::clone(&changed);
+            s.rig
+                .kit
+                .dispatcher
+                .on_change(Rc::new(move || heard.set(heard.get() + 1)));
+            let answer = ask(
+                &s.app,
+                "member.vacation_back",
+                json!({"project": s.project, "member": owner}),
+            )
+            .await;
+            assert_eq!(answer["ok"], true, "{answer}");
+            assert!(changed.get() > 0, "engine change was announced");
+            assert!(s.member(&owner).vacation_since.is_none());
+            for operation in ["member.vacation", "member.vacation_back"] {
+                let refused = ask(
+                    &s.app,
+                    operation,
+                    json!({"project": s.project, "member": "chief"}),
+                )
+                .await;
+                assert_eq!(refused["ok"], false, "{refused}");
+                assert!(
+                    refused["error"].as_str().unwrap().contains("not a member"),
+                    "{refused}"
+                );
+            }
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn bkv05_board_says_only_a_scheduler_eligible_backup_is_ready() {
+    LocalSet::new()
+        .run_until(async {
+            let s = staffing();
+            let owner = bkv_page_owner(&s).await;
+            let backup = bkv_page_backup(&s, &owner);
+            let owner_id = s.member(&owner).id;
+            s.rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .mark_out_with_kind(
+                    owner_id,
+                    "9999-12-31T23:59:59.000Z",
+                    "out of quota",
+                    cf_ledger::HoldKind::Quota,
+                )
+                .unwrap();
+            let board = ask(&s.app, "board.get", json!({"project": s.project})).await;
+            let lanes = board["board"]["lanes"].as_array().unwrap();
+            let lane = lanes
+                .iter()
+                .find(|lane| lane["participant"]["handle"] == owner)
+                .unwrap();
+            assert_eq!(lane["backupReady"]["worker"], backup, "{lane}");
+            s.rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .send_on_vacation(s.project, &backup, &[])
+                .unwrap();
+            let board = ask(&s.app, "board.get", json!({"project": s.project})).await;
+            let lanes = board["board"]["lanes"].as_array().unwrap();
+            let lane = lanes
+                .iter()
+                .find(|lane| lane["participant"]["handle"] == owner)
+                .unwrap();
+            assert!(lane["backupReady"].is_null(), "{lane}");
+        })
+        .await;
+}
+
+async fn bkv05_board_ready(s: &Staffing, owner: &str) -> Value {
+    let board = ask(&s.app, "board.get", json!({"project": s.project})).await;
+    board["board"]["lanes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|lane| lane["participant"]["handle"] == owner)
+        .unwrap()["backupReady"]
+        .clone()
+}
+
+#[tokio::test]
+async fn bkv05_board_backup_readiness_follows_the_scheduler_for_every_hold() {
+    LocalSet::new().run_until(async {
+        for case in ["quota", "account", "busy", "moved", "owner_vacation", "backup_vacation", "backup_out", "backup_edit", "free_peer"] {
+            let s = staffing();
+            let owner = bkv_page_owner(&s).await;
+            let backup = bkv_page_backup(&s, &owner);
+            let owner_id = s.member(&owner).id;
+            let backup_id = s.member(&backup).id;
+            let (kind, until) = match case {
+                "account" => (cf_ledger::HoldKind::Account, "9999-12-31T23:59:59.998Z"),
+                "busy" => (cf_ledger::HoldKind::Busy, "9999-12-31T23:59:59.000Z"),
+                "moved" => (cf_ledger::HoldKind::Moved, "9999-12-31T23:59:59.999Z"),
+                _ => (cf_ledger::HoldKind::Quota, "9999-12-31T23:59:59.000Z"),
+            };
+            s.rig.kit.ledger.borrow_mut().mark_out_with_kind(owner_id, until, "hold", kind).unwrap();
+            match case {
+                "owner_vacation" => { s.rig.kit.ledger.borrow_mut().send_on_vacation(s.project, &owner, &[]).unwrap(); },
+                "backup_vacation" => { s.rig.kit.ledger.borrow_mut().send_on_vacation(s.project, &backup, &[]).unwrap(); },
+                "backup_out" => { s.rig.kit.ledger.borrow_mut().mark_out_with_kind(backup_id, until, "hold", cf_ledger::HoldKind::Quota).unwrap(); },
+                "backup_edit" => { s.rig.kit.ledger.borrow().sqlite().execute("UPDATE participant SET needs_edit = 1 WHERE id = ?", [backup_id]).unwrap(); },
+                "free_peer" => {
+                    let added = s.add(json!({"harness":"codex", "model":"gpt-6.1-sol", "effort":"high", "tier":"standard", "roles":["worker"]})).await;
+                    assert_eq!(added["ok"], true, "{added}");
+                },
+                _ => {},
+            }
+            let ready = bkv05_board_ready(&s, &owner).await;
+            if case == "quota" || case == "account" {
+                assert_eq!(ready["worker"], backup, "{case}: {ready}");
+            } else {
+                assert!(ready.is_null(), "{case}: {ready}");
+            }
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn bkv05_each_harness_pair_can_send_and_bring_back_member_and_backup() {
+    LocalSet::new().run_until(async {
+        let choices = [
+            ("claude-code", "claude-opus-5-5", "high"),
+            ("codex", "gpt-6.1-sol", "high"),
+            ("pi", "anthropic/claude-fable-5", "high"),
+            ("devin", "swe-2", "high"),
+            ("muse", "muse-wonder-1.0", "high"),
+        ];
+        for (harness, model, effort) in choices {
+            for (back_harness, back_model, back_effort) in choices {
+                let s = staffing();
+                let added = s.add(json!({"harness":harness,"model":model,"effort":effort,"tier":"standard","roles":["worker"]})).await;
+                let owner = added["member"]["handle"].as_str().unwrap();
+                let added = ask(&s.app, "backup.add", json!({"project":s.project,"member":owner,"harness":back_harness,"model":back_model,"effort":back_effort})).await;
+                let backup = added["member"]["handle"].as_str().unwrap();
+                for member in [owner, backup] {
+                    let body = json!({"project":s.project,"member":member});
+                    for operation in ["member.vacation", "member.vacation", "member.vacation_back", "member.vacation_back"] {
+                        let answer = bkv05_ask(&s, operation, body.clone()).await;
+                        assert_eq!(answer["ok"], true, "{harness} / {back_harness} {member} {operation}: {answer}");
+                        assert_eq!(s.member(member).vacation_since.is_some(), operation == "member.vacation");
+                    }
+                }
+            }
+        }
+    }).await;
+}

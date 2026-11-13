@@ -7,6 +7,7 @@ import {
   nameApart,
   outWords,
   tryAgain,
+  vacationButton,
 } from './board.js'
 import { harnessesOf } from './computer-use.js'
 import { holdEnter, ProjectSections } from './project-sections.js'
@@ -1212,6 +1213,16 @@ export class NewProjectDialog {
         `Remove ${roleLabel(pick.role)} ${pick.name}`,
       )
       const row = staffRow(whoCell(pick.name, runsLabel(pick, false)), pick.role, remove)
+      if (pick.vacationSince) {
+        row.firstElementChild.append(element('br'), element('span', 'member-meta', 'on Vacation'))
+        row.lastElementChild.append(
+          vacationButton(pick.name, true, () => {
+            for (const chosen of this.#picked)
+              if (chosen._id === pick._id) chosen.vacationSince = null
+            this.#draw()
+          }),
+        )
+      }
       row.dataset.model = pick.model ?? ''
       rows.push(row)
       if (drawn.has(pick._id) || pick.role === 'designer') continue
@@ -1244,6 +1255,15 @@ export class NewProjectDialog {
           ],
         )
         row.dataset.model = backup.model ?? ''
+        if (backup.vacationSince) {
+          row.firstElementChild.append(element('br'), element('span', 'member-meta', 'on Vacation'))
+          row.lastElementChild.append(
+            vacationButton(backup.model, true, () => {
+              backup.vacationSince = null
+              this.#draw()
+            }),
+          )
+        }
         rows.push(row)
       } else {
         row.lastElementChild.append(
@@ -1687,6 +1707,8 @@ export class ProjectSettingsDialog {
    * the quota may have been renewed early, by hand (T-1357). A member not out says nothing.
    */
   #sayOut(cell, member) {
+    if (member.vacationSince)
+      cell.append(element('br'), element('span', 'member-meta', 'on Vacation'))
     const lane = this.#board.lanes.find(
       (found) => found.participant.handle === member.handle && isMember(found.participant),
     )
@@ -1710,6 +1732,28 @@ export class ProjectSettingsDialog {
     )
   }
 
+  #vacation(member) {
+    return vacationButton(
+      `@${member.handle}`,
+      Boolean(member.vacationSince),
+      () =>
+        void this.#page.act(async () => {
+          try {
+            await this.#page.daemon(
+              member.vacationSince ? 'member.vacation_back' : 'member.vacation',
+              {
+                project: this.#project,
+                member: member.handle,
+              },
+            )
+          } catch (refused) {
+            this.#member.say(refused instanceof Error ? refused.message : String(refused))
+            throw refused
+          }
+        }),
+    )
+  }
+
   /** A member as the project's board has it now, which a Remove kept across redraws acts on. */
   #memberNow(member) {
     return (
@@ -1729,6 +1773,7 @@ export class ProjectSettingsDialog {
         ? goneCell(name, modelShown(backup), runs, HARNESS_NAMES[backup.harness])
         : whoCell(name, runs)
     const row = backupStaffRow(who, `@${owner.handle}`, [
+      this.#vacation(backup),
       button(
         'Change',
         'quiet-button',
@@ -1842,6 +1887,7 @@ export class ProjectSettingsDialog {
             `Edit ${name}`,
           )
       const row = staffRow(who([role]), role, remove, edit)
+      row.lastElementChild.append(this.#vacation(member))
       this.#sayOut(row.firstElementChild, member)
       row.dataset.handle = member.handle
       if (gone) row.dataset.modelGone = member.model

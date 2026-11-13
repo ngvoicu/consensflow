@@ -251,6 +251,18 @@ fn project_json(request: &NewProject) -> Value {
 }
 
 impl Engine for Standin {
+    fn send_on_vacation<'a>(
+        &'a self,
+        _: i64,
+        _: &'a str,
+    ) -> Work<'a, Result<ParticipantView, EngineError>> {
+        unreachable!("Vacation is not part of the recorded page traces")
+    }
+
+    fn bring_back_from_vacation(&self, _: i64, _: &str) -> Result<ParticipantView, EngineError> {
+        unreachable!("Vacation is not part of the recorded page traces")
+    }
+
     fn open_project(
         &self,
         request: NewProject,

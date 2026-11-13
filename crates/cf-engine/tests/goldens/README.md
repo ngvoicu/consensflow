@@ -293,3 +293,8 @@ brief written for one member (review T-1510). The same task has `cf inbox read` 
 past the bound a role is read whole at in parts (`cf_base::role_read::role_parts`): it prints in
 one piece to 141 rows with specs on (166 without), and to 5 and 30 with the most rules for the
 staff, and in parts past that, so no staff is too large to be read.
+
+The same twelve chief texts say a tier can be served by a backup, that a member on Vacation
+takes no tasks, and that the chief still names the tier (BKV-05, T-1627). With those words,
+the one-piece bounds are 139 rows with specs on and 163 without, or 2 and 27 with the most
+staff rules; longer texts are read in parts as before.

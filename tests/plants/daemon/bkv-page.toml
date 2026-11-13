@@ -35,3 +35,44 @@ runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "bkv_page_cha
 file = "crates/cf-daemon/src/page/staff.rs"
 find = "page.engine.remove_backup(project, &handle).await?"
 replace = "page.ledger.borrow_mut().remove_backup(project, &handle)?"
+
+# BKV-05: the page routes need the engine's session proof and change notification.
+[[plant]]
+name = "bkv05: Vacation route only marks the ledger"
+meant = "bkv05_vacation_route_releases_unopened_pool_work_but_keeps_named_work"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "bkv05_vacation_route_releases_unopened_pool_work_but_keeps_named_work"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = "page.engine.send_on_vacation(project, &handle).await?"
+replace = "page.ledger.borrow_mut().send_on_vacation(project, &handle, &[])?"
+
+[[plant]]
+name = "bkv05: return route only marks the ledger"
+meant = "bkv05_return_route_uses_engine_and_chief_is_refused"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "bkv05_return_route_uses_engine_and_chief_is_refused"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = "page.engine.bring_back_from_vacation(project, &handle)?"
+replace = "page.ledger.borrow_mut().bring_back(project, &handle)?"
+
+[[plant]]
+name = "bkv05: board says a resting backup can take tasks"
+meant = "bkv05_board_says_only_a_scheduler_eligible_backup_is_ready"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "bkv05_board_says_only_a_scheduler_eligible_backup_is_ready"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''                let candidates = self
+                    .seams
+                    .ledger
+                    .borrow()
+                    .candidates_for(project.id, role, tier)?;'''
+replace = '''                let mut candidates = self
+                    .seams
+                    .ledger
+                    .borrow()
+                    .candidates_for(project.id, role, tier)?;
+                for candidate in &mut candidates {
+                    if let Some(backup) = &mut candidate.backup {
+                        backup.vacation_since = None;
+                    }
+                }'''

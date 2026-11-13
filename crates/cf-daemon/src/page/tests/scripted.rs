@@ -156,6 +156,18 @@ impl Engine for Scripted {
         unreachable!("{UNUSED}")
     }
 
+    fn send_on_vacation<'a>(
+        &'a self,
+        _: i64,
+        _: &'a str,
+    ) -> Work<'a, Result<ParticipantView, EngineError>> {
+        unreachable!("{UNUSED}")
+    }
+
+    fn bring_back_from_vacation(&self, _: i64, _: &str) -> Result<ParticipantView, EngineError> {
+        unreachable!("{UNUSED}")
+    }
+
     fn finish_task(&self, _: i64, _: i64) -> Work<'_, Result<Finished, EngineError>> {
         unreachable!("{UNUSED}")
     }

@@ -171,6 +171,24 @@ pub(super) async fn remove_backup(page: &Page, body: Body<'_>) -> Result<Fields,
     one("member", page.engine.remove_backup(project, &handle).await?)
 }
 
+pub(super) async fn vacation(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let project = body.whole("project")?;
+    let handle = body.text("member");
+    one(
+        "member",
+        page.engine.send_on_vacation(project, &handle).await?,
+    )
+}
+
+pub(super) async fn vacation_back(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let project = body.whole("project")?;
+    let handle = body.text("member");
+    one(
+        "member",
+        page.engine.bring_back_from_vacation(project, &handle)?,
+    )
+}
+
 /// `member.edit`: Edit member (T-1143). The member `member` names runs from its next window
 /// on a model its harness lists, at an effort it lists for it, in the tier the human chose;
 /// its handle, roles and work stay, and a window open now keeps what it runs on.

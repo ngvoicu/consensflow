@@ -7,7 +7,7 @@
 //! requesters were told they wait.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use cf_base::refusal::Refusal;
@@ -407,6 +407,49 @@ impl Taker<'_> {
 }
 
 impl Dispatcher {
+    /// The backups the scheduler would pick for a fresh task of each role and tier now.
+    /// This uses the same verdict and choice as a real assignment, including other members.
+    pub fn backup_ready(
+        &self,
+        project: &ProjectView,
+    ) -> Result<BTreeMap<i64, BTreeMap<String, String>>, EngineError> {
+        let mut ready = BTreeMap::<i64, BTreeMap<String, String>>::new();
+        for owner in project.participants.iter().filter(|owner| {
+            owner.member_id.is_none()
+                && owner.backup_of.is_none()
+                && project
+                    .participants
+                    .iter()
+                    .any(|backup| backup.backup_of == Some(owner.id))
+        }) {
+            for role in &owner.roles {
+                let tier = if cf_ledger::roles::takes_no_tier(std::slice::from_ref(role)) {
+                    None
+                } else {
+                    owner.tier.as_deref()
+                };
+                let candidates = self
+                    .seams
+                    .ledger
+                    .borrow()
+                    .candidates_for(project.id, role, tier)?;
+                let verdicts: Vec<_> = candidates
+                    .iter()
+                    .map(|candidate| self.not_free(&Seat::of(candidate)))
+                    .collect();
+                if let Some(Taker::Backup { backup, of, .. }) = self.taker(&candidates, &verdicts) {
+                    if of.member.id == owner.id {
+                        ready
+                            .entry(owner.id)
+                            .or_default()
+                            .insert(role.clone(), backup.member.handle.clone());
+                    }
+                }
+            }
+        }
+        Ok(ready)
+    }
+
     /// Each open task goes to the best free member of its tier; the
     /// requester hears once when none is. A task that needs others waits
     /// for them to be accepted, in silence: its card says what it waits for.

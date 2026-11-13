@@ -192,3 +192,51 @@ async fn a_member_whose_roles_have_no_tier_is_said_with_none_and_one_with_a_role
         ]
     );
 }
+
+#[tokio::test]
+async fn bkv05_staff_carries_the_backup_owner_and_each_vacation() {
+    let scene = scene();
+    let backup = scene
+        .context
+        .ledger
+        .borrow_mut()
+        .add_backup(
+            scene.project.id,
+            "zeus",
+            &cf_ledger::NewMember {
+                harness: "codex".into(),
+                model: Some("gpt-6-astra".into()),
+                model_name: Some("gpt-6-astra".into()),
+                effort: None,
+                designer: false,
+                roles: vec!["worker".into()],
+                tier: "standard".into(),
+            },
+        )
+        .unwrap();
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .send_on_vacation(scene.project.id, "zeus", &[])
+        .unwrap();
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .send_on_vacation(scene.project.id, &backup.handle, &[])
+        .unwrap();
+    let (_, said) = staff(&scene, &scene.context).await;
+    let members = said["members"].as_array().unwrap();
+    let owner = members
+        .iter()
+        .find(|member| member["handle"] == "zeus")
+        .unwrap();
+    let cover = members
+        .iter()
+        .find(|member| member["handle"] == backup.handle)
+        .unwrap();
+    assert!(owner["vacationSince"].is_string(), "{owner}");
+    assert!(cover["vacationSince"].is_string(), "{cover}");
+    assert_eq!(cover["backupOf"], "zeus", "{cover}");
+}

@@ -115,12 +115,15 @@ pub enum PageOperation {
     BackupAdd,
     BackupChange,
     BackupRemove,
+    /// Send a member on Vacation or bring it back.
+    MemberVacation,
+    MemberVacationBack,
 }
 
 impl PageOperation {
     /// Every operation, in the order Node's page listed them, then those this
     /// build added, in the order it added them.
-    pub const ALL: [PageOperation; 54] = [
+    pub const ALL: [PageOperation; 56] = [
         Self::ProjectsList,
         Self::ProjectOpen,
         Self::ProjectResume,
@@ -175,6 +178,8 @@ impl PageOperation {
         Self::BackupAdd,
         Self::BackupChange,
         Self::BackupRemove,
+        Self::MemberVacation,
+        Self::MemberVacationBack,
     ];
 
     /// The name the page, the app and the bridge say it by (`project.open`).
@@ -234,6 +239,8 @@ impl PageOperation {
             Self::BackupAdd => "backup.add",
             Self::BackupChange => "backup.change",
             Self::BackupRemove => "backup.remove",
+            Self::MemberVacation => "member.vacation",
+            Self::MemberVacationBack => "member.vacation_back",
         }
     }
 
@@ -297,7 +304,7 @@ mod tests {
             .unwrap();
         let mut forwarded: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         let mut named: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(named.len(), 54);
+        assert_eq!(named.len(), 56);
         forwarded.sort_unstable();
         named.sort_unstable();
         assert_eq!(named, forwarded);
@@ -353,7 +360,7 @@ mod tests {
             "message.approve",
             "message.decline",
         ];
-        const ADDED: [&str; 26] = [
+        const ADDED: [&str; 28] = [
             "wakeup.get",
             "wakeup.set",
             "project.specs",
@@ -380,6 +387,8 @@ mod tests {
             "backup.add",
             "backup.change",
             "backup.remove",
+            "member.vacation",
+            "member.vacation_back",
         ];
         let listed: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
         assert_eq!(listed[..RECORDED.len()], RECORDED);

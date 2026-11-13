@@ -52,7 +52,9 @@
     "member.edit",
     "backup.add",
     "backup.change",
-    "backup.remove"
+    "backup.remove",
+    "member.vacation",
+    "member.vacation_back"
   ],
   "ping": "{\"ok\":true}"
 }

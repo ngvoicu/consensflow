@@ -227,6 +227,20 @@ const board = new BoardView(boardRoot, $('#stack-dialog'), {
   onShowTerminal: (participant, opened) => showSession(participant, opened),
   onHideTerminal: (participant) => hideSession(participant),
   onTryAgain: (participant) => tryAgain(participant),
+  onVacation: async (participant) => {
+    try {
+      await daemon(participant.vacationSince ? 'member.vacation_back' : 'member.vacation', {
+        project: participant.projectId,
+        member: participant.handle,
+      })
+      return null
+    } catch (cause) {
+      report(cause)
+      return cause instanceof Error ? cause.message : String(cause)
+    } finally {
+      await refresh()
+    }
+  },
   onEndSession: (participant) =>
     act(async () => {
       await daemon('session.end', { project: participant.projectId, handle: participant.handle })

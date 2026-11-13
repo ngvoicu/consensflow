@@ -154,6 +154,16 @@ impl Ledger {
         staff::candidates(&self.store, project_id, number)
     }
 
+    /// Candidates for a fresh task of a role and tier, before there is a task.
+    pub fn candidates_for(
+        &self,
+        project_id: i64,
+        role: &str,
+        tier: Option<&str>,
+    ) -> Result<Vec<Candidate>, LedgerError> {
+        staff::candidates_for(&self.store, project_id, role, tier)
+    }
+
     /// The active members of one role, in join order.
     pub fn members(&self, project_id: i64, role: &str) -> Result<Vec<MemberView>, LedgerError> {
         staff::members(&self.store, project_id, Some(role))

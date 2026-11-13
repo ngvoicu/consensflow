@@ -25,7 +25,9 @@ use crate::tasks::tell_stranded_waiters;
 use crate::views::{participant_view, ParticipantRow, TaskRow, PARTICIPANT_SELECT};
 
 pub(crate) use backup::{add_backup, change_backup, remove_backup};
-pub(crate) use pools::{candidates, has_members_of_tier, holders_of_tier, members, nearest_tier};
+pub(crate) use pools::{
+    candidates, candidates_for, has_members_of_tier, holders_of_tier, members, nearest_tier,
+};
 pub use pools::{BackupCandidate, Candidate, HoldKind};
 pub(crate) use quota::{hold_kind, mark_back, mark_out, mark_out_kind};
 use sessions::close_session;

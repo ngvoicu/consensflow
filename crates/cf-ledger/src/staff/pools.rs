@@ -141,14 +141,40 @@ pub(crate) fn candidates(
     number: i64,
 ) -> Result<Vec<Candidate>, LedgerError> {
     let task = store.task_row(project_id, number)?;
-    members(store, project_id, task.pool.as_deref())?
+    candidates_of(
+        store,
+        project_id,
+        task.pool.as_deref(),
+        task.tier.as_deref(),
+        task.taken_from_id,
+    )
+}
+
+/// The same pool without a task, for the engine's availability projection.
+pub(crate) fn candidates_for(
+    store: &Store,
+    project_id: i64,
+    role: &str,
+    tier: Option<&str>,
+) -> Result<Vec<Candidate>, LedgerError> {
+    candidates_of(store, project_id, Some(role), tier, None)
+}
+
+fn candidates_of(
+    store: &Store,
+    project_id: i64,
+    role: Option<&str>,
+    tier: Option<&str>,
+    taken_from: Option<i64>,
+) -> Result<Vec<Candidate>, LedgerError> {
+    members(store, project_id, role)?
         .into_iter()
-        .filter(|member| task.tier.is_none() || member.tier == task.tier)
+        .filter(|member| tier.is_none() || member.tier.as_deref() == tier)
         .map(|member| {
             let row = store.participant_row(member.id)?;
-            let backup = backup_of(store, member.id, task.taken_from_id)?;
+            let backup = backup_of(store, member.id, taken_from)?;
             Ok(Candidate {
-                had_it: Some(member.id) == task.taken_from_id,
+                had_it: Some(member.id) == taken_from,
                 vacation_since: row.vacation_since,
                 out_kind: HoldKind::read(row.out_kind.as_deref()),
                 member,

@@ -82,6 +82,8 @@ pub(super) async fn serve(page: &Page, operation: PageOperation, body: Value) ->
         PageOperation::BackupAdd => staff::add_backup(page, body).await,
         PageOperation::BackupChange => staff::change_backup(page, body).await,
         PageOperation::BackupRemove => staff::remove_backup(page, body).await,
+        PageOperation::MemberVacation => staff::vacation(page, body).await,
+        PageOperation::MemberVacationBack => staff::vacation_back(page, body).await,
     };
     served.map_err(|said| said.0)
 }
