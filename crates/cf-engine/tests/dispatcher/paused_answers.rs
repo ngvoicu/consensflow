@@ -251,6 +251,34 @@ fn an_answer_waiting_to_be_handed_over_loses_paused_guidance_if_the_task_resumes
 }
 
 #[test]
+fn an_answer_already_in_the_chiefs_input_box_may_be_sent_after_the_task_resumes() {
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    context.adapter.with("chief", |agent| agent.arrive = false);
+    answers_and_goes_on(&context, &told);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let answer = context
+        .task(project, 1)
+        .messages
+        .into_iter()
+        .find(|message| message.kind == "answer" && message.reply_to == Some(told.id))
+        .expect("the answer to the tell");
+    assert_eq!(context.message(answer.id).state, "delivering");
+    context
+        .adapter
+        .input_box
+        .set(Some(cf_harness::contract::InputBox::Holds));
+    let before = crate::deliveries::enters(&context);
+    crate::withheld_enter::enter_again_with(&context, "p1-chief", || {
+        context.resume_task(project, 1, "Go on");
+    });
+    assert_eq!(crate::deliveries::enters(&context), before + 1);
+    assert_eq!(context.message(answer.id).state, "delivering");
+}
+
+#[test]
 fn an_answer_s_paused_task_guidance_stays_part_of_the_paste_after_a_resume() {
     let context = Context::new();
     let (project, told) = told_at_work(&context);

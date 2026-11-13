@@ -357,12 +357,19 @@ impl<'a> Admitting<'a> {
                 return Ok(false);
             }
         }
-        let handed = self
-            .dispatcher
-            .seams
-            .ledger
-            .borrow_mut()
-            .admit(message, carried)?;
+        let handed = if self.again {
+            self.dispatcher
+                .seams
+                .ledger
+                .borrow_mut()
+                .admit_again(message, carried)?
+        } else {
+            self.dispatcher
+                .seams
+                .ledger
+                .borrow_mut()
+                .admit(message, carried)?
+        };
         self.withdrawn.set(handed == HandOver::Withdrawn);
         self.pause_changed.set(handed == HandOver::PauseChanged);
         Ok(handed == HandOver::Admitted)

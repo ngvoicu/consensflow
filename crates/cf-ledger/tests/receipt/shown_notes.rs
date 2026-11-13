@@ -261,6 +261,35 @@ fn a_carried_answers_changed_pause_also_stops_the_first_handover() {
 }
 
 #[test]
+fn an_older_handover_mark_does_not_exempt_a_new_carrier_paste_from_the_pause_check() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    let carrier = w.note(&session, "chief", task, "More for the chief");
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET carried_by = ?1 WHERE id = ?2",
+            [carrier.id, answer.id],
+        )
+        .expect("the answer rides in the carrier");
+        // A carrier taken back retains its earlier handover mark for closed-project reads.
+        db.execute(
+            "UPDATE message SET handed_at = '2026-01-01T00:00:00.000Z' WHERE id = ?",
+            [carrier.id],
+        )
+        .expect("a previous paste was handed over");
+    });
+    let begun = w.begin(carrier.id);
+    assert!(begun.carried.iter().any(|row| row.id == answer.id));
+    w.resume(task, "Go on");
+
+    assert_eq!(
+        w.ledger.admit(carrier.id, &[answer.id]).unwrap(),
+        cf_ledger::HandOver::PauseChanged
+    );
+}
+
+#[test]
 fn a_paste_already_handed_over_may_be_sent_after_its_tells_pause_ends() {
     let mut w = world();
     let (task, session, tell) = delivered_tell(&mut w);
@@ -274,6 +303,11 @@ fn a_paste_already_handed_over_may_be_sent_after_its_tells_pause_ends() {
 
     assert_eq!(
         w.ledger.admit(answer.id, &[]).unwrap(),
+        cf_ledger::HandOver::PauseChanged,
+        "a new paste must be prepared again"
+    );
+    assert_eq!(
+        w.ledger.admit_again(answer.id, &[]).unwrap(),
         cf_ledger::HandOver::Admitted
     );
 }

@@ -517,7 +517,17 @@ impl Ledger {
     /// row of `carried` (what its paste was begun with) still riding in it: then
     /// they are the window's, marked handed in this write.
     pub fn admit(&mut self, message_id: i64, carried: &[i64]) -> Result<HandOver, LedgerError> {
-        messages::admit(&mut self.store, message_id, carried)
+        messages::admit(&mut self.store, message_id, carried, false)
+    }
+
+    /// Whether an Enter may send a paste already handed over: its words cannot be
+    /// prepared again, even if a tell's pause changed after the hand-over.
+    pub fn admit_again(
+        &mut self,
+        message_id: i64,
+        carried: &[i64],
+    ) -> Result<HandOver, LedgerError> {
+        messages::admit(&mut self.store, message_id, carried, true)
     }
 
     /// The first row of `carried` (what the paste of `message_id`, handed over
