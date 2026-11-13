@@ -403,7 +403,7 @@ fn roots_handed(
 
 #[cfg(unix)]
 #[test]
-fn the_stand_in_is_handed_the_folders_it_writes_in_its_answers_its_config_and_its_project_and_no_others(
+fn the_stand_in_is_handed_its_answers_its_config_and_its_project_and_after_them_what_the_window_was_handed(
 ) {
     // A stand-in the door did not start writes only below what it is handed: the run's folder of
     // answers (its journal, and a worker's files), the Claude config its window runs on (its
@@ -418,16 +418,25 @@ fn the_stand_in_is_handed_the_folders_it_writes_in_its_answers_its_config_and_it
     // The window's `$PWD` is where it is, by its real path.
     let project = std::fs::canonicalize(&project).unwrap();
     let agent = home.path().join("fake-agent");
-    // What the wrapper hands, by its own words, is the prefix: the folders this test process made
-    // through the door come after it (the kit's program start), or none do.
+    // A folder this test process made through the door: the kit's program start hands it to the
+    // window, and the wrapper keeps it after its own roots.
+    let rigs = cf_e2e::door::made("cf-evals-roots-").unwrap();
+    let inherited = std::fs::canonicalize(rigs.path()).unwrap();
+    // What the wrapper hands, by its own words, comes first; the folders the window was handed
+    // (this process's, among them the one made above) follow, each of its own.
     let handed_first = |model: &str, config: Option<&Path>, expected: String| {
         let roots = roots_handed(&wrapper, &agent, model, &project, config);
         let rest = roots.strip_prefix(&expected).unwrap_or_else(|| {
             panic!("{model}: the stand-in is handed {roots:?}, not {expected:?} first")
         });
+        let kept: Vec<&str> = rest.split(':').filter(|root| !root.is_empty()).collect();
         assert!(
             rest.is_empty() || rest.starts_with(':'),
             "{model}: {rest:?} follows {expected:?} as a folder of its own"
+        );
+        assert!(
+            kept.contains(&inherited.to_string_lossy().as_ref()),
+            "{model}: what the window was handed ({inherited:?}) is not kept after the run's own: {roots:?}"
         );
     };
     for (model, folder) in members(&stand_ins) {

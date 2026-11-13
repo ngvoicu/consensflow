@@ -576,6 +576,26 @@ fn what_a_run_made_is_handed_to_a_program_it_starts_and_a_program_that_was_hande
     assert_eq!(roots_handed_down(None), Vec::<PathBuf>::new());
 }
 
+/// A path a program is handed may lead through a link (the temp folder is one on a Mac: `/var`
+/// leads to `/private/var`, and a shell's `$PWD` or a wrapper's folder is as the caller wrote it);
+/// the registry is by real paths, so a root handed so is the folder it leads to.
+#[cfg(unix)]
+#[test]
+fn a_root_handed_down_through_a_link_is_the_folder_it_leads_to() {
+    let mine = made("own-").unwrap();
+    let (theirs, _kept) = a_persons_folder();
+    let link = theirs.path().join("link-to-own");
+    std::os::unix::fs::symlink(mine.path(), &link).unwrap();
+    let real = canonical(mine.path()).unwrap();
+    assert_eq!(roots_handed_down(Some(link.as_os_str())), [real]);
+    // A root that is not there is kept as it is written: nothing is below it.
+    let absent = theirs.path().join("not-made-yet");
+    assert_eq!(
+        roots_handed_down(Some(absent.as_os_str())),
+        [absent.clone()]
+    );
+}
+
 /// What the program a run starts does with what it was handed: this test program again, which
 /// writes where it was handed and not elsewhere, and says what came of each in a file.
 #[test]
@@ -611,6 +631,18 @@ fn a_program_a_run_starts_writes_below_what_was_handed_down_to_it_and_nowhere_el
             fs::read_to_string(mine.path().join("by-the-program.txt")).unwrap(),
             "handed down"
         );
+        // A root handed as a path through a link writes below the folder it leads to all the same.
+        #[cfg(unix)]
+        {
+            fs::remove_file(mine.path().join("by-the-program.txt")).unwrap();
+            let link = theirs.path().join("link-to-own");
+            std::os::unix::fs::symlink(mine.path(), &link).unwrap();
+            let handed = vec![(MADE_ROOTS.to_owned(), link.to_string_lossy().into_owned())];
+            assert_eq!(
+                start(&theirs.path().join("linked.txt"), handed),
+                "own: written; theirs: refused"
+            );
+        }
         // A program that was handed nothing has made nothing, and writes nowhere.
         fs::remove_file(mine.path().join("by-the-program.txt")).unwrap();
         assert_eq!(

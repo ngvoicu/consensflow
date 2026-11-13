@@ -637,7 +637,8 @@ pub fn own_stem(stem: &str) -> String {
 }
 
 /// The variable that hands the folders this run made to a program it starts, which is another
-/// process with a registry of its own: the real paths, joined as a `PATH` is. Never set by a
+/// process with a registry of its own: the real paths, joined as a `PATH` is (a wrapper that hands a
+/// program a folder as it wrote it is read by the real path it leads to: [`roots_handed_down`]). Never set by a
 /// person; a program that does not find it has made nothing and may write nowhere. `cargo xtask
 /// live`, the rig's start ([`crate::rig`]) and the kit's own program starts clear it before they
 /// set their own; a person who sets it by hand and runs a test with `cargo test` alone gives that
@@ -655,10 +656,16 @@ fn registry() -> std::sync::MutexGuard<'static, Vec<PathBuf>> {
         .unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The paths `value` hands down ([`MADE_ROOTS`]).
+/// The paths `value` hands down ([`MADE_ROOTS`]), each by its real path where it is there: the
+/// registry is by real paths, and a program that is handed a folder as its wrapper wrote it (a
+/// shell's `$PWD`, the temp folder of a Mac, where `/var` leads to `/private/var`) writes below it.
 fn roots_handed_down(value: Option<&std::ffi::OsStr>) -> Vec<PathBuf> {
     value
-        .map(|value| std::env::split_paths(value).collect())
+        .map(|value| {
+            std::env::split_paths(value)
+                .map(|root| canonical(&root).unwrap_or(root))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
