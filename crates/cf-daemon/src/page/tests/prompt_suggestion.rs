@@ -13,6 +13,74 @@ use crate::testing::{request, said, scene};
 
 const WORDS: &str = "the prompt suggestion is on (true) or off (false)";
 
+#[tokio::test]
+async fn own_hands_is_a_page_only_project_switch() {
+    LocalSet::new()
+        .run_until(async {
+            let held = asked();
+            let project = held.project;
+            let on = ask(
+                &held.app,
+                "project.own_hands",
+                json!({"project": project, "ownHands": true}),
+            )
+            .await;
+            assert_eq!(on["ok"], true, "{on}");
+            assert_eq!(on["project"]["ownHands"], true);
+            assert_eq!(held.rig.kicks.get(), 1);
+            let board = ask(&held.app, "board.get", json!({"project": project})).await;
+            assert_eq!(board["board"]["project"]["ownHands"], true);
+            let invalid = ask(
+                &held.app,
+                "project.own_hands",
+                json!({"project": project, "ownHands": "yes"}),
+            )
+            .await;
+            assert_eq!(invalid["ok"], false);
+            let off = ask(
+                &held.app,
+                "project.own_hands",
+                json!({"project": project, "ownHands": false}),
+            )
+            .await;
+            assert_eq!(off["ok"], true);
+            assert!(off["project"].get("ownHands").is_none());
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_windows_token_cannot_switch_own_hands() {
+    let scene = scene();
+    let screens = crate::screens::testing::inert();
+    for token in [&scene.zeus, &scene.chief] {
+        for target in [
+            "/api/own_hands",
+            "/api/project.own_hands",
+            "/api/projects/1/own_hands",
+        ] {
+            let request = request(
+                Method::POST,
+                target,
+                Some(token),
+                r#"{"project":1,"ownHands":true}"#,
+            );
+            let (status, _) = said(crate::api::handle(&scene.context, &screens, request).await);
+            assert_eq!(status, 404, "{target}");
+        }
+    }
+    assert!(
+        !scene
+            .context
+            .ledger
+            .borrow()
+            .project(scene.project.id)
+            .unwrap()
+            .unwrap()
+            .own_hands
+    );
+}
+
 /// The page over a project with a worker, on a bridge.
 struct Asked {
     _daemon: Bridge,

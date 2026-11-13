@@ -31,6 +31,27 @@ fn own_step(scene: &Scene) -> i64 {
 }
 
 #[tokio::test]
+async fn own_hands_leaves_the_chiefs_own_step_able_to_finish() {
+    let scene = scene();
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .set_own_hands(scene.project.id, true)
+        .unwrap();
+    let number = own_step(&scene);
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/done"),
+        r#"{"body":"Checked"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["state"], "accepted");
+}
+
+#[tokio::test]
 async fn the_chiefs_own_step_is_done_while_its_brief_is_on_its_way_and_answers_accepted() {
     let scene = scene();
     let number = own_step(&scene);

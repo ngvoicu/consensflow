@@ -21,6 +21,61 @@ fn given<'a>(folder: &'a str, variant: Variant, skill: &'a str) -> ProjectSpecs<
 
 const SKILL: &str = "/home/me/.consensflow/integrations/specmint/claude/core-0123abcd/.claude/skills/specmint-core/SKILL.md";
 
+#[test]
+fn own_hands_news_has_each_changed_section_and_fits_in_one_piece() {
+    use cf_base::env::Env;
+    use cf_proto::cf_word::{CfWord, Shell};
+    let specs = given("plans", Variant::Core, SKILL);
+    for cf in [
+        CfWord::bare(),
+        CfWord::new(
+            "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf",
+            Shell::Posix,
+        ),
+        CfWord::new(
+            r"C:\Program Files\ConsensFlow\resources\cli\bin\cf.exe",
+            Shell::PowerShell,
+        ),
+    ] {
+        for on in [true, false] {
+            let instructions = crate::roles::role_instructions_for(
+                &Env::default(),
+                "chief",
+                &[],
+                &cf,
+                Some(&specs),
+                on,
+            )
+            .unwrap();
+            let note = own_hands_said(on, &instructions, Some(&specs));
+            assert!(note.starts_with(if on {
+                "The person turned \"Do with your own hands\" on:"
+            } else {
+                "The person turned \"Do with your own hands\" off:"
+            }));
+            assert!(note.contains("## What you do"));
+            let whole_duty = instructions
+                .split_once("## What you do\n")
+                .unwrap()
+                .1
+                .split_once("\n## What you never do\n")
+                .unwrap()
+                .0;
+            assert!(
+                note.contains(whole_duty),
+                "the whole changed duty replaces the earlier one"
+            );
+            assert!(note.contains("## Reviews"));
+            assert!(note.contains("## This project's specs"));
+            assert!(!note.contains("## The staff"));
+            assert!(!note.contains("## The project's rules for the staff"));
+            let complete = format!("{note}\n\n{CONTEXT}");
+            assert!(fits_whole(&complete), "{} bytes", complete.len());
+            assert!(cf_base::role_read::role_read_whole(&complete));
+        }
+    }
+}
+
 fn specs_note(was: Option<&SpecsSetting>, now: Option<&ProjectSpecs<'_>>) -> Option<String> {
     Change {
         specs: Some((was, now)),

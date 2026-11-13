@@ -154,6 +154,60 @@ async fn a_task_for_a_tier_opens_on_the_board_and_wakes_the_dispatcher_once() {
 }
 
 #[tokio::test]
+async fn own_hands_leaves_every_kind_of_board_task_available() {
+    let scene = scene();
+    for (role, model, designer) in [
+        ("advisor", "advisor-model", false),
+        ("reviewer", "reviewer-model", false),
+        ("tester", "tester-model", false),
+        ("designer", "image-model", true),
+    ] {
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .add_member(
+                scene.project.id,
+                &cf_ledger::NewMember {
+                    model: None,
+                    effort: None,
+                    model_name: Some(model.to_owned()),
+                    harness: if designer { "codex" } else { "claude-code" }.to_owned(),
+                    designer,
+                    roles: vec![role.to_owned()],
+                    tier: "standard".to_owned(),
+                },
+            )
+            .unwrap();
+    }
+    let finished = finished_session_task(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .accept_task(scene.project.id, finished, "chief")
+        .unwrap();
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .set_own_hands(scene.project.id, true)
+        .unwrap();
+    for body in [
+        json!({"tier":"standard", "body":"worker"}),
+        json!({"tier":"standard", "advice":true, "body":"advice"}),
+        json!({"tier":"standard", "review":true, "body":"review"}),
+        json!({"tier":"standard", "test":true, "body":"test"}),
+        json!({"design":true, "body":"image"}),
+        json!({"after":finished, "body":"follow up"}),
+        json!({"self":true, "body":"own later step"}),
+    ] {
+        let (status, said) = post(&scene, &scene.chief, &body.to_string()).await;
+        assert_eq!(status, 201, "{body}: {said}");
+    }
+}
+
+#[tokio::test]
 async fn whether_the_brief_waits_for_the_human_is_read_as_the_board_is_now() {
     let scene = scene();
     scene

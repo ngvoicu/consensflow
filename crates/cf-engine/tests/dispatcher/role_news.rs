@@ -34,6 +34,84 @@ const RULES: &str = "- Push to origin only, never to upstream.";
 /// The rules after the human changed them.
 const CHANGED: &str = "- Push to origin only.";
 
+#[test]
+fn own_hands_switch_is_told_once_each_way_on_every_harness() {
+    for first in [FirstMessage::Delivered, FirstMessage::Opened] {
+        for harness in HARNESSES {
+            let context = made(first);
+            let project = project_on(&context, harness);
+            let chief = at_rest(&context, &project);
+            context
+                .ledger
+                .borrow_mut()
+                .set_own_hands(project.id, true)
+                .unwrap();
+            passes(&context);
+            let on = told(&context, chief);
+            assert_eq!(on.len(), 1, "{harness}: {first:?}");
+            assert!(
+                on[0].starts_with("The person turned \"Do with your own hands\" on:"),
+                "{}",
+                on[0]
+            );
+            assert!(on[0].contains("only when"));
+            assert_eq!(said_to_the_chief(&context.adapter).iter().filter(|line| line.contains("The person turned \"Do with your own hands\" on:")).count(), 1);
+            rests(&context, &project);
+            passes(&context);
+            assert_eq!(told(&context, chief).len(), 1);
+            context
+                .ledger
+                .borrow_mut()
+                .set_own_hands(project.id, false)
+                .unwrap();
+            passes(&context);
+            let off = told(&context, chief);
+            assert_eq!(off.len(), 2, "{harness}: {first:?}");
+            assert!(
+                off[1].starts_with("The person turned \"Do with your own hands\" off:"),
+                "{}",
+                off[1]
+            );
+            assert_eq!(
+                said_to_the_chief(&context.adapter)
+                    .iter()
+                    .filter(
+                        |line| line.contains("The person turned \"Do with your own hands\" off:")
+                    )
+                    .count(),
+                1
+            );
+            rests(&context, &project);
+            passes(&context);
+            assert_eq!(told(&context, chief).len(), 2);
+        }
+    }
+}
+
+#[test]
+fn own_hands_is_in_the_chiefs_next_launch_on_every_harness() {
+    for harness in HARNESSES {
+        let context = made(FirstMessage::Delivered);
+        let project = project_on(&context, harness);
+        at_rest(&context, &project);
+        context
+            .ledger
+            .borrow_mut()
+            .set_own_hands(project.id, true)
+            .unwrap();
+        relaunch(&context, project.id);
+        passes(&context);
+        let launches = chief_launches(&context.adapter);
+        assert!(
+            launches.last().unwrap()["instructions"]
+                .as_str()
+                .unwrap()
+                .contains("own hands"),
+            "{harness}"
+        );
+    }
+}
+
 /// A test's engine whose chief runs on `harness`, its windows taking their first
 /// message as `first` says.
 fn made(first: FirstMessage) -> Context {

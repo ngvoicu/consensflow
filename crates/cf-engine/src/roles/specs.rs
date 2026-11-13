@@ -29,6 +29,10 @@ pub struct ProjectSpecs<'a> {
 impl ProjectSpecs<'_> {
     /// The section, which ends in a line break, for a chief's text.
     pub(super) fn section(&self) -> String {
+        self.section_for(false)
+    }
+
+    pub(super) fn section_for(&self, own_hands: bool) -> String {
         let Self {
             variant,
             folder,
@@ -41,6 +45,17 @@ impl ProjectSpecs<'_> {
         } else {
             (*skill).to_owned()
         };
+        if own_hands {
+            return format!(
+                "\n## This project's specs\n\
+                 \n\
+                 Specs are on in this project. Plan specs with the Specmint skill `{name}`: its SKILL.md is at {skill}, and the files it names are beside it; read it before you plan. Your specs and their registry are in `{folder}`: use this copy of the skill and no other; its paths name it.\n\
+                 \n\
+                 Use a spec when the human asks for one, or when an ask is big enough that its work comes in phases. You write the spec and its registry yourself. What Specmint calls research, a subagent or implementation you do yourself, unless the human explicitly asks to put that work on the board.\n\
+                 \n\
+                 For work the human asks to put on the board, write the spec first; put its tasks on the board in phase order, with `--needs` for the phase before, and give each brief the spec item and what its worker needs. After accepting a task, mark the spec's progress as the skill says.\n"
+            );
+        }
         format!(
             "\n## This project's specs\n\
              \n\

@@ -128,6 +128,9 @@ pub struct ProjectView {
     /// off; on, ConsensFlow writes nothing about it.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub prompt_suggestion: bool,
+    /// The person has the chief work itself; omitted while off.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub own_hands: bool,
 }
 
 impl ProjectView {

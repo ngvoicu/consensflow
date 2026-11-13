@@ -320,6 +320,12 @@ async function open(page, given = model()) {
   await page.addInitScript((data) => {
     window.__calls = []
     window.__model = data
+    const ownHandsKept = JSON.parse(sessionStorage.getItem('test-own-hands') ?? '{}')
+    for (const [id, on] of Object.entries(ownHandsKept)) {
+      const project = data.projects.find((item) => item.id === Number(id))
+      if (project && on) project.ownHands = true
+      if (data.boards[id]?.project && on) data.boards[id].project.ownHands = true
+    }
     // Every listener of each event, as the app keeps them: one registered twice hears it
     // twice. `__listeners.get(name)` says the event to all of them; an event no listener
     // is there for is heard by none, as the app says it.
@@ -623,6 +629,17 @@ async function open(page, given = model()) {
           if (promptSuggestion) shown.promptSuggestion = true
           else delete shown.promptSuggestion
         }
+        return answer({ project: shownProject(project)[0] })
+      },
+      'project.own_hands': ({ project, ownHands }) => {
+        if (window.__ownHandsFailure) return { ok: false, error: window.__ownHandsFailure }
+        if (typeof ownHands !== 'boolean') return { ok: false, error: 'expected a flag' }
+        for (const shown of shownProject(project)) {
+          if (ownHands) shown.ownHands = true
+          else delete shown.ownHands
+        }
+        ownHandsKept[project] = ownHands
+        sessionStorage.setItem('test-own-hands', JSON.stringify(ownHandsKept))
         return answer({ project: shownProject(project)[0] })
       },
       'wakeup.get': ({ project }) => answer({ wakeUp: wakeUpOf(project) }),
@@ -3250,6 +3267,58 @@ test("says on a Devin chief's card the id Devin lists after a switch to Devin, a
   await expect(meta).toHaveText('Codex · gpt-6-astra')
   await as({ harness: 'claude-code', model: 'claude-sonnet-5-5' })
   await expect(meta).toHaveText('Claude Code · claude-sonnet-5-5')
+})
+
+test('Do with your own hands appears on the chief in both pane states', async ({ page }) => {
+  const data = model()
+  await open(page, data)
+  const card = page.locator('#stage .terminal-card[data-handle="chief"]')
+  const control = card.getByRole('switch', { name: 'Do with your own hands' })
+  await expect(control).toHaveAttribute('aria-checked', 'false')
+  await expect(control).toHaveAttribute(
+    'title',
+    "The chief does the work itself, in the project's folder. It puts work on the board only when you ask.",
+  )
+  if (process.env.CF_OWN_HANDS_SCREENSHOTS) {
+    await card.screenshot({ path: `${process.env.CF_OWN_HANDS_SCREENSHOTS}/chief-off.png` })
+  }
+  await control.click()
+  await expect
+    .poll(() => calls(page, 'project.own_hands'))
+    .toEqual([{ project: 1, ownHands: true }])
+  await expect(control).toHaveAttribute('aria-checked', 'true')
+  if (process.env.CF_OWN_HANDS_SCREENSHOTS) {
+    await card.screenshot({ path: `${process.env.CF_OWN_HANDS_SCREENSHOTS}/chief-on.png` })
+  }
+  await page.reload()
+  await expect(control).toHaveAttribute('aria-checked', 'true')
+  await changed(page, () => {
+    const chief = window.__model.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+    chief.activity = { state: 'closed' }
+    chief.pane = null
+  })
+  await expect(card.getByRole('switch', { name: 'Do with your own hands' })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  )
+  await card.getByRole('switch', { name: 'Do with your own hands' }).click()
+  await expect(card.getByRole('switch', { name: 'Do with your own hands' })).toHaveAttribute(
+    'aria-checked',
+    'false',
+  )
+})
+
+test('Do with your own hands shows an operation failure and keeps the saved state', async ({
+  page,
+}) => {
+  await open(page)
+  await page.evaluate(() => {
+    window.__ownHandsFailure = 'the change failed'
+  })
+  const control = page.getByRole('switch', { name: 'Do with your own hands' })
+  await control.click()
+  await expect(page.locator('#status')).toHaveText('the change failed')
+  await expect(control).toHaveAttribute('aria-checked', 'false')
 })
 
 test("keeps the chief's card in the dock while its window is down, and Switch chief is the way on", async ({

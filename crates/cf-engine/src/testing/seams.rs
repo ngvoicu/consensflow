@@ -154,7 +154,7 @@ impl Roles for FakeRoles {
     fn instructions(
         &self,
         participant: &ParticipantView,
-        _project: &ProjectView,
+        project: &ProjectView,
         specs: Option<&ProjectSpecs<'_>>,
     ) -> Result<String, String> {
         let mut text = format!(
@@ -162,6 +162,9 @@ impl Roles for FakeRoles {
             participant.role,
             self.rewritten.borrow()
         );
+        if participant.role == "chief" && project.own_hands {
+            text.push_str(" own hands");
+        }
         self.recorder.called(
             "roles",
             None,
@@ -169,7 +172,7 @@ impl Roles for FakeRoles {
             json!(text),
         );
         if self.with_staff.get() && participant.role == "chief" {
-            text += &format!(" staff {}", crate::roles::staff_of(_project).len());
+            text += &format!(" staff {}", crate::roles::staff_of(project).len());
         }
         if let Some(specs) = specs {
             text += &format!(
