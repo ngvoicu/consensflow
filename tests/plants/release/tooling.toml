@@ -2695,7 +2695,7 @@ meant = "the_copy_is_made_a_checkout_whose_one_commit_is_what_went_over_and_noth
 runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
+file = "tools/xtask/src/windows/script/templates.rs"
 find = "  if (Get-Command git -ErrorAction SilentlyContinue) { Save-Tree } else {"
 replace = "  if ($false) { Save-Tree } else {"
 
@@ -2705,7 +2705,7 @@ meant = "the_copy_is_made_a_checkout_whose_one_commit_is_what_went_over_and_noth
 runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
+file = "tools/xtask/src/windows/script/templates.rs"
 find = "@('read-tree', '--empty'), @('--literal-pathspecs', 'add', '-f', '--pathspec-from-file=«synced»')"
 replace = "@('add', '-A')"
 

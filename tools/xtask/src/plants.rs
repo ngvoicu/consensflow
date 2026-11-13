@@ -44,7 +44,14 @@ use kit::Family;
 use runs::{Execute, Runner};
 
 const ABOUT: &str = "Plant the bugs of a family one at a time and check that a test fails for each one (a family of tests/plants)";
-const USAGE: &str = "<family> [words in a plant's name…] [--check]";
+const USAGE: &str = "<family> [words in a plant's name…] [--check] [--test-threads N]";
+/// What `--test-threads` does and why it is there: the Mac's one machine, where a run
+/// uncapped stopped the board over its heat (`this heat stopped the board once`).
+const OPTIONS: &str = "      --test-threads N   nextest and cargo test runs get N threads; it wins over a table's; this heat stopped the board once\n      CF_PLANTS_TEST_THREADS=N   the same, where no flag is given";
+
+/// The variable that carries the threads the plants driver was asked for, from the flag
+/// or the environment: nextest is given them as its own option (`reporters`).
+const THREADS_VAR: &str = "CF_PLANTS_TEST_THREADS";
 
 pub const COMMANDS: &[Command] = &[Command {
     words: &["plants"],
@@ -159,6 +166,13 @@ struct Request {
     /// `--help`, wherever it is: a family comes first, so the help xtask answers
     /// for the first word of a command's arguments is not the one asked for here.
     help: bool,
+    /// The threads every nextest run is capped at, where asked for.
+    test_threads: Option<u32>,
+}
+
+/// A number of test threads, where `value` is one and more than none.
+fn threads_value(value: &str) -> Option<u32> {
+    value.parse::<u32>().ok().filter(|threads| *threads > 0)
 }
 
 impl Request {
@@ -168,8 +182,10 @@ impl Request {
             words: Vec::new(),
             check: false,
             help: false,
+            test_threads: None,
         };
-        for arg in args {
+        let mut args = args.iter();
+        while let Some(arg) = args.next() {
             let Some(word) = arg.to_str() else {
                 return Err(Failure::Usage(
                     "plants takes text, not a name that is none".into(),
@@ -179,8 +195,33 @@ impl Request {
                 request.check = true;
             } else if word == "--help" {
                 request.help = true;
+            } else if word == "--test-threads" {
+                let Some(value) = args.next().and_then(|arg| arg.to_str()) else {
+                    return Err(Failure::Usage(
+                        "plants --test-threads takes a number of threads".into(),
+                    ));
+                };
+                match threads_value(value) {
+                    Some(threads) => request.test_threads = Some(threads),
+                    _ => {
+                        return Err(Failure::Usage(format!(
+                            "plants --test-threads takes a number of threads, not {value}"
+                        )))
+                    }
+                }
+            } else if let Some(value) = word.strip_prefix("--test-threads=") {
+                match threads_value(value) {
+                    Some(threads) => request.test_threads = Some(threads),
+                    _ => {
+                        return Err(Failure::Usage(format!(
+                            "plants --test-threads takes a number of threads, not {value}"
+                        )))
+                    }
+                }
             } else if word.starts_with("--") {
-                return Err(Failure::Usage(format!("plants takes --check, not {word}")));
+                return Err(Failure::Usage(format!(
+                    "plants takes --check and --test-threads, not {word}"
+                )));
             } else if request.family.is_none() {
                 request.family = Some(word.to_owned());
             } else {
@@ -191,6 +232,36 @@ impl Request {
     }
 }
 
+/// `context` as the caller's threads are to be given to runs: the flag's, where given
+/// (`--test-threads` in `args`), and the variable's otherwise; the flag's win, and a
+/// variable of no number of threads is refused, never run wide.
+fn with_caller_threads(context: &Context, args: &[OsString]) -> Result<Context, Failure> {
+    let threads = match Request::read(args)?.test_threads {
+        Some(threads) => Some(threads),
+        None => match context.env.text(THREADS_VAR) {
+            None => None,
+            Some(value) => match threads_value(value) {
+                Some(threads) => Some(threads),
+                _ => {
+                    return Err(Failure::Usage(format!(
+                        "{THREADS_VAR} takes a number of threads, not {value}"
+                    )))
+                }
+            },
+        },
+    };
+    match threads {
+        Some(threads) => Ok(Context {
+            root: context.root.clone(),
+            env: context
+                .env
+                .clone()
+                .with_var(THREADS_VAR, &threads.to_string()),
+        }),
+        None => Ok(context.clone()),
+    }
+}
+
 pub(crate) fn run(
     context: &Context,
     args: &[OsString],
@@ -198,8 +269,9 @@ pub(crate) fn run(
 ) -> Result<i32, Failure> {
     // This xtask is what `cargo xtask` is to the commands that run.
     let own = std::env::current_exe()?;
-    plant(context, args, console, |family| {
-        Execute::new(context, own, family.limit)
+    let context = with_caller_threads(context, args)?;
+    plant(&context, args, console, |family| {
+        Execute::new(&context, own, family.limit)
     })
 }
 
@@ -217,7 +289,7 @@ fn plant<R: Runner>(
     if request.help {
         writeln!(
             console.out,
-            "Usage: cargo xtask plants {USAGE}\n\n{ABOUT}\n\nThe families: {}.",
+            "Usage: cargo xtask plants {USAGE}\n\n{ABOUT}\n\n{OPTIONS}\n\nThe families: {}.",
             families.join(", ")
         )?;
         return Ok(0);

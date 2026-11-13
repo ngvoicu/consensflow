@@ -1074,7 +1074,7 @@ runs = ["smoke-driver"]
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke.rs"
 find = '''
-    let _hold = cache::hold(&cache)?;
+    let _hold = cache::hold(&cache, say)?;
 '''
 replace = ""
 
@@ -1101,8 +1101,8 @@ runs = ["smoke-driver"]
 
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke.rs"
-find = "                talk(say, older);"
-replace = "                let _ = older;"
+find = "                    talk(self.say, older);"
+replace = "                    let _ = older;"
 
 [[plant]]
 name = "updater cache: a kept update is not older for the changes made in the checkout"
@@ -1138,10 +1138,10 @@ runs = ["smoke-cache"]
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/cache.rs"
 find = '''
-        fs::write(&mark, state.text()).map_err(files("write", &mark))?;
+        Ok(state) => fs::write(&mark, state.text()).map_err(files("write", &mark))?,
 '''
 replace = '''
-        let _ = state;
+        Ok(state) => drop(state),
 '''
 
 [[plant]]
@@ -1177,7 +1177,7 @@ find = '''&["diff", "HEAD", "--binary"]'''
 replace = '''&["diff", "--binary"]'''
 
 # A hold that is dropped at once holds nothing: `Hold` is `#[must_use]`, so that a bare
-# `cache::hold(&cache)?;` is a warning, and the gate's clippy denies warnings.
+# `cache::hold(&cache, say)?;` is a warning, and the gate's clippy denies warnings.
 [[plant]]
 name = "updater driver: the hold on the cache is a bare statement"
 meant = "unused_must_use"
@@ -1185,8 +1185,8 @@ runs = ["smoke-lint"]
 
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke.rs"
-find = "    let _hold = cache::hold(&cache)?;"
-replace = "    cache::hold(&cache)?;"
+find = "    let _hold = cache::hold(&cache, say)?;"
+replace = "    cache::hold(&cache, say)?;"
 
 # A cache in the checkout that git does not ignore is not a change in the checkout.
 [[plant]]
@@ -1226,8 +1226,8 @@ runs = ["smoke-cache"]
 
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/cache.rs"
-find = "                    let _ = io::copy(&mut file, &mut digest);"
-replace = "                    let _ = &mut file;"
+find = '    io::copy(&mut file, digest).map_err(files("read", path))?;'
+replace = "    let _ = (&mut file, digest);"
 
 # T-1338: the update's own line in the app's log, the daemon told by what it shows, the programs of
 # the installed bundle that are the app, and the ledger kept by hand held to what the migrations

@@ -390,14 +390,14 @@ find = "if now < *was {"
 replace = "if now > *was {"
 
 [[plant]]
-name = "feeds: a record is trusted whatever it holds"
-meant = "does_not_approve_a_feed_that_names_an_earlier_release_than_it_did_when_the_publisher_read_it"
+name = "feeds: a record's entry that names no release is passed over"
+meant = "refuses_a_record_of_what_the_feeds_named_that_is_there_and_does_not_read_it_is_not_absent"
 runs = ["feeds"]
 
 [[plant.edit]]
 file = "tools/cf-publish/src/checks.rs"
-find = ".filter_map(|(feed, named)| Some((feed, Version::parse(named.as_str()?).ok()?)))"
-replace = '.filter_map(|(feed, named)| Some((feed, Version::parse(named.as_str()?).ok().or_else(|| Version::parse("99.0.0").ok())?)))'
+find = "if version.is_none() && !entry.is_null() {"
+replace = "if version.is_none() && !entry.is_null() && entry.is_null() {"
 
 [[plant]]
 name = "feeds: a feed that names a later release is waited for as if it were served stale"

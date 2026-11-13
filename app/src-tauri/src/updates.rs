@@ -5,7 +5,24 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
-use tauri_plugin_updater::{RemoteRelease, Update, UpdaterExt};
+use tauri_plugin_updater::Update;
+
+mod check;
+#[cfg(target_os = "macos")]
+mod relaunch;
+
+use check::{check_by_page, check_in_app, Found};
+#[cfg(test)]
+use check::{describe_check_error, test_update_url, validate_release};
+pub(crate) use check::{feed_unavailable, ReleaseInfo};
+#[cfg(target_os = "macos")]
+pub(crate) use relaunch::relaunch_installed;
+#[cfg(all(test, target_os = "macos"))]
+use relaunch::{relaunch, relaunch_once};
+#[cfg(target_os = "macos")]
+use relaunch::{restart_swept, INSTALLED};
+#[cfg(test)]
+use tauri_plugin_updater::UpdaterExt;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -30,6 +47,14 @@ impl Channel {
         format!("https://github.com/ngvoicu/consensflow/releases/download/{tag}/latest.json")
             .parse()
             .unwrap()
+    }
+
+    fn label(self) -> &'static str {
+        if self == Self::Alpha {
+            "Alpha"
+        } else {
+            "Stable"
+        }
     }
 
     fn default_for(version: &str) -> Self {
@@ -65,10 +90,43 @@ fn current_snapshot<R: Runtime>(app: &AppHandle<R>) -> UpdateSnapshot {
     snapshot
 }
 
+/// An event to the page that was not sent, said with its name.
+fn unsent(event: &str, sent: tauri::Result<()>) -> Result<(), String> {
+    sent.map_err(|error| format!("ConsensFlow could not send the page the event {event}: {error}"))
+}
+
 fn publish<R: Runtime>(app: &AppHandle<R>) -> Value {
+    publish_with(
+        app,
+        |event, snapshot| app.emit(event, snapshot),
+        |said| eprintln!("{said}"),
+    )
+}
+
+/// The state, told to the page by `emit` and returned as the command's answer. A command's
+/// answer carries the state whatever the event does, so a failed send is `log`ged and nothing else.
+fn publish_with<R: Runtime>(
+    app: &AppHandle<R>,
+    emit: impl FnOnce(&str, &UpdateSnapshot) -> tauri::Result<()>,
+    log: impl FnOnce(&str),
+) -> Value {
     let snapshot = current_snapshot(app);
-    let _ = app.emit("update-state-changed", &snapshot);
+    if let Err(said) = unsent(
+        "update-state-changed",
+        emit("update-state-changed", &snapshot),
+    ) {
+        log(&said);
+    }
     serde_json::to_value(snapshot).unwrap()
+}
+
+/// The menu's "Check for Updates" asks the page to open its dialog.
+fn menu_selected(id: &str, emit: impl FnOnce(&str) -> tauri::Result<()>, log: impl FnOnce(&str)) {
+    if id == "check-updates" {
+        if let Err(said) = unsent("check-updates", emit("check-updates")) {
+            log(&said);
+        }
+    }
 }
 
 fn command_error<R: Runtime>(app: &AppHandle<R>, error: String) -> Value {
@@ -96,14 +154,6 @@ pub fn update_channel<R: Runtime>(app: AppHandle<R>, channel: Channel) -> Value 
 /// the page it is downloaded from.
 const INSTALLS_IN_APP: bool = cfg!(target_os = "macos");
 
-/// What a check found: the release, the signed update to download where the
-/// app installs it, and the page to download it from where it does not.
-struct Found {
-    pending: Option<Update>,
-    available: Option<ReleaseInfo>,
-    page: Option<String>,
-}
-
 #[tauri::command]
 pub async fn update_check<R: Runtime>(app: AppHandle<R>) -> Value {
     crate::panics::settled("update_check", async move {
@@ -127,92 +177,6 @@ pub async fn update_check<R: Runtime>(app: AppHandle<R>) -> Value {
     .await
 }
 
-/// The signed update the feed offers this platform, checked, for the app to
-/// download and install.
-#[allow(clippy::disallowed_methods)] // Reads the packaged smoke's CONSENSFLOW_SELFTEST_UPDATER_* variables: older than cf_base::env::Env.
-async fn check_in_app<R: Runtime>(
-    app: &AppHandle<R>,
-    snapshot: &UpdateSnapshot,
-) -> Result<Found, String> {
-    let fixture = test_update_url(
-        crate::selftest::enabled(),
-        std::env::var("CONSENSFLOW_SELFTEST_UPDATER_URL")
-            .ok()
-            .as_deref(),
-    )?;
-    let mut builder = app
-        .updater_builder()
-        .target(tauri_plugin_updater::target().ok_or("This platform has no update target")?)
-        .endpoints(vec![fixture
-            .clone()
-            .unwrap_or_else(|| snapshot.channel.endpoint())])
-        .map_err(|e| e.to_string())?
-        .timeout(std::time::Duration::from_secs(20))
-        .configure_client(|client| client.https_only(true));
-    if fixture.is_some() {
-        // Only the existing opt-in packaged self-test may replace the
-        // distribution boundary. TLS and archive signatures still verify.
-        let pem = std::fs::read(
-            std::env::var("CONSENSFLOW_SELFTEST_UPDATER_CERT").map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-        let certificate = reqwest::Certificate::from_pem(&pem).map_err(|e| e.to_string())?;
-        let public = std::fs::read_to_string(
-            std::env::var("CONSENSFLOW_SELFTEST_UPDATER_KEY").map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| e.to_string())?;
-        builder = builder
-            .pubkey(public.trim())
-            .no_proxy()
-            .configure_client(move |client| {
-                client
-                    .https_only(true)
-                    .add_root_certificate(certificate.clone())
-            });
-    }
-    let updater = builder.build().map_err(|e| e.to_string())?;
-    let mut pending = updater
-        .check()
-        .await
-        .map_err(|e| describe_check_error(snapshot.channel, e))?;
-    let available = pending
-        .as_ref()
-        .map(|update| {
-            validate_release(
-                &snapshot.current_version,
-                snapshot.channel,
-                &update.raw_json,
-                &update.target,
-            )
-        })
-        .transpose()?;
-    if let (Some(endpoint), Some(update)) = (fixture, pending.as_mut()) {
-        update.download_url = endpoint.join("archive").map_err(|e| e.to_string())?;
-    }
-    Ok(Found {
-        pending,
-        available,
-        page: None,
-    })
-}
-
-/// The release the feed names, checked as any release is, and the page it
-/// is downloaded from: the feed holds no archive this platform installs.
-async fn check_by_page(snapshot: &UpdateSnapshot) -> Result<Found, String> {
-    let document =
-        crate::update_page::read_feed(snapshot.channel.endpoint(), snapshot.channel).await?;
-    let available =
-        crate::update_page::newer_release(&snapshot.current_version, snapshot.channel, &document)?;
-    let page = available
-        .as_ref()
-        .map(|release| crate::update_page::page_of(&release.version));
-    Ok(Found {
-        pending: None,
-        available,
-        page,
-    })
-}
-
 /// Opens the page of the release a check found, where the app does not
 /// install it itself.
 #[tauri::command]
@@ -227,46 +191,6 @@ pub fn update_open_page<R: Runtime>(app: AppHandle<R>) -> Value {
         Ok(()) => publish(&app),
         Err(error) => command_error(&app, format!("The download page could not open: {error}")),
     }
-}
-
-fn describe_check_error(channel: Channel, error: tauri_plugin_updater::Error) -> String {
-    if matches!(error, tauri_plugin_updater::Error::ReleaseNotFound) {
-        feed_unavailable(channel)
-    } else {
-        error.to_string()
-    }
-}
-
-/// What a check says of a channel's feed that is not there.
-pub(crate) fn feed_unavailable(channel: Channel) -> String {
-    let label = if channel == Channel::Alpha {
-        "Alpha"
-    } else {
-        "Stable"
-    };
-    format!("The {label} update feed is unavailable. Please try again later.")
-}
-
-fn test_update_url(enabled: bool, address: Option<&str>) -> Result<Option<url::Url>, String> {
-    if !enabled {
-        return Ok(None);
-    }
-    let Some(address) = address else {
-        return Ok(None);
-    };
-    let url: url::Url = address
-        .parse()
-        .map_err(|e: url::ParseError| e.to_string())?;
-    if url.scheme() != "https"
-        || !matches!(url.host_str(), Some("localhost" | "127.0.0.1"))
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err("The packaged updater fixture must use loopback HTTPS".into());
-    }
-    Ok(Some(url))
 }
 
 #[tauri::command]
@@ -346,101 +270,6 @@ async fn install<R: Runtime>(app: AppHandle<R>) -> Value {
     }
 }
 
-/// Starts the app an update installed, by `restart` (Tauri's, which never returns), once every
-/// descriptor of this app's is close-on-exec, which a descriptor left inheritable would otherwise
-/// be the new app's for as long as it runs. Called off the main thread, as the install is,
-/// Tauri's restart only asks the event loop to end, and the loop's end starts the new app
-/// ([`relaunch_installed`]) after the app's last code, which marks them all again (`at_exit`,
-/// lib.rs). This one is for the ways Tauri starts the new app itself, without that: a restart
-/// called on the main thread, one whose request to end the loop failed, and one the relaunch
-/// could not start. The app is ending, and its own programs are started holding only their
-/// streams, so nothing here needs a descriptor passed on.
-#[cfg(target_os = "macos")]
-fn restart_swept<T>(restart: impl FnOnce() -> T) -> T {
-    if let Err(failed) = cf_process::close_all_on_exec() {
-        eprintln!(
-            "ConsensFlow restarts holding descriptors it could not mark close-on-exec: {failed}"
-        );
-    }
-    restart()
-}
-
-/// The app an update installed at this one's path, once the install has swapped it in: the
-/// event loop's end starts it ([`relaunch_installed`]).
-#[cfg(target_os = "macos")]
-static INSTALLED: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-
-/// Starts the app an update installed, as this one was started, and ends this process. Called
-/// at the event loop's end (lib.rs), after the app's last code and before Tauri's restart, which
-/// since Tauri 2.12.2 starts the new app through LaunchServices (`open -n`): launchd's child, in
-/// a session of its own, its input and output `/dev/null`. A self-test's app reads the smoke's
-/// FIFO and writes its reports on its output, and the smoke ends the app's process group: the
-/// app an update restarted so would hear nothing, say nothing, and outlive the smoke (T-930).
-/// This starts the bundle's executable itself, as Tauri 2.11 did: this app's environment,
-/// streams, process group and arguments, holding nothing of this app's but its streams. Returns
-/// where no update was installed, or where the new app could not be started: Tauri's restart
-/// then starts it as it does.
-#[cfg(target_os = "macos")]
-pub(crate) fn relaunch_installed<R: Runtime>(app: &AppHandle<R>) {
-    relaunch_once(
-        INSTALLED.get().map(PathBuf::as_path),
-        || app.cleanup_before_exit(),
-        |installed| relaunch(installed, std::env::args_os().skip(1)).map(drop),
-        || std::process::exit(0),
-    );
-}
-
-/// The installed app is started once, by `start`, or not at all here (T-941): Tauri's cleanup
-/// runs first, a panic of it stopped and said, and a start that succeeds is followed by `exit`
-/// and nothing else, so Tauri's restart, which runs where this returns, never starts it a second
-/// time. Where nothing was installed nothing runs; where the start fails it is said, and this
-/// returns.
-#[cfg(target_os = "macos")]
-fn relaunch_once(
-    installed: Option<&Path>,
-    cleanup: impl FnOnce(),
-    start: impl FnOnce(&Path) -> Result<(), String>,
-    exit: impl FnOnce(),
-) {
-    let Some(installed) = installed else {
-        return;
-    };
-    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(cleanup)).is_err() {
-        eprintln!("ConsensFlow's cleanup before starting the installed update panicked");
-    }
-    match start(installed) {
-        Ok(()) => exit(),
-        Err(error) => eprintln!(
-            "ConsensFlow could not start the installed update itself ({error}); Tauri's restart starts it"
-        ),
-    }
-}
-
-/// Starts the executable of the bundle at `app` (its Info.plist names it) with `args`, this
-/// process's environment and input, and nothing of its but the standard streams.
-#[cfg(target_os = "macos")]
-#[allow(clippy::disallowed_methods)] // The app starts the installed update itself, holding only its streams: older than cf-process's rule.
-fn relaunch(
-    app: &Path,
-    args: impl IntoIterator<Item = std::ffi::OsString>,
-) -> Result<std::process::Child, String> {
-    let tools = crate::update_install::Tools::system();
-    let executable = crate::update_install::plist_value(&tools, app, "CFBundleExecutable")?;
-    let mut parts = Path::new(&executable).components();
-    if !matches!(
-        (parts.next(), parts.next()),
-        (Some(std::path::Component::Normal(_)), None)
-    ) {
-        return Err(format!(
-            "the bundle names no executable of its own: {executable:?}"
-        ));
-    }
-    let mut command = std::process::Command::new(app.join("Contents/MacOS").join(&executable));
-    command.args(args);
-    cf_process::hold_only_the_streams(&mut command);
-    command.spawn().map_err(|e| e.to_string())
-}
-
 fn preferences_directory(home: &Path, configured: Option<PathBuf>) -> PathBuf {
     configured
         .unwrap_or_else(|| home.join(".consensflow"))
@@ -477,12 +306,35 @@ pub fn setup(app: &tauri::App) -> tauri::Result<()> {
     app.set_menu(menu)?;
     app.on_menu_event(|app, event| {
         crate::panics::contained("the app's handler of its menu", || {
-            if event.id().as_ref() == "check-updates" {
-                let _ = app.emit("check-updates", ());
-            }
+            menu_selected(
+                event.id().as_ref(),
+                |name| app.emit(name, ()),
+                |said| eprintln!("{said}"),
+            );
         });
     });
     Ok(())
+}
+
+/// Where an update is, as the page names it (`phase` of the snapshot, in lower case).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum Phase {
+    Idle,
+    Checking,
+    Available,
+    Downloading,
+    /// Downloaded and its signature verified; the bytes are held for the install.
+    Ready,
+    Installing,
+    Error,
+}
+
+impl Phase {
+    /// A check, a download or an install is running.
+    fn is_running(self) -> bool {
+        matches!(self, Self::Checking | Self::Downloading | Self::Installing)
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -491,12 +343,15 @@ pub struct UpdateSnapshot {
     ok: bool,
     current_version: String,
     channel: Channel,
-    phase: &'static str,
+    phase: Phase,
     available: Option<ReleaseInfo>,
     downloaded_bytes: u64,
     total_bytes: Option<u64>,
     last_checked: Option<String>,
     error: Option<String>,
+    /// Why the saved channel could not be used, while its file is not replaced; the page offers
+    /// to keep the channel shown. Also the `error` where nothing else is.
+    preference_problem: Option<String>,
     blockers: Vec<Value>,
     /// Where an available release is downloaded from by hand, on a platform
     /// whose app does not install it itself; none where it does.
@@ -507,6 +362,21 @@ struct UpdateState {
     snapshot: UpdateSnapshot,
     pending: Option<Update>,
     bytes: Option<Vec<u8>>,
+    /// Why the saved channel could not be used, while the file that holds it is not replaced.
+    preference_problem: Option<String>,
+}
+
+/// The channel the preferences file holds: none where there is no file, an error where there is
+/// one that cannot be read or is not a channel.
+fn saved_channel(preferences: &Path) -> Result<Option<Channel>, String> {
+    let bytes = match std::fs::read(preferences) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("could not be read ({error})")),
+    };
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|error| format!("is not a channel ({error})"))
 }
 
 pub struct UpdateManager {
@@ -516,27 +386,38 @@ pub struct UpdateManager {
 
 impl UpdateManager {
     pub fn new(current: &str, preferences: PathBuf) -> Self {
-        let channel = std::fs::read(&preferences)
-            .ok()
-            .and_then(|b| serde_json::from_slice::<Channel>(&b).ok())
-            .unwrap_or_else(|| Channel::default_for(current));
+        let (channel, preference_problem) = match saved_channel(&preferences) {
+            Ok(Some(channel)) => (channel, None),
+            Ok(None) => (Channel::default_for(current), None),
+            Err(reason) => {
+                let channel = Channel::default_for(current);
+                let problem = format!(
+                    "The saved update channel {reason}, so the {} channel is used. Choose a channel to replace it.",
+                    channel.label()
+                );
+                eprintln!("ConsensFlow: {problem} ({})", preferences.display());
+                (channel, Some(problem))
+            }
+        };
         Self {
             state: Mutex::new(UpdateState {
                 snapshot: UpdateSnapshot {
                     ok: true,
                     current_version: current.into(),
                     channel,
-                    phase: "idle",
+                    phase: Phase::Idle,
                     available: None,
                     downloaded_bytes: 0,
                     total_bytes: None,
                     last_checked: None,
                     error: None,
+                    preference_problem: None,
                     blockers: Vec::new(),
                     page: None,
                 },
                 pending: None,
                 bytes: None,
+                preference_problem,
             }),
             preferences,
         }
@@ -548,16 +429,21 @@ impl UpdateManager {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// The page's state; a saved channel that could not be used is its error until a channel
+    /// is chosen, unless a failure of the update itself is already.
     fn snapshot(&self) -> UpdateSnapshot {
-        self.state().snapshot.clone()
+        let state = self.state();
+        let mut snapshot = state.snapshot.clone();
+        snapshot.preference_problem = state.preference_problem.clone();
+        if snapshot.error.is_none() {
+            snapshot.error = state.preference_problem.clone();
+        }
+        snapshot
     }
 
     fn set_channel(&self, channel: Channel) -> Result<(), String> {
         let mut state = self.state();
-        if matches!(
-            state.snapshot.phase,
-            "checking" | "downloading" | "installing"
-        ) {
+        if state.snapshot.phase.is_running() {
             return Err("Wait for the current update operation to finish".into());
         }
         let parent = self
@@ -572,8 +458,9 @@ impl UpdateManager {
         )
         .and_then(|()| std::fs::rename(&temporary, &self.preferences))
         .map_err(|e| e.to_string())?;
+        state.preference_problem = None;
         state.snapshot.channel = channel;
-        state.snapshot.phase = "idle";
+        state.snapshot.phase = Phase::Idle;
         state.snapshot.available = None;
         state.snapshot.page = None;
         state.snapshot.error = None;
@@ -587,13 +474,10 @@ impl UpdateManager {
 
     fn begin_check(&self) -> bool {
         let mut state = self.state();
-        if matches!(
-            state.snapshot.phase,
-            "checking" | "downloading" | "ready" | "installing"
-        ) {
+        if state.snapshot.phase.is_running() || state.snapshot.phase == Phase::Ready {
             return false;
         }
-        state.snapshot.phase = "checking";
+        state.snapshot.phase = Phase::Checking;
         state.snapshot.error = None;
         state.snapshot.available = None;
         state.snapshot.page = None;
@@ -606,9 +490,9 @@ impl UpdateManager {
     fn found(&self, found: Found) {
         let mut state = self.state();
         state.snapshot.phase = if found.available.is_some() {
-            "available"
+            Phase::Available
         } else {
-            "idle"
+            Phase::Idle
         };
         state.pending = found.pending;
         state.snapshot.available = found.available;
@@ -620,7 +504,7 @@ impl UpdateManager {
 
     fn fail(&self, error: String) {
         let mut state = self.state();
-        state.snapshot.phase = "error";
+        state.snapshot.phase = Phase::Error;
         state.snapshot.error = Some(error);
     }
 
@@ -632,8 +516,9 @@ impl UpdateManager {
     ) -> Result<cf_panes::pty::UpdatePermit, String> {
         let (permit, bytes, version) = {
             let mut state = self.state();
-            if state.snapshot.phase != "ready" || state.bytes.is_none() {
-                return Err("Download and verify the update before installing".into());
+            const NOT_READY: &str = "Download and verify the update before installing";
+            if state.snapshot.phase != Phase::Ready {
+                return Err(NOT_READY.into());
             }
             let version = state
                 .snapshot
@@ -643,14 +528,17 @@ impl UpdateManager {
                 .version
                 .clone();
             let permit = panes.begin_update().map_err(|e| e.to_string())?;
-            state.snapshot.phase = "installing";
+            let Some(bytes) = state.bytes.take() else {
+                return Err(NOT_READY.into());
+            };
+            state.snapshot.phase = Phase::Installing;
             state.snapshot.error = None;
-            (permit, state.bytes.take().unwrap(), version)
+            (permit, bytes, version)
         };
         if let Err(error) = action(&bytes, &version) {
             let mut state = self.state();
             state.bytes = Some(bytes);
-            state.snapshot.phase = "ready";
+            state.snapshot.phase = Phase::Ready;
             state.snapshot.error = Some(error.clone());
             return Err(error);
         }
@@ -660,14 +548,14 @@ impl UpdateManager {
     async fn download(&self, notify: impl Fn(&UpdateSnapshot)) -> Result<(), String> {
         let mut update = {
             let mut state = self.state();
-            if !matches!(state.snapshot.phase, "available" | "error") {
+            if !matches!(state.snapshot.phase, Phase::Available | Phase::Error) {
                 return Err("Choose an available update before downloading".into());
             }
             let update = state
                 .pending
                 .clone()
                 .ok_or("Check for updates before downloading")?;
-            state.snapshot.phase = "downloading";
+            state.snapshot.phase = Phase::Downloading;
             state.snapshot.error = None;
             state.snapshot.downloaded_bytes = 0;
             state.snapshot.total_bytes = None;
@@ -697,7 +585,7 @@ impl UpdateManager {
             Ok(bytes) => {
                 let mut state = self.state();
                 state.bytes = Some(bytes);
-                state.snapshot.phase = "ready";
+                state.snapshot.phase = Phase::Ready;
             }
             Err(error) => {
                 let error = format!("Download or signature verification failed: {error}");
@@ -709,65 +597,6 @@ impl UpdateManager {
         notify(&self.snapshot());
         Ok(())
     }
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct ReleaseInfo {
-    pub(crate) version: String,
-    pub(crate) notes: String,
-    pub(crate) date: Option<String>,
-}
-
-pub fn validate_release(
-    current: &str,
-    channel: Channel,
-    document: &Value,
-    target: &str,
-) -> Result<ReleaseInfo, String> {
-    let release: RemoteRelease =
-        serde_json::from_value(document.clone()).map_err(|e| e.to_string())?;
-    let current = Version::parse(current).map_err(|e| e.to_string())?;
-    if release.version <= current || !channel.accepts(&release.version) {
-        return Err("This release is not newer or does not belong to the selected channel".into());
-    }
-    let version = release.version.to_string();
-    if document["version"].as_str() != Some(&version) {
-        return Err("The release version must be a canonical semantic version".into());
-    }
-    let notes = release.notes.clone().unwrap_or_default();
-    if notes.len() > 64 * 1024 || release.pub_date.is_none() {
-        return Err("The release needs a publication date and bounded release notes".into());
-    }
-    let url = release.download_url(target).map_err(|e| e.to_string())?;
-    let prefix = format!("/ngvoicu/consensflow/releases/download/v{version}/");
-    let filename = url.path().strip_prefix(&prefix).unwrap_or_default();
-    if url.scheme() != "https"
-        || url.host_str() != Some("github.com")
-        || url.port().is_some()
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-        || !filename.ends_with(".app.tar.gz")
-        || !filename.contains(&version)
-        || !filename
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
-        || release
-            .signature(target)
-            .map_err(|e| e.to_string())?
-            .trim()
-            .is_empty()
-    {
-        return Err(
-            "The update archive must be a signed, versioned ConsensFlow GitHub asset".into(),
-        );
-    }
-    Ok(ReleaseInfo {
-        version,
-        notes,
-        date: document["pub_date"].as_str().map(str::to_owned),
-    })
 }
 
 #[cfg(test)]
@@ -1026,7 +855,7 @@ mod tests {
             let manager = UpdateManager::new("3.0.0-alpha.42", dir.path().join("prefs.json"));
             assert!(manager.begin_check());
             manager.fail(message);
-            assert_eq!(manager.snapshot().phase, "error");
+            assert_eq!(manager.snapshot().phase, Phase::Error);
             assert!(manager.snapshot().available.is_none());
             assert!(manager.begin_check(), "a failed check must be retryable");
         }
@@ -1049,9 +878,201 @@ mod tests {
         assert!(!manager.begin_check());
         assert!(manager.set_channel(Channel::Alpha).is_err());
         manager.fail("Offline".into());
-        assert_eq!(manager.snapshot().phase, "error");
+        assert_eq!(manager.snapshot().phase, Phase::Error);
         assert!(manager.begin_check(), "a failed check must be retryable");
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// A failed send of the state or of the menu's check is said with the event's name, and
+    /// leaves the answer of the command and what was healthy as it was.
+    #[test]
+    fn a_page_event_that_cannot_be_sent_is_said_and_stops_nothing() {
+        let app = tauri::test::mock_app();
+        let dir = tempfile::tempdir().unwrap();
+        app.manage(UpdateManager::new("3.0.0", dir.path().join("updates.json")));
+        let gone = || -> tauri::Result<()> { Err(std::io::Error::other("webview gone").into()) };
+
+        let said = std::cell::RefCell::new(Vec::new());
+        let answer = publish_with(
+            app.handle(),
+            |_, _| gone(),
+            |line| said.borrow_mut().push(line.to_owned()),
+        );
+        assert_eq!(
+            answer["phase"], "idle",
+            "the command still answers with the state"
+        );
+        let said = said.into_inner();
+        assert!(
+            matches!(said.as_slice(), [line] if line.contains("update-state-changed") && line.contains("webview gone")),
+            "{said:?}"
+        );
+
+        let told = std::cell::RefCell::new(Vec::new());
+        let said = std::cell::RefCell::new(Vec::new());
+        publish_with(
+            app.handle(),
+            |event, snapshot| {
+                told.borrow_mut().push((event.to_owned(), snapshot.phase));
+                Ok(())
+            },
+            |line| said.borrow_mut().push(line.to_owned()),
+        );
+        assert_eq!(
+            told.into_inner(),
+            [("update-state-changed".to_owned(), Phase::Idle)]
+        );
+        assert!(said.into_inner().is_empty(), "a sent event is not logged");
+
+        let said = std::cell::RefCell::new(Vec::new());
+        menu_selected(
+            "check-updates",
+            |_| gone(),
+            |line| said.borrow_mut().push(line.to_owned()),
+        );
+        let said = said.into_inner();
+        assert!(
+            matches!(said.as_slice(), [line] if line.contains("check-updates") && line.contains("webview gone")),
+            "{said:?}"
+        );
+        let sent = std::cell::RefCell::new(Vec::new());
+        menu_selected(
+            "check-updates",
+            |name| {
+                sent.borrow_mut().push(name.to_owned());
+                Ok(())
+            },
+            |line| panic!("nothing to say: {line}"),
+        );
+        menu_selected(
+            "quit",
+            |name| panic!("{name} is not the menu's check"),
+            |line| panic!("{line}"),
+        );
+        assert_eq!(sent.into_inner(), ["check-updates"]);
+    }
+
+    /// The page reads `phase` as these words (`ui/updates.js`); the named states go out as them.
+    #[test]
+    fn the_phases_go_to_the_page_under_the_words_it_reads() {
+        for (phase, word) in [
+            (Phase::Idle, "idle"),
+            (Phase::Checking, "checking"),
+            (Phase::Available, "available"),
+            (Phase::Downloading, "downloading"),
+            (Phase::Ready, "ready"),
+            (Phase::Installing, "installing"),
+            (Phase::Error, "error"),
+        ] {
+            assert_eq!(serde_json::to_value(phase).unwrap(), word);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let manager = UpdateManager::new("3.0.0", dir.path().join("updates.json"));
+        assert_eq!(
+            serde_json::to_value(manager.snapshot()).unwrap()["phase"],
+            "idle"
+        );
+    }
+
+    /// The page names the phases once (`PHASE` in `ui/updates.js`): the same seven words, not
+    /// a word the shell does not send and none left out.
+    #[test]
+    fn the_pages_phase_names_are_the_words_the_shell_sends() {
+        let page = include_str!("../../ui/updates.js");
+        let block = page
+            .split("const PHASE = Object.freeze({")
+            .nth(1)
+            .and_then(|rest| rest.split("})").next())
+            .expect("the page's PHASE");
+        let mut named: Vec<(&str, &str)> = block
+            .lines()
+            .filter_map(|line| line.trim().trim_end_matches(',').split_once(": "))
+            .map(|(key, value)| (key, value.trim_matches('\'')))
+            .collect();
+        named.sort_unstable();
+        let mut sent: Vec<(String, String)> = [
+            Phase::Idle,
+            Phase::Checking,
+            Phase::Available,
+            Phase::Downloading,
+            Phase::Ready,
+            Phase::Installing,
+            Phase::Error,
+        ]
+        .map(|phase| {
+            let word = serde_json::to_value(phase).unwrap();
+            let word = word.as_str().unwrap().to_owned();
+            (word.clone(), word)
+        })
+        .to_vec();
+        sent.sort_unstable();
+        let sent: Vec<(&str, &str)> = sent.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        assert_eq!(named, sent);
+    }
+
+    /// A saved choice that is not there is no problem and takes the version's own channel; one
+    /// that is there and cannot be read or parsed is said to the page, which a user on Alpha
+    /// whose file was damaged was not told of when the app turned to Stable.
+    #[test]
+    fn a_saved_channel_that_cannot_be_read_is_told_apart_from_one_that_is_not_there() {
+        let dir = tempfile::tempdir().unwrap();
+        let absent = UpdateManager::new("3.0.0-alpha.35", dir.path().join("absent.json"));
+        assert_eq!(absent.snapshot().channel, Channel::Alpha);
+        assert_eq!(absent.snapshot().error, None, "a first run has no problem");
+        assert_eq!(absent.snapshot().preference_problem, None);
+
+        let saved = dir.path().join("saved.json");
+        std::fs::write(&saved, br#""stable""#).unwrap();
+        let valid = UpdateManager::new("3.0.0-alpha.35", saved);
+        assert_eq!(valid.snapshot().channel, Channel::Stable);
+        assert_eq!(valid.snapshot().error, None);
+
+        let damaged = dir.path().join("damaged.json");
+        std::fs::write(&damaged, br#""sta"#).unwrap();
+        let unreadable = dir.path().join("a-folder.json");
+        std::fs::create_dir(&unreadable).unwrap();
+        for (what, path) in [("damaged", damaged), ("unreadable", unreadable)] {
+            let manager = UpdateManager::new("3.0.0-alpha.35", path.clone());
+            let snapshot = manager.snapshot();
+            assert_eq!(
+                snapshot.channel,
+                Channel::Alpha,
+                "{what}: the default is used"
+            );
+            let said = snapshot.error.unwrap_or_default();
+            assert!(
+                said.contains("saved update channel") && said.contains("Alpha"),
+                "{what}: the user is told, got {said:?}"
+            );
+            assert_eq!(
+                serde_json::to_value(manager.snapshot()).unwrap()["preferenceProblem"],
+                said,
+                "{what}: the page is told which problem it is, to offer keeping the channel"
+            );
+            assert!(manager.begin_check());
+            assert!(
+                manager.snapshot().error.is_some(),
+                "{what}: a check does not take the problem away"
+            );
+        }
+    }
+
+    /// Choosing a channel replaces the damaged file, and with it the problem.
+    #[test]
+    fn choosing_a_channel_replaces_a_damaged_preference_and_its_problem() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("updates.json");
+        std::fs::write(&path, b"{").unwrap();
+        let manager = UpdateManager::new("3.0.0-alpha.35", path.clone());
+        assert!(manager.snapshot().error.is_some());
+        manager.set_channel(Channel::Alpha).unwrap();
+        assert_eq!(manager.snapshot().error, None);
+        assert_eq!(manager.snapshot().preference_problem, None);
+        let again = UpdateManager::new("3.0.0-alpha.35", path);
+        assert_eq!(
+            (again.snapshot().channel, again.snapshot().error),
+            (Channel::Alpha, None)
+        );
     }
 
     #[test]
@@ -1067,7 +1088,7 @@ mod tests {
             .is_err());
         {
             let mut state = manager.state.lock().unwrap();
-            state.snapshot.phase = "ready";
+            state.snapshot.phase = Phase::Ready;
             state.snapshot.available = Some(ReleaseInfo {
                 version: "3.0.0-alpha.36".into(),
                 notes: String::new(),
@@ -1082,7 +1103,7 @@ mod tests {
             Err("Disk full".into())
         });
         assert!(result.is_err());
-        assert_eq!(manager.snapshot().phase, "ready");
+        assert_eq!(manager.snapshot().phase, Phase::Ready);
         assert_eq!(manager.snapshot().error.as_deref(), Some("Disk full"));
         assert!(manager.state.lock().unwrap().bytes.is_some());
         assert!(panes.begin_update().is_ok());
@@ -1188,15 +1209,15 @@ mod tests {
                     .unwrap();
                 let manager = UpdateManager::new("0.1.0", dir.path().join("prefs.json"));
                 manager.state.lock().unwrap().pending = Some(update);
-                manager.state.lock().unwrap().snapshot.phase = "available";
+                manager.state.lock().unwrap().snapshot.phase = Phase::Available;
                 let result = manager.download(|_| {}).await;
                 if tampered {
                     assert!(result.is_err());
-                    assert_eq!(manager.snapshot().phase, "error");
+                    assert_eq!(manager.snapshot().phase, Phase::Error);
                     assert!(manager.state.lock().unwrap().bytes.is_none());
                 } else {
                     result.unwrap();
-                    assert_eq!(manager.snapshot().phase, "ready");
+                    assert_eq!(manager.snapshot().phase, Phase::Ready);
                     assert_eq!(
                         manager.state.lock().unwrap().bytes.as_deref(),
                         Some(bytes.as_slice())

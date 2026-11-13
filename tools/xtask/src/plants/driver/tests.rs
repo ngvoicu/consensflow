@@ -31,6 +31,8 @@ struct Fake<A: FnMut(&[String]) -> Answer> {
     temp_there: Vec<bool>,
     /// The harnesses the machine lacks, each with why (`lacks`).
     lacking: Vec<(String, String)>,
+    /// The commands it was told have no use for the driver's threads (`say_no_effect`).
+    no_effect: Vec<String>,
 }
 
 impl<A: FnMut(&[String]) -> Answer> Fake<A> {
@@ -46,6 +48,7 @@ impl<A: FnMut(&[String]) -> Answer> Fake<A> {
             stops_in_state: VecDeque::new(),
             states: 0,
             lacking: Vec::new(),
+            no_effect: Vec::new(),
         }
     }
 }
@@ -92,6 +95,10 @@ impl<A: FnMut(&[String]) -> Answer> Runner for Fake<A> {
             .iter()
             .find(|(lacked, _)| lacked == harness)
             .map(|(_, why)| why.clone())
+    }
+
+    fn say_no_effect(&mut self, command: &[String]) {
+        self.no_effect.push(command.join(" "));
     }
 }
 
@@ -1067,6 +1074,29 @@ fn what_a_plant_needs_first_or_a_build_again_of_cf_has_every_command_run_again_w
             "first",
         ]
     );
+}
+
+#[test]
+fn the_no_effect_said_is_for_a_tables_own_runs_only_never_the_drivers_own_commands() {
+    let (_folder, context) = checkout();
+    let mut needs = plant(
+        "p: needs",
+        &[("src/b.rs", "three", "3")],
+        &[("first", false)],
+    );
+    needs.prepare = vec![vec!["prepare".into()]];
+    let family = family(vec![needs]);
+    let mut runner = Fake::new(|command| match command[0].as_str() {
+        "prepare" | "rebuild-cf" => ended(0, ""),
+        _ => catches(&context, "m::the_test"),
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 0, "{said}");
+    // The prepare ran, and is a command of the plant's own, but is not under `[run]`.
+    assert!(runner.ran.iter().any(|command| command == "prepare"));
+    // What takes no threads is said of the table's own run command only: never of a
+    // command the driver ran for itself.
+    assert_eq!(runner.no_effect, ["first"]);
 }
 
 #[test]
