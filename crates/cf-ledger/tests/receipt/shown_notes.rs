@@ -214,6 +214,71 @@ fn an_older_delivered_answer_with_no_proof_of_ways_on_keeps_the_note_typed_until
 }
 
 #[test]
+fn a_resume_before_handover_sends_the_answer_back_to_prepare_its_words_again() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    w.begin(answer.id);
+    w.resume(task, "Go on");
+
+    assert_eq!(
+        w.ledger.admit(answer.id, &[]).unwrap(),
+        cf_ledger::HandOver::PauseChanged
+    );
+    assert!(!w
+        .ledger
+        .handed_over(w.project)
+        .unwrap()
+        .contains(&answer.id));
+}
+
+#[test]
+fn a_carried_answers_changed_pause_also_stops_the_first_handover() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    let carrier = w.note(&session, "chief", task, "More for the chief");
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET carried_by = ?1 WHERE id = ?2",
+            [carrier.id, answer.id],
+        )
+        .expect("the answer rides in the carrier");
+    });
+    let begun = w.begin(carrier.id);
+    assert!(begun.carried.iter().any(|row| row.id == answer.id));
+    w.resume(task, "Go on");
+
+    assert_eq!(
+        w.ledger.admit(carrier.id, &[answer.id]).unwrap(),
+        cf_ledger::HandOver::PauseChanged
+    );
+    assert!(!w
+        .ledger
+        .handed_over(w.project)
+        .unwrap()
+        .contains(&answer.id));
+}
+
+#[test]
+fn a_paste_already_handed_over_may_be_sent_after_its_tells_pause_ends() {
+    let mut w = world();
+    let (task, session, tell) = delivered_tell(&mut w);
+    let answer = answer_tell(&mut w, &session, tell);
+    w.begin(answer.id);
+    assert_eq!(
+        w.ledger.admit(answer.id, &[]).unwrap(),
+        cf_ledger::HandOver::Admitted
+    );
+    w.resume(task, "Go on");
+
+    assert_eq!(
+        w.ledger.admit(answer.id, &[]).unwrap(),
+        cf_ledger::HandOver::Admitted
+    );
+}
+
+#[test]
 fn an_older_carrier_already_pasting_an_answer_without_ways_on_keeps_the_note_typed() {
     let mut w = world();
     let (task, session, tell) = delivered_tell(&mut w);

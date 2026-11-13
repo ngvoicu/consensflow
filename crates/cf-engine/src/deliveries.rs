@@ -289,6 +289,8 @@ pub(crate) struct Admitting<'a> {
     refused: Cell<bool>,
     /// It said no because what was to go in was withdrawn since it was begun.
     withdrawn: Cell<bool>,
+    /// The tell's pause changed before this paste was handed over.
+    pause_changed: Cell<bool>,
     /// Why it could not tell, where the ledger could not be read.
     failed: RefCell<Option<EngineError>>,
 }
@@ -305,6 +307,7 @@ impl<'a> Admitting<'a> {
             received: Cell::new(None),
             refused: Cell::new(false),
             withdrawn: Cell::new(false),
+            pause_changed: Cell::new(false),
             failed: RefCell::new(None),
         }
     }
@@ -332,6 +335,8 @@ impl<'a> Admitting<'a> {
     pub(crate) fn because(&self) -> &'static str {
         if self.withdrawn.get() {
             "what its paste held was withdrawn before it was handed over"
+        } else if self.pause_changed.get() {
+            "the tell's pause changed before its answer was handed over"
         } else {
             "its project was closed before it was handed over"
         }
@@ -359,6 +364,7 @@ impl<'a> Admitting<'a> {
             .borrow_mut()
             .admit(message, carried)?;
         self.withdrawn.set(handed == HandOver::Withdrawn);
+        self.pause_changed.set(handed == HandOver::PauseChanged);
         Ok(handed == HandOver::Admitted)
     }
 }

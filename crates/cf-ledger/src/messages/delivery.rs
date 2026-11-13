@@ -330,20 +330,7 @@ pub(crate) fn begin_delivery(
             [message_id],
         )?;
         let carried = carried(store, message_id)?;
-        let mut paused = Vec::new();
-        if message.recipient_role == "chief" {
-            for row in std::iter::once(&message).chain(&carried) {
-                if row.kind != "answer" {
-                    continue;
-                }
-                if let Some(number) = super::paused_answers::answer_to_current_pause(store, row.id)?
-                {
-                    if !paused.contains(&number) {
-                        paused.push(number);
-                    }
-                }
-            }
-        }
+        let paused = paused_answers_in(store, &message, &carried)?;
         let mut begun = json!({ "message": message_id, "attempt": message.attempts + 1 });
         if !paused.is_empty() {
             begun["tellPauseWaysOn"] = json!(paused);
@@ -354,6 +341,28 @@ pub(crate) fn begin_delivery(
             carried,
         })
     })
+}
+
+/// The pauses for which this paste's answers need the chief's ways on.
+fn paused_answers_in(
+    store: &Store,
+    message: &MessageView,
+    carried: &[MessageView],
+) -> Result<Vec<i64>, LedgerError> {
+    let mut paused = Vec::new();
+    if message.recipient_role == "chief" {
+        for row in std::iter::once(message).chain(carried) {
+            if row.kind != "answer" {
+                continue;
+            }
+            if let Some(number) = super::paused_answers::answer_to_current_pause(store, row.id)? {
+                if !paused.contains(&number) {
+                    paused.push(number);
+                }
+            }
+        }
+    }
+    Ok(paused)
 }
 
 /// An event's `data` with what the engine's look read of the window, where it says
@@ -437,6 +446,8 @@ pub enum HandOver {
     /// Nothing goes in: the message, or a row its paste carries, was withdrawn
     /// since its delivery began (its task moved on, `continuations`).
     Withdrawn,
+    /// A tell's pause changed after the paste was prepared; prepare it again.
+    PauseChanged,
 }
 
 /// The transport is about to let a hand-over begun ([`begin_delivery`]) go to its
@@ -453,7 +464,9 @@ pub enum HandOver {
 /// does the brief of the chief's own step finished while it was on its way, in
 /// the finish's words (`withdrawn_late`): the transport asks again for an Enter
 /// that sends a paste left in the chief's input box, and a step accepted is no
-/// brief to send (the merge of main's field 3.0.6, T-392).
+/// brief to send (the merge of main's field 3.0.6, T-392). Before a first hand-over,
+/// a chief's answer to a tell goes back if its pause changed since the paste was
+/// prepared; a paste already handed retains its original words for an Enter.
 pub(crate) fn admit(
     store: &mut Store,
     message_id: i64,
@@ -471,8 +484,9 @@ pub(crate) fn admit(
             return Ok(HandOver::Closed);
         }
         let mut stale = withdrawn_if_stale(store, &message)?;
-        for row in carried(store, message_id)? {
-            stale |= withdrawn_if_stale(store, &row)?;
+        let carried = carried(store, message_id)?;
+        for row in &carried {
+            stale |= withdrawn_if_stale(store, row)?;
         }
         if stale {
             return Ok(HandOver::Withdrawn);
@@ -489,6 +503,24 @@ pub(crate) fn admit(
             .collect::<rusqlite::Result<_>>()?;
         if message.state != "delivering" || begun_with.iter().any(|id| !riding.contains(id)) {
             return Ok(HandOver::Withdrawn);
+        }
+        // An adapter may wait after the paste is prepared. Recheck in this same write,
+        // before the first hand-over, so the words match the pause at hand-over. Once a
+        // paste has been handed over, an Enter must use its original words instead.
+        if message.recipient_role == "chief"
+            && (message.kind == "answer" || carried.iter().any(|row| row.kind == "answer"))
+        {
+            let already_handed: bool = store.db.query_row(
+                "SELECT handed_at IS NOT NULL FROM message WHERE id = ?",
+                [message_id],
+                |row| row.get(0),
+            )?;
+            if !already_handed
+                && paused_answers_in(store, &message, &carried)?
+                    != super::paused_answers::tell_pause_ways_on(store, message_id)?
+            {
+                return Ok(HandOver::PauseChanged);
+            }
         }
         let at = store.at();
         store.db.execute(

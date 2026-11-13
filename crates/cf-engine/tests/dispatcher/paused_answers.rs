@@ -211,6 +211,46 @@ fn an_answer_typed_after_its_task_resumes_has_no_paused_task_guidance() {
 }
 
 #[test]
+fn an_answer_waiting_to_be_handed_over_loses_paused_guidance_if_the_task_resumes() {
+    let context = Context::new();
+    let (project, told) = told_at_work(&context);
+    let handing = context.adapter.deliver_holds.hold(|asked| {
+        asked[0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains(ANSWER))
+    });
+    answers_and_goes_on(&context, &told);
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    let answer = context
+        .task(project, 1)
+        .messages
+        .into_iter()
+        .find(|message| message.kind == "answer" && message.reply_to == Some(told.id))
+        .expect("the answer to the tell");
+    assert_eq!(context.message(answer.id).state, "delivering");
+    assert!(!given(&context, "chief")
+        .iter()
+        .any(|text| text.contains(ANSWER)));
+
+    context.resume_task(project, 1, "Go on");
+    handing.open();
+    context.settle();
+    for _ in 0..6 {
+        context.pass().unwrap();
+    }
+    let pastes = given(&context, "chief");
+    let answers: Vec<_> = pastes.iter().filter(|text| text.contains(ANSWER)).collect();
+    assert_eq!(
+        answers.len(),
+        1,
+        "the answer is typed exactly once: {pastes:?}"
+    );
+    assert!(!answers[0].contains("T-1 is paused."), "{}", answers[0]);
+}
+
+#[test]
 fn an_answer_s_paused_task_guidance_stays_part_of_the_paste_after_a_resume() {
     let context = Context::new();
     let (project, told) = told_at_work(&context);
