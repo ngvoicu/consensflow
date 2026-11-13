@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use cf_base::env::Env;
-use cf_base::file::{read_file_sync, write_file, FileError};
+use cf_base::file::{is_missing, read_file_sync, write_file, FileError};
 use cf_base::home::config_root;
 use cf_base::path;
 
@@ -77,7 +77,14 @@ pub fn install(env: &Env, cf: &Path, places: &Places) -> Result<Option<Installed
         if let Some(shim) = &shim {
             program::place(&program_of(&file), shim).map_err(|failed| failed.to_string())?;
             // The `.cmd` of ours the shim replaces: cmd.exe would run it for the name `cf.cmd`.
-            let _ = std::fs::remove_file(script_of(&file));
+            // Where there is none, there is nothing to do; one that cannot be taken away
+            // leaves the old command where a shell finds it first, so the install says so.
+            let cmd = script_of(&file);
+            if let Err(failed) = std::fs::remove_file(&cmd) {
+                if !is_missing(&failed) {
+                    return Err(format!("{}: {failed}", cmd.display()));
+                }
+            }
         }
     }
     status(env, places)
