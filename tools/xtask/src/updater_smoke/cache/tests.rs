@@ -2,6 +2,7 @@
 //! update was built from.
 
 use super::*;
+use crate::updater_smoke::say::Line;
 use crate::updater_smoke::testing::{fake_bundle, hold_when_free, Fake};
 
 /// A context for a checkout at `root`, whose user's home is `home`.
@@ -145,8 +146,10 @@ fn names_the_checkout_a_cache_is_for_in_a_file_of_its_own_that_a_cleanup_reads()
 #[test]
 fn a_cache_is_held_by_one_run_at_a_time_and_the_second_is_told_so() {
     let cache = tempfile::tempdir().unwrap();
-    let first = hold(cache.path()).unwrap();
-    let said = hold(cache.path()).unwrap_err().to_string();
+    let first = hold(cache.path(), &Say::channel().0).unwrap();
+    let said = hold(cache.path(), &Say::channel().0)
+        .unwrap_err()
+        .to_string();
     assert!(said.starts_with("another run of the smoke"), "{said}");
     assert!(
         said.ends_with(&format!(
@@ -164,10 +167,130 @@ fn a_cache_is_held_by_one_run_at_a_time_and_the_second_is_told_so() {
     }
     // Another cache is not held by it.
     let other = tempfile::tempdir().unwrap();
-    let _other = hold(other.path()).unwrap();
+    let _other = hold(other.path(), &Say::channel().0).unwrap();
     // A run that ended lets go of its cache.
     drop(first);
     let _again = hold_when_free(cache.path());
+}
+
+#[test]
+fn a_lock_that_cannot_say_who_holds_it_is_held_and_says_so_once() {
+    let cache = tempfile::tempdir().unwrap();
+    let (say, lines) = Say::channel();
+    let first = hold_recording(cache.path(), &say, |_| Err(io::Error::other("disk full"))).unwrap();
+    drop(say);
+    let lock = cache.path().join(LOCK);
+    assert_eq!(
+        lines.iter().collect::<Vec<_>>(),
+        [Line::Err(format!(
+            "smoke:updater: could not write who holds the lock in {}: disk full; the lock is held",
+            lock.display()
+        ))]
+    );
+    // It is held all the same, by the system's lock, whatever the file says.
+    let said = hold(cache.path(), &Say::channel().0)
+        .unwrap_err()
+        .to_string();
+    assert!(said.starts_with("another run of the smoke"), "{said}");
+    drop(first);
+}
+
+#[test]
+fn the_holder_is_written_by_the_real_recorder_and_its_failure_is_the_writes_own() {
+    let cache = tempfile::tempdir().unwrap();
+    let lock = cache.path().join(LOCK);
+    let (say, lines) = Say::channel();
+    let _held = hold(cache.path(), &say).unwrap();
+    drop(say);
+    assert_eq!(lines.iter().count(), 0);
+    assert_eq!(
+        fs::read_to_string(&lock).unwrap(),
+        format!("{}\n", std::process::id())
+    );
+    // A file that cannot be written to is the write's error, not nothing.
+    let mut read_only = File::open(&lock).unwrap();
+    assert!(record_holder(&mut read_only).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_file_of_the_checkout_that_cannot_be_read_is_no_state_to_reuse_a_build_on() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo = Repo::new();
+    repo.write("new", "one\n");
+    let path = repo.path().join("new");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    // A user who can read it anyway (root) has no failure to show.
+    if File::open(&path).is_ok() {
+        return;
+    }
+    let said = State::of(repo.path(), None, &Env::from_process())
+        .unwrap_err()
+        .to_string();
+    assert!(said.contains("could not read"), "{said}");
+    assert!(said.contains(&path.display().to_string()), "{said}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_build_whose_checkout_cannot_be_fingerprinted_says_so_when_it_is_kept() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let repo = Repo::new();
+    repo.write("new", "one\n");
+    let path = repo.path().join("new");
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    if File::open(&path).is_ok() {
+        return;
+    }
+    let cache = tempfile::tempdir().unwrap();
+    let update = cache.path().join("update").join("ConsensFlow.app");
+    let (say, lines) = Say::channel();
+    keep_update(repo.path(), &update, &Env::from_process(), &say, || {
+        Ok(fake_bundle(&cache.path().join("built"), &Fake::default()))
+    })
+    .unwrap();
+    drop(say);
+    let said: Vec<Line> = lines.iter().collect();
+    assert_eq!(
+        said,
+        [Line::Err(format!(
+            "smoke:updater: no record of this build is kept: could not read {}: Permission denied (os error 13)",
+            path.display()
+        ))]
+    );
+    assert!(!update.with_file_name(BUILT_FROM).exists());
+}
+
+#[test]
+fn a_record_that_is_there_and_cannot_be_read_is_not_no_record() {
+    let repo = Repo::new();
+    let cache = tempfile::tempdir().unwrap();
+    let update = cache.path().join("update").join("ConsensFlow.app");
+    fs::create_dir_all(update.with_file_name(BUILT_FROM)).unwrap();
+    let said = repo.older(&update).unwrap();
+    assert!(!said.contains("has no record"), "{said}");
+    assert!(
+        said.starts_with("the kept update's record of what it was built from is there and cannot be read: could not read"),
+        "{said}"
+    );
+    assert!(said.contains(BUILT_FROM), "{said}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_repository_inside_the_checkout_is_there_by_its_name_and_is_no_failure() {
+    let repo = Repo::new();
+    let nested = repo.path().join("nested");
+    fs::create_dir(&nested).unwrap();
+    process::capture(
+        &Invocation::new("git", &nested).args(["init", "-q"]),
+        &Env::from_process(),
+    )
+    .unwrap();
+    fs::write(nested.join("f"), "inside\n").unwrap();
+    assert!(repo.state().changes.is_some());
 }
 
 #[test]
@@ -314,10 +437,16 @@ fn keeps_the_update_with_what_the_checkout_was_when_the_build_started_to_read_it
     let built = fake_bundle(&scratch.path().join("built"), &Fake::default());
 
     // A checkout that changes while the build goes on is the one the build began with.
-    let kept = keep_update(repo.path(), &update, &Env::from_process(), || {
-        repo.write("f", "changed during the build\n");
-        Ok(built.clone())
-    })
+    let kept = keep_update(
+        repo.path(),
+        &update,
+        &Env::from_process(),
+        &Say::channel().0,
+        || {
+            repo.write("f", "changed during the build\n");
+            Ok(built.clone())
+        },
+    )
     .unwrap();
     assert_eq!(kept, update);
     assert!(update.join("Contents/Info.plist").is_file());
@@ -328,9 +457,13 @@ fn keeps_the_update_with_what_the_checkout_was_when_the_build_started_to_read_it
     assert!(repo.older(&update).unwrap().contains("it was built from"));
 
     // Built again, the record is the new one.
-    keep_update(repo.path(), &update, &Env::from_process(), || {
-        Ok(built.clone())
-    })
+    keep_update(
+        repo.path(),
+        &update,
+        &Env::from_process(),
+        &Say::channel().0,
+        || Ok(built.clone()),
+    )
     .unwrap();
     assert_eq!(repo.older(&update), None);
 }
@@ -351,11 +484,17 @@ fn a_cache_in_the_checkout_that_git_does_not_ignore_is_no_change_in_the_checkout
     let built = fake_bundle(&scratch.path().join("built"), &Fake::default());
 
     // The build adds to the cache (the update, the record of it, a run's folder).
-    keep_update(repo.path(), &update, &Env::from_process(), || {
-        fs::create_dir_all(cache.join("run-1")).unwrap();
-        fs::write(cache.join("run-1").join("key"), "a key\n").unwrap();
-        Ok(built.clone())
-    })
+    keep_update(
+        repo.path(),
+        &update,
+        &Env::from_process(),
+        &Say::channel().0,
+        || {
+            fs::create_dir_all(cache.join("run-1")).unwrap();
+            fs::write(cache.join("run-1").join("key"), "a key\n").unwrap();
+            Ok(built.clone())
+        },
+    )
     .unwrap();
     // What it records is the checkout, with nothing changed in it, and it is the checkout still.
     assert_eq!(
@@ -388,9 +527,13 @@ fn an_update_built_where_the_checkout_cannot_be_read_has_no_record_and_one_that_
     fs::write(&mark, "commit old\nchanges none\n").unwrap();
 
     // A build that failed leaves the update and its record as they were.
-    let failed = keep_update(scratch.path(), &update, &Env::from_process(), || {
-        Err(Error::new("the build failed"))
-    });
+    let failed = keep_update(
+        scratch.path(),
+        &update,
+        &Env::from_process(),
+        &Say::channel().0,
+        || Err(Error::new("the build failed")),
+    );
     assert_eq!(failed.unwrap_err().to_string(), "the build failed");
     assert_eq!(
         fs::read_to_string(&mark).unwrap(),
@@ -398,9 +541,13 @@ fn an_update_built_where_the_checkout_cannot_be_read_has_no_record_and_one_that_
     );
 
     // A checkout that is none: the update is kept, and the record of the one before is not its own.
-    keep_update(scratch.path(), &update, &Env::from_process(), || {
-        Ok(built.clone())
-    })
+    keep_update(
+        scratch.path(),
+        &update,
+        &Env::from_process(),
+        &Say::channel().0,
+        || Ok(built.clone()),
+    )
     .unwrap();
     assert!(update.join("Contents/Info.plist").is_file());
     assert!(!mark.exists());
