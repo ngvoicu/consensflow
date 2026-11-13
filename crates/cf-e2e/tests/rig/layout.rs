@@ -54,18 +54,16 @@ fn program(
         host.parent(),
         "cf and the pane host are built together"
     );
-    let mut run = Run::new(std::env::current_exe()?)
-        .args([
-            "--exact",
-            "layout::the_program_a_case_of_the_layout_runs",
-            "--nocapture",
-            "--test-threads=1",
-        ])
-        .inheriting_env()
-        .var(cf_e2e::cf::BUILT, built)
-        .var(CASE, case)
-        .var(SIGNALS, layout.signals())
-        .limit(Duration::from_secs(240));
+    let mut run = cf_e2e::process::case_of(
+        std::env::current_exe()?,
+        "layout::the_program_a_case_of_the_layout_runs",
+        Duration::from_secs(240),
+    )
+    .args(["--nocapture", "--test-threads=1"])
+    .inheriting_env()
+    .var(cf_e2e::cf::BUILT, built)
+    .var(CASE, case)
+    .var(SIGNALS, layout.signals());
     for (name, value) in layout.vars().iter() {
         run = run.var(name, value);
     }
@@ -226,18 +224,16 @@ fn audit_case(case: &str, signals: &Path) -> Outcome {
         // A folder of the run's own for the child to write below: made through the door, so the
         // run hands it down to the program it starts (the test's own folder takes it away).
         let root = cf_e2e::door::made_in(signals, "child-")?.hand_on();
-        let ran = Run::new(std::env::current_exe()?)
-            .args([
-                "--exact",
-                "layout::the_program_a_case_of_the_layout_runs",
-                "--nocapture",
-                "--test-threads=1",
-            ])
-            .var(CASE, "audit-child")
-            .var(SIGNALS, signals)
-            .var(CHILD_ROOT, &root)
-            .limit(Duration::from_secs(120))
-            .run()?;
+        let ran = cf_e2e::process::case_of(
+            std::env::current_exe()?,
+            "layout::the_program_a_case_of_the_layout_runs",
+            Duration::from_secs(120),
+        )
+        .args(["--nocapture", "--test-threads=1"])
+        .var(CASE, "audit-child")
+        .var(SIGNALS, signals)
+        .var(CHILD_ROOT, &root)
+        .run()?;
         assert_eq!(ran.code, Some(0), "{ran}");
         print!("{}", ran.stdout);
         return Ok(());
