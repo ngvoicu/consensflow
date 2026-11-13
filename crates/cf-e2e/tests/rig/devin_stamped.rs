@@ -169,7 +169,10 @@ fn a_pause_stops_the_turn(shape: &str) -> Outcome {
         .to_owned();
     // Past the adapter's 30 s for a prompt: only the wire's word holds the turn at work.
     sleep(secs(35));
-    rig.tell(project.id(), "CF tell T-1 :: Reply with exactly: ANSWERED")?;
+    rig.tell(
+        project.id(),
+        "CF task pause T-1 :: Reply with exactly: ANSWERED",
+    )?;
     let question = |events: &[Value]| -> Option<Value> {
         events
             .iter()

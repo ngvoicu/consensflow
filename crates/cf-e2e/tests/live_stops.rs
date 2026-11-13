@@ -35,7 +35,7 @@
 //!   `pretool` or `prompt`): the stop the daemon could take for ignored. When Claude
 //!   stopped, the resume of the task, and its result.
 //!
-//! - `tell`      The chief's `cf tell` into Claude inside a long command while two
+//! - `tell`      The chief's `cf task pause T-n "…"` (once `cf tell`) into Claude inside a long command while two
 //!   background agents it started run (T-604): one Escape stops the turn, the window
 //!   stays open with its agents and nobody is told it did not stop, and the tell's
 //!   words go into the same window once it rests, which answers them (T-551).

@@ -289,7 +289,7 @@ fn tell_case(live: &Live) -> Result<String> {
             .any(|record| muse::kind(record) == "run/assistant_tool_calls_committed"))
     })?;
     let worker = worker(&project)?;
-    rig.tell(project.id(), "CF tell T-1 :: Also say HANDED_OVER.")?;
+    rig.tell(project.id(), "CF task pause T-1 :: Also say HANDED_OVER.")?;
     let mut told = None;
     rig.wait_for("the tell to be received", secs(180), || {
         told = message_with(&project, &worker, "HANDED_OVER")?

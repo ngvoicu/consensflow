@@ -1,7 +1,7 @@
 //! A task resumed after a tell read `queued` while its window worked on it.
 //!
 //! Seen by the owner on another board on 2026-11-02, on the build of the day (T-1139, field
-//! bug 8): the chief stopped T-10 with `cf tell T-10 "…"`, which pauses the task and puts the
+//! bug 8): the chief stopped T-10 with `cf tell T-10 "…"` (now `cf task pause T-10 "…"`), which pauses the task and puts the
 //! words to its window. The window answered ("ok") and went straight on with its work in the
 //! same turn. The chief ran `cf task resume T-10 "…"`, and its words waited behind that turn,
 //! which nothing is typed into while it is at work. The window's transcript showed tool calls
@@ -79,7 +79,7 @@ fn a_task_resumed_after_a_tell_reads_working_while_its_window_goes_on_with_the_t
     // The chief tells the window; it answers, and goes on with twelve steps of work.
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
     let words = format!("Stop now. REPLY {ANSWER} THEN PACED 12 3 Reply with exactly: {REPORT}");
-    let tell = rig.cf_in_window(&chief, ["tell", "T-1", words.as_str()])?;
+    let tell = rig.cf_in_window(&chief, ["task", "pause", "T-1", words.as_str()])?;
     assert_eq!(tell.code, Some(0), "{tell}");
     rig.wait_for(
         "the answer to the tell to reach the chief",

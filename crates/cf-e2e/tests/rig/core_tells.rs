@@ -43,7 +43,7 @@ fn told_while_working(rig: &Rig) -> cf_e2e::Result<Project<'_>> {
     rig.wait_for("T-1 to be working", secs(30), || {
         Ok(project.task(1)?["state"] == "working")
     })?;
-    rig.tell(project.id(), "CF tell T-1 :: Stop now. REPLY stopped")?;
+    rig.tell(project.id(), "CF task pause T-1 :: Stop now. REPLY stopped")?;
     rig.wait_for("T-1 to be paused", secs(30), || {
         Ok(project.task(1)?["state"] == "paused")
     })?;

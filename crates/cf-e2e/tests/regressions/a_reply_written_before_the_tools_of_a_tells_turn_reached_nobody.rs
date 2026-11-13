@@ -2,7 +2,7 @@
 //! nobody.
 //!
 //! Seen on 2026-11-02 by the live sweep (T-1131, `live tell devin` on the Mac, Devin
-//! 3000.11.234, in two runs) and found by T-1151: the chief ran `cf tell T-1 "…"`, which pauses
+//! 3000.11.234, in two runs) and found by T-1151: the chief ran `cf tell T-1 "…"` (now `cf task pause T-1 "…"`), which pauses
 //! the task and puts the words to its window as a question. The words asked for one line as
 //! text, then a short command, then a last line. Devin wrote the first line, ran the command
 //! (and `cf answer m-2` with the last line, in the second run), and ended its turn with the last
@@ -63,7 +63,7 @@ fn tell_and_wait_for_the_note<'a>(
         Ok(project.task(1)?["state"] == "working")
     })?;
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
-    let tell = rig.cf_in_window(&chief, ["tell", "T-1", words])?;
+    let tell = rig.cf_in_window(&chief, ["task", "pause", "T-1", words])?;
     assert_eq!(tell.code, Some(0), "{tell}");
     rig.wait_for(
         "the words the turn ended with to reach the chief",
