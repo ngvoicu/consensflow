@@ -108,7 +108,7 @@ fn words_told_once_the_brief_is_on_its_way_go_in_next_and_the_answer_after_them_
 }
 
 #[test]
-fn only_a_queued_task_of_a_members_window_keeps_words_and_no_words_are_none() {
+fn only_a_task_of_a_members_window_that_is_not_over_keeps_words_and_no_words_are_none() {
     let mut w = world();
     let (task, _, brief) = queued(&mut w);
     let blank = w
@@ -117,15 +117,28 @@ fn only_a_queued_task_of_a_members_window_keeps_words_and_no_words_are_none() {
         .unwrap_err();
     assert_eq!(blank.code(), Some("invalid-text"));
 
+    // A task at work keeps words as a queued one does: they go in at rest.
     w.deliver(brief);
     let working = w
         .ledger
+        .tell_queued(w.project, task, "chief", "In time")
+        .unwrap();
+    assert_eq!(
+        (working.kind.as_str(), working.state.as_str()),
+        ("note", "queued")
+    );
+    assert_eq!(w.state(task), "working", "nothing is moved");
+
+    // A task that is over has no window to keep them for.
+    w.ledger.cancel_task(w.project, task, "chief").unwrap();
+    let over = w
+        .ledger
         .tell_queued(w.project, task, "chief", "Too late")
         .unwrap_err();
-    assert_eq!(working.code(), Some("invalid-transition"));
+    assert_eq!(over.code(), Some("invalid-transition"));
     assert_eq!(
-        working.to_string(),
-        format!("cannot keep words for the window of T-{task}: it is working")
+        over.to_string(),
+        format!("cannot keep words for the window of T-{task}: it is cancelled")
     );
 
     let open = w.open("Lexer").task.number;

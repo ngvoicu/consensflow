@@ -46,7 +46,10 @@
 //! that has no header of ConsensFlow's: the notice with which Claude Code, Muse or Codex wakes
 //! its agent for work that ended, or words typed into the window. **Not** those that
 //! - wrote no complete answer (a turn cut off);
-//! - are a line about what the worker waits for, which is not a report ([`WRAPPER_CHARS`]):
+//! - are a line about what the worker waits for, which is not a report ([`WRAPPER_CHARS`]),
+//!   unless the next message is the chief's tell sent while the window was at work
+//!   ([`Why::Told`]): a worker that ended its turn on "Done, head abc123" and then answered
+//!   the tell with "Noted." has "Done, head abc123" in its result:
 //!   - where the next message is the answer to its question, a turn that ended on the question
 //!     (the last output of a tool is `cf ask`'s own, "m-N asked @chief. The answer arrives as a
 //!     message; end your turn now.", or it ran no tool) in at most that many characters.
@@ -74,7 +77,7 @@
 //! the tell of a paused task is the pause note's (`paused`).
 
 use cf_harness::records::{Item, Role};
-use cf_ledger::{ParticipantView, TaskThread};
+use cf_ledger::{sent_at_work, ParticipantView, TaskThread};
 use cf_proto::ledger::MessageView;
 use cf_proto::questions::ASKED_THEN_END_THE_TURN;
 use serde_json::Value;
@@ -97,6 +100,10 @@ pub(crate) enum Why {
     Answer(i64),
     /// A note of ConsensFlow's for the window went in (words told before it was up): its id.
     Note(i64),
+    /// The chief's tell (`cf tell`), sent while the window was at work, went in: its id. A turn
+    /// that ended before it ended with the words the result would have been, whatever their
+    /// length: they are no line about what the worker waits for.
+    Told(i64),
     /// Another message of ConsensFlow's went in (the chief's tell): its id, and what it is.
     Message(i64, String),
     /// A message with no header of ConsensFlow's went in: the harness's own notice that work
@@ -112,7 +119,7 @@ impl Why {
             Why::Answer(question) => {
                 format!("Written before the answer to its question m-{question} went in:")
             }
-            Why::Note(id) => format!("Written before the note m-{id} went in:"),
+            Why::Note(id) | Why::Told(id) => format!("Written before the note m-{id} went in:"),
             Why::Message(id, kind) => {
                 format!("Written before m-{id}, {}, went in:", kind_words(kind))
             }
@@ -266,6 +273,9 @@ impl Dispatcher {
             let why = match message_of(thread, &items[ended.at]) {
                 Some(message) => match message.reply_to.filter(|asked| own.contains(asked)) {
                     Some(question) if message.kind == "answer" => Why::Answer(question),
+                    _ if message.kind == "note" && sent_at_work(message, &thread.messages) => {
+                        Why::Told(message.id)
+                    }
                     _ if message.kind == "note" => Why::Note(message.id),
                     _ => Why::Message(message.id, message.kind.clone()),
                 },
@@ -304,6 +314,7 @@ impl Dispatcher {
         let a_line_about_the_wait = short
             && match &why {
                 Why::Answer(_) => ended_on_asking(ended.turn),
+                Why::Told(_) => false,
                 Why::Note(_) | Why::Message(..) | Why::Notice => true,
             };
         if words == WITHOUT_ANSWER

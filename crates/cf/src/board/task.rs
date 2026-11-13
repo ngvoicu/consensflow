@@ -491,7 +491,7 @@ fn moved(
         }));
     }
     // What the words that send a window on say of themselves.
-    let sent = if briefed && !text.is_empty() {
+    let sent = if (briefed || action == "pause") && !text.is_empty() {
         format!("\n{}", brief::sent(number, &text))
     } else {
         String::new()
@@ -533,6 +533,22 @@ fn moved(
         format!(" Its title is now {}.", quoted(title))
     });
     let said = match action {
+        // A pause with words is the stop that puts them to the window as a question.
+        "pause" if answer.value().get("message").is_some() => {
+            let message = answer.value().get("message");
+            let field = |name: &str| js::text(message.and_then(|message| message.get(name)));
+            let (id, window) = (field("id"), field("recipient"));
+            if field("kind") == "note" {
+                format!(
+                    "T-{number} is not paused: it is at work on the words that resumed it, so m-{id} waits for @{window}'s window and goes in after them.{running}"
+                )
+            } else {
+                format!(
+                    "T-{number} is paused and m-{id} put to @{window}; its answer arrives as a message. Then: {} task resume T-{number} \"…\"{running}",
+                    board.cf()
+                )
+            }
+        }
         "pause" => format!(
             "T-{number} is paused: its window stops and its work waits. Resume it with: {} task resume T-{number} \"what to do now\"{running}",
             board.cf()
@@ -544,7 +560,14 @@ fn moved(
         "resume" => format!("T-{number} resumes in @{} with your words.{titled}", js::text(task.get("assignee"))),
         "finish" => {
             let count = |field: &str| answer.value().get(field).and_then(Value::as_u64);
-            finishing(number, &task, count("jobs"), count("agents"))
+            let withdrawn = match answer.value().get("toldWithdrawn") {
+                Some(withdrawn) => withdrawn_words(answer.list(Some(withdrawn), "toldWithdrawn")?),
+                None => String::new(),
+            };
+            format!(
+                "{}{withdrawn}",
+                finishing(number, &task, count("jobs"), count("agents"))
+            )
         }
         // The chief's own step is accepted with its words: nothing comes back to decide.
         "done" if task.get("state").and_then(Value::as_str) == Some("accepted") => format!(
@@ -832,6 +855,25 @@ fn went_with_it(ids: &[Value]) -> String {
         [one] => format!("\nWhat you told its window, {one}, went with it: it never had it."),
         several => format!(
             "\nWhat you told its window, {}, went with it: it never had them.",
+            several.join(", ")
+        ),
+    }
+}
+
+/// What a finish says of the messages `ids`, the words you told the task's window while it
+/// was at work that had not gone in, which it withdrew: nothing when there are none.
+fn withdrawn_words(ids: &[Value]) -> String {
+    let ids: Vec<String> = ids
+        .iter()
+        .map(|id| format!("m-{}", js::text(Some(id))))
+        .collect();
+    match ids.as_slice() {
+        [] => String::new(),
+        [one] => format!(
+            "\nWhat you told its window, {one}, had not gone in and is withdrawn: the result is what it said before it."
+        ),
+        several => format!(
+            "\nWhat you told its window, {}, had not gone in and is withdrawn: the result is what it said before them.",
             several.join(", ")
         ),
     }

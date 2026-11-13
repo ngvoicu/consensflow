@@ -55,7 +55,7 @@
 use std::rc::Rc;
 
 use cf_base::refusal::Refusal;
-use cf_ledger::{ParticipantView, TaskThread, TaskView};
+use cf_ledger::{MessageView, ParticipantView, TaskThread, TaskView};
 
 use super::earlier_turns::with_earlier;
 use super::{
@@ -81,6 +81,8 @@ pub struct Finished {
     pub task: TaskView,
     pub jobs: usize,
     pub agents: usize,
+    /// The words told to its window at work that waited for it and were withdrawn.
+    pub withdrawn: Vec<MessageView>,
 }
 
 impl Dispatcher {
@@ -239,11 +241,13 @@ impl Dispatcher {
         // ConsensFlow's own) go in when it is next at rest, and the answer to them is the
         // result: finishing now would take an answer that came before them (Calliope's L1
         // on the merge with field-306, T-370; Devin arrival gap 4).
-        let told = self
-            .seams
-            .ledger
-            .borrow()
-            .notes_waiting(participant.id, thread.task.id)?;
+        // Not the words told while it was at work (`cf tell`): Finish takes the result as it
+        // stands and withdraws them, and says so.
+        let told =
+            self.seams
+                .ledger
+                .borrow()
+                .notes_waiting_for_finish(project, number, participant.id)?;
         if told {
             return Err(refused(
                 "words-on-their-way",
@@ -292,6 +296,7 @@ impl Dispatcher {
             task: moved.task,
             jobs: pending.jobs,
             agents: pending.agents,
+            withdrawn: moved.withdrawn,
         })
     }
 }

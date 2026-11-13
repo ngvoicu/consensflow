@@ -37,8 +37,8 @@ use super::{
 use crate::messages::{
     drop_queued_but_told, fold, leave_pause_notes, notes_waiting, put_back_paused_answers,
     queued_paused_answers, recover_after_lost_answer, release_carried, say_again, tell_sent_back,
-    warnings_on_their_way, warnings_queued, withdraw_open_questions, withdraw_paused_answers,
-    Afterwards, Dropped,
+    warnings_on_their_way, warnings_queued, withdraw_at_work, withdraw_open_questions,
+    withdraw_paused_answers, Afterwards, Dropped,
 };
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES, MAX_BODY,
@@ -161,6 +161,14 @@ fn record_counted(
             return own_steps::finish(store, project_id, &task, body);
         }
         require_task_state(&task, states, "record a result for")?;
+        // The chief's Finish takes the result as it stands: the words told to the window at
+        // work that have not gone in are withdrawn, and the reply says which.
+        let mut withdrawn = Vec::new();
+        if let (true, Some(assignee), "working" | "waiting") =
+            (finished_by_word, task.assignee_id, task.state.as_str())
+        {
+            withdrawn = withdraw_at_work(store, &task, assignee)?;
+        }
         if let Some(assignee) = task.assignee_id {
             if notes_waiting(store, assignee, task.id)? {
                 return Err(LedgerError::refused_with(
@@ -238,7 +246,7 @@ fn record_counted(
         Ok(TaskMoved {
             task: task_by_id(store, task.id)?,
             message: store.message(message_id)?,
-            withdrawn: Vec::new(),
+            withdrawn,
             landing: Vec::new(),
         })
     })

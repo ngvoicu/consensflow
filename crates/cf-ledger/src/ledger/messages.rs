@@ -312,6 +312,28 @@ impl Ledger {
         messages::notes_waiting(&self.store, participant_id, task_id)
     }
 
+    /// [`Ledger::notes_waiting`] for the chief's Finish of T-`number`: the words told to
+    /// its window at work that wait are not counted, as Finish withdraws them.
+    pub fn notes_waiting_for_finish(
+        &self,
+        project_id: i64,
+        number: i64,
+        participant_id: i64,
+    ) -> Result<bool, LedgerError> {
+        let task = self.store.task_row(project_id, number)?;
+        messages::notes_waiting_for_finish(&self.store, participant_id, &task)
+    }
+
+    /// Whether `message`, told words, was sent while its task's window was at work, not
+    /// before the brief went in (`told_at_work`).
+    pub fn sent_at_work(&self, message: &MessageView) -> Result<bool, LedgerError> {
+        let Some(number) = message.task_number else {
+            return Ok(false);
+        };
+        let task = self.store.task_row(message.project_id, number)?;
+        messages::sent_at_work_of(&self.store, message, &task)
+    }
+
     /// A launch whose first message was `carrier` is over before its window
     /// opened: when its task was called off meanwhile, whoever told the window
     /// words that rode in it hears that the window never had them.

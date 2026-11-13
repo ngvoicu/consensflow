@@ -2594,7 +2594,7 @@ fn a_member_whose_window_never_comes_up_with_a_note_told_it_as_its_first_message
     assert_match(
         launch_of(&context, &session)["message"].as_str().unwrap(),
         &format!(
-            r"^\[ConsensFlow m-{} · T-1 · note from @chief\]\nUse the grammar in the docs$",
+            r"^\[ConsensFlow m-{} · T-1 · note from @chief\]\nUse the grammar in the docs\n\nT-1 goes on: take this in and carry on\.",
             note.id
         ),
     );
@@ -2694,7 +2694,9 @@ fn a_member_whose_window_never_comes_up_and_is_never_killed_has_the_note_told_it
         (failed.state.as_str(), failed.reason.as_deref()),
         ("failed", Some(why.as_str()))
     );
-    assert_eq!(tiers.task(1).task.state, "failed");
+    // Told while its window was at work (after its brief went in): the task is not failed for
+    // them (`cf tell`); the chief is told they did not reach it.
+    assert_eq!(tiers.task(1).task.state, "working");
     let kept_words = format!("m-{}", note.id);
     assert_eq!(
         tiers
@@ -2703,7 +2705,7 @@ fn a_member_whose_window_never_comes_up_and_is_never_killed_has_the_note_told_it
             .filter(|said| said.contains(&kept_words))
             .collect::<Vec<_>>(),
         [format!(
-            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\"\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
+            "Your {kept_words} on T-1 did not reach @{session}'s window: {why}.\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
         )]
     );
     assert_eq!(
@@ -2723,14 +2725,12 @@ fn a_member_whose_window_never_comes_up_and_is_never_killed_has_the_note_told_it
     let host = Rc::clone(&context.host);
     context.run(async move { host.exited(window).await });
     after.pass().unwrap();
-    assert_eq!(tiers.task(1).task.state, "failed");
-    assert!(
-        !tiers
-            .notes("chief")
-            .iter()
-            .any(|said| said.starts_with("T-1 is paused")),
-        "{:?}",
-        tiers.notes("chief")
+    // The task was not failed by the note, so the window's exit pauses it as any window's.
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert_eq!(
+        context.message(note.id).state,
+        "failed",
+        "settles nothing more"
     );
 }
 
@@ -2749,7 +2749,9 @@ fn a_member_whose_window_never_comes_up_and_whose_kill_is_refused_has_the_note_t
     let why = "the window could not take its first message (its cause is in ConsensFlow's log)"
         .to_owned();
     assert_eq!(context.message(note.id).state, "failed");
-    assert_eq!(tiers.task(1).task.state, "failed");
+    // Told while its window was at work (after its brief went in): the task is not failed for
+    // them (`cf tell`); the chief is told they did not reach it.
+    assert_eq!(tiers.task(1).task.state, "working");
     let kept_words = format!("m-{}", note.id);
     assert_eq!(
         tiers
@@ -2758,7 +2760,7 @@ fn a_member_whose_window_never_comes_up_and_whose_kill_is_refused_has_the_note_t
             .filter(|said| said.contains(&kept_words))
             .collect::<Vec<_>>(),
         [format!(
-            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\"\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
+            "Your {kept_words} on T-1 did not reach @{session}'s window: {why}.\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
         )]
     );
     assert_eq!(

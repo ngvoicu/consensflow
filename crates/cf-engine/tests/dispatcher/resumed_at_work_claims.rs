@@ -363,9 +363,9 @@ fn the_ledger_sends_back_only_a_task_shown_working_for_words_that_have_not_gone_
 }
 
 #[test]
-fn words_cannot_be_kept_for_a_window_that_has_the_words_that_resumed_its_task() {
-    // Only a task still waiting for its resume's words keeps a tell behind them: one at work
-    // on them is told by a pause and a question, as ever.
+fn words_are_kept_for_a_window_that_has_the_words_that_resumed_its_task() {
+    // A tell to a task at work on its resume's words is kept as to any task at work: it goes
+    // in at rest, before anything is taken as the result.
     let context = Context::new();
     let (project, words) = shown_working(&context);
     context
@@ -382,7 +382,7 @@ fn words_cannot_be_kept_for_a_window_that_has_the_words_that_resumed_its_task() 
         .ledger
         .borrow_mut()
         .tell_queued(project, 1, "chief", "Also check the lexer");
-    assert!(kept.is_err(), "{kept:?}");
+    assert!(kept.is_ok(), "{kept:?}");
 }
 
 // ---- the guards that held no plant ------------------------------------------------------
