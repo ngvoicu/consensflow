@@ -45,8 +45,9 @@
 //! read the model may not have seen whole is no proof that it has it. The one
 //! exception is a role too long for one message, which goes only to the windows
 //! of Codex and Muse: their read is held to the larger bound measured on them
-//! (`cf_base::role_read`, 29,000 bytes and 500 lines), and a role printed within
-//! it counts as told.
+//! (`cf_base::role_read`, 29,000 bytes and 500 lines) in every state of its
+//! note, queued too, and `cf` prints it in parts within it, each said read as
+//! the part it is: the role counts as told once every part was printed.
 
 /// An output shorter than this, in bytes, is shown whole by every harness
 /// whose cut was found as a number: Codex's 10,000 tokens are the smallest

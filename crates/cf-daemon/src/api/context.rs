@@ -16,6 +16,8 @@ use cf_base::refusal::Refusal;
 use cf_engine::Finished;
 use cf_harness::contract::Work;
 use cf_ledger::Ledger;
+use cf_proto::cf_word::CfWord;
+use cf_proto::ledger::ParticipantView;
 use tokio::sync::watch;
 
 use super::credentials::Credentials;
@@ -83,6 +85,10 @@ pub struct Context {
     pub closing: Closing,
     pub log: Rc<Log>,
     pub trace: Rc<Trace>,
+    /// How a command starts in the window of a participant, as its pane was told
+    /// (`seams::cf_word_of`): the words of a role are counted in parts as that window's
+    /// `cf` prints them (T-1513).
+    pub cf: Rc<dyn Fn(&ParticipantView) -> CfWord>,
     /// Whether each request a window's token answered is written to the trace for the
     /// tooling ([`super::calls`]): only a test's daemon, started with
     /// [`super::calls::TOOLING_API_CALLS`], has it.

@@ -26,6 +26,15 @@ parentheses. Changed by hand, in those words alone, when the tester was added; t
 daemon's traces of the same words (`crates/cf-daemon/tests/goldens`) were changed with
 them.
 
+## The usage after the four roles of spec new-roles
+
+The same prints have the entries of `--frontend`, `--architect` and `--research` after the
+worker's and of `--integrate` after the tester's, in the order of `cf_ledger::roles`, and
+the two sentences name the four in their parentheses (`or, with no tier, --frontend,
+--architect, --research, --integrate or --design`). Changed by hand, in those words alone,
+on 2026-11-11, with the daemon's traces of the same words (`cf-board-019`, `-021`, `-028`
+and `-029`).
+
 ## The usage after a tell could wait
 
 `cf tell` to a task still queued, its window not up yet, keeps its words for the window

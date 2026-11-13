@@ -79,7 +79,12 @@ fn the_same_through_what_cf_served_whole() {
     let one = w.answer(first, "JSON");
     let two = w.answer(second, "v2");
     w.ledger
-        .receive_read(zeus, &[one.id], Read::Inbox)
+        .receive_read(
+            zeus,
+            &[one.id],
+            Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
         .expect("read");
     assert_eq!(w.state(task), "waiting");
     assert_eq!(
@@ -88,7 +93,12 @@ fn the_same_through_what_cf_served_whole() {
         "how it was served is the proof"
     );
     w.ledger
-        .receive_read(zeus, &[two.id], Read::Task)
+        .receive_read(
+            zeus,
+            &[two.id],
+            Read::Task,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
         .expect("read");
     assert_eq!(w.state(task), "working");
     assert_eq!(w.receipt(two.id), serde_json::json!({ "read": "task" }));
@@ -102,10 +112,20 @@ fn what_cf_served_to_anyone_else_or_that_is_no_answer_for_the_reader_is_not_rece
     let diana = w.id("diana");
     let one = w.answer(first, "JSON");
     w.ledger
-        .receive_read(chief, &[one.id], Read::Task)
+        .receive_read(
+            chief,
+            &[one.id],
+            Read::Task,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
         .expect("a read by the chief");
     w.ledger
-        .receive_read(diana, &[one.id], Read::Inbox)
+        .receive_read(
+            diana,
+            &[one.id],
+            Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
         .expect("a read by another");
     assert_eq!(
         w.states(&[one.id]),

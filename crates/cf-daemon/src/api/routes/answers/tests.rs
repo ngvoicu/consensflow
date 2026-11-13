@@ -342,7 +342,12 @@ async fn an_answer_read_already_is_ok_and_writes_nothing_more_by_whichever_way_i
         .context
         .ledger
         .borrow_mut()
-        .receive_read(zeus, &[other.id], cf_ledger::Read::Inbox)
+        .receive_read(
+            zeus,
+            &[other.id],
+            cf_ledger::Read::Inbox,
+            &cf_proto::cf_word::CfWord::bare(),
+        )
         .unwrap();
     let (status, _) = receipt_from(&scene, &scene.zeus, &other.id.to_string(), HANDED_OVER).await;
     assert_eq!(status, 200);
@@ -835,4 +840,177 @@ fn a_message_number_is_a_whole_number_over_zero_and_within_what_a_message_holds(
         assert_eq!(number(text), None, "{text}");
     }
     assert_eq!(whole_and_positive(None), None);
+}
+
+/// The chief's window's `cf`, as the scene's daemon says it starts a command there.
+fn chiefs_cf(scene: &Scene) -> cf_proto::cf_word::CfWord {
+    let chief = scene
+        .project
+        .participants
+        .iter()
+        .find(|participant| participant.role == "chief")
+        .expect("a chief");
+    (scene.context.cf)(chief)
+}
+
+/// A role whose words print in one part where a window's `cf` is the bare word, and in two
+/// in the chief's window of the scene, whose `cf` is a path: lines that each name commands,
+/// few enough that the bytes and not the lines cut it.
+fn a_role_in_two_parts_only_in_the_chiefs_window(scene: &Scene) -> String {
+    use cf_base::role_read::role_parts;
+    let cf = chiefs_cf(scene);
+    let mut lines = Vec::new();
+    loop {
+        let at = lines.len();
+        lines.push(format!(
+            "Run cf task get T-{at}, then cf inbox read m-{at}, then cf task list, before you answer."
+        ));
+        let words = lines.join("\n");
+        if role_parts(&cf.in_text(&words)).len() > 1 {
+            assert_eq!(role_parts(&words).len(), 1, "one part with a bare cf");
+            return words;
+        }
+    }
+}
+
+/// A role note to the scene's chief that says `words`, delivered.
+fn a_delivered_role(scene: &Scene, words: &str) -> i64 {
+    let mut ledger = scene.context.ledger.borrow_mut();
+    let role = ledger
+        .note_role(scene.project.id, "chief", words, "the role")
+        .unwrap();
+    ledger.begin_delivery(role.id).unwrap();
+    ledger.confirm_delivery(role.id, None).unwrap();
+    role.id
+}
+
+/// T-1513: `cf inbox read` prints a role over the bound in parts and says each it printed
+/// with its number and how many there are: the ledger reads the role once every part was
+/// printed, and the dispatcher is woken then. A part that is no whole number from 1 to the
+/// parts, parts said of more than one message, or one of the two said without the other, is
+/// refused, and changes nothing.
+#[tokio::test]
+async fn a_role_said_read_by_its_parts_is_read_once_every_part_is_and_a_bad_part_is_refused() {
+    let scene = scene();
+    let id = a_delivered_role(
+        &scene,
+        &a_role_in_two_parts_only_in_the_chiefs_window(&scene),
+    );
+    let part = |part: Value, parts: Value| {
+        json!({ "answers": [id], "via": "inbox", "part": part, "parts": parts }).to_string()
+    };
+    for written in [
+        part(json!(0), json!(2)),
+        part(json!(3), json!(2)),
+        part(json!("1"), json!(2)),
+        part(json!(1.5), json!(2)),
+        part(json!(1), json!(null)),
+        part(json!(1), json!(0)),
+        json!({ "answers": [id], "via": "inbox", "part": 1 }).to_string(),
+        json!({ "answers": [id], "via": "inbox", "parts": 2 }).to_string(),
+        json!({ "answers": [id, id], "via": "inbox", "part": 2, "parts": 2 }).to_string(),
+    ] {
+        let (status, said) = read_from(&scene, &scene.chief, &written).await;
+        assert_eq!(status, 400, "{written}");
+        assert_eq!(said["error"], "invalid-read", "{written}");
+    }
+    assert_eq!(scene.logged("message.part_read"), 0);
+    let (status, said) = read_from(&scene, &scene.chief, &part(json!(2), json!(2))).await;
+    assert_eq!((status, said), (200, json!({})));
+    assert_eq!(scene.message(id).state, "delivered", "one part of two");
+    assert_eq!(scene.logged("message.part_read"), 1);
+    assert_eq!(scene.kicks.get(), 0);
+    let (status, _) = read_from(&scene, &scene.chief, &part(json!(1), json!(2))).await;
+    assert_eq!(status, 200);
+    assert_eq!(scene.message(id).state, "read", "every part, in any order");
+    assert_eq!(scene.kicks.get(), 1, "the dispatcher is woken");
+}
+
+/// T-1513 (review T-1521): a part of a role printed while its note is back in the queue (its
+/// paste given back) is taken through the route as any part is, and counts: once every part
+/// was printed and the paste goes in, the role is read, though no part was printed after it.
+#[tokio::test]
+async fn parts_of_a_role_printed_while_its_note_is_back_in_the_queue_count_once_its_paste_goes_in()
+{
+    let scene = scene();
+    let id = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let role = ledger
+            .note_role(
+                scene.project.id,
+                "chief",
+                &a_role_in_two_parts_only_in_the_chiefs_window(&scene),
+                "the role",
+            )
+            .unwrap();
+        ledger.begin_delivery(role.id).unwrap();
+        ledger
+            .retry_delivery(role.id, "the record never showed it", true)
+            .unwrap();
+        role.id
+    };
+    assert_eq!(scene.message(id).state, "queued");
+    for part in [1, 2] {
+        let written = json!({ "answers": [id], "via": "inbox", "part": part, "parts": 2 });
+        let (status, said) = read_from(&scene, &scene.chief, &written.to_string()).await;
+        assert_eq!((status, said), (200, json!({})), "part {part}");
+        assert_eq!(scene.message(id).state, "queued", "part {part}");
+    }
+    assert_eq!(scene.logged("message.part_read"), 2);
+    let mut ledger = scene.context.ledger.borrow_mut();
+    ledger.begin_delivery(id).unwrap();
+    ledger.confirm_delivery(id, None).unwrap();
+    drop(ledger);
+    assert_eq!(
+        scene.message(id).state,
+        "read",
+        "every part was printed, then it went in"
+    );
+}
+
+/// T-1513 (review T-1516): the daemon does not take a read's word for how many parts a role
+/// is printed in. The ledger counts them as the caller's window's `cf` prints the note, and a
+/// read that says another count, or says read whole a role that prints in two, is refused
+/// with words that say why, logs nothing and reads nothing. The count is the window's: the
+/// role here would be one part with a bare `cf`, and is two in the chief's window.
+#[tokio::test]
+async fn a_read_that_says_a_count_of_parts_the_window_does_not_print_is_refused_and_reads_nothing()
+{
+    let scene = scene();
+    let id = a_delivered_role(
+        &scene,
+        &a_role_in_two_parts_only_in_the_chiefs_window(&scene),
+    );
+    for written in [
+        json!({ "answers": [id], "via": "inbox", "part": 1, "parts": 1 }),
+        json!({ "answers": [id], "via": "inbox" }),
+        json!({ "answers": [id], "via": "inbox", "part": 3, "parts": 3 }),
+    ] {
+        let (status, said) = read_from(&scene, &scene.chief, &written.to_string()).await;
+        assert_eq!(status, 400, "{written}");
+        assert_eq!(said["error"], "invalid-read", "{written}");
+        let parts = written["parts"].as_u64().unwrap_or(1);
+        assert_eq!(
+            said["message"],
+            format!("m-{id} is printed in 2 parts in this window, not {parts}: a read says the part `cf inbox read` printed and how many it prints the note in"),
+            "{written}"
+        );
+    }
+    assert_eq!(scene.logged("message.part_read"), 0);
+    assert_eq!(scene.message(id).state, "delivered");
+    assert_eq!(scene.kicks.get(), 0);
+    let short = a_delivered_role(&scene, "A short role.");
+    let (status, _) = read_from(
+        &scene,
+        &scene.chief,
+        &json!({ "answers": [short], "via": "inbox" }).to_string(),
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        scene.message(short).state,
+        "read",
+        "a role in one part read whole"
+    );
+    assert_eq!(scene.kicks.get(), 1);
 }

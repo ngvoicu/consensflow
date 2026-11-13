@@ -23,7 +23,7 @@ use cf_proto::questions::ASKED_THEN_END_THE_TURN;
 use serde_json::{json, Map, Value};
 
 use cf_base::js;
-use cf_base::role_read::role_read_whole;
+use cf_base::role_read::{printed_part, role_read_whole};
 use lines::{list, message_line, printed_body};
 use usage::usage;
 use words::{message_id, quoted, require_text, split, task_number, Shape};
@@ -50,6 +50,12 @@ const ANSWER: Shape = Shape {
 /// The flags of `cf tell`, which names its task first.
 const TELL: Shape = Shape {
     valued: &[brief::FILE],
+    ..Shape::NUMBERED
+};
+
+/// The flags of `cf inbox read`, which names its message first.
+const INBOX_READ: Shape = Shape {
+    valued: &["--part"],
     ..Shape::NUMBERED
 };
 
@@ -94,6 +100,10 @@ struct Wrote {
     via: &'static str,
     answers: Vec<i64>,
     seen: fn(&str) -> bool,
+    /// The part of the role that was printed, and of how many, where it was printed in
+    /// parts (`cf_base::role_read::role_parts`). JSON prints it whole, and is said read as
+    /// a whole.
+    part: Option<(usize, usize)>,
 }
 
 impl Said {
@@ -134,18 +144,21 @@ impl Said {
             via,
             answers,
             seen: cut::seen_whole,
+            part: None,
         });
         self
     }
 
     /// Of an output that carries whole the role the note `id` told its window
-    /// in part: it is read whole by the windows a role goes to by a note up to a
-    /// bound of its own, past the one every harness shows (`role_read_whole`).
-    fn having_written_a_role(mut self, id: i64) -> Self {
+    /// in part, or `part` of it (its number, and of how many): it is read whole by the
+    /// windows a role goes to by a note up to a bound of its own, past the one every
+    /// harness shows (`role_read_whole`).
+    fn having_written_a_role(mut self, id: i64, part: Option<(usize, usize)>) -> Self {
         self.wrote = Some(Wrote {
             via: "inbox",
             answers: vec![id],
             seen: role_read_whole,
+            part,
         });
         self
     }
@@ -158,14 +171,19 @@ impl Wrote {
     /// printed what it was asked to (a daemon of Node's knows no such route): it
     /// is not raised, and a message not acknowledged waits to be pasted, as an
     /// unread one does.
-    fn acknowledge(&self, board: &Board) {
+    /// A role printed in parts is said read by the part printed, and of how many, but
+    /// where the output was its JSON (`json`), which holds it whole.
+    fn acknowledge(&self, board: &Board, json: bool) {
         if self.answers.is_empty() {
             return;
         }
-        let _ = board.post(
-            "/api/answers/read",
-            &json!({ "answers": self.answers, "via": self.via }),
-        );
+        let said = match self.part.filter(|_| !json) {
+            Some((part, parts)) => json!({
+                "answers": self.answers, "via": self.via, "part": part, "parts": parts,
+            }),
+            None => json!({ "answers": self.answers, "via": self.via }),
+        };
+        let _ = board.post("/api/answers/read", &said);
     }
 }
 
@@ -209,7 +227,7 @@ pub fn run(
             out.write_all(printed.as_bytes())?;
             out.flush()?;
             if let Some(wrote) = wrote.filter(|wrote| (wrote.seen)(&printed)) {
-                wrote.acknowledge(board);
+                wrote.acknowledge(board, json);
             }
             Ok(0)
         }
@@ -256,53 +274,80 @@ fn command(
     }
 }
 
+/// `--part` named a part the message does not have.
+fn a_part_there_is_not(word: &str) -> Failure {
+    Failure::Usage(format!(
+        "--part {} is no part of this message: it takes the number of a part a role is printed in, the first 1, as the line under each part says",
+        quoted(word)
+    ))
+}
+
 /// `cf inbox read m-N` prints a message whole, and so says it wrote it whole
 /// when it still waited to be pasted: the board decides what that receives. It
 /// says so too of a role that went into its window in part (the board answers
 /// `"role": true` of a note that tells its reader a role), once it was
-/// delivered: the role is told once the window has read it. `cf inbox` lists
+/// delivered: the role is told once the window has read it. A role too long to be read
+/// whole in one piece it prints in parts, each within the bound it is read whole at, with
+/// the line that says the next part's command (`--part N`, the first by default), and says
+/// read the part it printed (T-1513). `cf inbox` lists
 /// first lines, cut, and says nothing of what it printed: no preview is a body,
 /// and a list does not know which are.
 fn inbox(rest: &[String], board: &Board) -> Result<Said, Failure> {
     let reading = rest.first().map(String::as_str) == Some("read");
-    let asked = if reading {
-        Shape::NUMBERED
-    } else {
-        Shape::TEXT
-    };
+    let asked = if reading { INBOX_READ } else { Shape::TEXT };
     let words = if reading {
         rest.get(1..).unwrap_or_default()
     } else {
         rest
     };
-    if split(words, asked).asks_for_help() {
+    let split = split(words, asked);
+    if split.asks_for_help() {
         return Ok(help_of(&["inbox"]));
     }
     if reading {
         let id = message_id(rest.get(1).map(String::as_str))?;
+        let part = match split.value("--part")? {
+            None => 1,
+            Some(word) => word
+                .parse::<usize>()
+                .ok()
+                .filter(|&part| part > 0)
+                .ok_or_else(|| a_part_there_is_not(word))?,
+        };
         let path = format!("/api/inbox/{id}");
         let mut answer = board.get(&path)?;
         let role = answer.value().get("role") == Some(&Value::Bool(true));
         let message = answer.take("message")?;
-        let text = format!(
-            "{}\n\n{}",
-            message_line(&message),
-            printed_body(&message, board.cf())
-        );
-        // A role goes in by a note, and a window reads it as soon as it has the paste:
-        // before the daemon has seen the paste arrive, as often as after.
-        let reached = matches!(
+        let line = message_line(&message);
+        let body = printed_body(&message, board.cf());
+        // A role is printed in the parts it is read whole in; any other message, and a role
+        // that is read whole in one, in one piece, as it always was.
+        let (text, parts) = if role {
+            printed_part(&line, &body, part, board.cf().as_str(), id as i64)
+                .ok_or_else(|| a_part_there_is_not(&part.to_string()))?
+        } else if part == 1 {
+            (format!("{line}\n\n{body}"), 1)
+        } else {
+            return Err(a_part_there_is_not(&part.to_string()));
+        };
+        // A role is said read by its own bound and as the part it is in every state its
+        // note is still to be read in: back in the queue, on its way or delivered. The board
+        // logs every part printed and tells the role once the conversation printed them all
+        // and its paste went in, so a part printed before the note is delivered counts too.
+        // A role read already is as any message.
+        let unread = matches!(
             message.get("state").and_then(Value::as_str),
-            Some("delivered" | "delivering")
+            Some("queued" | "delivering" | "delivered")
         );
         let told = message
             .get("id")
             .and_then(Value::as_i64)
-            .filter(|_| role && reached);
+            .filter(|_| role && unread);
         let waiting = lines::waiting_message(&message);
         let said = Said::new(message, text);
+        let in_parts = (parts > 1).then_some((part, parts));
         return Ok(match told {
-            Some(id) => said.having_written_a_role(id),
+            Some(id) => said.having_written_a_role(id, in_parts),
             None => said.having_written("inbox", waiting),
         });
     }
@@ -488,10 +533,19 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
                     None | Some(Value::Null) => String::new(),
                     tier => format!(" · {}", js::text(tier)),
                 };
+                // Each role by its name: the frontend designer and the image designer are
+                // never one word (spec new-roles).
+                let roles = list(member.get("roles"))
+                    .iter()
+                    .map(|role| {
+                        let id = js::text(Some(role));
+                        cf_ledger::roles::name_of(&id).to_owned()
+                    })
+                    .collect::<Vec<_>>()
+                    .join("+");
                 format!(
-                    "@{}{runs} · {}{tier} · {}",
+                    "@{}{runs} · {roles}{tier} · {}",
                     js::text(member.get("handle")),
-                    js::join(list(member.get("roles")), "+"),
                     js::text(member.get("harnessName"))
                 )
             })

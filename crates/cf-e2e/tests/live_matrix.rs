@@ -70,7 +70,7 @@ fn asked(
         .map(|word| {
             Role::named(word).ok_or_else(|| {
                 Error::Daemon(format!(
-                    "--stand-in takes worker, reviewer, advisor or tester, not {word}"
+                    "--stand-in takes worker, reviewer, advisor, tester or a seat besides them (frontend, architect, researcher, integrator), not {word}"
                 ))
             })
         })

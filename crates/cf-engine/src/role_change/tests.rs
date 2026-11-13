@@ -2,7 +2,7 @@ use cf_proto::cf_word::{CfWord, Shell};
 use std::sync::Arc;
 
 use cf_base::env::Env;
-use cf_base::role_read::role_read_whole;
+use cf_base::role_read::{printed_part, role_read_whole};
 use cf_ledger::{STAFF_RULES_MAX_BYTES, STAFF_RULES_MAX_LINES};
 use cf_proto::agents::WorkTier;
 use cf_proto::specs::Variant;
@@ -42,7 +42,7 @@ fn note(sender: Option<&str>, kind: &str, body: String) -> MessageView {
 #[test]
 fn a_replacement_says_plainly_that_it_replaces_the_instructions_the_conversation_began_with_and_holds_the_text_whole_after_it(
 ) {
-    let body = body_of("the role\nin full");
+    let body = body_of("the role\nin full", &CfWord::bare());
     assert!(body.starts_with(OPENING));
     assert!(
         OPENING.contains("replace the ones you were given then"),
@@ -59,12 +59,23 @@ fn the_ledger_knows_a_replacement_by_the_role_it_was_written_to_say_and_no_note_
     let said = context
         .ledger
         .borrow_mut()
-        .note_role(project.id, "chief", &body_of("a role"), "a role")
+        .note_role(
+            project.id,
+            "chief",
+            &body_of("a role", &CfWord::bare()),
+            "a role",
+        )
         .unwrap();
     // The same words, from ConsensFlow itself and from a participant, and the
     // opening quoted: none of them says a role.
-    let alike = context.note_from_consensflow(project.id, "chief", &body_of("a role"));
-    let by_zeus = context.note(project.id, "zeus", "chief", &body_of("a role"));
+    let alike =
+        context.note_from_consensflow(project.id, "chief", &body_of("a role", &CfWord::bare()));
+    let by_zeus = context.note(
+        project.id,
+        "zeus",
+        "chief",
+        &body_of("a role", &CfWord::bare()),
+    );
     let quoting = context.note(project.id, "zeus", "chief", &format!("Quoted: {OPENING}"));
     let hand_off = context.note_from_consensflow(
         project.id,
@@ -109,19 +120,12 @@ fn a_launch_writes_the_replacement_as_the_note_the_ledger_knows_and_whose_words_
         .dispatcher
         .replace_role(&context.project(project.id), &participant, &role)
         .unwrap();
-    assert_eq!(written.body, body_of("the role\nin full"));
+    assert_eq!(written.body, body_of("the role\nin full", &CfWord::bare()));
     assert_eq!(
         context.ledger.borrow().role_notes_to(chief).unwrap(),
         [written.id]
     );
     context.close();
-}
-
-/// The real text of a chief with `rows` staff rows who each hold two roles, with
-/// specs on or off: the paths of a Mac, as long as the folder its skill's copy is
-/// kept in makes its path.
-fn a_chiefs_role(rows: usize, specs_on: bool) -> String {
-    a_chiefs_role_with(rows, specs_on, None)
 }
 
 /// The most rules for the staff the ledger takes, in what costs a text that says
@@ -145,7 +149,9 @@ fn the_most_rules() -> String {
     rules
 }
 
-/// [`a_chiefs_role`] with the project's rules for the staff, if it has some.
+/// The real text of a chief with `rows` staff rows who each hold two roles, with
+/// specs on or off and the project's rules for the staff, if it has some: the paths
+/// of a Mac, as long as the folder its skill's copy is kept in makes its path.
 fn a_chiefs_role_with(rows: usize, specs_on: bool, rules: Option<&str>) -> String {
     a_chiefs_role_for(&a_mac(), rows, specs_on, rules)
 }
@@ -194,115 +200,165 @@ fn a_chiefs_role_for(cf: &CfWord, rows: usize, specs_on: bool, rules: Option<&st
     .unwrap()
 }
 
-/// What `cf inbox read` prints of `note` once it was delivered: its line and
-/// its words.
-fn printed_by_cf(note: &MessageView) -> String {
-    format!(
-        "m-{} [delivered] note from ConsensFlow\n\n{}\n",
-        note.id, note.body
-    )
+/// What `cf inbox read` prints of part `part` (the first is 1) of `note` in the window whose
+/// `cf` is `cf`, while its paste is on its way (the longest line a role's note is printed
+/// under), and how many parts it has.
+fn printed_by_cf(note: &MessageView, part: usize, cf: &CfWord) -> (String, usize) {
+    let line = format!("m-{} [delivering] note from ConsensFlow", note.id);
+    let (text, of) =
+        printed_part(&line, &cf.in_text(&note.body), part, cf.as_str(), note.id).unwrap();
+    (format!("{text}\n"), of)
 }
 
-/// The real text of a chief with specs on and a staff of twenty-five who each hold
-/// two roles is told: it is longer than a message goes in whole at since the
-/// chief's rules for smaller contexts (T-1009), so its window is given the
-/// opening, which says to read the rest now, and the command that prints it, and
-/// what that command prints is read whole by its window, so the role is told once
-/// it is read.
+/// Whether `cf inbox read` prints `note` in the window whose `cf` is `cf` in one piece read
+/// whole, as a role was before it was printed in parts.
+fn read_in_one(note: &MessageView, cf: &CfWord) -> bool {
+    let (printed, of) = printed_by_cf(note, 1, cf);
+    of == 1 && role_read_whole(&printed)
+}
+
+/// The real text of a chief with specs on is told whatever its staff and its rules: it is
+/// longer than a message goes in whole at since the chief's rules for smaller contexts
+/// (T-1009), so its window is given the opening, which says to read the rest now, and the
+/// command that prints it; and that command prints it in one piece read whole, or, past
+/// that (T-1513, review T-1510: the most rules and a staff of 6 since the ban on a task for
+/// a member by name came back, 8 before it), in parts, each read whole, which the opening
+/// says how many of. A Mac's and a Windows window's (PowerShell's) both.
 #[test]
-fn the_real_text_of_a_chief_with_specs_and_a_large_staff_is_told_whole_or_told_and_read() {
-    // A staff of 25 with no rules; with the most rules the ledger takes, a staff of 15, the
-    // most the chief's words leave room for (T-1234: 19 with a model column in the table,
-    // 29 before it; the words of the designer and of the chief's own model took the rest).
+fn the_real_text_of_a_chief_with_specs_any_staff_and_the_most_rules_is_told_whole_or_read_in_every_part(
+) {
     let most = the_most_rules();
-    for (rows, rules) in [(25, None), (15, Some(most.as_str()))] {
-        told_whole_or_told_and_read(&a_chiefs_role_with(rows, true, rules));
+    for cf in [a_mac(), a_windows()] {
+        for (rows, rules) in [
+            (25, None),
+            (300, None),
+            (5, Some(most.as_str())),
+            (6, Some(most.as_str())),
+            (8, Some(most.as_str())),
+            (12, Some(most.as_str())),
+            (20, Some(most.as_str())),
+            (143, Some(most.as_str())),
+            (300, Some(most.as_str())),
+        ] {
+            told_whole_or_told_and_read(&a_chiefs_role_for(&cf, rows, true, rules), &cf);
+        }
     }
 }
 
-/// A chief's `text`, said again in a replacement, goes in whole, or in part
-/// with the command that prints the rest, which its window reads whole.
-fn told_whole_or_told_and_read(text: &str) {
+/// A chief's `text`, said again in a replacement in the window whose `cf` is `cf`, goes in
+/// whole, or in part with the command that prints the rest, which prints it in one piece or
+/// in the parts its opening says, each of which its window reads whole.
+fn told_whole_or_told_and_read(text: &str, cf: &CfWord) {
     let text = text.to_owned();
-    let replacement = note(None, "note", body_of(&text));
-    let said = delivery_text(&replacement, &[], &CfWord::bare());
-    if goes_whole(&replacement, &[], &CfWord::bare()) {
+    let replacement = note(None, "note", body_of(&text, cf));
+    let said = delivery_text(&replacement, &[], cf);
+    if goes_whole(&replacement, &[], cf) {
         assert!(said.contains(&text), "the role is cut");
         return;
     }
     assert!(
-        said.contains(OPENING_IN_PART),
-        "it says to read the rest now"
-    );
-    assert!(
-        said.ends_with("read all of it with: cf inbox read m-4242)"),
+        said.ends_with(&format!("read all of it with: {cf} inbox read m-4242)")),
         "the command that prints the rest: {}",
         &said[said.len() - 200..]
     );
     assert!(replacement.body.ends_with(&text));
+    let (_, of) = printed_by_cf(&replacement, 1, cf);
+    let opening = if of == 1 {
+        OPENING_IN_PART.to_owned()
+    } else {
+        Telling::Replaces.in_parts(of)
+    };
     assert!(
-        role_read_whole(&printed_by_cf(&replacement)),
-        "what cf prints of it is read whole: {} bytes",
-        printed_by_cf(&replacement).len()
+        said.starts_with(&format!(
+            "[ConsensFlow m-4242 · note from ConsensFlow]\n{opening}\n\n"
+        )),
+        "it says to read the rest now, and in how many parts: {}",
+        &said[..900]
+    );
+    let mut words = String::new();
+    for part in 1..=of {
+        let (printed, _) = printed_by_cf(&replacement, part, cf);
+        assert!(
+            role_read_whole(&printed),
+            "part {part} of {of} is read whole: {} bytes, {} lines",
+            printed.len(),
+            printed.matches('\n').count()
+        );
+        words += cf_base::role_read::role_parts(&cf.in_text(&replacement.body))[part - 1].words;
+    }
+    assert_eq!(
+        words,
+        cf.in_text(&replacement.body),
+        "the parts are the note"
     );
 }
 
-/// The staff a role holds whole in a replacement, and the staff it holds told in
-/// part and read whole, which the docs of this module say: more rows are a role
-/// told in part, and past the second, one `cf` does not say it read.
+/// The staff a role holds whole in a replacement, the staff `cf` prints it for in one piece
+/// read whole, which the docs of this module say, and the parts it is printed in past that.
 #[test]
-fn the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say() {
-    let rows_while = |specs_on, holds: &dyn Fn(&MessageView) -> bool| {
-        (1..)
-            .take_while(|&rows| holds(&note(None, "note", body_of(&a_chiefs_role(rows, specs_on)))))
-            .last()
-            .unwrap_or(0)
-    };
-    let whole = |note: &MessageView| goes_whole(note, &[], &CfWord::bare());
-    let read = |note: &MessageView| role_read_whole(&printed_by_cf(note));
-    assert_eq!(
-        rows_while(true, &whole),
-        0,
-        "docs: never whole with specs on"
-    );
-    assert_eq!(
-        rows_while(false, &whole),
-        0,
-        "docs: never whole without specs either"
-    );
-    assert_eq!(
-        rows_while(true, &read),
-        151,
-        "docs: read to 151 rows with specs on"
-    );
-    assert_eq!(
-        rows_while(false, &read),
-        174,
-        "docs: read to 174 rows without"
-    );
-    // With the most rules for the staff the ledger takes.
-    let most = the_most_rules();
-    let rows_with_the_most = |specs_on| {
+fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_docs_say() {
+    let cf = a_mac();
+    let rows_while = |specs_on, rules: Option<&str>, holds: &dyn Fn(&MessageView) -> bool| {
         (1..)
             .take_while(|&rows| {
-                read(&note(
+                holds(&note(
                     None,
                     "note",
-                    body_of(&a_chiefs_role_with(rows, specs_on, Some(&most))),
+                    body_of(&a_chiefs_role_with(rows, specs_on, rules), &cf),
                 ))
             })
             .last()
             .unwrap_or(0)
     };
+    let whole = |note: &MessageView| goes_whole(note, &[], &cf);
+    let one = |note: &MessageView| read_in_one(note, &cf);
+    let most = the_most_rules();
     assert_eq!(
-        rows_with_the_most(true),
-        15,
-        "docs: read to 15 rows with specs on and the most rules"
+        rows_while(true, None, &whole),
+        0,
+        "docs: never whole with specs on"
     );
     assert_eq!(
-        rows_with_the_most(false),
-        38,
-        "docs: read to 38 rows without specs and the most rules"
+        rows_while(false, None, &whole),
+        0,
+        "docs: never whole without specs either"
+    );
+    assert_eq!(
+        rows_while(true, None, &one),
+        141,
+        "docs: one piece to 141 rows with specs on"
+    );
+    assert_eq!(
+        rows_while(false, None, &one),
+        166,
+        "docs: one piece to 166 rows without"
+    );
+    assert_eq!(
+        rows_while(true, Some(&most), &one),
+        5,
+        "docs: one piece to 5 rows with specs on and the most rules"
+    );
+    assert_eq!(
+        rows_while(false, Some(&most), &one),
+        30,
+        "docs: one piece to 30 rows without specs and the most rules"
+    );
+    let parts = |rows| {
+        printed_by_cf(
+            &note(
+                None,
+                "note",
+                body_of(&a_chiefs_role_with(rows, true, Some(&most)), &cf),
+            ),
+            1,
+            &cf,
+        )
+        .1
+    };
+    assert_eq!(
+        [parts(6), parts(143), parts(300)],
+        [2, 2, 3],
+        "docs: past one piece, 2 parts to 143 rows, 3 at 300"
     );
 }
 
@@ -327,11 +383,11 @@ fn a_members_real_text_with_the_most_rules_for_the_staff_goes_in_whole() {
         )
         .map(|text| with_staff_rules(text, role, Some(&most)))
         .unwrap();
-        for (whole, in_part) in [
-            (OPENING, OPENING_IN_PART),
-            (BEGAN_WITHOUT, BEGAN_WITHOUT_IN_PART),
+        for (whole, telling) in [
+            (OPENING, Telling::Replaces),
+            (BEGAN_WITHOUT, Telling::BeganWithout),
         ] {
-            let said = note_of(whole, in_part, &text);
+            let said = note_of(telling, &text, &CfWord::bare());
             assert!(said.starts_with(whole), "{role}: told whole");
             assert!(
                 goes_whole(&note(None, "note", said.clone()), &[], &CfWord::bare()),
@@ -398,7 +454,11 @@ fn the_summary_of_a_compaction_after_the_answer_leaves_the_answer_whole() {
     );
     assert_eq!(answers(&items), ["The parser is sound."]);
     // Nor does one between a replacement of the role and its word end the role's turn.
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
+    let replacement = delivery_text(
+        &note(None, "note", body_of("a role", &CfWord::bare())),
+        &[],
+        &CfWord::bare(),
+    );
     let mut items = vec![assistant("Parser done"), user(&replacement), summary];
     items.push(assistant("Understood."));
     assert_eq!(answers(&items), ["Parser done"]);
@@ -408,7 +468,11 @@ fn the_summary_of_a_compaction_after_the_answer_leaves_the_answer_whole() {
 fn a_turn_of_a_record_answers_a_replacement_by_the_id_in_its_header_and_no_words_it_quotes() {
     let user = |text: &str| said_by(Role::User, text, true);
     let assistant = |text: &str| said_by(Role::Assistant, text, true);
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
+    let replacement = delivery_text(
+        &note(None, "note", body_of("a role", &CfWord::bare())),
+        &[],
+        &CfWord::bare(),
+    );
     // The opening, and the whole text of the replacement, quoted in a note about
     // the task (m-7), from someone: the worker's word answers the task.
     let mut quoting = note(Some("chief"), "note", format!("Review this: {replacement}"));
@@ -429,7 +493,11 @@ fn a_turn_of_a_record_answers_a_replacement_by_the_id_in_its_header_and_no_words
 
 #[test]
 fn the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its_task() {
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
+    let replacement = delivery_text(
+        &note(None, "note", body_of("a role", &CfWord::bare())),
+        &[],
+        &CfWord::bare(),
+    );
     let user = |text: &str| said_by(Role::User, text, true);
     let assistant = |text: &str| said_by(Role::Assistant, text, true);
 
@@ -481,7 +549,11 @@ fn the_final_answer_is_what_follows_the_last_tool_call_or_message_and_what_is_no
     let user = |text: &str| said_by(Role::User, text, true);
     let assistant = |text: &str| said_by(Role::Assistant, text, true);
     let tool = |text: &str| said_by(Role::Tool, text, true);
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
+    let replacement = delivery_text(
+        &note(None, "note", body_of("a role", &CfWord::bare())),
+        &[],
+        &CfWord::bare(),
+    );
 
     // Several words after the last tool call are all of it, in order.
     assert_eq!(
@@ -619,7 +691,11 @@ fn a_turn_with_no_words_after_its_last_tool_call_answers_with_the_last_words_it_
         Some(vec![" ".to_owned()])
     );
     // Nor from a turn on a replacement of the role, which is no answer to the task.
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
+    let replacement = delivery_text(
+        &note(None, "note", body_of("a role", &CfWord::bare())),
+        &[],
+        &CfWord::bare(),
+    );
     let of_the_role = [
         user("Go"),
         step("Parser done"),
@@ -728,7 +804,11 @@ fn only_the_turn_after_the_latest_message_has_a_reply() {
     assert_eq!(reply(&items, &[]), ["Stopped"]);
     // A message to the member that is a role begins a turn of its own: its words are the role's,
     // and neither end nor begin the reply.
-    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[], &CfWord::bare());
+    let replacement = delivery_text(
+        &note(None, "note", body_of("a role", &CfWord::bare())),
+        &[],
+        &CfWord::bare(),
+    );
     let items = [
         user("Go"),
         assistant("Stopped"),
@@ -876,7 +956,7 @@ fn a_replacement_whose_recipient_has_no_conversation_any_more_is_confirmed_and_r
         .note_role(
             project.id,
             "chief",
-            &body_of("the role it is now"),
+            &body_of("the role it is now", &CfWord::bare()),
             "the role it is now",
         )
         .unwrap();
@@ -1100,15 +1180,17 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
     // A case: its name, the window's `cf`, the staff's rows, specs on or off, the rules, and the
     // lines the part after the first begins with.
     type Case<'a> = (&'a str, CfWord, usize, bool, Option<&'a str>, &'a [&'a str]);
+    // The image designer's paragraph in the chief's section on roles (T-1480).
+    const IMAGES: &str = "An image comes from the image designer (`--design`). Give it";
     let cases: [Case; 4] = [
-        ("a Mac, no staff", a_mac(), 0, false, None, &["The tiers:"]),
+        ("a Mac, no staff", a_mac(), 0, false, None, &[IMAGES]),
         (
             "a Mac, the largest chief",
             a_mac(),
             25,
             true,
             Some(&utf8),
-            &["The tiers:"],
+            &[IMAGES],
         ),
         (
             "Windows, the largest chief",
@@ -1116,7 +1198,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&utf8),
-            &["## Choose the tier, not the member"],
+            &["Where the staff has an integrator, it lands accepted work; a"],
         ),
         (
             "a Mac, the most escaped rules",
@@ -1124,7 +1206,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&escaped),
-            &["The tiers:"],
+            &[IMAGES],
         ),
     ];
     for (name, cf, rows, specs, rules, expected) in cases {

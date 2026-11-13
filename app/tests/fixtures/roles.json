@@ -8,6 +8,30 @@
     "imageAgent": false
   },
   {
+    "id": "frontend",
+    "name": "frontend designer",
+    "label": "Frontend designer",
+    "article": "a",
+    "tiered": false,
+    "imageAgent": false
+  },
+  {
+    "id": "architect",
+    "name": "architect",
+    "label": "Architect",
+    "article": "an",
+    "tiered": false,
+    "imageAgent": false
+  },
+  {
+    "id": "researcher",
+    "name": "researcher",
+    "label": "Researcher",
+    "article": "a",
+    "tiered": false,
+    "imageAgent": false
+  },
+  {
     "id": "advisor",
     "name": "advisor",
     "label": "Advisor",
@@ -29,6 +53,14 @@
     "label": "Tester",
     "article": "a",
     "tiered": true,
+    "imageAgent": false
+  },
+  {
+    "id": "integrator",
+    "name": "integrator",
+    "label": "Integrator",
+    "article": "an",
+    "tiered": false,
     "imageAgent": false
   },
   {

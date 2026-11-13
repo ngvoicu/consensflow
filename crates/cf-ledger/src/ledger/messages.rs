@@ -1,6 +1,7 @@
 //! The ledger's messages, their delivery and the human's gate, as its callers
 //! hold them.
 
+use cf_proto::cf_word::CfWord;
 use serde_json::Value;
 
 use super::Ledger;
@@ -279,14 +280,34 @@ impl Ledger {
     /// Messages of `recipient` among `ids` that `cf` served whole are received,
     /// as the way they were served receives them (`Read`): how many were. One whose
     /// paste is still on its way keeps the read until its delivery ends, and is not
-    /// counted.
+    /// counted. A role printed in the inbox is its part 1 of 1 printed in the window whose
+    /// `cf` is `cf` ([`Ledger::receive_read_part`]: refused where it prints in more).
     pub fn receive_read(
         &mut self,
         recipient: i64,
         ids: &[i64],
         via: Read,
+        cf: &CfWord,
     ) -> Result<usize, LedgerError> {
-        messages::receive_read(&mut self.store, recipient, ids, via)
+        messages::receive_read(&mut self.store, recipient, ids, via, cf)
+    }
+
+    /// `cf inbox read` printed whole part `part` (the first is 1) of `of` of the note `id`,
+    /// a role, to `recipient`, in the window whose `cf` is `cf`: `of` is refused (400
+    /// `invalid-read`) where it is not the number of parts that window's `cf` prints the note
+    /// in (`cf_base::role_read::role_parts`). The role is read once every part of it was
+    /// printed in the conversation it goes to, whatever state the note was in at each, and
+    /// told once its paste is confirmed too. How many messages were received.
+    pub fn receive_read_part(
+        &mut self,
+        recipient: i64,
+        id: i64,
+        part: usize,
+        of: usize,
+        via: Read,
+        cf: &CfWord,
+    ) -> Result<usize, LedgerError> {
+        messages::receive_read_part(&mut self.store, recipient, id, part, of, via, cf)
     }
 
     /// The claims no door acknowledged on answers for a participant are voided,

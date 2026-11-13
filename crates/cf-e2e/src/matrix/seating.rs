@@ -33,7 +33,28 @@ pub enum Role {
     Reviewer,
     Advisor,
     Tester,
+    // The four roles of spec new-roles: seats a run may add beside the square's five, as the
+    // image designer is, each at most once. None of them has a tier.
+    Frontend,
+    Architect,
+    Researcher,
+    Integrator,
 }
+
+/// The pools whose tasks and members take no tier, as the product's roles' table has them
+/// (`cf_ledger::roles`; a test of this crate holds the two together): a member of these alone
+/// is added with none, and the daemon refuses one.
+pub const POOLS_WITHOUT_TIER: [&str; 5] = [
+    "frontend",
+    "architect",
+    "researcher",
+    "integrator",
+    "designer",
+];
+
+/// The tier the daemon keeps a member of roles with no tier in: the lowest, which decides
+/// nothing.
+pub const NO_TIER: &str = "light";
 
 impl Role {
     /// Every position, in the order the design's table has them.
@@ -45,9 +66,41 @@ impl Role {
         Self::Tester,
     ];
 
-    /// The position called `name`, as [`Role::name`] says it.
+    /// The seats a run may add beside the five, each at most once: none is in the square.
+    pub const EXTRA: [Self; 4] = [
+        Self::Frontend,
+        Self::Architect,
+        Self::Researcher,
+        Self::Integrator,
+    ];
+
+    /// The position called `name`, as [`Role::name`] says it: one of the five, or of the extra
+    /// seats.
     pub fn named(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|role| role.name() == name)
+        Self::ALL
+            .into_iter()
+            .chain(Self::EXTRA)
+            .find(|role| role.name() == name)
+    }
+
+    /// Whether it is one of the extra seats, which no board of the square has.
+    pub fn is_extra(self) -> bool {
+        Self::EXTRA.contains(&self)
+    }
+
+    /// Whether its member and its tasks have a tier.
+    pub fn tiered(self) -> bool {
+        self.pool()
+            .is_some_and(|pool| !POOLS_WITHOUT_TIER.contains(&pool))
+    }
+
+    /// The tier its member is staff at: [`TIER`], or [`NO_TIER`] for a role with none.
+    pub fn tier(self) -> &'static str {
+        if self.tiered() {
+            TIER
+        } else {
+            NO_TIER
+        }
     }
 
     /// Its name, as the evidence says it (and as the ledger names a member's role).
@@ -58,6 +111,10 @@ impl Role {
             Self::Reviewer => "reviewer",
             Self::Advisor => "advisor",
             Self::Tester => "tester",
+            Self::Frontend => "frontend",
+            Self::Architect => "architect",
+            Self::Researcher => "researcher",
+            Self::Integrator => "integrator",
         }
     }
 
@@ -70,6 +127,10 @@ impl Role {
             Self::Reviewer => Some("reviewer"),
             Self::Advisor => Some("advisor"),
             Self::Tester => Some("tester"),
+            Self::Frontend => Some("frontend"),
+            Self::Architect => Some("architect"),
+            Self::Researcher => Some("researcher"),
+            Self::Integrator => Some("integrator"),
         }
     }
 
@@ -228,6 +289,7 @@ pub fn plan_text() -> String {
         ));
     }
     text.push_str("\nThe image designer is a sixth member and Codex alone (`--seats ...,designer=codex`): the catalog refuses `designer: true` for every other harness.\n");
+    text.push_str("The frontend designer, the architect, the researcher and the integrator are members besides the five, on any harness and each at most once (`--seats ...,frontend=pi`), with no tier; a board that seats one is no row of the square.\n");
     text
 }
 
@@ -312,7 +374,7 @@ impl Seating {
             }
             let Some(role) = Role::named(position) else {
                 return refuse(format!(
-                    "no position is called {position} (chief, worker, reviewer, advisor, tester, or designer for the sixth member)"
+                    "no position is called {position} (chief, worker, reviewer, advisor, tester; frontend, architect, researcher or integrator besides them; or designer for the sixth member)"
                 ));
             };
             if seats.iter().any(|(seated, _)| *seated == role) {
@@ -338,6 +400,7 @@ impl Seating {
             );
         }
         seats.sort_by_key(|(role, _)| *role);
+        // A board is a row of the square and nothing besides: no extra seat, no designer.
         let board = (0..BOARDS).find(|board| row_of(*board).as_slice() == seats.as_slice());
         Ok(Self::real(
             board.filter(|_| designer.is_none()),
@@ -379,6 +442,12 @@ impl Seating {
             .any(|role| seats.iter().filter(|seat| seat.role == *role).count() != 1)
         {
             return Err(refuse("it does not seat each position once"));
+        }
+        if Role::EXTRA
+            .iter()
+            .any(|role| seats.iter().filter(|seat| seat.role == *role).count() > 1)
+        {
+            return Err(refuse("it seats a member besides the five twice"));
         }
         let designer = match manifest["designer"].as_str() {
             Some("codex") => Some(Harness::Codex),
@@ -501,13 +570,14 @@ impl Seating {
     pub fn staff(&self, members: &mut Members) -> Vec<Check> {
         let mut checks = Vec::new();
         for seat in self.seats.iter().filter(|seat| seat.role != Role::Chief) {
-            let what = format!("{} {} is staff at {TIER}", seat.role.name(), seat.who());
+            let expected = seat.role.tier();
+            let what = format!("{} {} is staff at {expected}", seat.role.name(), seat.who());
             let role = seat.role.pool().unwrap_or_default();
             checks.push(match members.add(&seat.agent(), &[role]) {
                 Ok(tier) => Check::new(
                     "staff",
                     &what,
-                    tier == TIER,
+                    tier == expected,
                     format!("member.add gave {} the tier {tier:?}", seat.agent()),
                 ),
                 Err(failed) => Check::failed("staff", &what, failed.to_string()),
@@ -649,6 +719,80 @@ mod tests {
         assert!(refused.contains("not the chief's"), "{refused}");
         assert_eq!(Role::named("tester"), Some(Role::Tester));
         assert_eq!(Role::named("designer"), None);
+        assert_eq!(Role::named("integrator"), Some(Role::Integrator));
+    }
+
+    #[test]
+    fn the_four_roles_of_spec_new_roles_are_seats_besides_the_five_with_no_tier_and_no_board() {
+        let seats = Seating::named(
+            "chief=claude,worker=codex,reviewer=pi,advisor=devin,tester=muse,frontend=pi,integrator=codex",
+        )
+        .unwrap();
+        assert_eq!(
+            (seats.board, seats.label().as_str()),
+            (None, "seats"),
+            "no row of the square"
+        );
+        assert_eq!(seats.seat(Role::Frontend).who(), "pi");
+        assert_eq!(seats.seat(Role::Integrator).who(), "codex");
+        let roles: Vec<Role> = seats.seats.iter().map(|seat| seat.role).collect();
+        assert_eq!(
+            roles[..5],
+            Role::ALL,
+            "the five first, in the square's order"
+        );
+        assert_eq!(roles[5..], [Role::Frontend, Role::Integrator]);
+        // As the manifest says it, and back.
+        assert_eq!(Seating::from_manifest(&seats.manifest()).unwrap(), seats);
+        // Each at most once.
+        let twice = Seating::named(
+            "chief=claude,worker=codex,reviewer=pi,advisor=devin,tester=muse,architect=pi,architect=muse",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(twice.contains("architect is named twice"), "{twice}");
+        let mut doubled = seats.manifest();
+        let extra = doubled["seats"][5].clone();
+        doubled["seats"].as_array_mut().unwrap().push(extra);
+        assert!(Seating::from_manifest(&doubled)
+            .unwrap_err()
+            .to_string()
+            .contains("besides the five twice"));
+        // Never in the square, and staff with no tier.
+        for role in Role::EXTRA {
+            assert!(!Role::ALL.contains(&role));
+            assert!(role.is_extra() && !role.tiered(), "{}", role.name());
+            assert_eq!(role.tier(), NO_TIER);
+            assert_eq!(Role::named(role.name()), Some(role));
+        }
+        assert!(Role::ALL.iter().all(|role| !role.is_extra()));
+        assert_eq!(Role::Worker.tier(), TIER);
+        assert!(plan_text().contains("each at most once (`--seats ...,frontend=pi`)"));
+    }
+
+    /// The seating's pools and which take no tier are the product's roles' table's: a row the
+    /// table gains or a tier it loses fails here.
+    #[test]
+    fn the_seats_pools_and_their_tiers_are_the_roles_tables() {
+        let mut ours: Vec<&str> = Role::ALL
+            .into_iter()
+            .chain(Role::EXTRA)
+            .filter_map(Role::pool)
+            .chain(["designer"])
+            .collect();
+        ours.sort_unstable();
+        let mut table = cf_ledger::roles::ids();
+        table.sort_unstable();
+        assert_eq!(ours, table);
+        let mut untiered: Vec<&str> = cf_ledger::roles::all()
+            .iter()
+            .filter(|role| !role.tiered)
+            .map(|role| role.id)
+            .collect();
+        untiered.sort_unstable();
+        let mut without = POOLS_WITHOUT_TIER.to_vec();
+        without.sort_unstable();
+        assert_eq!(without, untiered);
     }
 
     #[test]

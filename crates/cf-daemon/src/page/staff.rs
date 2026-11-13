@@ -80,7 +80,9 @@ pub(super) async fn add(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
             .filter(|role| !existing.roles.contains(role))
             .cloned(),
     );
-    ledger.set_roles(project, &existing.handle, &held)?;
+    // A role with tiers gained by a member given none comes with the tier chosen now.
+    let tier = (!cf_ledger::roles::takes_no_tier(&member.roles)).then_some(member.tier.as_str());
+    ledger.set_roles(project, &existing.handle, &held, tier)?;
     // Roles with no tier leave the member in the tier it has, for its work with one.
     let mut edit = edit_of(&member);
     if cf_ledger::roles::takes_no_tier(&member.roles) {
@@ -417,13 +419,20 @@ pub(super) async fn resolve(
     })
 }
 
-/// `member.roles`: the roles are checked before the member is looked for.
+/// `member.roles`: the roles are checked before the member is looked for. A role with tiers
+/// gained by a member whose roles had none comes with the `tier` the human chose (FD-04).
 pub(super) async fn roles(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let roles = parse_roles(body.get("roles"))?;
-    let member =
-        page.ledger
-            .borrow_mut()
-            .set_roles(body.whole("project")?, &body.text("agent"), &roles)?;
+    let tier = match body.get("tier") {
+        None | Some(Value::Null) => None,
+        given => Some(tier_of(given)?),
+    };
+    let member = page.ledger.borrow_mut().set_roles(
+        body.whole("project")?,
+        &body.text("agent"),
+        &roles,
+        tier.map(WorkTier::as_str),
+    )?;
     one("member", member)
 }
 

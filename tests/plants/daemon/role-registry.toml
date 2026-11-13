@@ -76,16 +76,15 @@ find = '''        .any(|role| find(role.as_ref()).is_some_and(|role| role.image_
 replace = '''        .any(|role| find(role.as_ref()).is_some_and(|role| !role.image_agent))'''
 
 [[plant]]
-name = "role registry: a task asks for a role with tiers before the designer"
-meant = "a_task_asks_for_the_image_designer_before_anything_else_then_advice_review_and_test"
+name = "role registry: a task names the roles it asks for out of the table's order"
+meant = "a_task_asks_for_every_role_whose_field_is_on_in_the_tables_order_and_the_worker_for_none"
 runs = ["rr-ledger-roles"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/roles.rs"
-find = '''    flagged(false)
-        .or_else(|| flagged(true))'''
-replace = '''    flagged(true)
-        .or_else(|| flagged(false))'''
+find = '''        .filter(|role| role.field().is_some_and(&on))'''
+replace = '''        .rev()
+        .filter(|role| role.field().is_some_and(&on))'''
 
 [[plant]]
 name = "role registry: the scheduler's note says the role's id, not its name"

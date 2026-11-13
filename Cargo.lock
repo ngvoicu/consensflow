@@ -470,6 +470,7 @@ version = "3.0.7-alpha.5"
 dependencies = [
  "cf-base",
  "cf-e2e",
+ "cf-ledger",
  "cf-panes",
  "cf-process",
  "cf-proto",

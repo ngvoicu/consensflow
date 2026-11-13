@@ -97,9 +97,10 @@ fn teaches_only_the_boards_commands(role: &str) {
             r"## Reviews\n\nNothing is reviewed unless you ask\.",
             &text
         ));
-        // The tester is one more role the chief names the tier of, and one line of the reviews' section.
+        // The tester is one more role the chief names the tier of, and one line of the reviews' section;
+        // what each role gives back is its line of the card (spec new-roles, FD-06).
         assert!(found(
-            r"a tester\s+of that tier \(`--test`\) runs the work to check it and changes no product code\.",
+            r#"cf task add --test --tier <tier> "…"\s+a test for a tester: what to run and what to check; results with evidence back, no product code changed"#,
             &text
         ));
         // An advisor and a reviewer change no project file, as their own texts say: each may
@@ -107,7 +108,6 @@ fn teaches_only_the_boards_commands(role: &str) {
         for said in [
             r#"cf task add --advice --tier <tier> "…"\s+a question for an advisor: findings back, no project file changed"#,
             r#"what to review and what to check; findings back, no project file changed"#,
-            r"answers\s+a\s+question\s+and\s+changes\s+no\s+project\s+file;\s+a\s+reviewer\s+of\s+that\s+tier\s+\(`--review`\)\s+checks\s+finished\s+work\s+and\s+changes\s+no\s+project\s+file;",
         ] {
             assert!(found(said, &text), "{said}");
         }
@@ -135,7 +135,7 @@ fn teaches_only_the_boards_commands(role: &str) {
             &text
         ));
         assert!(found(
-            r"A\s+revision goes back to its window with `--after`; its result names the file\.",
+            r"A\s+revision goes back to its window with `--after`\.",
             &text
         ));
         assert!(!found(r"say what to draw", &text));
@@ -327,7 +327,7 @@ fn tells_every_window_it_never_has_to_wait_for_what_the_board_brings() {
         r"You never have to poll or wait for a result: ConsensFlow brings each one to\s+you as a message when it is ready",
         &instructions("chief", &[zeus()])
     ));
-    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+    for role in cf_ledger::roles::ids() {
         assert!(
             found(
                 r"Never wait for an answer\s+in your shell \(no `sleep`",
@@ -353,11 +353,74 @@ fn tells_the_tester_to_run_the_work_report_with_evidence_and_change_no_product_c
     assert!(!found(r"read-only|changes no file", &text));
 }
 
+/// Every role of the table is a command of the chief's card (spec new-roles, FD-06): a role
+/// whose switch the card does not show is one the chief cannot give work to, and a role with no
+/// tier is shown with none.
+#[test]
+fn shows_the_chief_a_command_for_every_role_of_the_table_with_a_tier_only_where_it_has_them() {
+    let text = instructions("chief", &[zeus()]);
+    let card = section(&text, "Your commands");
+    for role in cf_ledger::roles::all() {
+        let shown = match (role.switch, role.tiered) {
+            (None, _) => "cf task add --tier <critical|complex|standard|light> \"…\"".to_owned(),
+            (Some(switch), true) => format!("cf task add {switch} --tier <tier> \"…\""),
+            (Some(switch), false) => format!("cf task add {switch} \"…\""),
+        };
+        assert!(
+            card.contains(&shown),
+            "{}: the card does not show {shown}",
+            role.id
+        );
+    }
+}
+
+/// What the chief is told of the four roles of spec new-roles and of a member's images (FD-06,
+/// FD-07; T-1480): when work goes to each, in the section on roles, and the researcher in What
+/// you do.
+#[test]
+fn tells_the_chief_when_work_goes_to_each_of_the_four_roles_and_how_a_members_images_are_drawn() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "What you do"),
+        "the chief's What you do",
+        &["reading of more than a few lookups to the researcher, so that only its answer enters your conversation."],
+    );
+    assert_says(
+        section(&text, "Choose the role, not the member"),
+        "the chief's section on roles",
+        &[
+            "Name the role a task needs, and its tier where its command above takes `--tier`.",
+            "Only a role nobody holds is refused, by its name: only the human adds members, so ask them for one.",
+            // The architect (A3, A5): a design first, and the briefs point to its files.
+            "Work big enough to need a design (a new module, a new API, a change of structure) goes to the architect first; its files stay, and the workers' briefs point to them.",
+            "It also reviews a change against its design.",
+            // The frontend designer: the purpose, never the look (rule 0); never beside a worker in the same files.
+            "How a screen looks, feels and moves is the frontend designer's call: its brief gives the purpose (who uses the screen, what they must be able to do, what exists already), never the look, and a worker's question of look goes to it through you.",
+            "Never give it and a worker the same files at once: order the two with `--needs`.",
+            "It can also go over a screen a worker built.",
+            // The integrator.
+            "Where the staff has an integrator, it lands accepted work; a conflict that needs a choice about what the product does comes back to you as a question with both sides.",
+            "It makes no tag, release or deploy unless its brief says so.",
+            // Rule 5, the image flow.
+            "A member that needs images asks you with a drawing order for each: add a `--design` task per order and, when all are done, answer in words, then each file's path and its line from ConsensFlow.",
+            "With no image designer, the member makes them itself (SVG, CSS or its harness's image tool), or you ask the human for them, with the orders.",
+        ],
+    );
+}
+
 #[test]
 fn tells_the_chief_one_member_runs_as_many_tasks_at_once_as_it_is_given() {
+    // Item 2 says to give parallel work together however few members a role has; the staff's
+    // section says why: a member runs any number of tasks at once (T-1480 took the second
+    // saying of it out of item 2).
+    let text = instructions("chief", &[zeus()]);
     assert!(found(
-        r"however few\s+members a tier has: one worker runs as many tasks at once as you give it,\s+and so does one advisor or one reviewer",
-        &instructions("chief", &[zeus()])
+        r"Independent tasks run side by side, each in a fresh window, however few\s+members a role has, so give work that can go in parallel as separate\s+tasks, together\.",
+        &text
+    ));
+    assert!(found(
+        r"it runs any number of tasks at once, each in its own\s+window\.",
+        &text
     ));
 }
 
@@ -401,17 +464,21 @@ fn tells_the_chief_a_member_is_a_model_that_runs_any_number_of_tasks_at_once_eac
 #[test]
 fn tells_the_chief_a_follow_up_is_for_what_its_window_knows_and_other_work_starts_at_once_beside_it(
 ) {
-    assert!(found(
-        r"the next step of that window's own work, only when it needs what that window already knows \(carry out the plan or findings it just wrote, part 2 after its part 1\); reviews, parallel work and work for another role stay fresh, and start at once beside that window's work\n",
-        &instructions("chief", &[zeus()])
-    ));
+    // Said once, in the section on continuing a window (the card's line names the command).
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "The one exception: continuing a window"),
+        "the chief's section on continuing a window",
+        &[
+            "The next step of that window's own work, only when it needs what that window already knows (carry out the plan or findings it just wrote, part 2 after its part 1), goes to it with `cf task add --after T-3 \"…\"`",
+            "All other work (reviews, parallel work and work for another role) stays fresh, and starts at once beside that window's work.",
+        ],
+    );
 }
 
 #[test]
 fn tells_every_window_its_messages_arrive_pasted_and_are_its_to_act_on() {
-    for role in [
-        "chief", "worker", "advisor", "reviewer", "tester", "designer",
-    ] {
+    for role in std::iter::once("chief").chain(cf_ledger::roles::ids()) {
         assert!(
             found(
                 r"Each message ConsensFlow brings you is typed into this terminal, headed\s+`\[ConsensFlow m-… · T-… · …\]`; your harness may show it as pasted text\. It is\s+ConsensFlow's delivery, and acting on it is your role\.",
@@ -441,17 +508,17 @@ fn says_so_when_the_staff_is_empty() {
         "the one way to continue a window"
     );
     assert!(
-        text.contains("the next step of that window's own work"),
+        text.contains("The next step of that window's own work"),
         "and when"
     );
     assert!(
-        text.contains("reviews, parallel work and work for another role stay fresh"),
+        text.contains("(reviews, parallel work and work for another role) stays fresh"),
         "and when not"
     );
     assert!(instructions("chief", &[zeus()]).contains("## What you do"));
     assert!(instructions("chief", &[zeus()]).contains("## What you never do"));
     assert!(found(
-        r"## What you never do\n\n- Change the project yourself: edit a file, commit, push, build or deploy",
+        r"## What you never do\n\n- Send work to another window: the board is the only channel",
         &instructions("chief", &[zeus()])
     ));
 }
@@ -508,9 +575,7 @@ fn every_text_for(cf: &CfWord) -> Vec<(String, String, usize)> {
         skill: "/home/me/.consensflow/skills/specmint-tdd/SKILL.md",
     };
     let mut texts = Vec::new();
-    for role in [
-        "chief", "worker", "advisor", "reviewer", "tester", "designer",
-    ] {
+    for role in std::iter::once("chief").chain(cf_ledger::roles::ids()) {
         for specs in [None, Some(&specs)] {
             let text = role_instructions(&Env::default(), role, &[zeus()], cf, specs).unwrap();
             // The commands each starts with: the chief's table and prose, a member's table and
@@ -611,6 +676,26 @@ fn with_no_path_the_commands_say_cf_and_a_path_that_is_empty_is_none() {
     }
 }
 
+/// T-1510's review of T-1480: the explicit ban went to pay for the four roles' words, and what
+/// was left said it only in part (a brief written for one member was no longer banned). It is
+/// back in What you never do (T-1513).
+#[test]
+fn never_gives_a_task_to_a_member_by_name_nor_writes_one_with_a_member_in_mind() {
+    let text = instructions("chief", &[]);
+    let never = text
+        .split("## What you never do")
+        .nth(1)
+        .and_then(|rest| rest.split("\n## ").next())
+        .expect("What you never do");
+    assert!(
+        found(
+            r"- Give a task to a member by name, or write one with a member in mind\.",
+            never
+        ),
+        "{never}"
+    );
+}
+
 #[test]
 fn gives_the_chief_s_subagents_if_its_harness_has_them_nothing_beyond_searching_and_reading() {
     assert!(found(
@@ -629,9 +714,7 @@ fn names_no_agent_to_pick_no_preset_no_nickname_and_no_cf_agent_or_catalog_in_an
     )
     .unwrap();
     let staff = [zeus()];
-    for role in [
-        "chief", "worker", "advisor", "reviewer", "tester", "designer",
-    ] {
+    for role in std::iter::once("chief").chain(cf_ledger::roles::ids()) {
         let text = instructions(role, &staff);
         let said = removed.find(&text);
         assert!(
@@ -872,9 +955,11 @@ fn tells_the_chief_to_start_a_fresh_window_for_the_next_round_after_about_three_
         "the chief's section on continuing a window",
         &[
             "After about three rounds of the same work (reopens, `--after`), a window's conversation is long and every step re-reads it.",
-            "For the next round add a new task that says where things stand (branch and head, done, left, findings still open), then accept the old one: its open findings go on in the new task.",
+            // A follow-up in a window left for hours wrote 300,000 to 660,000 tokens again
+            // (T-1446's measurements): a late one is a new task too.
+            "One that finished hours ago reads it all again at its first call.",
+            "For the next round, or a late follow-up, add a new task that says where things stand (branch and head, done, left, findings still open), then accept the old one: its open findings go on in the new task.",
             "Accepting releases whatever `--needs` it, so if tasks wait on it, add the new task `--before` them first.",
-            "`--after` is for the next step of a window's own work, not for round after round.",
         ],
     );
 }
@@ -885,13 +970,20 @@ fn tells_the_chief_to_start_a_fresh_window_for_the_next_round_after_about_three_
 fn tells_the_chief_it_may_change_the_project_itself_when_the_human_says_so_and_why_no_work_goes_to_another_window(
 ) {
     let text = instructions("chief", &[zeus()]);
+    // The rule and its exception are said once, in What you do (T-1480 took What you never
+    // do's second saying of them out).
+    assert_says(
+        section(&text, "What you do"),
+        "the chief's What you do",
+        &[
+            "You do not change the project yourself: no file edits, no commits or pushes, no builds, releases or deploys.",
+            "The one exception: the human tells you to do a change yourself.",
+        ],
+    );
     assert_says(
         section(&text, "What you never do"),
         "the chief's What you never do",
-        &[
-            "Change the project yourself: edit a file, commit, push, build or deploy. That is a worker's task, unless the human told you to do it yourself.",
-            "Send work to another window: the board is the only channel, and only the human gives you work, here in your terminal.",
-        ],
+        &["Send work to another window: the board is the only channel, and only the human gives you work, here in your terminal; never read another agent's session files."],
     );
 }
 
@@ -975,7 +1067,10 @@ fn tells_the_reviewer_to_begin_with_whether_the_work_is_ready_and_to_number_each
         ],
     );
     // The reviewer's rules are its own: no other member is asked to number findings.
-    for role in ["worker", "advisor", "tester", "designer"] {
+    for role in cf_ledger::roles::ids()
+        .into_iter()
+        .filter(|role| *role != "reviewer")
+    {
         let text = instructions(role, &[zeus()]);
         assert!(
             !says(&text, "numbered so a later review can name it"),
@@ -1076,7 +1171,7 @@ fn tells_the_chief_every_member_has_the_projects_rules_so_a_brief_does_not_repea
 
 #[test]
 fn gives_each_member_the_projects_rules_for_the_staff_under_their_own_heading_after_its_role() {
-    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+    for role in cf_ledger::roles::ids() {
         let role_text = instructions(role, &[zeus()]);
         let text = with_staff_rules(role_text.clone(), role, Some(HUMANS_RULES));
         assert!(
@@ -1122,9 +1217,7 @@ fn shows_the_chief_the_same_rules_marked_as_what_every_member_already_has() {
 
 #[test]
 fn a_project_with_no_rules_for_its_staff_leaves_every_text_as_it_was_to_the_byte() {
-    for role in [
-        "chief", "worker", "advisor", "reviewer", "tester", "designer",
-    ] {
+    for role in std::iter::once("chief").chain(cf_ledger::roles::ids()) {
         let role_text = instructions(role, &[zeus()]);
         assert_eq!(
             with_staff_rules(role_text.clone(), role, None),
@@ -1132,5 +1225,96 @@ fn a_project_with_no_rules_for_its_staff_leaves_every_text_as_it_was_to_the_byte
             "{role}"
         );
         assert!(!role_text.contains(STAFF_RULES_HEADING), "{role}");
+    }
+}
+
+/// Every role of the table has its text (spec new-roles, FD-04): its title by its name, its
+/// own description and intro, and the shared rules; a row added to the table without its
+/// parts in `staff.md` fails here, as the engine refuses a missing slot.
+#[test]
+fn every_role_of_the_table_has_its_own_text_under_its_name() {
+    let mut intros = Vec::new();
+    let mut descriptions = Vec::new();
+    for role in cf_ledger::roles::all() {
+        let text = role_instructions(&Env::default(), role.id, &[zeus()], &CfWord::bare(), None)
+            .unwrap_or_else(|refused| panic!("{}: {refused}", role.id));
+        assert!(
+            text.contains(&format!("\n# ConsensFlow {}\n", role.name)),
+            "{}: {text}",
+            role.id
+        );
+        assert!(
+            text.contains(&format!("Keep this {} role", role.id)),
+            "{}",
+            role.id
+        );
+        assert!(
+            found(r"Never wait for an answer\s+in your shell", &text),
+            "{}",
+            role.id
+        );
+        let intro = text
+            .split("\n# ConsensFlow ")
+            .nth(1)
+            .and_then(|rest| rest.split("\n## Your commands").next())
+            .unwrap_or_default()
+            .to_owned();
+        assert!(
+            !intros.contains(&intro),
+            "{}: another role's intro",
+            role.id
+        );
+        intros.push(intro);
+        // The description its harness's skill lists it by is its own too.
+        let description = text
+            .lines()
+            .find_map(|line| line.strip_prefix("description: "))
+            .unwrap_or_default()
+            .to_owned();
+        assert!(
+            !description.is_empty() && !descriptions.contains(&description),
+            "{}: no description of its own: {description:?}",
+            role.id
+        );
+        descriptions.push(description);
+    }
+}
+
+/// The four roles' texts say what their rules give each (spec new-roles): the frontend
+/// designer decides the look and asks for images through the chief, the architect writes
+/// nothing that runs, the researcher changes no file, and the integrator changes no
+/// behaviour and releases only when told so.
+#[test]
+fn the_four_new_roles_texts_say_their_own_territory() {
+    let text = |role: &str| instructions(role, &[zeus()]);
+    let frontend = text("frontend");
+    for said in [
+        r"The look is\s+yours to decide",
+        r"Look at the project's screens, styles and components first",
+        r"When you need an image, ask the chief with a drawing order",
+        r"where\s+it cannot, say it was not looked at",
+        r"why you chose\s+what you chose",
+    ] {
+        assert!(found(said, &frontend), "frontend: {said}");
+    }
+    let architect = text("architect");
+    for said in [
+        r"Nothing you\s+write runs",
+        r"Read the code as it stands and the project's documents first",
+        r"what that rework\s+would cost and buy",
+    ] {
+        assert!(found(said, &architect), "architect: {said}");
+    }
+    assert!(found(
+        r"A research task changes no file",
+        &text("researcher")
+    ));
+    let integrator = text("integrator");
+    for said in [
+        r"You change no\s+behaviour",
+        r"Tag,\s+release or deploy only where the brief says so in words",
+        r"showing both sides",
+    ] {
+        assert!(found(said, &integrator), "integrator: {said}");
     }
 }

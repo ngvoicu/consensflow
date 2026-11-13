@@ -72,7 +72,8 @@ jobs:
     timeout-minutes: 150
     # The only job that can read the signing keys: the `release` environment
     # admits v* tags and main. No third-party action runs here; Rust comes
-    # from the runner's own rustup.
+    # from the runner's own rustup, at the version .github/rust-version names: a release
+    # built with another Rust would lower-case text otherwise than the page (T-1523).
     environment: release
     # What the files it built hash to, which the sign job holds them to: any job of
     # the run can replace an artifact of it, and no job can forge another's output.
@@ -89,7 +90,7 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             app/package-lock.json
-      - run: rustup update stable --no-self-update && rustup default stable
+      - run: rustup toolchain install "$(cat .github/rust-version)" --profile minimal --no-self-update && rustup default "$(cat .github/rust-version)"
       - name: The tag names the source version
         if: github.ref_type == 'tag'
         run: test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
@@ -272,7 +273,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - run: rustup update stable --no-self-update && rustup default stable
+      - run: rustup toolchain install "$(cat .github/rust-version)" --profile minimal --no-self-update && rustup default "$(cat .github/rust-version)"
       - name: Build the release tool
         run: cargo build --release --locked -p cf-release
       - name: CI passed this commit on both platforms
@@ -308,7 +309,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - run: rustup update stable --no-self-update && rustup default stable
+      - run: rustup toolchain install "$(cat .github/rust-version)" --profile minimal --no-self-update && rustup default "$(cat .github/rust-version)"
       - name: Build cf-publish, and say what it hashes to
         id: build
         run: |
@@ -338,7 +339,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - run: rustup update stable --no-self-update && rustup default stable
+      - run: rustup toolchain install "$(cat .github/rust-version)" --profile minimal --no-self-update && rustup default "$(cat .github/rust-version)"
       - name: Build cf-publish for macOS, and say what it hashes to
         id: build
         run: |

@@ -49,7 +49,7 @@ fn as_it_began(m: &Metrics) -> bool {
 fn restore_reported(m: &Metrics) -> bool {
     m.tasks
         .iter()
-        .filter(|task| crate::measure::is_work_pool(task.pool.as_deref()))
+        .filter(|task| task.is_work())
         .nth(1)
         .is_some_and(|task| matches!(task.state.as_str(), "done" | "accepted"))
 }

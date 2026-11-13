@@ -163,6 +163,41 @@ impl Board {
             .unwrap();
     }
 
+    /// The chief gives a follow-up with `brief` to a window of a member of `role`, as the
+    /// ledger stores one: no pool, the window (a session of the member, begun for `role`) its
+    /// assignee. Its number.
+    fn follows_up(&mut self, role: &str, brief: &str) -> i64 {
+        let at = self.tick();
+        let roles = format!(r#"["{role}"]"#);
+        self.db
+            .execute(
+                "INSERT INTO participant (project_id, handle, role, roles, harness, designer, tier, created_at)
+                 VALUES (?1, ?2, ?3, ?4, 'claude-code', 0, 'light', ?5)",
+                rusqlite::params![self.project, format!("{role}-member"), role, roles, at],
+            )
+            .unwrap();
+        let member = self.db.last_insert_rowid();
+        self.db
+            .execute(
+                "INSERT INTO participant (project_id, handle, role, roles, harness, designer, tier, member_id, created_at)
+                 VALUES (?1, ?2, ?3, ?4, 'claude-code', 0, 'light', ?5, ?6)",
+                rusqlite::params![self.project, format!("{role}-member-wren"), role, roles, member, at],
+            )
+            .unwrap();
+        let window = self.db.last_insert_rowid();
+        self.tasks += 1;
+        let number = self.tasks;
+        self.db
+            .execute(
+                "INSERT INTO task (project_id, number, title, body, requester_id, assignee_id, state, pool, tier, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'working', NULL, NULL, ?7, ?7)",
+                rusqlite::params![self.project, number, format!("T-{number}"), brief, CHIEF, window, at],
+            )
+            .unwrap();
+        self.message(number, (window, CHIEF), "task", brief, &at);
+        number
+    }
+
     /// The member of task `number` finishes it with `result`.
     fn finishes(&mut self, number: i64, result: &str) {
         let at = self.tick();
@@ -735,6 +770,35 @@ fn a_chief_that_starts_a_fresh_window_with_a_handoff_holds_the_review_blockers()
         failing(REVIEW_BLOCKERS, &board.measured()),
         Vec::<String>::new()
     );
+}
+
+/// A follow-up the ledger stores with no pool is the role its window began for (the review of
+/// T-1441, T-1453): an architect's, a researcher's or an integrator's next step after the second
+/// blocking review changes no work, where every task with no pool was taken for work and passed
+/// the check. A follow-up for a worker's window, or a frontend designer's, is work, as before.
+#[test]
+fn a_follow_up_for_a_window_of_another_role_after_the_second_blocking_review_is_no_change_of_the_work(
+) {
+    for (role, changes) in [
+        ("architect", false),
+        ("researcher", false),
+        ("integrator", false),
+        ("worker", true),
+        ("frontend", true),
+    ] {
+        let (mut board, work, first, second) = after_the_second_blocking_review();
+        board.follows_up(role, "Next: the step after T-3.");
+        board.accepts(work);
+        board.accepts(first);
+        board.accepts(second);
+        let failed = failing(REVIEW_BLOCKERS, &board.measured());
+        assert_eq!(
+            !failed.iter().any(|name| name
+                == "after the second review the chief changes the work or asks the owner"),
+            changes,
+            "{role}: {failed:?}"
+        );
+    }
 }
 
 #[test]

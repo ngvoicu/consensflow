@@ -67,8 +67,7 @@ fn what_changes_when_the_run_is_not_quiet_is_the_chiefs_state_the_tasks_and_ever
 
 #[test]
 fn t_1_s_result_is_in_once_the_first_worker_task_is_done_or_accepted() {
-    let tasks = |cards: Value| -> Vec<Value> { cards.as_array().unwrap().clone() };
-    let first_in = |cards: Value| first_result_in(&tasks(cards).iter().collect::<Vec<_>>());
+    let first_in = |cards: Value| first_result_in(&work_of(&json!({ "open": cards })));
     // T-1 at work, then done, then accepted beside its follow-up.
     assert!(!first_in(
         json!([{ "number": 1, "pool": "worker", "state": "working" }])
@@ -96,6 +95,27 @@ fn t_1_s_result_is_in_once_the_first_worker_task_is_done_or_accepted() {
             ])),
             "{pool}"
         );
+    }
+    // A follow-up has no pool, and is the role of the window that has it, as `board.get` says
+    // a lane's: its participant's (the session's own row). An architect's done before the
+    // worker's T-2 is no worker's result (T-1453); a worker's window's is.
+    let lanes = |role: &str| {
+        json!({
+            "lanes": [
+                { "participant": { "handle": "daedalus-wren", "role": role },
+                  "tasks": [{ "number": 1, "pool": null, "state": "done" }] },
+                { "participant": { "handle": "zeus-otter", "role": "worker" },
+                  "tasks": [{ "number": 2, "pool": "worker", "state": "working" }] },
+            ],
+            "open": [],
+        })
+    };
+    for (role, first) in [
+        ("architect", false),
+        ("researcher", false),
+        ("worker", true),
+    ] {
+        assert_eq!(first_result_in(&work_of(&lanes(role))), first, "{role}");
     }
     // A failed or cancelled T-1 brought no line in, and a board with no task has no result.
     assert!(!first_in(
@@ -189,13 +209,13 @@ impl Looks {
     fn look(&self, cards: &str, page: &str, step: &Step) {
         cf_e2e::files::write(&self.workspace.path().join("site/evaluare.html"), page).unwrap();
         let cards: Value = serde_json::from_str(cards).unwrap();
-        let tasks: Vec<&Value> = cards.as_array().unwrap().iter().collect();
+        let board = json!({ "open": cards });
         let mut kept = self.kept.get();
         keep_at_result(
             &mut self.read.borrow_mut(),
             &mut kept,
             step,
-            &tasks,
+            &work_of(&board),
             self.workspace.path(),
         )
         .unwrap();

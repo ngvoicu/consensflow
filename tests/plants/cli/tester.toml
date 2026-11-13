@@ -31,10 +31,10 @@ runs = ["board-task"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '''            .filter(switched)
+find = '''        .filter(|role| role.switch.is_some_and(|switch| words.on(switch)))
 '''
-replace = '''            .filter(switched)
-            .filter(|role| role.id != "tester")
+replace = '''        .filter(|role| role.switch.is_some_and(|switch| words.on(switch)))
+        .filter(|role| role.id != "tester")
 '''
 
 [[plant]]
@@ -58,5 +58,5 @@ runs = ["board-goldens"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/usage.rs"
-find = "(with --advice for an advisor, --review for a reviewer or --test for a tester; or --design,"
-replace = "(with --advice for an advisor or --review for a reviewer; or --design,"
+find = "(with --advice for an advisor, --review for a reviewer or --test for a tester; or,"
+replace = "(with --advice for an advisor or --review for a reviewer; or,"

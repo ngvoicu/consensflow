@@ -145,6 +145,7 @@ fn the_commands_that_run_in_rust_say_so_in_their_help() {
         "--as-archiver",
         "departures",
         "unreachable-pub",
+        "rust-version",
         "bench records-memory",
         "check",
         "smoke",
@@ -195,6 +196,7 @@ fn check_steps() -> Vec<String> {
     let for_windows = "cargo clippy --offline --target x86_64-pc-windows-msvc --all-targets \
                        --workspace --exclude app -- -D warnings";
     let mut steps = vec![
+        "cargo xtask rust-version".to_string(),
         "cargo fmt --all --check".to_string(),
         "cargo clippy --workspace --exclude app --all-targets -- -D warnings".to_string(),
         "cargo xtask unreachable-pub".to_string(),
@@ -273,8 +275,8 @@ fn check_stops_at_the_first_step_that_fails_and_answers_its_status() {
     assert_eq!(
         err(&ran),
         format!(
-            "{}xtask check [1/{total}]: cargo fmt --all --check\n\
-             xtask check: step 1 of {total} ended with status 3: cargo fmt --all --check\n",
+            "{}xtask check [1/{total}]: cargo xtask rust-version\n\
+             xtask check: step 1 of {total} ended with status 3: cargo xtask rust-version\n",
             if cfg!(windows) {
                 NO_LINT_FOR_WINDOWS
             } else {

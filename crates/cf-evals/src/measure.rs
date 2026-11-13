@@ -34,7 +34,7 @@ pub use chief::{chief_open_question, devin_chief_questions, devin_data, on_windo
 pub(crate) use copy::on_copy;
 pub use files::{begun, changed, ended, gone, read};
 pub use metrics::{
-    is_work_pool, owner_questions_value, Asking, Check, FileRead, LongestResult, MemberQuestions,
+    is_work_role, owner_questions_value, Asking, Check, FileRead, LongestResult, MemberQuestions,
     Metrics, Note, OwnerQuestions, Plumbing, ProjectRef, Reopen, Rounds, Task,
 };
 pub use plumbing::mechanics;
@@ -101,9 +101,9 @@ pub fn measure(file: &Path, options: &Options) -> Result<Metrics> {
             .collect::<Vec<_>>()
             .join("\n"),
         longest_result: LongestResult {
-            worker: longest_result(&mine, |row| {
-                !row.pool_is("advisor") && !row.pool_is("reviewer")
-            }),
+            // Work alone, by the role each task is for (T-1453): a researcher's findings or an
+            // architect's follow-up are no worker's result.
+            worker: longest_result(&mine, |row| row.task.is_work()),
             advisor: longest_result(&mine, |row| row.pool_is("advisor")),
             reviewer: longest_result(&mine, |row| row.pool_is("reviewer")),
         },
