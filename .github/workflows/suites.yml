@@ -147,11 +147,13 @@ jobs:
                 if [ "$metadata_rc" -ne 0 ]; then exit "$metadata_rc"; fi
                 targets=()
                 while IFS= read -r name; do [ -n "$name" ] && targets+=(--test "$name"); done < "$RUNNER_TEMP/engine-targets"
-                cargo test -p cf-engine --no-fail-fast -j 4 --lib --bins "${targets[@]}" -- --test-threads=4
+                cargo test -p cf-engine --no-fail-fast -j 4 --lib --bins --examples "${targets[@]}" -- --test-threads=4
                 other_rc=$?
                 cargo test -p cf-engine --test dispatcher --no-fail-fast -j 4 -- --test-threads=2
                 dispatcher_rc=$?
-                [ "$other_rc" -eq 0 ] && [ "$dispatcher_rc" -eq 0 ] ;;
+                cargo test -p cf-engine --doc -j 4 -- --test-threads=4
+                doc_rc=$?
+                [ "$other_rc" -eq 0 ] && [ "$dispatcher_rc" -eq 0 ] && [ "$doc_rc" -eq 0 ] ;;
               plants)
                 IFS=, read -r -a names <<< "$PLANT_NAMES"
                 [ -n "$FAMILY" ] && [ "${#names[@]}" -gt 0 ] && [ -n "${names[0]}" ] || exit 2
