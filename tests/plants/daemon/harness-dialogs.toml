@@ -35,6 +35,63 @@ hd-base-dialog = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "te
 hd-engine-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "dialogs::"]
 hd-claude-cu = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::computer_use_prompt::"]
 hd-rig-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_codex_chiefs_idle_prompt_was_read_as_a_dialog::"]
+cln75-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "harness_dialogs::cln75_"]
+cln75-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::dialogs::cln75_"]
+
+[[plant]]
+name = "cln75: a safely declined dialog is typed to the chief"
+meant = "cln75_a_dialog_consensflow_declines_is_shown_and_the_human_is_told_the_same_words"
+runs = ["cln75-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '        let ends_without_answer = decline.is_some()'
+replace = '        let ends_without_answer = false && decline.is_some()'
+
+[[plant]]
+name = "cln75: a harness self-ending dialog is typed to the chief"
+meant = "cln75_a_self_ending_dialog_is_shown_in_the_chiefs_inbox_not_typed"
+runs = ["cln75-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '''            || dialog
+                .as_ref()
+                .is_some_and(|dialog| dialog.closes_after_s.is_some());'''
+replace = '            || false;'
+
+[[plant]]
+name = "cln75: the notice that a decline was made is typed to the chief"
+meant = "cln75_a_delayed_decline_is_shown_too"
+runs = ["cln75-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '        self.tell_dialog_with_disposition(project, participant, &body, true)'
+replace = '        self.tell_dialog_with_disposition(project, participant, &body, false)'
+
+[[plant]]
+name = "cln75: Claude's countdown is not read as a deadline"
+meant = "cln75_a_recorded_permission_prompt_reads_the_time_claude_has_left"
+runs = ["cln75-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''        let closes_after_s = closes_after_s
+            .or_else(|| super::dialog_identity::warning_seconds(&shown.dialog.detail, screen));'''
+replace = '        let closes_after_s = closes_after_s;'
+
+[[plant]]
+name = "cln75: a framed quote of a warning is a harness deadline"
+meant = "cln75_a_recorded_permission_prompt_reads_the_time_claude_has_left"
+runs = ["cln75-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/dialog_identity.rs"
+find = '''    if !raw.trim_start().starts_with(WARNING) {
+        return None;
+    }'''
+replace = '    let _ = raw;'
 
 [[plant]]
 name = "harness dialogs: the engine never watches a window's screen for one, and nobody is told"
@@ -410,7 +467,7 @@ runs = ["hd-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dialogs.rs"
-find = "        self.tell_dialog(project, participant, &body)\n    }\n\n    /// The task of"
+find = "        self.tell_dialog_with_disposition(project, participant, &body, true)\n    }\n\n    /// The task of"
 replace = "        let _ = body;\n        Ok(())\n    }\n\n    /// The task of"
 
 [[plant]]
@@ -1024,8 +1081,8 @@ runs = ["hd-claude-identity"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/dialog_identity.rs"
-find = '    let Some(start) = detail.iter().rposition(|row| row.starts_with(WARNING)) else {'
-replace = '    let Some(start) = detail.iter().position(|row| row.starts_with(WARNING)) else {'
+find = '    let start = detail.iter().rposition(|row| row.starts_with(WARNING))?;'
+replace = '    let start = detail.iter().position(|row| row.starts_with(WARNING))?;'
 
 [[plant]]
 name = "harness dialogs: once: place: a command that prints the warning is read by its first row alone, and the first command's decline is pressed into the second"
@@ -1054,8 +1111,8 @@ runs = ["hd-engine"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/dialog_identity.rs"
-find = '    let Some(start) = detail.iter().rposition(|row| row.starts_with(WARNING)) else {'
-replace = '    let Some(start) = detail.iter().position(|row| row.starts_with(WARNING)) else {'
+find = '    let start = detail.iter().rposition(|row| row.starts_with(WARNING))?;'
+replace = '    let start = detail.iter().position(|row| row.starts_with(WARNING))?;'
 
 [[plant]]
 name = "harness dialogs: once: place: the pin of Claude's adapter lets the added method move"
@@ -1283,7 +1340,7 @@ find = '''
                 quoted(&decline.choice)
             ),
         };
-        self.tell_dialog(project, participant, &body)'''
+        self.tell_dialog_with_disposition(project, participant, &body, true)'''
 replace = '''
                 quoted(&decline.choice)
             ),

@@ -36,6 +36,9 @@
 //! later look that still shows the dialog with that choice, by its one key, once: a look that
 //! finds it gone, or drawn otherwise, presses nothing, and a key the window did not take is not
 //! pressed again. A dialog that goes and comes again is told again.
+//! A member's dialog that ConsensFlow will decline, or whose harness says it closes by itself,
+//! asks its task's giver no decision: the note is shown to a chief, not typed. Other givers and
+//! the human receive it as before; a dialog in the chief's own window is unchanged (CLN-75).
 //!
 //! **A decline can be a key with no choice of its own** (T-1300): Claude Code's Computer Use
 //! permission prompt, which a member's `request_access` raises where ConsensFlow.app lacks
@@ -271,6 +274,10 @@ impl Dispatcher {
             .and_then(|dialog| window.safe_decline(dialog))
             .filter(|decline| !(decline.members_only && participant.role == "chief"));
         let body = told(&participant.handle, dialog.as_ref(), decline.as_ref());
+        let ends_without_answer = decline.is_some()
+            || dialog
+                .as_ref()
+                .is_some_and(|dialog| dialog.closes_after_s.is_some());
         {
             let mut watch = record.dialog.borrow_mut();
             watch.told = Some(key);
@@ -279,7 +286,7 @@ impl Dispatcher {
             watch.told_at = Some(now);
             watch.told_as = identity;
         }
-        self.tell_dialog(project, participant, &body)?;
+        self.tell_dialog_with_disposition(project, participant, &body, ends_without_answer)?;
         Ok(observed)
     }
 
@@ -361,7 +368,7 @@ impl Dispatcher {
                 quoted(&decline.choice)
             ),
         };
-        self.tell_dialog(project, participant, &body)
+        self.tell_dialog_with_disposition(project, participant, &body, true)
     }
 
     /// The task of `participant`'s window whose giver hears of its dialogs: none for the chief's.
@@ -405,6 +412,16 @@ impl Dispatcher {
         participant: &ParticipantView,
         body: &str,
     ) -> Result<(), EngineError> {
+        self.tell_dialog_with_disposition(project, participant, body, false)
+    }
+
+    fn tell_dialog_with_disposition(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        body: &str,
+        ends_without_answer: bool,
+    ) -> Result<(), EngineError> {
         let task = self.dialog_task(participant)?;
         let number = task.as_ref().map(|thread| thread.task.number);
         let requester = task
@@ -412,15 +429,22 @@ impl Dispatcher {
             .map(|thread| thread.task.requester.clone())
             .filter(|requester| requester != "human");
         for to in requester.into_iter().chain(["human".to_owned()]) {
-            self.seams.ledger.borrow_mut().note(
-                project.id,
-                &NewNote {
-                    from: None,
-                    to,
-                    task: number,
-                    body: body.to_owned(),
-                },
-            )?;
+            let note = NewNote {
+                from: None,
+                to,
+                task: number,
+                body: body.to_owned(),
+            };
+            if ends_without_answer && note.to != "human" {
+                // `show` queues for a non-chief requester as before; the human's note is unchanged.
+                self.seams.ledger.borrow_mut().show(
+                    project.id,
+                    &note,
+                    &format!("dialog reported in @{}'s window", participant.handle),
+                )?;
+            } else {
+                self.seams.ledger.borrow_mut().note(project.id, &note)?;
+            }
         }
         self.changed();
         Ok(())

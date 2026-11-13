@@ -185,6 +185,17 @@ fn a_permission_prompt_whose_clock_counts_down_is_told_once_to_the_chief_and_the
         told[0]
     );
     assert!(told[0].contains("block this request in 0:"), "{}", told[0]);
+    assert!(
+        told[0].contains("Its harness closes it by itself"),
+        "{}",
+        told[0]
+    );
+    let inbox = project.inbox("chief")?;
+    let notice = inbox
+        .iter()
+        .find(|message| message["body"] == told[0])
+        .expect("the dialog note in the inbox");
+    assert!(notice["receipt"]["shown"].is_string(), "{notice}");
     assert_eq!(dialog_notes(&project, "human")?, told);
     // Nothing was pressed in it: it is on no list of safe declines.
     let config = rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default().to_owned();
