@@ -3,8 +3,7 @@
 //! model, makes tasks wait and goes on, held to the events and the messages every participant
 //! was written. The golden `goldens/plain-run.json` was recorded on the tree before the
 //! scheduler knew of either; a change that moves it is made in the file by hand, with its
-//! reason in the commit (`CF_WRITE_PLAIN_RUN=1 cargo test -p cf-engine --test dispatcher plain_run`
-//! writes it again).
+//! reason in the commit.
 
 use std::path::PathBuf;
 
@@ -51,10 +50,9 @@ fn a_project_with_no_backup_and_nobody_on_vacation_writes_the_rows_it_wrote_befo
     context.pass().unwrap();
     // zeus runs out for twenty minutes, its task held with its window.
     let resets_at = after(&context, 20 * 60_000);
-    context.adapter.refuse(
-        "zeus",
-        exhausted(Some(&now(&context)), Some(&resets_at)),
-    );
+    context
+        .adapter
+        .refuse("zeus", exhausted(Some(&now(&context)), Some(&resets_at)));
     context.pass().unwrap();
     // The next task goes to diana, whose account is then refused for good.
     tiers.open_body("Write the lexer");
@@ -89,13 +87,6 @@ fn a_project_with_no_backup_and_nobody_on_vacation_writes_the_rows_it_wrote_befo
     context.pass().unwrap();
 
     let found = rows(&context, tiers.project.id);
-    if std::env::var_os("CF_WRITE_PLAIN_RUN").is_some() {
-        std::fs::write(
-            golden(),
-            serde_json::to_string_pretty(&found).unwrap() + "\n",
-        )
-        .unwrap();
-    }
     let recorded: Value =
         serde_json::from_str(&std::fs::read_to_string(golden()).expect("the recorded run"))
             .unwrap();

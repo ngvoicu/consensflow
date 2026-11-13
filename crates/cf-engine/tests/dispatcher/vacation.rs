@@ -96,9 +96,13 @@ fn a_task_given_whose_window_never_opened_goes_back_to_the_board_for_another_mem
     context.pass().unwrap();
     assert_eq!(with(&tiers, 1), "diana");
     assert!(
-        context.adapter.prepared().iter().all(|launch| launch["participant"]["handle"]
-            .as_str()
-            .is_some_and(|handle| !handle.starts_with("zeus"))),
+        context
+            .adapter
+            .prepared()
+            .iter()
+            .all(|launch| launch["participant"]["handle"]
+                .as_str()
+                .is_some_and(|handle| !handle.starts_with("zeus"))),
         "no window was opened for zeus"
     );
 }

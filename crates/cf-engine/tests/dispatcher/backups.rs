@@ -15,11 +15,19 @@ const MOVED: &str = "9999-12-31T23:59:59.999Z";
 
 /// What the giver is told once a task goes to a backup whose member is out for its quota.
 fn went_to(task: i64, backup: &str, member: &str, until: &str) -> String {
-    format!("T-{task} went to @{backup}, the backup of @{member}, which is out of quota until {until}.")
+    format!(
+        "T-{task} went to @{backup}, the backup of @{member}, which is out of quota until {until}."
+    )
 }
 
 /// A backup for `member`, on `harness` and `model`.
-fn backed(context: &Context, project: i64, member: &str, harness: &str, model: &str) -> ParticipantView {
+fn backed(
+    context: &Context,
+    project: i64,
+    member: &str,
+    harness: &str,
+    model: &str,
+) -> ParticipantView {
     let config = NewMember {
         harness: harness.to_owned(),
         model: Some(model.to_owned()),
@@ -73,8 +81,8 @@ fn told_of_a_backup(tiers: &Tiers<'_>) -> Vec<String> {
 }
 
 #[test]
-fn a_task_goes_to_the_backup_of_the_only_member_when_it_is_out_for_its_quota_and_its_giver_is_told_once()
-{
+fn a_task_goes_to_the_backup_of_the_only_member_when_it_is_out_for_its_quota_and_its_giver_is_told_once(
+) {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);
     let backup = backed(&context, tiers.project.id, "zeus", "claude-code", "gaia");
@@ -260,7 +268,9 @@ fn a_wait_after_a_restart_still_says_the_model_is_busy_and_not_that_the_quota_is
         tiers
             .notes("chief")
             .iter()
-            .any(|note| note.contains(&format!("@zeus's model is busy (ConsensFlow tries it again at {until})"))),
+            .any(|note| note.contains(&format!(
+                "@zeus's model is busy (ConsensFlow tries it again at {until})"
+            ))),
         "{:?}",
         tiers.notes("chief")
     );
@@ -419,7 +429,12 @@ fn a_task_released_and_taken_again_by_a_backup_is_told_to_its_giver_once() {
     assert_eq!(tiers.task(1).task.assignee, None);
     context.pass().unwrap();
     assert_eq!(taker(&tiers, 1), backup.handle);
-    assert_eq!(told_of_a_backup(&tiers).len(), 1, "{:?}", told_of_a_backup(&tiers));
+    assert_eq!(
+        told_of_a_backup(&tiers).len(),
+        1,
+        "{:?}",
+        told_of_a_backup(&tiers)
+    );
 }
 
 #[test]
@@ -440,7 +455,10 @@ fn a_busy_refusal_of_its_window_keeps_its_backup_from_the_next_task_after_a_rest
     );
     context.pass().unwrap();
     context.pass().unwrap();
-    assert!(tiers.out_until("zeus").is_some(), "its model is marked busy");
+    assert!(
+        tiers.out_until("zeus").is_some(),
+        "its model is marked busy"
+    );
     let restarted = context.make();
     tiers.open_body("Lexer");
     restarted.pass().unwrap();

@@ -442,13 +442,18 @@ impl Dispatcher {
                 .map(|member| self.not_free(&Seat::of(member)))
                 .collect();
             if let Some(taker) = self.taker(&candidates, &verdicts) {
-                self.seams.ledger.borrow_mut().assign_task(
-                    project.id,
-                    task.number,
-                    taker.id(),
-                )?;
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .assign_task(project.id, task.number, taker.id())?;
                 self.scheduler.waiting_noted.borrow_mut().remove(&task.id);
-                if let Taker::Backup { backup, of, held, until } = taker {
+                if let Taker::Backup {
+                    backup,
+                    of,
+                    held,
+                    until,
+                } = taker
+                {
                     self.tell_backup_took(project, &task, backup, of, held, until)?;
                 }
                 self.changed();
@@ -602,7 +607,10 @@ impl Dispatcher {
                 from: None,
                 to: task.requester.clone(),
                 task: Some(task.number),
-                body: format!("T-{} went to @{}, the backup of @{}, {why}.", task.number, backup.member.handle, of.member.handle),
+                body: format!(
+                    "T-{} went to @{}, the backup of @{}, {why}.",
+                    task.number, backup.member.handle, of.member.handle
+                ),
             },
             &aside,
         )?;
@@ -1423,9 +1431,9 @@ impl Dispatcher {
             .ledger
             .borrow()
             .candidates(project.id, task.number)?;
-        Ok(candidates
-            .iter()
-            .any(|member| member.member.id != owner.id && self.not_free(&Seat::of(member)).is_none()))
+        Ok(candidates.iter().any(|member| {
+            member.member.id != owner.id && self.not_free(&Seat::of(member)).is_none()
+        }))
     }
 
     /// The note that `task`'s window's model is busy, where its requester was given it, or is

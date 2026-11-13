@@ -32,7 +32,8 @@ use std::task::{Context, Poll, Waker};
 use cf_base::time::iso;
 use cf_harness::contract::{Observed, Pane};
 use cf_ledger::{
-    DeletedProject, HoldKind, NewMember, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
+    DeletedProject, HoldKind, NewMember, NewProject, ParticipantView, ProjectView, RemovedMember,
+    TaskReleased,
 };
 use cf_proto::panes::PaneExit;
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
@@ -637,7 +638,6 @@ impl Dispatcher {
         self.changed();
         Ok(back)
     }
-
 
     /// The human gives a task in a window to another member of its tier. Its
     /// window is stopped first, even one the human opened; one that would
