@@ -49,7 +49,10 @@
     "project.advisor_tool",
     "project.prompt_suggestion",
     "models.get",
-    "member.edit"
+    "member.edit",
+    "backup.add",
+    "backup.change",
+    "backup.remove"
   ],
   "ping": "{\"ok\":true}"
 }
