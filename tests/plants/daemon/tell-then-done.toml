@@ -517,8 +517,18 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "            for row in std::iter::once(&message).chain(&carried) {"
-replace = "            for row in std::iter::once(&message) {"
+find = "        for row in std::iter::once(message).chain(carried) {"
+replace = "        for row in std::iter::once(message) {"
+
+[[plant]]
+name = "answered tell: a resumed task keeps stale guidance at handover"
+meant = "an_answer_waiting_to_be_handed_over_loses_paused_guidance_if_the_task_resumes"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "            if !already_handed\n                && paused_answers_in(store, &message, &carried)?\n                    != super::paused_answers::tell_pause_ways_on(store, message_id)?\n            {"
+replace = "            if !already_handed && false {"
 
 [[plant]]
 name = "answered tell: a retry takes the earlier attempt's ways on"
