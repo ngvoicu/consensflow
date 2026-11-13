@@ -379,3 +379,49 @@ fn a_start_the_broker_cannot_tell_goes_as_it_came_and_the_window_says_so_once_in
         assert!(body.contains("it names no `threadSource`"), "{body}");
     });
 }
+
+#[test]
+fn a_note_of_an_unclassified_start_that_the_board_refuses_is_one_line_in_the_daemons_log_without_the_token(
+) {
+    use std::sync::Arc;
+
+    use cf_board::scripted::{reply, scripted};
+    use cf_board::Board;
+
+    use super::fixture::wait;
+
+    run(async {
+        let home = tempfile::tempdir().unwrap();
+        let api = scripted(vec![reply(
+            403,
+            json!({ "message": "notes are closed", "error": "closed" }),
+        )]);
+        let f = Fixture::with(Options {
+            role: Some(ROLE.to_owned()),
+            board: Some(Arc::new(Board::new(Some(&api.url), "window-token"))),
+            log_home: Some(home.path().to_owned()),
+            ..Options::default()
+        })
+        .await;
+        let tui = f.connect().await;
+        let unknown = json!({ "ephemeral": false, "developerInstructions": null });
+        f.call(
+            &tui,
+            1,
+            "thread/start",
+            unknown.clone(),
+            json!({ "thread": { "id": A } }),
+        )
+        .await;
+        wait(|| !logged(home.path()).is_empty()).await;
+        let lines = logged(home.path());
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(
+            lines[0].contains(" info cf codex-session could not tell the board that a thread started without its role: notes are closed"),
+            "{}",
+            lines[0]
+        );
+        assert!(!lines[0].contains("window-token"), "{}", lines[0]);
+        assert_eq!(api.received().len(), 1, "no second try");
+    });
+}
