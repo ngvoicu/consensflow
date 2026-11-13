@@ -161,6 +161,10 @@ async fn own_hands_leaves_every_kind_of_board_task_available() {
         ("reviewer", "reviewer-model", false),
         ("tester", "tester-model", false),
         ("designer", "image-model", true),
+        ("frontend", "frontend-model", false),
+        ("architect", "architect-model", false),
+        ("researcher", "research-model", false),
+        ("integrator", "integrator-model", false),
     ] {
         scene
             .context
@@ -199,6 +203,10 @@ async fn own_hands_leaves_every_kind_of_board_task_available() {
         json!({"tier":"standard", "review":true, "body":"review"}),
         json!({"tier":"standard", "test":true, "body":"test"}),
         json!({"design":true, "body":"image"}),
+        json!({"frontend":true, "body":"frontend"}),
+        json!({"architect":true, "body":"architecture"}),
+        json!({"research":true, "body":"research"}),
+        json!({"integrate":true, "body":"integrate"}),
         json!({"after":finished, "body":"follow up"}),
         json!({"self":true, "body":"own later step"}),
     ] {
