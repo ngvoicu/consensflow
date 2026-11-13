@@ -128,12 +128,12 @@ fn assert_finish_takes_the_last_words(rig: &Rig, project: &Project, chief: &Valu
 
 /// The chief's recorded conversation and the note's message, so an inbox entry is not
 /// mistaken for a message that was typed into its window.
-fn chief_session(rig: &Rig, project: &Project) -> String {
+fn chief_session(rig: &Rig, project: &Project) -> cf_e2e::Result<String> {
     windows_of(rig, project)
         .first()
         .and_then(|frame| after(frame, "--session-id"))
-        .expect("the chief has a session")
-        .to_owned()
+        .map(str::to_owned)
+        .ok_or_else(|| cf_e2e::Error::Daemon("the chief has no session".to_owned()))
 }
 
 /// A user prompt in the chief's record containing `words`, including a carried message.
@@ -147,7 +147,7 @@ fn prompt_with(rig: &Rig, session: &str, words: &str) -> Option<String> {
 }
 
 fn note_message(project: &Project) -> cf_e2e::Result<Value> {
-    Ok(project
+    project
         .inbox("chief")?
         .into_iter()
         .find(|message| {
@@ -156,7 +156,7 @@ fn note_message(project: &Project) -> cf_e2e::Result<Value> {
                     .as_str()
                     .is_some_and(|body| body.contains(REPORT))
         })
-        .expect("the note is in the inbox"))
+        .ok_or_else(|| cf_e2e::Error::Daemon("the note is not in the inbox".to_owned()))
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn without_a_board_answer_the_first_and_last_words_are_typed_to_the_chief() -> O
     let message = note_message(&project)?;
     assert!(message["receipt"]["shown"].is_null(), "{message}");
     assert!(message["id"].as_i64().is_some(), "{message}");
-    let session = chief_session(&rig, &project);
+    let session = chief_session(&rig, &project)?;
     rig.wait_for("the unanswered note to be typed", secs(90), || {
         Ok(prompt_with(&rig, &session, WRITTEN).is_some())
     })?;
@@ -205,7 +205,7 @@ fn first_words_absent_from_the_board_answer_are_shown_but_not_typed() -> Outcome
         .find(|message| message["kind"] == "answer" && message["body"] == REPORT)
         .expect("the answer is in the inbox");
     assert!(answer["id"].as_i64().is_some(), "{answer}");
-    let session = chief_session(&rig, &project);
+    let session = chief_session(&rig, &project)?;
     rig.wait_for("the board answer to be typed", secs(90), || {
         Ok(prompt_with(&rig, &session, REPORT).is_some())
     })?;

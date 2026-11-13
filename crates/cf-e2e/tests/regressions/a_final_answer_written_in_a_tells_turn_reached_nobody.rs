@@ -43,12 +43,12 @@ fn holding(project: &Project, word: &str) -> cf_e2e::Result<Vec<(String, String)
 
 /// The chief's recorded conversation, where typed messages can be distinguished from
 /// messages only present in its inbox.
-fn chief_session(rig: &Rig, project: &Project) -> String {
+fn chief_session(rig: &Rig, project: &Project) -> cf_e2e::Result<String> {
     windows_of(rig, project)
         .first()
         .and_then(|frame| after(frame, "--session-id"))
-        .expect("the chief has a session")
-        .to_owned()
+        .map(str::to_owned)
+        .ok_or_else(|| cf_e2e::Error::Daemon("the chief has no session".to_owned()))
 }
 
 /// A user prompt in the chief's record containing `words`, including a carried message.
@@ -89,7 +89,7 @@ fn the_answer_is_typed_with_ways_on_and_the_distinct_final_words_are_shown_and_c
     })?;
 
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
-    let session = chief_session(&rig, &project);
+    let session = chief_session(&rig, &project)?;
     let words = format!("Stop now. REPLY {ANSWER} THEN SLEEP 2 Reply with exactly: {REPORT}");
     let tell = rig.cf_in_window(&chief, ["tell", "T-1", words.as_str()])?;
     assert_eq!(tell.code, Some(0), "{tell}");
@@ -206,7 +206,7 @@ fn an_answered_tells_note_stays_shown_when_the_chief_resumes_before_the_answer_i
     })?;
 
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
-    let session = chief_session(&rig, &project);
+    let session = chief_session(&rig, &project)?;
     let words = format!("Stop now. REPLY {ANSWER} THEN SLEEP 2 Reply with exactly: {REPORT}");
     let tell = rig.cf_in_window(&chief, ["tell", "T-1", words.as_str()])?;
     assert_eq!(tell.code, Some(0), "{tell}");
@@ -297,7 +297,7 @@ fn an_unanswered_tells_note_is_typed_after_the_chief_resumes() -> Outcome {
         Ok(project.task(1)?["state"] == "working")
     })?;
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
-    let session = chief_session(&rig, &project);
+    let session = chief_session(&rig, &project)?;
     let words = format!("Stop now. SLEEP 2 Reply with exactly: {REPORT}");
     let tell = rig.cf_in_window(&chief, ["tell", "T-1", words.as_str()])?;
     assert_eq!(tell.code, Some(0), "{tell}");
