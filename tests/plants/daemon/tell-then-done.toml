@@ -234,7 +234,7 @@ runs = ["engine-paused-answers"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
-find = '        let then = if task.state == "paused" {'
+find = '        let then = if !moved {'
 replace = "        let then = if true {"
 
 [[plant]]
@@ -539,3 +539,13 @@ runs = ["ledger-receipt"]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
 find = "    if row.state == \"queued\"\n        && (paste == answer\n            || store\n                .message(paste)?\n                .is_some_and(|carrier| matches!(carrier.state.as_str(), \"queued\" | \"gated\")))\n    {"
 replace = "    if row.state == \"queued\" {"
+
+[[plant]]
+name = "answered tell: a later pause hides that the tell's pause moved on"
+meant = "an_answered_tell_from_a_previous_pause_is_shown_even_if_the_task_paused_again"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "        return tell_moved_after(store, task, tell);"
+replace = "        return Ok(false);"
