@@ -520,7 +520,7 @@ export class TerminalsView {
       ownHands.setAttribute('role', 'switch')
       ownHands.setAttribute('aria-checked', String(entry.ownHands))
       ownHands.title =
-        "The chief does the work itself, in the project's folder. It puts work on the board only when you ask."
+        'The chief does the work itself and uses the board only when you ask. It hears of a change when it is next at rest.'
       group.append(
         ownHands,
         history,

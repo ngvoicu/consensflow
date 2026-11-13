@@ -36,7 +36,7 @@ fn own_hands_shares_the_commands_and_board_instructions_word_for_word() {
 }
 
 #[test]
-fn own_hands_shares_the_specs_section_except_for_who_does_the_work() {
+fn own_hands_specs_do_small_asks_and_phase_work_in_the_project_folder() {
     let specs = ProjectSpecs {
         variant: Variant::Core,
         folder: "plans",
@@ -59,16 +59,19 @@ fn own_hands_shares_the_specs_section_except_for_who_does_the_work() {
         text.split_once("## This project's specs\n\n")
             .unwrap()
             .1
-            .split("\n\n")
-            .map(str::to_owned)
-            .collect::<Vec<_>>()
+            .to_owned()
     };
     let off = section(&off);
     let on = section(&on);
-    assert_eq!(off.len(), 4);
-    assert_eq!(on.len(), off.len());
-    assert_eq!((&on[0], &on[1], &on[3]), (&off[0], &off[1], &off[3]));
-    assert_ne!(on[2], off[2]);
+    assert!(
+        on.contains("A small ask is no spec: you do it yourself."),
+        "{on}"
+    );
+    assert!(on.contains("Write the spec before you start its work, and do it in phase order. After you finish an item, mark the spec's progress as the skill says: its checkbox in SPEC.md and its count in the registry."), "{on}");
+    assert!(!on.contains("it goes straight on the board as a task"));
+    assert!(!on.contains("Then put them on the board in phase order"));
+    assert!(off.contains("A small ask is no spec: it goes straight on the board as a task."));
+    assert!(off.contains("Write the spec before any of its tasks go on the board. Then put them on the board in phase order:"));
 }
 
 #[test]

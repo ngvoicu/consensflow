@@ -89,6 +89,149 @@ fn own_hands_switch_is_told_once_each_way_on_every_harness() {
 }
 
 #[test]
+fn own_hands_changed_in_a_turn_is_told_once_at_the_next_rest_on_every_harness() {
+    for first in [FirstMessage::Delivered, FirstMessage::Opened] {
+        for harness in HARNESSES {
+            for was_on in [false, true] {
+                let context = made(first);
+                let project = project_on(&context, harness);
+                let chief = at_rest(&context, &project);
+                if was_on {
+                    context
+                        .ledger
+                        .borrow_mut()
+                        .set_own_hands(project.id, true)
+                        .unwrap();
+                    passes(&context);
+                    rests(&context, &project);
+                }
+                let label = format!("{harness}, {first:?}, was on: {was_on}");
+                in_a_turn(&context, &project);
+                let typed = context.host.inputs().len();
+                let said = said_to_the_chief(&context.adapter);
+                let notes = role_notes(&context, chief).len();
+                context
+                    .ledger
+                    .borrow_mut()
+                    .set_own_hands(project.id, !was_on)
+                    .unwrap();
+                passes(&context);
+                assert_eq!(
+                    context.host.inputs().len(),
+                    typed,
+                    "{label}: nothing typed in the turn"
+                );
+                assert_eq!(
+                    said_to_the_chief(&context.adapter),
+                    said,
+                    "{label}: no new user turn"
+                );
+                assert_eq!(
+                    role_notes(&context, chief).len(),
+                    notes,
+                    "{label}: no note written during the turn"
+                );
+
+                answers(&context, &project);
+                let told_now = told(&context, chief);
+                let direction = if was_on { "off" } else { "on" };
+                let prefix = format!("The person turned \"Do with your own hands\" {direction}:");
+                assert_eq!(told_now.len(), notes + 1, "{label}: one note at rest");
+                assert!(
+                    told_now.last().unwrap().starts_with(&prefix),
+                    "{label}: {told_now:?}"
+                );
+                let after = said_to_the_chief(&context.adapter);
+                assert_eq!(
+                    after.len(),
+                    said.len() + 1,
+                    "{label}: exactly one user turn at rest"
+                );
+                assert!(
+                    after.last().unwrap().contains(&prefix),
+                    "{label}: {after:?}"
+                );
+                rests(&context, &project);
+                passes(&context);
+                assert_eq!(
+                    told(&context, chief).len(),
+                    notes + 1,
+                    "{label}: no duplicate"
+                );
+                context.close();
+            }
+        }
+    }
+}
+
+#[test]
+fn own_hands_changed_back_in_a_turn_tells_the_chief_nothing_on_every_harness() {
+    for first in [FirstMessage::Delivered, FirstMessage::Opened] {
+        for harness in HARNESSES {
+            for was_on in [false, true] {
+                let context = made(first);
+                let project = project_on(&context, harness);
+                let chief = at_rest(&context, &project);
+                if was_on {
+                    context
+                        .ledger
+                        .borrow_mut()
+                        .set_own_hands(project.id, true)
+                        .unwrap();
+                    passes(&context);
+                    rests(&context, &project);
+                }
+                let label = format!("{harness}, {first:?}, was on: {was_on}");
+                in_a_turn(&context, &project);
+                let typed = context.host.inputs().len();
+                let said = said_to_the_chief(&context.adapter);
+                let notes = role_notes(&context, chief).len();
+                context
+                    .ledger
+                    .borrow_mut()
+                    .set_own_hands(project.id, !was_on)
+                    .unwrap();
+                passes(&context);
+                assert_eq!(
+                    context.host.inputs().len(),
+                    typed,
+                    "{label}: nothing typed in the turn"
+                );
+                assert_eq!(
+                    role_notes(&context, chief).len(),
+                    notes,
+                    "{label}: no note mid-turn"
+                );
+                context
+                    .ledger
+                    .borrow_mut()
+                    .set_own_hands(project.id, was_on)
+                    .unwrap();
+                passes(&context);
+                assert_eq!(
+                    context.host.inputs().len(),
+                    typed,
+                    "{label}: still nothing typed"
+                );
+                answers(&context, &project);
+                passes(&context);
+                assert_eq!(
+                    role_notes(&context, chief).len(),
+                    notes,
+                    "{label}: no note at rest"
+                );
+                assert_eq!(
+                    said_to_the_chief(&context.adapter),
+                    said,
+                    "{label}: no user turn at rest"
+                );
+                context.close();
+            }
+        }
+    }
+}
+
+#[test]
 fn own_hands_is_in_the_chiefs_next_launch_on_every_harness() {
     for harness in HARNESSES {
         let context = made(FirstMessage::Delivered);

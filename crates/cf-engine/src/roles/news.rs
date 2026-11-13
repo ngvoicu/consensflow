@@ -119,14 +119,18 @@ pub(crate) fn own_hands_said(
         "The person turned \"Do with your own hands\" off: return to your ordinary chief role and put work on the board as your instructions say."
     };
     let part = |name| Ok::<_, RoleError>(chief::part(on, name)?.replace("{{cf}}", cf.as_str()));
-    let description = part("description")?;
     let opening = part("opening")?;
     let duty = part("duty")?;
     let never = part("never")?;
     let specs = specs.map_or_else(String::new, |specs| {
-        format!("\n\n## This project's specs\n\n{}", specs.work_for(on))
+        format!(
+            "\n\n## This project's specs\n\n{}\n\n{}\n\n{}",
+            ProjectSpecs::small_ask_for(on),
+            specs.work_for(on),
+            ProjectSpecs::phases_for(on)
+        )
     });
-    Ok(format!("{intro}\n\nThese replace the earlier directions on how you work and use the board:\n\n{description}\n\n{opening}\n\n## What you do\n\n{duty}\n\n## What you never do\n\n{never}{specs}"))
+    Ok(format!("{intro}\n\nThese replace the earlier directions on how you work and use the board:\n\n{opening}\n\n## What you do\n\n{duty}\n\n## What you never do\n\n{never}{specs}"))
 }
 
 /// What the human changed of the project's rules for its staff.

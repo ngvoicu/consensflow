@@ -45,21 +45,41 @@ impl ProjectSpecs<'_> {
         } else {
             (*skill).to_owned()
         };
+        let small_ask = Self::small_ask_for(own_hands);
         let work = self.work_for(own_hands);
+        let phases = Self::phases_for(own_hands);
         format!(
             "\n## This project's specs\n\
              \n\
              Specs are on in this project. Plan specs with the Specmint skill `{name}`: its SKILL.md is at {skill}, and the files it names are beside it; read it before you plan. Your specs and their registry are in `{folder}`: use this copy of the skill and no other; its paths name it.\n\
              \n\
-             Use a spec when the human asks for one, or when an ask is big enough that its work comes in phases. A small ask is no spec: it goes straight on the board as a task.\n\
+             Use a spec when the human asks for one, or when an ask is big enough that its work comes in phases. {small_ask}\n\
              \n\
              {work}\n\
              \n\
-             Write the spec before any of its tasks go on the board. Then put them on the board in phase order: each task of a later phase has `--needs` the tasks of the phase before it, and each brief names the spec item it comes from and carries all its worker needs, since a member never reads the spec. With an architect, the spec says the work and its order and points to the architect's files for what the software is. After you accept a task, mark the spec's progress as the skill says: its checkbox in SPEC.md and its count in the registry.\n"
+             {phases}\n"
         )
     }
 
-    /// The only spec instructions changed when the person switches how the chief works.
+    /// The sentence on small asks, which also goes in a switch note.
+    pub(super) fn small_ask_for(own_hands: bool) -> &'static str {
+        if own_hands {
+            "A small ask is no spec: you do it yourself."
+        } else {
+            "A small ask is no spec: it goes straight on the board as a task."
+        }
+    }
+
+    /// The phase instructions, which also go in a switch note.
+    pub(super) fn phases_for(own_hands: bool) -> &'static str {
+        if own_hands {
+            "Write the spec before you start its work, and do it in phase order. After you finish an item, mark the spec's progress as the skill says: its checkbox in SPEC.md and its count in the registry."
+        } else {
+            "Write the spec before any of its tasks go on the board. Then put them on the board in phase order: each task of a later phase has `--needs` the tasks of the phase before it, and each brief names the spec item it comes from and carries all its worker needs, since a member never reads the spec. With an architect, the spec says the work and its order and points to the architect's files for what the software is. After you accept a task, mark the spec's progress as the skill says: its checkbox in SPEC.md and its count in the registry."
+        }
+    }
+
+    /// The instructions on who writes and implements the spec.
     pub(super) fn work_for(&self, own_hands: bool) -> String {
         let folder = self.folder;
         if own_hands {

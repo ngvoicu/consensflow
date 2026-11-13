@@ -56,7 +56,10 @@ fn own_hands_notice_gives_only_the_changed_parts() {
                 .split_once("\n## ")
                 .unwrap()
                 .0;
-            assert!(note.contains(description));
+            assert!(
+                !note.contains(description),
+                "front matter is not a direction"
+            );
             assert!(note.contains(opening));
             assert!(note.contains(never.trim_end()));
             assert!(note.contains("## What you do"));
@@ -117,6 +120,16 @@ fn own_hands_news_has_each_changed_section_and_fits_in_one_piece() {
             assert!(!note.contains("## Reviews"));
             assert!(note.contains("## This project's specs"));
             assert!(note.contains(&specs.work_for(on)));
+            if on {
+                assert!(note.contains("A small ask is no spec: you do it yourself."));
+                assert!(note.contains(
+                    "Write the spec before you start its work, and do it in phase order."
+                ));
+            } else {
+                assert!(note
+                    .contains("A small ask is no spec: it goes straight on the board as a task."));
+                assert!(note.contains("Write the spec before any of its tasks go on the board."));
+            }
             assert!(!note.contains("## The staff"));
             assert!(!note.contains("## The project's rules for the staff"));
             let complete = format!("{note}\n\n{CONTEXT}");

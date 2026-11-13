@@ -3277,7 +3277,7 @@ test('Do with your own hands appears on the chief in both pane states', async ({
   await expect(control).toHaveAttribute('aria-checked', 'false')
   await expect(control).toHaveAttribute(
     'title',
-    "The chief does the work itself, in the project's folder. It puts work on the board only when you ask.",
+    'The chief does the work itself and uses the board only when you ask. It hears of a change when it is next at rest.',
   )
   if (process.env.CF_OWN_HANDS_SCREENSHOTS) {
     await card.screenshot({ path: `${process.env.CF_OWN_HANDS_SCREENSHOTS}/chief-off.png` })
