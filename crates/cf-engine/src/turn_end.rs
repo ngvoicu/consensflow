@@ -137,9 +137,8 @@ pub struct Hold {
 pub(crate) struct HeldPart {
     /// What the task is held for, while it is.
     pub(crate) holding: Option<Hold>,
-    /// What the task's requester was told of its hold ([`Told`]): once for the hold, whatever
-    /// its jobs do and its turns say on the way (T-1181); a second time only if the hold turns
-    /// into one that cannot end by itself.
+    /// What the task's requester was told of its hold ([`Told`]): once for the hold and
+    /// once more if it cannot end by itself, plus the stretch's timed reminders.
     told: Option<Told>,
     /// The line of the window's record lost in the task's turn that its requester was told
     /// of, by a note of the hold or of a turn that may have lost its last line: told once.
@@ -1050,23 +1049,19 @@ impl Dispatcher {
                 shown.receipt.get("reminded").and_then(Value::as_i64)
             });
         let due_from = if let Some(id) = previous {
-            let mut reminded_at = shown
-                .as_ref()
-                .map_or(told.previous.map(|(_, at)| at), |shown| {
-                    shown
-                        .receipt
-                        .get("reminded_at")
-                        .and_then(Value::as_str)
-                        .and_then(time::parse)
-                });
-            if reminded_at.is_none() {
-                reminded_at = self
-                    .seams
-                    .ledger
-                    .borrow()
-                    .message(id)?
-                    .and_then(|message| time::parse(&message.created_at));
+            let Some(prior) = self.seams.ledger.borrow().message(id)? else {
+                return Ok(None);
+            };
+            // Do not stack reminders while the chief is busy. The next interval begins
+            // when the last one arrived, not when it was put in the delivery queue.
+            if matches!(prior.state.as_str(), "queued" | "gated" | "delivering") {
+                return Ok(None);
             }
+            let reminded_at = prior
+                .delivered_at
+                .as_deref()
+                .and_then(time::parse)
+                .or_else(|| time::parse(&prior.created_at));
             let Some(reminded_at) = reminded_at else {
                 return Ok(None);
             };

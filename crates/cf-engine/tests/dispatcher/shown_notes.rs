@@ -92,6 +92,76 @@ fn held_for_finish(context: &Context) {
     context.pass().unwrap();
 }
 
+/// Deliver a note at the current test time and let the chief finish its turn.
+fn chief_reads(context: &Context) {
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    context.adapter.answer("chief", "Noted");
+    context.pass().unwrap();
+}
+
+#[test]
+fn a_busy_chief_is_not_queued_repeated_reminders_before_the_first_is_delivered() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.adapter.busy("chief");
+    held(&context, "The wait starts", 1);
+    context.advance(AN_HOUR);
+    context.pass().unwrap();
+    assert_eq!(typed(&context, &tiers).len(), 1);
+    context.advance(6 * AN_HOUR);
+    context.pass().unwrap();
+    assert_eq!(
+        typed(&context, &tiers).len(),
+        1,
+        "one reminder waits for the chief"
+    );
+    assert!(pasted_reminders(&context).is_empty());
+    context.adapter.with("chief", |agent| agent.settled = true);
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted_reminders(&context).len(), 1);
+    context.adapter.answer("chief", "Noted");
+    context.pass().unwrap();
+    context.advance(3 * AN_HOUR - 1_000);
+    context.pass().unwrap();
+    assert_eq!(
+        typed(&context, &tiers).len(),
+        1,
+        "three hours after delivery"
+    );
+    context.advance(1_000);
+    context.pass().unwrap();
+    assert_eq!(typed(&context, &tiers).len(), 2);
+}
+
+#[test]
+fn a_finish_hold_does_not_stack_reminders_for_a_busy_chief() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    held_for_finish(&context);
+    chief_reads(&context);
+    context.adapter.busy("chief");
+    context.advance(AN_HOUR);
+    context.pass().unwrap();
+    assert_eq!(typed(&context, &tiers).len(), 2);
+    context.advance(6 * AN_HOUR);
+    context.pass().unwrap();
+    assert_eq!(typed(&context, &tiers).len(), 2, "one reminder waits");
+    context.adapter.with("chief", |agent| agent.settled = true);
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted_reminders(&context).len(), 1);
+    context.adapter.answer("chief", "Noted");
+    context.pass().unwrap();
+    context.advance(3 * AN_HOUR);
+    context.pass().unwrap();
+    assert_eq!(typed(&context, &tiers).len(), 3);
+}
+
 #[test]
 fn a_hold_keeps_its_stretch_when_it_needs_finish_then_can_end_again() {
     let context = Context::new();
@@ -138,6 +208,7 @@ fn a_hold_that_keeps_needing_finish_is_reminded_without_promising_a_result() {
     let tiers = zeus_at_work(&context);
     held_for_finish(&context);
     assert_eq!(typed(&context, &tiers).len(), 1, "Finish is told at once");
+    chief_reads(&context);
     context.advance(AN_HOUR);
     context.pass().unwrap();
     let notes = typed(&context, &tiers);
@@ -150,6 +221,7 @@ fn a_hold_that_keeps_needing_finish_is_reminded_without_promising_a_result() {
         notes[1].contains("result will not come by itself"),
         "{notes:?}"
     );
+    chief_reads(&context);
     context.advance(3 * AN_HOUR);
     context.pass().unwrap();
     assert_eq!(
@@ -164,9 +236,11 @@ fn a_reminder_before_a_finish_hold_can_end_is_carried_into_the_shown_hold() {
     let context = Context::new();
     let tiers = zeus_at_work(&context);
     held_for_finish(&context);
+    chief_reads(&context);
     context.advance(AN_HOUR);
     context.pass().unwrap();
     assert_eq!(typed(&context, &tiers).len(), 2);
+    chief_reads(&context);
     context.advance(20 * 60_000);
     held_again(&context, 1);
     context.advance(AN_HOUR);
@@ -523,6 +597,7 @@ fn a_single_long_hold_is_typed_at_one_hour_and_again_at_four_hours() {
     context.pass().unwrap();
     let reminder = "T-1 has been working in the background for 60 minutes, holding again 0 times (1 command). Its result comes when that ends; `cf task finish T-1` takes what it said last now.";
     assert_eq!(typed(&context, &tiers), [reminder]);
+    chief_reads(&context);
     assert_eq!(
         aside(&tiers).as_deref(),
         Some("in the background: 1 command"),
