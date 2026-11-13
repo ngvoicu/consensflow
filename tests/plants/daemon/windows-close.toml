@@ -63,7 +63,7 @@
 # - the windows a pane host still has open when its peer ends its input are ended with it, and it
 #   tells the exit of each, with what the window left running, before it closes its own output
 #   (`crates/cf-panes/src/headless.rs`, `shut_down`; the bridge keeps its output past the end of its
-#   input for it, `crates/cf-bridge/src/lib.rs`): the long run's final drain learns what each window
+#   input for it, `crates/cf-bridge/src/shutdown.rs`): the long run's final drain learns what each window
 #   left from them, as it learns of a window that ended before. The host waits for the exits it owes
 #   three seconds at most (`FAREWELL`) and for what it told to be written two (`FLUSH`), and a peer
 #   that reads nothing is not waited for any longer (3.0.6, item 8). The daemon is not told: both
@@ -533,7 +533,7 @@ meant = "a_bridge_that_does_not_keep_its_output_ends_it_with_its_input"
 runs = ["bridge-lib-kept-output"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/shutdown.rs"
 find = "self.close_transport(BridgeError::Eof, false, self.inner.keeps_output);"
 replace = "self.close_transport(BridgeError::Eof, false, true);"
 
@@ -543,7 +543,7 @@ meant = "ending_the_output_of_a_peer_that_reads_nothing_gives_up_after_its_time"
 runs = ["bridge-lib-kept-output"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/shutdown.rs"
 find = '''
         let flushed = self.wait_for_the_writer(deadline);
         self.cut_output();
@@ -558,7 +558,7 @@ meant = "a_failed_write_ends_an_output_the_bridge_kept"
 runs = ["bridge-lib-kept-output"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/shutdown.rs"
 find = '''
             drop(lifecycle);
             if !keeps_output {
