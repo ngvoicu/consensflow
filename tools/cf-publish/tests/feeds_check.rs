@@ -232,7 +232,6 @@ mod after_a_release_is_published_the_files_and_the_feeds_serve_what_the_rule_say
             format!("\"{LATER}\""),
             format!("\"{BRIDGE}\""),
             "null".to_string(),
-            "\"banana\"".to_string(),
         ] {
             record(&format!("{{\"feed-alpha\":{named}}}"));
             assert_eq!(
@@ -241,12 +240,6 @@ mod after_a_release_is_published_the_files_and_the_feeds_serve_what_the_rule_say
                 "it named {named}: it did not go back"
             );
         }
-        record("{}");
-        assert_eq!(
-            world.check(),
-            Vec::<String>::new(),
-            "no record of this feed"
-        );
         fs::remove_file(world.dir.path().join(FEEDS_BEFORE)).unwrap();
         assert_eq!(
             world.check(),
@@ -258,6 +251,106 @@ mod after_a_release_is_published_the_files_and_the_feeds_serve_what_the_rule_say
         record(r#"{"feed-alpha":"3.0.0-alpha.83"}"#);
         serving(&world.github, "feed-alpha", BRIDGE);
         assert_eq!(world.check(), [DOES_NOT_SERVE]);
+    }
+
+    #[test]
+    fn refuses_a_record_of_what_the_feeds_named_that_is_there_and_does_not_read_it_is_not_absent() {
+        let world = after_publishing(LATER);
+        let path = world.dir.path().join(FEEDS_BEFORE);
+        let shown = path.display().to_string();
+        let record = |text: &str| fs::write(&path, text).unwrap();
+        // The feed went back to this release from a later one; the record of
+        // that later one is cut short, not a record, or names no release.
+        record(r#"{"feed-alpha":"3.0.0-alpha.83""#);
+        let problems = world.check();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problems[0].starts_with(&format!(
+                "{shown} is not a record of what the feeds named (EOF while parsing an object"
+            )),
+            "{problems:?}"
+        );
+        for (text, why) in [
+            ("[\"3.0.0-alpha.83\"]", "not an object of feeds"),
+            ("", "EOF while parsing a value at line 1 column 0"),
+        ] {
+            record(text);
+            assert_eq!(
+                world.check(),
+                [format!(
+                    "{shown} is not a record of what the feeds named ({why}): no feed can be held to it"
+                )],
+                "{text:?}"
+            );
+        }
+        for named in ["\"banana\"", "83", "true", "{}"] {
+            record(&format!("{{\"feed-alpha\":{named}}}"));
+            assert_eq!(
+                world.check(),
+                [format!(
+                    "{shown} says feed-alpha named {named}, which is no release and not null: the feed cannot be held to it"
+                )],
+                "{named}"
+            );
+        }
+        // One feed's entry that does not read does not let the others off.
+        record(r#"{"feed-alpha":"3.0.0-alpha.83","feed-stable":"banana"}"#);
+        assert_eq!(
+            world.check(),
+            [
+                format!("{shown} says feed-stable named \"banana\", which is no release and not null: the feed cannot be held to it"),
+                format!("feed-alpha went backward: it named 3.0.0-alpha.83 when this release was published, and names {LATER} now"),
+            ]
+        );
+        // A record that cannot be read at all.
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        let problems = world.check();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problems[0].starts_with(&format!("{shown} cannot be read (")),
+            "{problems:?}"
+        );
+        assert!(
+            problems[0].ends_with("): no feed can be held to what it named before"),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn refuses_a_record_that_has_no_entry_for_a_feed_this_release_moves_a_missing_one_is_not_null()
+    {
+        // The publisher writes an entry, a release or null, for every new feed it
+        // moves: a record that reads and lacks one holds that feed to nothing.
+        let world = after_publishing(LATER);
+        let path = world.dir.path().join(FEEDS_BEFORE);
+        let shown = path.display().to_string();
+        let missing = |feed: &str| {
+            format!(
+                "{shown} has no entry for {feed}, which this release moves: the feed cannot be held to what it named before"
+            )
+        };
+        for text in ["{}", r#"{"feed-stable":"3.0.0-alpha.83"}"#] {
+            fs::write(&path, text).unwrap();
+            assert_eq!(world.check(), [missing("feed-alpha")], "{text}");
+        }
+        // A stable release moves both new feeds; the stable one went backward
+        // and its entry is the one left out.
+        let world = after_publishing("3.0.1");
+        feed(
+            &world.github,
+            "feed-stable",
+            world.files.text("latest.json"),
+        );
+        let path = world.dir.path().join(FEEDS_BEFORE);
+        let shown = path.display().to_string();
+        fs::write(&path, r#"{"feed-alpha":"3.0.0"}"#).unwrap();
+        assert_eq!(
+            world.check(),
+            [format!(
+                "{shown} has no entry for feed-stable, which this release moves: the feed cannot be held to what it named before"
+            )]
+        );
     }
 
     #[test]

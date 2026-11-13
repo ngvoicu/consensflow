@@ -76,15 +76,8 @@
 //! the Mac job (1.2 of 12.2 in alpha.3's tag run), and Apple's acceptance is a
 //! thing the tag's run would otherwise be the first to find out.
 //!
-//! How long it takes: with CI already green on main's commit, the trial and the
-//! tag's run each take the Mac job's 12 minutes (the app's build 7.5, signing and
-//! both notarizations 1.2, the smoke 1.7; Windows' 8 run beside it), after the
-//! wait for a macOS runner, which was 12.6 minutes for alpha.3's tag run and is
-//! nothing when one is free; so 13 to 26 minutes for each, and about 30 to 55
-//! from the command to the feed. With CI still to run, its 75 minutes more. A
-//! promotion has no trial, for the `release` environment, which holds the signing
-//! keys, admits `main` and `v*` tags and not `release/X.Y.Z`: it is CI on its
-//! branch (about 75 minutes), then the tag's run, and its commit is the alpha's
+//! A promotion has no trial, for the `release` environment, which holds the signing
+//! keys, admits `main` and `v*` tags and not `release/X.Y.Z`: its commit is the alpha's
 //! with the version alone changed (`promote::version_only`), the alpha having had
 //! its trial and its tag's run.
 //!

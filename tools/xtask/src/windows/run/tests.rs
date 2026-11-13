@@ -1182,32 +1182,34 @@ fn a_run_for_a_busy_zeewin2_waits_for_its_turn_and_goes_when_it_is_free_saying_w
     let zeewin2 = Machine::named("zeewin2").unwrap();
     let mut options = rig.options();
     options.wait = 1;
-    let (ended, out, err) = std::thread::scope(|scope| {
+    let said = Said::default();
+    let (ended, out) = std::thread::scope(|scope| {
         let run = scope.spawn(|| {
-            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let mut out = Vec::new();
             let ended = run(
                 &rig.context,
                 &zeewin2,
                 &options,
                 &mut Console {
                     out: &mut out,
-                    err: &mut err,
+                    err: &mut said.clone(),
                 },
                 &Interrupt::default(),
             );
-            (
-                ended,
-                String::from_utf8(out).unwrap(),
-                String::from_utf8(err).unwrap(),
-            )
+            (ended, String::from_utf8(out).unwrap())
         });
-        std::thread::sleep(std::time::Duration::from_millis(400));
+        // The job goes when the run has said it waits for it: the line is what is waited on.
+        until("the run says it waits for zeewin2", || {
+            said.text().contains("windows: waiting for zeewin2, ")
+        });
         fs::remove_file(&poker).unwrap();
         run.join().unwrap()
     });
+    let err = said.text();
     assert_eq!(ended.unwrap(), Outcome::Exited(0), "{err}");
+    // The seconds it says are the run's own clock's, and a Mac that is busy may read one.
     assert!(
-        err.contains("windows: waiting for zeewin2, 0 s of up to 1 min: zeewin2 is busy: poker-lab's job holds it"),
+        err.contains(" s of up to 1 min: zeewin2 is busy: poker-lab's job holds it"),
         "{err}"
     );
     assert!(!out.contains("busy"), "nothing is refused: {out}");
@@ -1252,9 +1254,37 @@ set -- "$host" "$last"
     )
 }
 
-/// Waits until `holds`, at most half a minute, saying `what` it waited for if it never does.
+/// A stderr that the test can read while the run still writes to it.
+#[derive(Clone, Default)]
+struct Said(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl Said {
+    fn text(&self) -> String {
+        let held = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        String::from_utf8_lossy(&held).into_owned()
+    }
+}
+
+impl Write for Said {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Waits until `holds`, at most two minutes (a hang's), saying `what` it waited for if it never does.
 fn until(what: &str, holds: impl Fn() -> bool) {
-    let by = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let by = std::time::Instant::now() + std::time::Duration::from_secs(120);
     while !holds() {
         assert!(std::time::Instant::now() < by, "never: {what}");
         std::thread::sleep(std::time::Duration::from_millis(5));
@@ -1653,4 +1683,140 @@ fn the_words_ssh_says_of_a_silent_peer_are_no_silence_where_the_command_said_how
     );
     let (ended, ..) = run_it(&rig, &Interrupt::default());
     assert_eq!(ended.unwrap(), Outcome::Exited(3));
+}
+
+/// A writer that cannot write: what a closed stderr is.
+struct Closed;
+
+impl Write for Closed {
+    fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+        Err(io::Error::other("closed"))
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// The line about a ticket that could not be kept alive is the run's last word and changes nothing
+/// of how it ended: a stderr that cannot take it does not turn a command that ended into an error.
+#[test]
+fn the_line_about_an_unkept_ticket_never_changes_how_the_run_ended() {
+    let mut out = Vec::new();
+    let said = say_unkept(
+        Some(io::Error::other("beat")),
+        &mut Console {
+            out: &mut out,
+            err: &mut Closed,
+        },
+        Ok(Outcome::Exited(3)),
+    );
+    assert_eq!(said.unwrap(), Outcome::Exited(3));
+    let said = say_unkept(
+        Some(io::Error::other("beat")),
+        &mut Console {
+            out: &mut out,
+            err: &mut Closed,
+        },
+        Err(Error::Silent("the end".into())),
+    );
+    assert_eq!(said.unwrap_err().to_string(), "the end");
+}
+
+#[test]
+fn the_line_about_an_unkept_ticket_is_said_once_with_its_cause_on_stderr_and_the_run_goes_on() {
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let said = say_unkept(
+        Some(io::Error::other("disk gone")),
+        &mut Console {
+            out: &mut out,
+            err: &mut err,
+        },
+        Ok(Outcome::Exited(0)),
+    );
+    assert_eq!(said.unwrap(), Outcome::Exited(0));
+    assert!(out.is_empty());
+    assert_eq!(
+        String::from_utf8(err).unwrap(),
+        "windows: the run's place in the queue could not be kept alive (disk gone); the run goes on\n"
+    );
+    let (mut out, mut err) = (Vec::new(), Vec::new());
+    let silent = say_unkept(
+        None,
+        &mut Console {
+            out: &mut out,
+            err: &mut err,
+        },
+        Ok(Outcome::Exited(0)),
+    );
+    assert_eq!(silent.unwrap(), Outcome::Exited(0));
+    assert!(err.is_empty());
+}
+
+/// The run's own call of the line about a ticket that could not be kept alive: a command that goes
+/// on while its ticket's beat fails ends as it would have, with its output, and the line is said
+/// once. The beat is driven by hand (the ticket's cell, taken from the queue's record of tickets),
+/// and the fake command is released by a file once the failure is recorded; nothing is waited on by
+/// a time but a hang, at two minutes.
+#[test]
+fn a_run_whose_ticket_could_not_be_kept_alive_under_way_ends_as_the_command_did_and_says_it_once() {
+    use crate::windows::queue::{beat_after, KEPT};
+
+    let queues = tempfile::tempdir().unwrap();
+    let mut rig = Rig::new();
+    rig.waits_in(queues.path());
+    rig.program("scp", SENDS);
+    let release = rig.bin.path().join("release");
+    rig.program(
+        "ssh",
+        &format!(
+            r#"waits "{}" 2400 || exit 97; {}"#,
+            release.display(),
+            machine(0)
+        ),
+    );
+    let mut options = rig.options();
+    options.wait = 60;
+    let said = Said::default();
+    let (ended, out) = std::thread::scope(|scope| {
+        let run = scope.spawn(|| {
+            let mut out = Vec::new();
+            let ended = run(
+                &rig.context,
+                &Machine::at("zeewin"),
+                &options,
+                &mut Console {
+                    out: &mut out,
+                    err: &mut said.clone(),
+                },
+                &Interrupt::default(),
+            );
+            (ended, String::from_utf8(out).unwrap())
+        });
+        let kept = || {
+            KEPT.lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .find(|(path, ..)| path.starts_with(queues.path()))
+                .cloned()
+        };
+        until("the run takes its ticket", || kept().is_some());
+        let (path, text, cell) = kept().unwrap();
+        // The ticket becomes a folder, which a beat cannot open for writing: this beat fails, and
+        // the failure is recorded before the command is let go on.
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        beat_after(&path, &text, &cell, 0, &mut || {});
+        assert!(cell.lock().unwrap().is_some(), "the beat did not fail");
+        fs::write(&release, "").unwrap();
+        run.join().unwrap()
+    });
+    let err = said.text();
+    assert_eq!(ended.unwrap(), Outcome::Exited(0), "{err}");
+    assert!(out.ends_with("== exit 0\n"), "{out}");
+    assert_eq!(err.matches("could not be kept alive").count(), 1, "{err}");
+    assert!(
+        err.contains("windows: the run's place in the queue could not be kept alive ("),
+        "{err}"
+    );
 }

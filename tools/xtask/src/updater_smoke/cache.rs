@@ -9,15 +9,21 @@
 //! doubled, and `cargo xtask stage` ran as `cargo xtask run … stage`). A folder for
 //! each checkout, because the update is that checkout's app (a `--reuse` run takes
 //! the one it finds) and two trees' runs at once would build in one place.
+//!
+//! What the fingerprint of a checkout does not see: an untracked FIFO can block it on open,
+//! and a repository or a symlinked folder inside the checkout is told by its name only, so a
+//! change inside it does not refuse a kept build.
 
 use std::fs::{self, File, OpenOptions, TryLockError};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use cf_base::env::Env;
+use cf_publish::digest::hex;
 use sha2::{Digest, Sha256};
 
 use super::bundle::{copy_bundle, remove_all};
+use super::say::Say;
 use super::{files, Error, Result};
 use crate::context::Context;
 use crate::process::{self, Invocation};
@@ -73,7 +79,22 @@ pub struct Hold {
 /// Takes the hold on `cache`, or says who has it. A second run in one cache would
 /// take the first's exports away as it made them (an export that is not marked yet
 /// is made again) and its kept apps as it copied them.
-pub fn hold(cache: &Path) -> Result<Hold> {
+pub fn hold(cache: &Path, say: &Say) -> Result<Hold> {
+    hold_recording(cache, say, record_holder)
+}
+
+/// Whose the lock is, for whoever is refused.
+fn record_holder(file: &mut File) -> io::Result<()> {
+    file.set_len(0)?;
+    writeln!(file, "{}", std::process::id())
+}
+
+/// [`hold`], with `record` to write who holds the lock once it is taken.
+fn hold_recording(
+    cache: &Path,
+    say: &Say,
+    record: impl FnOnce(&mut File) -> io::Result<()>,
+) -> Result<Hold> {
     let path = cache.join(LOCK);
     let mut file = OpenOptions::new()
         .create(true)
@@ -84,9 +105,13 @@ pub fn hold(cache: &Path) -> Result<Hold> {
         .map_err(files("open", &path))?;
     match file.try_lock() {
         Ok(()) => {
-            // Whose it is, for whoever is refused.
-            let _ = file.set_len(0);
-            let _ = writeln!(file, "{}", std::process::id());
+            // The lock is the system's, not the file's text: a run that cannot say who holds it holds it.
+            if let Err(cause) = record(&mut file) {
+                say.err(format!(
+                    "smoke:updater: could not write who holds the lock in {}: {cause}; the lock is held",
+                    path.display()
+                ));
+            }
             Ok(Hold { _file: file })
         }
         Err(TryLockError::WouldBlock) => {
@@ -141,20 +166,19 @@ impl State {
                     .is_some_and(|cache| physical.join(path).starts_with(cache))
             })
             .collect();
-        let changes = (!diff.is_empty() || !untracked.is_empty()).then(|| {
+        let changes = if diff.is_empty() && untracked.is_empty() {
+            None
+        } else {
             let mut digest = Sha256::new();
             digest.update(diff.as_bytes());
             for path in untracked {
                 digest.update(b"\0untracked\0");
                 digest.update(path.as_bytes());
                 digest.update(b"\0");
-                // A file that cannot be read is one that is there and nothing more.
-                if let Ok(mut file) = File::open(root.join(path)) {
-                    let _ = io::copy(&mut file, &mut digest);
-                }
+                digest_file(&mut digest, &root.join(path))?;
             }
-            hex(&digest.finalize()[..6])
-        });
+            Some(hex(&digest.finalize()[..6]))
+        };
         Ok(Self { commit, changes })
     }
 
@@ -187,6 +211,18 @@ impl State {
     }
 }
 
+/// Feeds the contents of the file at `path` to `digest`: all of them, or an error. A directory is
+/// the one thing that is not read: git lists a repository inside the checkout as one, and the
+/// fingerprint holds its name and no more.
+fn digest_file(digest: &mut Sha256, path: &Path) -> Result {
+    if path.is_dir() {
+        return Ok(());
+    }
+    let mut file = File::open(path).map_err(files("read", path))?;
+    io::copy(&mut file, digest).map_err(files("read", path))?;
+    Ok(())
+}
+
 /// What `git <args>` wrote in the checkout at `root`.
 fn git(root: &Path, env: &Env, args: &[&str]) -> Result<String> {
     let ran = process::capture(
@@ -215,6 +251,7 @@ pub fn keep_update(
     root: &Path,
     update: &Path,
     env: &Env,
+    say: &Say,
     build: impl FnOnce() -> Result<PathBuf>,
 ) -> Result<PathBuf> {
     let state = State::of(root, cache_of(update), env);
@@ -222,8 +259,11 @@ pub fn keep_update(
     let mark = update.with_file_name(BUILT_FROM);
     remove_all(&mark)?;
     let kept = copy_bundle(&built, update, env)?;
-    if let Ok(state) = state {
-        fs::write(&mark, state.text()).map_err(files("write", &mark))?;
+    match state {
+        Ok(state) => fs::write(&mark, state.text()).map_err(files("write", &mark))?,
+        Err(cause) => say.err(format!(
+            "smoke:updater: no record of this build is kept: {cause}"
+        )),
     }
     Ok(kept)
 }
@@ -234,10 +274,19 @@ pub fn keep_update(
 pub fn older_update(update: &Path, root: &Path, env: &Env) -> Option<String> {
     let again = "build it again without --reuse";
     let mark = update.with_file_name(BUILT_FROM);
-    let Ok(text) = fs::read_to_string(&mark) else {
-        return Some(format!(
-            "the kept update has no record of what it was built from: {again}"
-        ));
+    let text = match fs::read_to_string(&mark) {
+        Ok(text) => text,
+        Err(cause) if cause.kind() == io::ErrorKind::NotFound => {
+            return Some(format!(
+                "the kept update has no record of what it was built from: {again}"
+            ));
+        }
+        Err(cause) => {
+            return Some(format!(
+                "the kept update's record of what it was built from is there and cannot be read: {}: {again}",
+                files("read", &mark)(cause)
+            ));
+        }
     };
     let Some(then) = State::read(&text) else {
         return Some(format!(
@@ -261,11 +310,6 @@ pub fn older_update(update: &Path, root: &Path, env: &Env) -> Option<String> {
             now.said()
         )
     })
-}
-
-/// `bytes` as lower-case hex.
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 #[cfg(test)]

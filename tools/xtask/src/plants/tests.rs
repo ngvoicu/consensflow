@@ -31,7 +31,9 @@ fn the_command_line_is_a_family_the_words_of_names_and_where_it_is_given_a_check
 #[test]
 fn an_option_that_is_not_the_check_is_refused_for_a_typo_would_run_every_plant() {
     let refused = read("cli --chek").unwrap_err();
-    assert!(matches!(&refused, Failure::Usage(said) if said == "plants takes --check, not --chek"));
+    assert!(
+        matches!(&refused, Failure::Usage(said) if said == "plants takes --check and --test-threads, not --chek")
+    );
     assert!(matches!(
         read("cli parser --").unwrap_err(),
         Failure::Usage(_)
@@ -56,6 +58,83 @@ fn words_that_are_not_text_are_refused() {
 
     let refused = Request::read(&[OsString::from_vec(vec![0xff, 0xfe])]).unwrap_err();
     assert!(matches!(refused, Failure::Usage(_)));
+}
+
+#[test]
+fn a_test_threads_number_on_the_command_line_is_the_callers_and_a_non_number_is_refused() {
+    assert_eq!(read("cli --test-threads 4").unwrap().test_threads, Some(4));
+    assert_eq!(read("cli --test-threads=4").unwrap().test_threads, Some(4));
+    assert_eq!(
+        read("cli parser --check --test-threads 2")
+            .unwrap()
+            .test_threads,
+        Some(2)
+    );
+    assert_eq!(read("cli").unwrap().test_threads, None);
+    assert_eq!(read("cli --check").unwrap().test_threads, None);
+    for words in [
+        "cli --test-threads",
+        "cli --test-threads many",
+        "cli --test-threads 0",
+        "cli --test-threads -2",
+        "cli --test-threads 4x",
+        "cli --test-threads=",
+    ] {
+        assert!(matches!(read(words), Err(Failure::Usage(_))), "{words}");
+    }
+}
+
+/// The checkout `context` with the variable `name` set where the run gave it.
+fn with_var(context: &Context, name: &str, value: &str) -> Context {
+    Context {
+        root: context.root.clone(),
+        env: context.env.clone().with_var(name, value),
+    }
+}
+
+#[test]
+fn the_threads_of_the_flag_win_over_the_variable_which_is_taken_on_its_own_and_a_non_number_is_refused(
+) {
+    let (_folder, context) = checkout();
+    // Neither asked: no threads.
+    assert_eq!(
+        with_caller_threads(&context, &line("demo"))
+            .unwrap()
+            .env
+            .text("CF_PLANTS_TEST_THREADS"),
+        None
+    );
+    // The flag's, where it is.
+    let flagged = with_caller_threads(&context, &line("demo --test-threads 4")).unwrap();
+    assert_eq!(flagged.env.text("CF_PLANTS_TEST_THREADS"), Some("4"));
+    // The variable's, where only it is.
+    let with = with_var(&context, "CF_PLANTS_TEST_THREADS", "8");
+    assert_eq!(
+        with_caller_threads(&with, &line("demo"))
+            .unwrap()
+            .env
+            .text("CF_PLANTS_TEST_THREADS"),
+        Some("8")
+    );
+    // The flag's over the variable's, where both are.
+    assert_eq!(
+        with_caller_threads(&with, &line("demo --test-threads 4"))
+            .unwrap()
+            .env
+            .text("CF_PLANTS_TEST_THREADS"),
+        Some("4")
+    );
+    // A variable of no number of threads is refused, never run wide (empty is unset).
+    for bogus in ["many", "0", "-2", "4x"] {
+        let with = with_var(&context, "CF_PLANTS_TEST_THREADS", bogus);
+        assert!(
+            matches!(
+                with_caller_threads(&with, &line("demo")),
+                Err(Failure::Usage(_))
+            ),
+            "{bogus:?}"
+        );
+    }
 }
 
 /// A runner for what runs nothing.
@@ -134,7 +213,9 @@ fn a_family_the_data_does_not_have_is_refused_with_the_ones_it_has() {
 #[test]
 fn the_help_says_how_the_command_is_used_and_the_families_the_data_has_and_runs_nothing() {
     let (_folder, context) = checkout();
-    let expected = format!("Usage: cargo xtask plants {USAGE}\n\n{ABOUT}\n\nThe families: demo.\n");
+    let expected = format!(
+        "Usage: cargo xtask plants {USAGE}\n\n{ABOUT}\n\n{OPTIONS}\n\nThe families: demo.\n"
+    );
     for words in [
         "--help",
         "demo --help",

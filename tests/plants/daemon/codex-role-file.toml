@@ -93,8 +93,8 @@ runs = ["codex-session"]
 
 [[plant.edit]]
 file = "crates/cf-codex-session/src/broker/pair.rs"
-find = '''        *self.deciding.borrow_mut() = Some(Deciding {'''
-replace = '''        let _ = Some(Deciding {'''
+find = '''        *self.deciding.borrow_mut() = Some(Deciding(Bounded::default()));'''
+replace = '''        let _ = Some(Deciding(Bounded::default()));'''
 
 [[plant]]
 name = "codex role file: a read of another thread is taken for the thread asked"
@@ -401,6 +401,16 @@ runs = ["codex-session"]
 file = "crates/cf-codex-session/src/broker/pair.rs"
 find = '''            self.shared.say_unclassified(why);'''
 replace = '''            let _ = why;'''
+
+[[plant]]
+name = "codex role file: a note of a start the broker cannot tell that the board refuses is lost without a line"
+meant = "a_note_of_an_unclassified_start_that_the_board_refuses_is_one_line_in_the_daemons_log_without_the_token"
+runs = ["codex-session"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/broker/mod.rs"
+find = '''            if let Some(home) = log_home {'''
+replace = '''            if let Some(home) = log_home.filter(|_| false) {'''
 
 [[plant]]
 name = "codex role file: ConsensFlow's variables go to no thread"

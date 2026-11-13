@@ -56,7 +56,7 @@ use cf_base::env::Env;
 use cf_process::{capture_whole, CaptureFailed, Captured, Limits, Run, LEFT_RUNNING};
 use tokio::runtime::Runtime;
 
-use self::reporters::Reporter;
+use self::reporters::{caller_threads, Reporter};
 use self::results::{Results, Test};
 use super::Error;
 use crate::context::Context;
@@ -191,6 +191,12 @@ pub trait Runner {
     fn lacks(&mut self, _harness: &str) -> Option<String> {
         None
     }
+
+    /// What is said of `command` that takes no threads (a Node or Playwright run, a
+    /// script): that the threads the driver was asked for have no effect on it. For a
+    /// command a plants table names under `[run]`, never for the driver's own, at
+    /// most once a run of the driver.
+    fn say_no_effect(&mut self, _command: &[String]) {}
 }
 
 impl Ran {
@@ -454,6 +460,9 @@ pub struct Execute {
     untold: u64,
     /// The builds before a run of cf-e2e's tests (`CF_E2E_PROGRAMS`).
     programs: Vec<Vec<String>>,
+    /// Whether a run that takes no threads was told the driver's threads have no
+    /// effect on it: said once, and the run goes on.
+    said_no_effect: bool,
 }
 
 impl Execute {
@@ -514,6 +523,7 @@ impl Execute {
                 .iter()
                 .map(|build| build.iter().map(|word| (*word).to_owned()).collect())
                 .collect(),
+            said_no_effect: false,
         }
     }
 
@@ -689,6 +699,21 @@ impl Runner for Execute {
             .iter()
             .map(|name| (OsString::from(name), folder.as_os_str().to_owned()));
         self.checkout.env = Env::from_vars(kept.into_iter().chain(given));
+    }
+
+    fn say_no_effect(&mut self, command: &[String]) {
+        // A plants table's own [run] command that takes no threads: told once theirs
+        // has no effect on it, and the run goes on.
+        #[allow(clippy::print_stderr)] // The runner has no console of its own.
+        if !self.said_no_effect && !Reporter::of(command).takes_threads(command) {
+            if let Some(threads) = caller_threads(&self.checkout) {
+                eprintln!(
+                    "plants: --test-threads {threads} has no effect on: {}",
+                    command.join(" ")
+                );
+                self.said_no_effect = true;
+            }
+        }
     }
 
     fn run(&mut self, command: &[String]) -> Result<Execution, Error> {
