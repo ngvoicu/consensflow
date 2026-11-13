@@ -1041,6 +1041,7 @@ fn write_bytes(file: &Path, bytes: &[u8]) -> Result {
         Ok(text) => write_private(file, text),
         Err(_) => {
             // A login is text; a file that is not is copied as it is.
+            files::guard(file)?;
             let mut made = fs::File::create(file).map_err(Error::file("write", file))?;
             made.write_all(bytes).map_err(Error::file("write", file))
         }

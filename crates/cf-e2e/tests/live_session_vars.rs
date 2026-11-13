@@ -233,8 +233,9 @@ fn check_of(rig: &Rig, install: &Installed, log: &Log) -> Result<Check> {
             format!("wrote no names to {} in {WRITTEN:?}", path.display()),
         ));
     };
-    // The file is this run's own, named by its process: it goes once read.
-    let _ = cf_e2e::door::Door::of_run().remove_own_named(&path);
+    // The file is this run's own, named by its process, in a folder this run made: it goes once
+    // read.
+    let _ = cf_e2e::door::Door::of_run().remove_in_made(&path);
     log.block(
         &format!("{name}: the names its shell had"),
         &names.join("\n"),

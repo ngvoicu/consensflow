@@ -76,6 +76,11 @@
 //! The run is given a Claude config folder of its own where its caller made one
 //! (`--claude-config`, with a copy of the login in it): the owner's is then not touched.
 //!
+//! A config folder given with `--claude-config` is its caller's, and the run writes nothing in it
+//! (T-1592): it must trust the live folders' root already (`.claude.json` holds
+//! `projects["<home>/.consensflow-candidate/live"].hasTrustDialogAccepted`), or the run stops
+//! before it acts. Without the flag the run uses a copy of the login it made for itself, which it seeds.
+//!
 //! ```text
 //! cargo xtask live monitor-wait
 //! cargo xtask live monitor-wait --fixture /tmp/monitor-wait.jsonl

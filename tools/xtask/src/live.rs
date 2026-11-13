@@ -67,10 +67,19 @@
 //! what it is, how old, and why a person might keep it (`live-sweep`). It takes none, and has
 //! no word that does: a person removes what they choose. No run's start takes one either.
 //!
-//! With `CF_LIVE_AUDIT=1` a run is say-only: the kit ends no process, closes no window and
-//! takes no file away, and writes down instead what it would have, each with its ground, in
-//! `CF_LIVE_AUDIT_FILE` (one in the temp folder that this names, unless given). Such a run is
-//! never a pass: this names the file and leaves with a code that is not 0.
+//! With `CF_LIVE_AUDIT=1` a run is say-only: the kit's door ends no process, closes no window,
+//! signals none and takes no file away, and writes down instead what it would have, each with its
+//! ground, in a file of the run's own: `CF_LIVE_AUDIT_FILE` (one in the temp folder that this
+//! names, unless given), made by the run as a new file (a file that is there is never added to, and
+//! a file that cannot be made or written stops the run before anything acts); the programs the run
+//! starts say into the same file. It says what it still does, as its first lines do:
+//! - the product's own shutdown at the rig's close still runs: the daemon ends, the pane host ends, and every pane of the rig and what descends from it (a Codex session's children among them) is ended by the product's own code, not the kit's door
+//! - keys the run types into the rig's own panes (an Escape, a Ctrl-C, /exit, a dialog's answer, a paste) are typed
+//! - a terminal the run opened itself (a pane of its own test, Muse's window) is hung up by the system when the run's process ends, with what runs in it
+//! - the run starts its rig and the programs the case names, and makes the folders and writes the files of its own below the shared folders (a project folder of its own in the live folder, its rig's folder in the temp folder)
+//! Such a run is never a pass: this names the file and leaves with a code that is not 0, whatever
+//! the run came to; so does `--set` (each run of the set with a file of its own, `<name>-<n>`) and
+//! `sweep`.
 
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -85,7 +94,7 @@ use crate::process::{self, Invocation};
 pub const COMMANDS: &[Command] = &[Command {
     words: &["live"],
     about: "Run a live test of cf-e2e (the tests/live_<name>.rs files): it runs real harnesses on the machine's own logins and spends real quota, so it is ignored unless asked for and is no part of check",
-    usage: "<name> [harness ...] | sweep [--in <folder>] [--home <folder>] [--older-than <days>] (lists what earlier runs left; takes none) | --set <set> (each run of the set, one after another: windows) [--keep] [--models harness=model[:effort],...] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; --keep leaves the run's home and project where they are (the Claude Code config folder goes, for it holds a copy of a login: its conversations and sessions are copied into the kept home); --models runs each harness it names on that model, and that effort where one is given, the others on their cheap one (--claude-model M is --models claude=M, and --models wins where both name Claude); words that are no flags name harnesses; run it with no name to list the tests)",
+    usage: "<name> [harness ...] | sweep [--in <folder>] [--home <folder>] [--older-than <days>] (lists what earlier runs left; takes none) | --set <set> (each run of the set, one after another: windows) [--keep] [--models harness=model[:effort],...] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; --keep leaves the run's home and project where they are (the Claude Code config folder goes, for it holds a copy of a login: its conversations and sessions are copied into the kept home); --models runs each harness it names on that model, and that effort where one is given, the others on their cheap one (--claude-model M is --models claude=M, and --models wins where both name Claude); words that are no flags name harnesses; run it with no name to list the tests) | with CF_LIVE_AUDIT=1 the run is say-only: the kit's door ends no process, closes no window and takes no file away, and writes down instead what it would have, in CF_LIVE_AUDIT_FILE (a new file of the run's own, whole command lines; one that cannot be made or written stops the run before anything acts), and the run is no pass (exit is never 0; --set gives each run a file of its own; sweep exits 1). What it still does: the product's own shutdown at the rig's close still runs: the daemon ends, the pane host ends, and every pane of the rig and what descends from it (a Codex session's children among them) is ended by the product's own code, not the kit's door; keys the run types into the rig's own panes (an Escape, a Ctrl-C, /exit, a dialog's answer, a paste) are typed; a terminal the run opened itself (a pane of its own test, Muse's window) is hung up by the system when the run's process ends, with what runs in it; the run starts its rig and the programs the case names, and makes the folders and writes the files of its own below the shared folders (a project folder of its own in the live folder, its rig's folder in the temp folder)",
     run: Run::Native(live),
 }];
 
@@ -149,6 +158,8 @@ fn live(context: &Context, args: &[OsString], console: &mut Console) -> Result<i
         return run_set(context, args, &names, console);
     }
     if args.first().is_some_and(|word| word == SWEEP) && !names.iter().any(|name| name == SWEEP) {
+        // The kit's own program lists and takes nothing in any mode, and under `CF_LIVE_AUDIT`
+        // leaves with 1, which a say-only run does whatever it came to.
         return Ok(process::run(&sweep(context, &args[1..]), &context.env)?);
     }
     let asked = parse(args, &names)?;
@@ -159,15 +170,50 @@ fn live(context: &Context, args: &[OsString], console: &mut Console) -> Result<i
         &invocation(context, &asked).var(AUDIT_FILE, &file),
         &context.env,
     )?;
-    let said = fs::read_to_string(&file).map_or(0, |text| text.lines().count());
-    writeln!(
-        console.err,
-        "say only ({AUDIT}): {said} ending{} and removal{} the run would have made are in {}; a say-only run is no pass",
-        if said == 1 { "" } else { "s" },
-        if said == 1 { "" } else { "s" },
-        file.display()
-    )?;
+    writeln!(console.err, "{}", audit_report(&file))?;
     Ok(if code == 0 { 1 } else { code })
+}
+
+/// What a say-only run left, as the person is told: the acts its file says, or that the run
+/// made no file, and in both that a say-only run is no pass. The file is made by the run (a new
+/// one of its own), so one that is not there is a run that stopped before it acted.
+fn audit_report(file: &Path) -> String {
+    match fs::read_to_string(file) {
+        Ok(text) => {
+            let said = said_acts(&text);
+            format!(
+                "say only ({AUDIT}): {said} ending{} and removal{} the run would have made are in {}, after the first lines that say what it still did; a say-only run is no pass",
+                if said == 1 { "" } else { "s" },
+                if said == 1 { "" } else { "s" },
+                file.display()
+            )
+        }
+        Err(_) => format!(
+            "say only ({AUDIT}): the run made no audit file {}: it stopped before it acted (a file that is there is never added to; name another in {AUDIT_FILE}); a say-only run is no pass",
+            file.display()
+        ),
+    }
+}
+
+/// How many acts an audit file says: its lines but the first lines of the run's own (`# …`).
+fn said_acts(text: &str) -> usize {
+    text.lines()
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .count()
+}
+
+/// The audit file of run number `at` (from 1) of a set, from the file the set's runs are named
+/// by: `<stem>-<at>.<extension>` beside it, as each run makes a new file of its own.
+fn audit_file_of(base: &Path, at: usize) -> std::path::PathBuf {
+    let stem = base.file_stem().map_or_else(
+        || "audit".to_owned(),
+        |stem| stem.to_string_lossy().into_owned(),
+    );
+    let name = match base.extension() {
+        Some(extension) => format!("{stem}-{at}.{}", extension.to_string_lossy()),
+        None => format!("{stem}-{at}"),
+    };
+    base.with_file_name(name)
 }
 
 /// The word that sweeps the rig folders older runs left.
@@ -249,16 +295,33 @@ fn run_set(
     console: &mut Console,
 ) -> Result<i32, Failure> {
     let (name, runs) = set_runs(args, names)?;
+    let audit = audit_file(&context.env);
     let mut came = Vec::new();
-    for (line, asked) in &runs {
+    for (at, (line, asked)) in runs.iter().enumerate() {
         writeln!(console.out, "== live {line}")?;
-        let status = process::run(&invocation(context, asked), &context.env)?;
+        // A say-only run makes its audit file as a new one of its own, so each run of a set has one.
+        let file = audit.as_ref().map(|base| audit_file_of(base, at + 1));
+        let mut invoked = invocation(context, asked);
+        if let Some(file) = &file {
+            invoked = invoked.var(AUDIT_FILE, file);
+        }
+        let status = process::run(&invoked, &context.env)?;
         came.push(format!(
             "{} live {line}",
             if status == 0 { "ok    " } else { "FAILED" }
         ));
+        if let Some(file) = &file {
+            writeln!(console.err, "{}", audit_report(file))?;
+        }
     }
     writeln!(console.out, "\nthe set {name}:\n{}", came.join("\n"))?;
+    if audit.is_some() {
+        writeln!(
+            console.err,
+            "say only ({AUDIT}): the set {name} is no pass, whatever each run came to"
+        )?;
+        return Ok(1);
+    }
     Ok(i32::from(
         came.iter().any(|line| line.starts_with("FAILED")),
     ))

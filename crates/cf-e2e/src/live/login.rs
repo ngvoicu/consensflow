@@ -773,6 +773,7 @@ pub(super) fn private_folder(path: &Path) -> Result {
 
 /// Makes `path` hold `text`, readable by the user alone (mode 600).
 pub(super) fn write_private(path: &Path, text: &str) -> Result {
+    files::guard(path)?;
     private(path, text).map_err(Error::file("write", path))
 }
 

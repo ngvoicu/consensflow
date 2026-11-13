@@ -185,10 +185,10 @@ pub fn run(run: &Run, case: Case) -> Done {
                 );
             }
             // What the case made, and the launches' files with the copies of the owner's
-            // config, go with it, unless the run is to be looked at.
+            // config, go with it, unless the run is to be looked at: the folder is this
+            // run's own, a receipt of the door.
             if !keep_requested() {
-                let _ =
-                    cf_e2e::door::Door::of_run().remove_in_live_root(Path::new(home), &workspace);
+                let _ = cf_e2e::door::Door::of_run().remove_made(&workspace);
             }
         }
         Err(failed) => done.account.fail(failed),

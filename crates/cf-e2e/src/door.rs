@@ -1,11 +1,15 @@
 //! The one door of the kit's endings and deletions: every process the kit ends or stops, every
 //! window it closes, every own program it kills, and every file or folder it takes away goes
-//! through here, each with the ground that makes it the run's own (T-1561). At 18:58 on
+//! through here, each with the ground that makes it the run's own (T-1561, T-1592). At 18:58 on
 //! 2026-11-12 a live run of a kit branch ended 22 processes that were none of its own (the
 //! owner's app helpers, two Codex daemons, a git ssh connection, another task's benchmark), and
 //! the review after found the same in what the kit deletes (T-1557): another run's rig folders, a
-//! login copy in use, the owner's own records by a name's end. A rule test holds the kit to the
-//! door (`tests/door_rule.rs`): no ending or deletion is written anywhere else.
+//! login copy in use, the owner's own records by a name's end. A rule test reads the kit's code
+//! for the plain ways around the door (`door/rule.rs`, with what it cannot see).
+//!
+//! The rule the grounds serve: a live run ends no process and removes or overwrites no path that
+//! this same run did not itself make. What an earlier run left is a person's to clean up
+//! (`cargo xtask live sweep` lists it and takes none).
 //!
 //! The grounds, each the proof the door asks:
 //!
@@ -13,19 +17,34 @@
 //!   descent alone makes: what descends from a window's or the test's own process, an orphan
 //!   that holds the command and runs in the run's own folder, a stand-in job by its file, or a
 //!   decoy the test started itself. Each is ended only while it is still the process chosen.
-//! - **An own program** ([`Door::end_child`]): a child this process started and still holds.
-//! - **A window** ([`Door::close_pane`]): a pane of the rig's own pane host.
-//! - **A folder the door made** ([`made_in`], [`Made`]), and **a path under one**
-//!   ([`Door::remove_in_made`]): a folder of a random name made by this process, known here.
+//! - **An own program** ([`Door::end_child`], [`Door::end_group_of_child`],
+//!   [`Door::signal_child`], [`Door::stall_child`]): a child this process started and still holds.
+//! - **A window** ([`Door::close_pane`]): a pane of the rig's own pane host; a terminal the test
+//!   opened itself ([`Door::close_own_terminal`], [`Door::quit_own_terminal`]).
+//! - **A folder the door made** ([`made_in`], [`Made`], [`Door::remove_made`]), and **a path under
+//!   one** ([`Door::remove_in_made`]): a folder of a random name made by this process, in the
+//!   registry here with its real path. No removal is grounded on a name alone.
+//! - **A stand-in's own status file** ([`Door::remove_status_of_this_process`]): `sessions/<its
+//!   own process id>.json`.
 //! - **A record of the renewal's** ([`Door::remove_record`]): in the harness's records folder,
 //!   the one entry named for the renewal's own folder, by its whole name.
 //!
+//! **Writes** have a guard where the kit's own writers are ([`crate::files`], [`writable`]): in
+//! the live folder every run on the machine shares (`~/.consensflow-candidate/live`) a file or a
+//! folder is made only below a folder this run made through [`made_in`], by its real path, and
+//! never through a link. Outside it the kit writes in folders of its own (a rig's, a login copy's)
+//! that it made through the door.
+//!
 //! **Say only.** With `CF_LIVE_AUDIT=1` the door does nothing: it writes what it would do, one
-//! line each (the act, the process or the path, the ground), to the file `CF_LIVE_AUDIT_FILE`
-//! names (`cargo xtask live` names one) or one of its own in the temp folder, and says each on
-//! the error output. A case that needs an ending to have happened stops there and fails, so
-//! that no say-only run passes. The tests make a door of their own ([`Door::saying`]) and never
-//! set the variable.
+//! line each (the act, the process or the path, the ground; the whole command line, with a tab or
+//! a line break written `\t`, `\n`), to the file `CF_LIVE_AUDIT_FILE` names (`cargo xtask live`
+//! names one) or one of its own in the temp folder, and says each on the error output. The run
+//! makes that file as a new one of its own, with first lines (`# …`) that say what the run still
+//! does ([`STILL_ACTS`]); a file that is there is never added to, and a run whose file cannot be
+//! made or written stops before it acts. The programs the run starts are given the same file
+//! ([`Door::audit_vars`]) and add to it. A case that needs an ending to have happened stops there
+//! and fails, so that no say-only run passes. The tests make a door of their own
+//! ([`Door::asked`]) and never set the variable.
 //!
 //! This is the kit's door. The product's door (`live::members::door`, what a member's lane
 //! shows) is another thing.
@@ -47,6 +66,19 @@ pub const AUDIT: &str = "CF_LIVE_AUDIT";
 /// The variable that names the file the door writes what it would do in.
 pub const AUDIT_FILE: &str = "CF_LIVE_AUDIT_FILE";
 
+/// The variable a say-only run gives the programs it starts to say that the file is made already
+/// (by it): they open it to add lines, and stop where it is not there. Never set by a person.
+pub const AUDIT_MADE: &str = "CF_LIVE_AUDIT_MADE";
+
+/// What a say-only run still does, each as the first lines of the audit file say it: the door
+/// says what the kit would end or take away, and these are what the kit does not do through it.
+pub const STILL_ACTS: &[&str] = &[
+    "the product's own shutdown at the rig's close still runs: the daemon ends, the pane host ends, and every pane of the rig and what descends from it (a Codex session's children among them) is ended by the product's own code, not the kit's door",
+    "keys the run types into the rig's own panes (an Escape, a Ctrl-C, /exit, a dialog's answer, a paste) are typed",
+    "the run starts its rig and the programs the case names, and makes the folders and writes the files of its own below the shared folders (a project folder of its own in the live folder, its rig's folder in the temp folder)",
+    "a terminal the run opened itself (a pane of its own test, Muse's window) is hung up by the system when the run's process ends, with what runs in it",
+];
+
 /// The file a folder kept for a person holds: an older rig folder that holds it is never swept.
 pub const KEPT: &str = "consensflow-kept.txt";
 
@@ -61,7 +93,9 @@ pub struct Door {
 }
 
 impl Door {
-    /// The run's door, as its variables ask: one that acts unless [`AUDIT`] says to say only.
+    /// The run's door, as its variables ask: one that acts unless [`AUDIT`] says to say only. A
+    /// say-only run whose audit file cannot be made, opened or written stops here, with the
+    /// reason, before anything it does acts ([`Door::asked`]).
     // The kit reads its own switch, as the run was started with it.
     #[allow(clippy::disallowed_methods)]
     pub fn of_run() -> &'static Door {
@@ -70,24 +104,97 @@ impl Door {
             Door::asked(
                 std::env::var_os(AUDIT).as_deref(),
                 std::env::var_os(AUDIT_FILE).as_deref(),
+                std::env::var_os(AUDIT_MADE).as_deref(),
             )
+            .unwrap_or_else(|why| panic!("the say-only run stops before it acts: {why}"))
         })
     }
 
-    /// The door the variables `audit` and `file` ask for: say-only where `audit` is set to
-    /// anything but `0` or nothing, writing to `file` or to a file of its own in the temp folder.
-    pub fn asked(audit: Option<&std::ffi::OsStr>, file: Option<&std::ffi::OsStr>) -> Door {
-        let saying = audit.is_some_and(|audit| !audit.is_empty() && audit != "0");
-        if !saying {
-            return Door::acting();
+    /// Makes the run's door now: a run that starts a log, a rig or a program asks it first, so
+    /// that an audit file that cannot be used stops the run before any act.
+    pub fn init() {
+        let _ = Door::of_run();
+    }
+
+    /// The door the variables `audit`, `file` and `made` ask for: say-only where `audit` is set to
+    /// anything but `0` or nothing. A say-only door has an audit file of its own: `file`, or one
+    /// in the temp folder named for this process. The process that begins the run makes it as a
+    /// new file, which it fails where one is there (a file of an older run is never added to), and
+    /// writes the first lines of ([`STILL_ACTS`]); a program the run started (`made` set) opens
+    /// that file to add lines and fails where it is not there. Anything else is an error, and the
+    /// run stops.
+    pub fn asked(
+        audit: Option<&std::ffi::OsStr>,
+        file: Option<&std::ffi::OsStr>,
+        made: Option<&std::ffi::OsStr>,
+    ) -> Result<Door, String> {
+        if !is_on(audit) {
+            return Ok(Door::acting());
         }
         let file = file
             .filter(|file| !file.is_empty())
             .map(PathBuf::from)
             .unwrap_or_else(|| {
-                std::env::temp_dir().join(format!("live-audit-{}.txt", std::process::id()))
+                std::env::temp_dir()
+                    .join(format!("consensflow-live-audit-{}.txt", std::process::id()))
             });
-        Door::saying(file)
+        if is_on(made) {
+            let open = fs::OpenOptions::new().append(true).open(&file);
+            open.map_err(|failed| {
+                format!(
+                    "the audit file {} the run began is not there to add to: {failed}",
+                    file.display()
+                )
+            })?;
+        } else {
+            let mut open = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&file)
+                .map_err(|failed| {
+                    format!(
+                        "the audit file {} cannot be made as a new file of this run's own ({failed}); a file that is there is never added to, so name another with {AUDIT_FILE}",
+                        file.display()
+                    )
+                })?;
+            let header = format!(
+                "# say-only run ({AUDIT}) of process {}: the kit's door ends no process, closes no window, signals none and takes no file away, and writes down each such act below instead; the run is no pass\n{}\n",
+                std::process::id(),
+                STILL_ACTS
+                    .iter()
+                    .map(|act| format!("# still acts: {act}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+            open.write_all(header.as_bytes()).map_err(|failed| {
+                format!(
+                    "the audit file {} cannot be written: {failed}",
+                    file.display()
+                )
+            })?;
+        }
+        Ok(Door::saying(file))
+    }
+
+    /// Whether the variables ask for a say-only run ([`AUDIT`]), read and nothing more: a program
+    /// that has no door to make (`live sweep`) says what a say-only run is no pass by.
+    // The kit reads its own switch, as the run was started with it.
+    #[allow(clippy::disallowed_methods)]
+    pub fn audit_asked() -> bool {
+        is_on(std::env::var_os(AUDIT).as_deref())
+    }
+
+    /// The variables that make a program this run starts say only into the same file, as this
+    /// run does: none where this run acts.
+    pub fn audit_vars() -> Vec<(String, String)> {
+        match Door::of_run().says_in() {
+            Some(file) => vec![
+                (AUDIT.to_owned(), "1".to_owned()),
+                (AUDIT_FILE.to_owned(), file.to_string_lossy().into_owned()),
+                (AUDIT_MADE.to_owned(), "1".to_owned()),
+            ],
+            None => Vec::new(),
+        }
     }
 
     /// A door that acts.
@@ -111,24 +218,29 @@ impl Door {
     }
 
     /// Writes that it would `act` on `what` by `ground`, where it only says: a line in its file
-    /// and on the error output.
+    /// (the file is added to, never made here) and on the error output. A line that cannot be
+    /// written stops the run: a say-only run whose audit does not say is no audit.
     #[allow(clippy::print_stderr)] // Said in the run's output as well as in its file.
     fn say(&self, act: &str, what: &str, ground: &str) {
         let Some(file) = &self.said else {
             return;
         };
-        let line = format!("{act}\t{what}\t{ground}");
+        let line = format!("{act}\t{}\t{}", escaped(what), escaped(ground));
         eprintln!("[say only] {line}");
         let written = fs::OpenOptions::new()
-            .create(true)
             .append(true)
             .open(file)
             .and_then(|mut open| writeln!(open, "{line}"));
         if let Err(failed) = written {
-            eprintln!(
-                "[say only] {} could not be written: {failed}",
+            let why = format!(
+                "[say only] {} could not be written: {failed}: the run stops, for what it would do is no longer said",
                 file.display()
             );
+            if std::thread::panicking() {
+                eprintln!("{why}");
+            } else {
+                panic!("{why}");
+            }
         }
     }
 
@@ -203,6 +315,89 @@ impl Door {
         }
         close();
         true
+    }
+
+    /// Types the keys of a quit into `name`, a terminal this test opened itself and holds (the two
+    /// Ctrl-Cs a person quits an app at rest with), by `quit`: whether it did (a say-only door
+    /// says it and types none).
+    pub fn quit_own_terminal(&self, name: &str, quit: impl FnOnce()) -> bool {
+        if self.says_only() {
+            self.say(
+                "quit",
+                name,
+                "keys typed into a terminal this test opened and holds",
+            );
+            return false;
+        }
+        quit();
+        true
+    }
+
+    /// Ends the group `child` leads, a program this process started and holds in a group of its
+    /// own (`name` says which): on Unix the group, on Windows the tree. Whether it did (a
+    /// say-only door says it and ends none).
+    pub fn end_group_of_child(&self, name: &str, child: &std::process::Child) -> bool {
+        if self.says_only() {
+            self.say(
+                "kill group",
+                &format!("process {} ({name})", child.id()),
+                "the group of a child this process started and holds",
+            );
+            return false;
+        }
+        #[cfg(unix)]
+        {
+            use nix::sys::signal::{killpg, Signal};
+            use nix::unistd::Pid;
+
+            if let Ok(leader) = i32::try_from(child.id()) {
+                let _ = killpg(Pid::from_raw(leader), Signal::SIGKILL);
+            }
+        }
+        #[cfg(windows)]
+        {
+            let root =
+                crate::process::own_var("SystemRoot").unwrap_or_else(|| r"C:\Windows".to_owned());
+            let _ = crate::process::Run::new(format!(r"{root}\System32\taskkill.exe"))
+                .args(["/T", "/F", "/PID"])
+                .arg(child.id().to_string())
+                .run();
+        }
+        true
+    }
+
+    /// Takes away `file`, the status file of this very process (`sessions/<its process id>.json`
+    /// in a config folder, which a stand-in window writes as Claude Code does and takes away as
+    /// it ends): left, and said, where it is any other file.
+    pub fn remove_status_of_this_process(&self, file: &Path) -> Removed {
+        let own = file
+            .extension()
+            .is_some_and(|extension| extension == "json")
+            && file
+                .file_stem()
+                .is_some_and(|stem| *stem == *std::process::id().to_string())
+            && file
+                .parent()
+                .and_then(Path::file_name)
+                .is_some_and(|folder| folder == "sessions");
+        if !own {
+            return Removed::Left(
+                file.to_path_buf(),
+                "it is no status file of this process".into(),
+            );
+        }
+        if fs::symlink_metadata(file).is_err() {
+            return Removed::Absent(file.to_path_buf());
+        }
+        if self.says_only() {
+            self.say(
+                "remove",
+                &said_path(file),
+                "the status file of this stand-in's own process",
+            );
+            return Removed::Said(file.to_path_buf());
+        }
+        remove_whole(file)
     }
 
     /// Stops `child`, a program this process started and holds (`name` says which), where it is,
@@ -298,64 +493,6 @@ impl Door {
         remove_whole(path)
     }
 
-    /// Takes away `path`, below the kit's own live folder of `home`
-    /// ([`crate::live::machine::live_root`], `.consensflow-candidate/live`), which only the kit
-    /// writes in: a fixed file or folder a live case makes there by its own name. Left, and
-    /// said, where it is not below that folder.
-    pub fn remove_in_live_root(&self, home: &Path, path: &Path) -> Removed {
-        let Some(live) = canonical(&crate::live::machine::live_root(home)) else {
-            return Removed::Left(
-                path.to_path_buf(),
-                "there is no live folder in that home".into(),
-            );
-        };
-        let Some(real) = path
-            .parent()
-            .and_then(canonical)
-            .zip(path.file_name())
-            .map(|(parent, name)| parent.join(name))
-        else {
-            return Removed::Absent(path.to_path_buf());
-        };
-        if !real.starts_with(&live) || real == live {
-            return Removed::Left(
-                path.to_path_buf(),
-                "it is not below the kit's own live folder".into(),
-            );
-        }
-        if fs::symlink_metadata(path).is_err() {
-            return Removed::Absent(path.to_path_buf());
-        }
-        if self.says_only() {
-            self.say(
-                "remove",
-                &said_path(path),
-                "below the kit's own live folder",
-            );
-            return Removed::Said(path.to_path_buf());
-        }
-        remove_whole(path)
-    }
-
-    /// Takes away `path`, a file or a folder whose name this process made ([`own_name`]): left,
-    /// and said, where its name is none of this process's.
-    pub fn remove_own_named(&self, path: &Path) -> Removed {
-        let own = path
-            .file_name()
-            .is_some_and(|name| own_names().iter().any(|known| name == known.as_str()));
-        if !own {
-            return Removed::Left(path.to_path_buf(), "its name is none this run made".into());
-        }
-        if fs::symlink_metadata(path).is_err() {
-            return Removed::Absent(path.to_path_buf());
-        }
-        if self.says_only() {
-            self.say("remove", &said_path(path), "named by this run's own name");
-            return Removed::Said(path.to_path_buf());
-        }
-        remove_whole(path)
-    }
-
     /// Takes away `record`, the one entry a harness wrote for the renewal's own folder.
     pub fn remove_record(&self, record: &Record) -> Removed {
         let path = record.path();
@@ -374,6 +511,11 @@ impl Door {
     }
 }
 
+/// Whether a switch's value says yes: anything but nothing or `0`.
+fn is_on(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|value| !value.is_empty() && value != "0")
+}
+
 /// What a say-only door answers of an ending: every process said, none ended.
 fn said_only(chosen: &Grounded) -> Ended {
     Ended {
@@ -382,14 +524,21 @@ fn said_only(chosen: &Grounded) -> Ended {
     }
 }
 
-/// A process as the door says it: its number, when it began, and its command line.
+/// A process as the door says it: its number, when it began, and its command line, whole.
 fn said_process(process: &Running) -> String {
     format!(
         "process {} begun {} ({})",
-        process.identity.pid,
-        process.identity.started,
-        crate::live::cut(&process.command, 160)
+        process.identity.pid, process.identity.started, process.command
     )
+}
+
+/// `text` as one field of a line of the audit file: a backslash, a tab and a line break written
+/// as `\\`, `\t` and `\n`, so that a command line that holds them is one field of one line.
+fn escaped(text: &str) -> String {
+    text.replace('\\', "\\\\")
+        .replace('\t', "\\t")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
 }
 
 /// A path as the door says it, and whether it is there.
@@ -462,26 +611,19 @@ impl fmt::Display for Removed {
     }
 }
 
-/// The file names this process made ([`own_name`]).
-fn own_names() -> std::sync::MutexGuard<'static, Vec<String>> {
-    static NAMES: Mutex<Vec<String>> = Mutex::new(Vec::new());
-    NAMES.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// A file name that is this process's alone, `<stem>-<pid>-<ms>-<n>.<extension>`, known to the
-/// door, which takes what has that name away ([`Door::remove_own_named`]): no file of another
-/// run, or of another case of this run, can have it.
+/// A file name that is this process's alone, `<stem>-<pid>-<ms>-<n>.<extension>`: no file of
+/// another run, or of another case of this run, can have it, so that a process list that shows
+/// it (a command line a member is given) shows this command's. It is a name and no ground: a
+/// file of it is taken only where it is below a folder the run made ([`Door::remove_in_made`]).
 pub fn own_name(stem: &str, extension: &str) -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNT: AtomicU64 = AtomicU64::new(0);
     let millis = jiff::Timestamp::now().as_millisecond();
-    let name = format!(
+    format!(
         "{stem}-{}-{millis}-{}.{extension}",
         std::process::id(),
         COUNT.fetch_add(1, Ordering::Relaxed)
-    );
-    own_names().push(name.clone());
-    name
+    )
 }
 
 /// The folders this process made through the door, by their real paths.
@@ -496,9 +638,89 @@ fn forget_made(path: &Path) {
     registry().retain(|made| Some(made) != real.as_ref() && made != path);
 }
 
+/// Whether `path` is a folder this process made through the door ([`made_in`]) and has not taken.
+pub fn is_made(path: &Path) -> bool {
+    canonical(path).is_some_and(|real| registry().contains(&real))
+}
+
+/// Whether `path` is a folder this process made through the door, or is below one, by real paths.
+pub fn is_made_or_below(path: &Path) -> bool {
+    real_beneath(path).is_some_and(|real| registry().iter().any(|made| real.starts_with(made)))
+}
+
+/// The real path of `path` where it is not there yet: its deepest folder that is there by its
+/// real path, and the rest of the names after it. None where a name is `..`.
+fn real_beneath(path: &Path) -> Option<PathBuf> {
+    let mut rest = Vec::new();
+    let mut at = path.to_path_buf();
+    loop {
+        if let Some(real) = canonical(&at) {
+            return Some(rest.iter().rev().fold(real, |real, name| real.join(name)));
+        }
+        let name = at.file_name()?.to_os_string();
+        if name == ".." {
+            return None;
+        }
+        rest.push(name);
+        at = at.parent()?.to_path_buf();
+    }
+}
+
+/// Whether `path` names a place in the kit's live zone: the folder every run puts its projects
+/// in (`<home>/.consensflow-candidate/live`) or anything below it, by the path as given or by the
+/// real path it leads to, where a Windows path is the same in any case.
+pub fn in_live_zone(path: &Path) -> bool {
+    let zone = |path: &Path| {
+        let names: Vec<String> = path
+            .components()
+            .map(|part| {
+                let name = part.as_os_str().to_string_lossy();
+                if cfg!(windows) {
+                    name.to_lowercase()
+                } else {
+                    name.into_owned()
+                }
+            })
+            .collect();
+        names
+            .windows(2)
+            .any(|pair| pair[0] == ".consensflow-candidate" && pair[1] == "live")
+    };
+    zone(path) || real_beneath(path).is_some_and(|real| zone(&real))
+}
+
+/// Whether a file or folder may be made at `path`: where it is in the live zone ([`in_live_zone`]),
+/// only below a folder this process made through the door ([`made_in`]), by the real path, and
+/// never as a link that leads elsewhere; where it is none, always. A zone is shared by every run
+/// on the machine, and a write that is not below this run's own folder there is another's. A
+/// folder (`folder`) may also be the run's own folder itself, made again.
+pub fn writable(path: &Path, folder: bool) -> Result<(), String> {
+    if !in_live_zone(path) {
+        return Ok(());
+    }
+    let Some(real) = real_beneath(path) else {
+        return Err("it leads up out of the folder it names".into());
+    };
+    if !registry()
+        .iter()
+        .any(|made| real.starts_with(made) && (folder || real != *made))
+    {
+        return Err(format!(
+            "it is in the live folder, but below no folder this run made: {} is another run's or nobody's",
+            real.display()
+        ));
+    }
+    if fs::symlink_metadata(path).is_ok_and(|found| found.file_type().is_symlink()) {
+        return Err("it is a link, and a write goes through a link to what it leads to".into());
+    }
+    Ok(())
+}
+
 /// A folder of a random name this process made through the door, in `parent`, its name begun
 /// with `prefix`: taken away through the door when it is dropped, unless it is kept.
 pub fn made_in(parent: &Path, prefix: &str) -> io::Result<Made> {
+    // A say-only run whose audit file cannot be used stops before it makes a folder.
+    Door::init();
     let folder = tempfile::Builder::new()
         .prefix(prefix)
         .tempdir_in(parent)?
@@ -610,9 +832,8 @@ impl fmt::Display for Ground {
             Ground::Root(root) => write!(formatter, "the root process {} itself", root.pid),
             Ground::Holding(window, text) => write!(
                 formatter,
-                "in window process {}'s tree, holding {}",
-                window.pid,
-                crate::live::cut(text, 60)
+                "in window process {}'s tree, holding {text}",
+                window.pid
             ),
             Ground::Orphan(folder, since) => write!(
                 formatter,

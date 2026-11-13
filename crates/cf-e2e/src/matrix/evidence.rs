@@ -220,8 +220,10 @@ pub fn ledger_snapshot(db: &Path, to: &Path) -> Result {
                 .map(|meta| (meta.len(), meta.modified().ok()))
         })
     };
-    let clones =
-        tempfile::tempdir().map_err(Error::file("make a folder in", &std::env::temp_dir()))?;
+    // The clone's folder is one this run makes through the door, which takes it away with the
+    // receipt of having made it.
+    let clones = crate::door::made("consensflow-ledger-clone-")
+        .map_err(Error::file("make a folder in", &std::env::temp_dir()))?;
     let clone = clones.path().join("clone.db");
     let mut held = false;
     for _ in 0..5 {
@@ -246,6 +248,8 @@ pub fn ledger_snapshot(db: &Path, to: &Path) -> Result {
     if let Some(folder) = to.parent() {
         files::make_dir(folder)?;
     }
+    // `VACUUM INTO` writes the file itself, so the write is asked of the guard first.
+    files::guard(to)?;
     let source = rusqlite::Connection::open(&clone).map_err(failed)?;
     source
         .execute("VACUUM INTO ?1", [to.to_string_lossy().as_ref()])

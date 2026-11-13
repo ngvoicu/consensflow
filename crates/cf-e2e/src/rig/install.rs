@@ -27,6 +27,16 @@ pub(super) fn tool_folder(root: &Path) -> PathBuf {
     root.join("system-bin")
 }
 
+/// A say-only run's rig says only too: the stand-ins and what the kit's own programs ask the door
+/// say into the run's audit file, whatever a case sets or unsets (`audit` is none where the run
+/// acts).
+fn says_only_as_the_run_does(env: &mut Vec<(String, String)>, audit: Vec<(String, String)>) {
+    for (name, value) in audit {
+        env.retain(|(held, _)| *held != name);
+        env.push((name, value));
+    }
+}
+
 /// What the daemon, the pane host and so every window is given, and nothing
 /// else of the machine's: a home of its own, a `PATH` that finds the stand-in
 /// `claude` first, the rig's own folder of programs for the system's, and the
@@ -119,6 +129,7 @@ pub(super) fn environment(
     );
     env.extend(config.vars.iter().cloned());
     env.retain(|(name, _)| !config.unset.contains(name));
+    says_only_as_the_run_does(&mut env, crate::door::Door::audit_vars());
     // A stand-in Devin keeps its store and settings in the rig's own home, whatever folders of
     // the machine's a caller passed: Devin's are under `APPDATA` on Windows, and the live kit
     // gives the machine's own, which put the stand-in's store in the machine owner's (zeewin2,
@@ -461,6 +472,35 @@ mod tests {
             root.join("home").join(".codex").to_string_lossy()
         );
         assert_eq!(var(&none, "PI_CODING_AGENT_DIR"), "");
+    }
+
+    #[test]
+    fn the_programs_of_a_say_only_runs_rig_say_only_into_its_file_whatever_a_case_sets() {
+        let root = Path::new("root");
+        let given = config()
+            .var("CF_LIVE_AUDIT", "0")
+            .var("CF_LIVE_AUDIT_FILE", "/another/file")
+            .unset("CF_LIVE_AUDIT_MADE");
+        let mut env = environment(root, &root.join("fake-bin"), &given, &[]);
+        // A run that acts gives its rig none of the three.
+        assert!(!env.iter().any(|(name, _)| name == "CF_LIVE_AUDIT_MADE"));
+        says_only_as_the_run_does(
+            &mut env,
+            vec![
+                ("CF_LIVE_AUDIT".to_owned(), "1".to_owned()),
+                ("CF_LIVE_AUDIT_FILE".to_owned(), "/the/said.txt".to_owned()),
+                ("CF_LIVE_AUDIT_MADE".to_owned(), "1".to_owned()),
+            ],
+        );
+        assert_eq!(var(&env, "CF_LIVE_AUDIT"), "1");
+        assert_eq!(var(&env, "CF_LIVE_AUDIT_FILE"), "/the/said.txt");
+        assert_eq!(var(&env, "CF_LIVE_AUDIT_MADE"), "1");
+        assert_eq!(
+            env.iter()
+                .filter(|(name, _)| name.starts_with("CF_LIVE_AUDIT"))
+                .count(),
+            3
+        );
     }
 
     #[test]

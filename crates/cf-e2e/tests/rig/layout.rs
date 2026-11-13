@@ -10,7 +10,9 @@
 //!
 //! After each, every file of the other run is there with the bytes it had and the time it was
 //! last written: a run changes, ends and removes nothing it did not make. A say-only run
-//! (`CF_LIVE_AUDIT`) has changed nothing below another run's folders at all.
+//! (`CF_LIVE_AUDIT`) has changed nothing below another run's folders at all, says in a file it
+//! made new and whole, has the programs it starts say into the same one, and stops before it
+//! acts where that file cannot be made.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -54,15 +56,19 @@ fn program(
             "--test-threads=1",
         ])
         .inheriting_env()
-        .without("CF_LIVE_AUDIT")
-        .without("CF_LIVE_AUDIT_FILE")
-        .without("CF_LIVE_AUDIT_MADE")
         .var(cf_e2e::cf::BUILT, built)
         .var(CASE, case)
         .var(SIGNALS, layout.signals())
         .limit(Duration::from_secs(240));
     for (name, value) in layout.vars().iter() {
         run = run.var(name, value);
+    }
+    // The program says only where the case asks it to, whatever this test run's own variables are
+    // (a `without` removes after every `var`, so it is made for the names the case does not set).
+    for name in ["CF_LIVE_AUDIT", "CF_LIVE_AUDIT_FILE", "CF_LIVE_AUDIT_MADE"] {
+        if !more.iter().any(|(set, _)| *set == name) {
+            run = run.without(name);
+        }
     }
     for (name, value) in more {
         run = run.var(name, value);
@@ -110,6 +116,9 @@ fn the_program_a_case_of_the_layout_runs() -> Outcome {
         return Ok(());
     };
     let signals = PathBuf::from(own_var(SIGNALS).ok_or("a case of the layout has no signals")?);
+    if case == "audit-parent" || case == "audit-child" {
+        return audit_case(&case, &signals);
+    }
     let home = own_var("HOME").ok_or("a case of the layout has no home")?;
     let log = Log::new("layout case");
     let name = if case == "whole" {
@@ -171,6 +180,50 @@ fn the_program_a_case_of_the_layout_runs() -> Outcome {
         assert!(released.is_some(), "the case was never released");
     }
     members.close()?;
+    Ok(())
+}
+
+/// What the audit cases do. The parent is a say-only run of its own: it asks its door, which
+/// makes the audit file, and starts a program (the child) as a run does. The child says what it
+/// was given, and takes away a status file of its own through its door, which is a line in the file
+/// the parent made.
+fn audit_case(case: &str, signals: &Path) -> Outcome {
+    if case == "audit-parent" {
+        let audit = cf_e2e::door::Door::of_run()
+            .says_in()
+            .map(Path::to_path_buf);
+        println!(
+            "AUDIT-FILE {}",
+            audit.map_or_else(String::new, |file| file.display().to_string())
+        );
+        let ran = Run::new(std::env::current_exe()?)
+            .args([
+                "--exact",
+                "layout::the_program_a_case_of_the_layout_runs",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .var(CASE, "audit-child")
+            .var(SIGNALS, signals)
+            .limit(Duration::from_secs(120))
+            .run()?;
+        assert_eq!(ran.code, Some(0), "{ran}");
+        print!("{}", ran.stdout);
+        return Ok(());
+    }
+    for name in ["CF_LIVE_AUDIT", "CF_LIVE_AUDIT_FILE", "CF_LIVE_AUDIT_MADE"] {
+        println!("CHILD-ENV {name}={}", own_var(name).unwrap_or_default());
+    }
+    let sessions = signals.join("child-config").join("sessions");
+    std::fs::create_dir_all(&sessions)?;
+    let status = sessions.join(format!("{}.json", std::process::id()));
+    std::fs::write(&status, "{}")?;
+    let door = cf_e2e::door::Door::of_run();
+    println!(
+        "CHILD-REMOVED {}",
+        door.remove_status_of_this_process(&status)
+    );
+    println!("CHILD-STATUS-LEFT {}", status.is_file());
     Ok(())
 }
 
@@ -248,16 +301,139 @@ fn a_second_invocation_of_the_same_case_beside_the_first_has_folders_of_its_own_
     Ok(())
 }
 
+/// The acts of an audit file: its lines but the first lines of the run's own.
+fn acts(text: &str) -> Vec<&str> {
+    text.lines().filter(|line| !line.starts_with('#')).collect()
+}
+
 #[test]
 fn a_say_only_run_changes_nothing_below_another_runs_folders() -> Outcome {
     let layout = layout();
+    for case in ["start", "whole"] {
+        let audit = layout.signals().join(format!("audit-{case}.txt"));
+        let audit_name = audit.to_string_lossy().into_owned();
+        passes(
+            &layout,
+            case,
+            &[("CF_LIVE_AUDIT", "1"), ("CF_LIVE_AUDIT_FILE", &audit_name)],
+        )?;
+        layout.unchanged()?;
+        // The file is the run's own: made new, with first lines that say what the run still does.
+        let text = std::fs::read_to_string(&audit)?;
+        assert!(text.starts_with("# say-only run"), "{text}");
+        for act in cf_e2e::door::STILL_ACTS {
+            assert!(text.contains(&format!("# still acts: {act}")), "{act}");
+        }
+        // A rehearsal keeps what a stand-in case said, to be read.
+        if let (Some(keep), "whole") = (own_var("CF_LAYOUT_KEEP_AUDIT"), case) {
+            std::fs::copy(&audit, keep)?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn the_programs_a_say_only_run_starts_say_into_the_same_file_whole() -> Outcome {
+    let layout = layout();
     let audit = layout.signals().join("audit.txt");
     let audit_name = audit.to_string_lossy().into_owned();
-    passes(
+    let output = passes(
         &layout,
-        "start",
+        "audit-parent",
         &[("CF_LIVE_AUDIT", "1"), ("CF_LIVE_AUDIT_FILE", &audit_name)],
     )?;
+    // The child, started with a cleared environment, was given the run's three variables.
+    for want in [
+        "CHILD-ENV CF_LIVE_AUDIT=1".to_owned(),
+        format!("CHILD-ENV CF_LIVE_AUDIT_FILE={audit_name}"),
+        "CHILD-ENV CF_LIVE_AUDIT_MADE=1".to_owned(),
+    ] {
+        assert!(output.contains(&want), "{want} is not in {output}");
+    }
+    // It said its removal in the parent's file, and left the file where it was.
+    assert!(output.contains("CHILD-STATUS-LEFT true"), "{output}");
+    assert!(output.contains("said, not taken"), "{output}");
+    let text = std::fs::read_to_string(&audit)?;
+    assert!(text.starts_with("# say-only run"), "{text}");
+    let said = acts(&text);
+    assert_eq!(said.len(), 1, "{text}");
+    assert!(
+        said[0].starts_with("remove\t") && said[0].contains("sessions"),
+        "{text}"
+    );
+    layout.unchanged()?;
+    Ok(())
+}
+
+#[test]
+fn a_say_only_run_that_cannot_make_its_file_stops_before_it_does_anything() -> Outcome {
+    let layout = layout();
+    let older = layout.signals().join("older.txt");
+    std::fs::write(&older, "an older run's audit\n")?;
+    let nowhere = layout.signals().join("no-such-folder").join("audit.txt");
+    let (older_name, nowhere_name) = (
+        older.to_string_lossy().into_owned(),
+        nowhere.to_string_lossy().into_owned(),
+    );
+    let live = |layout: &Layout| -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(layout.live())
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names
+    };
+    let temp = |layout: &Layout| -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(layout.temp())
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names
+    };
+    let (live_before, temp_before) = (live(&layout), temp(&layout));
+    for (file, why) in [
+        (&older_name, "cannot be made as a new file"),
+        (&nowhere_name, "cannot be made as a new file"),
+    ] {
+        let ran = program(
+            &layout,
+            "start",
+            &[("CF_LIVE_AUDIT", "1"), ("CF_LIVE_AUDIT_FILE", file)],
+        )?
+        .run()?;
+        assert_ne!(
+            ran.code,
+            Some(0),
+            "a run whose audit file cannot be made went on: {ran}"
+        );
+        assert!(
+            format!("{}{}", ran.stdout, ran.stderr).contains(why),
+            "{ran}"
+        );
+    }
+    // Nothing was made, and the older run's file is as it was.
+    assert_eq!(std::fs::read_to_string(&older)?, "an older run's audit\n");
+    assert!(!nowhere.exists());
+    assert_eq!(
+        live(&layout),
+        live_before,
+        "the run made a folder in the live folder"
+    );
+    assert_eq!(
+        temp(&layout),
+        temp_before,
+        "the run made a folder in the temp folder"
+    );
+    layout.untouched()?;
     layout.unchanged()?;
     Ok(())
 }
@@ -333,6 +509,22 @@ fn live_sweep_has_no_word_that_takes_a_folder() -> Outcome {
     let ran = sweep(&layout, &["--yes"])?;
     assert_eq!(ran.code, Some(2), "{ran}");
     assert!(ran.stderr.contains("--yes"), "{ran}");
+    layout.untouched()?;
+    layout.unchanged()?;
+    Ok(())
+}
+
+#[test]
+fn live_sweep_under_a_say_only_switch_lists_and_is_no_pass() -> Outcome {
+    let layout = layout();
+    let mut run = Run::new(SWEEP).inheriting_env().var("CF_LIVE_AUDIT", "1");
+    for (name, value) in layout.vars().iter() {
+        run = run.var(name, value);
+    }
+    let ran = run.run()?;
+    assert_eq!(ran.code, Some(1), "{ran}");
+    assert!(ran.stderr.contains("is no pass"), "{ran}");
+    assert!(ran.stdout.contains("folders earlier runs left"), "{ran}");
     layout.untouched()?;
     layout.unchanged()?;
     Ok(())

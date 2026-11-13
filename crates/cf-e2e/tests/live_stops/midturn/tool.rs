@@ -105,7 +105,7 @@ pub fn clear_ticks(folder: &Path, command: &Command) -> Vec<String> {
         .into_iter()
         .filter(|name| {
             matches!(
-                cf_e2e::door::Door::of_run().remove_own_named(&folder.join(name)),
+                cf_e2e::door::Door::of_run().remove_in_made(&folder.join(name)),
                 cf_e2e::door::Removed::Removed(_)
             )
         })

@@ -372,6 +372,11 @@ fn opened(
     });
     if closed {
         let _ = drain.join();
+    } else {
+        // A say-only door left the pane open: the table is not dropped, which would close it
+        // (the system hangs a terminal's program up with it), so what the audit says is what
+        // the case did.
+        std::mem::forget(table);
     }
     #[cfg(unix)]
     ended?;

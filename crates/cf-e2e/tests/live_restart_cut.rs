@@ -87,7 +87,7 @@ struct OwnTicks(std::path::PathBuf);
 
 impl Drop for OwnTicks {
     fn drop(&mut self) {
-        let _ = Door::of_run().remove_own_named(&self.0);
+        let _ = Door::of_run().remove_in_made(&self.0);
     }
 }
 

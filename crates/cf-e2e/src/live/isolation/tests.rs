@@ -1446,7 +1446,7 @@ fn a_home_never_made_has_nothing_to_say_and_the_words_never_hold_a_login() {
 }
 
 #[test]
-fn a_home_a_killed_run_left_is_taken_away_by_the_next_that_is_made() {
+fn a_home_a_killed_run_left_is_left_by_the_next_that_is_made_and_no_run_takes_it() {
     let owner = Owner::new();
     // A process id nothing has: a child that ended and was waited for.
     let mut child = Run::new("/usr/bin/true").spawn().unwrap();
@@ -1460,9 +1460,11 @@ fn a_home_a_killed_run_left_is_taken_away_by_the_next_that_is_made() {
         .join(format!("{PREFIX}{}-xyz789", std::process::id()));
     write(&running.join("codex/auth.json"), "{}");
     owner.codex().made_at(at(NOW)).unwrap();
+    // A home that looks left may be a person's to look at: a start takes none (T-1592), and
+    // `live sweep` lists it.
     assert!(
-        !left.exists(),
-        "the home of a run that is gone is taken away"
+        left.join("pi/agent/auth.json").is_file(),
+        "the home of a run that is gone is left where it is"
     );
     assert!(running.exists(), "a process that is there keeps its own");
 }

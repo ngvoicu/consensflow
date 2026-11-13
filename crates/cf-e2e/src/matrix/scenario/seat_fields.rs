@@ -223,7 +223,7 @@ pub fn seat_fields() -> Vec<Scenario> {
                 Step {
                     human: Some(|members| {
                         let spent = members.folder().join(SPENT);
-                        std::fs::remove_file(&spent).map_err(crate::Error::file("remove", &spent))?;
+                        super::taken(&spent)?;
                         members.page("member.back", serde_json::json!({ "participant": "matrix-worker" })).map(|_| ())
                     }),
                     restarts: false,

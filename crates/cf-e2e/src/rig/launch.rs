@@ -40,6 +40,7 @@ impl Rig {
     /// pane host under test if they are not built; refuses a daemon whose start
     /// line says it is not the native one.
     pub fn start(config: Config) -> Result<Self> {
+        crate::door::Door::init();
         // Before anything: what the case's thread has failed with so far is none of this
         // rig's, and the case it names is the one that starts it.
         let judged = config.judged.then(Verdict::start);

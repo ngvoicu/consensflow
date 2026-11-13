@@ -29,6 +29,11 @@
 //!
 //! Codex reads its login from `CODEX_HOME`, which the run's caller points at a home of
 //! the run's own.
+//!
+//! A config folder given with `--claude-config` is its caller's, and the run writes nothing in it
+//! (T-1592): it must trust the live folders' root already (`.claude.json` holds
+//! `projects["<home>/.consensflow-candidate/live"].hasTrustDialogAccepted`), or the run stops
+//! before it acts. Without the flag the run uses a copy of the login it made for itself, which it seeds.
 
 use std::path::Path;
 use std::thread::sleep;

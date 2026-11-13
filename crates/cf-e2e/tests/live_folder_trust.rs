@@ -114,7 +114,7 @@ use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use cf_e2e::live::machine::live_folder_in;
+use cf_e2e::live::machine::{live_folder_in, live_path_in};
 use cf_e2e::live::members::{member, member_as, named, stand_in_chief, Members, Plan};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window};
@@ -597,7 +597,7 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
         let main = live_folder_in(&home, &format!("{base}/worktree-main"))?;
         git(&main, &["init", "-q"])?;
         git(&main, &["commit", "-q", "--allow-empty", "-m", "first"])?;
-        let tree = home.join(".consensflow-candidate/live").join(&name);
+        let tree = live_path_in(&home, &name)?;
         git(&main, &["worktree", "add", "-q", &tree.to_string_lossy()])?;
     }
     if case == Case::Submodule {

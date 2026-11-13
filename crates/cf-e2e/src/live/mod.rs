@@ -233,6 +233,8 @@ pub struct Log {
 impl Log {
     /// A run called `name` (`live designer`), beginning now.
     pub fn new(name: &str) -> Self {
+        // A say-only run whose audit file cannot be used stops here, before it does anything.
+        crate::door::Door::init();
         Self {
             name: name.to_owned(),
             started: Instant::now(),

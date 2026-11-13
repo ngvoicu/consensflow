@@ -511,3 +511,37 @@ fn sweep_runs_the_kits_own_program_with_the_words_after_it() {
         "{ran}"
     );
 }
+
+#[test]
+fn a_set_under_audit_gives_each_run_a_file_of_its_own_beside_the_one_named() {
+    assert_eq!(
+        audit_file_of(Path::new("/a/said.txt"), 2),
+        PathBuf::from("/a/said-2.txt")
+    );
+    assert_eq!(
+        audit_file_of(Path::new("/a/said"), 1),
+        PathBuf::from("/a/said-1")
+    );
+}
+
+#[test]
+fn what_a_say_only_run_left_is_told_as_acts_without_its_first_lines_and_never_as_a_pass() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("said.txt");
+    fs::write(
+        &file,
+        "# say-only run of process 4\n# still acts: the product's own shutdown\nkill\tprocess 5\tground\nremove\t/x\tground\n",
+    )
+    .unwrap();
+    assert_eq!(said_acts(&fs::read_to_string(&file).unwrap()), 2);
+    let told = audit_report(&file);
+    assert!(told.contains("2 endings and removals"), "{told}");
+    assert!(told.contains("no pass"), "{told}");
+    // A run that made no file stopped before it acted, and the person is told that, not zero acts.
+    let none = audit_report(&folder.path().join("none.txt"));
+    assert!(
+        none.contains("made no audit file") && none.contains("stopped before it acted"),
+        "{none}"
+    );
+    assert!(none.contains("no pass"), "{none}");
+}

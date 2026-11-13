@@ -27,10 +27,11 @@ mod path;
 mod tests;
 mod wrapper;
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use super::isolation::{lasting, Isolation};
@@ -431,8 +432,9 @@ const REPORTS: &str = "app/src-tauri/target/live-reports";
 /// may ask the system's keychain by; on Windows they also have the machine's own folders
 /// for settings and programs ([`WINDOWS`]).
 ///
-/// Either config is seeded first with the trust a person's own has for the run's folders
-/// ([`seed_claude_trust`]).
+/// The kit's own copy of the login is seeded with the trust a person's own has for the run's
+/// folders ([`seed_claude_trust`]); a folder the run was given must hold it already
+/// ([`claude_trust_is_seeded`]).
 pub fn rig(installs: &[Installed], stand_in: impl Into<PathBuf>) -> Config {
     let claude_config = super::option("claude-config");
     let home = own_var("HOME").or_else(|| own_var("USERPROFILE"));
@@ -441,9 +443,16 @@ pub fn rig(installs: &[Installed], stand_in: impl Into<PathBuf>) -> Config {
             .iter()
             .any(|install| install.harness == Harness::Claude)
         {
-            if let Err(failed) = seed_claude_trust(Path::new(config), Path::new(home)) {
-                panic!("the run's Claude config {config} could not be seeded: {failed}");
-            }
+            // A folder the run was given is its caller's, not one this run made: the kit
+            // writes nothing in it, and refuses before anything acts where it holds no trust
+            // of the live folders' root (the caller seeds it as a person's own is).
+            assert!(
+                claude_trust_is_seeded(Path::new(config), Path::new(home)),
+                "the run's Claude config {config} does not trust {} (its .claude.json holds no \
+                 projects entry for it with hasTrustDialogAccepted): the kit writes nothing in a \
+                 folder it was given, so seed it there, or let the run use its own copy of the login",
+                live_root(Path::new(home)).display()
+            );
         }
     }
     let config = rig_keeping_claude_in(installs, stand_in, claude_config);
@@ -455,16 +464,17 @@ pub fn live_root(home: &Path) -> PathBuf {
     home.join(".consensflow-candidate").join("live")
 }
 
-/// Seeds the Claude config folder `config`, the run's own (the kit's copy of the login,
-/// [`super::login::Login`], or one the run was given, `--claude-config`), with what
-/// a person's own config holds of the folders a run's windows open in: they are below
-/// a folder the person said yes to (the owner's `~/.claude.json` keeps
-/// `projects["<home>"].hasTrustDialogAccepted`, T-629), so Claude Code asks in a new
-/// repository there and not in a plain folder. A config made fresh trusts nothing, and
-/// asked even in a plain folder (`live folder-trust`'s fresh case, T-523). Its
-/// `.claude.json` is given the live folders' root as trusted, merged into what it holds.
-/// The owner's own is never written: `home` itself, and a folder inside `home`'s
-/// `.claude`, are refused.
+/// Seeds the Claude config folder `config`, the kit's copy of the login ([`super::login::Login`],
+/// a folder this run made through the door) with what a person's own config holds of the folders
+/// a run's windows open in: they are below a folder the person said yes to (the owner's
+/// `~/.claude.json` keeps `projects["<home>"].hasTrustDialogAccepted`, T-629), so Claude Code
+/// asks in a new repository there and not in a plain folder. A config made fresh trusts nothing,
+/// and asked even in a plain folder (`live folder-trust`'s fresh case, T-523). Its `.claude.json`
+/// is given the live folders' root as trusted, merged into what it holds.
+///
+/// It writes only in a folder this run made, and never through a link at the file: the owner's
+/// own config, a folder another run made and one a person made are refused, and so is a
+/// `.claude.json` that is a link.
 pub fn seed_claude_trust(config: &Path, home: &Path) -> Result {
     let real = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let (config, owners) = (real(config), real(&home.join(".claude")));
@@ -474,7 +484,19 @@ pub fn seed_claude_trust(config: &Path, home: &Path) -> Result {
             config.display()
         )));
     }
+    if !crate::door::is_made_or_below(&config) {
+        return Err(Error::Daemon(format!(
+            "{} is no folder this run made, so its trust is not written",
+            config.display()
+        )));
+    }
     let file = config.join(".claude.json");
+    if fs::symlink_metadata(&file).is_ok_and(|found| found.file_type().is_symlink()) {
+        return Err(Error::Daemon(format!(
+            "{} is a link, which a write would go through",
+            file.display()
+        )));
+    }
     let mut held: serde_json::Value = files::read_string(&file)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
@@ -486,6 +508,16 @@ pub fn seed_claude_trust(config: &Path, home: &Path) -> Result {
     let root = claude_project_key(&live_root(home).to_string_lossy());
     held["projects"][&root]["hasTrustDialogAccepted"] = serde_json::Value::Bool(true);
     files::write(&file, held.to_string())
+}
+
+/// Whether the Claude config folder `config`, one a run was given and did not make, already
+/// trusts the live folders' root of `home`: read and never written.
+pub fn claude_trust_is_seeded(config: &Path, home: &Path) -> bool {
+    let root = claude_project_key(&live_root(home).to_string_lossy());
+    files::read_string(&config.join(".claude.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .is_some_and(|held| held["projects"][&root]["hasTrustDialogAccepted"] == true)
 }
 
 /// A folder as Claude Code keeps it in the record of its projects (the keys of `projects` in
@@ -895,17 +927,80 @@ pub fn home() -> Result<PathBuf> {
         })
 }
 
-/// A live test's own folder, `~/.consensflow-candidate/live/<name>`, made: where
-/// a harness's window runs, so that what Claude Code asks of a folder (its trust)
-/// is asked once and kept.
+/// A live test's own folder, `~/.consensflow-candidate/live/<name>-<random>/...`, made: where
+/// a harness's window runs, so that what Claude Code asks of a folder (its trust) is asked once
+/// and kept. See [`live_folder_in`].
 pub fn live_folder(name: &str) -> Result<PathBuf> {
     live_folder_in(&home()?, name)
 }
 
-/// [`live_folder`] under the home `home`: the home a rig gives its windows, which
-/// is the machine's where the windows run the machine's harnesses.
+/// The folders this process allocated in a live folder, by the live folder and the first name
+/// of what was asked ([`live_folder_in`]).
+static ALLOCATED: Mutex<BTreeMap<(PathBuf, String), PathBuf>> = Mutex::new(BTreeMap::new());
+
+/// Where a case's folder `name` is in the live folder of `home`, the folder made: the first name
+/// of `name` is allocated in the live folder as a folder of a random name this process made
+/// through the door ([`crate::door::made_in`], `<first>-<random>`), once for this process, so
+/// that every step of the case that asks for the same name again, a restart, a resumed window
+/// or a second step, is given the same path; the names after it (`a/b`) are made inside it.
+///
+/// The live folder is shared by every run on the machine and by every harness's trust of it (the
+/// owner's Claude trusts the folder above, and a folder below is asked of no more), so a folder of
+/// a name another run used is another run's: nothing is made or written there, and a second
+/// invocation of the same case, beside the first or after it, has a folder of its own
+/// ([`crate::files::guard`] holds every write to that). The folder stays after the run, for a
+/// person to look at, and `cargo xtask live sweep` lists it.
 pub fn live_folder_in(home: &Path, name: &str) -> Result<PathBuf> {
-    let folder = live_root(home).join(name);
+    let (first, rest) = split_name(name)?;
+    let root = allocate_in(home, &first)?;
+    let folder = rest.iter().fold(root, |folder, part| folder.join(part));
     files::make_dir(&folder)?;
+    Ok(folder)
+}
+
+/// [`live_folder_in`]'s path, where the folder is not to be made: a case that needs the path of
+/// a folder inside the one it asked for (a worktree git makes) says it by this, and makes it
+/// itself.
+pub fn live_path_in(home: &Path, name: &str) -> Result<PathBuf> {
+    let (first, rest) = split_name(name)?;
+    let root = allocate_in(home, &first)?;
+    Ok(rest.iter().fold(root, |folder, part| folder.join(part)))
+}
+
+/// The first name of a case's folder `name`, and the names after it. A name that is empty, leads
+/// up (`..`) or is a drive or a root has no place in the live folder.
+fn split_name(name: &str) -> Result<(String, Vec<String>)> {
+    let mut parts = name.split(['/', '\\']).filter(|part| !part.is_empty());
+    let wrong = |why: &str| Error::Daemon(format!("the live folder {name:?} {why}"));
+    let first = parts.next().ok_or_else(|| wrong("has no name"))?.to_owned();
+    let rest: Vec<String> = parts.map(str::to_owned).collect();
+    for part in std::iter::once(&first).chain(&rest) {
+        if part == "." || part == ".." || part.contains(':') {
+            return Err(wrong("leads out of the live folder"));
+        }
+    }
+    Ok((first, rest))
+}
+
+/// The folder of this process for `first` in the live folder of `home`, made at the first ask.
+fn allocate_in(home: &Path, first: &str) -> Result<PathBuf> {
+    let root = live_root(home);
+    // The shared folder itself is made empty, if it is not there: the one place a case's live
+    // folder makes anything that is not its own, and a person's own `mkdir` makes the same.
+    fs::create_dir_all(&root).map_err(Error::file("make", &root))?;
+    let key = (
+        fs::canonicalize(&root).unwrap_or_else(|_| root.clone()),
+        first.to_owned(),
+    );
+    let mut allocated = ALLOCATED.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(folder) = allocated.get(&key) {
+        if crate::door::is_made(folder) {
+            return Ok(folder.clone());
+        }
+    }
+    let made = crate::door::made_in(&root, &format!("{first}-"))
+        .map_err(Error::file("make a folder in", &root))?;
+    let folder = made.hand_on();
+    allocated.insert(key, folder.clone());
     Ok(folder)
 }

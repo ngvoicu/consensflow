@@ -123,8 +123,7 @@ pub fn make(program: &Path) -> Result<Home> {
         calls::install(&decoy.folder, program)?;
         let log = decoy.folder.join(calls::LOG);
         if log.exists() {
-            let removed = cf_e2e::door::Door::of_run()
-                .remove_in_live_root(&cf_e2e::live::machine::home()?, &log);
+            let removed = cf_e2e::door::Door::of_run().remove_in_made(&log);
             if !removed.is_gone() {
                 return Err(cf_e2e::Error::Daemon(removed.to_string()));
             }
@@ -136,8 +135,7 @@ pub fn make(program: &Path) -> Result<Home> {
     for name in STALE {
         let stale = root.join(name);
         if stale.exists() {
-            let removed = cf_e2e::door::Door::of_run()
-                .remove_in_live_root(&cf_e2e::live::machine::home()?, &stale);
+            let removed = cf_e2e::door::Door::of_run().remove_in_made(&stale);
             if !removed.is_gone() {
                 return Err(cf_e2e::Error::Daemon(removed.to_string()));
             }

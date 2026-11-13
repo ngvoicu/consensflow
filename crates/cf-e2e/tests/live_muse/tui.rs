@@ -407,11 +407,18 @@ impl Window {
         String::from_utf8_lossy(&screen[from..]).into_owned()
     }
 
-    /// Quits as a person does at rest, two Ctrl-Cs, and kills what is left.
+    /// Quits as a person does at rest, two Ctrl-Cs, and kills what is left. The two keys are
+    /// typed through the door ([`cf_e2e::door::Door::quit_own_terminal`]): a say-only run says them
+    /// and types none.
     pub fn close(mut self) {
-        self.keys(b"\x03");
-        thread::sleep(Duration::from_secs(1));
-        self.keys(b"\x03");
+        let typed = cf_e2e::door::Door::of_run().quit_own_terminal("Muse's terminal", || {
+            self.keys(b"\x03");
+            thread::sleep(Duration::from_secs(1));
+            self.keys(b"\x03");
+        });
+        if !typed {
+            return;
+        }
         let deadline = Instant::now() + Duration::from_secs(8);
         while Instant::now() < deadline {
             if matches!(self.child.try_wait(), Ok(Some(_))) {

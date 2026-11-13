@@ -86,5 +86,14 @@ fn main() -> ExitCode {
     for left in &found {
         println!("{}", left.says());
     }
+    if cf_e2e::door::Door::audit_asked() {
+        // Sweep lists and takes nothing in any mode, so a say-only switch changes nothing in it;
+        // the exit is what a say-only run's is, never a pass.
+        eprintln!(
+            "{} is set: sweep lists and takes nothing in any mode, so there is nothing for it to say only; a say-only run is no pass",
+            cf_e2e::door::AUDIT
+        );
+        return ExitCode::FAILURE;
+    }
     ExitCode::SUCCESS
 }

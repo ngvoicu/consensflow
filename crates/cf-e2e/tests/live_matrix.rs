@@ -17,7 +17,7 @@
 //!
 //! The evidence of a run is under `evals/reports/live-matrix/<run-id>/`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use cf_e2e::checkout;
 use cf_e2e::live::report;
@@ -210,11 +210,16 @@ mod tests {
     /// each window's last screen, the records, the ledger, the events and the daemon's last lines
     /// of the run that went red. Two reds of the field6 pair on GitHub's Windows runner kept
     /// nothing of their windows (CI runs 41787972093 and 41792519144, T-1226).
-    struct Reports(tempfile::TempDir);
+    struct Reports(tempfile::TempDir, PathBuf);
 
     impl Reports {
         fn new() -> Self {
-            Self(tempfile::tempdir().unwrap())
+            Self::keeping_in(checkout::path(REPORTS))
+        }
+
+        /// Reports whose evidence is kept in `kept` where the case fails.
+        fn keeping_in(kept: PathBuf) -> Self {
+            Self(tempfile::tempdir().unwrap(), kept)
         }
 
         fn path(&self) -> &Path {
@@ -225,7 +230,7 @@ mod tests {
     impl Drop for Reports {
         fn drop(&mut self) {
             if std::thread::panicking() {
-                let kept = checkout::path(REPORTS);
+                let kept = self.1.clone();
                 match copied_below(self.0.path(), &kept) {
                     Ok(names) => eprintln!(
                         "--- the failed case's evidence is kept in {}: {}",
@@ -262,34 +267,34 @@ mod tests {
     /// keeps nothing there.
     #[test]
     fn a_failed_case_keeps_its_evidence_where_ci_uploads_it_and_a_passed_one_does_not() {
-        let unique = cf_e2e::door::own_name("t1226-kept", "d");
-        let kept = checkout::path(REPORTS).join(&unique);
-        let write = |reports: &Reports, unique: &str| {
-            let folder = reports.path().join(unique).join("windows");
+        // A folder of this run's own stands for the one CI uploads from, where a case of the
+        // suite keeps its evidence (`REPORTS`), so that the test takes away what it made.
+        let kept = cf_e2e::door::made("t1226-kept-").unwrap();
+        let write = |reports: &Reports| {
+            let folder = reports.path().join("windows");
             std::fs::create_dir_all(&folder).unwrap();
             std::fs::write(folder.join("p1-worker.txt"), "the worker's last screen\n").unwrap();
         };
         {
-            let reports = Reports::new();
-            write(&reports, &unique);
+            let reports = Reports::keeping_in(kept.path().to_path_buf());
+            write(&reports);
         }
         assert!(
-            !kept.exists(),
+            std::fs::read_dir(kept.path()).unwrap().next().is_none(),
             "a passed case keeps nothing: {}",
-            kept.display()
+            kept.path().display()
         );
         let failed = std::thread::spawn({
-            let unique = unique.clone();
+            let kept = kept.path().to_path_buf();
             move || {
-                let reports = Reports::new();
-                write(&reports, &unique);
+                let reports = Reports::keeping_in(kept);
+                write(&reports);
                 panic!("the case failed");
             }
         })
         .join();
         assert!(failed.is_err());
-        let screen = std::fs::read_to_string(kept.join("windows").join("p1-worker.txt"));
-        let _ = cf_e2e::door::Door::acting().remove_own_named(&kept);
+        let screen = std::fs::read_to_string(kept.path().join("windows").join("p1-worker.txt"));
         assert_eq!(screen.unwrap(), "the worker's last screen\n");
     }
 

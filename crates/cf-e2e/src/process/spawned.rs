@@ -207,6 +207,13 @@ impl Spawned {
         crate::door::Door::of_run().signal_child(&self.program, &self.child, signal);
     }
 
+    /// Ends the group it leads (it was started in a group of its own, [`super::Run::own_group`]) and
+    /// what runs in it, through the door ([`crate::door::Door::end_group_of_child`]): on Unix the
+    /// group, on Windows the tree. A say-only door says it and ends none.
+    pub fn end_group(&self) {
+        crate::door::Door::of_run().end_group_of_child(&self.program, &self.child);
+    }
+
     /// Ends it at once, and waits for it to be gone, through the door ([`crate::door::Door::end_child`]):
     /// a say-only door says it and neither kills nor waits.
     pub fn kill(&mut self) {

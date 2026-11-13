@@ -5,8 +5,9 @@
 //! its review (T-1557) found a rig's start taking other runs' folders and a renewal taking the
 //! owner's records by the end of their names. Every ending and every removal of the live kit
 //! now asks the door, which acts only on its grounds and, in a say-only run, says instead
-//! ([`super::AUDIT`]). This rule reads the live kit's code (`src/live`, `src/rig`, `src/process*`,
-//! `src/daemon.rs` and the `tests/live_*` suites) and fails on any other way to do either:
+//! ([`super::AUDIT`]). This rule reads the live kit's code (`src/live`, `src/rig`, `src/matrix`,
+//! `src/bin` (the stand-in programs), `src/process*`, `src/daemon.rs` and the `tests/live_*`
+//! suites) and fails on any other way to do either:
 //!
 //! - a call of `remove_file`, `remove_dir`, `remove_dir_all`, the descent's `end_chosen` /
 //!   `pause_chosen` (and their `_by`), `signal`, `stall`, `end_all`, libc's or nix's `kill`,
@@ -27,6 +28,17 @@
 //! read; nor is code only a unit test builds (`#[cfg(test)]`, and the module files such an
 //! attribute gates), which runs on folders and programs it made. What a closure given to the door does is the door's to allow.
 //! Macros are read token by token: a call named above, followed by its arguments, is one.
+//!
+//! What it cannot see, and what the kit's guards do not stand for either (T-1592): a program or a
+//! file named in a string that is built (a shell line made from parts, `format!`ed into a
+//! command), a call made through a function value, a trait object or another crate's wrapper, an
+//! ending or a removal that a destructor does (a dropped terminal hangs its program up, a
+//! dropped `tempfile` folder is taken, a dropped child of another crate may be killed), the
+//! folders the rule does not read (`src/files.rs`, `tools/xtask`, the product's own crates), and
+//! a raw `std::fs` write: the write guard ([`crate::files::guard`]) stands where the kit's own
+//! writers ([`crate::files`]) are called, and a raw `std::fs::write` or `File::create` in a
+//! suite is none of its business. The kit's tests say what a run did by running it
+//! (`tests/rig/layout.rs`); this reads the code for the ways that are plain.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -55,7 +67,7 @@ const CALLS: &[&str] = &[
 ];
 
 /// The door's methods that are handed what to do, done only where the door allows it.
-const DOOR_CLOSURES: &[&str] = &["close_pane", "close_own_terminal"];
+const DOOR_CLOSURES: &[&str] = &["close_pane", "close_own_terminal", "quit_own_terminal"];
 
 /// Where a string runs a program that ends processes, or asks the pane host to end a pane.
 fn ends_in_words(text: &str) -> bool {
@@ -70,10 +82,22 @@ fn ends_in_words(text: &str) -> bool {
         "killall ",
         "Stop-Process",
         "pane.kill",
-        "kill -",
     ]
     .iter()
     .any(|word| text.contains(word))
+        || sends_a_signal(text)
+}
+
+/// Whether `text` holds `kill -<signal>` that sends one: `kill -0` only asks whether the process
+/// is there, and ends none.
+fn sends_a_signal(text: &str) -> bool {
+    text.match_indices("kill -").any(|(at, word)| {
+        let after = &text[at + word.len()..];
+        let mut chars = after.chars();
+        let asks_only =
+            chars.next() == Some('0') && !chars.next().is_some_and(|c| c.is_ascii_digit());
+        !asks_only
+    })
 }
 
 /// One place the rule found.
@@ -284,6 +308,25 @@ fn holds_children(text: &str) -> bool {
     })
 }
 
+/// The file a `#[path = "…"]` attribute among `attrs` names.
+fn path_attribute(attrs: &[Attribute]) -> Option<String> {
+    attrs.iter().find_map(|attr| {
+        if !attr.path().is_ident("path") {
+            return None;
+        }
+        match &attr.meta {
+            Meta::NameValue(value) => match &value.value {
+                Expr::Lit(literal) => match &literal.lit {
+                    syn::Lit::Str(text) => Some(text.value()),
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        }
+    })
+}
+
 /// The module files that `file`'s `#[cfg(test)] mod name;` items gate: `name.rs` and the
 /// folder `name`, beside `file` where it is a `mod.rs` or `lib.rs`, and below its own folder
 /// otherwise.
@@ -306,11 +349,15 @@ fn gated_by(file: &Path, text: &str) -> Vec<PathBuf> {
         .iter()
         .filter_map(|item| match item {
             syn::Item::Mod(module) if module.content.is_none() && for_tests_only(&module.attrs) => {
-                Some(module.ident.to_string())
+                Some((module.ident.to_string(), path_attribute(&module.attrs)))
             }
             _ => None,
         })
-        .flat_map(|name| [base.join(format!("{name}.rs")), base.join(name)])
+        .flat_map(|(name, path)| match path {
+            // `#[path = "x.rs"]`: beside the file that declares it.
+            Some(path) => vec![folder.join(path)],
+            None => vec![base.join(format!("{name}.rs")), base.join(name)],
+        })
         .collect()
 }
 
@@ -355,7 +402,15 @@ fn live_files() -> (PathBuf, Vec<PathBuf>) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let src = root.join("src");
     let mut files = Vec::new();
-    for part in ["live", "rig", "process", "process.rs", "daemon.rs"] {
+    for part in [
+        "live",
+        "rig",
+        "matrix",
+        "bin",
+        "process",
+        "process.rs",
+        "daemon.rs",
+    ] {
         files.extend(rust_files(&src.join(part)));
     }
     for entry in fs::read_dir(root.join("tests")).unwrap().flatten() {
@@ -402,6 +457,12 @@ fn the_live_kit_ends_and_removes_only_through_its_door() {
         "src/live/login.rs",
         "src/process/spawned.rs",
         "src/daemon.rs",
+        "src/matrix/run.rs",
+        "src/matrix/evidence.rs",
+        "src/matrix/scenario/window_life.rs",
+        "src/bin/fake_agent.rs",
+        "src/bin/fake_agent/tool.rs",
+        "tests/live_muse/tui.rs",
     ] {
         assert!(files.contains(&root.join(suite)), "{suite} is read");
     }
@@ -441,6 +502,8 @@ fn the_rule_finds_each_way_to_end_or_remove_and_not_what_only_reads_or_asks_the_
         r#"fn f() { Run::new("/bin/kill").arg(pid); }"#,
         r#"fn f() { rig.host("pane.kill", pane); }"#,
         r#"fn f() { let s = format!("pkill -f {mark}"); }"#,
+        r#"fn f() { let s = "kill -9 $pid"; }"#,
+        r#"fn f() { let s = "kill -KILL 4711"; }"#,
         "use std::process::Child;\nfn f(child: &mut Child) { let _ = child.kill(); }",
         "struct S { child: Box<dyn portable_pty::Child> }\nimpl S { fn f(&mut self) { let _ = self.child.kill(); } }",
         r#"fn f() { assert!(std::fs::remove_file(p).is_ok() == true); }"#,
@@ -453,6 +516,7 @@ fn the_rule_finds_each_way_to_end_or_remove_and_not_what_only_reads_or_asks_the_
     // What it does not.
     for text in [
         "fn f() { let _ = Door::of_run().remove_made(&p); }",
+        "use std::process::Child;\nfn f(child: &mut Child) { door.quit_own_terminal(\"t\", || { let _ = child.kill(); }); }",
         "fn f() { window.kill(); }",
         "fn f() { let code = ExitStatusExt::signal(&status); }",
         r#"fn f() { Run::new("ps").args(["-p", &pid]); }"#,
@@ -467,8 +531,25 @@ fn the_rule_finds_each_way_to_end_or_remove_and_not_what_only_reads_or_asks_the_
         "#[cfg(all(test, unix))]\nmod tests { fn f() { std::fs::remove_file(&p).unwrap(); } }",
         "// std::fs::remove_dir_all(&p)\nfn f() {}",
         "fn f() { let folder = crate::door::made(\"x-\").unwrap(); }",
+        r#"fn f() { let s = "kill -0 \"$PPID\" 2>/dev/null || exit 0"; }"#,
         "#[cfg(test)]\nmod tests { fn f() { let folder = tempfile::tempdir().unwrap(); } }",
     ] {
         assert_eq!(found(text), Vec::new(), "{text}");
     }
+}
+
+#[test]
+fn a_module_a_test_cfg_and_a_path_gate_is_the_file_the_path_names() {
+    let gated = gated_by(
+        Path::new("/s/turn.rs"),
+        "#[cfg(test)]\n#[path = \"turn_tests.rs\"]\nmod tests;\n#[cfg(test)]\nmod plain;\nmod live;",
+    );
+    assert_eq!(
+        gated,
+        [
+            PathBuf::from("/s/turn_tests.rs"),
+            PathBuf::from("/s/turn/plain.rs"),
+            PathBuf::from("/s/turn/plain"),
+        ]
+    );
 }

@@ -313,11 +313,17 @@ fn a_window_opens_as_the_app_opens_one_takes_a_paste_answers_and_is_read_through
     let window = Open::new(&rig, &install, "paste", "paste-claude")
         .without_trust()
         .open_telling(&live::Log::new("a window"), "claude")?;
-    let folder = Path::new(&home)
-        .join(".consensflow-candidate")
-        .join("live")
-        .join("paste");
+    // The folder of the case is one this process allocated in the live folder (a name of its
+    // own, `paste-<random>`), and every ask of the same name is given the same.
+    let folder = live::machine::live_folder_in(Path::new(&home), "paste")?;
     assert_eq!(window.workspace(), folder);
+    assert_eq!(
+        folder.parent(),
+        Some(live::machine::live_root(Path::new(&home)).as_path())
+    );
+    assert!(folder
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with("paste-")));
     assert!(
         window.session().is_some(),
         "Claude is opened on an id it is given"

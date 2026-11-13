@@ -556,31 +556,63 @@ fn the_machines_home_is_the_one_this_run_has_and_a_run_that_has_none_is_an_error
 }
 
 #[test]
-fn a_live_test_has_a_folder_of_its_own_below_the_candidates_in_the_home_made_when_asked_for() {
+fn a_live_test_has_a_folder_of_its_own_below_the_candidates_live_folder_one_name_one_folder_in_a_process(
+) {
     let home = tempfile::tempdir().unwrap();
+    // Another run's folder of the name the case asks for: it is not this case's.
+    let live = live_root(home.path());
+    fs::create_dir_all(live.join("paste")).unwrap();
+    fs::write(live.join("paste").join("README.md"), "another run's").unwrap();
+
     let folder = live_folder_in(home.path(), "paste").unwrap();
-    assert_eq!(
-        folder,
-        home.path()
-            .join(".consensflow-candidate")
-            .join("live")
-            .join("paste")
+    assert_eq!(folder.parent(), Some(live.as_path()));
+    assert!(
+        folder
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("paste-")),
+        "{}",
+        folder.display()
     );
+    assert_ne!(folder, live.join("paste"));
     assert!(folder.is_dir());
-    // Asked for again, it is the same folder and what was in it stays.
-    fs::write(folder.join("README.md"), "kept").unwrap();
+    assert_eq!(
+        fs::read_to_string(live.join("paste").join("README.md")).unwrap(),
+        "another run's"
+    );
+    // Asked for again in this process, it is the same folder and what was in it stays: a case
+    // that asks in two steps keeps one folder.
+    files::write(&folder.join("README.md"), "kept").unwrap();
     assert_eq!(live_folder_in(home.path(), "paste").unwrap(), folder);
     assert_eq!(
         fs::read_to_string(folder.join("README.md")).unwrap(),
         "kept"
     );
+    // The names after the first are inside it, and the path alone is the same one.
+    let inner = live_folder_in(home.path(), "paste/codex").unwrap();
+    assert_eq!(inner, folder.join("codex"));
+    assert!(inner.is_dir());
+    assert_eq!(
+        live_path_in(home.path(), "paste/other").unwrap(),
+        folder.join("other")
+    );
+    assert!(!folder.join("other").exists());
+    // Another name is another folder; another home is another live folder.
+    assert_ne!(live_folder_in(home.path(), "other").unwrap(), folder);
+    let elsewhere = tempfile::tempdir().unwrap();
+    assert!(live_folder_in(elsewhere.path(), "paste")
+        .unwrap()
+        .starts_with(live_root(elsewhere.path())));
+    // A name that leads out is refused.
+    for name in ["", "..", "a/../../b", "/"] {
+        assert!(live_folder_in(home.path(), name).is_err(), "{name:?}");
+    }
 }
 
 #[test]
 fn a_claude_config_of_the_runs_own_is_seeded_with_the_live_folders_trusted_and_keeps_what_it_held()
 {
     let home = tempfile::tempdir().unwrap();
-    let config = tempfile::tempdir().unwrap();
+    let config = crate::door::made("consensflow-seed-test-").unwrap();
     fs::write(
         config.path().join(".claude.json"),
         r#"{"hasCompletedOnboarding":true,"projects":{"/elsewhere":{"hasTrustDialogAccepted":false}}}"#,
@@ -610,9 +642,40 @@ fn a_claude_config_of_the_runs_own_is_seeded_with_the_live_folders_trusted_and_k
 }
 
 #[test]
+fn a_claude_config_this_run_did_not_make_is_not_written_and_one_it_was_given_must_trust_already() {
+    let home = tempfile::tempdir().unwrap();
+    // A folder a person made (or another run): nothing is written in it.
+    let given = tempfile::tempdir().unwrap();
+    fs::write(given.path().join(".claude.json"), r#"{"projects":{}}"#).unwrap();
+    assert!(seed_claude_trust(given.path(), home.path()).is_err());
+    assert_eq!(
+        fs::read_to_string(given.path().join(".claude.json")).unwrap(),
+        r#"{"projects":{}}"#
+    );
+    assert!(!claude_trust_is_seeded(given.path(), home.path()));
+    let root = claude_project_key(&live_root(home.path()).to_string_lossy());
+    fs::write(
+        given.path().join(".claude.json"),
+        format!(r#"{{"projects":{{"{root}":{{"hasTrustDialogAccepted":true}}}}}}"#),
+    )
+    .unwrap();
+    assert!(claude_trust_is_seeded(given.path(), home.path()));
+    // A folder this run made, whose .claude.json is a link, is not written through.
+    #[cfg(unix)]
+    {
+        let made = crate::door::made("consensflow-seed-test-").unwrap();
+        let target = given.path().join("elsewhere.json");
+        fs::write(&target, "{}").unwrap();
+        std::os::unix::fs::symlink(&target, made.path().join(".claude.json")).unwrap();
+        assert!(seed_claude_trust(made.path(), home.path()).is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "{}");
+    }
+}
+
+#[test]
 fn a_config_seeded_in_an_empty_folder_holds_the_trust_alone() {
     let home = tempfile::tempdir().unwrap();
-    let config = tempfile::tempdir().unwrap();
+    let config = crate::door::made("consensflow-seed-test-").unwrap();
     seed_claude_trust(config.path(), home.path()).unwrap();
     let held: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(config.path().join(".claude.json")).unwrap())
@@ -644,7 +707,7 @@ fn claude_code_keeps_a_folder_on_windows_with_forward_slashes_and_elsewhere_as_i
 #[cfg(windows)]
 #[test]
 fn the_live_root_is_trusted_on_windows_by_the_key_claude_code_looks_it_up_by() {
-    let config = tempfile::tempdir().unwrap();
+    let config = crate::door::made("consensflow-seed-test-").unwrap();
     seed_claude_trust(config.path(), Path::new(r"C:\Users\AGV")).unwrap();
     let held: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(config.path().join(".claude.json")).unwrap())
