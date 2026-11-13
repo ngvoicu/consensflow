@@ -230,3 +230,9 @@ The first line of the footer that teaches a text from standard input reads, sinc
 --file):", where it ended "as written:" (the heredoc is not PowerShell's; the
 footer line about a file, and the commands it names, did not change). Changed by hand in the
 4 prints of `board.json` that hold the footer.
+
+On 2026-11-13 (T-1609), the four prints of board usage gained the member's
+`cf tell "…"`, the note line names the human, and the footer's character count
+is the chief's tell. The stdin note case is now a member tell; it, the chief's
+numbered tell and the two empty commands first read `/api/whoami` for the calling
+role. Their existing posts, output and refusals are unchanged.

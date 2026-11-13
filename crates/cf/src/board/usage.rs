@@ -102,17 +102,21 @@ mod tests {
     fn a_command_is_its_line_of_the_list_with_the_lines_that_go_on_from_it() {
         assert_eq!(
             of(&["note"]),
-            "  cf note \"…\" [--human]             something they should know; nothing waits on it"
+            "  cf note \"…\" [--human]             a note to the human; nothing waits on it"
         );
         let tell = of(&["tell"]);
-        assert_eq!(tell.lines().count(), 3);
+        assert_eq!(tell.lines().count(), 4);
         assert!(tell
             .lines()
+            .take(3)
             .skip(1)
             .all(|line| line.starts_with(&" ".repeat(CONTINUED))));
+        assert!(tell.contains(
+            "cf tell \"…\"                       a member tells whoever gave its task; nothing waits"
+        ));
         assert!(tell.contains("then cf task resume T-3"));
-        assert!(tell
-            .ends_with("(queued or open: kept for its window, to go in with or after its brief)"));
+        assert!(tell.lines().nth(2).is_some_and(|line| line
+            .ends_with("(queued or open: kept for its window, to go in with or after its brief)")));
     }
 
     #[test]

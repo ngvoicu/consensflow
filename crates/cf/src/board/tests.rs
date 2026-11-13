@@ -1379,7 +1379,10 @@ fn a_flag_of_one_value_given_twice_is_refused() {
             "--file",
         ),
     ] {
-        let ran = cf(words, vec![reply(200, json!({}))]);
+        let ran = cf(
+            words,
+            vec![reply(200, json!({ "participant": { "role": "chief" } }))],
+        );
         assert_eq!(ran.code.unwrap(), 2, "{words:?}");
         assert_eq!(
             ran.err,
@@ -1387,7 +1390,12 @@ fn a_flag_of_one_value_given_twice_is_refused() {
             "{words:?}"
         );
         assert!(ran.out.is_empty(), "{words:?}: {}", ran.out);
-        assert!(ran.asked.is_empty(), "{words:?}: {:?}", ran.asked);
+        let expected = if words[0] == "tell" {
+            vec![("GET".to_owned(), "/api/whoami".to_owned(), None)]
+        } else {
+            vec![]
+        };
+        assert_eq!(ran.asked, expected, "{words:?}");
     }
 }
 
