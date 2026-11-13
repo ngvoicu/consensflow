@@ -429,3 +429,23 @@ runs = ["engine-paused-answers"]
 file = "crates/cf-engine/src/in_flight.rs"
 find = "            if let Some(number) = self.seams.ledger.borrow().answer_to_current_pause(row.id)? {"
 replace = "            if let Some(number) = None::<i64> {"
+
+[[plant]]
+name = "answered tell: a refunded note attempt is forgotten"
+meant = "a_note_queued_again_after_an_attempt_stays_typed_when_its_tell_is_answered"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "                AND NOT EXISTS\n                    (SELECT 1 FROM event e WHERE e.project_id = message.project_id\n                       AND e.kind = 'delivery.begun'\n                       AND CASE WHEN json_valid(e.data)\n                                THEN json_extract(e.data, '$.message') END = message.id)\n"
+replace = ""
+
+[[plant]]
+name = "answered tell: a refunded carrier attempt is forgotten"
+meant = "a_note_in_a_carrier_is_shown_only_if_the_carrier_never_began"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "                       AND NOT EXISTS\n                           (SELECT 1 FROM event e WHERE e.project_id = c.project_id\n                              AND e.kind = 'delivery.begun'\n                              AND CASE WHEN json_valid(e.data)\n                                       THEN json_extract(e.data, '$.message') END = c.id)"
+replace = ""
