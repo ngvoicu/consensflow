@@ -93,7 +93,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::agents;
-use super::login::{private_folder, sweep, write_private};
+use super::login::{private_folder, write_private};
 use super::machine::Harness;
 use super::renew::{Kept, Renewal, Renewed, TestMachine};
 use crate::process::own_var;
@@ -120,7 +120,7 @@ pub const fn lasting(planned: Duration) -> Duration {
 
 /// What the name of a run's home begins with, in the temporary folder: the id of the process
 /// that made it follows, so that one a killed run left behind is known to be nobody's.
-const PREFIX: &str = "consensflow-live-home-";
+pub(crate) const PREFIX: &str = "consensflow-live-home-";
 
 /// What the run's home is given.
 #[derive(Debug, Clone)]
@@ -677,7 +677,7 @@ impl Isolation {
             .iter()
             .map(|seed| self.read(seed, now))
             .collect::<Result<Vec<_>>>()?;
-        sweep(&self.parent, PREFIX);
+        crate::rig::sweep::say_copies(&self.parent);
         let folder =
             crate::door::made_in(&self.parent, &format!("{PREFIX}{}-", std::process::id()))
                 .map_err(|source| Error::File {

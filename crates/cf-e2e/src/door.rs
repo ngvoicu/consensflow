@@ -17,9 +17,6 @@
 //! - **A window** ([`Door::close_pane`]): a pane of the rig's own pane host.
 //! - **A folder the door made** ([`made_in`], [`Made`]), and **a path under one**
 //!   ([`Door::remove_in_made`]): a folder of a random name made by this process, known here.
-//! - **A folder nobody uses** ([`Door::remove_unused`]): a login copy of a run that is gone, or
-//!   an older rig folder, taken only while no process runs in it or names it in its command line
-//!   or its environment, as the machine says now; where that cannot be read, it is left.
 //! - **A record of the renewal's** ([`Door::remove_record`]): in the harness's records folder,
 //!   the one entry named for the renewal's own folder, by its whole name.
 //!
@@ -43,8 +40,6 @@ use crate::live::members::{
     descending_from, end_chosen, holding, orphans_in_folder, pause_chosen, Ended, Identity,
     Machine, Pause, RunFolder, Running, ThisMachine,
 };
-
-mod usage;
 
 /// The variable that makes the door say only.
 pub const AUDIT: &str = "CF_LIVE_AUDIT";
@@ -298,82 +293,6 @@ impl Door {
         }
         if self.says_only() {
             self.say("remove", &said_path(path), "under a folder this run made");
-            return Removed::Said(path.to_path_buf());
-        }
-        remove_whole(path)
-    }
-
-    /// Takes away `path`, a folder named for the process `owner`, once that process is gone and
-    /// no process uses the folder, as the machine says now ([`usage`]): where either is not so,
-    /// or cannot be read, it is left and the reason said.
-    pub fn remove_unused(&self, path: &Path, owner: u32) -> Removed {
-        match ThisMachine.identity(owner) {
-            Ok(None) => {}
-            Ok(Some(_)) => return Removed::Left(path.to_path_buf(), "its run is there".into()),
-            Err(failed) => {
-                return Removed::Left(
-                    path.to_path_buf(),
-                    format!("whether its run is there could not be read: {failed}"),
-                )
-            }
-        }
-        self.remove_if_unused(path, Some(owner), "its run is gone and no process uses it")
-    }
-
-    /// Takes away `path`, a rig's folder older than `older` that no person kept ([`KEPT`]) and
-    /// no process uses, as the machine says now: what `cargo xtask live sweep` takes. Anything
-    /// else is left and the reason said. On Windows every one is left: the kit cannot ask there
-    /// which processes work in a folder or hold a file in it, and nothing in Temp is taken for
-    /// what command lines say (T-1368).
-    pub fn remove_stale_rig(
-        &self,
-        path: &Path,
-        older: std::time::Duration,
-        now: std::time::SystemTime,
-    ) -> Removed {
-        let named = path
-            .file_name()
-            .is_some_and(|name| name.to_string_lossy().starts_with(RIG_PREFIX));
-        let Ok(found) = fs::symlink_metadata(path) else {
-            return Removed::Absent(path.to_path_buf());
-        };
-        if !named || !found.is_dir() {
-            return Removed::Left(path.to_path_buf(), "it is no rig's folder".into());
-        }
-        if path.join(KEPT).exists() {
-            return Removed::Left(path.to_path_buf(), "it was kept".into());
-        }
-        if cfg!(windows) {
-            return Removed::Left(
-                path.to_path_buf(),
-                "on Windows the kit cannot read which processes work in a folder".into(),
-            );
-        }
-        let age = found
-            .modified()
-            .ok()
-            .and_then(|changed| now.duration_since(changed).ok());
-        if age.is_none_or(|age| age <= older) {
-            return Removed::Left(path.to_path_buf(), "it is not old enough".into());
-        }
-        self.remove_if_unused(path, None, "an older rig folder no process uses")
-    }
-
-    fn remove_if_unused(&self, path: &Path, owner: Option<u32>, ground: &str) -> Removed {
-        match usage::in_use(path, owner) {
-            Ok(false) => {}
-            Ok(true) => {
-                return Removed::Left(path.to_path_buf(), "a process uses it".into());
-            }
-            Err(why) => {
-                return Removed::Left(
-                    path.to_path_buf(),
-                    format!("whether a process uses it could not be read: {why}"),
-                )
-            }
-        }
-        if self.says_only() {
-            self.say("remove", &said_path(path), ground);
             return Removed::Said(path.to_path_buf());
         }
         remove_whole(path)

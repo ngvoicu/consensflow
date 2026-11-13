@@ -5,7 +5,7 @@
 // ages against, and read the switch a child of theirs is started with.
 #![allow(clippy::disallowed_methods)]
 
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use super::*;
 
@@ -365,67 +365,6 @@ fn a_record_is_named_for_the_real_path_of_the_folder_it_is_of() {
         Record::of(Path::new("/records"), &parent.path().join("none")),
         None
     );
-}
-
-#[test]
-fn an_older_rig_folder_is_taken_only_unkept_unused_and_old_enough() {
-    let parent = tempfile::tempdir().unwrap();
-    let door = Door::acting();
-    let make = |name: &str| {
-        let folder = parent.path().join(name);
-        fs::create_dir_all(folder.join("workspace")).unwrap();
-        folder
-    };
-    let old = make("consensflow-integration-old");
-    let kept = make("consensflow-integration-kept");
-    fs::write(kept.join(KEPT), "kept").unwrap();
-    let other = make("someone-elses");
-    let later = SystemTime::now() + Duration::from_secs(3 * 24 * 60 * 60);
-    let day = Duration::from_secs(24 * 60 * 60);
-
-    assert!(matches!(
-        door.remove_stale_rig(&kept, day, later),
-        Removed::Left(..)
-    ));
-    assert!(matches!(
-        door.remove_stale_rig(&other, day, later),
-        Removed::Left(..)
-    ));
-    assert!(matches!(
-        door.remove_stale_rig(&old, day, SystemTime::now()),
-        Removed::Left(..)
-    ));
-    let taken = door.remove_stale_rig(&old, day, later);
-    if cfg!(target_os = "macos") {
-        assert_eq!(taken, Removed::Removed(old.clone()));
-    } else {
-        // A machine where the kit cannot read which processes work in a folder leaves it:
-        // Windows (T-1368), and a Linux.
-        assert!(matches!(taken, Removed::Left(..)), "{taken:?}");
-    }
-    assert!(kept.is_dir() && other.is_dir());
-
-    // One a process works in is left.
-    let used = make("consensflow-integration-used");
-    let me = std::env::current_exe().unwrap();
-    let mut child = std::process::Command::new(&me)
-        .args([
-            "--exact",
-            "door::tests::a_child_that_waits_a_minute",
-            "--ignored",
-        ])
-        .env("CF_E2E_DOOR_CHILD", "1")
-        .current_dir(&used)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
-    std::thread::sleep(Duration::from_millis(300));
-    let left = door.remove_stale_rig(&used, day, later);
-    let _ = child.kill();
-    let _ = child.wait();
-    assert!(matches!(left, Removed::Left(..)), "{left:?}");
-    assert!(used.is_dir());
 }
 
 #[test]

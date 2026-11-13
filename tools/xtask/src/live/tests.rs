@@ -505,9 +505,9 @@ fn a_say_only_run_says_in_the_file_it_is_given_or_one_of_its_own_and_a_run_that_
 
 #[test]
 fn sweep_runs_the_kits_own_program_with_the_words_after_it() {
-    let ran = sweep(&context(), &words("--older-than 3 --yes")).display();
+    let ran = sweep(&context(), &words("--older-than 3 --home /h")).display();
     assert!(
-        ran.ends_with("cargo run -q -p cf-e2e --bin live-sweep -- --older-than 3 --yes"),
+        ran.ends_with("cargo run -q -p cf-e2e --bin live-sweep -- --older-than 3 --home /h"),
         "{ran}"
     );
 }

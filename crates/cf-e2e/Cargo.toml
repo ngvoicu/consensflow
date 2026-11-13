@@ -48,8 +48,9 @@ name = "fake-cf"
 path = "src/bin/fake_cf.rs"
 required-features = ["test-support"]
 
-# `cargo xtask live sweep`: the rig folders older runs left, listed, and with `--yes` taken
-# through the kit's door (`cf_e2e::door`), a kept one and one a process uses never.
+# `cargo xtask live sweep`: the folders earlier runs left (rig folders, login copies, harness
+# homes, live-case projects) listed with what each is and why a person might keep it. It takes
+# none: a person removes what they choose.
 [[bin]]
 name = "live-sweep"
 path = "src/bin/live_sweep.rs"

@@ -391,7 +391,7 @@ fn the_folder_goes_when_the_login_is_dropped_and_when_the_run_panics() {
 }
 
 #[test]
-fn a_folder_a_killed_run_left_is_taken_away_and_a_folder_of_a_run_that_is_there_is_not() {
+fn the_folders_earlier_runs_left_are_only_counted_and_none_is_taken() {
     let parent = tempfile::tempdir().unwrap();
     // A process id nothing has: a child that ended and was waited for.
     let mut child = Run::new("/usr/bin/true").spawn().unwrap();
@@ -409,13 +409,12 @@ fn a_folder_a_killed_run_left_is_taken_away_and_a_folder_of_a_run_that_is_there_
     let no_process = make(format!("{PREFIX}not-a-number-1"));
     let file = parent.path().join(format!("{PREFIX}{gone}-file"));
     std::fs::write(&file, "").unwrap();
-    sweep(parent.path(), PREFIX);
-    assert!(
-        !left.exists(),
-        "the folder of a run that is gone is taken away"
-    );
-    for kept in [&running, &others, &no_process, &file] {
-        assert!(kept.exists(), "{} is nobody's to take away", kept.display());
+    // The copies of earlier runs: the one of a run that is gone and the one with no run's
+    // number; not the one of this run, nor a rig's folder, nor a file. Said once.
+    assert_eq!(crate::rig::sweep::say_copies(parent.path()), 2);
+    assert_eq!(crate::rig::sweep::say_copies(parent.path()), 0, "said once");
+    for kept in [&left, &running, &others, &no_process, &file] {
+        assert!(kept.exists(), "{} is another run's to take", kept.display());
     }
 }
 

@@ -74,7 +74,6 @@ use sha2::{Digest, Sha256};
 use super::keychain;
 use super::machine::Harness;
 use super::renew::{self, Kept, Renewal, Renewed, TestMachine};
-use crate::door::Removed;
 use crate::process::{own_var, Run};
 use crate::rig::ClaudeConfig;
 use crate::{files, Error, Result};
@@ -96,8 +95,8 @@ const CLAUDE_JSON: &str = r#"{"hasCompletedOnboarding":true,"hasSeenAutoDefaultN
 
 /// What the name of a run's config folder begins with, in the temporary folder: the id of
 /// the process that made it follows, so that one a killed run left behind is known to be
-/// nobody's ([`sweep`]).
-const PREFIX: &str = "consensflow-live-claude-";
+/// nobody's to take, and is counted ([`crate::rig::sweep::say_copies`]).
+pub(crate) const PREFIX: &str = "consensflow-live-claude-";
 
 /// Where the machine keeps the login of Claude Code.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -693,7 +692,7 @@ impl Login {
             return Ok(made.folder.path().to_path_buf());
         }
         let (oauth, renewed) = self.usable(self.source.read()?, now)?;
-        sweep(&self.parent, PREFIX);
+        crate::rig::sweep::say_copies(&self.parent);
         let folder =
             crate::door::made_in(&self.parent, &format!("{PREFIX}{}-", std::process::id()))
                 .map_err(|source| Error::File {
@@ -827,54 +826,6 @@ fn copy_tree(from: &Path, to: &Path) -> Result {
         }
     }
     Ok(())
-}
-
-/// Takes away the folders of runs that were killed before they could (`prefix`, the id of
-/// the process, and a random word), in `parent`, through the door: a folder whose run is gone
-/// and that no process uses is nobody's, and holds a login ([`Door::remove_unused`]). A run that
-/// is there keeps its own; a harness that run detached, which runs on the copy after its run
-/// ended, keeps it too (T-1557, finding 3b). Says, in one line, what it took and what it left in
-/// use.
-#[allow(clippy::print_stderr)] // Said in the output of the run.
-pub(super) fn sweep(parent: &Path, prefix: &str) {
-    let Ok(entries) = fs::read_dir(parent) else {
-        return;
-    };
-    let (mut taken, mut left) = (Vec::new(), Vec::new());
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let owner = name
-            .strip_prefix(prefix)
-            .and_then(|rest| rest.split('-').next())
-            .and_then(|id| id.parse::<u32>().ok());
-        let is_folder = entry.file_type().is_ok_and(|kind| kind.is_dir());
-        let (true, Some(owner)) = (is_folder, owner) else {
-            continue;
-        };
-        match crate::door::Door::of_run().remove_unused(&entry.path(), owner) {
-            Removed::Removed(_) | Removed::Said(_) => taken.push(name),
-            Removed::Left(_, why) if why != "its run is there" => {
-                left.push(format!("{name} ({why})"))
-            }
-            Removed::Left(..) | Removed::Absent(_) => {}
-        }
-    }
-    if !taken.is_empty() || !left.is_empty() {
-        eprintln!(
-            "the login copies of runs that are gone in {}: taken {}; left {}",
-            parent.display(),
-            if taken.is_empty() {
-                "none".to_owned()
-            } else {
-                taken.join(", ")
-            },
-            if left.is_empty() {
-                "none".to_owned()
-            } else {
-                left.join(", ")
-            },
-        );
-    }
 }
 
 impl fmt::Debug for Login {

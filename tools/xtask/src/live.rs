@@ -61,10 +61,11 @@
 //! machine (the release's step 2 names it): the checks only a Windows machine holds, the
 //! typed marks of `live parity` among them (T-961, row 32; T-972).
 //!
-//! `cargo xtask live sweep [--in <folder>] [--older-than <days>] [--yes]` lists the rig folders
-//! older runs left (in the temp folder, older than a day, unless named), and with `--yes` takes
-//! them through the kit's door: one a person kept, or one a process uses, never (`live-sweep`,
-//! `cf_e2e::door`). A rig's start takes none.
+//! `cargo xtask live sweep [--in <folder>] [--home <folder>] [--older-than <days>]` lists the
+//! folders earlier runs left (rig folders, login copies and harness homes in the temp folder,
+//! the project folders of live cases below the home's `.consensflow-candidate/live`), each with
+//! what it is, how old, and why a person might keep it (`live-sweep`). It takes none, and has
+//! no word that does: a person removes what they choose. No run's start takes one either.
 //!
 //! With `CF_LIVE_AUDIT=1` a run is say-only: the kit ends no process, closes no window and
 //! takes no file away, and writes down instead what it would have, each with its ground, in
@@ -84,7 +85,7 @@ use crate::process::{self, Invocation};
 pub const COMMANDS: &[Command] = &[Command {
     words: &["live"],
     about: "Run a live test of cf-e2e (the tests/live_<name>.rs files): it runs real harnesses on the machine's own logins and spends real quota, so it is ignored unless asked for and is no part of check",
-    usage: "<name> [harness ...] | sweep [--in <folder>] [--older-than <days>] [--yes] | --set <set> (each run of the set, one after another: windows) [--keep] [--models harness=model[:effort],...] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; --keep leaves the run's home and project where they are (the Claude Code config folder goes, for it holds a copy of a login: its conversations and sessions are copied into the kept home); --models runs each harness it names on that model, and that effort where one is given, the others on their cheap one (--claude-model M is --models claude=M, and --models wins where both name Claude); words that are no flags name harnesses; run it with no name to list the tests)",
+    usage: "<name> [harness ...] | sweep [--in <folder>] [--home <folder>] [--older-than <days>] (lists what earlier runs left; takes none) | --set <set> (each run of the set, one after another: windows) [--keep] [--models harness=model[:effort],...] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; --keep leaves the run's home and project where they are (the Claude Code config folder goes, for it holds a copy of a login: its conversations and sessions are copied into the kept home); --models runs each harness it names on that model, and that effort where one is given, the others on their cheap one (--claude-model M is --models claude=M, and --models wins where both name Claude); words that are no flags name harnesses; run it with no name to list the tests)",
     run: Run::Native(live),
 }];
 

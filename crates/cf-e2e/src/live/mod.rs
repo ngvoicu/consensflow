@@ -98,6 +98,7 @@ pub mod human;
 pub mod isolation;
 pub mod keychain;
 pub mod launcher;
+pub mod layout;
 pub mod login;
 pub mod machine;
 pub mod mcp_server;

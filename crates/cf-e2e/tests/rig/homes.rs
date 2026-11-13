@@ -8,8 +8,8 @@
 //!
 //! A run that was killed leaves its rigs' homes, and so does `CONSENSFLOW_LIVE_KEEP`. A
 //! rig that starts takes none of them, for they may be another run's (T-1557, finding 3a):
-//! `cargo xtask live sweep --yes` takes, through the kit's door, the ones older than a day
-//! that no person kept and no process works in or names, without reading what is in them.
+//! `cargo xtask live sweep` lists the ones older than a day, and says of each whether a person
+//! kept it and whether a process works in or names it, and takes none (T-1592).
 
 use std::fs;
 use std::path::Path;
@@ -85,7 +85,6 @@ mod sweeping {
     use std::path::Path;
     use std::time::{Duration, SystemTime};
 
-    use cf_e2e::door::Door;
     use cf_e2e::process::Run;
     use cf_e2e::rig::sweep;
 
@@ -110,7 +109,7 @@ mod sweeping {
     }
 
     #[test]
-    fn a_rig_that_starts_takes_no_home_and_the_sweep_takes_the_old_ones_no_process_works_in_or_names(
+    fn a_rig_that_starts_takes_no_home_and_the_sweep_lists_the_old_ones_and_says_which_a_process_works_in_or_names(
     ) -> Outcome {
         let folder = tempfile::tempdir()?;
         let stale = home(folder.path(), "consensflow-integration-stale", DAY * 3)?;
@@ -156,48 +155,53 @@ mod sweeping {
         assert!(started, "a rig's start took a home that was there");
         assert!(report.is_file() && link.is_symlink());
 
-        // The sweep: what it lists, and what its door takes of that.
+        // The sweep: what it lists of them, and what it says of the processes that use each.
+        // It takes none.
         #[allow(clippy::disallowed_methods)]
         let now = SystemTime::now();
-        let listed = sweep::older(folder.path(), now, sweep::OLDER);
-        let swept: Vec<_> = listed
-            .iter()
-            .map(|home| Door::acting().remove_stale_rig(home, sweep::OLDER, now))
-            .collect();
+        let listed = sweep::listing(
+            folder.path(),
+            &folder.path().join("no-live"),
+            now,
+            sweep::OLDER,
+        );
         sleeper.kill();
         namer.kill();
-        assert_eq!(
-            listed,
-            vec![named.clone(), stale.clone(), worked_in.clone()]
-        );
-        // A machine where the kit cannot read which processes work in a folder takes none.
-        let reads = cfg!(target_os = "macos");
-        assert_eq!(
-            swept.iter().filter(|removed| removed.is_gone()).count(),
-            usize::from(reads),
-            "{swept:?}"
-        );
-        assert_eq!(
-            stale.exists(),
-            !reads,
-            "a home older than a day, worked in by none"
-        );
-        assert!(
-            worked_in.join("workspace").join("note").is_file(),
-            "a home a process works in"
-        );
-        assert!(
-            named.join("workspace").join("note").is_file(),
-            "a home a process names"
-        );
-        assert!(
-            young.join("workspace").join("note").is_file(),
-            "a home under a day old"
-        );
-        assert!(
-            other.join("workspace").join("note").is_file(),
-            "a folder that is no home"
-        );
+        let paths: Vec<_> = listed.iter().map(|left| left.path.clone()).collect();
+        assert_eq!(paths, vec![named.clone(), stale.clone(), worked_in.clone()]);
+        // A machine where the kit cannot read which processes work in a folder says so.
+        let said = |home: &std::path::PathBuf| {
+            listed
+                .iter()
+                .find(|left| &left.path == home)
+                .map(|left| left.used.clone())
+        };
+        if cfg!(target_os = "macos") {
+            assert_eq!(
+                said(&stale),
+                Some(sweep::Used::No),
+                "a home older than a day, worked in by none"
+            );
+            assert_eq!(
+                said(&worked_in),
+                Some(sweep::Used::Yes),
+                "a home a process works in"
+            );
+            assert_eq!(
+                said(&named),
+                Some(sweep::Used::Yes),
+                "a home a process names"
+            );
+        } else {
+            assert!(matches!(said(&stale), Some(sweep::Used::Unread(_))));
+        }
+        for home in [&stale, &worked_in, &named, &young, &other] {
+            assert!(
+                home.join("workspace").join("note").is_file(),
+                "the sweep took {}",
+                home.display()
+            );
+        }
         assert!(report.is_file(), "a report");
         assert!(
             link.is_symlink() && elsewhere.join("workspace").join("note").is_file(),

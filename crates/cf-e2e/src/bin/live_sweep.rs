@@ -1,9 +1,11 @@
-//! `cargo xtask live sweep [--in <folder>] [--older-than <days>] [--yes]`: the rig folders that
-//! older runs left in `folder` (the temp folder unless named), each older than `days` (one
-//! unless given), listed. With `--yes` each is taken through the kit's door
-//! ([`cf_e2e::door::Door::remove_stale_rig`]): one a person kept, and one a process uses or
-//! names, as the machine says at that moment, is left and the reason said. A rig's own start
-//! takes none of them (T-1557, finding 3a), and nothing else does.
+//! `cargo xtask live sweep [--in <folder>] [--home <folder>] [--older-than <days>]`: the folders
+//! that earlier runs left, each listed with what it is and why a person might keep it. The rig
+//! folders, login copies and harness homes of runs are looked for in `folder` (the temp folder
+//! unless named), and the project folders of live cases in the live folder of `home`
+//! (`.consensflow-candidate/live` in the person's home unless named), each last changed at
+//! least `days` ago (any age unless given). It takes nothing: a folder that looks left may be
+//! another run's at work, or its evidence kept to be looked at, and a person removes what they
+//! choose (T-1557, T-1592).
 
 // A command a person runs answers on its own output.
 #![allow(clippy::print_stdout, clippy::print_stderr)]
@@ -12,28 +14,35 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime};
 
-use cf_e2e::door::Door;
+use cf_e2e::live::machine::live_root;
+use cf_e2e::process::own_var;
 use cf_e2e::rig::sweep;
 
 /// What the command line asks.
 struct Asked {
     folder: PathBuf,
+    home: PathBuf,
     older: Duration,
-    yes: bool,
 }
 
 fn asked(args: &[String]) -> Result<Asked, String> {
+    let home = own_var("HOME")
+        .or_else(|| own_var("USERPROFILE"))
+        .map(PathBuf::from)
+        .ok_or("this machine says no home")?;
     let mut asked = Asked {
         folder: std::env::temp_dir(),
-        older: sweep::OLDER,
-        yes: false,
+        home,
+        older: Duration::ZERO,
     };
     let mut words = args.iter();
     while let Some(word) = words.next() {
         match word.as_str() {
-            "--yes" => asked.yes = true,
             "--in" => {
                 asked.folder = PathBuf::from(words.next().ok_or("--in takes a folder")?);
+            }
+            "--home" => {
+                asked.home = PathBuf::from(words.next().ok_or("--home takes a folder")?);
             }
             "--older-than" => {
                 let days: f64 = words
@@ -45,7 +54,8 @@ fn asked(args: &[String]) -> Result<Asked, String> {
             }
             other => {
                 return Err(format!(
-                    "{other} is no word of sweep: [--in <folder>] [--older-than <days>] [--yes]"
+                    "{other} is no word of sweep, which lists and takes nothing: \
+                     [--in <folder>] [--home <folder>] [--older-than <days>]"
                 ))
             }
         }
@@ -64,27 +74,17 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let now = SystemTime::now();
-    let found = sweep::older(&asked.folder, now, asked.older);
+    let live = live_root(&asked.home);
+    let found = sweep::listing(&asked.folder, &live, SystemTime::now(), asked.older);
     println!(
-        "{} rig folder{} older than {:.1} days in {}",
+        "{} folder{} earlier runs left, in {} and {}; nothing is taken, a person removes what they choose",
         found.len(),
         if found.len() == 1 { "" } else { "s" },
-        asked.older.as_secs_f64() / 86_400.0,
-        asked.folder.display()
+        asked.folder.display(),
+        live.display()
     );
-    for folder in &found {
-        if asked.yes {
-            println!(
-                "{}",
-                Door::of_run().remove_stale_rig(folder, asked.older, now)
-            );
-        } else {
-            println!("  {}", folder.display());
-        }
-    }
-    if !asked.yes && !found.is_empty() {
-        println!("nothing was taken: --yes takes the ones nobody kept or uses");
+    for left in &found {
+        println!("{}", left.says());
     }
     ExitCode::SUCCESS
 }
