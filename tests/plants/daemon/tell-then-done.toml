@@ -199,8 +199,13 @@ runs = ["engine-paused-answers", "ledger-pause-notes"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
-find = "    for (id, said) in notes_of(store, task, Some(\"queued\"))? {"
-replace = "    for (id, said) in notes_of(store, task, None)? {"
+find = "pub(crate) fn keep_moved(store: &mut Store, task: &TaskRow) -> Result<(), LedgerError> {\n    for (id, said) in notes_of(store, task, Some(\"queued\"))? {"
+replace = "pub(crate) fn keep_moved(store: &mut Store, task: &TaskRow) -> Result<(), LedgerError> {\n    for (id, said) in notes_of(store, task, None)? {"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = ".is_some_and(|note| note.state != \"queued\")"
+replace = ".is_some_and(|note| note.state != \"queued\" && note.state != \"delivered\")"
 
 [[plant]]
 name = "tell then done: finishing withdraws the answer note whether the chief has read it or not"
@@ -219,8 +224,8 @@ runs = ["engine-paused-answers", "ledger-pause-notes"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
-find = "                then: Then::Moved,\n                ..said\n"
-replace = "                then: said.then,\n                ..said\n"
+find = "        if matches!(said.then, Then::Paused(_)) {\n            let body = render(&Answered {\n                then: Then::Moved,\n                ..said\n"
+replace = "        if matches!(said.then, Then::Paused(_)) {\n            let body = render(&Answered {\n                then: said.then,\n                ..said\n"
 
 [[plant]]
 name = "tell then done: a turn that ended after the resume is told in the words of a paused task"
@@ -381,3 +386,46 @@ runs = ["ledger-pause-notes"]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
 find = "               AND state IN ('queued', 'gated', 'delivering')\",\n"
 replace = "               AND state IN ('queued', 'gated')\",\n"
+
+# CLN-71: once the window's answer to the tell is on its way to the chief,
+# its note is shown; until then it is typed. A late answer changes an unpasted
+# note too, and the answer itself says how to go on while that pause holds.
+[[plant]]
+name = "answered tell: the answered tell's note is typed"
+meant = "an_answered_tells_note_is_shown_while_the_task_stays_paused"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "        let shown = show_for_answer(store, &task, handle, tell, false)?;"
+replace = "        let shown = false;"
+
+[[plant]]
+name = "answered tell: the unanswered tell's note is shown"
+meant = "an_unanswered_tells_note_is_queued_with_both_ways_on_while_the_task_stays_paused"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "        let shown = show_for_answer(store, &task, handle, tell, false)?;"
+replace = "        let shown = true;"
+
+[[plant]]
+name = "answered tell: a late answer leaves the queued note to be typed"
+meant = "a_late_board_answer_shows_the_queued_note_even_if_the_task_stays_paused"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "            paused_answers::show_answered(store, &task, question_id, false)?;"
+replace = "            let _ = (&task, question_id);"
+
+[[plant]]
+name = "answered tell: the chief's answer omits the ways on"
+meant = "an_answered_tells_turn_is_shown_and_the_answer_tells_the_paused_chief_both_ways_on"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = "            if let Some(number) = self.seams.ledger.borrow().answer_to_current_pause(row.id)? {"
+replace = "            if let Some(number) = None::<i64> {"
