@@ -207,11 +207,14 @@ fn an_answered_tells_note_stays_shown_when_the_chief_resumes_before_the_answer_i
 
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
     let session = chief_session(&rig, &project)?;
+    // The chief is already in its own turn before the tell can be answered.
+    rig.tell(project.id(), "SLEEP 40 Reply with exactly: BUSY")?;
+    rig.wait_for("the chief to be at work", secs(30), || {
+        Ok(project.lane("chief")?["activity"]["state"] != "idle")
+    })?;
     let words = format!("Stop now. REPLY {ANSWER} THEN SLEEP 2 Reply with exactly: {REPORT}");
     let tell = rig.cf_in_window(&chief, ["tell", "T-1", words.as_str()])?;
     assert_eq!(tell.code, Some(0), "{tell}");
-    // The chief is at work on a turn of its own: nothing is given it until that is over.
-    rig.tell(project.id(), "SLEEP 40 Reply with exactly: BUSY")?;
 
     rig.wait_for("the answered tell note to be shown", secs(60), || {
         Ok(note(&project)?.is_some())
@@ -225,6 +228,17 @@ fn an_answered_tells_note_stays_shown_when_the_chief_resumes_before_the_answer_i
             .is_some_and(|body| body.starts_with("T-1 is paused, and @")),
         "{waiting}"
     );
+    let answer = project
+        .inbox("chief")?
+        .into_iter()
+        .find(|message| {
+            message["kind"] == "answer"
+                && message["body"]
+                    .as_str()
+                    .is_some_and(|body| body.contains(ANSWER))
+        })
+        .expect("the board answer is in the inbox");
+    assert_eq!(answer["state"], "queued", "{answer}");
 
     // The human resumes the task before the queued answer reaches the chief.
     let resumed = rig.page("task.resume", json!({ "project": project.id(), "task": 1 }))?;
@@ -247,16 +261,6 @@ fn an_answered_tells_note_stays_shown_when_the_chief_resumes_before_the_answer_i
 
     // The chief gets the board answer, not a second typed message for the note.
     let note_id = waiting["id"].as_i64().expect("the note has an id");
-    let answer = project
-        .inbox("chief")?
-        .into_iter()
-        .find(|message| {
-            message["kind"] == "answer"
-                && message["body"]
-                    .as_str()
-                    .is_some_and(|body| body.contains(ANSWER))
-        })
-        .expect("the board answer is in the inbox");
     assert!(answer["id"].as_i64().is_some(), "{answer}");
     rig.wait_for("the answer to reach the chief", secs(90), || {
         Ok(prompt_with(&rig, &session, ANSWER).is_some())
@@ -298,10 +302,13 @@ fn an_unanswered_tells_note_is_typed_after_the_chief_resumes() -> Outcome {
     })?;
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
     let session = chief_session(&rig, &project)?;
+    rig.tell(project.id(), "SLEEP 40 Reply with exactly: BUSY")?;
+    rig.wait_for("the chief to be at work", secs(30), || {
+        Ok(project.lane("chief")?["activity"]["state"] != "idle")
+    })?;
     let words = format!("Stop now. SLEEP 2 Reply with exactly: {REPORT}");
     let tell = rig.cf_in_window(&chief, ["tell", "T-1", words.as_str()])?;
     assert_eq!(tell.code, Some(0), "{tell}");
-    rig.tell(project.id(), "SLEEP 40 Reply with exactly: BUSY")?;
     rig.wait_for("the unanswered tell note to wait", secs(60), || {
         Ok(note(&project)?.is_some())
     })?;
