@@ -45,6 +45,12 @@ impl Ledger {
         staff::remove_backup(&mut self.store, project, member)
     }
 
+    /// Why a participant is out, as the ledger kept it with its mark: none when it is not out,
+    /// or its mark has no kind (a timed mark from before the kind was kept).
+    pub fn hold_kind(&self, participant: i64) -> Result<Option<HoldKind>, LedgerError> {
+        staff::hold_kind(&self.store, participant)
+    }
+
     /// Put a staff row on Vacation. `unopened` identifies its sessions the caller
     /// has proved have no window or open in flight, while holding its engine step.
     pub fn send_on_vacation(
@@ -54,6 +60,17 @@ impl Ledger {
         unopened: &[i64],
     ) -> Result<ParticipantView, LedgerError> {
         staff::send_on_vacation(&mut self.store, project, member, unopened)
+    }
+
+    /// Return the never-opened tasks of `unopened` sessions of a staff row on Vacation. It
+    /// never sets the mark, and does nothing once the row has been brought back.
+    pub fn release_unopened(
+        &mut self,
+        project: i64,
+        member: &str,
+        unopened: &[i64],
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::release_unopened(&mut self.store, project, member, unopened)
     }
 
     /// Bring a staff row back from Vacation without changing its quota hold.

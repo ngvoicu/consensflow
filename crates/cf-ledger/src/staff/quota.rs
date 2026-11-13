@@ -122,3 +122,16 @@ pub(crate) fn mark_back(
         participant_view(&store.participant_row(member.id)?)
     })
 }
+
+/// The kind kept with a participant's out mark.
+pub(crate) fn hold_kind(
+    store: &Store,
+    participant_id: i64,
+) -> Result<Option<HoldKind>, LedgerError> {
+    let kind: Option<String> = store.db.query_row(
+        "SELECT out_kind FROM participant WHERE id = ?",
+        [participant_id],
+        |row| row.get(0),
+    )?;
+    Ok(HoldKind::read(kind.as_deref()))
+}

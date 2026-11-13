@@ -32,7 +32,8 @@ fn upgrading_main_keeps_projects_members_tasks_and_history_and_adds_the_marks() 
              (81,10,'2026-10-05','member.left','{\"handle\":\"rejoined\",\"cancelled\":[]}'),
              (82,10,'2026-10-06','member.added','{\"handle\":\"rejoined\",\"roles\":[\"worker\"],\"harness\":\"codex\",\"rejoined\":true}');"
     ).unwrap();
-    let legacy = |db: &Connection| -> Vec<(
+    /// A legacy participant row: id, handle, tier, left_at, out_until, out_since, former handles.
+    type LegacyRow = (
         i64,
         String,
         Option<String>,
@@ -40,7 +41,8 @@ fn upgrading_main_keeps_projects_members_tasks_and_history_and_adds_the_marks() 
         Option<String>,
         Option<String>,
         String,
-    )> {
+    );
+    let legacy = |db: &Connection| -> Vec<LegacyRow> {
         db.prepare("SELECT id,handle,tier,left_at,out_until,out_since,former_handles FROM participant WHERE id BETWEEN 51 AND 55 ORDER BY id").unwrap()
             .query_map([], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?))).unwrap()
             .map(Result::unwrap).collect()
@@ -1644,4 +1646,63 @@ fn review_participant_view_exposes_its_backup_link_and_vacation() {
     let json = serde_json::to_value(viewed).unwrap();
     assert_eq!(json["backupOf"], owner);
     assert!(json["vacationSince"].is_string());
+}
+
+#[test]
+fn a_release_of_unopened_sessions_never_sets_the_mark_and_does_nothing_after_a_bring_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let p = project(&mut ledger, vec![member("alpha", "worker", "standard")]);
+    let primary = id(&p, "alpha");
+    let task = ledger
+        .create_task(p.id, &work("worker", "standard"))
+        .unwrap()
+        .task;
+    let assigned = ledger.assign_task(p.id, task.number, primary).unwrap().task;
+    let session_handle = assigned.assignee.unwrap();
+    let session = id(&ledger.project(p.id).unwrap().unwrap(), &session_handle);
+
+    // A release for a member that is not on Vacation sets no mark and returns nothing.
+    let view = ledger.release_unopened(p.id, "alpha", &[session]).unwrap();
+    assert_eq!(view.vacation_since, None);
+    assert_eq!(
+        ledger
+            .task(p.id, task.number)
+            .unwrap()
+            .unwrap()
+            .task
+            .assignee
+            .as_deref(),
+        Some(session_handle.as_str())
+    );
+
+    // A Send on Vacation that a Bring back overlapped: its later per-session release neither
+    // brings the mark back nor takes the task.
+    ledger.send_on_vacation(p.id, "alpha", &[]).unwrap();
+    ledger.bring_back(p.id, "alpha").unwrap();
+    let view = ledger.release_unopened(p.id, "alpha", &[session]).unwrap();
+    assert_eq!(view.vacation_since, None);
+    assert_eq!(
+        ledger
+            .task(p.id, task.number)
+            .unwrap()
+            .unwrap()
+            .task
+            .assignee
+            .as_deref(),
+        Some(session_handle.as_str())
+    );
+
+    // On Vacation, the same release returns the never-opened task.
+    ledger.send_on_vacation(p.id, "alpha", &[]).unwrap();
+    ledger.release_unopened(p.id, "alpha", &[session]).unwrap();
+    assert_eq!(
+        ledger
+            .task(p.id, task.number)
+            .unwrap()
+            .unwrap()
+            .task
+            .assignee,
+        None
+    );
 }

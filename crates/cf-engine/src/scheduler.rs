@@ -15,8 +15,8 @@ use cf_base::time;
 use cf_harness::contract::Observed;
 use cf_harness::records::{Level, Quota, Role};
 use cf_ledger::{
-    Candidate, HeldTask, LedgerError, NewNote, ParticipantView, ProjectView, TaskCard, TaskThread,
-    TaskView, RESUME_WORDS,
+    BackupCandidate, Candidate, HeldTask, HoldKind, LedgerError, MemberView, NewNote,
+    ParticipantView, ProjectView, TaskCard, TaskThread, TaskView, RESUME_WORDS,
 };
 use serde_json::Value;
 
@@ -207,7 +207,9 @@ pub(crate) struct SchedulerState {
     /// The members out because their model was busy, each with the time it was marked out
     /// until: their lane and the board say so, not that they are out of quota. In memory, as
     /// the ledger keeps no kind of a member's time out; after a restart they read as out.
-    busy_out: RefCell<HashMap<i64, String>>,
+    /// The tasks whose giver was told they went to a member's backup, each with its project:
+    /// told once for a task, however often it comes back to the board.
+    backup_noted: RefCell<HashMap<i64, i64>>,
 }
 
 /// The same refusal: the one a record's reading gave, or one of the same time.
@@ -291,6 +293,119 @@ fn after(later: &str, earlier: &str) -> bool {
         .is_some_and(|(later, earlier)| later > earlier)
 }
 
+/// A member or a backup as the pick looks at it: its row, whether it is on Vacation, and the
+/// kind of its hold as the ledger keeps it.
+struct Seat<'a> {
+    member: &'a MemberView,
+    vacation_since: Option<&'a str>,
+    out_kind: Option<HoldKind>,
+}
+
+impl<'a> Seat<'a> {
+    fn of(candidate: &'a Candidate) -> Self {
+        Self {
+            member: &candidate.member,
+            vacation_since: candidate.vacation_since.as_deref(),
+            out_kind: candidate.out_kind,
+        }
+    }
+
+    fn of_backup(backup: &'a BackupCandidate) -> Self {
+        Self {
+            member: &backup.member,
+            vacation_since: backup.vacation_since.as_deref(),
+            out_kind: backup.out_kind,
+        }
+    }
+}
+
+/// Why a member is not free, the first reason that holds, as the pick reads it; the words the
+/// board shows are made from it ([`NotFree::words`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NotFree {
+    NoAdapter {
+        handle: String,
+        harness: String,
+    },
+    NeedsEdit {
+        handle: String,
+        agent: Option<String>,
+    },
+    Vacation {
+        handle: String,
+    },
+    Out {
+        handle: String,
+        until: String,
+        held: Held,
+        kind: Option<HoldKind>,
+    },
+}
+
+impl NotFree {
+    /// Whether the member is out for its quota or its login, which its backup takes work for:
+    /// not for a busy or moved model, nor one whose hold the ledger has no kind of (a timed hold
+    /// from before the kind was kept).
+    fn hands_on(&self) -> bool {
+        matches!(
+            self,
+            NotFree::Out {
+                held: Held::Quota | Held::Account,
+                kind: Some(HoldKind::Quota | HoldKind::Account),
+                ..
+            }
+        )
+    }
+
+    fn words(&self) -> String {
+        match self {
+            NotFree::NoAdapter { handle, harness } => format!(
+                "@{handle} runs on {harness}, whose windows ConsensFlow cannot open (remove @{handle} from the staff and add a member on another harness)"
+            ),
+            NotFree::NeedsEdit { handle, agent } => needs_an_edit_because(handle, agent.as_deref()),
+            NotFree::Vacation { handle } => format!("@{handle} is on Vacation"),
+            NotFree::Out {
+                handle,
+                until,
+                held,
+                ..
+            } => match held {
+                Held::Moved => {
+                    format!("@{handle}'s model moved on its own (it waits for the human's word)")
+                }
+                Held::Account => format!(
+                    "@{handle}'s account is unavailable (its billing or login was refused)"
+                ),
+                Held::Busy => {
+                    format!("@{handle}'s model is busy (ConsensFlow tries it again at {until})")
+                }
+                Held::Quota => format!("@{handle} is out of quota until {until}"),
+            },
+        }
+    }
+}
+
+/// Who takes a task.
+enum Taker<'a> {
+    Member(&'a Candidate),
+    /// The backup of a member out for `held`, until `until`.
+    Backup {
+        backup: &'a BackupCandidate,
+        of: &'a Candidate,
+        held: Held,
+        until: &'a str,
+    },
+}
+
+impl Taker<'_> {
+    fn id(&self) -> i64 {
+        match self {
+            Taker::Member(member) => member.member.id,
+            Taker::Backup { backup, .. } => backup.member.id,
+        }
+    }
+}
+
 impl Dispatcher {
     /// Each open task goes to the best free member of its tier; the
     /// requester hears once when none is. A task that needs others waits
@@ -321,17 +436,25 @@ impl Dispatcher {
                 .ledger
                 .borrow()
                 .candidates(project.id, task.number)?;
-            let free: Vec<&Candidate> = candidates
+            let verdicts: Vec<Option<NotFree>> = candidates
                 .iter()
-                .filter(|member| self.why_not_free(member).is_none())
+                .map(|member| self.not_free(&Seat::of(member)))
                 .collect();
-            if let Some(best) = rank(free, &candidates).first() {
-                self.seams.ledger.borrow_mut().assign_task(
-                    project.id,
-                    task.number,
-                    best.member.id,
-                )?;
+            if let Some(taker) = self.taker(&candidates, &verdicts) {
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .assign_task(project.id, task.number, taker.id())?;
                 self.scheduler.waiting_noted.borrow_mut().remove(&task.id);
+                if let Taker::Backup {
+                    backup,
+                    of,
+                    held,
+                    until,
+                } = taker
+                {
+                    self.tell_backup_took(project, &task, backup, of, held, until)?;
+                }
                 self.changed();
                 assigned = true;
             } else if !self.scheduler.waiting_noted.borrow().contains_key(&task.id) {
@@ -340,10 +463,18 @@ impl Dispatcher {
                     .borrow_mut()
                     .insert(task.id, project.id);
                 let pool = cf_ledger::roles::pool_name(task.pool.as_deref(), task.tier.as_deref());
-                let mut why: Vec<String> = candidates
-                    .iter()
-                    .filter_map(|member| self.why_not_free(member))
-                    .collect();
+                let mut why: Vec<String> = Vec::new();
+                for (member, verdict) in candidates.iter().zip(&verdicts) {
+                    let Some(reason) = verdict else { continue };
+                    why.push(reason.words());
+                    // A member out for its quota or its login has a backup that did not take
+                    // the task: it says why.
+                    if let Some(backup) = member.backup.as_ref().filter(|_| reason.hands_on()) {
+                        if let Some(rests) = self.not_free(&Seat::of_backup(backup)) {
+                            why.push(format!("its backup {}", rests.words()));
+                        }
+                    }
+                }
                 // A wait always says why: nobody holds the role (the last member of it left
                 // after the task was given), or, if it ever came to it, that no member is free.
                 if why.is_empty() {
@@ -375,6 +506,11 @@ impl Dispatcher {
                         ));
                     }
                 }
+                // Where a backup or Vacation is in play, the wait says when the first of them
+                // may be free again.
+                if let Some(first) = self.earliest_reset(&candidates) {
+                    renewed.push_str(&format!(" The earliest reset is {first}."));
+                }
                 self.seams.ledger.borrow_mut().note(
                     project.id,
                     &NewNote {
@@ -392,6 +528,128 @@ impl Dispatcher {
             }
         }
         Ok(assigned)
+    }
+
+    /// Who takes a task: the best free member; only where none is free, the backup of the member
+    /// out for its quota or its login whose reset is latest, if that backup is free.
+    fn taker<'a>(
+        &self,
+        candidates: &'a [Candidate],
+        verdicts: &'a [Option<NotFree>],
+    ) -> Option<Taker<'a>> {
+        let free: Vec<&Candidate> = candidates
+            .iter()
+            .zip(verdicts)
+            .filter(|(_, verdict)| verdict.is_none())
+            .map(|(member, _)| member)
+            .collect();
+        if let Some(best) = rank(free, candidates).first() {
+            return Some(Taker::Member(best));
+        }
+        candidates
+            .iter()
+            .zip(verdicts)
+            .filter_map(|(of, verdict)| {
+                let NotFree::Out { held, until, .. } = verdict.as_ref().filter(|v| v.hands_on())?
+                else {
+                    return None;
+                };
+                let backup = of.backup.as_ref()?;
+                self.not_free(&Seat::of_backup(backup))
+                    .is_none()
+                    .then_some(())?;
+                let reset = time::parse(until)?;
+                Some((reset, of, backup, *held, until.as_str()))
+            })
+            .max_by_key(|(reset, of, ..)| (*reset, std::cmp::Reverse(of.member.id)))
+            .map(|(_, of, backup, held, until)| Taker::Backup {
+                backup,
+                of,
+                held,
+                until,
+            })
+    }
+
+    /// Tells a task's giver, once for the task, that it went to a member's backup, and until
+    /// when that member is out: shown, not typed, for it asks no decision (RS-25).
+    fn tell_backup_took(
+        &self,
+        project: &ProjectView,
+        task: &TaskView,
+        backup: &BackupCandidate,
+        of: &Candidate,
+        held: Held,
+        until: &str,
+    ) -> Result<(), EngineError> {
+        if self
+            .scheduler
+            .backup_noted
+            .borrow_mut()
+            .insert(task.id, project.id)
+            .is_some()
+        {
+            return Ok(());
+        }
+        let why = match held {
+            Held::Account => {
+                "whose account is unavailable (its billing or login was refused)".to_owned()
+            }
+            _ => format!("which is out of quota until {until}"),
+        };
+        let aside = format!(
+            "with @{}, the backup of @{}, {why}",
+            backup.member.handle, of.member.handle
+        );
+        self.seams.ledger.borrow_mut().show(
+            project.id,
+            &NewNote {
+                from: None,
+                to: task.requester.clone(),
+                task: Some(task.number),
+                body: format!(
+                    "T-{} went to @{}, the backup of @{}, {why}.",
+                    task.number, backup.member.handle, of.member.handle
+                ),
+            },
+            &aside,
+        )?;
+        self.changed();
+        Ok(())
+    }
+
+    /// The first time a member or a backup that is in play comes back by its reset, when the
+    /// staff has a backup or a member on Vacation: none where it has neither, or none has a reset.
+    /// A member on Vacation is resting, and its backup with it.
+    fn earliest_reset(&self, candidates: &[Candidate]) -> Option<String> {
+        if !candidates
+            .iter()
+            .any(|member| member.backup.is_some() || member.vacation_since.is_some())
+        {
+            return None;
+        }
+        let timed = |until: Option<&str>| {
+            until
+                .filter(|until| !never(until) && self.out(Some(until)))
+                .and_then(|until| time::parse(until).map(|at| (at, until.to_owned())))
+        };
+        candidates
+            .iter()
+            .filter(|member| member.vacation_since.is_none())
+            .flat_map(|member| {
+                let own = self.not_free(&Seat::of(member));
+                let backup = member
+                    .backup
+                    .as_ref()
+                    .filter(|backup| backup.vacation_since.is_none())
+                    .filter(|_| own.as_ref().is_some_and(NotFree::hands_on));
+                [
+                    timed(member.member.out_until.as_deref()),
+                    backup.and_then(|backup| timed(backup.member.out_until.as_deref())),
+                ]
+            })
+            .flatten()
+            .min_by_key(|(at, _)| *at)
+            .map(|(_, until)| until)
     }
 
     /// Tells a task's requester, once, that the tier it asked went to the nearest
@@ -423,42 +681,38 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// Why a member is not free, the first reason that holds for it: on a
-    /// harness whose windows open, not out (of quota, or held for its account or
-    /// its model); none when it is free. A quota nearly spent holds nobody: a
-    /// member works to the end of its allowance, on every harness, and waits
-    /// only when its harness says it is out (T-1356).
-    fn why_not_free(&self, candidate: &Candidate) -> Option<String> {
-        let member = &candidate.member;
+    /// Why a member is not free, the first reason that holds for it: on a harness whose windows
+    /// open, not needing an edit, not on Vacation, not out (of quota, or held for its account or
+    /// its model); none when it is free. A quota nearly spent holds nobody: a member works to the
+    /// end of its allowance, on every harness, and waits only when its harness says it is out
+    /// (T-1356).
+    fn not_free(&self, seat: &Seat<'_>) -> Option<NotFree> {
+        let member = seat.member;
         let harness = member.harness.as_deref().unwrap_or("null");
         if self.seams.adapters.adapter(harness).is_none() {
-            return Some(format!(
-                "@{} runs on {harness}, whose windows ConsensFlow cannot open (remove @{} from the staff and add a member on another harness)",
-                member.handle, member.handle
-            ));
+            return Some(NotFree::NoAdapter {
+                handle: member.handle.clone(),
+                harness: harness.to_owned(),
+            });
         }
         if member.needs_edit {
-            return Some(needs_an_edit_because(
-                &member.handle,
-                member.agent.as_deref(),
-            ));
+            return Some(NotFree::NeedsEdit {
+                handle: member.handle.clone(),
+                agent: member.agent.clone(),
+            });
+        }
+        if seat.vacation_since.is_some() {
+            return Some(NotFree::Vacation {
+                handle: member.handle.clone(),
+            });
         }
         if self.out(member.out_until.as_deref()) {
-            let until = member.out_until.as_deref().unwrap_or_default();
-            return Some(match self.kind_of_hold(member.id, until) {
-                Held::Moved => format!(
-                    "@{}'s model moved on its own (it waits for the human's word)",
-                    member.handle
-                ),
-                Held::Account => format!(
-                    "@{}'s account is unavailable (its billing or login was refused)",
-                    member.handle
-                ),
-                Held::Busy => format!(
-                    "@{}'s model is busy (ConsensFlow tries it again at {until})",
-                    member.handle
-                ),
-                Held::Quota => format!("@{} is out of quota until {until}", member.handle),
+            let until = member.out_until.clone().unwrap_or_default();
+            return Some(NotFree::Out {
+                handle: member.handle.clone(),
+                held: held_of(&until, seat.out_kind),
+                kind: seat.out_kind,
+                until,
             });
         }
         None
@@ -484,18 +738,11 @@ impl Dispatcher {
 
     /// What holds `member`, out until `until`: its model's move and its account's refusal
     /// are marked by the time they are out until (`MOVED`, `NEVER`); a busy model by the
-    /// mark of its own (`marked_busy`) at that very time, which a later quota refusal
-    /// outlasts; else a quota.
+    /// kind the ledger kept with the mark (it outlasts a restart, and a later quota refusal
+    /// never relabels a longer hold); else a quota.
     pub(crate) fn kind_of_hold(&self, member: i64, until: &str) -> Held {
-        if moved_hold(until) {
-            Held::Moved
-        } else if never(until) {
-            Held::Account
-        } else if self.busy_until(member).as_deref() == Some(until) {
-            Held::Busy
-        } else {
-            Held::Quota
-        }
+        let kept = self.seams.ledger.borrow().hold_kind(member).ok().flatten();
+        held_of(until, kept)
     }
 
     /// The handles, as "@zeus", of the `candidates` that are out now for `held`.
@@ -504,7 +751,7 @@ impl Dispatcher {
             .iter()
             .filter(|candidate| {
                 candidate.member.out_until.as_deref().is_some_and(|until| {
-                    self.out(Some(until)) && self.kind_of_hold(candidate.member.id, until) == held
+                    self.out(Some(until)) && held_of(until, candidate.out_kind) == held
                 })
             })
             .map(|candidate| format!("@{}", candidate.member.handle))
@@ -1172,9 +1419,9 @@ impl Dispatcher {
             .ledger
             .borrow()
             .candidates(project.id, task.number)?;
-        Ok(candidates
-            .iter()
-            .any(|member| member.member.id != owner.id && self.why_not_free(member).is_none()))
+        Ok(candidates.iter().any(|member| {
+            member.member.id != owner.id && self.not_free(&Seat::of(member)).is_none()
+        }))
     }
 
     /// The note that `task`'s window's model is busy, where its requester was given it, or is
@@ -1229,19 +1476,6 @@ impl Dispatcher {
             .unwrap_or(0);
         let wait = BUSY_BACKOFF_MS.get(tries).copied().unwrap_or(BUSY_HOLD_MS);
         Ok(time::iso(self.now() + wait))
-    }
-
-    /// A member marked out until `until` because its model was busy: said so, not out of quota.
-    pub(crate) fn marked_busy(&self, member: i64, until: &str) {
-        self.scheduler
-            .busy_out
-            .borrow_mut()
-            .insert(member, until.to_owned());
-    }
-
-    /// Until when a member is out because its model was busy, where it is.
-    pub(crate) fn busy_until(&self, member: i64) -> Option<String> {
-        self.scheduler.busy_out.borrow().get(&member).cloned()
     }
 
     /// Until when `member`, as the ledger has it now, is out because its model is busy for a
@@ -1640,6 +1874,10 @@ impl Dispatcher {
             .waiting_noted
             .borrow_mut()
             .retain(|_, noted| *noted != project);
+        self.scheduler
+            .backup_noted
+            .borrow_mut()
+            .retain(|_, noted| *noted != project);
     }
 }
 
@@ -1672,6 +1910,20 @@ pub(crate) fn needs_an_edit_because(handle: &str, agent: Option<&str>) -> String
         "@{handle} needs an edit: the update could not tell what it ran on ({} is in no catalog and no agents file); edit it under Project settings, or remove it",
         agent.unwrap_or("its agent")
     )
+}
+
+/// Why a hold is what it is: a moved model or a refused account by the time it is marked until
+/// (`MOVED`, `NEVER`); a busy model by the kind the ledger kept with the mark; else a quota.
+pub(crate) fn held_of(until: &str, kept: Option<cf_ledger::HoldKind>) -> Held {
+    if moved_hold(until) {
+        Held::Moved
+    } else if never(until) {
+        Held::Account
+    } else if kept == Some(cf_ledger::HoldKind::Busy) {
+        Held::Busy
+    } else {
+        Held::Quota
+    }
 }
 
 #[cfg(test)]

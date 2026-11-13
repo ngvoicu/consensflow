@@ -91,6 +91,95 @@ impl Context {
         self.executor.start_now(open)
     }
 
+    /// The human sends a member on Vacation, begun where it is called.
+    pub fn begin_send_on_vacation(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Answer<Result<ParticipantView, EngineError>> {
+        let (dispatcher, handle) = (Rc::clone(&self.dispatcher), handle.to_owned());
+        let sending = self.operation(
+            "sendOnVacation",
+            json!([project, handle]),
+            answer,
+            async move { dispatcher.send_on_vacation(project, &handle).await },
+        );
+        self.executor.start_now(sending)
+    }
+
+    /// The human sends a member on Vacation.
+    pub fn send_on_vacation(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Result<ParticipantView, EngineError> {
+        let sending = self.begin_send_on_vacation(project, handle);
+        self.finish(sending)
+    }
+
+    /// The human brings a member back from Vacation.
+    pub fn bring_back_from_vacation(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Result<ParticipantView, EngineError> {
+        self.dispatcher.bring_back_from_vacation(project, handle)
+    }
+
+    /// A member's backup taken off the staff, begun where it is called.
+    pub fn begin_remove_backup(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Answer<Result<ParticipantView, EngineError>> {
+        let (dispatcher, handle) = (Rc::clone(&self.dispatcher), handle.to_owned());
+        let removal = self.operation(
+            "removeBackup",
+            json!([project, handle]),
+            answer,
+            async move { dispatcher.remove_backup(project, &handle).await },
+        );
+        self.executor.start_now(removal)
+    }
+
+    /// A member's backup taken off the staff.
+    pub fn remove_backup(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Result<ParticipantView, EngineError> {
+        let removal = self.begin_remove_backup(project, handle);
+        self.finish(removal)
+    }
+
+    /// A member's backup replaced.
+    pub fn change_backup(
+        &self,
+        project: i64,
+        handle: &str,
+        backup: cf_ledger::NewMember,
+    ) -> Result<ParticipantView, EngineError> {
+        let change = self.begin_change_backup(project, handle, backup);
+        self.finish(change)
+    }
+
+    /// A member's backup replaced, begun where it is called.
+    pub fn begin_change_backup(
+        &self,
+        project: i64,
+        handle: &str,
+        backup: cf_ledger::NewMember,
+    ) -> Answer<Result<ParticipantView, EngineError>> {
+        let (dispatcher, handle) = (Rc::clone(&self.dispatcher), handle.to_owned());
+        let change = self.operation(
+            "changeBackup",
+            json!([project, handle]),
+            answer,
+            async move { dispatcher.change_backup(project, &handle, &backup).await },
+        );
+        self.executor.start_now(change)
+    }
+
     /// A member taken off the staff, begun where it is called.
     pub fn begin_remove_member(
         &self,
@@ -301,13 +390,10 @@ impl Context {
     /// A member marked out for its busy model, as a refusal of one does (T-1112) but with no
     /// window refused: out until `until`, and said to be busy.
     pub fn mark_out_busy(&self, member: i64, until: &str) {
-        let marked = self
-            .ledger
+        self.ledger
             .borrow_mut()
-            .mark_out(member, until, "model busy")
+            .mark_out_with_kind(member, until, "model busy", cf_ledger::HoldKind::Busy)
             .expect("the member marked out");
-        self.dispatcher
-            .marked_busy(member, marked.out_until.as_deref().unwrap_or_default());
     }
 
     /// The human says a member out of quota is back (`backFromQuota`).
@@ -399,6 +485,20 @@ pub struct Restarted<'a> {
 impl Restarted<'_> {
     fn engine(&self) -> Rc<Dispatcher> {
         self.engine.upgrade().expect("the context holds the engine")
+    }
+
+    /// The human says a member out of quota is back (`backFromQuota`), to this engine.
+    pub fn back_from_quota(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Result<ParticipantView, EngineError> {
+        self.engine().back_from_quota(project, handle)
+    }
+
+    /// Until when this engine says `member` is out for a busy model.
+    pub fn model_busy_until(&self, member: &ParticipantView) -> Option<String> {
+        self.engine().model_busy_until(member)
     }
 
     /// What this engine says the participant's window is doing.
