@@ -250,8 +250,13 @@ impl Machine {
     /// Whether this machine is free for a run in the copy `dir`: [`Machine::ready`], no run of
     /// this runner holding its copy, no program holding its lock, and no run queued for it.
     fn free(&self, context: &Context, dir: &str) -> Free {
-        let queued = Queues::of(&context.env)
-            .map_or(0, |queues| queues.depth(&self.name, SystemClock.now_ms()));
+        let queued = match Queues::of(&context.env) {
+            Some(queues) => match queues.queued(&self.name, SystemClock.now_ms()) {
+                Ok(queued) => queued,
+                Err(why) => return Free::No(why.to_string()),
+            },
+            None => 0,
+        };
         if queued > 0 {
             return Free::No(queued_words(queued));
         }

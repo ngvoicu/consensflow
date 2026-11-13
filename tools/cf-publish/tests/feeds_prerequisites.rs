@@ -227,6 +227,52 @@ fn refuses_where_sha256sums_is_gone_or_lists_no_file_the_old_apps_need() {
 }
 
 #[test]
+fn refuses_a_bridge_sha256sums_with_a_row_that_is_not_as_the_release_writes_it_naming_the_row() {
+    /// The bridge's SHA256SUMS changed by `edit`, which takes its rows.
+    fn sums_edited(edit: impl Fn(Vec<String>) -> Vec<String>) -> impl FnOnce(&Github, &Files) {
+        move |github, files| {
+            let sums = published_assets(files).text("SHA256SUMS");
+            let rows = sums.lines().map(str::to_owned).collect::<Vec<_>>();
+            let edited: String = edit(rows).iter().map(|row| format!("{row}\n")).collect();
+            let assets = published_assets(files).with("SHA256SUMS", edited);
+            github.release(&format!("v{BRIDGE}"), Spec::new().assets(assets.iter()));
+        }
+    }
+    let garbage = found(sums_edited(|rows| {
+        let mut edited = vec!["garbage".to_owned()];
+        edited.extend(rows);
+        edited
+    }));
+    assert_eq!(
+        garbage,
+        [format!(
+            "the bridge's v{BRIDGE}/SHA256SUMS row 1 is not \"<sha-256>  <name>\": \"garbage\""
+        )]
+    );
+    // The archive's row in capitals: the installers read lowercase alone.
+    let upper = found(sums_edited(|rows| {
+        rows.into_iter()
+            .map(|row| {
+                if row.ends_with(&archive(BRIDGE)) {
+                    format!("{}{}", row[..64].to_ascii_uppercase(), &row[64..])
+                } else {
+                    row
+                }
+            })
+            .collect()
+    }));
+    assert_eq!(upper.len(), 1, "{upper:?}");
+    assert!(
+        upper[0].starts_with(&format!("the bridge's v{BRIDGE}/SHA256SUMS row ")),
+        "{upper:?}"
+    );
+    assert!(
+        upper[0].ends_with(&format!("  {}\"", archive(BRIDGE))),
+        "{upper:?}"
+    );
+}
+
+#[test]
 fn waits_out_an_old_feed_served_stale_for_a_moment() {
     let asked = Arc::new(AtomicUsize::new(0));
     let passed = found(|github, _| {

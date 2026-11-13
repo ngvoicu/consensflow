@@ -251,14 +251,29 @@ impl Shared {
     /// Tells whoever reads the window's notes (its chief; for the chief's own
     /// window, the human) that a start of its TUI's went without its role
     /// ([`unclassified_note`]): asked of the board off this thread, as a question
-    /// is. A window with no board, or a board that refuses, says nothing more.
+    /// is. A window with no board says nothing; a note the board does not take is
+    /// one line in the daemon's log, once: the note is said once, and not retried.
     fn say_unclassified(&self, why: &'static str) {
         let Some(board) = self.board.clone() else {
             return;
         };
+        let log_home = self.log_home.clone();
         self.spawn(async move {
             let body = json!({ "body": unclassified_note(why) });
-            let _ = tokio::task::spawn_blocking(move || board.post("/api/notes", &body)).await;
+            let failed =
+                match tokio::task::spawn_blocking(move || board.post("/api/notes", &body)).await {
+                    Ok(Ok(_)) => return,
+                    Ok(Err(refused)) => refused.to_string(),
+                    Err(ended) => ended.to_string(),
+                };
+            if let Some(home) = log_home {
+                crate::log::info_in(
+                    &home,
+                    &format!(
+                        "cf codex-session could not tell the board that a thread started without its role: {failed}"
+                    ),
+                );
+            }
         });
     }
 }

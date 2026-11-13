@@ -2,7 +2,17 @@ import { element } from './dom.js'
 
 const SIX_HOURS = 6 * 60 * 60 * 1_000
 const QUIET_DELAY = 10_000
-const BUSY_PHASES = new Set(['checking', 'downloading', 'installing'])
+// The shell's phases of an update, as it names them (`Phase` in updates.rs).
+const PHASE = Object.freeze({
+  idle: 'idle',
+  checking: 'checking',
+  available: 'available',
+  downloading: 'downloading',
+  ready: 'ready',
+  installing: 'installing',
+  error: 'error',
+})
+const BUSY_PHASES = new Set([PHASE.checking, PHASE.downloading, PHASE.installing])
 const CHANNELS = new Set(['alpha', 'stable'])
 const DISMISSED_KEY = 'consensflow.dismissed-update-versions.v1'
 // Blockers the backend synthesizes for panes already gone from its table, so
@@ -40,12 +50,14 @@ function normalizeSnapshot(value) {
     ok: true,
     currentVersion: text(value.currentVersion, 'Unknown'),
     channel: CHANNELS.has(value.channel) ? value.channel : 'stable',
-    phase: text(value.phase, 'idle'),
+    phase: text(value.phase, PHASE.idle),
     available: candidate,
     downloadedBytes: Number.isFinite(value.downloadedBytes) ? value.downloadedBytes : 0,
     totalBytes: Number.isFinite(value.totalBytes) ? value.totalBytes : null,
     lastChecked: value.lastChecked === null ? null : text(value.lastChecked),
     error: value.error === null ? null : text(value.error),
+    // Why the saved channel could not be used while its file is not replaced; null otherwise.
+    preferenceProblem: text(value.preferenceProblem) || null,
     blockers: array(value.blockers).filter(record),
     // Where the release is downloaded by hand, on a system whose app installs
     // nothing itself (Windows, for now); null where the app installs it.
@@ -60,6 +72,10 @@ function commandFailure(result) {
 
 function eventPayload(event) {
   return record(event?.payload) ? event.payload : event
+}
+
+function channelLabelOf(channel) {
+  return channel === 'alpha' ? 'Alpha' : 'Stable'
 }
 
 function formatBytes(bytes) {
@@ -162,6 +178,13 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
 
   const stateLine = liveLine('updates-state')
   const feedback = liveLine('updates-feedback')
+  // A saved channel that could not be read: said with the way to keep the channel in use.
+  const preference = element('div', 'updates-feedback')
+  preference.id = 'updates-preference'
+  preference.dataset.tone = 'error'
+  const preferenceText = element('span')
+  const keep = updaterButton('quiet-button', 'Keep', 'updates-keep')
+  preference.append(preferenceText, ' ', keep)
   const progress = named('p', 'updates-progress', 'updates-progress')
   const content = element('div', 'updates-content')
   content.append(
@@ -173,6 +196,7 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     ),
     metadata,
     stateLine,
+    preference,
     feedback,
     candidateSection,
     progress,
@@ -278,6 +302,11 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     feedback.textContent = feedbackText
     feedback.dataset.tone = feedbackTone
     feedback.hidden = feedbackText.length === 0
+    const problem = current?.preferenceProblem ?? null
+    preference.hidden = problem === null
+    preferenceText.textContent = problem ?? ''
+    keep.textContent = `Keep ${channelLabelOf(current?.channel)}`
+    keep.disabled = busy()
 
     const candidate = current?.available ?? null
     candidateSection.hidden = candidate === null
@@ -288,7 +317,7 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     }
 
     const hasDownload = candidate !== null
-    const isReady = current?.phase === 'ready'
+    const isReady = current?.phase === PHASE.ready
     const bytes = current?.downloadedBytes ?? 0
     const total = current?.totalBytes
     // Downloaded by hand from its page: nothing to download or install here.
@@ -301,17 +330,17 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     openPage.hidden = !byPage
     download.disabled = !hasDownload || busy() || isReady
     install.disabled =
-      !hasDownload || current?.phase !== 'ready' || (current?.blockers?.length ?? 0) !== 0
+      !hasDownload || current?.phase !== PHASE.ready || (current?.blockers?.length ?? 0) !== 0
     renderBlockers()
     renderBanner()
   }
 
   function stateText(current) {
-    if (current.phase === 'checking') return 'Checking for signed updates…'
-    if (current.phase === 'downloading') return 'Downloading update…'
-    if (current.phase === 'ready') return 'Update downloaded and ready to install.'
-    if (current.phase === 'installing') return 'Installing update and preparing restart…'
-    if (current.phase === 'error') return 'The last update operation failed.'
+    if (current.phase === PHASE.checking) return 'Checking for signed updates…'
+    if (current.phase === PHASE.downloading) return 'Downloading update…'
+    if (current.phase === PHASE.ready) return 'Update downloaded and ready to install.'
+    if (current.phase === PHASE.installing) return 'Installing update and preparing restart…'
+    if (current.phase === PHASE.error) return 'The last update operation failed.'
     if (current.available !== null && current.page !== null) {
       return 'A newer release is available: download its installer or portable exe from its page.'
     }
@@ -329,7 +358,7 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     const next = normalizeSnapshot(value)
     if (next === null) return false
     snapshot = next
-    if (next.error !== null && next.phase === 'error') setFeedback(next.error, 'error')
+    if (next.error !== null && next.phase === PHASE.error) setFeedback(next.error, 'error')
     render()
     return true
   }
@@ -360,7 +389,8 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     operation = null
     if (applySnapshot(result)) {
       if (!quiet) {
-        if (snapshot.error !== null) setFeedback(snapshot.error, 'error')
+        if (snapshot.error !== null && snapshot.error !== snapshot.preferenceProblem)
+          setFeedback(snapshot.error, 'error')
         else if (snapshot.available === null) setFeedback('You are up to date.', 'info')
         else setFeedback(`Update available: ${snapshot.available.version}`, 'info')
         render()
@@ -386,7 +416,7 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
   }
 
   async function downloadUpdate() {
-    if (snapshot?.available === null || busy() || snapshot?.phase === 'ready') return
+    if (snapshot?.available === null || busy() || snapshot?.phase === PHASE.ready) return
     const result = await call('update_download')
     if (!applySnapshot(result)) {
       setFeedback(commandFailure(result) ?? 'The update download failed', 'error')
@@ -418,12 +448,26 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
     await checkForUpdates()
   }
 
+  // The shown channel is chosen again, which writes it over a saved choice that could not be read.
+  async function keepChannel() {
+    if (snapshot === null || snapshot.preferenceProblem === null || busy()) return
+    const kept = snapshot.channel
+    const result = await call('update_channel', { channel: kept })
+    if (!applySnapshot(result)) {
+      setFeedback(commandFailure(result) ?? 'The channel could not be kept', 'error')
+      render()
+      return
+    }
+    setFeedback(`Keeping the ${channelLabelOf(kept)} channel.`, 'info')
+    render()
+  }
+
   async function installUpdate() {
     if (!(await refreshStatus({ explicit: true }))) return
     const current = snapshot
     if (
       current === null ||
-      current.phase !== 'ready' ||
+      current.phase !== PHASE.ready ||
       current.available === null ||
       current.blockers.length > 0
     ) {
@@ -463,6 +507,7 @@ export async function initializeUpdates({ invoke, listen, getState } = {}) {
   check.addEventListener('click', () => void checkForUpdates())
   download.addEventListener('click', () => void downloadUpdate())
   channel.addEventListener('change', () => void changeChannel())
+  keep.addEventListener('click', () => void keepChannel())
   install.addEventListener('click', () => void installUpdate())
   openPage.addEventListener('click', () => void openDownloadPage())
   dialog.addEventListener('close', () => previousFocus?.focus?.())

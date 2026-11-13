@@ -10,11 +10,15 @@
 # `a_close_waited_for_a_codex_chiefs_server_to_end` (the real daemon and pane host, on the stand-in
 # Codex whose server takes neither). One plant takes one rule out; a test of it fails.
 #
+# A window whose Codex program could not be waited on is a failed window, not one that ended with 0
+# (CLN-64): the supervisor's `exit_code` keeps the wait's error, and the crate's own test of it runs.
+#
 # Every name holds `codex close`, so `npm run plants:daemon -- "codex close"` runs them all.
 
 [run]
 rig-codex-close = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "codex_session::ends_"], builds = true }
 rig-regression-codex-close = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_close_waited_for_a_codex_chiefs_server_to_end::"], builds = true }
+supervisor-wait = { command = ["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "supervisor::everywhere::a_wait_that_failed"] }
 
 [[plant]]
 name = "codex close: the supervisor leaves SIGHUP to its default, and dies of it before it ends Codex's server"
@@ -40,3 +44,13 @@ find = '''
 '''
 replace = '''
 '''
+
+[[plant]]
+name = "codex close: a wait on Codex's TUI that failed is read as the window's exit of 0"
+meant = "a_wait_that_failed_is_a_failure_and_no_exit_of_zero"
+runs = ["supervisor-wait"]
+
+[[plant.edit]]
+file = "crates/cf-codex-session/src/supervisor.rs"
+find = "    Ok(status.map_err(SessionError::Wait)?.code().unwrap_or(0))"
+replace = "    Ok(status.ok().and_then(|status| status.code()).unwrap_or(0))"

@@ -157,3 +157,47 @@ fn the_sub_agents_file_is_the_one_the_variable_names_and_none_without_the_variab
         Err(SessionError::Children { .. })
     ));
 }
+
+fn failed_wait() -> io::Error {
+    io::Error::other("the wait failed")
+}
+
+#[test]
+fn a_wait_that_failed_is_a_failure_and_no_exit_of_zero() {
+    let failure = exit_code(Err(failed_wait())).unwrap_err();
+    assert!(matches!(failure, SessionError::Wait(_)), "{failure:?}");
+    assert_eq!(
+        failure.to_string(),
+        "could not wait for Codex's program to end: the wait failed"
+    );
+    assert_eq!(failure.startup(), StartKind::NotSetUp);
+}
+
+#[test]
+fn a_poll_of_the_server_that_failed_is_a_failure_and_not_a_server_still_running() {
+    let failure = ended_of(Some(Err(failed_wait()))).unwrap_err();
+    assert!(matches!(failure, SessionError::Wait(_)), "{failure:?}");
+    assert_eq!(ended_of(Some(Ok(None))).unwrap(), None);
+    assert_eq!(ended_of(None).unwrap(), None);
+}
+
+#[test]
+fn a_status_that_was_read_gives_its_code_and_a_signal_gives_zero() {
+    #[cfg(unix)]
+    use std::os::unix::process::ExitStatusExt;
+    #[cfg(windows)]
+    use std::os::windows::process::ExitStatusExt;
+    #[cfg(unix)]
+    let (code_seven, signalled) = (ExitStatus::from_raw(7 << 8), ExitStatus::from_raw(15));
+    #[cfg(windows)]
+    let (code_seven, signalled) = (ExitStatus::from_raw(7), ExitStatus::from_raw(7));
+    assert_eq!(exit_code(Ok(code_seven)).unwrap(), 7);
+    #[cfg(unix)]
+    assert_eq!(exit_code(Ok(signalled)).unwrap(), 0);
+    #[cfg(windows)]
+    let _ = signalled;
+    assert_eq!(
+        ended_of(Some(Ok(Some(code_seven)))).unwrap(),
+        Some(code_seven)
+    );
+}

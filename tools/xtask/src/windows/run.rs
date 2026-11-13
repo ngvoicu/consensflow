@@ -21,7 +21,7 @@
 use super::interrupt::Interrupt;
 use super::machine::Machine;
 use super::options::Options;
-use super::queue::{self, Queues, Waited, Who};
+use super::queue::{self, Queues, Ticket, Waited, Who};
 use super::reach;
 use super::script::{
     command_line, encode_script, remote_script, run_id, run_script, stop_script, upload_name,
@@ -141,7 +141,7 @@ pub fn run(
         &mut |line| writeln!(console.err, "windows: {line}"),
     )?;
     // The ticket is the run's place, kept until the run is over.
-    let _turn = match waited {
+    let turn = match waited {
         Waited::Stopped => return Ok(Outcome::Stopped),
         Waited::Refused(why) => {
             writeln!(console.out, "{why}").map_err(Error::Output)?;
@@ -154,6 +154,60 @@ pub fn run(
             turn
         }
     };
+    let ended = send_and_stream(context, machine, &plan, console, interrupt);
+    // A ticket that could not be kept alive does not end a run that is under way, nor take its
+    // result: the runs behind may have gone past it, and the lock of the machine decides.
+    say_unkept(turn.as_ref().and_then(Ticket::beat_failure), console, ended)
+}
+
+/// Says that the run's ticket could not be kept alive, if it could not.
+fn say_unkept(
+    unkept: Option<std::io::Error>,
+    console: &mut Console,
+    ended: Result<Outcome, Error>,
+) -> Result<Outcome, Error> {
+    if let Some(cause) = unkept {
+        // Best effort: this line is told of a run that is over, and a stderr that cannot take it
+        // does not change how the run ended, nor cost it the reports that are brought back after.
+        let _ = writeln!(
+            console.err,
+            "windows: the run's place in the queue could not be kept alive ({cause}); the run goes on"
+        );
+    }
+    ended
+}
+
+/// Sends the tree and follows the run there to its end.
+fn send_and_stream(
+    context: &Context,
+    machine: &Machine,
+    plan: &Plan,
+    console: &mut Console,
+    interrupt: &Interrupt,
+) -> Result<Outcome, Error> {
+    let identity = match send_tree(context, machine, plan, console, interrupt)? {
+        Sent::Stopped => return Ok(Outcome::Stopped),
+        Sent::Identity(identity) => identity,
+    };
+    stream_run(context, machine, plan, console, interrupt, &identity)
+}
+
+/// How sending the tree to the machine ended.
+enum Sent {
+    /// A stop was heard.
+    Stopped,
+    /// The tree is there; its identity, which the run is to say back.
+    Identity(String),
+}
+
+/// Packs the tree as it is now and sends it to the machine, where the run script will unpack it.
+fn send_tree(
+    context: &Context,
+    machine: &Machine,
+    plan: &Plan,
+    console: &mut Console,
+    interrupt: &Interrupt,
+) -> Result<Sent, Error> {
     let scratch = tempfile::tempdir().map_err(Error::Scratch)?;
 
     // A stop is looked for after each step, before what it says is: a Ctrl-C ends
@@ -161,17 +215,17 @@ pub fn run(
     // is the stop's doing.
     let listed = tree::files(context);
     if stopped(interrupt, listed.is_err()) {
-        return Ok(Outcome::Stopped);
+        return Ok(Sent::Stopped);
     }
     let listed = listed?;
     let identity = tree::identity(context, &listed);
     if stopped(interrupt, identity.is_err()) {
-        return Ok(Outcome::Stopped);
+        return Ok(Sent::Stopped);
     }
     let identity = identity?;
     let packed = tree::pack(context, &listed, &identity, &plan.script, scratch.path());
     if stopped(interrupt, packed.is_err()) {
-        return Ok(Outcome::Stopped);
+        return Ok(Sent::Stopped);
     }
     let tarball = packed?;
     let scp = reach::scp(context, reach::RUN)
@@ -179,7 +233,7 @@ pub fn run(
         .arg(&plan.upload);
     let sent = process::capture(&scp, &context.env);
     if stopped(interrupt, !matches!(&sent, Ok(done) if done.code == 0)) {
-        return Ok(Outcome::Stopped);
+        return Ok(Sent::Stopped);
     }
     // scp is run quiet, so what it says is what is wrong: said as the run's own words.
     let sent = sent?;
@@ -197,14 +251,25 @@ pub fn run(
         }
         return Err(Error::step(&scp, sent.code, ""));
     }
+    Ok(Sent::Identity(identity))
+}
 
+/// Runs the run script on the machine and follows what it says until it ends.
+fn stream_run(
+    context: &Context,
+    machine: &Machine,
+    plan: &Plan,
+    console: &mut Console,
+    interrupt: &Interrupt,
+    identity: &str,
+) -> Result<Outcome, Error> {
     let run = ssh(context, &machine.host, &plan.run);
     let tree_said = format!("{TREE_MARK}{identity}");
     match session::stream(&run, &context.env, console, interrupt, &tree_said)? {
         Ended::Exited(status) => Ok(Outcome::Exited(status)),
         Ended::Unstarted(status) => Ok(Outcome::NotStarted(status)),
         Ended::WrongTree(said) => {
-            let ended = end_there(context, machine, &plan)?;
+            let ended = end_there(context, machine, plan)?;
             Err(Error::WrongTree {
                 sent: tree_said,
                 said,
@@ -212,20 +277,20 @@ pub fn run(
             })
         }
         Ended::Stopped => {
-            say_if_not_ended(end_there(context, machine, &plan)?, console)?;
+            say_if_not_ended(end_there(context, machine, plan)?, console)?;
             Ok(Outcome::Stopped)
         }
         Ended::Silent => {
             // The network may be back, and the run is not read by anyone any more: it is ended
             // there if the machine can be asked, as a stop's is, so that it holds the machine no longer.
-            let ended = end_there(context, machine, &plan)?;
+            let ended = end_there(context, machine, plan)?;
             Err(Error::Silent(format!(
                 "{} and ssh ended it, so how the command ended is not known: {ended}",
                 reach::silent_words(&machine.host, reach::RUN)
             )))
         }
         Ended::Unwritten(cause) => {
-            say_if_not_ended(end_there(context, machine, &plan)?, console)?;
+            say_if_not_ended(end_there(context, machine, plan)?, console)?;
             Err(Error::Output(cause))
         }
     }
