@@ -1,5 +1,5 @@
 //! The note that gives a requester the last complete answer of a paused task's window
-//! (T-442): the chief's `cf tell` pauses a working task and puts its words to the window;
+//! (T-442): the chief's `cf task pause T-n "…"` pauses a working task and puts its words to the window;
 //! the window answered, went on in the same turn, and ended it with its complete answer,
 //! which no result could be taken from while the task was paused. The engine finds that
 //! answer (`turn_end/paused.rs`) and the ledger writes the note, once for each tell: the

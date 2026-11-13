@@ -1,5 +1,5 @@
 //! A tell's turn that goes on to its complete answer while its task is paused (T-442;
-//! T-429 on 3.0.5, T-534's live runs on 3.0.6-alpha.2). `cf tell` pauses the task and puts
+//! T-429 on 3.0.5, T-534's live runs on 3.0.6-alpha.2). `cf task pause T-n "…"` (then `cf tell`, T-1616) pauses the task and puts
 //! the chief's words to its window as a question; the window answered with `cf answer`,
 //! went straight on in the same turn, and ended it with its complete answer, and nobody
 //! had those words: the task was paused, so no result was taken, and no message carried

@@ -288,7 +288,7 @@ fn a_tell_while_the_turn_works_stops_it_takes_the_brief_back_and_goes_in_alone_o
     )?;
     in_its_turn(&rig, &project, 1, secs(90))?;
     let worker = worker(&project)?;
-    // The chief's tell into a task at work pauses it for the question: the daemon stops
+    // The chief's pause with words into a task at work pauses it for the question: the daemon stops
     // the turn, Muse puts the brief back before a word of its answer, and the question
     // goes in on its own once the window rests.
     rig.tell(project.id(), "CF task pause T-1 :: Also say HANDED_OVER.")?;

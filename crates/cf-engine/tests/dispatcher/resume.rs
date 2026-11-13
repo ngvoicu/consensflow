@@ -543,7 +543,7 @@ fn the_chiefs_pause_and_its_tell_stay_paused_through_a_close_and_a_resume() {
     tiers.open_for("worker", "light", "Write the docs");
     context.pass().unwrap();
     context.pass().unwrap();
-    // `cf task pause T-1`, and `cf tell T-3`, which pauses T-3 to put its words in.
+    // `cf task pause T-1`, and `cf task pause T-3 "…"`, which pauses T-3 to put its words in.
     context.pause_task(project, 1);
     let hera = tiers.assignee(3);
     context.tell(project, &hera, 3, "Use the new style");

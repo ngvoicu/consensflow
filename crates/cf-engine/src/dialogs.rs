@@ -332,7 +332,7 @@ impl Dispatcher {
         // as any message of the board's, and whoever gave its task and the human hear of it.
         let number = match self.dialog_task(participant)? {
             Some(thread) => Some(thread.task.number),
-            // The chief's `cf tell` pauses a member's task, and the task is still the window's: a
+            // The chief's `cf task pause T-n "…"` pauses a member's task, and the task is still the window's: a
             // note about no task, or about a paused one, is no row a member's queue lets go in,
             // so it is kept for the task and goes in once the chief resumes it (T-1300).
             None => self.paused_task(participant)?,

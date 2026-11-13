@@ -208,7 +208,7 @@ fn a_tell_pasted_after_the_agent_detached_a_job_does_not_make_the_host_forget_it
         .to_owned();
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
 
-    // The chief tells the worker something: the tell stops the turn at its tool call, pauses the
+    // The chief pauses the worker with words: the pause stops the turn at its tool call, pauses the
     // task, and is pasted once the window rests. That paste marks the second turn, which the
     // stand-in spends deaf to every key.
     cf(

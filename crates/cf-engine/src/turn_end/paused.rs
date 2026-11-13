@@ -1,7 +1,7 @@
 //! The answer a tell's turn ends with while its task is paused (T-442; T-429 on 3.0.5,
 //! T-534's live runs on 3.0.6-alpha.2).
 //!
-//! `cf tell` pauses a working task and puts the chief's words to its window as a question;
+//! `cf task pause T-n "…"` (then `cf tell`, until T-1616) pauses a working task and puts the chief's words to its window as a question;
 //! the window answers it with `cf answer`, and the answer reaches the chief as a message.
 //! A member that has answered may go straight on, in the same turn, with the work the
 //! pause stopped, and end that turn with its complete answer, or answer in plain text what

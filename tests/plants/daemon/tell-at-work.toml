@@ -101,3 +101,24 @@ runs = ["daemon-routes-task-tell"]
 file = "crates/cf-daemon/src/api/routes/task.rs"
 find = "                body: Some(words.to_owned()),"
 replace = "                body: Some(\"Stop\".to_owned()),"
+
+[[plant]]
+name = "tell at work: a window at work reads at rest, so the words go to its adapter"
+meant = "a_tell_at_work_asks_the_adapter_of_every_harness_for_nothing_until_the_window_rests_and_then_once"
+runs = ["engine-tell-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = """        let Some(rest) = rest else {
+            let unrest = record.delivery.borrow().unrest.clone();
+            return Ok(Pace::Wait("""
+replace = """        let Some(rest) = rest else {
+            let unrest = record.delivery.borrow().unrest.clone();
+            return Ok(Pace::Go);
+            #[allow(unreachable_code)]
+            return Ok(Pace::Wait("""
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        let idle = free && !drawing;"
+replace = "        let idle = !drawing;"

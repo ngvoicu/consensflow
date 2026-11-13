@@ -433,3 +433,59 @@ fn a_window_that_closes_with_a_tell_waiting_tells_the_teller_once_and_fails_noth
         .collect();
     assert_eq!(said.len(), 1, "the teller is told once: {said:?}");
 }
+
+/// On every harness there is, the hold of a tell at work is the engine's, above the adapters: the
+/// adapter of the window's harness is asked for no delivery (nothing is handed to Codex's broker,
+/// nothing to Pi's extension, which refuses at work, nothing typed on the keyboards of the three
+/// others), no key is pressed, and the task stays working, until the window rests; then the words
+/// go in once, and the same adapter is asked once.
+#[test]
+fn a_tell_at_work_asks_the_adapter_of_every_harness_for_nothing_until_the_window_rests_and_then_once(
+) {
+    use cf_engine::testing::Made;
+    use cf_proto::agents::Harness;
+    use serde_json::json;
+
+    let kinds: Vec<&'static str> = Harness::ALL.into_iter().map(Harness::kind).collect();
+    assert_eq!(kinds.len(), 5, "{kinds:?}");
+    for &kind in &kinds {
+        let context = Context::made(Made {
+            harnesses: kinds.clone(),
+            ..Made::default()
+        });
+        let project = context
+            .open_project(json!({
+                "directory": "/work/app",
+                "name": "app",
+                "chief": { "harness": "claude-code", "model": "claude-opus-5" },
+                "staff": [{ "agent": "zeus", "harness": kind, "role": "worker", "tier": "standard" }],
+            }))
+            .unwrap()
+            .unwrap();
+        let tiers = Tiers { context: &context, project };
+        tiers.open();
+        context.pass().unwrap();
+        context.pass().unwrap();
+        assert_eq!(tiers.task(1).task.state, "working", "{kind}");
+        context.adapter.busy("zeus");
+        let seam = format!("adapter:{kind}");
+        let delivered = |context: &Context| context.recorder.calls(&seam, &["deliver"]).len();
+        let before = delivered(&context);
+        let told = tell(&context, &tiers, "Use the v2 grammar");
+        for _ in 0..3 {
+            context.pass().unwrap();
+        }
+        assert_eq!(delivered(&context), before, "{kind}: asked to deliver at work");
+        assert_eq!(context.host.inputs(), Vec::<serde_json::Value>::new(), "{kind}: a key");
+        assert_eq!(tiers.task(1).task.state, "working", "{kind}");
+        assert_eq!(context.message(told.id).state, "queued", "{kind}");
+
+        context.adapter.answer("zeus", "Parser, a first draft");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        assert_eq!(delivered(&context), before + 1, "{kind}: once, at rest");
+        assert_eq!(context.message(told.id).state, "delivered", "{kind}");
+        assert_eq!(tiers.task(1).task.state, "working", "{kind}");
+        context.close();
+    }
+}
