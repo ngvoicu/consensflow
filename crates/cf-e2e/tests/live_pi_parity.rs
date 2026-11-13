@@ -124,7 +124,7 @@ const CASES: [Case; 2] = [
 /// A skill called `name` in the skills folder `folder`.
 fn skill(folder: &Path, name: &str) -> Result {
     cf_e2e::door::write(
-        &folder.join(name).join("SKILL.md"),
+        folder.join(name).join("SKILL.md"),
         format!("---\nname: {name}\ndescription: {name} of the parity run\n---\n\nbody\n"),
     )
 }
@@ -154,15 +154,15 @@ fn user_config(home: &Path) -> Result {
         "defaultProvider": PROVIDER, "defaultModel": MODEL, "defaultThinkingLevel": "low",
         "defaultProjectTrust": "always", "lastChangelogVersion": "99.0.0",
     });
-    cf_e2e::door::write(&agent.join("settings.json"), settings.to_string())?;
-    cf_e2e::door::write(&agent.join("AGENTS.md"), "MARK_USER_AGENTS\n")?;
-    cf_e2e::door::write(&agent.join("APPEND_SYSTEM.md"), "MARK_USER_APPEND\n")?;
+    cf_e2e::door::write(agent.join("settings.json"), settings.to_string())?;
+    cf_e2e::door::write(agent.join("AGENTS.md"), "MARK_USER_AGENTS\n")?;
+    cf_e2e::door::write(agent.join("APPEND_SYSTEM.md"), "MARK_USER_APPEND\n")?;
     skill(&agent.join("skills"), "user-skill")?;
     skill(&home.join(".agents").join("skills"), "agents-skill")?;
     extension(&agent.join("extensions").join("user-ext.ts"), "user_ext")?;
-    cf_e2e::door::write(&agent.join("extensions").join("probe.ts"), PROBE)?;
+    cf_e2e::door::write(agent.join("extensions").join("probe.ts"), PROBE)?;
     cf_e2e::door::write(
-        &agent.join("prompts").join("user-prompt.md"),
+        agent.join("prompts").join("user-prompt.md"),
         "---\ndescription: probe\n---\nhi\n",
     )?;
     let server = home.join("mcp-server.mjs");
@@ -174,7 +174,7 @@ fn user_config(home: &Path) -> Result {
 /// where `append` (and the one an earlier case of this run wrote taken away where not).
 fn project_config(folder: &Path, server: &Path, append: bool) -> Result {
     let pi = folder.join(".pi");
-    cf_e2e::door::write(&folder.join("AGENTS.md"), "MARK_PROJECT_AGENTS\n")?;
+    cf_e2e::door::write(folder.join("AGENTS.md"), "MARK_PROJECT_AGENTS\n")?;
     skill(&pi.join("skills"), "project-skill")?;
     skill(
         &folder.join(".agents").join("skills"),
@@ -182,7 +182,7 @@ fn project_config(folder: &Path, server: &Path, append: bool) -> Result {
     )?;
     extension(&pi.join("extensions").join("project-ext.ts"), "project_ext")?;
     cf_e2e::door::write(
-        &pi.join("prompts").join("project-prompt.md"),
+        pi.join("prompts").join("project-prompt.md"),
         "---\ndescription: probe\n---\nhi\n",
     )?;
     mcp(&pi.join("mcp.json"), server, "project_mcp")?;

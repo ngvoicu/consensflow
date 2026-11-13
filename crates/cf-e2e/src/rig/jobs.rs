@@ -75,13 +75,13 @@ impl Job {
     /// let: the case has seen what the turn its end woke led to, which the monitor's end
     /// would otherwise race.
     pub fn let_its_monitor_end(&self) -> crate::Result {
-        crate::door::write(&self.beside("monitor-may-end"), "")
+        crate::door::write(self.beside("monitor-may-end"), "")
     }
 
     /// Lets the agent a `CLAUDE-HELD` left running end, as the stand-in waits to be let: the
     /// case has seen what it looked for while the agent ran, which a clock would race.
     pub fn let_its_agent_end(&self) -> crate::Result {
-        crate::door::write(&self.beside("agent-may-end"), "")
+        crate::door::write(self.beside("agent-may-end"), "")
     }
 
     /// Its file of the kind `kind`: `<file>.<kind>`.

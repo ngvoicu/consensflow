@@ -223,7 +223,7 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
     let own = own_commands(root, config);
     let system = if config.finder {
         // There, as Homebrew's is on a Mac, for what a case puts in it.
-        crate::door::make_dir(&tool_folder(root))?;
+        crate::door::make_dir(tool_folder(root))?;
         tool_folder(root)
     } else {
         fake_bin.clone()
@@ -368,7 +368,7 @@ pub(super) fn write_stand_ins(root: &Path) -> Result<()> {
         text: roster.to_string(),
         source,
     })?;
-    crate::door::write(&root.join(STAND_INS), format!("{text}\n"))
+    crate::door::write(root.join(STAND_INS), format!("{text}\n"))
 }
 
 #[cfg(test)]

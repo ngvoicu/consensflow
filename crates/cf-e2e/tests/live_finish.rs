@@ -162,7 +162,7 @@ fn each(log: &Log, checked: &str, step: impl Fn(Who) -> Result<Finished>) -> Res
         ));
     }
     log.report("what each worker came to", &report::table(&checks));
-    report::verdict_of(&log, &checks)
+    report::verdict_of(log, &checks)
 }
 
 #[test]

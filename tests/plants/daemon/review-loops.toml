@@ -483,8 +483,8 @@ runs = ["review-loops-fake-agent"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent/scripted.rs"
-find = '.write(true).create_new(true)'
-replace = '.write(true).create(true)'
+find = 'cf_e2e::door::create_new(&file)'
+replace = 'cf_e2e::door::create(&file)'
 
 [[plant]]
 name = "review loops: the stand-in does not give the last result again"

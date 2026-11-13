@@ -88,7 +88,7 @@ const LONG_ASK: &str = "Run these shell commands one at a time, each only after 
 /// A file whose words are some 12,000 tokens.
 fn notes(folder: &Path) -> Result {
     let line = "These are the notes of the compaction check, a line of filler words to read.\n";
-    cf_e2e::door::write(&folder.join("notes.txt"), line.repeat(600))
+    cf_e2e::door::write(folder.join("notes.txt"), line.repeat(600))
 }
 
 /// A folder of the case's own, by the path it resolves to (Codex and Devin know a folder so).

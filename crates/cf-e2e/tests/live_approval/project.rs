@@ -30,7 +30,7 @@ pub fn folder(rig: &Rig, planned: &Planned) -> Result<PathBuf> {
     ));
     live::git_repository(&folder)?;
     cf_e2e::door::write(
-        &folder.join("README.md"),
+        folder.join("README.md"),
         format!(
             "# Approval bench, project {}\n\nA demo project: its chief is {}.\n",
             planned.number,
@@ -38,7 +38,7 @@ pub fn folder(rig: &Rig, planned: &Planned) -> Result<PathBuf> {
         ),
     )?;
     for name in ["AGENTS.md", "CLAUDE.md"] {
-        cf_e2e::door::write(&folder.join(name), BRIEF)?;
+        cf_e2e::door::write(folder.join(name), BRIEF)?;
     }
     Ok(folder)
 }

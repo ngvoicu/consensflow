@@ -139,12 +139,12 @@ impl Evidence {
     pub fn json(&self, name: &str, value: &Value) -> Result {
         let text = serde_json::to_string_pretty(value)
             .map_err(|failed| Error::Daemon(format!("{name}: {failed}")))?;
-        crate::door::write(&self.folder.join(name), format!("{text}\n"))
+        crate::door::write(self.folder.join(name), format!("{text}\n"))
     }
 
     /// Writes `text` as `name`.
     pub fn text(&self, name: &str, text: &str) -> Result {
-        crate::door::write(&self.folder.join(name), text)
+        crate::door::write(self.folder.join(name), text)
     }
 
     /// Writes the checks, as JSON and as the table a person reads: `known` are the checks that
@@ -232,7 +232,7 @@ pub fn ledger_snapshot(db: &Path, to: &Path) -> Result {
         let before = stamp();
         crate::door::copy_keeping_mode(db, &clone)?;
         if wal.is_file() {
-            crate::door::copy_keeping_mode(&wal, &clones.path().join("clone.db-wal"))?;
+            crate::door::copy_keeping_mode(&wal, clones.path().join("clone.db-wal"))?;
         }
         if stamp() == before {
             held = true;

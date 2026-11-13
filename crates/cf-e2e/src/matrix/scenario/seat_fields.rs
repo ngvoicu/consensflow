@@ -208,7 +208,7 @@ pub fn seat_fields() -> Vec<Scenario> {
             "field-devin-quota",
             vec![
                 Step {
-                    human: Some(|members| crate::door::write(&members.folder().join(SPENT), "")),
+                    human: Some(|members| crate::door::write(members.folder().join(SPENT), "")),
                     restarts: false,
                     name: "the worker's account is out",
                     asks: |_| String::new(),

@@ -106,7 +106,7 @@ impl Ask {
     pub fn prepare(self, place: &Place) -> Result<()> {
         if self == Ask::Edit {
             cf_e2e::door::write(
-                &place.folder.join(format!("edit-{}.txt", place.tag)),
+                place.folder.join(format!("edit-{}.txt", place.tag)),
                 "alpha beta gamma\n",
             )?;
         }

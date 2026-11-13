@@ -166,7 +166,7 @@ impl StatusLine {
                 thread::sleep(LOOK);
             }
             let lived = began.elapsed().as_millis();
-            let _ = cf_e2e::door::write_whole(&file.with_extension("lived"), &format!("{lived}\n"));
+            let _ = cf_e2e::door::write_whole(file.with_extension("lived"), &format!("{lived}\n"));
         });
         Ok(())
     }

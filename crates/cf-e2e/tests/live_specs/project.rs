@@ -102,7 +102,7 @@ pub fn folder(rig: &Rig, planned: &Planned) -> Result<PathBuf> {
         .join(format!("p{}-{}", planned.number, planned.chief.name()));
     cf_e2e::live::git_repository(&folder)?;
     cf_e2e::door::write(
-        &folder.join("README.md"),
+        folder.join("README.md"),
         format!(
             "# Specs test, project {}\n\nA demo project: its chief is {}.\n",
             planned.number,
@@ -110,7 +110,7 @@ pub fn folder(rig: &Rig, planned: &Planned) -> Result<PathBuf> {
         ),
     )?;
     for name in ["AGENTS.md", "CLAUDE.md"] {
-        cf_e2e::door::write(&folder.join(name), BRIEF)?;
+        cf_e2e::door::write(folder.join(name), BRIEF)?;
     }
     Ok(folder)
 }

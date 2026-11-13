@@ -687,7 +687,7 @@ impl Isolation {
                 })?;
         private_folder(folder.path())?;
         for relative in &self.plan.folders {
-            crate::door::make_dir(&folder.path().join(relative))?;
+            crate::door::make_dir(folder.path().join(relative))?;
         }
         let mut copied = Vec::new();
         for seed in seeds.into_iter().flatten() {
@@ -940,7 +940,7 @@ impl Isolation {
                     self.harness.name()
                 ))
             })?;
-        crate::door::write(&home.join(below).join(name), text)
+        crate::door::write(home.join(below).join(name), text)
     }
 
     /// What a run that left the owner's setup as it was says it checked: the files, each with the

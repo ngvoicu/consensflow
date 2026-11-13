@@ -513,7 +513,7 @@ fn question_case(live: &Live) -> Result<String> {
         path: PathBuf::from("a temporary folder"),
         source,
     })?;
-    cf_e2e::door::write(&foreign.path().join("AGENTS.md"), FOREIGN_RULES)?;
+    cf_e2e::door::write(foreign.path().join("AGENTS.md"), FOREIGN_RULES)?;
     let config = live
         .config()
         .var("CODEX_HOME", foreign.path().display().to_string());

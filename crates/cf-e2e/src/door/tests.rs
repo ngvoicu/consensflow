@@ -440,20 +440,20 @@ fn the_door_writes_only_below_a_folder_this_run_made_wherever_the_folder_is() {
     // Every way to write, copy onto, rename onto, cut or add to a place that is none of this run's
     // folders is refused, in a folder of the temp folder as in the live folder.
     assert!(write(&kept, "mine").is_err());
-    assert!(write(&theirs.path().join("new.txt"), "mine").is_err());
-    assert!(write_executable(&theirs.path().join("run.sh"), "#!/bin/sh").is_err());
-    assert!(copy(&kept, &theirs.path().join("copy.txt")).is_err());
-    assert!(rename(&kept, &theirs.path().join("moved.txt")).is_err());
+    assert!(write(theirs.path().join("new.txt"), "mine").is_err());
+    assert!(write_executable(theirs.path().join("run.sh"), "#!/bin/sh").is_err());
+    assert!(copy(&kept, theirs.path().join("copy.txt")).is_err());
+    assert!(rename(&kept, theirs.path().join("moved.txt")).is_err());
     assert!(create(&kept).is_err());
     assert!(append(&kept).is_err());
-    assert!(create_new(&theirs.path().join("fresh")).is_err());
-    assert!(create_new_private(&theirs.path().join("private")).is_err());
-    assert!(make_dir(&theirs.path().join("folder").join("deeper")).is_err());
+    assert!(create_new(theirs.path().join("fresh")).is_err());
+    assert!(create_new_private(theirs.path().join("private")).is_err());
+    assert!(make_dir(theirs.path().join("folder").join("deeper")).is_err());
     assert!(make_dir(theirs.path()).is_err());
     assert!(set_permissions(&kept, fs::metadata(&kept).unwrap().permissions()).is_err());
     assert!(set_modified(&kept, std::time::SystemTime::now()).is_err());
-    assert!(write_whole(&theirs.path().join("said"), "x").is_err());
-    assert!(say_its_process(&theirs.path().join("job")).is_err());
+    assert!(write_whole(theirs.path().join("said"), "x").is_err());
+    assert!(say_its_process(theirs.path().join("job")).is_err());
     assert_eq!(fs::read_to_string(&kept).unwrap(), "theirs");
     for name in [
         "new.txt",
@@ -474,33 +474,29 @@ fn the_door_writes_only_below_a_folder_this_run_made_wherever_the_folder_is() {
     let mine = made("own-").unwrap();
     let file = mine.path().join("sub").join("note.txt");
     write(&file, "mine").unwrap();
-    copy(&file, &mine.path().join("copy.txt")).unwrap();
-    rename(
-        &mine.path().join("copy.txt"),
-        &mine.path().join("moved.txt"),
-    )
-    .unwrap();
-    write_executable(&mine.path().join("bin").join("run.sh"), "#!/bin/sh").unwrap();
-    create(&mine.path().join("cut.txt")).unwrap();
-    append(&mine.path().join("log.txt")).unwrap();
-    create_new(&mine.path().join("fresh.txt")).unwrap();
-    create_new_private(&mine.path().join("private.txt")).unwrap();
-    make_dir(&mine.path().join("a").join("b")).unwrap();
+    copy(&file, mine.path().join("copy.txt")).unwrap();
+    rename(mine.path().join("copy.txt"), mine.path().join("moved.txt")).unwrap();
+    write_executable(mine.path().join("bin").join("run.sh"), "#!/bin/sh").unwrap();
+    create(mine.path().join("cut.txt")).unwrap();
+    append(mine.path().join("log.txt")).unwrap();
+    create_new(mine.path().join("fresh.txt")).unwrap();
+    create_new_private(mine.path().join("private.txt")).unwrap();
+    make_dir(mine.path().join("a").join("b")).unwrap();
     make_dir(mine.path()).unwrap();
-    write_whole(&mine.path().join("said"), "x").unwrap();
-    say_its_process(&mine.path().join("job")).unwrap();
+    write_whole(mine.path().join("said"), "x").unwrap();
+    say_its_process(mine.path().join("job")).unwrap();
     set_modified(&file, std::time::SystemTime::now()).unwrap();
     assert_eq!(fs::read_to_string(&file).unwrap(), "mine");
     assert_eq!(fs::read_to_string(mine.path().join("said")).unwrap(), "x");
     // A file made new is not made over, and the folder itself is no place for a file of its own.
-    assert!(create_new(&mine.path().join("fresh.txt")).is_err());
+    assert!(create_new(mine.path().join("fresh.txt")).is_err());
     assert!(write(mine.path(), "text").is_err());
     // What is taken from a place that is none of this run's is not the run's to move, even into its own.
-    assert!(rename(&kept, &mine.path().join("taken.txt")).is_err());
+    assert!(rename(&kept, mine.path().join("taken.txt")).is_err());
     assert_eq!(fs::read_to_string(&kept).unwrap(), "theirs");
     nothing(&mine.path().join("taken.txt"));
     // A copy reads from anywhere: what is read is not changed.
-    copy(&kept, &mine.path().join("from-theirs.txt")).unwrap();
+    copy(&kept, mine.path().join("from-theirs.txt")).unwrap();
     assert_eq!(
         fs::read_to_string(mine.path().join("from-theirs.txt")).unwrap(),
         "theirs"
@@ -519,9 +515,9 @@ fn a_link_in_a_folder_this_run_made_leads_no_write_out_of_it() {
     assert!(copy(&kept, &link).is_err());
     let up = mine.path().join("up");
     std::os::unix::fs::symlink(theirs.path(), &up).unwrap();
-    assert!(write(&up.join("kept.txt"), "through").is_err());
-    assert!(write(&up.join("new.txt"), "through").is_err());
-    assert!(make_dir(&up.join("deeper")).is_err());
+    assert!(write(up.join("kept.txt"), "through").is_err());
+    assert!(write(up.join("new.txt"), "through").is_err());
+    assert!(make_dir(up.join("deeper")).is_err());
     assert_eq!(fs::read_to_string(&kept).unwrap(), "theirs");
     assert!(!theirs.path().join("new.txt").exists());
 }
@@ -539,7 +535,7 @@ fn a_file_a_caller_names_is_made_new_and_refused_where_it_is_there_and_is_then_t
     write(&fixture, "{}").unwrap();
     append(&fixture).unwrap();
     assert_eq!(fs::read_to_string(&fixture).unwrap(), "{}");
-    assert!(write(&theirs.path().join("neighbour.json"), "{}").is_err());
+    assert!(write(theirs.path().join("neighbour.json"), "{}").is_err());
     assert!(make_dir(&fixture).is_err());
     assert!(made_file(&fixture).is_err());
 }
@@ -550,9 +546,9 @@ fn the_place_an_allocation_is_made_in_is_made_where_it_is_not_there_and_is_no_pl
     let live = home.path().join(".consensflow-candidate").join("live");
     let mine = made_in(&live, "case-").unwrap();
     assert!(live.is_dir() && mine.path().starts_with(&live));
-    assert!(write(&live.join("another.txt"), "x").is_err());
-    assert!(make_dir(&live.join("another")).is_err());
-    write(&mine.path().join("brief.md"), "mine").unwrap();
+    assert!(write(live.join("another.txt"), "x").is_err());
+    assert!(make_dir(live.join("another")).is_err());
+    write(mine.path().join("brief.md"), "mine").unwrap();
     // What was there is not changed by a second allocation.
     fs::write(live.join("older"), "an older run's").unwrap();
     let again = made_in(&live, "case-").unwrap();
@@ -638,7 +634,7 @@ fn a_program_a_run_starts_writes_below_what_was_handed_down_to_it_and_nowhere_el
         verdict,
         format!(
             "own: {}; theirs: {}",
-            said(write(&own.join("by-the-program.txt"), "handed down")),
+            said(write(own.join("by-the-program.txt"), "handed down")),
             said(write(&theirs, "over"))
         ),
     )

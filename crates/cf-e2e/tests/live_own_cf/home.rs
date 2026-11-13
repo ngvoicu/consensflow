@@ -130,7 +130,7 @@ pub fn make(program: &Path) -> Result<Home> {
         }
     }
     for (name, text) in profiles(&decoys, windows) {
-        cf_e2e::door::write(&root.join(name), text)?;
+        cf_e2e::door::write(root.join(name), text)?;
     }
     for name in STALE {
         let stale = root.join(name);

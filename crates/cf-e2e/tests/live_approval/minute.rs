@@ -36,7 +36,7 @@ print \"$rounds rounds, last digest $digest\\n\";
 
 /// Puts the script in the project's `folder`, which the advisor's window runs in.
 pub fn write(folder: &Path) -> Result {
-    cf_e2e::door::write(&folder.join(SCRIPT), PROGRAM)
+    cf_e2e::door::write(folder.join(SCRIPT), PROGRAM)
 }
 
 /// What the advisor is asked: to run the script, then to answer with `marker`.

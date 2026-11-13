@@ -98,7 +98,7 @@ fn fake_owner(log: &Log, binary: &Path, told: bool) -> Result<Came> {
     let config =
         cf_e2e::door::made("live-launcher-").map_err(io("make a folder", Path::new("tmp")))?;
     cf_e2e::door::write(
-        &config.path().join(".claude.json"),
+        config.path().join(".claude.json"),
         r#"{"hasCompletedOnboarding":true,"hasSeenAutoDefaultNotice":true}"#,
     )?;
     live::machine::seed_claude_trust(config.path(), home)?;

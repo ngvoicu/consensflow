@@ -647,6 +647,7 @@ pub const MADE_ROOTS: &str = "CF_LIVE_MADE_ROOTS";
 
 /// The folders and files this process made through the door, by their real paths, and those its
 /// parent handed to it ([`MADE_ROOTS`]).
+#[allow(clippy::disallowed_methods)] // the door is read before any `main` could hand an Env on
 fn registry() -> std::sync::MutexGuard<'static, Vec<PathBuf>> {
     static MADE: OnceLock<Mutex<Vec<PathBuf>>> = OnceLock::new();
     MADE.get_or_init(|| Mutex::new(roots_handed_down(std::env::var_os(MADE_ROOTS).as_deref())))

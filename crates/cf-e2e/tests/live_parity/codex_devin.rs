@@ -521,7 +521,7 @@ fn check(harness: Harness, log: &Log) -> Result {
     let daemons = members.rig().home();
     let home = files::real_path(&daemons.parent().unwrap_or(&daemons).join("home"));
     for (name, text) in &case.rig_files {
-        cf_e2e::door::write(&home.join(name), text)?;
+        cf_e2e::door::write(home.join(name), text)?;
         log.say(format!(
             "the human's own {name} is written in the rig's home"
         ));

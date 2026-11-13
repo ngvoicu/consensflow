@@ -26,20 +26,21 @@ fn words(line: &str) -> Vec<OsString> {
     line.split_whitespace().map(OsString::from).collect()
 }
 
-/// What `cargo xtask live <line>` runs, and the variables it sets.
+/// What `cargo xtask live <line>` runs, and the variables it sets (a variable it takes out of the
+/// program's environment is none it sets: the test of `CF_LIVE_MADE_ROOTS` reads those).
 fn runs(line: &str) -> Result<(String, Vec<(String, String)>), Failure> {
     let asked = parse(&words(line), &names())?;
     let invocation = invocation(&context(), &asked);
     let vars = invocation
         .vars
         .iter()
-        .map(|(name, value)| {
-            (
-                name.to_string_lossy().into_owned(),
-                value
-                    .as_ref()
-                    .map_or_else(String::new, |value| value.to_string_lossy().into_owned()),
-            )
+        .filter_map(|(name, value)| {
+            value.as_ref().map(|value| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.to_string_lossy().into_owned(),
+                )
+            })
         })
         .collect();
     Ok((invocation.display(), vars))

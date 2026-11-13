@@ -226,10 +226,10 @@ fn at_path(folder: &Path, name: &str) -> PathBuf {
 /// The files a shape names, written into `folder`: the images are whole PNGs.
 fn write_files(folder: &Path) -> Result {
     for image in IMAGES {
-        cf_e2e::door::write(&at_path(folder, image), cf_e2e::png::SMALL)?;
+        cf_e2e::door::write(at_path(folder, image), cf_e2e::png::SMALL)?;
     }
-    cf_e2e::door::write(&at_path(folder, SPACED), cf_e2e::png::SMALL)?;
-    cf_e2e::door::write(&at_path(folder, TEXT), "Notes on the desk scene.\n")
+    cf_e2e::door::write(at_path(folder, SPACED), cf_e2e::png::SMALL)?;
+    cf_e2e::door::write(at_path(folder, TEXT), "Notes on the desk scene.\n")
 }
 
 /// A shape's body, with the paths filled in from `folder`.

@@ -51,7 +51,7 @@ impl Home {
     /// what their harness lists. The case's own file beside the home, never the daemon's.
     pub fn stand_ins(&self, roster: &Value) -> Result<()> {
         crate::door::write(
-            &self.scratch.root().join(crate::stand_in_lists::ROSTER),
+            self.scratch.root().join(crate::stand_in_lists::ROSTER),
             format!("{roster}\n"),
         )
     }

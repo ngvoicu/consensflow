@@ -112,7 +112,7 @@ runs = ["rig-stand-ins"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent/background.rs"
 find = '''
-        cf_e2e::files::say_its_process(&self.file).map_err(|failed| failed.to_string())?;
+        cf_e2e::door::say_its_process(&self.file).map_err(|failed| failed.to_string())?;
 '''
 replace = '''
         {

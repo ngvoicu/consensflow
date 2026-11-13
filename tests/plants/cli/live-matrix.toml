@@ -537,7 +537,7 @@ runs = ["matrix-fake-agent-records"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent/records.rs"
-find = """        fs::write(&self.transcript, "")?;"""
+find = """        cf_e2e::door::write(&self.transcript, "")?;"""
 replace = """        let _ = &self.transcript;"""
 
 [[plant]]

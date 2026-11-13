@@ -627,7 +627,7 @@ const HELD_AGENT: &str = "a7c1e5d90b2f43386";
 fn hold(window: &Window, agent_only: bool, report: &str) -> Result<Vec<Step>, String> {
     thread::sleep(THINKING);
     let gates = window.jobs.file("held")?;
-    cf_e2e::door::write_whole(&beside(&gates, "pid"), &format!("{}\n", std::process::id()))
+    cf_e2e::door::write_whole(beside(&gates, "pid"), &format!("{}\n", std::process::id()))
         .map_err(|failed| format!("{}: {failed}", gates.display()))?;
     let mut steps: Vec<Step> = (1..=HELD_PROGRESS)
         .map(|at| Step::progress(at, HELD_PROGRESS))

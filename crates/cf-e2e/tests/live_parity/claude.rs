@@ -171,7 +171,7 @@ fn throwaway_config(
 ) -> Result {
     cf_e2e::door::make_dir(throwaway)?;
     cf_e2e::door::write(
-        &throwaway.join(".credentials.json"),
+        throwaway.join(".credentials.json"),
         json!({ "claudeAiOauth": login }).to_string(),
     )?;
     #[cfg(unix)]
@@ -188,7 +188,7 @@ fn throwaway_config(
             settings.remove("hooks");
             settings.remove("statusLine");
             cf_e2e::door::write(
-                &throwaway.join("settings.json"),
+                throwaway.join("settings.json"),
                 Value::Object(settings).to_string(),
             )?;
         }
@@ -214,7 +214,7 @@ fn throwaway_config(
     configuration.insert("projects".to_owned(), Value::Object(projects));
     configuration.insert("hasCompletedOnboarding".to_owned(), Value::Bool(true));
     cf_e2e::door::write(
-        &throwaway.join(".claude.json"),
+        throwaway.join(".claude.json"),
         Value::Object(configuration).to_string(),
     )
 }

@@ -138,7 +138,7 @@ pub fn without_keychain(into: &Path) -> Result<Option<PathBuf>> {
     }
     let folder = into.join("no-keychain");
     crate::door::make_dir(&folder)?;
-    crate::door::write_executable(&folder.join(PROGRAM), script())?;
+    crate::door::write_executable(folder.join(PROGRAM), script())?;
     Ok(Some(folder))
 }
 

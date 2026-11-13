@@ -91,7 +91,7 @@ fn why(flat: &str) -> Option<String> {
 /// `work`.
 fn make_labs(work: &Path) -> Result {
     for lab in LABS {
-        cf_e2e::door::make_dir(&work.join(lab).join("deep"))?;
+        cf_e2e::door::make_dir(work.join(lab).join("deep"))?;
     }
     Ok(())
 }

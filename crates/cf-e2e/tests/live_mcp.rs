@@ -216,10 +216,10 @@ fn folder() -> Result<PathBuf> {
     let folder = live_folder("mcp")?;
     live::git_repository(&folder)?;
     cf_e2e::door::write(
-        &folder.join("README.md"),
+        folder.join("README.md"),
         "# MCP check\n\nA demo project for the live check of a worker that has an MCP server.\n",
     )?;
-    cf_e2e::door::write(&folder.join("CLAUDE.md"), BRIEF)?;
+    cf_e2e::door::write(folder.join("CLAUDE.md"), BRIEF)?;
     Ok(folder)
 }
 

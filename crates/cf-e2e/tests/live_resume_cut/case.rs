@@ -84,7 +84,7 @@ fn keep(run: &Run, window: &Window, (case, when): (Case, &str), session: &str) -
         return Ok(());
     };
     if let Some(file) = transcript_file(&window.claude_config(), session) {
-        cf_e2e::door::copy(&file, &folder.join(kept_name(case, when, session)))?;
+        cf_e2e::door::copy(&file, folder.join(kept_name(case, when, session)))?;
     }
     Ok(())
 }

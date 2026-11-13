@@ -89,7 +89,7 @@ fn seed_marketplace_from(home: &Path, config: &Path) -> Result {
         }
     });
     cf_e2e::door::write(
-        &plugins.join("known_marketplaces.json"),
+        plugins.join("known_marketplaces.json"),
         format!("{known}\n"),
     )
 }
@@ -107,7 +107,7 @@ fn copy_tree(from: &Path, to: &Path) -> Result {
         if kind.is_dir() {
             copy_tree(&entry.path(), &target)?;
         } else if kind.is_file() {
-            cf_e2e::door::copy(&entry.path(), &target)?;
+            cf_e2e::door::copy(entry.path(), &target)?;
         }
     }
     Ok(())

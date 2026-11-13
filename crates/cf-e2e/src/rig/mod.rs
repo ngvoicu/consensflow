@@ -598,7 +598,7 @@ impl Rig {
     /// The stand-ins a case seats are `roster`'s (`{agents: [{id, kind, model, effort,
     /// workTier, designer}]}`), for the projects it opens and the members it adds after.
     pub fn stand_ins(&self, roster: &Value) -> Result<()> {
-        crate::door::write(&self.stand_ins_file(), format!("{roster}\n"))
+        crate::door::write(self.stand_ins_file(), format!("{roster}\n"))
     }
 
     /// The daemon's home, `CONSENSFLOW_HOME`.
@@ -834,7 +834,7 @@ impl Rig {
     pub fn keep_home(&mut self) -> PathBuf {
         self.keep_root = true;
         let _ = crate::door::write(
-            &self.root.join(crate::door::KEPT),
+            self.root.join(crate::door::KEPT),
             "kept for a person to look at\n",
         );
         self.root.clone()

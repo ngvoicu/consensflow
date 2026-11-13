@@ -13,7 +13,7 @@ use crate::{report, IMAGE};
 pub fn project(folder: &Path) -> Result {
     live::git_repository(folder)?;
     cf_e2e::door::write(
-        &folder.join("README.md"),
+        folder.join("README.md"),
         "# Honey shop\n\nA demo project: the image designer draws its pictures here.\n",
     )
 }

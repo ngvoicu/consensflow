@@ -596,7 +596,7 @@ runs = ["rig-stand-in-codex"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_codex/servers.rs"
 find = '''
-    if let Err(failed) = cf_e2e::files::say_its_process(Path::new(file)) {
+    if let Err(failed) = cf_e2e::door::say_its_process(Path::new(file)) {
         return refuse(&failed.to_string());
     }
     thread::sleep(Duration::from_secs(seconds));'''

@@ -645,10 +645,10 @@ fn prepare(rig: &Rig, plan: &Plan) -> Result<PathBuf> {
         .ok_or_else(|| Error::Daemon("the rig gives its windows no home".to_owned()))?;
     let folder = live_folder_in(Path::new(home), &plan.folder)?;
     for name in ["AGENTS.md", "CLAUDE.md"] {
-        crate::door::write(&folder.join(name), plan.brief)?;
+        crate::door::write(folder.join(name), plan.brief)?;
     }
     for (path, text) in &plan.files {
-        crate::door::write(&folder.join(path), text)?;
+        crate::door::write(folder.join(path), text)?;
     }
     if plan.repository {
         let made = Run::new(Path::new("git"))

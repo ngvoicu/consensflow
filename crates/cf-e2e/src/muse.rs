@@ -35,10 +35,10 @@ pub enum Run {
 /// it, `credential_backend: file`). The person's file is read, never written.
 pub fn seed_live_home(rig_home: &Path, real_home: &Path) -> Result {
     let config = rig_home.join(".config").join("muse");
-    crate::door::write(&config.join("settings.json"), "{\"schema_version\":1}\n")?;
+    crate::door::write(config.join("settings.json"), "{\"schema_version\":1}\n")?;
     let auth = real_home.join(".config").join("muse").join("auth.json");
     let text = files::read_string(&auth)?;
-    crate::door::write(&config.join("auth.json"), login_copy(&text)?)
+    crate::door::write(config.join("auth.json"), login_copy(&text)?)
 }
 
 /// The person's login as a live rig's home is given it: `text` as JSON, with every key whose
@@ -239,7 +239,7 @@ impl StandIn {
     /// Writes down the window's process, this program's, and Muse's, its child's.
     pub fn note_pids(&self, window: u32, muse: u32) -> std::io::Result<()> {
         use std::io::Write as _;
-        crate::door::append(&pids_beside(&self.argv))?
+        crate::door::append(pids_beside(&self.argv))?
             .write_all(format!("{window} {muse}\n").as_bytes())
     }
 
@@ -317,9 +317,9 @@ fn write_windows(
     let pinned = dir.join(format!("muse-bin-{}.exe", install.version));
     crate::door::make_dir(dir)?;
     crate::door::copy_keeping_mode(program, &pinned)?;
-    crate::door::write(&dir.join(".muse-version"), format!("{}\n", install.version))?;
+    crate::door::write(dir.join(".muse-version"), format!("{}\n", install.version))?;
     crate::door::write(
-        &dir.join("muse.cmd"),
+        dir.join("muse.cmd"),
         format!("@\"{}\" %*\r\n", pinned.display()),
     )?;
     let stand_in = StandIn {
@@ -328,7 +328,7 @@ fn write_windows(
         run,
         rig_home: rig_home.to_owned(),
     };
-    crate::door::write(&StandIn::file_of(&pinned), stand_in.to_json().to_string())
+    crate::door::write(StandIn::file_of(&pinned), stand_in.to_json().to_string())
 }
 
 /// The models the rig's echo Muse lists when the daemon reads them as a dialog opens (A4-28,
@@ -417,9 +417,9 @@ pub fn write_stand_in(
         return write_windows(dir, install, run, argv, rig_home);
     }
     let pinned = dir.join(format!("muse-bin-{}", install.version));
-    crate::door::write(&dir.join(".muse-version"), format!("{}\n", install.version))?;
+    crate::door::write(dir.join(".muse-version"), format!("{}\n", install.version))?;
     crate::door::write_executable(
-        &dir.join("muse"),
+        dir.join("muse"),
         format!("#!/bin/sh\nexec '{}' \"$@\"\n", pinned.display()),
     )?;
     let script = format!(
@@ -483,9 +483,9 @@ pub fn write_live_stand_in(
         return write_windows(dir, install, run, argv, rig_home);
     }
     let pinned = dir.join(format!("muse-bin-{}", install.version));
-    crate::door::write(&dir.join(".muse-version"), format!("{}\n", install.version))?;
+    crate::door::write(dir.join(".muse-version"), format!("{}\n", install.version))?;
     crate::door::write_executable(
-        &dir.join("muse"),
+        dir.join("muse"),
         format!("#!/bin/sh\nexec '{}' \"$@\"\n", pinned.display()),
     )?;
     let script = format!(
