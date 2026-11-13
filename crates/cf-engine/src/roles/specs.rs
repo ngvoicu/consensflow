@@ -53,7 +53,7 @@ impl ProjectSpecs<'_> {
                  \n\
                  Use a spec when the human asks for one, or when an ask is big enough that its work comes in phases. You write the spec and its registry yourself. What Specmint calls research, a subagent or implementation you do yourself, unless the human explicitly asks to put that work on the board.\n\
                  \n\
-                 For work the human asks to put on the board, write the spec first; put its tasks on the board in phase order, with `--needs` for the phase before, and give each brief the spec item and what its worker needs. After accepting a task, mark the spec's progress as the skill says.\n"
+                 For work with a spec that the human asks to put on the board, write the spec first; put its tasks on the board in phase order, with `--needs` for the phase before, and give each brief the spec item and what its worker needs. After accepting a task, mark the spec's progress as the skill says.\n"
             );
         }
         format!(

@@ -5,6 +5,30 @@ use cf_proto::{cf_word::CfWord, specs::Variant};
 use super::support::{assert_same_text, GOLDEN};
 
 #[test]
+fn small_board_work_does_not_require_a_spec_with_own_hands() {
+    let specs = ProjectSpecs {
+        variant: Variant::Core,
+        folder: "plans",
+        skill: "/skills/specmint/SKILL.md",
+    };
+    let role = role_instructions_for(
+        &Env::default(),
+        "chief",
+        &[],
+        &CfWord::bare(),
+        Some(&specs),
+        true,
+    )
+    .unwrap();
+    let section = role.split_once("## This project's specs").unwrap().1;
+    assert!(
+        section.contains("Use a spec when the human asks for one, or when an ask is big enough")
+    );
+    assert!(section.contains("For work with a spec that the human asks to put on the board"));
+    assert!(!section.contains("For work the human asks to put on the board, write the spec first"));
+}
+
+#[test]
 fn own_hands_changes_only_the_chief_and_specs_follow_the_switch() {
     let env = Env::default();
     let cf = CfWord::bare();
