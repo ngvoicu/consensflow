@@ -171,6 +171,9 @@ jobs:
       - name: Install nextest for plants
         if: matrix.suite == 'plants'
         run: cargo install cargo-nextest --version 0.9.148 --locked
+      - name: Fetch dependencies for offline plants
+        if: matrix.suite == 'plants'
+        run: cargo fetch --locked
       - name: Prepare Windows cross-clippy
         if: matrix.suite == 'clippy-windows'
         run: |
@@ -235,7 +238,7 @@ jobs:
           } 2>&1 | tee "$RUNNER_TEMP/suite-logs/test.log"
           result=${PIPESTATUS[0]}
           printf 'Suite %s finished with exit %s\n' "$SUITE" "$result" > "$RUNNER_TEMP/suite-logs/summary.txt"
-          grep -E 'test result:|[0-9]+ (passed|failed|skipped)|^failures:|\.\.\. FAILED|^ *FAIL ' "$RUNNER_TEMP/suite-logs/test.log" >> "$RUNNER_TEMP/suite-logs/summary.txt" || true
+          grep -E 'test result:|[0-9]+ (passed|failed|skipped)|^failures:|\.\.\. FAILED|^ *FAIL |^(MISSED|DOES NOT COMPILE|NOT BUILT|HUNG|DOES NOT APPLY|NOT RUN|UNSTABLE|BROKEN) ' "$RUNNER_TEMP/suite-logs/test.log" >> "$RUNNER_TEMP/suite-logs/summary.txt" || true
           exit "$result"
       - name: Write the summary
         if: always()
