@@ -740,7 +740,7 @@ runs = ["xtask-lib-windows"]
 platforms = ["windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
+file = "tools/xtask/src/windows/script/templates.rs"
 find = "if (!Limit(job, 0x2000))"
 replace = "if (!Limit(job, 0))"
 
@@ -763,7 +763,7 @@ runs = ["xtask-lib-windows"]
 platforms = ["windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
+file = "tools/xtask/src/windows/script/templates.rs"
 find = "if (!AssignProcessToJobObject(job, GetCurrentProcess()))"
 # Not `if (false)`: Add-Type takes the compiler's warning of unreachable code for an error, and the run is
 # then in no job at all (a stop walks its tree), which is another plant.
@@ -811,7 +811,7 @@ runs = ["xtask-lib-windows"]
 platforms = ["windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
+file = "tools/xtask/src/windows/script/templates.rs"
 find = "  if ($null -ne $job) { [CfJob]::Release($job) }\n"
 replace = ""
 
@@ -865,7 +865,7 @@ runs = ["xtask-lib-windows"]
 platforms = ["windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
+file = "tools/xtask/src/windows/script/templates.rs"
 find = "-ErrorAction SilentlyContinue\nexit 0\n\"##;"
 replace = "-ErrorAction SilentlyContinue\n\"##;"
 
@@ -905,7 +905,7 @@ runs = ["xtask-lib-windows"]
 platforms = ["windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
+file = "tools/xtask/src/windows/script/templates.rs"
 find = "  try { Add-Content -LiteralPath $owner -Value '«in_job»' } catch {"
 replace = "  try { } catch {"
 
@@ -926,7 +926,7 @@ runs = ["xtask-lib-windows"]
 platforms = ["windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
+file = "tools/xtask/src/windows/script/templates.rs"
 find = "  if ($run) { taskkill @ends"
 replace = "  if ($true) { taskkill @ends"
 
@@ -947,7 +947,7 @@ runs = ["xtask-lib-windows"]
 platforms = ["windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
+file = "tools/xtask/src/windows/script/templates.rs"
 find = "-ErrorAction Stop | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item -LiteralPath $owner)"
 replace = "-ErrorAction Stop | Where-Object { $_.StartTime -le (Get-Item -LiteralPath $owner)"
 
@@ -968,7 +968,7 @@ runs = ["xtask-lib-windows"]
 platforms = ["windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
+file = "tools/xtask/src/windows/script/templates.rs"
 find = " -and $_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime"
 replace = ""
 
@@ -992,7 +992,7 @@ runs = ["xtask-lib-windows"]
 platforms = ["windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
+file = "tools/xtask/src/windows/script/templates.rs"
 find = "  Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue; if"
 replace = "  Remove-Item -LiteralPath $owner -Force; if"
 
@@ -1257,7 +1257,7 @@ runs = ["xtask-lib-windows"]
 platforms = ["windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
+file = "tools/xtask/src/windows/script/templates.rs"
 find = "& $tar -xmzf $tarball -C $dir"
 replace = "tar.exe -xmzf $tarball -C $dir"
 
@@ -1288,7 +1288,7 @@ runs = ["xtask-lib-windows"]
 platforms = ["windows"]
 
 [[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
+file = "tools/xtask/src/windows/script/templates.rs"
 find = "if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) {"
 replace = "if ($false) {"
 
