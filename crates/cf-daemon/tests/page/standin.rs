@@ -15,8 +15,8 @@ use cf_engine::seams::EngineError;
 use cf_engine::{Finished, SwitchTo, SwitchWhen};
 use cf_harness::contract::Work;
 use cf_ledger::{
-    ChiefSwitch, DeletedProject, Ledger, LedgerError, NewProject, ParticipantView, ProjectView,
-    RemovedMember, TaskReleased,
+    ChiefSwitch, DeletedProject, Ledger, LedgerError, NewMember, NewProject, ParticipantView,
+    ProjectView, RemovedMember, TaskReleased,
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -372,6 +372,23 @@ impl Engine for Standin {
             .map_err(EngineError::from);
         seam.settle(&answered);
         Box::pin(ready(answered))
+    }
+
+    fn change_backup<'a>(
+        &'a self,
+        _: i64,
+        _: &'a str,
+        _: &'a NewMember,
+    ) -> Work<'a, Result<ParticipantView, EngineError>> {
+        unreachable!("recorded page traces predate backup operations")
+    }
+
+    fn remove_backup<'a>(
+        &'a self,
+        _: i64,
+        _: &'a str,
+    ) -> Work<'a, Result<ParticipantView, EngineError>> {
+        unreachable!("recorded page traces predate backup operations")
     }
 
     fn reassign_task(

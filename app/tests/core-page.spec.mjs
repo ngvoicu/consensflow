@@ -14749,6 +14749,41 @@ for (const scheme of ['dark', 'light']) {
   })
 }
 
+test('BKV settings offers no backup for an image designer', async ({ page }) => {
+  await open(page, shotData('after'))
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const designer = dialog
+    .getByRole('table', { name: 'On the staff' })
+    .locator('tr', { hasText: '@codex-default' })
+  await expect(designer).toContainText('Image designer')
+  await expect(designer.getByRole('button', { name: /backup/i })).toHaveCount(0)
+})
+
+test('BKV New project offers no backup for an image designer', async ({ page }) => {
+  const data = model()
+  data.lastStaff = [
+    {
+      harness: 'codex',
+      model: null,
+      modelName: null,
+      effort: null,
+      designer: true,
+      tier: 'light',
+      role: 'designer',
+      roles: ['designer'],
+    },
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const designer = dialog
+    .getByRole('table', { name: 'Members for the staff' })
+    .locator('tr', { hasText: 'Image designer' })
+  await expect(designer).toHaveCount(1)
+  await expect(designer.getByRole('button', { name: /backup/i })).toHaveCount(0)
+})
+
 test('BKV settings places one backup under its member and offers no backup of a backup', async ({
   page,
 }) => {

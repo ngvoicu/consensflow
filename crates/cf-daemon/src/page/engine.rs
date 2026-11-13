@@ -25,7 +25,8 @@ use cf_engine::seams::EngineError;
 use cf_engine::{Activity, ActivityState, Dispatcher, Finished, SwitchTo, SwitchWhen};
 use cf_harness::contract::{Pane, Work};
 use cf_ledger::{
-    DeletedProject, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
+    DeletedProject, NewMember, NewProject, ParticipantView, ProjectView, RemovedMember,
+    TaskReleased,
 };
 use serde_json::{json, Map, Value};
 
@@ -94,6 +95,21 @@ pub trait Engine {
         project: i64,
         handle: &'a str,
     ) -> Work<'a, Result<RemovedMember, EngineError>>;
+
+    /// Replace a backup, closing and forgetting the old one's windows.
+    fn change_backup<'a>(
+        &'a self,
+        project: i64,
+        handle: &'a str,
+        backup: &'a NewMember,
+    ) -> Work<'a, Result<ParticipantView, EngineError>>;
+
+    /// Remove a backup, closing and forgetting its windows.
+    fn remove_backup<'a>(
+        &'a self,
+        project: i64,
+        handle: &'a str,
+    ) -> Work<'a, Result<ParticipantView, EngineError>>;
 
     /// A task given to another member of its tier (`reassignTask`).
     fn reassign_task(
@@ -255,6 +271,23 @@ impl Engine for Rc<Dispatcher> {
         handle: &'a str,
     ) -> Work<'a, Result<RemovedMember, EngineError>> {
         Box::pin(Dispatcher::remove_member(self, project, handle))
+    }
+
+    fn change_backup<'a>(
+        &'a self,
+        project: i64,
+        handle: &'a str,
+        backup: &'a NewMember,
+    ) -> Work<'a, Result<ParticipantView, EngineError>> {
+        Box::pin(Dispatcher::change_backup(self, project, handle, backup))
+    }
+
+    fn remove_backup<'a>(
+        &'a self,
+        project: i64,
+        handle: &'a str,
+    ) -> Work<'a, Result<ParticipantView, EngineError>> {
+        Box::pin(Dispatcher::remove_backup(self, project, handle))
     }
 
     fn reassign_task(

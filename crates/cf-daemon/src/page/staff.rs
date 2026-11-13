@@ -131,9 +131,20 @@ async fn backup_pick(page: &Page, body: Body<'_>) -> Result<NewMember, Said> {
     picked_member(page, Body::new(&Value::Object(fields)), true).await
 }
 
+/// The image designer draws on Codex's image model and has no backup.
+fn require_backup_owner(page: &Page, project: i64, handle: &str) -> Result<(), Said> {
+    if active_member(page, project, |member| member.handle == handle)?
+        .is_some_and(|member| member.designer)
+    {
+        return Err(Said::from("An image designer has no backup."));
+    }
+    Ok(())
+}
+
 pub(super) async fn add_backup(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let project = body.whole("project")?;
     let handle = body.text("member");
+    require_backup_owner(page, project, &handle)?;
     let backup = backup_pick(page, body).await?;
     one(
         "member",
@@ -146,22 +157,18 @@ pub(super) async fn add_backup(page: &Page, body: Body<'_>) -> Result<Fields, Sa
 pub(super) async fn change_backup(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let project = body.whole("project")?;
     let handle = body.text("member");
+    require_backup_owner(page, project, &handle)?;
     let backup = backup_pick(page, body).await?;
     one(
         "member",
-        page.ledger
-            .borrow_mut()
-            .change_backup(project, &handle, &backup)?,
+        page.engine.change_backup(project, &handle, &backup).await?,
     )
 }
 
 pub(super) async fn remove_backup(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let project = body.whole("project")?;
     let handle = body.text("member");
-    one(
-        "member",
-        page.ledger.borrow_mut().remove_backup(project, &handle)?,
-    )
+    one("member", page.engine.remove_backup(project, &handle).await?)
 }
 
 /// `member.edit`: Edit member (T-1143). The member `member` names runs from its next window

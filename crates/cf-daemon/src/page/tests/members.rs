@@ -1571,6 +1571,47 @@ async fn bkv_page_every_harness_can_back_every_other_harness() {
                     assert_eq!(backup["harness"], backup_harness);
                     assert_eq!(backup["roles"], json!(["reviewer"]));
                     assert_eq!(backup["tier"], "complex");
+                    let owner_id = owner["id"].as_i64().unwrap();
+                    let backup_id = backup["id"].as_i64().unwrap();
+                    s.rig
+                        .kit
+                        .ledger
+                        .borrow_mut()
+                        .mark_out_with_kind(
+                            owner_id,
+                            "9999-12-31T23:59:59.000Z",
+                            "out of quota",
+                            cf_ledger::HoldKind::Quota,
+                        )
+                        .unwrap();
+                    let task = s.rig.kit.create_task(
+                        s.project,
+                        cf_ledger::NewTask {
+                            from: "chief".into(),
+                            pool: Some("reviewer".into()),
+                            tier: Some("complex".into()),
+                            body: "Review".into(),
+                            ..cf_ledger::NewTask::default()
+                        },
+                    );
+                    s.rig.kit.pass().unwrap();
+                    s.rig.kit.pass().unwrap();
+                    let assigned = s
+                        .rig
+                        .kit
+                        .task(s.project, task.task.number)
+                        .task
+                        .assignee
+                        .unwrap();
+                    assert_eq!(
+                        s.member(&assigned).member_id,
+                        Some(backup_id),
+                        "{primary_harness} with {backup_harness}"
+                    );
+                    assert!(
+                        s.rig.kit.host.last(&assigned).is_some(),
+                        "{primary_harness} with {backup_harness}: backup window"
+                    );
                 }
             }
         })
@@ -1610,22 +1651,99 @@ async fn bkv_page_bad_copy_link_refuses_the_whole_project() {
 }
 
 #[tokio::test]
-async fn bkv_page_open_without_staff_copies_a_designers_backup_on_another_harness() {
-    LocalSet::new().run_until(async {
-        let s = staffing();
-        let added = s.add(json!({"harness": "codex", "roles": ["designer"]})).await;
-        assert_eq!(added["ok"], true, "{added}");
-        let owner = added["member"]["handle"].as_str().unwrap();
-        let backup = cf_ledger::NewMember::from_json(&json!({"harness": "claude-code", "model": "claude-opus-5-5", "effort": "high", "tier": "light", "roles": ["worker"]})).unwrap();
-        s.rig.kit.ledger.borrow_mut().add_backup(s.project, owner, &backup).unwrap();
-        let opened = ask(&s.app, "project.open", json!({"directory": "/work/bkv-designer", "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high"})).await;
-        assert_eq!(opened["ok"], true, "{opened}");
-        let lanes = bkv_page_link(&s, opened["project"]["id"].as_i64().unwrap());
-        let owner = lanes.iter().find(|p| p["designer"] == true && p["backupOf"].is_null()).unwrap();
-        let backup = lanes.iter().find(|p| p["backupOf"] == owner["id"]).unwrap();
-        assert_eq!(backup["harness"], "claude-code");
-        assert_eq!(backup["roles"], json!(["designer"]));
-    }).await;
+async fn bkv_page_an_image_designer_cannot_have_a_backup() {
+    LocalSet::new()
+        .run_until(async {
+            let s = staffing();
+            let added = s
+                .add(json!({"harness": "codex", "roles": ["designer"]}))
+                .await;
+            assert_eq!(added["ok"], true, "{added}");
+            let owner = added["member"]["handle"].as_str().unwrap();
+            for operation in ["backup.add", "backup.change"] {
+                let refused = ask(
+                    &s.app,
+                    operation,
+                    json!({
+                        "project": s.project, "member": owner,
+                        "harness": "claude-code", "model": "claude-opus-5-5", "effort": "high"
+                    }),
+                )
+                .await;
+                assert_eq!(refused["ok"], false, "{operation}: {refused}");
+                assert_eq!(
+                    refused["error"], "An image designer has no backup.",
+                    "{operation}: {refused}"
+                );
+            }
+            let owner_id = s.member(owner).id;
+            assert!(!bkv_page_link(&s, s.project)
+                .iter()
+                .any(|p| p["backupOf"] == owner_id));
+        })
+        .await;
+}
+
+/// Changing or removing a backup through the page also closes its old window.
+#[tokio::test]
+async fn bkv_page_changing_or_removing_a_backup_closes_its_window() {
+    LocalSet::new()
+        .run_until(async {
+            for operation in ["backup.change", "backup.remove"] {
+                let s = staffing();
+                let owner = bkv_page_owner(&s).await;
+                let backup = bkv_page_backup(&s, &owner);
+                let owner_id = s.member(&owner).id;
+                s.rig
+                    .kit
+                    .ledger
+                    .borrow_mut()
+                    .mark_out_with_kind(
+                        owner_id,
+                        "9999-12-31T23:59:59.000Z",
+                        "out of quota",
+                        cf_ledger::HoldKind::Quota,
+                    )
+                    .unwrap();
+                let task = s.rig.kit.create_task(
+                    s.project,
+                    cf_ledger::NewTask {
+                        from: "chief".into(),
+                        pool: Some("worker".into()),
+                        tier: Some("standard".into()),
+                        body: "Work".into(),
+                        ..cf_ledger::NewTask::default()
+                    },
+                );
+                s.rig.kit.pass().unwrap();
+                s.rig.kit.pass().unwrap();
+                let assigned = s
+                    .rig
+                    .kit
+                    .task(s.project, task.task.number)
+                    .task
+                    .assignee
+                    .unwrap();
+                assert!(assigned.starts_with(&backup), "{operation}: {assigned}");
+                let pane = s.rig.kit.host.last(&assigned).expect("backup window").pane;
+                let body = json!({"project": s.project, "member": owner,
+                "harness": "muse", "model": "muse-wonder-1.0", "effort": "high"});
+                let answer = ask(&s.app, operation, body);
+                tokio::pin!(answer);
+                let answer = loop {
+                    tokio::select! {
+                        answer = &mut answer => break answer,
+                        () = tokio::task::yield_now() => s.rig.kit.settle(),
+                    }
+                };
+                assert_eq!(answer["ok"], true, "{operation}: {answer}");
+                assert!(
+                    s.rig.kit.host.killed().contains(&pane),
+                    "{operation} closes the old backup window"
+                );
+            }
+        })
+        .await;
 }
 
 #[tokio::test]

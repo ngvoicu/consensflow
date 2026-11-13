@@ -1214,7 +1214,7 @@ export class NewProjectDialog {
       const row = staffRow(whoCell(pick.name, runsLabel(pick, false)), pick.role, remove)
       row.dataset.model = pick.model ?? ''
       rows.push(row)
-      if (drawn.has(pick._id)) continue
+      if (drawn.has(pick._id) || pick.role === 'designer') continue
       drawn.add(pick._id)
       const backup = backups.get(pick._id)
       const owner = { key: pick._id, label: pick.name }
@@ -1661,7 +1661,7 @@ export class ProjectSettingsDialog {
     for (const entry of entries) {
       rows.push(entry.row)
       const owner = entry.member
-      if (drawn.has(owner.id) || this.#removing === owner.handle) continue
+      if (drawn.has(owner.id) || owner.designer || this.#removing === owner.handle) continue
       drawn.add(owner.id)
       const backup = backups.get(owner.id)
       if (backup) rows.push(this.#backupRow(owner, backup))
