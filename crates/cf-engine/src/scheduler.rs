@@ -207,7 +207,6 @@ pub(crate) struct SchedulerState {
     /// The members out because their model was busy, each with the time it was marked out
     /// until: their lane and the board say so, not that they are out of quota. In memory, as
     /// the ledger keeps no kind of a member's time out; after a restart they read as out.
-    busy_out: RefCell<HashMap<i64, String>>,
     /// The tasks whose giver was told they went to a member's backup, each with its project:
     /// told once for a task, however often it comes back to the board.
     backup_noted: RefCell<HashMap<i64, i64>>,
@@ -711,11 +710,7 @@ impl Dispatcher {
             let until = member.out_until.clone().unwrap_or_default();
             return Some(NotFree::Out {
                 handle: member.handle.clone(),
-                // A busy hold is busy as the ledger kept it, after a restart too.
-                held: match seat.out_kind {
-                    Some(HoldKind::Busy) if !never(&until) => Held::Busy,
-                    _ => self.kind_of_hold(member.id, &until),
-                },
+                held: held_of(&until, seat.out_kind),
                 kind: seat.out_kind,
                 until,
             });
@@ -743,18 +738,11 @@ impl Dispatcher {
 
     /// What holds `member`, out until `until`: its model's move and its account's refusal
     /// are marked by the time they are out until (`MOVED`, `NEVER`); a busy model by the
-    /// mark of its own (`marked_busy`) at that very time, which a later quota refusal
-    /// outlasts; else a quota.
+    /// kind the ledger kept with the mark (it outlasts a restart, and a later quota refusal
+    /// never relabels a longer hold); else a quota.
     pub(crate) fn kind_of_hold(&self, member: i64, until: &str) -> Held {
-        if moved_hold(until) {
-            Held::Moved
-        } else if never(until) {
-            Held::Account
-        } else if self.busy_until(member).as_deref() == Some(until) {
-            Held::Busy
-        } else {
-            Held::Quota
-        }
+        let kept = self.seams.ledger.borrow().hold_kind(member).ok().flatten();
+        held_of(until, kept)
     }
 
     /// The handles, as "@zeus", of the `candidates` that are out now for `held`.
@@ -763,7 +751,7 @@ impl Dispatcher {
             .iter()
             .filter(|candidate| {
                 candidate.member.out_until.as_deref().is_some_and(|until| {
-                    self.out(Some(until)) && self.kind_of_hold(candidate.member.id, until) == held
+                    self.out(Some(until)) && held_of(until, candidate.out_kind) == held
                 })
             })
             .map(|candidate| format!("@{}", candidate.member.handle))
@@ -1490,19 +1478,6 @@ impl Dispatcher {
         Ok(time::iso(self.now() + wait))
     }
 
-    /// A member marked out until `until` because its model was busy: said so, not out of quota.
-    pub(crate) fn marked_busy(&self, member: i64, until: &str) {
-        self.scheduler
-            .busy_out
-            .borrow_mut()
-            .insert(member, until.to_owned());
-    }
-
-    /// Until when a member is out because its model was busy, where it is.
-    pub(crate) fn busy_until(&self, member: i64) -> Option<String> {
-        self.scheduler.busy_out.borrow().get(&member).cloned()
-    }
-
     /// Until when `member`, as the ledger has it now, is out because its model is busy for a
     /// moment (T-1112): none when it is not out, or is out for anything else. The page says it
     /// of the member's lanes, for a busy hold looks like any timed hold by its time alone and
@@ -1935,6 +1910,20 @@ pub(crate) fn needs_an_edit_because(handle: &str, agent: Option<&str>) -> String
         "@{handle} needs an edit: the update could not tell what it ran on ({} is in no catalog and no agents file); edit it under Project settings, or remove it",
         agent.unwrap_or("its agent")
     )
+}
+
+/// Why a hold is what it is: a moved model or a refused account by the time it is marked until
+/// (`MOVED`, `NEVER`); a busy model by the kind the ledger kept with the mark; else a quota.
+pub(crate) fn held_of(until: &str, kept: Option<cf_ledger::HoldKind>) -> Held {
+    if moved_hold(until) {
+        Held::Moved
+    } else if never(until) {
+        Held::Account
+    } else if kept == Some(cf_ledger::HoldKind::Busy) {
+        Held::Busy
+    } else {
+        Held::Quota
+    }
 }
 
 #[cfg(test)]

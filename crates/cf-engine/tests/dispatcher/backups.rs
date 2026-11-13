@@ -493,3 +493,54 @@ fn a_backups_window_still_opening_is_waited_for_before_it_is_closed_for_a_member
         "its window closed once opened"
     );
 }
+
+/// A busy member of a project with no backup, marked out as its refusal marks it, and an engine
+/// made again, which has no memory of the mark but the ledger's.
+fn busy_after_a_restart(context: &Context) -> (Tiers<'_>, String) {
+    let tiers = Tiers::new(context, &["zeus"]);
+    let until = soon(context, 1);
+    context.mark_out_busy(tiers.id("zeus"), &until);
+    (tiers, until)
+}
+
+#[test]
+fn after_a_restart_a_busy_model_is_not_offered_try_again_now_and_the_press_is_refused() {
+    let context = Context::new();
+    let (tiers, until) = busy_after_a_restart(&context);
+    let restarted = context.make();
+    let zeus = tiers.participant("zeus").unwrap();
+    assert_eq!(restarted.model_busy_until(&zeus), Some(until.clone()));
+    let refused = restarted
+        .back_from_quota(tiers.project.id, "zeus")
+        .unwrap_err();
+    assert_eq!(
+        refused.to_string(),
+        format!("Its model is busy: ConsensFlow tries it again at {until}")
+    );
+    assert_eq!(tiers.out_until("zeus"), Some(until), "its hold stands");
+}
+
+#[test]
+fn after_a_restart_the_wait_for_a_busy_model_does_not_say_the_quota_was_renewed() {
+    let context = Context::new();
+    let (tiers, until) = busy_after_a_restart(&context);
+    let restarted = context.make();
+    tiers.open();
+    restarted.pass().unwrap();
+    let said: Vec<String> = tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|note| note.contains("waits for a free"))
+        .collect();
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(
+        said[0].contains(&format!(
+            "@zeus's model is busy (ConsensFlow tries it again at {until})"
+        )),
+        "{said:?}"
+    );
+    assert!(
+        !said[0].contains("the quota was renewed early") && !said[0].contains("Try again now"),
+        "no press is offered for a busy model: {said:?}"
+    );
+}

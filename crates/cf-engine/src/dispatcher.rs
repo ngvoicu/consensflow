@@ -47,7 +47,7 @@ use crate::privacy::PrivacyState;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
-use crate::scheduler::{busy_turn, moved_hold, out_words, News, SchedulerState, Unwell};
+use crate::scheduler::{busy_turn, moved_hold, out_words, Held, News, SchedulerState, Unwell};
 use crate::seams::{EngineError, Seams};
 use crate::shown::{Part, Shown};
 use crate::stalls::StallsState;
@@ -587,10 +587,30 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .send_on_vacation(project, handle, &[])?;
+        self.release_vacation_sessions(project, &found, member.id, handle)
+            .await?;
+        self.changed();
+        Ok(self
+            .project_now(project)?
+            .and_then(|now| now.participants.into_iter().find(|p| p.id == sent.id))
+            .unwrap_or(sent))
+    }
+
+    /// The never-opened tasks of a member's sessions on Vacation go back to the board, each
+    /// session looked at while its step is held. It sets no mark and does nothing for a member
+    /// brought back meanwhile, and it is safe to run again (the Resume runs it for a member
+    /// whose Vacation the app's stop cut short).
+    pub(crate) async fn release_vacation_sessions(
+        self: &Rc<Self>,
+        project: i64,
+        found: &ProjectView,
+        member: i64,
+        handle: &str,
+    ) -> Result<(), EngineError> {
         for session in found
             .participants
             .iter()
-            .filter(|p| p.member_id == Some(member.id))
+            .filter(|p| p.member_id == Some(member))
             .map(|p| p.id)
         {
             let record = self.record_of(session);
@@ -602,16 +622,12 @@ impl Dispatcher {
                 this.seams
                     .ledger
                     .borrow_mut()
-                    .send_on_vacation(project, &handle, &[session])?;
+                    .release_unopened(project, &handle, &[session])?;
                 Ok::<(), EngineError>(())
             };
             self.exclusive(&record, work).await.await?;
         }
-        self.changed();
-        Ok(self
-            .project_now(project)?
-            .and_then(|now| now.participants.into_iter().find(|p| p.id == sent.id))
-            .unwrap_or(sent))
+        Ok(())
     }
 
     /// Whether a session has never had a window: none open, none being opened or ended, and no
@@ -1837,7 +1853,7 @@ impl Dispatcher {
         // A window of a member out for its busy model whose own record shows no refusal says
         // so too (T-1112).
         let words = match unwell {
-            None if self.busy_until(owner.id).as_deref() == Some(until.as_str()) => {
+            None if self.kind_of_hold(owner.id, &until) == Held::Busy => {
                 format!("model busy, tried again at {until}")
             }
             _ => out_words(&until, unwell),
@@ -1953,9 +1969,6 @@ impl Dispatcher {
             kind,
         )?;
         let until = marked.out_until.clone().unwrap_or_default();
-        if let Some(Unwell::Busy(_)) = unwell {
-            self.marked_busy(owner.id, &until);
-        }
         self.set_activity(
             record,
             Activity::because(ActivityState::Out, out_words(&until, unwell)),

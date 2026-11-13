@@ -212,10 +212,8 @@ runs = ["busy-models-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''
-            self.marked_busy(owner.id, &until);
-'''
-replace = "\n"
+find = '''            Some(Unwell::Busy(_)) => HoldKind::Busy,'''
+replace = '''            Some(Unwell::Busy(_)) => HoldKind::Quota,'''
 
 [[plant]]
 name = "busy-models: the note does not say what comes after the tries"

@@ -270,3 +270,33 @@ fn a_window_the_human_opened_for_a_task_given_is_opened_and_the_task_stays() {
     context.send_on_vacation(tiers.project.id, "zeus").unwrap();
     assert_eq!(tiers.assignee(1), session);
 }
+
+#[test]
+fn a_vacation_the_app_stopped_in_the_middle_of_is_finished_at_the_resume() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    let zeus = tiers.id("zeus");
+    context
+        .ledger
+        .borrow_mut()
+        .assign_task(tiers.project.id, 1, zeus)
+        .unwrap();
+    // The mark was set, and the app stopped before the session was released.
+    context
+        .ledger
+        .borrow_mut()
+        .send_on_vacation(tiers.project.id, "zeus", &[])
+        .unwrap();
+    assert_eq!(with(&tiers, 1), "zeus");
+    let restarted = context.make();
+    restarted.resume_project(tiers.project.id).unwrap();
+    assert_eq!(
+        tiers.task(1).task.assignee,
+        None,
+        "the task went back to the board"
+    );
+    // Run again, it changes nothing.
+    restarted.resume_project(tiers.project.id).unwrap();
+    assert_eq!(tiers.task(1).task.assignee, None);
+}

@@ -9,7 +9,7 @@ use super::{require_member_row, require_staff_role};
 use crate::model::LedgerError;
 use crate::store::Store;
 use crate::tasks::release_inside;
-use crate::views::participant_view;
+use crate::views::{participant_view, ParticipantRow};
 use crate::ParticipantView;
 
 /// The caller supplies the member's sessions it has proved unopened while
@@ -26,23 +26,73 @@ pub(crate) fn send(
         let member = store.participant_by_handle(project, handle)?;
         require_member_row(store, member.id, "goes on Vacation")?;
         require_staff_role(handle, &member)?;
-        let sessions: HashSet<i64> = unopened.iter().copied().collect();
-        for session in &sessions {
-            let row = store.participant_row(*session)?;
-            if row.project_id != project || row.member_id != Some(member.id) {
-                return Err(LedgerError::refused_with(
-                    "not-a-member-session",
-                    format!("@{} is not a session of @{handle}", row.handle),
-                    409,
-                ));
-            }
-        }
+        let sessions = own_sessions(store, project, handle, &member, unopened)?;
         if member.vacation_since.is_none() {
             let at = store.at();
-            store.db.execute("UPDATE participant SET vacation_since = ? WHERE id = ?", params![at, member.id])?;
-            store.log(project, "member.vacation", json!({ "handle": handle, "since": at }))?;
+            store.db.execute(
+                "UPDATE participant SET vacation_since = ? WHERE id = ?",
+                params![at, member.id],
+            )?;
+            store.log(
+                project,
+                "member.vacation",
+                json!({ "handle": handle, "since": at }),
+            )?;
         }
-        let queued: Vec<(i64, i64)> = store.db.prepare(
+        release_queued(store, project, &member, &sessions)?;
+        participant_view(&store.participant_row(member.id)?)
+    })
+}
+
+/// Return the queued, never-opened tasks of `unopened` sessions of a member that is on
+/// Vacation now. It never sets the mark, and does nothing for a member brought back meanwhile:
+/// a slow Send on Vacation must not undo a Bring back that overlapped it.
+pub(crate) fn release_unopened(
+    store: &mut Store,
+    project: i64,
+    handle: &str,
+    unopened: &[i64],
+) -> Result<ParticipantView, LedgerError> {
+    store.write(|store| {
+        let member = store.participant_by_handle(project, handle)?;
+        require_member_row(store, member.id, "goes on Vacation")?;
+        require_staff_role(handle, &member)?;
+        let sessions = own_sessions(store, project, handle, &member, unopened)?;
+        if member.vacation_since.is_some() {
+            release_queued(store, project, &member, &sessions)?;
+        }
+        participant_view(&store.participant_row(member.id)?)
+    })
+}
+
+fn own_sessions(
+    store: &Store,
+    project: i64,
+    handle: &str,
+    member: &ParticipantRow,
+    unopened: &[i64],
+) -> Result<HashSet<i64>, LedgerError> {
+    let sessions: HashSet<i64> = unopened.iter().copied().collect();
+    for session in &sessions {
+        let row = store.participant_row(*session)?;
+        if row.project_id != project || row.member_id != Some(member.id) {
+            return Err(LedgerError::refused_with(
+                "not-a-member-session",
+                format!("@{} is not a session of @{handle}", row.handle),
+                409,
+            ));
+        }
+    }
+    Ok(sessions)
+}
+
+fn release_queued(
+    store: &mut Store,
+    project: i64,
+    member: &ParticipantRow,
+    sessions: &HashSet<i64>,
+) -> Result<(), LedgerError> {
+    let queued: Vec<(i64, i64)> = store.db.prepare(
             "SELECT t.number, t.assignee_id FROM task t JOIN participant s ON s.id = t.assignee_id
              WHERE t.project_id = ?1 AND s.member_id = ?2 AND t.state = 'queued' AND t.pool IS NOT NULL
                AND NOT EXISTS (SELECT 1 FROM conversation c WHERE c.participant_id = s.id)
@@ -61,13 +111,12 @@ pub(crate) fn send(
              ORDER BY t.number"
         )?.query_map(params![project, member.id], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
-        for (number, session) in queued {
-            if sessions.contains(&session) {
-                release_inside(store, project, number, "its member went on Vacation", true)?;
-            }
+    for (number, session) in queued {
+        if sessions.contains(&session) {
+            release_inside(store, project, number, "its member went on Vacation", true)?;
         }
-        participant_view(&store.participant_row(member.id)?)
-    })
+    }
+    Ok(())
 }
 
 /// Clear only Vacation. Quota holds and the work they hold are untouched.

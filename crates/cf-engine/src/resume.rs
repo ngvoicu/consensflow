@@ -282,6 +282,15 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .set_project_state(project, "open")?;
+        // A Vacation the app's stop cut short, with a session still to release, is finished.
+        for member in resumed
+            .participants
+            .iter()
+            .filter(|p| p.vacation_since.is_some() && p.member_id.is_none())
+        {
+            self.release_vacation_sessions(project, &resumed, member.id, &member.handle)
+                .await?;
+        }
         let at_work = self.at_work(&resumed)?;
         if let Some(chief) = resumed.participants.iter().find(|p| p.role == "chief") {
             // The human asks for the chief now: a chief that failed before is tried at once.

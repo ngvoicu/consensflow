@@ -27,13 +27,15 @@ use crate::views::{participant_view, ParticipantRow, TaskRow, PARTICIPANT_SELECT
 pub(crate) use backup::{add_backup, change_backup, remove_backup};
 pub(crate) use pools::{candidates, has_members_of_tier, holders_of_tier, members, nearest_tier};
 pub use pools::{BackupCandidate, Candidate, HoldKind};
-pub(crate) use quota::{mark_back, mark_out, mark_out_kind};
+pub(crate) use quota::{hold_kind, mark_back, mark_out, mark_out_kind};
 use sessions::close_session;
 pub(crate) use sessions::{
     bring_back, can_continue, end_session, follow_up_session, has_task_in_hand, require_free,
     start_session, undecided_results, Giving,
 };
-pub(crate) use vacation::{bring_back as return_from_vacation, send as send_on_vacation};
+pub(crate) use vacation::{
+    bring_back as return_from_vacation, release_unopened, send as send_on_vacation,
+};
 
 /// A staff row from the last project. Ids are included for rows in a backup
 /// relationship so a new project can reconnect the two without guessing by model.

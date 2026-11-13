@@ -396,16 +396,6 @@ replace = '''            .insert(task.id, project.id)
         {'''
 
 [[plant]]
-name = "bkv engine: a busy hold is read as a quota after a restart"
-meant = "a_wait_after_a_restart_still_says_the_model_is_busy_and_not_that_the_quota_is_out"
-runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backups::"]]
-[[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = '''                    Some(HoldKind::Busy) if !never(&until) => Held::Busy,
-'''
-replace = ''''''
-
-[[plant]]
 name = "bkv engine: the wait leaves out why a backup rests"
 meant = "a_backup_on_vacation_takes_no_task_and_the_wait_says_so"
 runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "vacation::"]]
@@ -462,6 +452,35 @@ runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher"
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''            Some(Unwell::Busy(_)) => HoldKind::Busy,'''
 replace = '''            Some(Unwell::Busy(_)) => HoldKind::Quota,'''
+
+[[plant]]
+name = "bkv engine: the kind of a hold is read from the memory of the process"
+meant = "after_a_restart_a_busy_model_is_not_offered_try_again_now_and_the_press_is_refused"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backups::after_a_restart"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''    } else if kept == Some(cf_ledger::HoldKind::Busy) {'''
+replace = '''    } else if false && kept == Some(cf_ledger::HoldKind::Busy) {'''
+
+[[plant]]
+name = "bkv ledger: a per-session release works for a member that is not on Vacation"
+meant = "a_release_of_unopened_sessions_never_sets_the_mark_and_does_nothing_after_a_bring_back"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_release_of_unopened_sessions"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/vacation.rs"
+find = '''        let sessions = own_sessions(store, project, handle, &member, unopened)?;
+        if member.vacation_since.is_some() {'''
+replace = '''        let sessions = own_sessions(store, project, handle, &member, unopened)?;
+        if true {'''
+
+[[plant]]
+name = "bkv engine: the Resume does not finish a Vacation the app stopped in"
+meant = "a_vacation_the_app_stopped_in_the_middle_of_is_finished_at_the_resume"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "vacation::a_vacation_the_app_stopped"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''.filter(|p| p.vacation_since.is_some() && p.member_id.is_none())'''
+replace = '''.filter(|p| false && p.vacation_since.is_some() && p.member_id.is_none())'''
 
 [[plant]]
 name = "bkv review: a non-image backup is accepted for a designer"

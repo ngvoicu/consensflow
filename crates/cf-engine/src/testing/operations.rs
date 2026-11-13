@@ -390,13 +390,10 @@ impl Context {
     /// A member marked out for its busy model, as a refusal of one does (T-1112) but with no
     /// window refused: out until `until`, and said to be busy.
     pub fn mark_out_busy(&self, member: i64, until: &str) {
-        let marked = self
-            .ledger
+        self.ledger
             .borrow_mut()
             .mark_out_with_kind(member, until, "model busy", cf_ledger::HoldKind::Busy)
             .expect("the member marked out");
-        self.dispatcher
-            .marked_busy(member, marked.out_until.as_deref().unwrap_or_default());
     }
 
     /// The human says a member out of quota is back (`backFromQuota`).
@@ -488,6 +485,20 @@ pub struct Restarted<'a> {
 impl Restarted<'_> {
     fn engine(&self) -> Rc<Dispatcher> {
         self.engine.upgrade().expect("the context holds the engine")
+    }
+
+    /// The human says a member out of quota is back (`backFromQuota`), to this engine.
+    pub fn back_from_quota(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Result<ParticipantView, EngineError> {
+        self.engine().back_from_quota(project, handle)
+    }
+
+    /// Until when this engine says `member` is out for a busy model.
+    pub fn model_busy_until(&self, member: &ParticipantView) -> Option<String> {
+        self.engine().model_busy_until(member)
     }
 
     /// What this engine says the participant's window is doing.
