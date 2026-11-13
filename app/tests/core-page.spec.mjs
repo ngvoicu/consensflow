@@ -11852,10 +11852,10 @@ test("takes a closed window's card out of the dock: its lane says so and opens i
     .poll(() => calls(page, 'session.open'))
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
   // The chief's window opens and closes with the project: its card has no Open, only its
-  // History, Switch chief and Start meeting.
+  // Do with your own hands, History, Switch chief and Start meeting.
   await expect
     .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
-    .toEqual(['History', 'Switch chief', 'Start meeting'])
+    .toEqual(['Do with your own hands', 'History', 'Switch chief', 'Start meeting'])
 })
 
 /** A message for the chief that its meeting with the human holds: queued, as the daemon lists it. */
@@ -11899,7 +11899,7 @@ test('meets the chief from its card: Start holds what comes for it, the button c
   await expect.poll(() => calls(page, 'project.meeting')).toEqual([{ project: 1, on: true }])
   await expect
     .poll(() => named(card.locator('button')))
-    .toEqual(['History', 'Switch chief', 'Stop meeting (0)'])
+    .toEqual(['Do with your own hands', 'History', 'Switch chief', 'Stop meeting (0)'])
   await expect(status).toHaveText('In a meeting · nothing held yet')
   await expect(status).toHaveAttribute('data-state', 'meeting')
   // What comes for the chief now waits, as the daemon's next board says: a member's question
@@ -11916,7 +11916,7 @@ test('meets the chief from its card: Start holds what comes for it, the button c
   )
   await expect
     .poll(() => named(card.locator('button')))
-    .toEqual(['History', 'Switch chief', 'Stop meeting (2)'])
+    .toEqual(['Do with your own hands', 'History', 'Switch chief', 'Stop meeting (2)'])
   await expect(status).toHaveText('In a meeting · 2 messages held')
   const held = page.getByRole('list', { name: 'Held for your meeting' })
   await expect
@@ -11944,7 +11944,7 @@ test('meets the chief from its card: Start holds what comes for it, the button c
     ])
   await expect
     .poll(() => named(card.locator('button')))
-    .toEqual(['History', 'Switch chief', 'Start meeting'])
+    .toEqual(['Do with your own hands', 'History', 'Switch chief', 'Start meeting'])
   await expect(held).toHaveCount(0)
   await expect(status).toHaveText('Working')
   await expect(page.locator('.foryou-status')).toHaveText('1 waiting · 1 note')
@@ -12076,7 +12076,7 @@ test("keeps a session's terminal out of the dock until the human shows it, and t
   await expect(page.locator('tr[data-handle="chief"] .row-head button')).toHaveCount(0)
   await expect
     .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
-    .toEqual(['History', 'Switch chief', 'Start meeting'])
+    .toEqual(['Do with your own hands', 'History', 'Switch chief', 'Start meeting'])
   // Out of the dock, a session's window is fed all the same: what it prints
   // is taken and acknowledged, so it never waits for a reader.
   expect(await page.evaluate(() => window.__emulators.length)).toBe(3)
