@@ -425,9 +425,19 @@ pub(super) fn show_answered(
             "UPDATE message SET state = 'read', receipt = ?1, delivered_at = ?2,
                     body = ?3, carried_by = NULL
               WHERE id = ?4 AND state = 'queued' AND attempts = 0
+                AND NOT EXISTS
+                    (SELECT 1 FROM event e WHERE e.project_id = message.project_id
+                       AND e.kind = 'delivery.begun'
+                       AND CASE WHEN json_valid(e.data)
+                                THEN json_extract(e.data, '$.message') END = message.id)
                 AND (carried_by IS NULL OR EXISTS
                      (SELECT 1 FROM message c WHERE c.id = message.carried_by
-                       AND c.state IN ('queued', 'gated') AND c.attempts = 0))",
+                       AND c.state IN ('queued', 'gated') AND c.attempts = 0
+                       AND NOT EXISTS
+                           (SELECT 1 FROM event e WHERE e.project_id = c.project_id
+                              AND e.kind = 'delivery.begun'
+                              AND CASE WHEN json_valid(e.data)
+                                       THEN json_extract(e.data, '$.message') END = c.id)))",
             params![receipt.to_string(), at, body, id],
         )?;
         if changed > 0 {

@@ -382,6 +382,40 @@ fn a_note_queued_again_after_an_attempt_stays_typed_when_its_tell_is_answered() 
 }
 
 #[test]
+fn a_note_in_a_carrier_is_shown_only_if_the_carrier_never_began() {
+    for began in [false, true] {
+        let mut w = world();
+        let (task, session, tell) = delivered_tell(&mut w);
+        let note = note_of_tell(&mut w, task, &session, tell);
+        let carrier = w.note(&session, "chief", task, "More for the chief");
+        // Model a note riding in a carrier, both still queued for the chief.
+        w.edit(|db| {
+            db.execute(
+                "UPDATE message SET carried_by = ?1 WHERE id = ?2",
+                [carrier.id, note.id],
+            )
+            .expect("it rides in the carrier");
+        });
+        if began {
+            let begun = w.begin(carrier.id);
+            assert!(begun.carried.iter().any(|row| row.id == note.id));
+            w.ledger
+                .retry_delivery(carrier.id, "the carrier lost confirmation", true)
+                .expect("the carrier is queued again");
+        }
+        answer_tell(&mut w, &session, tell);
+        let note = w.message(note.id);
+        if began {
+            assert_eq!(note.state, "queued");
+            assert!(note.receipt.get(SHOWN).is_none());
+        } else {
+            assert_eq!(note.state, "read");
+            assert!(note.receipt.get(SHOWN).is_some());
+        }
+    }
+}
+
+#[test]
 fn an_answered_tells_note_to_a_human_requester_is_still_queued() {
     let mut w = world();
     let task = w
