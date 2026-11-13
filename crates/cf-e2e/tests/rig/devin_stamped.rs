@@ -230,6 +230,57 @@ fn a_pause_stops_the_turn(shape: &str) -> Outcome {
 }
 
 #[test]
+fn a_tell_to_a_devin_turn_stamped_as_devin_3000_11_stamps_it_presses_no_key_and_goes_in_after_the_turn(
+) -> Outcome {
+    a_tell_presses_no_key(DEVIN_3000_11)
+}
+
+#[test]
+fn a_tell_to_a_devin_3000_12_turn_presses_no_key_and_goes_in_after_the_turn() -> Outcome {
+    a_tell_presses_no_key(DEVIN_3000_12)
+}
+
+/// A tell stops nothing (T-1616): no Escape is pressed into the turn, T-1 stays working, and
+/// the words are pasted once the turn has rested, on the wire log of the Devin `shape` names.
+fn a_tell_presses_no_key(shape: &str) -> Outcome {
+    let rig = Rig::start(stamped_rig(shape))?;
+    let project = given(&rig, "THINK 40 Reply with exactly: T1_DONE")?;
+    let pane = project.lane("devin-worker")?["pane"]["id"]
+        .as_str()
+        .ok_or("the worker has no window")?
+        .to_owned();
+    sleep(secs(2));
+    rig.tell(project.id(), "CF tell T-1 :: Reply with exactly: ANSWERED")?;
+    let note = |events: &[Value]| -> Option<Value> {
+        events
+            .iter()
+            .find(|event| event["kind"] == "message.sent" && event["data"]["kind"] == "note")
+            .map(|event| event["data"]["message"].clone())
+    };
+    rig.wait_for("the tell to be kept for the window", secs(30), || {
+        Ok(note(&rig.events()).is_some())
+    })?;
+    assert_eq!(
+        project.task(1)?["state"],
+        "working",
+        "the tell moved nothing"
+    );
+    assert_eq!(rig.presses(&pane, &[27]).len(), 0, "no key at the tell");
+    rig.wait_for("the words to go into the window", secs(120), || {
+        let events = rig.events();
+        Ok(note(&events).is_some_and(|message| {
+            when_of(&events, "delivery.confirmed", |event| {
+                event["data"]["message"] == message
+            })
+            .is_some()
+        }))
+    })?;
+    assert_eq!(rig.presses(&pane, &[27]).len(), 0, "no key at all");
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
 fn a_devin_window_opened_again_on_a_turn_it_replays_stamped_is_at_rest_and_takes_the_note_once(
 ) -> Outcome {
     opened_again_takes_the_note_once(DEVIN_3000_11)
