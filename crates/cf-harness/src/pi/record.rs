@@ -7,7 +7,7 @@
 //!
 //! The session's last assistant step decides the turn. It is settled when
 //! that step stopped, was aborted (an Escape: a pause, a tell, the human) or
-//! failed (a provider's error), no tool call is open, and either the
+//! failed (a provider's error, an output-limit cut, or a deferred response), no tool call is open, and either the
 //! extension's evidence names it, or the file has been quiet for 120 seconds
 //! (`QUIET_MS`): Pi's agent retry is capped at 60 seconds
 //! (`retry.maxAgentDelayMs`, since Pi 0.86.0 and still in 1.3.0, the newest
@@ -136,6 +136,8 @@ struct Session {
     failed: bool,
     /// Why the latest turn failed, where Pi said (`errorMessage`).
     failure: Option<String>,
+    /// ConsensFlow's plain description of a stop that returned no whole reply.
+    failure_kind: Option<&'static str>,
     /// The last tool call the session shows, as a line (`calls::describe`).
     last_call: Option<Arc<LastCall>>,
     quota: Option<Arc<Quota>>,
@@ -162,6 +164,7 @@ impl Session {
             terminal: None,
             failed: false,
             failure: None,
+            failure_kind: None,
             last_call: None,
             quota: None,
             records: 0,
@@ -245,6 +248,7 @@ impl Session {
                 self.open_tools.clear();
                 self.failed = false;
                 self.failure = None;
+                self.failure_kind = None;
                 self.push(id, Role::User, text, true, at);
                 self.turn_open = true;
                 self.terminal = None;
@@ -329,15 +333,20 @@ impl Session {
         }
         self.quota = None;
         self.turn_open = true;
+        let cut_tool_calls = stop == Some("length")
+            && matches!(field("content"), Some(Value::Array(blocks))
+                if blocks.iter().any(|block| block.get("type").and_then(Value::as_str) == Some("toolCall")));
         match stop {
             // An abort is a turn over, not a failed one.
             Some("stop" | "aborted") => {
                 self.failed = false;
                 self.failure = None;
+                self.failure_kind = None;
                 self.terminal = Some(id);
             }
             Some("error") => {
                 self.failed = true;
+                self.failure_kind = None;
                 // `String(message.errorMessage ?? 'provider error')`.
                 let failure = match field("errorMessage") {
                     None | Some(Value::Null) => "provider error".to_owned(),
@@ -366,6 +375,28 @@ impl Session {
                     self.quota = Some(Arc::new(quota));
                 }
                 self.terminal = Some(id);
+            }
+            // Pi 1.5.0 rejects each cut tool call and continues the agent loop;
+            // that message is not the end of the agent's work.
+            Some("length") if cut_tool_calls => {
+                self.failed = false;
+                self.failure = None;
+                self.failure_kind = None;
+                self.terminal = None;
+            }
+            Some(reason @ ("length" | "deferred")) => {
+                self.failed = true;
+                self.failure = None;
+                self.failure_kind = Some(match reason {
+                    "length" => "the member's reply was cut at the model's output limit; nothing was taken as its result",
+                    _ => "the provider deferred the member's reply; no result was returned",
+                });
+                self.terminal = Some(id);
+            }
+            Some("toolUse") if self.failure_kind.is_some() => {
+                self.failed = false;
+                self.failure_kind = None;
+                self.terminal = None;
             }
             _ => self.terminal = None,
         }
@@ -442,8 +473,13 @@ impl Session {
         record.lines.places = Some(self.places.clone());
         record.beside = self.beside.clone();
         record.in_flight = in_flight;
-        record.failed = self.failed;
+        // A cut/deferred message can be followed by Pi's own continuation. Do not
+        // fail the task until Pi's settlement evidence or the quiet spell says the
+        // agent actually ended. Provider errors keep their existing behaviour.
+        record.failed =
+            self.failed && (self.failure_kind.is_none() || native_settled || can_settle);
         record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
+        record.failure_kind = self.failure_kind.map(str::to_owned);
         record.last_call.clone_from(&self.last_call);
         record.quota = self.quota.clone();
         record.settlement = if native_settled || can_settle {

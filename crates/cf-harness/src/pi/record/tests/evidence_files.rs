@@ -117,6 +117,27 @@ fn evidence_settles_what_an_error_ended_and_never_what_a_call_holds_open() {
 }
 
 #[test]
+fn evidence_of_a_cut_reply_ends_the_failed_turn_without_waiting_for_quiet() {
+    let mut stage = Stage::with(&[
+        header(),
+        user("u1", "go"),
+        assistant("a1", "length", "partial"),
+    ]);
+    let named = options(&stage, "launch-1");
+    let before = known(&stage.look(0, &named));
+    assert!(before.in_flight && !before.failed);
+    put(
+        &stage,
+        "launch-1.json",
+        settled("launch-1", SESSION, &json!("a1")),
+    );
+    let ended = known(&stage.look(0, &named));
+    assert!(!ended.in_flight && ended.failed);
+    assert_eq!(ended.settlement, Settlement::Settled);
+    assert_eq!(ended.failure_kind.as_deref(), Some("the member's reply was cut at the model's output limit; nothing was taken as its result"));
+}
+
+#[test]
 fn the_launch_is_what_the_options_say_and_the_environment_says_what_they_leave_none() {
     let evidence = tempfile::tempdir().unwrap();
     let dir = evidence.path().to_str().unwrap();
