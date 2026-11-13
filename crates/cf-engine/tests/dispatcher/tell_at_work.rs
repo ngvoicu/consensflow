@@ -462,7 +462,10 @@ fn a_tell_at_work_asks_the_adapter_of_every_harness_for_nothing_until_the_window
             }))
             .unwrap()
             .unwrap();
-        let tiers = Tiers { context: &context, project };
+        let tiers = Tiers {
+            context: &context,
+            project,
+        };
         tiers.open();
         context.pass().unwrap();
         context.pass().unwrap();
@@ -475,8 +478,16 @@ fn a_tell_at_work_asks_the_adapter_of_every_harness_for_nothing_until_the_window
         for _ in 0..3 {
             context.pass().unwrap();
         }
-        assert_eq!(delivered(&context), before, "{kind}: asked to deliver at work");
-        assert_eq!(context.host.inputs(), Vec::<serde_json::Value>::new(), "{kind}: a key");
+        assert_eq!(
+            delivered(&context),
+            before,
+            "{kind}: asked to deliver at work"
+        );
+        assert_eq!(
+            context.host.inputs(),
+            Vec::<serde_json::Value>::new(),
+            "{kind}: a key"
+        );
         assert_eq!(tiers.task(1).task.state, "working", "{kind}");
         assert_eq!(context.message(told.id).state, "queued", "{kind}");
 
