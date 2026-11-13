@@ -35,8 +35,9 @@ impl Ledger {
     }
 
     /// A note from ConsensFlow that asks its reader no decision: to a chief it is shown, not
-    /// typed, and `aside` is what its task's line says of it until the task moves on
-    /// ([`crate::TaskView::aside`]); to anyone else it goes as [`Ledger::note`]'s does.
+    /// typed, and `aside` is what its task's line says of it until the task moves on or the
+    /// thing described ends ([`crate::TaskView::aside`]); to anyone else it goes as
+    /// [`Ledger::note`]'s does.
     pub fn show(
         &mut self,
         project_id: i64,
@@ -55,6 +56,11 @@ impl Ledger {
         number: i64,
     ) -> Result<Option<MessageView>, LedgerError> {
         crate::tasks::aside_note(&self.store, project_id, number)
+    }
+
+    /// End this shown note when what it describes ends; other asides stay active.
+    pub fn end_aside(&mut self, project_id: i64, aside: i64) -> Result<(), LedgerError> {
+        crate::tasks::end_aside(&mut self.store, project_id, aside)
     }
 
     /// A worker held again: update the shown line and count the re-hold, without

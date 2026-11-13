@@ -205,6 +205,137 @@ fn a_note_shown_to_anyone_but_a_chief_is_queued_as_any_note() {
     assert_eq!(aside(&w, task), None);
 }
 
+fn background_reminder(w: &mut World, number: i64) -> MessageView {
+    w.ledger.note(w.project, &NewNote {
+        from: None,
+        to: "chief".into(),
+        body: format!("T-{number} has been working in the background for 60 minutes, holding again 0 times (1 command)."),
+        task: Some(number),
+    }).unwrap()
+}
+
+#[test]
+fn cln76_review_moves_withdraw_unhanded_reminders_but_keep_handed_and_other_notes() {
+    type Move = fn(&mut World, i64);
+    let moves: [(&str, Move); 4] = [
+        ("pause", |w, n| w.pause(n)),
+        ("cancel", |w, n| {
+            w.ledger.cancel_task(w.project, n, "chief").unwrap();
+        }),
+        ("result", |w, n| {
+            w.ledger.record_result(w.project, n, "Done").unwrap();
+        }),
+        ("finish", |w, n| {
+            w.ledger
+                .record_finished(w.project, n, "Done", (1, 0))
+                .unwrap();
+        }),
+    ];
+    for (name, change) in moves {
+        for handed in [false, true] {
+            let mut w = world();
+            let (task, _) = with_zeus(&mut w);
+            let first = background_reminder(&mut w, task);
+            let second = background_reminder(&mut w, task);
+            let other = w
+                .ledger
+                .note(
+                    w.project,
+                    &NewNote {
+                        from: None,
+                        to: "chief".into(),
+                        task: Some(task),
+                        body: "An unrelated note".into(),
+                    },
+                )
+                .unwrap();
+            w.begin(first.id);
+            if handed {
+                assert_eq!(
+                    w.ledger.admit(first.id, &[]).unwrap(),
+                    cf_ledger::HandOver::Admitted
+                );
+            }
+            change(&mut w, task);
+            assert_eq!(
+                w.message(first.id).state,
+                if handed { "delivering" } else { "cancelled" },
+                "{name}, handed={handed}"
+            );
+            assert_eq!(
+                w.message(second.id).state,
+                "cancelled",
+                "{name}, handed={handed}"
+            );
+            assert_eq!(
+                w.message(other.id).state,
+                if name == "cancel" {
+                    "cancelled"
+                } else {
+                    "queued"
+                },
+                "{name}, handed={handed}"
+            );
+            if !handed {
+                assert_eq!(
+                    w.ledger.admit(first.id, &[]).unwrap(),
+                    cf_ledger::HandOver::Withdrawn
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn cln76_review_an_exchange_withdraws_the_old_reminder_when_it_counts() {
+    let mut w = world();
+    let (task, session) = with_zeus(&mut w);
+    let first = background_reminder(&mut w, task);
+    w.note(&session, "human", task, "Not to the requester");
+    assert_eq!(w.message(first.id).state, "queued");
+    let incoming = w.note("chief", &session, task, "More context");
+    assert_eq!(w.message(first.id).state, "queued", "not received yet");
+    w.deliver(incoming.id);
+    assert_eq!(
+        w.message(first.id).state,
+        "cancelled",
+        "the worker received it"
+    );
+    let second = background_reminder(&mut w, task);
+    w.note(&session, "chief", task, "A finding");
+    assert_eq!(
+        w.message(second.id).state,
+        "cancelled",
+        "the worker sent its note"
+    );
+}
+
+#[test]
+fn cln76_review_a_handed_reminder_returned_after_its_stretch_ended_is_withdrawn() {
+    let mut w = world();
+    let (task, _) = with_zeus(&mut w);
+    let reminder = background_reminder(&mut w, task);
+    w.begin(reminder.id);
+    assert_eq!(
+        w.ledger.admit(reminder.id, &[]).unwrap(),
+        cf_ledger::HandOver::Admitted
+    );
+    w.ledger.record_result(w.project, task, "Done").unwrap();
+    assert_eq!(
+        w.message(reminder.id).state,
+        "delivering",
+        "the handed note stays"
+    );
+    w.ledger
+        .retry_delivery(reminder.id, "the paste was refused", false)
+        .unwrap();
+    assert_eq!(
+        w.message(reminder.id).state,
+        "cancelled",
+        "it is no longer handed and cannot be retyped"
+    );
+}
+
 #[test]
 fn the_newest_aside_holds_until_the_task_moves_and_is_said_anew_in_place() {
     let mut w = world();

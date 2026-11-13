@@ -58,6 +58,7 @@ pub(crate) fn approve_message(
             "UPDATE message SET state = 'queued' WHERE id = ?",
             [message_id],
         )?;
+        crate::tasks::background_exchange(store, message_id, false)?;
         store.log(
             message.project_id,
             "message.approved",

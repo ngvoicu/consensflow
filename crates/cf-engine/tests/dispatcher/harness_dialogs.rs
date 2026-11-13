@@ -150,7 +150,9 @@ fn cln75_a_self_ending_dialog_is_shown_in_the_chiefs_inbox_not_typed() {
     );
     assert_eq!(notes[0].state, "read");
     assert!(
-        notes[0].body.contains("closes it by itself 17 s"),
+        notes[0]
+            .body
+            .contains("Its harness closes it by itself within 17 s."),
         "{}",
         notes[0].body
     );
@@ -162,6 +164,148 @@ fn cln75_a_self_ending_dialog_is_shown_in_the_chiefs_inbox_not_typed() {
     assert!(crate::fixtures::given(&context, "chief")[before..]
         .iter()
         .all(|text| !text.contains(SELF_ENDING_DIALOG)));
+}
+
+#[test]
+fn cln76_review_a_closed_dialog_no_longer_hides_the_background_hold() {
+    let context = Context::new();
+    let tiers = at_work(&context, &[TRUST_PROMPT]);
+    context.adapter.answer_leaving_a_job("zeus", "Watching");
+    context.pass().unwrap();
+    assert_eq!(
+        tiers.task(1).task.aside.as_deref(),
+        Some("in the background: 1 command")
+    );
+
+    context.adapter.wake("zeus", "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>");
+    context.pass().unwrap();
+    context
+        .host
+        .set_snapshot(json!({ "tail": [SELF_ENDING_DIALOG, " ❯ 1. Yes", "   2. No"] }));
+    passes(&context, 12, 1_000);
+    let notes = chief_dialog_inbox(&context, &tiers);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert_eq!(
+        tiers.task(1).task.aside.as_deref(),
+        Some("dialog reported in @zeus-amber-pine's window")
+    );
+
+    clear_screen_and_pass(&context);
+    context
+        .adapter
+        .answer_leaving_a_job("zeus", "Still watching");
+    context.pass().unwrap();
+    let dialog = context.message(notes[0].id);
+    assert!(
+        dialog.receipt.get("over").is_some(),
+        "the closed dialog's shown note is over: {dialog:?}"
+    );
+    assert_eq!(
+        tiers.task(1).task.aside.as_deref(),
+        Some("in the background: 1 command")
+    );
+}
+
+#[test]
+fn cln76_review_a_dialog_is_over_when_restart_ends_its_window() {
+    let context = Context::new();
+    let tiers = at_work(&context, &[TRUST_PROMPT]);
+    context.adapter.answer_leaving_a_job("zeus", "Watching");
+    context.pass().unwrap();
+    context.adapter.wake("zeus", "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>");
+    context.pass().unwrap();
+    context
+        .host
+        .set_snapshot(json!({ "tail": [SELF_ENDING_DIALOG, " ❯ 1. Yes", "   2. No"] }));
+    passes(&context, 12, 1_000);
+    let notes = chief_dialog_inbox(&context, &tiers);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+
+    // A daemon restart ends every pane; the project and its task stay suspended as they were.
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let dialog = context.message(notes[0].id);
+    assert!(
+        dialog.receipt.get("over").is_some(),
+        "the dialog's window died at restart: {dialog:?}"
+    );
+    assert_eq!(
+        tiers.task(1).task.aside.as_deref(),
+        Some("in the background: 1 command")
+    );
+}
+
+#[test]
+fn cln76_review_restart_ends_a_dialog_in_an_already_suspended_project() {
+    let context = Context::new();
+    let tiers = at_work(&context, &[SELF_ENDING_DIALOG, " ❯ 1. Yes", "   2. No"]);
+    passes(&context, 12, 1_000);
+    let notes = chief_dialog_inbox(&context, &tiers);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    // A Close can leave a window alive when it refuses to close.
+    context
+        .ledger
+        .borrow_mut()
+        .set_project_state(tiers.project.id, "suspended")
+        .unwrap();
+    assert!(context.message(notes[0].id).receipt.get("over").is_none());
+
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let dialog = context.message(notes[0].id);
+    assert!(
+        dialog.receipt.get("over").is_some(),
+        "the daemon restart ended this window too: {dialog:?}"
+    );
+}
+
+#[test]
+fn cln76_review_an_unreadable_screen_does_not_end_a_shown_dialog() {
+    let context = Context::new();
+    let screen = [SELF_ENDING_DIALOG, " ❯ 1. Yes", "   2. No"];
+    let tiers = at_work(&context, &screen);
+    passes(&context, 12, 1_000);
+    let notes = chief_dialog_inbox(&context, &tiers);
+    assert_eq!(notes.len(), 1);
+    context.host.set_snapshot(json!({}));
+    passes(&context, 12, 1_000);
+    assert!(
+        context.message(notes[0].id).receipt.get("over").is_none(),
+        "an unreadable screen does not say the dialog is gone"
+    );
+    context.host.set_snapshot(json!({ "tail": screen }));
+    passes(&context, 12, 1_000);
+    assert_eq!(
+        chief_dialog_inbox(&context, &tiers).len(),
+        1,
+        "the same dialog is not shown twice"
+    );
+    clear_screen_and_pass(&context);
+    assert!(context.message(notes[0].id).receipt.get("over").is_some());
+}
+
+#[test]
+fn cln76_review_an_open_harness_dialog_is_told_when_its_screen_is_unreadable() {
+    let context = Context::new();
+    let tiers = at_work(&context, &[TRUST_PROMPT]);
+    context.host.set_snapshot(json!({}));
+    context.adapter.with("zeus", |agent| {
+        agent.waiting = Some(Waiting {
+            reason: Some(DIALOG_OPEN.to_owned()),
+        });
+    });
+    passes(&context, 6, 1_000);
+    let notes = chief_dialog_inbox(&context, &tiers);
+    assert_eq!(
+        notes.len(),
+        1,
+        "the harness says a dialog is open: {notes:?}"
+    );
+    assert!(notes[0]
+        .body
+        .contains("its screen shows no words ConsensFlow can read"));
+    assert_eq!(
+        of_dialogs(&to_human(&context, tiers.project.id)),
+        [notes[0].body.clone()]
+    );
 }
 
 #[test]

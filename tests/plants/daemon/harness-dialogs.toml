@@ -67,8 +67,18 @@ runs = ["cln75-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dialogs.rs"
-find = '        self.tell_dialog_with_disposition(project, participant, &body, true)'
-replace = '        self.tell_dialog_with_disposition(project, participant, &body, false)'
+find = 'self.tell_dialog_with_disposition(project, participant, &body, true)?'
+replace = 'self.tell_dialog_with_disposition(project, participant, &body, false)?'
+
+[[plant]]
+name = "cln75: a self-ending dialog is promised to close at the exact second"
+meant = "dialogs::tests::a_note_names_the_window_the_question_its_choices_and_that_nothing_is_pressed"
+runs = ["hd-engine-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = 'format!(" Its harness closes it by itself within {seconds} s.")'
+replace = 'format!(" Its harness closes it by itself {seconds} s after it opened.")'
 
 [[plant]]
 name = "cln75: Claude's countdown is not read as a deadline"

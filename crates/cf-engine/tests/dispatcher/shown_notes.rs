@@ -213,6 +213,52 @@ fn a_busy_chief_is_not_queued_repeated_reminders_before_the_first_is_delivered()
 }
 
 #[test]
+fn cln76_review_a_waiting_reminder_is_withdrawn_before_the_result_is_typed() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.adapter.busy("chief");
+    held(&context, "The wait starts", 1);
+    context.advance(AN_HOUR);
+    context.pass().unwrap();
+    let reminder = tiers
+        .task(1)
+        .messages
+        .into_iter()
+        .find(|message| {
+            message
+                .body
+                .contains("has been working in the background for")
+        })
+        .expect("the reminder is queued");
+    assert_eq!(reminder.state, "queued");
+    assert!(pasted_reminders(&context).is_empty());
+
+    context.adapter.wake("zeus", ENDED);
+    context.pass().unwrap();
+    context.adapter.answer("zeus", "The work is finished.");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(
+        context.message(reminder.id).state,
+        "cancelled",
+        "a reminder of the ended stretch must be withdrawn"
+    );
+
+    context.adapter.with("chief", |agent| agent.settled = true);
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    let pastes = given(&context, "chief");
+    assert!(
+        pastes
+            .iter()
+            .any(|paste| paste.contains("The work is finished.")),
+        "{pastes:?}"
+    );
+    assert!(pasted_reminders(&context).is_empty(), "{pastes:?}");
+}
+
+#[test]
 fn a_finish_hold_does_not_stack_reminders_for_a_busy_chief() {
     let context = Context::new();
     let tiers = zeus_at_work(&context);

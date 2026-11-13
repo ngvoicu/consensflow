@@ -98,8 +98,10 @@ fn m_list(ids: &[i64]) -> String {
 /// The asides of task `task_id` end, `at`: a note of ConsensFlow's own
 /// that was shown, not typed (`queue`'s `SHOWN`), says what its task's line says only while
 /// it holds, and it holds until the task moves on. The note stays, as it was given; its
-/// receipt says since when it is over.
+/// receipt says since when it is over. Any timed background reminders not handed over are
+/// withdrawn with it; a handed reminder that comes back later is withdrawn on its return.
 pub(crate) fn end_asides(store: &mut Store, task_id: i64, at: &str) -> Result<(), LedgerError> {
+    withdraw_background_reminders(store, task_id)?;
     store.db.execute(
         "UPDATE message SET receipt = json_set(receipt, '$.over', ?1)
          WHERE task_id = ?2 AND state = 'read' AND sender_id IS NULL AND kind = 'note'
@@ -108,6 +110,110 @@ pub(crate) fn end_asides(store: &mut Store, task_id: i64, at: &str) -> Result<()
         params![at, task_id],
     )?;
     Ok(())
+}
+
+/// Withdraw unhanded reminders of a stretch that has ended. The words identify the engine's
+/// own timed reminders, including ones an older build queued without a receipt marker.
+/// `handed_at` is stamped on a carrier's rows too, so a paste already handed stays intact.
+pub(crate) fn withdraw_background_reminders(
+    store: &mut Store,
+    task_id: i64,
+) -> Result<(), LedgerError> {
+    let (project, number): (i64, i64) = store.db.query_row(
+        "SELECT project_id, number FROM task WHERE id = ?",
+        [task_id],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let prefix = format!("T-{number} has been working in the background for ");
+    let reminders: Vec<(i64, bool)> = store
+        .db
+        .prepare(
+            "SELECT id, handed_at IS NOT NULL FROM message
+         WHERE task_id = ?1 AND kind = 'note' AND sender_id IS NULL
+           AND state IN ('queued', 'delivering') AND claimed_at IS NULL
+           AND substr(body, 1, length(?2)) = ?2 ORDER BY id",
+        )?
+        .query_map(params![task_id, prefix], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    let ids: Vec<i64> = reminders
+        .iter()
+        .filter_map(|(id, handed)| (!handed).then_some(*id))
+        .collect();
+    for (id, handed) in reminders {
+        if handed {
+            // Keep the already handed paste intact. If it is later refused, this durable
+            // event lets the return path withdraw it instead of typing it a second time.
+            store.log(
+                project,
+                "background.reminder_ended",
+                serde_json::json!({ "message": id }),
+            )?;
+        }
+    }
+    crate::messages::withdraw_each(
+        store,
+        project,
+        &ids,
+        &format!("T-{number}'s background-hold stretch ended"),
+    )
+}
+
+/// A handed reminder returned to the queue after its stretch ended.
+pub(crate) fn returned_background_reminder(
+    store: &Store,
+    message: i64,
+) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM message m JOIN event e ON e.project_id = m.project_id
+           AND e.kind = 'background.reminder_ended' AND json_extract(e.data, '$.message') = m.id
+         WHERE m.id = ? AND m.state IN ('queued', 'delivering') AND m.handed_at IS NULL",
+        )?
+        .exists([message])?)
+}
+
+/// An exchange ends a stretch as soon as it is sent by its worker or received by it.
+/// The two directions have different receipt rules, just as the engine's stretch clock does.
+pub(crate) fn background_exchange(
+    store: &mut Store,
+    message: i64,
+    received: bool,
+) -> Result<(), LedgerError> {
+    let task: Option<i64> = store
+        .db
+        .query_row(
+            "SELECT m.task_id FROM message m JOIN task t ON t.id = m.task_id
+          WHERE m.id = ?1 AND m.sender_id IS NOT NULL AND (
+            (?2 = 1 AND m.recipient_id = t.assignee_id AND m.state IN ('delivered', 'read'))
+            OR (?2 = 0 AND m.sender_id = t.assignee_id AND m.recipient_id = t.requester_id
+                AND m.state IN ('queued', 'delivering', 'delivered', 'read')))",
+            params![message, received],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(task) = task {
+        withdraw_background_reminders(store, task)?;
+    }
+    Ok(())
+}
+
+/// End one shown note when the thing it described ends, leaving other task asides alone.
+pub(crate) fn end_aside(store: &mut Store, project: i64, aside: i64) -> Result<(), LedgerError> {
+    store.write(|store| {
+        let at = store.at();
+        store.db.execute(
+            "UPDATE message SET receipt = json_set(receipt, '$.over', ?1)
+             WHERE id = ?2 AND project_id = ?3 AND state = 'read' AND sender_id IS NULL
+               AND kind = 'note' AND json_valid(receipt)
+               AND json_extract(receipt, '$.shown') IS NOT NULL
+               AND json_extract(receipt, '$.over') IS NULL",
+            params![at, aside, project],
+        )?;
+        Ok(())
+    })
 }
 
 /// The note T-`number`'s line says now: its newest note shown, not typed, that holds (the

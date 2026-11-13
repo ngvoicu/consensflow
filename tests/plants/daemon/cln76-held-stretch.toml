@@ -11,6 +11,127 @@ finish-reminder = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "d
 carry-reminder = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_reminder_before_a_finish_hold_can_end_is_carried_into_the_shown_hold", "--", "--test-threads=2"]
 busy-chief = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_busy_chief_is_not_queued_repeated_reminders_before_the_first_is_delivered", "--", "--test-threads=2"]
 awake-worker = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_worker_awake_with_background_work_is_reminded_at_the_first_hour", "--", "--test-threads=2"]
+review-result = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::cln76_review_a_waiting_reminder_is_withdrawn_before_the_result_is_typed", "--", "--test-threads=2"]
+review-dialog = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "harness_dialogs::cln76_review_a_closed_dialog_no_longer_hides_the_background_hold", "--", "--test-threads=2"]
+review-screen = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "harness_dialogs::cln76_review_an_unreadable_screen_does_not_end_a_shown_dialog", "--", "--test-threads=2"]
+review-open = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "harness_dialogs::cln76_review_an_open_harness_dialog_is_told_when_its_screen_is_unreadable", "--", "--test-threads=2"]
+review-restart = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "harness_dialogs::cln76_review_a_dialog_is_over_when_restart_ends_its_window", "--", "--test-threads=2"]
+review-suspended-restart = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "harness_dialogs::cln76_review_restart_ends_a_dialog_in_an_already_suspended_project", "--", "--test-threads=2"]
+review-ends = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "shown_notes::cln76_review_moves_withdraw_unhanded_reminders_but_keep_handed_and_other_notes"]
+review-exchange = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "shown_notes::cln76_review_an_exchange_withdraws_the_old_reminder_when_it_counts"]
+review-return = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "shown_notes::cln76_review_a_handed_reminder_returned_after_its_stretch_ended_is_withdrawn"]
+
+[[plant]]
+name = "cln76 review: a suspended project's dialog outlives restart"
+meant = "harness_dialogs::cln76_review_restart_ends_a_dialog_in_an_already_suspended_project"
+runs = ["review-suspended-restart"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''         WHERE state = 'read' AND sender_id IS NULL AND kind = 'note''''
+replace = '''         WHERE project_id IN (SELECT id FROM project WHERE state = 'open') AND state = 'read' AND sender_id IS NULL AND kind = 'note''''
+
+[[plant]]
+name = "cln76 review: a dialog note outlives the window lost at restart"
+meant = "harness_dialogs::cln76_review_a_dialog_is_over_when_restart_ends_its_window"
+runs = ["review-restart"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''            if index == 0 {
+                end_restart_dialogs(store, &at)?;
+            }'''
+replace = ''''''
+
+[[plant]]
+name = "cln76 review: a queued reminder survives its task's result"
+meant = "shown_notes::cln76_review_a_waiting_reminder_is_withdrawn_before_the_result_is_typed"
+runs = ["review-result"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks.rs"
+find = '''    crate::messages::withdraw_each(
+        store,
+        project,
+        &ids,
+        &format!("T-{number}'s background-hold stretch ended"),
+    )'''
+replace = '''    let _ = (project, ids);
+    Ok(())'''
+
+[[plant]]
+name = "cln76 review: a closed dialog remains on the task line"
+meant = "harness_dialogs::cln76_review_a_closed_dialog_no_longer_hides_the_background_hold"
+runs = ["review-dialog"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '''        if absent {
+            self.end_dialog_notes(project, record)?;
+        }'''
+replace = '''        if false && absent {
+            self.end_dialog_notes(project, record)?;
+        }'''
+
+[[plant]]
+name = "cln76 review: an unreadable screen ends a shown dialog"
+meant = "harness_dialogs::cln76_review_an_unreadable_screen_does_not_end_a_shown_dialog"
+runs = ["review-screen"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '''shown.as_ref().is_none_or(|shown| !shown.is_known())'''
+replace = '''false && shown.as_ref().is_none_or(|shown| !shown.is_known())'''
+
+[[plant]]
+name = "cln76 review: a handed reminder is withdrawn with its task"
+meant = "shown_notes::cln76_review_moves_withdraw_unhanded_reminders_but_keep_handed_and_other_notes"
+runs = ["review-ends"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks.rs"
+find = '''(!handed).then_some(*id)'''
+replace = '''Some(*id)'''
+
+[[plant]]
+name = "cln76 review: an unreadable screen hides an open harness dialog"
+meant = "harness_dialogs::cln76_review_an_open_harness_dialog_is_told_when_its_screen_is_unreadable"
+runs = ["review-open"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dialogs.rs"
+find = '''sign == DialogSign::Screen && shown.as_ref().is_none_or(|shown| !shown.is_known())'''
+replace = '''shown.as_ref().is_none_or(|shown| !shown.is_known())'''
+
+[[plant]]
+name = "cln76 review: an exchange leaves its old reminder waiting"
+meant = "shown_notes::cln76_review_an_exchange_withdraws_the_old_reminder_when_it_counts"
+runs = ["review-exchange"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''        crate::tasks::background_exchange(store, message_id, true)?;'''
+replace = ''''''
+
+[[plant]]
+name = "cln76 review: a worker's note leaves its old reminder waiting"
+meant = "shown_notes::cln76_review_an_exchange_withdraws_the_old_reminder_when_it_counts"
+runs = ["review-exchange"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/queue.rs"
+find = '''        crate::tasks::background_exchange(store, id, false)?;'''
+replace = ''''''
+
+[[plant]]
+name = "cln76 review: a returned reminder can be typed again"
+meant = "shown_notes::cln76_review_a_handed_reminder_returned_after_its_stretch_ended_is_withdrawn"
+runs = ["review-return"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/continuations.rs"
+find = '''&& crate::tasks::returned_background_reminder(store, message.id)?'''
+replace = '''&& false && crate::tasks::returned_background_reminder(store, message.id)?'''
 
 [[plant]]
 name = "cln76: a re-hold starts the hour again"

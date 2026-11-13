@@ -670,6 +670,9 @@ pub(crate) fn call_off(
         require_result_received(store, &task, by)?;
     }
     require_unawaited(store, &task, ending)?;
+    // A timed reminder already handed to the chief remains the window's; those still
+    // waiting are withdrawn before the general cancellation takes its other messages.
+    crate::tasks::withdraw_background_reminders(store, task.id)?;
     let dropped = Dropped::of(store, &task)?;
     let assignee = task
         .assignee_id
@@ -716,11 +719,15 @@ pub(crate) fn call_off(
         store.db.execute(
             "UPDATE message SET state = 'cancelled', reason = ?
        WHERE task_id = ? AND state IN ('queued', 'delivering', 'gated')
-         AND id NOT IN (SELECT value FROM json_each(?))",
+         AND id NOT IN (SELECT value FROM json_each(?))
+         AND NOT (kind = 'note' AND sender_id IS NULL AND handed_at IS NOT NULL
+                  AND substr(body, 1, length(?)) = ?)",
             params![
                 format!("cancelled by @{by}"),
                 task.id,
-                json!(on_their_way).to_string()
+                json!(on_their_way).to_string(),
+                format!("T-{} has been working in the background for ", task.number),
+                format!("T-{} has been working in the background for ", task.number)
             ],
         )?;
     }
