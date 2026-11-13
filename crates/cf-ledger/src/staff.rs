@@ -54,6 +54,8 @@ pub struct StaffMember {
     pub backup_of: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vacation_since: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub out_kind: Option<HoldKind>,
 }
 
 /// A participant joining a project: its handle, its role or its roles (the
@@ -586,7 +588,7 @@ pub(crate) fn last_staff(store: &Store) -> Result<Vec<StaffMember>, LedgerError>
         .db
         .prepare(&format!(
             "SELECT id, harness, model, effort, model_name, designer, tier, role, roles,
-                    backup_of, vacation_since,
+                    backup_of, vacation_since, out_kind,
                     EXISTS (SELECT 1 FROM participant b WHERE b.backup_of = participant.id AND b.left_at IS NULL) AS has_backup
              FROM participant
        WHERE project_id = (SELECT MAX(project_id) FROM participant WHERE {member})
@@ -609,6 +611,7 @@ pub(crate) fn last_staff(store: &Store) -> Result<Vec<StaffMember>, LedgerError>
                     { Some(row.get("id")?) } else { None },
                     backup_of: row.get("backup_of")?,
                     vacation_since: row.get("vacation_since")?,
+                    out_kind: HoldKind::read(row.get::<_, Option<String>>("out_kind")?.as_deref()),
                 },
                 row.get::<_, String>("roles")?,
             ))

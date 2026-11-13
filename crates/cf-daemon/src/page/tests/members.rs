@@ -1642,3 +1642,44 @@ async fn bkv_page_the_chief_has_no_backup_and_bad_changes_keep_the_old_one() {
         assert!(bkv_page_link(&s, s.project).iter().any(|p| p["handle"] == backup && !p["backupOf"].is_null()));
     }).await;
 }
+
+#[tokio::test]
+async fn bkv_page_last_staff_carries_each_rows_out_kind_and_vacation() {
+    LocalSet::new()
+        .run_until(async {
+            let s = staffing();
+            let owner = bkv_page_owner(&s).await;
+            let backup = bkv_page_backup(&s, &owner);
+            let owner_id = s.member(&owner).id;
+            let backup_id = s.member(&backup).id;
+            {
+                let mut ledger = s.rig.kit.ledger.borrow_mut();
+                ledger
+                    .mark_out_with_kind(
+                        owner_id,
+                        "2099-01-01T00:00:00.000Z",
+                        "quota",
+                        cf_ledger::HoldKind::Quota,
+                    )
+                    .unwrap();
+                ledger
+                    .mark_out_with_kind(
+                        backup_id,
+                        "2099-01-01T00:00:00.000Z",
+                        "login",
+                        cf_ledger::HoldKind::Account,
+                    )
+                    .unwrap();
+                ledger.send_on_vacation(s.project, &backup, &[]).unwrap();
+            }
+            let last = ask(&s.app, "staff.last", json!({})).await;
+            assert_eq!(last["ok"], true, "{last}");
+            let rows = last["staff"].as_array().unwrap();
+            let owner = rows.iter().find(|row| row["id"] == owner_id).unwrap();
+            let backup = rows.iter().find(|row| row["backupOf"] == owner_id).unwrap();
+            assert_eq!(owner["outKind"], "quota", "{owner}");
+            assert_eq!(backup["outKind"], "account", "{backup}");
+            assert!(backup["vacationSince"].is_string(), "{backup}");
+        })
+        .await;
+}
