@@ -120,12 +120,12 @@ replace = '''
 [[plant.edit]]
 file = "app/src-tauri/src/lib.rs"
 find = '''
-    .build(context);
-    let app = built(app);
+        .build(context),
+    );
 '''
 replace = '''
-    .build(context);
-    let app = built(app);
+        .build(context),
+    );
     tls::install_ring_as_default();
 '''
 
