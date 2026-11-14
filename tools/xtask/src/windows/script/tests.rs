@@ -37,7 +37,7 @@ fn t1655_the_sweep_leaves_old_evidence_alone() {
 
 #[test]
 fn t1655_the_listing_reads_the_live_matrix_evidence() {
-    assert!(reports_script(DIR).contains(r"'.runs\live-matrix'"));
+    assert!(reports_script(DIR).contains(r"'app\src-tauri\target\live-matrix'"));
 }
 
 /// The run script of a run in the usual folder, in the copy's root: what it is asked for.
