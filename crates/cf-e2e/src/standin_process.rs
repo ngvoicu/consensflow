@@ -524,6 +524,21 @@ fn safe_path_entry(folder: &Path, forbidden: &[PathBuf]) -> bool {
     true
 }
 
+/// Check an externally handed folder before inspecting any file inside it.
+#[allow(clippy::disallowed_methods)] // The process mode is set before test threads.
+pub(crate) fn require_unlinked_safe_path(path: &Path, lookup: &str) {
+    if std::env::var_os("CF_E2E_STAND_IN").as_deref() != Some(std::ffi::OsStr::new("1")) {
+        return;
+    }
+    let forbidden = INHERITED_HARNESS_HOMES
+        .get()
+        .unwrap_or_else(|| panic!("{lookup}: no inherited-home boundary"));
+    assert!(
+        safe_path_entry(path, forbidden),
+        "{lookup}: forbidden, linked or ambiguous path"
+    );
+}
+
 /// The compiler of the Cargo that built this test, if its complete path was
 /// safe to inspect before the inherited homes were discarded.
 pub(crate) fn build_compiler() -> Option<&'static Path> {
@@ -571,6 +586,13 @@ fn process_temp_parent() -> PathBuf {
     assert!(
         plain_absolute(&parent),
         "stand-in temporary lookup: aliased or invalid path"
+    );
+    let forbidden = INHERITED_HARNESS_HOMES
+        .get()
+        .unwrap_or_else(|| panic!("stand-in temporary lookup: no inherited-home boundary"));
+    assert!(
+        !forbidden.iter().any(|home| same_or_inside(&parent, home)),
+        "stand-in temporary lookup: inside an inherited harness home"
     );
     for name in ["HOME", "USERPROFILE"] {
         if let Some(home) = std::env::var_os(name).filter(|home| !home.is_empty()) {
@@ -673,6 +695,9 @@ pub fn require_watch_path(path: &Path, lookup: &str) {
     if let Some(Some(fixture)) = FIXTURE_ROOT.get() {
         roots.push(fixture.clone());
     }
+    let forbidden = INHERITED_HARNESS_HOMES
+        .get()
+        .unwrap_or_else(|| panic!("{lookup}: no inherited-home boundary"));
     if let Ok(exe) = std::env::current_exe() {
         if let Some(target) = exe.parent().and_then(Path::parent) {
             roots.push(target.to_path_buf());
@@ -702,11 +727,19 @@ pub fn require_watch_path(path: &Path, lookup: &str) {
     };
     let mut pending = normalize(path);
     for _ in 0..40 {
+        assert!(
+            !forbidden.iter().any(|home| same_or_inside(&pending, home)),
+            "{lookup}: inside an inherited harness home"
+        );
         let base = roots
             .iter()
             .filter(|base| pending.starts_with(base))
             .max_by_key(|base| base.components().count())
             .unwrap_or_else(|| panic!("{lookup}: outside the stand-in run"));
+        assert!(
+            safe_path_entry(base, forbidden),
+            "{lookup}: forbidden, linked or ambiguous root"
+        );
         let suffix: Vec<_> = pending
             .strip_prefix(base)
             .unwrap_or_else(|_| panic!("{lookup}: invalid root"))
@@ -756,6 +789,75 @@ pub fn require_watch_path(path: &Path, lookup: &str) {
 #[cfg(test)]
 mod tests {
     use super::safe_path_entry;
+
+    #[test]
+    fn standin_isolation_temp_parent_refuses_an_inherited_harness_home() {
+        let root = crate::door::made("harness-temp-parent-").unwrap();
+        let account = root.path().join("pretend-account");
+        let codex = root.path().join("pretend-owner-codex");
+        let temp = codex.join("temp");
+        crate::door::make_dir(&account).unwrap();
+        crate::door::make_dir(&temp).unwrap();
+        let output = crate::process::Run::new(std::env::current_exe().unwrap())
+            .inheriting_env()
+            .arg("--list")
+            .var("HOME", &account)
+            .var("USERPROFILE", &account)
+            .var("CODEX_HOME", &codex)
+            .var("TMPDIR", &temp)
+            .var("TMP", &temp)
+            .var("TEMP", &temp)
+            .var("CF_E2E_STAND_IN", "1")
+            .run()
+            .unwrap();
+        assert_ne!(
+            output.code,
+            Some(0),
+            "temporary lookup entered a harness home"
+        );
+        assert!(
+            format!("{}{}", output.stdout, output.stderr).contains("stand-in temporary lookup"),
+            "the temporary lookup did not fail closed: {}{}",
+            output.stdout,
+            output.stderr
+        );
+        assert_eq!(std::fs::read_dir(&temp).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn standin_isolation_hosted_muse_watch_refuses_an_inherited_harness_home() {
+        const CHILD: &str = "CF_T1647_HOSTED_MUSE_WATCH";
+        if let Some(path) = crate::process::own_var(CHILD) {
+            super::require_watch_path(std::path::Path::new(&path), "stand-in Muse watch lookup");
+            panic!("the hosted Muse watch returned without refusing the harness home");
+        }
+
+        let root = crate::door::made("hosted-muse-watch-").unwrap();
+        let codex = root.path().join("pretend-owner-codex");
+        let watched = codex.join("muse-echo").join("muse");
+        crate::door::make_dir(watched.parent().unwrap()).unwrap();
+        let output = crate::process::Run::new(std::env::current_exe().unwrap())
+            .inheriting_env()
+            .args([
+                "--exact",
+                "standin_process::tests::standin_isolation_hosted_muse_watch_refuses_an_inherited_harness_home",
+                "--nocapture",
+            ])
+            .var("GITHUB_ACTIONS", "true")
+            .var("CF_E2E_HOSTED_MUSE", "1")
+            .var("RUNNER_TEMP", &codex)
+            .var("CODEX_HOME", &codex)
+            .var(CHILD, &watched)
+            .run()
+            .unwrap();
+        assert_ne!(output.code, Some(0), "the child did not refuse");
+        assert!(
+            format!("{}{}", output.stdout, output.stderr).contains("stand-in Muse watch lookup"),
+            "the hosted Muse watch did not fail closed: {}{}",
+            output.stdout,
+            output.stderr
+        );
+    }
 
     #[test]
     fn standin_isolation_missing_inherited_home_refuses_before_searching_path() {

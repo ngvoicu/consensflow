@@ -6,6 +6,52 @@ use std::time::Duration;
 
 use super::*;
 
+#[test]
+fn standin_isolation_muse_launcher_refuses_an_inherited_harness_home() {
+    const CHILD: &str = "CF_T1647_MUSE_LAUNCHER_HOME";
+    if let Some(folder) = crate::process::own_var(CHILD) {
+        let launcher = if cfg!(windows) { "muse.cmd" } else { "muse" };
+        let install = Installed::at(
+            Harness::Muse,
+            std::path::Path::new(&folder).join(launcher),
+            std::env::temp_dir(),
+        );
+        let _ = rig(&[install], "synthetic-stand-in");
+        panic!("the Muse launcher lookup returned without refusing the harness home");
+    }
+
+    let root = crate::door::made("muse-launcher-home-").unwrap();
+    let codex = root.path().join("pretend-owner-codex");
+    crate::door::make_dir(&codex).unwrap();
+    let launcher = if cfg!(windows) { "muse.cmd" } else { "muse" };
+    let binary = if cfg!(windows) {
+        "muse-bin-test-version.exe"
+    } else {
+        "muse-bin-test-version"
+    };
+    crate::door::write(codex.join(launcher), "synthetic launcher").unwrap();
+    crate::door::write(codex.join(".muse-version"), "test-version\n").unwrap();
+    crate::door::write(codex.join(binary), "synthetic binary").unwrap();
+    let output = crate::process::Run::new(std::env::current_exe().unwrap())
+        .inheriting_env()
+        .args([
+            "--exact",
+            "live::machine::tests::standin_isolation_muse_launcher_refuses_an_inherited_harness_home",
+            "--nocapture",
+        ])
+        .var("CODEX_HOME", &codex)
+        .var(CHILD, &codex)
+        .run()
+        .unwrap();
+    assert_ne!(output.code, Some(0), "the child did not refuse");
+    assert!(
+        format!("{}{}", output.stdout, output.stderr).contains("Muse launcher lookup: "),
+        "the Muse launcher lookup did not fail closed: {}{}",
+        output.stdout,
+        output.stderr
+    );
+}
+
 // Each test names a decoy home outside the run, never the person's actual home.
 // A lookup that would reach that home must refuse it, rather than fall back.
 fn standin_isolation_refuses_home(harness: Harness) {

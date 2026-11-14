@@ -148,3 +148,51 @@ runs = ["standin-home-unit"]
 file = "crates/cf-e2e/src/standin_process.rs"
 find = '''        !homes.iter().any(|home| same_or_inside(folder, home))'''
 replace = '''        !homes.iter().any(|_home| false)'''
+
+[[plant]]
+name = "standin homes: temporary parent enters an inherited harness home"
+meant = "standin_isolation_temp_parent_refuses_an_inherited_harness_home"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''    assert!(
+        !forbidden.iter().any(|home| same_or_inside(&parent, home)),
+        "stand-in temporary lookup: inside an inherited harness home"
+    );'''
+replace = '''    let _ = forbidden; // The plant lets the temporary parent enter a harness home.'''
+
+[[plant]]
+name = "standin homes: hosted Muse search enters an inherited harness home"
+meant = "standin_isolation_hosted_muse_refuses_an_inherited_harness_home"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''    crate::standin_process::require_unlinked_safe_path(&folder, "stand-in Muse lookup");'''
+replace = '''    // The plant searches the handed hosted folder without checking it.'''
+
+[[plant]]
+name = "standin homes: hosted Muse watch enters an inherited harness home"
+meant = "standin_isolation_hosted_muse_watch_refuses_an_inherited_harness_home"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''            !forbidden.iter().any(|home| same_or_inside(&pending, home)),'''
+replace = '''            !forbidden.iter().any(|_home| false),'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''            safe_path_entry(base, forbidden),'''
+replace = '''            true,'''
+
+[[plant]]
+name = "standin homes: Muse launcher search enters an inherited harness home"
+meant = "standin_isolation_muse_launcher_refuses_an_inherited_harness_home"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    crate::standin_process::require_watch_path(&install.command, "Muse launcher lookup");'''
+replace = '''    // The plant searches the launcher before checking it.'''

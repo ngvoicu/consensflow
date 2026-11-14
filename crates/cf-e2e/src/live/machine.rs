@@ -599,6 +599,8 @@ fn rig_keeping_claude_in(
 /// ([`muse_stand_in_beside`]): it runs the machine's Muse in the rig's own folders on a copy of the
 /// person's login (T-1084), where before this kit refused a rig that seats Muse there (T-985).
 fn muse_of(install: &Installed) -> crate::muse::Installed {
+    crate::standin_process::require_home(&install.home, "Muse home lookup");
+    crate::standin_process::require_watch_path(&install.command, "Muse launcher lookup");
     let folder = install
         .command
         .parent()
