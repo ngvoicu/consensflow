@@ -6,7 +6,8 @@ use cf_engine::seams::EngineError;
 use cf_engine::{Finished, SwitchTo, SwitchWhen};
 use cf_harness::contract::Work;
 use cf_ledger::{
-    DeletedProject, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
+    DeletedProject, NewMember, NewProject, ParticipantView, ProjectView, RemovedMember,
+    TaskReleased,
 };
 
 use super::*;
@@ -135,6 +136,35 @@ impl Engine for Scripted {
         _: i64,
         _: &'a str,
     ) -> Work<'a, Result<RemovedMember, EngineError>> {
+        unreachable!("{UNUSED}")
+    }
+
+    fn change_backup<'a>(
+        &'a self,
+        _: i64,
+        _: &'a str,
+        _: &'a NewMember,
+    ) -> Work<'a, Result<ParticipantView, EngineError>> {
+        unreachable!("{UNUSED}")
+    }
+
+    fn remove_backup<'a>(
+        &'a self,
+        _: i64,
+        _: &'a str,
+    ) -> Work<'a, Result<ParticipantView, EngineError>> {
+        unreachable!("{UNUSED}")
+    }
+
+    fn send_on_vacation<'a>(
+        &'a self,
+        _: i64,
+        _: &'a str,
+    ) -> Work<'a, Result<ParticipantView, EngineError>> {
+        unreachable!("{UNUSED}")
+    }
+
+    fn bring_back_from_vacation(&self, _: i64, _: &str) -> Result<ParticipantView, EngineError> {
         unreachable!("{UNUSED}")
     }
 

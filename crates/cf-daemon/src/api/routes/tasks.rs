@@ -5,8 +5,9 @@
 //! its view ([`brief_waits`]).
 
 use cf_base::js;
-use cf_ledger::NewTask;
+use cf_ledger::{NewTask, PlanTask};
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 
 use cf_ledger::TaskCard;
 
@@ -94,6 +95,12 @@ pub(super) async fn create(
         ));
     }
     let body = request.json().await?;
+    if body.contains_key("plan") {
+        return create_plan(context, caller, &body);
+    }
+    if body.contains_key("action") {
+        return decide(context, caller, &body);
+    }
     // `Number(body.after)`, read before anything is asked of the ledger.
     let after = match body.get("after") {
         Some(after) => Some(js::to_number(Some(after)).map_err(|_| {
@@ -161,6 +168,220 @@ pub(super) async fn create(
     }
     answer.insert("gated".to_owned(), json!(gated));
     Ok(Answer::created(Value::Object(answer)))
+}
+
+/// Put a section's name in every refusal without changing its code or status.
+fn in_section(name: &str, error: Failure) -> Failure {
+    match error {
+        Failure::Refused(mut refusal) => {
+            refusal.message = format!("section {name}: {}", refusal.message);
+            Failure::Refused(refusal)
+        }
+        other => other,
+    }
+}
+
+/// Parse and validate each section as one ordinary task. Named references are
+/// held for the ledger, which resolves them inside the transaction.
+fn create_plan(
+    context: &Context,
+    caller: &Caller,
+    body: &Map<String, Value>,
+) -> Result<Answer, Failure> {
+    let sections = body
+        .get("plan")
+        .and_then(Value::as_array)
+        .ok_or_else(|| Failure::refuse(400, "invalid-plan", "plan must be a list of sections"))?;
+    let key = match body.get("key") {
+        None => None,
+        Some(Value::String(key)) => Some(key.as_str()),
+        Some(_) => return Err(Failure::refuse(400, "invalid-key", "key must be one word")),
+    };
+    let mut plan = Vec::new();
+    for section in sections {
+        let part = section.as_object().ok_or_else(|| {
+            Failure::refuse(400, "invalid-plan", "each section must be an object")
+        })?;
+        let name = part.get("name").and_then(Value::as_str).unwrap_or("");
+        let parse = || -> Result<PlanTask, Failure> {
+            let mut part = part.clone();
+            part.remove("name");
+            let mut named = [Vec::new(), Vec::new()];
+            for (index, field) in ["needs", "before"].into_iter().enumerate() {
+                if let Some(value) = part.get_mut(field) {
+                    let array = value.as_array_mut().ok_or_else(|| {
+                        Failure::refuse(400, "invalid-needs", format!("{field} takes a list"))
+                    })?;
+                    let mut numbers = Vec::new();
+                    for item in array.iter() {
+                        match item {
+                            Value::String(name) if !name.is_empty() => {
+                                named[index].push(name.clone())
+                            }
+                            Value::Number(_) => numbers.push(item.clone()),
+                            _ => {
+                                return Err(Failure::refuse(
+                                    400,
+                                    "invalid-needs",
+                                    format!("{field} takes task numbers or section names"),
+                                ))
+                            }
+                        }
+                    }
+                    *array = numbers;
+                }
+            }
+            let after = match part.get("after") {
+                Some(value) => Some(js::to_number(Some(value)).map_err(|_| {
+                    Failure::refuse(400, "invalid-after", "after takes a task number")
+                })?),
+                None => None,
+            };
+            if let Some(number) = after.filter(|number| whole(*number).is_none()) {
+                return Err(Failure::refuse(
+                    404,
+                    "unknown-task",
+                    format!("no task T-{} in this project", js::number_text(number)),
+                ));
+            }
+            let task = NewTask::from_json(&given(caller, &part, after)?)?;
+            if part.get("self") == Some(&Value::Bool(true))
+                && task.needs.is_empty()
+                && task.before.is_empty()
+                && named.iter().all(Vec::is_empty)
+            {
+                return Err(Failure::refuse(
+                    400,
+                    "own-work",
+                    "you are already at it: do it now, or give it --needs",
+                ));
+            }
+            Ok(PlanTask {
+                name: name.to_owned(),
+                task,
+                needs: std::mem::take(&mut named[0]),
+                before: std::mem::take(&mut named[1]),
+            })
+        };
+        plan.push(parse().map_err(|error| in_section(name, error))?);
+    }
+    // Hash both what the server will create and the optional fingerprint of the
+    // source file, so a key cannot silently substitute different task fields.
+    let encoded = serde_json::to_vec(&json!({ "plan": sections, "source": body.get("source") }))
+        .map_err(|error| Failure::Internal(error.to_string()))?;
+    let fingerprint = format!("{:x}", Sha256::digest(encoded));
+    let created =
+        context
+            .ledger
+            .borrow_mut()
+            .create_plan(caller.project.id, &plan, key, &fingerprint)?;
+    if !created.repeated {
+        (context.kick)();
+    }
+    let gated = context
+        .ledger
+        .borrow()
+        .project(caller.project.id)?
+        .is_some_and(|project| project.gate);
+    let tasks: Vec<Value> = created
+        .tasks
+        .iter()
+        .map(|(name, number)| json!({ "name": name, "task": { "number": number } }))
+        .collect();
+    let answer = json!({ "tasks": tasks, "gated": gated });
+    Ok(if created.repeated {
+        Answer::ok(answer)
+    } else {
+        Answer::created(answer)
+    })
+}
+
+/// Several decisions are one ledger write. Read each task and its warnings in
+/// the same synchronous borrow, then wake the dispatcher only after commit.
+fn decide(
+    context: &Context,
+    caller: &Caller,
+    body: &Map<String, Value>,
+) -> Result<Answer, Failure> {
+    let action = body
+        .get("action")
+        .and_then(Value::as_str)
+        .filter(|action| ["accept", "cancel"].contains(action))
+        .ok_or_else(|| Failure::refuse(400, "invalid-action", "action must be accept or cancel"))?;
+    let values = body
+        .get("tasks")
+        .and_then(Value::as_array)
+        .ok_or_else(|| Failure::refuse(400, "no-tasks", "tasks must be a list of task numbers"))?;
+    let numbers: Vec<i64> = values
+        .iter()
+        .map(|number| {
+            number.as_i64().filter(|number| *number > 0).ok_or_else(|| {
+                let named = number
+                    .as_i64()
+                    .map_or_else(|| number.to_string(), |n| format!("T-{n}"));
+                Failure::refuse(
+                    400,
+                    "invalid-task",
+                    format!("{named} is not a positive task number"),
+                )
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    let by = caller.participant.handle.as_str();
+    let words = body.get("body").and_then(Value::as_str).unwrap_or_default();
+    let mut ledger = context.ledger.borrow_mut();
+    let mut warnings = Vec::new();
+    for &number in &numbers {
+        let thread = ledger.task(caller.project.id, number)?.ok_or_else(|| {
+            Failure::refuse(
+                404,
+                "unknown-task",
+                format!("no task T-{number} in this project"),
+            )
+        })?;
+        if !may_move(caller, &thread.task.requester) {
+            return Err(Failure::refuse(
+                403,
+                "not-a-coordinator",
+                format!(
+                    "only the chief or @{} may {action} T-{number}",
+                    thread.task.requester
+                ),
+            ));
+        }
+        let running = if action == "accept" {
+            Some(ledger.left_running(caller.project.id, number)?)
+        } else {
+            None
+        };
+        let dropped = if action == "cancel" {
+            ledger
+                .told_unreceived(caller.project.id, number)?
+                .into_iter()
+                .filter(|message| message.sender.as_deref() == Some(by))
+                .map(|message| message.id)
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        warnings.push((running, dropped));
+    }
+    let moved = ledger.decide_tasks(caller.project.id, &numbers, by, action, words)?;
+    drop(ledger);
+    (context.kick)();
+    let mut tasks = Vec::new();
+    for (task, (running, dropped)) in moved.iter().zip(warnings) {
+        let mut result = Map::new();
+        result.insert("task".into(), value(&TaskSummary::from(task))?);
+        if let Some((jobs, agents)) = running.filter(|count| *count != (0, 0)) {
+            result.insert("running".into(), json!({"jobs":jobs,"agents":agents}));
+        }
+        if !dropped.is_empty() {
+            result.insert("dropped".into(), json!(dropped));
+        }
+        tasks.push(Value::Object(result));
+    }
+    Ok(Answer::ok(json!({ "tasks": tasks })))
 }
 
 /// What Node handed `createTask`, as the ledger reads a task from JSON: who

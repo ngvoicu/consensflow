@@ -369,23 +369,23 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     );
     assert_eq!(
         rows_while(true, None, &one),
-        141,
-        "docs: one piece to 141 rows with specs on"
+        138,
+        "docs: one piece to 138 rows with specs on"
     );
     assert_eq!(
         rows_while(false, None, &one),
-        166,
-        "docs: one piece to 166 rows without"
+        163,
+        "docs: one piece to 163 rows without"
     );
     assert_eq!(
         rows_while(true, Some(&most), &one),
-        5,
-        "docs: one piece to 5 rows with specs on and the most rules"
+        2,
+        "docs: one piece to 2 rows with specs on and the most rules"
     );
     assert_eq!(
         rows_while(false, Some(&most), &one),
-        30,
-        "docs: one piece to 30 rows without specs and the most rules"
+        27,
+        "docs: one piece to 27 rows without specs and the most rules"
     );
     let parts = |rows| {
         printed_by_cf(
@@ -400,7 +400,7 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
         .1
     };
     assert_eq!(
-        [parts(6), parts(143), parts(300)],
+        [parts(3), parts(143), parts(300)],
         [2, 2, 3],
         "docs: past one piece, 2 parts to 143 rows, 3 at 300"
     );
@@ -1242,7 +1242,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&utf8),
-            &["Where the staff has an integrator, it lands accepted work; a"],
+            &["How a screen looks, feels and moves is the frontend designer"],
         ),
         (
             "a Mac, the most escaped rules",

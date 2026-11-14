@@ -62,7 +62,7 @@ pub(super) async fn switch_chief(page: &Page, body: Body<'_>) -> Result<Fields, 
 pub(super) async fn add(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let project = body.whole("project")?;
     let member = picked_member(page, body, true).await?;
-    let on_it = active_member(page, project, |member_now| {
+    let on_it = active_primary(page, project, |member_now| {
         member_now.harness.as_deref() == Some(member.harness.as_str())
             && member_now.model == member.model
             && member_now.effort == member.effort
@@ -91,6 +91,101 @@ pub(super) async fn add(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     one(
         "member",
         ledger.edit_member(project, &existing.handle, &edit)?,
+    )
+}
+
+/// A matching primary: a backup on the same model is its own staff row.
+fn active_primary(
+    page: &Page,
+    project: i64,
+    which: impl Fn(&ParticipantView) -> bool,
+) -> Result<Option<ParticipantView>, Said> {
+    let ledger = page.ledger.borrow();
+    let Some(view) = ledger.project(project)? else {
+        return Err(Said(format!("no project {project}")));
+    };
+    for member in view.participants {
+        if member.role != "chief"
+            && member.role != "human"
+            && member.member_id.is_none()
+            && member.left_at.is_none()
+            && which(&member)
+            && !ledger.is_backup(project, &member.handle)?
+        {
+            return Ok(Some(member));
+        }
+    }
+    Ok(None)
+}
+
+/// Pick a backup from the same model catalog as a member, without its owner's roles or tier.
+async fn backup_pick(page: &Page, body: Body<'_>) -> Result<NewMember, Said> {
+    let mut fields = serde_json::Map::new();
+    for key in ["harness", "model", "effort", "read"] {
+        if let Some(value) = body.get(key) {
+            fields.insert(key.to_owned(), value.clone());
+        }
+    }
+    fields.insert("tier".to_owned(), json!("light"));
+    fields.insert("roles".to_owned(), json!(["worker"]));
+    picked_member(page, Body::new(&Value::Object(fields)), true).await
+}
+
+/// The image designer draws on Codex's image model and has no backup.
+fn require_backup_owner(page: &Page, project: i64, handle: &str) -> Result<(), Said> {
+    if active_member(page, project, |member| member.handle == handle)?
+        .is_some_and(|member| member.designer)
+    {
+        return Err(Said::from("An image designer has no backup."));
+    }
+    Ok(())
+}
+
+pub(super) async fn add_backup(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let project = body.whole("project")?;
+    let handle = body.text("member");
+    require_backup_owner(page, project, &handle)?;
+    let backup = backup_pick(page, body).await?;
+    one(
+        "member",
+        page.ledger
+            .borrow_mut()
+            .add_backup(project, &handle, &backup)?,
+    )
+}
+
+pub(super) async fn change_backup(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let project = body.whole("project")?;
+    let handle = body.text("member");
+    require_backup_owner(page, project, &handle)?;
+    let backup = backup_pick(page, body).await?;
+    one(
+        "member",
+        page.engine.change_backup(project, &handle, &backup).await?,
+    )
+}
+
+pub(super) async fn remove_backup(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let project = body.whole("project")?;
+    let handle = body.text("member");
+    one("member", page.engine.remove_backup(project, &handle).await?)
+}
+
+pub(super) async fn vacation(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let project = body.whole("project")?;
+    let handle = body.text("member");
+    one(
+        "member",
+        page.engine.send_on_vacation(project, &handle).await?,
+    )
+}
+
+pub(super) async fn vacation_back(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let project = body.whole("project")?;
+    let handle = body.text("member");
+    one(
+        "member",
+        page.engine.bring_back_from_vacation(project, &handle)?,
     )
 }
 

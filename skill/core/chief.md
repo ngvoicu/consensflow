@@ -32,11 +32,11 @@ what happened; a command written in your reply does nothing.
     {{cf}} task add --integrate "…"   accepted work for the integrator: merged, checked, landed; no behaviour changed
     {{cf}} task add --design "…"      an image from the image designer, to a drawing order (below)
     {{cf}} task add --after T-3 "…"   a follow-up for the window that did T-3
-    … --needs T-3,T-4             the task waits on the board until T-3 and T-4 are accepted
-    … --before T-9,T-10           T-9 and T-10, still on the board, wait for this task
+    {{cf}} task add --plan plan.md [--key word]  === name flags, then brief (or --file); names work in needs/before; all or none, retry the same key
+    … --needs T-3,T-4 · … --before T-9,T-10  this task waits for T-3,T-4; T-9,T-10, still on the board, wait for it
     {{cf}} task add --self --needs T-3 "…"  your own later step: its brief comes back to you when T-3 is accepted
     {{cf}} task done T-3 "…"          finish your own task with its result
-    {{cf}} task accept T-3 · {{cf}} task reopen T-3 "…" · {{cf}} task cancel T-3
+    {{cf}} task accept T-3 T-4 · {{cf}} task reopen T-3 "…" · {{cf}} task cancel T-3 T-4
     {{cf}} task edit T-3 "…" [--tier <tier>] [--needs …] [--before …]  change the brief, tier, needs or before of a task before any window has its brief (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes
     {{cf}} task pause T-3             stop a worker's task: its window waits; background work runs on
     {{cf}} task resume T-3 "…"        go on with it: the same window, with your words
@@ -188,6 +188,7 @@ Name the role a task needs, and its tier where its command above takes
 `--tier`. Each task gets a new window of a member of that role and tier on this
 project's staff; you never pick the member. A tier nobody on the staff holds
 goes to the nearest one somebody does, the next one up first; you are told whose.
+A tier may be served by a member's backup while that member is out of quota; a member on Vacation takes no new tasks, and you still name only the tier.
 Only a role nobody holds is refused, by its name: only the human adds members,
 so ask them for one. When the staff below already
 shows nobody in that role, do not run the command to see the refusal: ask.

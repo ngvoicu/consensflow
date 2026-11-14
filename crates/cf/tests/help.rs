@@ -94,8 +94,8 @@ const BOARD: [(&[&str], &str); 19] = [
             "                                    keeps its context; only when that context matters;\n",
             "                                    until T-3 and the window's done tasks are accepted it waits\n",
             "  cf task add --self --needs T-3 \"…\" your own later step: its brief comes back to you when T-3 is accepted\n",
-            "  … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted\n",
-            "  … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task\n",
+            "  cf task add --plan plan.md [--key word]  all or none; retry the same key; each === name flags is followed by its brief (or --file)\n",
+            "  … --needs T-3,T-4 · … --before T-9,T-10  this task waits for T-3,T-4; T-9,T-10 wait for it; in a plan, names work too\n",
         ),
     ),
     (
@@ -120,13 +120,13 @@ const BOARD: [(&[&str], &str); 19] = [
     (
         &["task", "accept"],
         concat!(
-            "  cf task accept|cancel T-3         move a task you asked for\n",
+            "  cf task accept|cancel T-3 T-4     decide several tasks together, all or none\n",
             "  cf task accept T-3 \"…\"            accept a failed task you checked; your words are its result\n",
         ),
     ),
     (
         &["task", "cancel"],
-        "  cf task accept|cancel T-3         move a task you asked for\n",
+        "  cf task accept|cancel T-3 T-4     decide several tasks together, all or none\n",
     ),
     (
         &["task", "reopen"],

@@ -19,14 +19,35 @@ use crate::staff::{
     require_member_row, start_session, Giving,
 };
 use crate::store::Store;
-use crate::views::TaskRow;
+use crate::views::{ParticipantRow, TaskRow};
+
+/// Fresh work cannot be named for a member on Vacation, including by naming
+/// one of its sessions. Follow-ups and reopened work use their own paths.
+fn require_available_for_new_task(
+    store: &Store,
+    taker: &ParticipantRow,
+) -> Result<(), LedgerError> {
+    let owner = taker
+        .member_id
+        .map(|id| store.participant_row(id))
+        .transpose()?;
+    let member = owner.as_ref().unwrap_or(taker);
+    if member.vacation_since.is_some() {
+        return Err(LedgerError::refused_with(
+            "member-on-vacation",
+            format!("@{} is on Vacation", member.handle),
+            409,
+        ));
+    }
+    Ok(())
+}
 
 /// A task from the chief or the human: to a participant by name (`to`), a
 /// follow-up for the session that did task `after`, or, given neither, for
 /// a `pool` and `tier` of the staff, critical work naming its `purpose`;
 /// what it says; the tasks it `needs`, and those on the board that come
 /// `before` it is done (they wait for it).
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
 pub struct NewTask {
     pub from: String,
     pub to: Option<String>,
@@ -316,6 +337,7 @@ pub(crate) fn create_task(
             }
             (None, Some(to)) => {
                 let named = store.participant_by_handle(project_id, to)?;
+                require_available_for_new_task(store, &named)?;
                 require_free(store, &named, Giving::Task)?;
                 Some(named)
             }
@@ -578,6 +600,7 @@ pub(crate) fn assign_task(
         let task = store.task_row(project_id, number)?;
         require_task_state(&task, &["open"], "assign")?;
         let member = require_member_row(store, participant_id, "takes a task")?;
+        require_available_for_new_task(store, &member)?;
         let roles: Vec<String> = serde_json::from_str(&member.roles)?;
         let candidate = member.left_at.is_none()
             && member.project_id == project_id

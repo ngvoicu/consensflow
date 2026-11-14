@@ -398,6 +398,32 @@ async function open(page, given = model()) {
         },
         specmint: data.specmint,
       })
+    const saveBackup = (body, replacing) => {
+      if (data.backupRefusal !== undefined) return { ok: false, error: data.backupRefusal }
+      const board = data.boards[body.project]
+      const owner = board.lanes.find((lane) => lane.participant.handle === body.member).participant
+      if (replacing)
+        board.lanes = board.lanes.filter((lane) => lane.participant.backupOf !== owner.id)
+      const id = Math.max(...board.lanes.map((lane) => lane.participant.id)) + 1
+      const backup = {
+        ...owner,
+        id,
+        handle: `backup-${id}`,
+        backupOf: owner.id,
+        harness: body.harness,
+        model: body.model,
+        modelName: body.model,
+        effort: body.effort,
+        outUntil: null,
+      }
+      board.lanes.push({
+        participant: backup,
+        tasks: [],
+        activity: { state: 'closed' },
+        pane: null,
+      })
+      return answer({ member: backup })
+    }
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
       'harnesses.missing': () => {
@@ -490,6 +516,31 @@ async function open(page, given = model()) {
         return answer({ member: { handle: body.member, tier: body.tier } })
       },
       'staff.last': () => answer({ staff: data.lastStaff ?? [] }),
+      'member.vacation': ({ project, member }) => {
+        if (data.vacationRefusal !== undefined) return { ok: false, error: data.vacationRefusal }
+        const found = data.boards[project].lanes.find(
+          (lane) => lane.participant.handle === member,
+        ).participant
+        found.vacationSince = new Date().toISOString()
+        return answer({ member: found })
+      },
+      'member.vacation_back': ({ project, member }) => {
+        if (data.vacationRefusal !== undefined) return { ok: false, error: data.vacationRefusal }
+        const found = data.boards[project].lanes.find(
+          (lane) => lane.participant.handle === member,
+        ).participant
+        delete found.vacationSince
+        return answer({ member: found })
+      },
+      'backup.add': (body) => saveBackup(body, false),
+      'backup.change': (body) => saveBackup(body, true),
+      'backup.remove': ({ project, member }) => {
+        if (data.backupRefusal !== undefined) return { ok: false, error: data.backupRefusal }
+        const board = data.boards[project]
+        const owner = board.lanes.find((lane) => lane.participant.handle === member).participant
+        board.lanes = board.lanes.filter((lane) => lane.participant.backupOf !== owner.id)
+        return answer({ member: owner })
+      },
       'member.roles': ({ project, agent, roles }) => {
         const lane = data.boards[project].lanes.find((l) => l.participant.handle === agent)
         lane.participant.roles = roles
@@ -11480,8 +11531,10 @@ test("docks the chief's terminal and a member's own, offers no Open terminal for
   )
   await expect(page.getByRole('button', { name: "Show @zeus's terminal" })).toHaveCount(0)
   await expect(page.getByRole('button', { name: "Show Chief of Staff's terminal" })).toHaveCount(0)
-  // A member without a window of its own is a heading: nothing to view on its row.
-  await expect(page.locator('tr[data-handle="diana"] .row-tools button')).toHaveCount(0)
+  // A member without a window has only its Vacation control, nothing to view.
+  await expect
+    .poll(() => toolsOf(page.locator('tr[data-handle="diana"]')))
+    .toEqual(['Send on Vacation'])
   await page.evaluate(() =>
     window.__output.onmessage({ id: 'p1-zeus', generation: 7, seq: 1, bytes: [104, 105] }),
   )
@@ -13237,7 +13290,7 @@ test('keeps every button of a lane inside its column, however narrow the board',
   expect(await outside()).toEqual([])
 })
 
-test("gives a member's heading row no buttons, and a closed session's row no Transcript: its card opens the task", async ({
+test("gives a member's heading row its Vacation control, and a closed session's row no Transcript: its card opens the task", async ({
   page,
 }) => {
   const data = model()
@@ -13250,7 +13303,9 @@ test("gives a member's heading row no buttons, and a closed session's row no Tra
   })
   await open(page, data)
   await unfold(page)
-  await expect(page.locator('tr[data-handle="diana"] .row-tools button')).toHaveCount(0)
+  await expect
+    .poll(() => toolsOf(page.locator('tr[data-handle="diana"]')))
+    .toEqual(['Send on Vacation'])
   await expect
     .poll(() => toolsOf(page.locator('tr[data-handle="diana-amber-pine"]')))
     .toEqual(['Show terminal', 'Delete session'])
@@ -14804,3 +14859,462 @@ for (const scheme of ['dark', 'light']) {
     testInfo.annotations.push({ type: 'shots', description: SHOTS })
   })
 }
+
+test('BKV settings offers no backup for an image designer', async ({ page }) => {
+  await open(page, shotData('after'))
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const designer = dialog
+    .getByRole('table', { name: 'On the staff' })
+    .locator('tr', { hasText: '@codex-default' })
+  await expect(designer).toContainText('Image designer')
+  await expect(designer.getByRole('button', { name: /backup/i })).toHaveCount(0)
+})
+
+test('BKV New project offers no backup for an image designer', async ({ page }) => {
+  const data = model()
+  data.lastStaff = [
+    {
+      harness: 'codex',
+      model: null,
+      modelName: null,
+      effort: null,
+      designer: true,
+      tier: 'light',
+      role: 'designer',
+      roles: ['designer'],
+    },
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const designer = dialog
+    .getByRole('table', { name: 'Members for the staff' })
+    .locator('tr', { hasText: 'Image designer' })
+  await expect(designer).toHaveCount(1)
+  await expect(designer.getByRole('button', { name: /backup/i })).toHaveCount(0)
+})
+
+test('BKV settings places one backup under its member and offers no backup of a backup', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].lanes.push({
+    participant: participant(11, 'hera', 'worker', { harness: 'codex', backupOf: 3 }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const table = dialog.getByRole('table', { name: 'On the staff' })
+  const rows = table.locator('tbody tr')
+  await expect(rows.nth(0)).toContainText('@zeus')
+  await expect(rows.nth(1)).toContainText('backup of @zeus')
+  await expect(rows.nth(1)).toContainText('@hera')
+  await expect(rows.nth(2)).toContainText('@diana')
+  await expect(dialog.getByRole('button', { name: 'Add backup for @hera' })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: 'Add backup for @chief' })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: 'Change backup for @zeus' })).toBeVisible()
+  if (process.env.CF_BKV_SHOTS)
+    await dialog.screenshot({ path: `${process.env.CF_BKV_SHOTS}/settings-backup.png` })
+})
+
+test('BKV New project keeps a last staff backup linked even on the same model', async ({
+  page,
+}) => {
+  const data = model()
+  data.lastStaff = [
+    { ...lastMember('zeus', 'claude-code', ['worker']), id: 30 },
+    { ...lastMember('zeus', 'claude-code', ['worker']), id: 31, backupOf: 30 },
+    lastMember('diana', 'codex', ['worker']),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const table = dialog.getByRole('table', { name: 'Members for the staff' })
+  await expect(table.getByText('backup of claude-sonnet-5')).toBeVisible()
+  if (process.env.CF_BKV_SHOTS)
+    await dialog.screenshot({ path: `${process.env.CF_BKV_SHOTS}/new-project-backup.png` })
+  await pickChief(dialog, 'Codex', 'gpt-6-astra')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(3)
+  const staff = (await calls(page, 'project.open')).at(-1).staff
+  const primary = staff.find((row) => row.id === 30)
+  const backup = staff.find((row) => row.backupOf === 30)
+  expect(primary.model).toBe('claude-sonnet-5')
+  expect(backup.model).toBe('claude-sonnet-5')
+})
+
+test('BKV settings adds changes and removes a backup using the member picker', async ({ page }) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await dialog.getByRole('button', { name: 'Add backup for @zeus' }).click()
+  await expect(dialog.getByRole('group', { name: 'Add backup for @zeus' })).toBeVisible()
+  await expect(dialog.locator('[name="role"]').locator('..')).toBeHidden()
+  await expect(dialog.locator('[name="memberTier"]').locator('..')).toBeHidden()
+  await pickMember(dialog, { harness: 'Codex', model: 'gpt-6-astra' })
+  await dialog.getByRole('button', { name: 'Add backup', exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'backup.add'))
+    .toEqual([{ project: 1, member: 'zeus', harness: 'codex', model: 'gpt-6-astra', effort: null }])
+  await expect(dialog.getByText('backup of @zeus')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Change backup for @zeus' }).click()
+  await expect(dialog.locator('[name="role"]').locator('..')).toBeHidden()
+  await expect(dialog.locator('[name="memberTier"]').locator('..')).toBeHidden()
+  await pickMember(dialog, { harness: 'Pi', model: 'meta/muse-spark' })
+  await dialog.getByRole('button', { name: 'Save backup' }).click()
+  await expect
+    .poll(() => calls(page, 'backup.change'))
+    .toEqual([
+      { project: 1, member: 'zeus', harness: 'pi', model: 'meta/muse-spark', effort: null },
+    ])
+  await expect(dialog.getByText('backup of @zeus')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Remove backup for @zeus' }).click()
+  await expect.poll(() => calls(page, 'backup.remove')).toEqual([{ project: 1, member: 'zeus' }])
+  await expect(dialog.getByText('backup of @zeus')).toHaveCount(0)
+})
+
+test('BKV settings says a backup refusal in the dialog', async ({ page }) => {
+  const data = model()
+  data.backupRefusal = '@zeus already has a backup'
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await dialog.getByRole('button', { name: 'Add backup for @zeus' }).click()
+  await pickMember(dialog, { harness: 'Codex', model: 'gpt-6-astra' })
+  await dialog.getByRole('button', { name: 'Add backup', exact: true }).click()
+  await expect(dialog.locator('.staff-add .staff-hint')).toHaveText('@zeus already has a backup')
+})
+
+test('BKV New project can add change remove a backup and add its model as another member', async ({
+  page,
+}) => {
+  const data = model()
+  data.lastStaff = [lastMember('zeus', 'claude-code', ['worker'])]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const table = dialog.getByRole('table', { name: 'Members for the staff' })
+  await dialog.getByRole('button', { name: 'Add backup for claude-sonnet-5' }).click()
+  await expect(dialog.locator('[name="role"]').locator('..')).toBeHidden()
+  await expect(dialog.locator('[name="memberTier"]').locator('..')).toBeHidden()
+  await pickMember(dialog, { harness: 'Codex', model: 'gpt-6-astra' })
+  await dialog.getByRole('button', { name: 'Add backup', exact: true }).click()
+  await expect(table.getByText('backup of claude-sonnet-5')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Change backup for claude-sonnet-5' }).click()
+  await pickMember(dialog, { harness: 'Pi', model: 'meta/muse-spark' })
+  await dialog.getByRole('button', { name: 'Save backup' }).click()
+  await expect(table.getByText('meta/muse-spark', { exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Remove backup for claude-sonnet-5' }).click()
+  await expect(table.getByText('backup of claude-sonnet-5')).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Add backup for claude-sonnet-5' }).click()
+  await pickMember(dialog, { harness: 'Codex', model: 'gpt-6-astra' })
+  await dialog.getByRole('button', { name: 'Add backup', exact: true }).click()
+  await pickMember(dialog, {
+    role: 'worker',
+    harness: 'Codex',
+    model: 'gpt-6-astra',
+    tier: 'standard',
+  })
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await pickChief(dialog, 'Codex', 'gpt-6-astra')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(3)
+  const staff = (await calls(page, 'project.open')).at(-1).staff
+  expect(staff.filter((row) => row.model === 'gpt-6-astra')).toHaveLength(2)
+  expect(staff.filter((row) => row.model === 'gpt-6-astra' && row.backupOf != null)).toHaveLength(1)
+})
+
+test('BKV settings marks a backup that needs an edit like a member', async ({ page }) => {
+  const data = model()
+  data.boards[1].lanes.push({
+    participant: participant(11, 'hera', 'worker', {
+      harness: 'codex',
+      backupOf: 3,
+      needsEdit: true,
+      agent: 'old-agent',
+    }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const row = page
+    .getByRole('dialog', { name: 'Project settings' })
+    .locator('tr[data-handle="hera"]')
+  await expect(row).toContainText(
+    'The update could not tell what old-agent ran on: edit it to a model its harness lists, or remove it.',
+  )
+})
+
+test('BKV New project shows the backup following its member to the newly chosen tier', async ({
+  page,
+}) => {
+  const data = model()
+  data.lastStaff = [
+    { ...lastMember('zeus', 'claude-code', ['worker'], 'light'), effort: null, id: 30 },
+    { ...lastMember('hera', 'codex', ['worker'], 'light'), effort: null, id: 31, backupOf: 30 },
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await pickMember(dialog, {
+    role: 'reviewer',
+    harness: 'Claude Code',
+    model: 'claude-sonnet-5',
+    tier: 'critical',
+  })
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  const backup = dialog.locator('tr', { hasText: 'backup of claude-sonnet-5' })
+  await expect(backup.locator('.member-meta').first()).toContainText('critical')
+})
+
+test('BKV settings marks an unlisted backup model just as it marks a member', async ({ page }) => {
+  const data = model()
+  data.boards[1].lanes.push({
+    participant: participant(11, 'hera', 'worker', {
+      harness: 'codex',
+      backupOf: 3,
+      model: 'retired-model',
+      modelName: 'retired-model',
+    }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const row = page
+    .getByRole('dialog', { name: 'Project settings' })
+    .locator('tr[data-handle="hera"]')
+  await expect(row).toContainText(
+    'Codex no longer lists retired-model: edit it to a model it lists.',
+  )
+})
+
+test('BKV New project leaves out a backup on a missing harness and keeps its member', async ({
+  page,
+}) => {
+  const data = model()
+  data.missing = ['codex']
+  data.lastStaff = [
+    { ...lastMember('zeus', 'claude-code', ['worker']), id: 30 },
+    { ...lastMember('hera', 'codex', ['worker']), id: 31, backupOf: 30 },
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const rows = dialog.getByRole('table', { name: 'Members for the staff' }).locator('tbody tr')
+  await expect(rows).toHaveCount(1)
+  await expect(rows.first()).toContainText('claude-sonnet-5')
+  await expect(dialog.getByText('backup of claude-sonnet-5')).toHaveCount(0)
+  await pickChief(dialog, 'Claude Code', 'claude-opus-5-5')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(1)
+  const [member] = (await calls(page, 'project.open')).at(-1).staff
+  expect(member.model).toBe('claude-sonnet-5')
+  expect(member.roles).toEqual(['worker'])
+  expect(member.backupOf).toBeUndefined()
+})
+
+test('BKV New project leaves out a missing-harness member and its backup together', async ({
+  page,
+}) => {
+  const data = model()
+  data.missing = ['codex']
+  data.lastStaff = [
+    { ...lastMember('hera', 'codex', ['worker']), id: 30 },
+    { ...lastMember('zeus', 'claude-code', ['worker']), id: 31, backupOf: 30 },
+    lastMember('zeus', 'claude-code', ['reviewer']),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await expect(dialog.getByText('backup of gpt-6-astra')).toHaveCount(0)
+  await pickChief(dialog, 'Claude Code', 'claude-opus-5-5')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(1)
+  expect((await calls(page, 'project.open')).at(-1).staff[0].roles).toEqual(['reviewer'])
+})
+
+test('BKV05 settings sends and brings back a member and its backup', async ({ page }) => {
+  const data = model()
+  data.boards[1].lanes.push({
+    participant: participant(11, 'hera', 'worker', { harness: 'codex', backupOf: 3 }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const owner = dialog.locator('tr[data-handle="zeus"]')
+  const backup = dialog.locator('tr[data-handle="hera"]')
+  await owner.getByText('Send on Vacation', { exact: true }).click()
+  await expect(owner).toContainText('on Vacation')
+  await expect.poll(() => calls(page, 'member.vacation')).toEqual([{ project: 1, member: 'zeus' }])
+  if (process.env.CF_BKV05_SHOTS)
+    await dialog.screenshot({ path: `${process.env.CF_BKV05_SHOTS}/settings-vacation.png` })
+  await backup.getByText('Send on Vacation', { exact: true }).click()
+  await expect(backup).toContainText('on Vacation')
+  await backup.getByText('Bring back', { exact: true }).click()
+  await expect(backup.locator('.member-meta', { hasText: 'on Vacation' })).toHaveCount(0)
+  await owner.getByText('Bring back', { exact: true }).click()
+  await expect(owner.locator('.member-meta', { hasText: 'on Vacation' })).toHaveCount(0)
+  await expect
+    .poll(() => calls(page, 'member.vacation_back'))
+    .toEqual([
+      { project: 1, member: 'hera' },
+      { project: 1, member: 'zeus' },
+    ])
+})
+
+test('BKV05 New project says a copied member and backup are on Vacation and brings them back', async ({
+  page,
+}) => {
+  const data = model()
+  data.lastStaff = [
+    { ...lastMember('zeus', 'claude-code', ['worker']), id: 30, vacationSince: at(10) },
+    { ...lastMember('hera', 'codex', ['worker']), id: 31, backupOf: 30, vacationSince: at(10) },
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const owner = dialog.locator('tr', { hasText: 'claude-sonnet-5' }).first()
+  const backup = dialog.locator('tr', { hasText: 'backup of claude-sonnet-5' })
+  await expect(owner).toContainText('on Vacation')
+  await expect(backup).toContainText('on Vacation')
+  await owner.getByText('Bring back', { exact: true }).click()
+  await backup.getByText('Bring back', { exact: true }).click()
+  await pickChief(dialog, 'Codex', 'gpt-6-astra')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  const staff = (await calls(page, 'project.open')).at(-1).staff
+  expect(staff.find((row) => row.id === 30).vacationSince).toBeFalsy()
+  expect(staff.find((row) => row.backupOf === 30).vacationSince).toBeFalsy()
+})
+
+test('BKV05 board names a resting member, its ready backup and an idle backup', async ({
+  page,
+}) => {
+  const data = model()
+  data.boards[1].lanes.find(
+    (lane) => lane.participant.handle === 'zeus',
+  ).participant.vacationSince = at(10)
+  const diana = data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana')
+  diana.participant.outKind = 'quota'
+  diana.backupReady = { worker: 'hera' }
+  data.boards[1].lanes.push({
+    participant: participant(11, 'hera', 'worker', {
+      harness: 'codex',
+      tier: 'light',
+      backupOf: 4,
+    }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  const zeus = page.locator('tr[data-handle="zeus"]')
+  const owner = page.locator('tr[data-handle="diana"]')
+  const backup = page.locator('tr[data-handle="hera"]')
+  await expect(zeus).toContainText('on Vacation')
+  await expect(owner).toContainText('@hera, its backup, takes its tasks')
+  await expect(backup).toContainText('backup of @diana')
+  await expect(backup.locator('.row-status')).toHaveCount(0)
+  if (process.env.CF_BKV05_SHOTS)
+    await page
+      .getByRole('table', { name: 'Tasks' })
+      .screenshot({ path: `${process.env.CF_BKV05_SHOTS}/board-vacation.png` })
+  await backup.getByText('Send on Vacation', { exact: true }).click()
+  await expect(backup).toContainText('on Vacation')
+  await backup.getByText('Bring back', { exact: true }).click()
+  await zeus.getByText('Bring back', { exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'member.vacation_back'))
+    .toEqual([
+      { project: 1, member: 'hera' },
+      { project: 1, member: 'zeus' },
+    ])
+  await owner.getByText('Send on Vacation', { exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'member.vacation'))
+    .toEqual([
+      { project: 1, member: 'hera' },
+      { project: 1, member: 'diana' },
+    ])
+})
+
+test('BKV05 settings says a Vacation refusal where it was pressed', async ({ page }) => {
+  const data = model()
+  data.vacationRefusal = 'This member cannot go on Vacation.'
+  data.boards[1].lanes.push({
+    participant: participant(11, 'hera', 'worker', { harness: 'codex', backupOf: 3 }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const row = dialog.locator('tr[data-handle="zeus"]')
+  await row.getByText('Send on Vacation', { exact: true }).click()
+  await expect(row).toContainText('This member cannot go on Vacation.')
+  const backup = dialog.locator('tr[data-handle="hera"]')
+  await backup.getByText('Send on Vacation', { exact: true }).click()
+  await expect(backup).toContainText('This member cannot go on Vacation.')
+})
+
+test('BKV05 an image designer can go on Vacation in settings', async ({ page }) => {
+  await open(page, shotData('after'))
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const designer = dialog.locator('tr', { hasText: '@codex-default' })
+  await expect(designer.getByText('Send on Vacation', { exact: true })).toBeVisible()
+})
+
+test('BKV05 the board says a Vacation refusal on the row where it was pressed', async ({
+  page,
+}) => {
+  const data = model()
+  data.vacationRefusal = 'This member cannot go on Vacation.'
+  await open(page, data)
+  const row = page.locator('tr[data-handle="zeus"]')
+  await row.getByText('Send on Vacation', { exact: true }).click()
+  await expect(row).toContainText('This member cannot go on Vacation.')
+})
+
+test('BKV05 a task held in an out member window keeps its quota hold with a backup', async ({
+  page,
+}) => {
+  const data = model()
+  const owner = data.boards[1].lanes.find((lane) => lane.participant.handle === 'diana').participant
+  const window = session(12, owner, 'amber-pine')
+  data.boards[1].lanes.push(
+    {
+      participant: window,
+      tasks: [
+        task(19, 'Held work', 'paused', 'chief', window.handle, 1, { heldUntil: owner.outUntil }),
+      ],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+    {
+      participant: participant(11, 'hera', 'worker', {
+        harness: 'codex',
+        tier: 'light',
+        backupOf: owner.id,
+      }),
+      tasks: [],
+      activity: { state: 'closed' },
+      pane: null,
+    },
+  )
+  await open(page, data)
+  const card = page.locator('tr[data-handle="diana"] button.card[data-task="19"]')
+  await expect(card).toContainText('out of quota until')
+  await expect(page.locator('tr[data-handle="hera"] button.card[data-task="19"]')).toHaveCount(0)
+})
