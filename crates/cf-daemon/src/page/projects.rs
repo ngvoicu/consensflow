@@ -85,6 +85,9 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
             request.insert(key.to_owned(), said.clone());
         }
     }
+    if let Some(said) = body.get("ownHands") {
+        request.insert("ownHands".to_owned(), said.clone());
+    }
     request.insert("staff".to_owned(), Value::Array(staff));
     let project = page.engine.open_project(new_project(request)?).await?;
     one("project", project)
@@ -475,6 +478,7 @@ mod tests {
                     compaction: Some(COMPACTION_DEFAULT),
                     advisor_tool: false,
                     prompt_suggestion: false,
+                    own_hands: false,
                 },
                 "{what}"
             );

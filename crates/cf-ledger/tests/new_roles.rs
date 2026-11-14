@@ -65,6 +65,7 @@ fn project_in(
             compaction: None,
             advisor_tool: false,
             prompt_suggestion,
+            own_hands: false,
         })
         .expect("a project")
 }

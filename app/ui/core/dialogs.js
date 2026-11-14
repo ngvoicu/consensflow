@@ -1043,7 +1043,7 @@ export class NewProjectDialog {
     }
     this.#starting = true
     const form = this.#form
-    const { gate, wakeUp, specs, rules, compaction, advisorTool, promptSuggestion } =
+    const { gate, wakeUp, specs, rules, compaction, advisorTool, promptSuggestion, ownHands } =
       this.#sections.values()
     const body = {
       directory: form.elements.directory.value,
@@ -1058,6 +1058,7 @@ export class NewProjectDialog {
     body.compaction = compaction
     if (advisorTool) body.advisorTool = true
     if (promptSuggestion) body.promptSuggestion = true
+    if (ownHands) body.ownHands = true
     this.#say('')
     let refused = null
     try {
@@ -1262,6 +1263,7 @@ export class ProjectSettingsDialog {
   #compaction
   #advisorTool
   #promptSuggestion
+  #ownHands
   /** Computer use: a part for each of the project's harnesses that has one. */
   #computerUse
   /** The project the dialog was last opened for, by id: the one it is for until it closes. */
@@ -1323,6 +1325,7 @@ export class ProjectSettingsDialog {
     this.#compaction = sections.compaction
     this.#advisorTool = sections.advisorTool
     this.#promptSuggestion = sections.promptSuggestion
+    this.#ownHands = sections.ownHands
     this.#computerUse = sections.computerUse
     // What the dialog changes is its project's, whichever board the page shows now.
     this.#gate.addEventListener('change', () => {
@@ -1434,6 +1437,7 @@ export class ProjectSettingsDialog {
     this.#compaction.show(board.project)
     this.#advisorTool.show(board.project)
     this.#promptSuggestion.show(board.project)
+    this.#ownHands.show(board.project)
     this.#computerUse.show(computerUse)
     this.#draw()
     this.#specs.draw(board.project, true)
@@ -1492,6 +1496,7 @@ export class ProjectSettingsDialog {
     const board = this.#page.board()
     if (!this.#dialog.open || board?.project.id !== this.#project) return
     this.#board = board
+    this.#ownHands.update(board.project)
     this.#draw()
   }
 

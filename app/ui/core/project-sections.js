@@ -1,6 +1,7 @@
 import { AdvisorTool } from './advisor-tool.js'
 import { Compaction } from './compaction.js'
 import { ComputerUseSection } from './computer-use.js'
+import { OwnHands } from './own-hands.js'
 import { PromptSuggestion } from './prompt-suggestion.js'
 import { SpecsGroup } from './specs.js'
 import { StaffRules } from './staff-rules.js'
@@ -57,6 +58,7 @@ export class ProjectSections {
   #compaction
   #advisorTool
   #promptSuggestion
+  #ownHands
   #computerUse
 
   /**
@@ -78,6 +80,7 @@ export class ProjectSections {
       sections.querySelector('.prompt-suggestion'),
       page,
     )
+    this.#ownHands = new OwnHands(sections.querySelector('.own-hands-section'), page)
     this.#gate = sections.querySelector('[name="gate"]')
     this.#wakeUp = new WakeUpCalls(sections.querySelector('.wakeup-section'), page)
     this.#specs = new SpecsGroup(sections.querySelector('.project-specs'), page, app)
@@ -118,6 +121,10 @@ export class ProjectSections {
     return this.#promptSuggestion
   }
 
+  get ownHands() {
+    return this.#ownHands
+  }
+
   get computerUse() {
     return this.#computerUse
   }
@@ -139,6 +146,7 @@ export class ProjectSections {
       compaction: this.#compaction.values(),
       advisorTool: this.#advisorTool.values(),
       promptSuggestion: this.#promptSuggestion.values(),
+      ownHands: this.#ownHands.values(),
     }
   }
 
@@ -158,6 +166,7 @@ export class ProjectSections {
     this.#compaction.reset()
     this.#advisorTool.reset()
     this.#promptSuggestion.reset()
+    this.#ownHands.reset()
     this.#wakeUp.reset()
     this.#specs.reset()
   }

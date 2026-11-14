@@ -41,6 +41,7 @@ fn ledger_with_two_queued_tasks(dir: &tempfile::TempDir) -> Ledger {
             compaction: None,
             advisor_tool: false,
             prompt_suggestion: false,
+            own_hands: false,
         })
         .expect("a project");
     for body in ["Snapshot", "Compare it with the snapshot"] {

@@ -239,3 +239,67 @@ async fn a_windows_token_reaches_no_route_that_writes_the_suggestion_so_only_the
         .unwrap();
     assert!(!after.prompt_suggestion, "nothing a window asked wrote it");
 }
+
+#[tokio::test]
+async fn creation_with_own_hands_sends_the_initial_mode_in_the_project_open_write() {
+    LocalSet::new().run_until(async {
+        let (_home, env) = super::reading::home_installed("[]");
+        let rig = rig_over(env, None);
+        let (daemon, app) = bridge_pair_over(&rig.spawn);
+        register(&daemon, &rig.page, &rig.spawn);
+        let base = json!({"directory":"/work/on", "harness":"claude-code", "model":"claude-sonnet-5", "staff":[]});
+        let mut on_body = base.clone();
+        on_body["ownHands"] = json!(true);
+        let on = ask(&app, "project.open", on_body).await;
+        assert_eq!(on["ok"], true, "{on}");
+        assert_eq!(on["project"]["ownHands"], true, "the first returned project");
+        let id = on["project"]["id"].as_i64().unwrap();
+        let ledger = rig.kit.ledger.borrow();
+        assert!(ledger.project(id).unwrap().unwrap().own_hands);
+        let events: Vec<_> = ledger.events(id, 0, 500).unwrap().into_iter()
+            .filter(|event| event.kind == "project.own_hands").map(|event| event.data).collect();
+        assert_eq!(events, [json!({"from":false, "to":true})]);
+        drop(ledger);
+        let off = ask(&app, "project.open", base.clone()).await;
+        assert_eq!(off["ok"], true, "{off}");
+        assert!(off["project"].get("ownHands").is_none());
+        for value in [json!(null), json!("true"), json!(1)] {
+            let mut invalid = base.clone();
+            invalid["ownHands"] = value.clone();
+            let before = rig.kit.ledger.borrow().projects().unwrap().len();
+            let refused = ask(&app, "project.open", invalid).await;
+            assert_eq!(refused["ok"], false, "{value}: {refused}");
+            assert_eq!(rig.kit.ledger.borrow().projects().unwrap().len(), before);
+        }
+    }).await;
+}
+
+#[tokio::test]
+async fn own_hands_settings_round_trip_survives_the_ledger_reopening() {
+    LocalSet::new()
+        .run_until(async {
+            let held = asked();
+            let project = held.project;
+            let on = ask(
+                &held.app,
+                "project.own_hands",
+                json!({"project":project,"ownHands":true}),
+            )
+            .await;
+            assert_eq!(on["project"]["ownHands"], true);
+            held.rig.kit.edit_ledger(|_| {});
+            let board = ask(&held.app, "board.get", json!({"project":project})).await;
+            assert_eq!(board["board"]["project"]["ownHands"], true);
+            let off = ask(
+                &held.app,
+                "project.own_hands",
+                json!({"project":project,"ownHands":false}),
+            )
+            .await;
+            assert_eq!(off["ok"], true);
+            held.rig.kit.edit_ledger(|_| {});
+            let board = ask(&held.app, "board.get", json!({"project":project})).await;
+            assert!(board["board"]["project"].get("ownHands").is_none());
+        })
+        .await;
+}

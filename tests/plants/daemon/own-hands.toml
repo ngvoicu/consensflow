@@ -3,6 +3,8 @@
 [run]
 own-news = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_news::own_hands_switch_is_told_once_each_way_on_every_harness"]
 own-text = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "own_hands_selects_the_chiefs_text_and_keeps_the_members_text"]
+own-open-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "described", "creation_keeps_own_hands_in_the_first_project_view_and_logs_the_choice"]
+own-open-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "creation_with_own_hands_sends_the_initial_mode_in_the_project_open_write"]
 
 [[plant]]
 name = "own hands: a switch under a running chief is never noticed"
@@ -29,3 +31,26 @@ find = '''            specs,
             project.own_hands,'''
 replace = '''            specs,
             false,'''
+
+[[plant]]
+name = "own hands creation: the ledger makes an on project off"
+meant = "creation_keeps_own_hands_in_the_first_project_view_and_logs_the_choice"
+runs = ["own-open-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''        if request.own_hands {'''
+replace = '''        if false && request.own_hands {'''
+
+[[plant]]
+name = "own hands creation: the page operation ignores the field"
+meant = "creation_with_own_hands_sends_the_initial_mode_in_the_project_open_write"
+runs = ["own-open-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '''    if let Some(said) = body.get("ownHands") {
+        request.insert("ownHands".to_owned(), said.clone());
+    }
+'''
+replace = ''''''

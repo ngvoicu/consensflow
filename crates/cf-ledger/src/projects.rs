@@ -184,6 +184,8 @@ pub struct NewProject {
     /// Whether Claude Code's prompt suggestion is left on in its windows, the chief's and the
     /// members'; false (off) is what every project starts with.
     pub prompt_suggestion: bool,
+    /// Whether the chief works itself from the project's first launch.
+    pub own_hands: bool,
 }
 
 impl NewProject {
@@ -241,6 +243,10 @@ impl NewProject {
             prompt_suggestion: match value.get("promptSuggestion") {
                 None => false,
                 said => parse_prompt_suggestion(said)?,
+            },
+            own_hands: match value.get("ownHands") {
+                None => false,
+                said => parse_own_hands(said)?,
             },
         })
     }
@@ -421,6 +427,9 @@ pub(crate) fn create_project(
             "project.created",
             json!({ "name": request.name, "directory": request.directory }),
         )?;
+        if request.own_hands {
+            set_own_hands(store, id, true)?;
+        }
         // Said as the project opens, kept and logged as if the human had said
         // them the moment after: a setting that is the default changes nothing.
         if let Some(wake_up) = wake_up {
