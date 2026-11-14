@@ -41,6 +41,41 @@ fn rows(context: &Context, project: i64) -> Value {
     json!({ "events": events, "messages": messages })
 }
 
+/// Hold apart only the paced kit's look on a delivery's beginning. The recorded
+/// run was made without pacing; the shared replay normalizer also removes other
+/// fields, so apply it only to these events.
+fn hold_apart_paced_delivery_looks(rows: &mut Value) {
+    for event in rows["events"].as_array_mut().expect("the recorded events") {
+        if event["kind"] == "delivery.begun" {
+            cf_ledger::testing::hold_apart_what_node_never_logs(std::slice::from_mut(event));
+        }
+    }
+}
+
+#[test]
+fn only_the_paced_delivery_look_is_held_apart() {
+    let mut rows = json!({
+        "events": [
+            {"kind": "delivery.begun", "data": {"message": 2, "look": {"status": "idle"}, "other": "kept"}},
+            {"kind": "delivery.failed", "data": {"look": {"status": "kept"}}},
+            {"kind": "task.state", "data": {"to": "paused", "stop": 5}}
+        ],
+        "messages": {"zeus": [{"look": "kept", "body": "unchanged"}]}
+    });
+    hold_apart_paced_delivery_looks(&mut rows);
+    assert_eq!(
+        rows,
+        json!({
+            "events": [
+                {"kind": "delivery.begun", "data": {"message": 2, "other": "kept"}},
+                {"kind": "delivery.failed", "data": {"look": {"status": "kept"}}},
+                {"kind": "task.state", "data": {"to": "paused", "stop": 5}}
+            ],
+            "messages": {"zeus": [{"look": "kept", "body": "unchanged"}]}
+        })
+    );
+}
+
 #[test]
 fn a_project_with_no_backup_and_nobody_on_vacation_writes_the_rows_it_wrote_before() {
     let context = Context::new();
@@ -86,9 +121,12 @@ fn a_project_with_no_backup_and_nobody_on_vacation_writes_the_rows_it_wrote_befo
     context.pass().unwrap();
     context.pass().unwrap();
 
-    let found = rows(&context, tiers.project.id);
-    let recorded: Value =
+    let mut found = rows(&context, tiers.project.id);
+    let mut recorded: Value =
         serde_json::from_str(&std::fs::read_to_string(golden()).expect("the recorded run"))
             .unwrap();
+    hold_apart_paced_delivery_looks(&mut found);
+    hold_apart_paced_delivery_looks(&mut recorded);
+    // Both modes must otherwise write exactly the same events and messages.
     assert_eq!(found, recorded);
 }
