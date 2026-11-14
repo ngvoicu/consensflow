@@ -381,7 +381,7 @@ meant = "a_program_the_close_has_not_ended_by_the_bound_is_named_then_and_its_cl
 runs = ["panes-output-end"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/spawn.rs"
 find = "if panes.contains_key(&key) {"
 replace = "if panes.contains_key(&key) || self.teardown.counts().0 > 0 {"
 
@@ -479,7 +479,7 @@ meant = "a_host_shut_down_with_windows_open_tells_the_exit_of_each_before_it_clo
 runs = ["headless-shut-down"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/teardown.rs"
 find = "        self.exits.paid_within(within)"
 replace = '''
         let _ = within;
@@ -2592,7 +2592,7 @@ meant = "a_program_the_system_cannot_start_names_why_by_its_code"
 runs = ["quote-less-pty"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/spawn.rs"
 find = '''                code: std::fs::metadata(program_path)
                     .err()
                     .as_ref()

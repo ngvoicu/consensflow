@@ -79,7 +79,7 @@ const SENDERS: [(&str, &str, &str); 13] = [
         "Windows: the window's own program, by the handle it was started with (`Child::kill`)",
     ),
     (
-        "pty.rs",
+        "pty/test_support.rs",
         "kill(pid, 0)",
         "signal 0 delivers nothing: whether a process is there (what tests ask)",
     ),

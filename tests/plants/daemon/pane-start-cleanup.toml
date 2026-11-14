@@ -2,7 +2,7 @@
 # T-1662): a window that failed to open after it was in the table is ended and the answer says
 # why it did not open, and the end's own failure with it; an exit watcher whose retirement of
 # a pane failed ends the pane as a close ends it, for a pane left in the table never has its
-# output end on Windows (`crates/cf-panes/src/pty.rs`, `abandon_open` and `retire_after_exit_by`).
+# output end on Windows (`crates/cf-panes/src/pty/spawn.rs` `abandon_open`, `crates/cf-panes/src/pty/teardown.rs` `retire_after_exit_by`).
 #
 # Every name holds `pane start cleanup`, so `npm run plants:daemon -- "pane start cleanup"` runs
 # them all.
@@ -16,7 +16,7 @@ meant = "a_window_that_fails_to_open_and_cannot_be_ended_says_both"
 runs = ["psc-panes"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/spawn.rs"
 find = "        match self.kill(key) {\n            Ok(()) => error,"
 replace = "        let _ = self.kill(key);\n        match Ok::<(), PaneError>(()) {\n            Ok(()) => error,"
 
@@ -26,6 +26,6 @@ meant = "a_pane_whose_exit_watcher_could_not_retire_it_is_ended_all_the_same"
 runs = ["psc-panes"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/teardown.rs"
 find = "        let ended = self.kill_detached(key);"
 replace = "        let ended: Result<(), PaneError> = Ok(());"
