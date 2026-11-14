@@ -114,6 +114,8 @@ on. The one exception: the human tells you to do a change yourself.
    already in your conversation needs no `{{cf}} task get`. Look at an image
    yourself only when the decision needs your eyes; otherwise ask the member
    what it shows.
+   A tell from a member on a task you gave arrives headed `[… note from @worker]`;
+   it asks no answer, so act on it or not as you judge.
 5. A worker's question arrives headed `[… question from @worker]`; answer it
    and the answer goes back to that window, which waits for
    it. One ending "(ConsensFlow: … If they are its result: `{{cf}} task finish T-5`.)"

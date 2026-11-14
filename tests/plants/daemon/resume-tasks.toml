@@ -654,8 +654,8 @@ runs = ["ledger-suspended", "engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "         AND id NOT IN (SELECT value FROM json_each(?))\","
-replace = "         AND ? IS NOT NULL\","
+find = "         AND id NOT IN (SELECT value FROM json_each(?))\n"
+replace = "         AND ? IS NOT NULL\n"
 
 [[plant]]
 name = "resume tasks: a pause note left on its way by its task's cancel goes back to its queue as any does"
@@ -1371,8 +1371,8 @@ runs = ["ledger-continuations"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
 find = '''
-        for row in carried(store, message_id)? {
-            stale |= withdrawn_if_stale(store, &row)?;
+        for row in &carried {
+            stale |= withdrawn_if_stale(store, row)?;
         }'''
 replace = ""
 
@@ -1384,9 +1384,19 @@ runs = ["ledger-continuations"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
 find = '''
-        withdraw_stale_among(store, &riding)?;'''
+        withdraw_stale_among(store, &riding)?;
+        store.db.execute('''
 replace = '''
-        let _ = riding;'''
+        let _ = &riding;
+        store.db.execute('''
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        withdraw_stale_among(store, &riding)?;
+        let returned = known_message(store, message_id)?;'''
+replace = '''
+        let returned = known_message(store, message_id)?;'''
 
 [[plant]]
 name = "resume tasks: a carrier taken back keeps a continuation whose task is not at work"

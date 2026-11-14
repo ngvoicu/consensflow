@@ -442,8 +442,8 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '                let aside = self.tell_it_goes_on(project, &thread, &said, &words)?;'
-replace = '                let aside = { let _ = (&thread, &words, &said); None };'
+find = '                next.aside = self.tell_it_goes_on(project, &thread, &said, &words)?;'
+replace = '                next.aside = { let _ = (&thread, &words, &said); None };'
 
 [[plant]]
 name = "turn-end-min: the note of a held task names no way out"

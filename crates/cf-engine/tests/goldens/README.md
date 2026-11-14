@@ -293,3 +293,11 @@ brief written for one member (review T-1510). The same task has `cf inbox read` 
 past the bound a role is read whole at in parts (`cf_base::role_read::role_parts`): it prints in
 one piece to 141 rows with specs on (166 without), and to 5 and 30 with the most rules for the
 staff, and in parts past that, so no staff is too large to be read.
+
+On 2026-11-13 (T-1609), the 27 member rows gained the shared `cf tell` line
+and its rule beside `cf ask`; the twelve ordinary chief rows gained one sentence
+on a tell arriving as a note. No eval card or other text was changed.
+
+On 2026-11-14 (T-1639), the four `ownHandsChief` goldens gained the same
+member-tell sentence in their shared board instructions, with own hands on and
+off and specs on and off. The accepted member-tell text predates those goldens.

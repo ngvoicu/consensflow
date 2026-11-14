@@ -96,7 +96,20 @@ impl Dispatcher {
             _ => None,
         };
         let cf = self.cf_for(message)?;
-        Ok(delivery_text_beside(message, carried, &cf, again, told_in))
+        let mut text = delivery_text_beside(message, carried, &cf, again, told_in);
+        let paused = if message.kind == "answer" || carried.iter().any(|row| row.kind == "answer") {
+            self.seams.ledger.borrow().tell_pause_ways_on(message.id)?
+        } else {
+            Vec::new()
+        };
+        for number in paused {
+            // The board answer can differ from the turn's last complete answer, which
+            // is what Finish takes from the window's record.
+            text.push_str(&format!(
+                "\n\nT-{number} is paused. To take its window's last complete answer as the result: {cf} task finish T-{number}. To send it on: {cf} task resume T-{number} \"…\"."
+            ));
+        }
+        Ok(text)
     }
 
     /// Once, at start: what was on its way to a window when the previous process

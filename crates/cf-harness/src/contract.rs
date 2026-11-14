@@ -525,8 +525,8 @@ pub struct Dialog {
     /// Whether the harness's prompt is drawn below its choices ([`Window::shows_prompt`]): the
     /// choices are then words of the conversation, or of the box.
     pub prompt_below: bool,
-    /// The seconds after which the harness closes it by itself where nobody answers it, where
-    /// it is known to (Claude Code's offers to install a plugin: 30 s).
+    /// A known duration after which the harness closes it by itself (Claude Code's offers to
+    /// install a plugin: 30 s), or seconds left on a countdown the harness draws in the dialog.
     pub closes_after_s: Option<u32>,
 }
 

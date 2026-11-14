@@ -174,6 +174,7 @@ const BOARD: [(&[&str], &str); 19] = [
             "  cf tell T-3 \"…\"                   stop T-3 and put this to its window: its answer arrives as\n",
             "                                    a message; then cf task resume T-3 \"…\"\n",
             "                                    (queued or open: kept for its window, to go in with or after its brief)\n",
+            "  cf tell \"…\"                       a member tells whoever gave its task; nothing waits\n",
         ),
     ),
     (
@@ -189,7 +190,7 @@ const BOARD: [(&[&str], &str); 19] = [
     ),
     (
         &["note"],
-        "  cf note \"…\" [--human]             something they should know; nothing waits on it\n",
+        "  cf note \"…\" [--human]             a note to the human; nothing waits on it\n",
     ),
     (
         &["answer"],
@@ -339,7 +340,7 @@ fn every_line_of_the_usage_is_a_commands_to_answer_help_with() {
 #[test]
 fn a_text_that_holds_the_word_among_others_or_after_a_double_dash_is_text() {
     // Each posts what it was given, and the board is asked as it is for any text.
-    let cases: [(&[&str], &str, Value); 12] = [
+    let cases: [(&[&str], &str, Value); 14] = [
         (
             &["note", "--", "--help"],
             "/api/notes",
@@ -376,6 +377,16 @@ fn a_text_that_holds_the_word_among_others_or_after_a_double_dash_is_text() {
             json!({ "body": "--help" }),
         ),
         (
+            &["tell", "--", "--help"],
+            "/api/notes",
+            json!({ "body": "--help" }),
+        ),
+        (
+            &["tell", "see", "--help"],
+            "/api/notes",
+            json!({ "body": "see --help" }),
+        ),
+        (
             &["answer", "m-12", "--", "-h"],
             "/api/answers",
             json!({ "question": 12, "body": "-h" }),
@@ -402,13 +413,15 @@ fn a_text_that_holds_the_word_among_others_or_after_a_double_dash_is_text() {
         ),
     ];
     for (args, path, body) in cases {
-        let api = api();
+        let api = scripted(common::replies_for(args, json!({})));
         window(&api, args);
-        assert_eq!(
-            asked(&api),
-            [("POST".to_owned(), path.to_owned(), Some(body))],
-            "{args:?}"
-        );
+        let needs_caller = args[0] == "tell" || (args[0] == "note" && !args.contains(&"--human"));
+        let mut requests = Vec::new();
+        if needs_caller {
+            requests.push(("GET".to_owned(), "/api/whoami".to_owned(), None));
+        }
+        requests.push(("POST".to_owned(), path.to_owned(), Some(body)));
+        assert_eq!(asked(&api), requests, "{args:?}");
     }
 }
 

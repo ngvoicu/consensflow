@@ -35,7 +35,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use cf_board::scripted::{reply, scripted};
+use cf_board::scripted::scripted;
 use common::{cf, cf_bytes};
 use serde_json::{json, Value};
 
@@ -191,7 +191,7 @@ fn file_commands() -> BTreeSet<String> {
 /// What the board received of `args` run with `input` on standard input: the body, and the exit
 /// code and the error output for a message when it is not what it should be.
 fn posted(args: &[String], input: &str) -> (Option<i32>, Option<Value>, String) {
-    let api = scripted(vec![reply(201, the_answer())]);
+    let api = scripted(common::replies_for(args, the_answer()));
     let ran = cf(
         args,
         &[("CONSENSFLOW_URL", &api.url), ("CONSENSFLOW_TOKEN", "tok")],
@@ -200,7 +200,7 @@ fn posted(args: &[String], input: &str) -> (Option<i32>, Option<Value>, String) 
     let body = api
         .received()
         .into_iter()
-        .next()
+        .find(|got| got.method == "POST")
         .and_then(|got| got.json())
         .and_then(|sent| sent.get("body").cloned());
     (
@@ -312,7 +312,7 @@ fn every_command_that_takes_a_text_gets_it_whole_through_a_shells_quoted_heredoc
                 "exec \"$BIN_UNDER_TEST\" {} <<'BRIEF'\n{text}\nBRIEF\n",
                 words.join(" ")
             );
-            let api = scripted(vec![reply(201, the_answer())]);
+            let api = scripted(common::replies_for(&command.words, the_answer()));
             let ran = common::cf_at(
                 Path::new("/bin/sh"),
                 &["-c", &script],
@@ -326,7 +326,7 @@ fn every_command_that_takes_a_text_gets_it_whole_through_a_shells_quoted_heredoc
             let body = api
                 .received()
                 .into_iter()
-                .next()
+                .find(|got| got.method == "POST")
                 .and_then(|got| got.json())
                 .and_then(|sent| sent.get("body").cloned());
             assert_eq!(
@@ -351,7 +351,7 @@ fn utf16_with_a_mark(text: &str) -> Vec<u8> {
 
 /// What the board received of `args` run with `input` as bytes on standard input.
 fn posted_bytes(args: &[String], input: &[u8]) -> (Option<i32>, Option<Value>, String) {
-    let api = scripted(vec![reply(201, the_answer())]);
+    let api = scripted(common::replies_for(args, the_answer()));
     let ran = cf_bytes(
         args,
         &[("CONSENSFLOW_URL", &api.url), ("CONSENSFLOW_TOKEN", "tok")],
@@ -360,7 +360,7 @@ fn posted_bytes(args: &[String], input: &[u8]) -> (Option<i32>, Option<Value>, S
     let body = api
         .received()
         .into_iter()
-        .next()
+        .find(|got| got.method == "POST")
         .and_then(|got| got.json())
         .and_then(|sent| sent.get("body").cloned());
     (

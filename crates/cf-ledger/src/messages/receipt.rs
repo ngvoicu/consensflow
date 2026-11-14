@@ -704,6 +704,7 @@ fn received_as(
          WHERE id = ?",
         params![at, receipt.to_string(), message.id],
     )?;
+    crate::tasks::background_exchange(store, message.id, true)?;
     store.log(
         message.project_id,
         "message.read",

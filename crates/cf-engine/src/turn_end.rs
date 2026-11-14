@@ -31,13 +31,13 @@
 //! what the reader knows of each command: since when it runs, and that a time limit moved
 //! it into the background) and that the result comes when they end; then the one other
 //! choice, to take what the worker said last now ([`Dispatcher::finish_task`]); then the
-//! worker's words. **That is the only note a hold sends, with one exception** (T-1181; the
-//! field boards of 2026-10-26 and 2026-11-02, ten and twelve notes of a task whose jobs
-//! came and went): a hold that turns into one nothing but Finish ends (every job left is a
+//! worker's words. The hold is shown to the chief, with a typed reminder after an hour in
+//! one stretch and every three hours thereafter; a worker's own re-holds do not restart it
+//! (CLN-76, T-1598). A hold that turns into one nothing but Finish ends (every job left is a
 //! monitor that said it ended and has no command of the window to look for, or the host
 //! cannot see the window's commands) is told once more, in the words of that
 //! ([`cannot_end_by_itself`]). A job that ends or begins, a monitor's notice, and what a
-//! look at the window found are told no more: the result is told when it comes, a hold that
+//! look at the window found write no note of their own: the result is told when it comes, a hold that
 //! ends with no result (the window gone, the task failed or paused) in the notes of those,
 //! and a task the requester tells in the answer. Only the harness's own word that each is
 //! over clears it (`cf-harness`' `claude::record::jobs`): no time that passes releases a task held so,
@@ -75,7 +75,7 @@
 //! once one task's has, whatever ended that task; so no later task's turn is woken by
 //! what an earlier one left, and no later task is given an earlier task's words.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -137,9 +137,8 @@ pub struct Hold {
 pub(crate) struct HeldPart {
     /// What the task is held for, while it is.
     pub(crate) holding: Option<Hold>,
-    /// What the task's requester was told of its hold ([`Told`]): once for the hold, whatever
-    /// its jobs do and its turns say on the way (T-1181); a second time only if the hold turns
-    /// into one that cannot end by itself.
+    /// What the task's requester was told of its hold ([`Told`]): once for the hold and
+    /// once more if it cannot end by itself, plus the stretch's timed reminders.
     told: Option<Told>,
     /// The line of the window's record lost in the task's turn that its requester was told
     /// of, by a note of the hold or of a turn that may have lost its last line: told once.
@@ -225,25 +224,48 @@ impl Rests {
 /// chief 12 notes in 1 h 46 as its jobs began and ended, and kluris' T-104 and T-105 about ten
 /// while they waited for Windows runs, each a turn of the chief's with nothing to do).
 ///
-/// A hold that can end by itself asks a chief nothing: its note is shown, not typed (RS-25),
-/// once for the hold as before, and `aside` is that note. A turn of the worker's own that
-/// leaves it held again (`turn`, the last item of the turn that left it held, is another)
-/// writes no note: the task's line says what runs now, and the hour of the reminder
-/// ([`STILL_WORKING_REMINDED_AFTER_MS`]) counts from then (`Ledger::renew_aside`). A Monitor
-/// that wakes its worker at each event (poker-lab's T-442) would write a note a tick.
+/// A hold that can end by itself is shown, not typed (RS-25), and `aside` is that note.
+/// A new worker turn that holds again changes its line and counts as a re-hold, but starts
+/// no new hour and writes no note. `exchanges` distinguishes a real message to or from the
+/// worker from a harness's own wake-up; the first hold after an exchange starts a stretch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Told {
     task: i64,
     stuck: bool,
     turn: Option<Arc<str>>,
     aside: Option<i64>,
+    exchanges: HashSet<i64>,
+    since: i64,
+    reholds: i64,
+    previous: Option<(i64, i64)>,
 }
 
-/// How long a task is held in the background, by a hold that can end by itself, with no
-/// turn of its worker's own, before its chief is sent one note (typed, not only shown) that
-/// says how long and what runs (RS-25): after that long a chief may want to finish or stop
-/// it, and a task held by a job that never ends would otherwise sit unseen on its line.
+/// How long a task has held since its first hold after an exchange before the chief is
+/// typed a reminder, regardless of how often the worker woke and held again.
 pub(crate) const STILL_WORKING_REMINDED_AFTER_MS: i64 = 60 * 60_000;
+
+/// How long after a typed reminder another is due while that stretch continues.
+const STILL_WORKING_REMIND_AGAIN_AFTER_MS: i64 = 3 * 60 * 60_000;
+
+/// Messages actually given to the worker, and its messages to its requester that are on
+/// their way or received. Shown notes and harness wake-ups are not an exchange. Include
+/// every qualifying id so a previously queued message delivered out of order is seen too.
+fn exchanges(thread: &TaskThread, worker: &str) -> HashSet<i64> {
+    thread
+        .messages
+        .iter()
+        .filter(|message| {
+            let received = message.recipient == worker
+                && message.sender.is_some()
+                && matches!(message.state.as_str(), "delivered" | "read");
+            let sent = message.sender.as_deref() == Some(worker)
+                && message.recipient == thread.task.requester
+                && !matches!(message.state.as_str(), "gated" | "cancelled" | "failed");
+            received || sent
+        })
+        .map(|message| message.id)
+        .collect()
+}
 
 /// How long the engine waits, at most, between two looks at a window's commands that end
 /// nothing (Calliope on 472b1d96: a window that runs a dev server, or whose host cannot
@@ -360,6 +382,7 @@ impl Dispatcher {
         let lost = lost_in_turn(record, observed, Some(start));
         if !observed.settled {
             self.tell_lost(project, participant, record, &thread, lost)?;
+            self.remind_during_turn(project, participant, record, &thread, observed, watching)?;
             self.looks_finished(
                 project,
                 participant,
@@ -408,13 +431,24 @@ impl Dispatcher {
             let monitors = observed.monitors();
             let stuck = cannot_end_by_itself(pending, &monitors, seen);
             let turn = answers.last.map(|last| Arc::clone(&last.id));
-            // Typed once for the hold, and again only where it turns into one that cannot end
-            // by itself, which nothing but the requester ends (T-1181). A hold that can end by
-            // itself is shown, not typed, and again after a turn of the worker's own (RS-25).
+            // Typed at once if the hold cannot end by itself; otherwise shown, with a timed
+            // reminder of the whole stretch (not one per worker turn).
+            let exchanged = exchanges(&thread, &participant.handle);
             let (to_tell, told) = {
                 let mut held = record.held.borrow_mut();
                 held.holding = Some(hold);
-                let told = held.told.clone().filter(|told| told.task == hold.task);
+                let mut told = held.told.clone().filter(|told| told.task == hold.task);
+                if let Some(aside) = told.as_ref().and_then(|told| told.aside) {
+                    let over = self
+                        .seams
+                        .ledger
+                        .borrow()
+                        .message(aside)?
+                        .is_some_and(|message| message.receipt.get("over").is_some());
+                    if over {
+                        told = None;
+                    }
+                }
                 let to_tell = match &told {
                     None => true,
                     Some(told) if stuck => !told.stuck,
@@ -428,38 +462,79 @@ impl Dispatcher {
                 commands: observed.commands(),
                 stuck,
             };
+            // A change between a shown hold and one requiring Finish is not an exchange.
+            // Keep the stretch across it, including when the first hold was typed.
+            let new_exchange = told
+                .as_ref()
+                .is_some_and(|told| exchanged.iter().any(|id| !told.exchanges.contains(id)));
+            let new_turn = told.as_ref().is_some_and(|told| told.turn != turn);
+            let continuing = told.is_some();
+            let mut next = told.unwrap_or_else(|| Told {
+                task: hold.task,
+                stuck,
+                turn: turn.clone(),
+                aside: None,
+                exchanges: exchanged.clone(),
+                since: self.now(),
+                reholds: 0,
+                previous: None,
+            });
+            if new_exchange {
+                next.since = self.now();
+                next.reholds = 0;
+                next.previous = None;
+            } else if new_turn {
+                next.reholds = next.reholds.saturating_add(1);
+            }
+            next.turn = turn;
+            next.exchanges = exchanged;
+            next.stuck = stuck;
             // Where a look decides, the requester is told once it was made (Calliope on
             // 472b1d96).
             if to_tell && watching != Watching::Waiting {
-                let aside = self.tell_it_goes_on(project, &thread, &said, &words)?;
+                next.aside = self.tell_it_goes_on(project, &thread, &said, &words)?;
+                if let Some(aside) = next.aside.filter(|_| continuing) {
+                    let since = time::iso(next.since);
+                    let previous_at = next.previous.map(|(_, at)| time::iso(at));
+                    let previous = next
+                        .previous
+                        .zip(previous_at.as_deref())
+                        .map(|((id, _), at)| (id, at));
+                    self.seams.ledger.borrow_mut().carry_aside(
+                        project.id,
+                        aside,
+                        &since,
+                        next.reholds,
+                        previous,
+                    )?;
+                }
                 let mut held = record.held.borrow_mut();
-                held.told = Some(Told {
-                    task: hold.task,
-                    stuck,
-                    turn,
-                    aside,
-                });
+                held.told = Some(next.clone());
                 held.lost_said = held.lost_said.or(lost);
-            } else if let Some((aside, told_turn)) = told
-                .filter(|_| !to_tell && !stuck)
-                .and_then(|told| Some((told.aside?, told.turn)))
-            {
-                // Not told now, and not stuck: the hold was shown (`to_tell` else).
-                if told_turn != turn {
-                    // A turn of its own left it held again: its line says what runs now, and
-                    // the hour counts from now. Nothing is written where the task moved on.
+            } else if !to_tell {
+                if let Some(aside) = next.aside.filter(|_| new_exchange || new_turn) {
                     let said_now =
                         format!("in the background: {}", running_said(&said, self.now()));
-                    self.seams
-                        .ledger
-                        .borrow_mut()
-                        .renew_aside(project.id, aside, &said_now)?;
-                    self.changed();
-                    if let Some(told) = record.held.borrow_mut().told.as_mut() {
-                        told.turn = turn;
+                    if new_exchange {
+                        self.seams
+                            .ledger
+                            .borrow_mut()
+                            .restart_aside(project.id, aside, &said_now)?;
+                    } else {
+                        self.seams
+                            .ledger
+                            .borrow_mut()
+                            .renew_aside(project.id, aside, &said_now)?;
                     }
-                } else {
-                    self.remind_held(project, &thread, &said, aside)?;
+                    self.changed();
+                }
+                record.held.borrow_mut().told = Some(next.clone());
+            } else {
+                return Ok(Turn::Held);
+            }
+            if let Some(previous) = self.remind_held(project, &thread, &said, &next)? {
+                if let Some(told) = record.held.borrow_mut().told.as_mut() {
+                    told.previous = Some(previous);
                 }
             }
             return Ok(Turn::Held);
@@ -931,39 +1006,123 @@ impl Dispatcher {
         Ok(aside)
     }
 
-    /// The one note typed of a hold shown on its task's line ([`Told`]'s `aside`) that has
-    /// gone on [`STILL_WORKING_REMINDED_AFTER_MS`] with no turn of the worker's own: how long
-    /// and what runs. Counted from the shown note's own time, and sent once, as the ledger
-    /// remembers on it; nothing where `aside` was typed (to anyone but a chief).
+    /// An earlier hold's stretch continues through a wake-up. If background work is
+    /// still pending, the hour can fall while the worker's own turn is under way.
+    /// A real exchange ends the old stretch; its next hold will start another.
+    fn remind_during_turn(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Record,
+        thread: &TaskThread,
+        observed: &Observed,
+        watching: Watching,
+    ) -> Result<(), EngineError> {
+        let Some(told) = record
+            .held
+            .borrow()
+            .told
+            .clone()
+            .filter(|told| told.task == thread.task.number)
+        else {
+            return Ok(());
+        };
+        if exchanges(thread, &participant.handle)
+            .iter()
+            .any(|id| !told.exchanges.contains(id))
+            || watching == Watching::Waiting
+        {
+            return Ok(());
+        }
+        let pending = pending_after_look(observed, watching);
+        if pending.total() == 0 {
+            return Ok(());
+        }
+        let seen = match watching {
+            Watching::Seen(seen) => Some(seen),
+            Watching::Undecided | Watching::Waiting => None,
+        };
+        let monitors = observed.monitors();
+        let said = Held {
+            pending,
+            stuck: cannot_end_by_itself(pending, &monitors, seen),
+            monitors,
+            commands: observed.commands(),
+        };
+        if let Some(previous) = self.remind_held(project, thread, &said, &told)? {
+            if let Some(told) = record.held.borrow_mut().told.as_mut() {
+                told.previous = Some(previous);
+            }
+        }
+        Ok(())
+    }
+
+    /// Remind of the stretch after an hour and every three hours after that. The receipt
+    /// keeps the start, re-holds and last reminder; another look can never send it twice.
     fn remind_held(
         &self,
         project: &ProjectView,
         thread: &TaskThread,
         held: &Held,
-        aside: i64,
-    ) -> Result<(), EngineError> {
-        let Some(shown) = self.seams.ledger.borrow().message(aside)? else {
-            return Ok(());
+        told: &Told,
+    ) -> Result<Option<(i64, i64)>, EngineError> {
+        let shown = if let Some(aside) = told.aside {
+            let Some(shown) = self.seams.ledger.borrow().message(aside)? else {
+                return Ok(None);
+            };
+            let shown_aside = shown
+                .receipt
+                .get(cf_ledger::SHOWN)
+                .is_some_and(|said| said.is_string());
+            if !shown_aside || shown.receipt.get("over").is_some() {
+                return Ok(None);
+            }
+            Some(shown)
+        } else {
+            None
         };
-        let shown_aside = shown
-            .receipt
-            .get(cf_ledger::SHOWN)
-            .is_some_and(|said| said.is_string());
-        if !shown_aside || shown.receipt.get("reminded").is_some() {
-            return Ok(());
-        }
-        // From when its line was last said anew, else from when it was shown.
-        let since = shown
-            .receipt
-            .get("since")
-            .and_then(Value::as_str)
-            .unwrap_or(&shown.created_at);
-        let Some(since) = time::parse(since) else {
-            return Ok(());
+        // A typed Finish note has no stable receipt: delivery may replace it. The window
+        // keeps this stretch while it is held, and carries it to the next shown note.
+        let since = shown.as_ref().map_or(Some(told.since), |shown| {
+            let since = shown
+                .receipt
+                .get("since")
+                .and_then(Value::as_str)
+                .unwrap_or(&shown.created_at);
+            time::parse(since)
+        });
+        let Some(since) = since else {
+            return Ok(None);
         };
         let now = self.now();
-        if now - since < STILL_WORKING_REMINDED_AFTER_MS {
-            return Ok(());
+        let previous = shown
+            .as_ref()
+            .map_or(told.previous.map(|(id, _)| id), |shown| {
+                shown.receipt.get("reminded").and_then(Value::as_i64)
+            });
+        let due_from = if let Some(id) = previous {
+            let Some(prior) = self.seams.ledger.borrow().message(id)? else {
+                return Ok(None);
+            };
+            // Do not stack reminders while the chief is busy. The next interval begins
+            // when the last one arrived, not when it was put in the delivery queue.
+            if matches!(prior.state.as_str(), "queued" | "gated" | "delivering") {
+                return Ok(None);
+            }
+            let reminded_at = prior
+                .delivered_at
+                .as_deref()
+                .and_then(time::parse)
+                .or_else(|| time::parse(&prior.created_at));
+            let Some(reminded_at) = reminded_at else {
+                return Ok(None);
+            };
+            reminded_at + STILL_WORKING_REMIND_AGAIN_AFTER_MS
+        } else {
+            since + STILL_WORKING_REMINDED_AFTER_MS
+        };
+        if now < due_from {
+            return Ok(None);
         }
         let number = thread.task.number;
         let minutes = (now - since) / 60_000;
@@ -974,23 +1133,48 @@ impl Dispatcher {
         };
         let running = running_said(held, now);
         let finish = finish_with(thread);
-        let body = format!(
-            "T-{number} has been working in the background for {long} with no turn of its own ({running}). Its result comes when that ends; {finish} takes what it said last now."
-        );
-        let sent = self.seams.ledger.borrow_mut().remind_of_aside(
-            project.id,
-            aside,
-            &NewNote {
-                from: None,
-                to: thread.task.requester.clone(),
-                task: Some(number),
-                body,
-            },
-        )?;
-        if sent.is_some() {
+        let reholds = shown.as_ref().map_or(told.reholds, |shown| {
+            shown
+                .receipt
+                .get("reholds")
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+        });
+        let times = if reholds == 1 { "time" } else { "times" };
+        let end = if held.stuck {
+            format!("Its result will not come by itself; {finish} takes what it said last.")
+        } else {
+            format!("Its result comes when that ends; {finish} takes what it said last now.")
+        };
+        let note = NewNote {
+            from: None,
+            to: thread.task.requester.clone(),
+            task: Some(number),
+            body: format!("T-{number} has been working in the background for {long}, holding again {reholds} {times} ({running}). {end}"),
+        };
+        let sent = if let Some(shown) = shown {
+            self.seams.ledger.borrow_mut().remind_of_aside(
+                project.id,
+                shown.id,
+                shown
+                    .receipt
+                    .get("stretch")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0),
+                previous,
+                &note,
+            )?
+        } else {
+            Some(self.seams.ledger.borrow_mut().note(project.id, &note)?)
+        };
+        if let Some(sent) = sent {
             self.changed();
+            return Ok(Some((
+                sent.id,
+                time::parse(&sent.created_at).unwrap_or(now),
+            )));
         }
-        Ok(())
+        Ok(None)
     }
 
     /// Whoever gave the task is told, once, that a line of the window's record was lost in a

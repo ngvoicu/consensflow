@@ -111,6 +111,10 @@ const RELEASE_SHOWN: &str = "a task taken back from its member, with no follow-u
 /// hold too (`aside`) while it holds, where Node's view has no such field.
 const HOLD_SAID: &str = "a task held for its member's quota, whose first note of the hold is typed to the chief as Node typed it, says the hold on its line as well while it holds (`aside`: `waits with @…: out of quota until …`, RS-25), a field Node's task view has not";
 
+/// A tell answer's delivery records the ways-on footer so its exact paste can be
+/// recognised after the task moves; Node's event had no footer to record.
+const TELL_WAYS_ON: &str = "a tell answer to a paused task records the tasks whose ways-on footer its paste carries in `delivery.begun`, so that paste is recognised after the task moves; Node's event has no such field";
+
 const DEPARTED: &[(&str, usize, &str)] = &[
     ("evals-measure-002", 0, NAMED_BY_MODEL),
     ("evals-measure-004", 0, NAMED_BY_MODEL),
@@ -137,6 +141,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-api-005", 17, ANSWERED_AS_IT_WAITED),
     ("core-api-006", 15, "the door's read `answerTo` is gone (a poll claims with `claim_answer`), and a choice answer lands queued, not read"),
     ("core-dispatcher-010", 121, REASON_PAUSE),
+    ("core-dispatcher-011", 117, TELL_WAYS_ON),
     ("core-dispatcher-028", 90, COPY_AFTER_THE_KEPT),
     ("core-dispatcher-029", 47, TELL_TAKES_A_WINDOW_LOSS_PAUSE),
     ("core-dispatcher-042", 72, "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, so the chief has no message waiting (`withWork`), where Node's has the note"),
@@ -171,7 +176,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-page-023", 8, WAITED_FOR),
     ("core-page-025", 8, UNREACHED),
     ("core-page-026", 14, UNREACHED),
-    ("evals-measure-001", 20, RESULT_ACCEPTED),
+    ("evals-measure-001", 12, "a tell answer to a paused task records the tasks whose ways-on footer its paste carries in `delivery.begun`, so that paste is recognised after the task moves; Node's event has no such field; its later departure: the chief accepts the task while its result is still queued, so the result is withdrawn where Node leaves it to be pasted"),
     ("evals-measure-015", 32, RESULT_ACCEPTED),
     ("home-copies-001", 34, KEPT_IN_BRIEF),
     ("home-copies-004", 34, KEPT_IN_BRIEF),

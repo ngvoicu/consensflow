@@ -49,10 +49,11 @@ cf inside a ConsensFlow window: the board's commands.
   cf tell T-3 "…"                   stop T-3 and put this to its window: its answer arrives as
                                     a message; then cf task resume T-3 "…"
                                     (queued or open: kept for its window, to go in with or after its brief)
+  cf tell "…"                       a member tells whoever gave its task; nothing waits
   cf inbox [read m-12]              what is waiting for you, or one message in full
   cf ask "…"                        a question to the chief (a member's; the chief asks the
                                     human in its own terminal)
-  cf note "…" [--human]             something they should know; nothing waits on it
+  cf note "…" [--human]             a note to the human; nothing waits on it
   cf answer m-12 "…"                answer a question put to you
   cf staff                           the members: roles and tiers
   cf whoami                         your project, role and current task
@@ -64,6 +65,6 @@ Any "…" can be - to read the text from standard input, as written (not PowerSh
   cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)
 A long one is surest in a file, which no shell cuts (every command that takes words):
   cf task add --tier standard --file brief.md
-task add, reopen, resume, edit and tell say how many characters went and how the text ends: see that it is all there.
+task add, reopen, resume, edit and the chief's tell say how many characters went and how the text ends: see that it is all there.
 
 Add --json for machine output.

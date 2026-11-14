@@ -33,7 +33,7 @@ replace = ""
 
 [[plant]]
 name = "tell then done: the rig's window answers its tell and goes on, and its final answer reaches nobody"
-meant = "the_final_answer_a_worker_ends_the_turn_of_a_tell_with_reaches_the_chief_and_finish_makes_it_the_result"
+meant = "the_answer_is_typed_with_ways_on_and_the_distinct_final_words_are_shown_and_can_be_finished"
 runs = ["rig-regression-tell-then-done"]
 builds = true
 
@@ -199,8 +199,13 @@ runs = ["engine-paused-answers", "ledger-pause-notes"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
-find = "    for (id, said) in notes_of(store, task, Some(\"queued\"))? {"
-replace = "    for (id, said) in notes_of(store, task, None)? {"
+find = "pub(crate) fn keep_moved(store: &mut Store, task: &TaskRow) -> Result<(), LedgerError> {\n    for (id, said) in notes_of(store, task, Some(\"queued\"))? {"
+replace = "pub(crate) fn keep_moved(store: &mut Store, task: &TaskRow) -> Result<(), LedgerError> {\n    for (id, said) in notes_of(store, task, None)? {"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = ".is_some_and(|note| note.state != \"queued\")"
+replace = ".is_some_and(|note| note.state != \"queued\" && note.state != \"delivered\")"
 
 [[plant]]
 name = "tell then done: finishing withdraws the answer note whether the chief has read it or not"
@@ -219,8 +224,8 @@ runs = ["engine-paused-answers", "ledger-pause-notes"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
-find = "                then: Then::Moved,\n                ..said\n"
-replace = "                then: said.then,\n                ..said\n"
+find = "        if matches!(said.then, Then::Paused(_)) {\n            let body = render(&Answered {\n                then: Then::Moved,\n                ..said\n"
+replace = "        if matches!(said.then, Then::Paused(_)) {\n            let body = render(&Answered {\n                then: said.then,\n                ..said\n"
 
 [[plant]]
 name = "tell then done: a turn that ended after the resume is told in the words of a paused task"
@@ -229,7 +234,7 @@ runs = ["engine-paused-answers"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
-find = '        let then = if task.state == "paused" {'
+find = '        let then = if !moved {'
 replace = "        let then = if true {"
 
 [[plant]]
@@ -381,3 +386,196 @@ runs = ["ledger-pause-notes"]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
 find = "               AND state IN ('queued', 'gated', 'delivering')\",\n"
 replace = "               AND state IN ('queued', 'gated')\",\n"
+
+# CLN-71: once the window's answer to the tell is on its way to the chief,
+# its note is shown; until then it is typed. A late answer changes an unpasted
+# note too, and the answer itself says how to go on while that pause holds.
+[[plant]]
+name = "answered tell: the answered tell's note is typed"
+meant = "an_answered_tells_note_is_shown_while_the_task_stays_paused"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "        let shown = show_for_answer(store, &task, handle, tell, false)?;"
+replace = "        let shown = false;"
+
+[[plant]]
+name = "answered tell: the unanswered tell's note is shown"
+meant = "an_unanswered_tells_note_is_queued_with_both_ways_on_while_the_task_stays_paused"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "        let shown = show_for_answer(store, &task, handle, tell, false)?;"
+replace = "        let shown = true;"
+
+[[plant]]
+name = "answered tell: a late answer leaves the queued note to be typed"
+meant = "a_late_board_answer_shows_the_queued_note_even_if_the_task_stays_paused"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "            paused_answers::show_answered(store, &task, question_id, false)?;"
+replace = "            let _ = (&task, question_id);"
+
+[[plant]]
+name = "answered tell: the chief's answer omits the ways on"
+meant = "an_answered_tells_turn_is_shown_and_the_answer_tells_the_paused_chief_both_ways_on"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = "            self.seams.ledger.borrow().tell_pause_ways_on(message.id)?"
+replace = "            Vec::<i64>::new()"
+
+[[plant]]
+name = "answered tell: a refunded note attempt is forgotten"
+meant = "a_note_queued_again_after_an_attempt_stays_typed_when_its_tell_is_answered"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "                AND NOT EXISTS\n                    (SELECT 1 FROM event e WHERE e.project_id = message.project_id\n                       AND e.kind = 'delivery.begun'\n                       AND CASE WHEN json_valid(e.data)\n                                THEN json_extract(e.data, '$.message') END = message.id)\n"
+replace = ""
+
+[[plant]]
+name = "answered tell: a refunded carrier attempt is forgotten"
+meant = "a_note_in_a_carrier_is_shown_only_if_the_carrier_never_began"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "                       AND NOT EXISTS\n                           (SELECT 1 FROM event e WHERE e.project_id = c.project_id\n                              AND e.kind = 'delivery.begun'\n                              AND CASE WHEN json_valid(e.data)\n                                       THEN json_extract(e.data, '$.message') END = c.id)"
+replace = ""
+
+[[plant]]
+name = "answered tell: a failed answer leaves no typed fallback"
+meant = "a_shown_note_has_a_typed_fallback_if_its_board_answers_delivery_fails"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "                if let Some(tell) = message.reply_to {\n                    super::paused_answers::recover_after_lost_answer(\n                        store,\n                        &task,\n                        Some(tell),\n                        false,\n                    )?;\n                }\n"
+replace = ""
+
+[[plant]]
+name = "answered tell: a withdrawn answer leaves no typed fallback"
+meant = "a_shown_note_has_a_typed_fallback_if_its_queued_board_answer_is_withdrawn"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "            if let (\"answer\", Some(tell)) = (message.kind.as_str(), message.reply_to) {\n                super::paused_answers::recover_after_lost_answer(store, &task, Some(tell), false)?;\n            }\n"
+replace = ""
+
+[[plant]]
+name = "answered tell: a failed task loses its shown answer"
+meant = "a_task_failing_after_its_answer_was_shown_keeps_a_typed_fallback"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        recover_after_lost_answer(store, &task, None, true)?;\n"
+replace = ""
+
+[[plant]]
+name = "answered tell: the delivery forgets its ways-on footer"
+meant = "an_answered_tells_turn_is_shown_and_the_answer_tells_the_paused_chief_both_ways_on"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        if !paused.is_empty() {\n            begun[\"tellPauseWaysOn\"] = json!(paused);\n        }\n"
+replace = ""
+
+[[plant]]
+name = "answered tell: an older delivery is assumed to have the ways on"
+meant = "an_older_delivered_answer_with_no_proof_of_ways_on_keeps_the_note_typed_until_a_move"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "    Ok(tell_pause_ways_on(store, paste)?.contains(&task.number))"
+replace = "    let _ = paste;\n    Ok(true)"
+
+[[plant]]
+name = "answered tell: a resumed task changes the guidance of an earlier paste"
+meant = "an_answer_s_paused_task_guidance_stays_part_of_the_paste_after_a_resume"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = "        let paused = if message.kind == \"answer\" || carried.iter().any(|row| row.kind == \"answer\") {\n            self.seams.ledger.borrow().tell_pause_ways_on(message.id)?\n        } else {\n            Vec::new()\n        };\n"
+replace = "        let paused: Vec<i64> = std::iter::once(message).chain(carried).filter_map(|row| self.seams.ledger.borrow().answer_to_current_pause(row.id).ok().flatten()).collect();\n"
+
+[[plant]]
+name = "answered tell: the carrier forgets its answer's ways on"
+meant = "the_ways_on_of_an_answer_in_a_carrier_stay_with_that_paste_after_resume"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        for row in std::iter::once(message).chain(carried) {"
+replace = "        for row in std::iter::once(message) {"
+
+[[plant]]
+name = "answered tell: a resumed task keeps stale guidance at handover"
+meant = "an_answer_waiting_to_be_handed_over_loses_paused_guidance_if_the_task_resumes"
+runs = ["engine-paused-answers"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        if !again\n            && message.recipient_role == \"chief\""
+replace = "        if false\n            && message.recipient_role == \"chief\""
+
+[[plant]]
+name = "answered tell: an older handover mark exempts a new paste"
+meant = "an_older_handover_mark_does_not_exempt_a_new_carrier_paste_from_the_pause_check"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        if !again\n            && message.recipient_role == \"chief\""
+replace = "        if !again\n            && !store.db.query_row(\"SELECT handed_at IS NOT NULL FROM message WHERE id = ?\", [message_id], |row| row.get::<_, bool>(0))?\n            && message.recipient_role == \"chief\""
+
+[[plant]]
+name = "answered tell: Enter checks the pause as if the paste were new"
+meant = "a_paste_already_handed_over_may_be_sent_after_its_tells_pause_ends"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "        messages::admit(&mut self.store, message_id, carried, true)"
+replace = "        messages::admit(&mut self.store, message_id, carried, false)"
+
+[[plant]]
+name = "answered tell: a retry takes the earlier attempt's ways on"
+meant = "a_retry_records_the_ways_on_of_the_new_attempt_not_the_earlier_one"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "            \"SELECT data FROM event WHERE kind = 'delivery.begun'\n              AND CASE WHEN json_valid(data) THEN json_extract(data, '$.message') END = ?\n              ORDER BY id DESC LIMIT 1\","
+replace = "            \"SELECT data FROM event WHERE kind = 'delivery.begun'\n              AND CASE WHEN json_valid(data) THEN json_extract(data, '$.message') END = ?\n              ORDER BY id ASC LIMIT 1\","
+
+[[plant]]
+name = "answered tell: an older begun carrier is assumed to have the ways on"
+meant = "an_older_carrier_already_pasting_an_answer_without_ways_on_keeps_the_note_typed"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "    if row.state == \"queued\"\n        && (paste == answer\n            || store\n                .message(paste)?\n                .is_some_and(|carrier| matches!(carrier.state.as_str(), \"queued\" | \"gated\")))\n    {"
+replace = "    if row.state == \"queued\" {"
+
+[[plant]]
+name = "answered tell: a later pause hides that the tell's pause moved on"
+meant = "an_answered_tell_from_a_previous_pause_is_shown_even_if_the_task_paused_again"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/paused_answers.rs"
+find = "        return tell_moved_after(store, task, tell);"
+replace = "        return Ok(false);"

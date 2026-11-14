@@ -58,12 +58,20 @@ pub(crate) fn approve_message(
             "UPDATE message SET state = 'queued' WHERE id = ?",
             [message_id],
         )?;
+        crate::tasks::background_exchange(store, message_id, false)?;
         store.log(
             message.project_id,
             "message.approved",
             json!({ "message": message_id, "by": by }),
         )?;
         adopt(store, message_id)?;
+        if let ("answer", Some(tell), Some(task)) = (
+            message.kind.as_str(),
+            message.reply_to,
+            message_task(store, message_id)?,
+        ) {
+            super::paused_answers::show_answered(store, &task, tell, false)?;
+        }
         known_message(store, message_id)
     })
 }

@@ -329,13 +329,40 @@ pub(crate) fn begin_delivery(
          WHERE id = ?",
             [message_id],
         )?;
-        let begun = json!({ "message": message_id, "attempt": message.attempts + 1 });
+        let carried = carried(store, message_id)?;
+        let paused = paused_answers_in(store, &message, &carried)?;
+        let mut begun = json!({ "message": message_id, "attempt": message.attempts + 1 });
+        if !paused.is_empty() {
+            begun["tellPauseWaysOn"] = json!(paused);
+        }
         store.log(message.project_id, "delivery.begun", looked(begun, look))?;
         Ok(Begun {
             message: known_message(store, message_id)?,
-            carried: carried(store, message_id)?,
+            carried,
         })
     })
+}
+
+/// The pauses for which this paste's answers need the chief's ways on.
+fn paused_answers_in(
+    store: &Store,
+    message: &MessageView,
+    carried: &[MessageView],
+) -> Result<Vec<i64>, LedgerError> {
+    let mut paused = Vec::new();
+    if message.recipient_role == "chief" {
+        for row in std::iter::once(message).chain(carried) {
+            if row.kind != "answer" {
+                continue;
+            }
+            if let Some(number) = super::paused_answers::answer_to_current_pause(store, row.id)? {
+                if !paused.contains(&number) {
+                    paused.push(number);
+                }
+            }
+        }
+    }
+    Ok(paused)
 }
 
 /// An event's `data` with what the engine's look read of the window, where it says
@@ -419,6 +446,8 @@ pub enum HandOver {
     /// Nothing goes in: the message, or a row its paste carries, was withdrawn
     /// since its delivery began (its task moved on, `continuations`).
     Withdrawn,
+    /// A tell's pause changed after the paste was prepared; prepare it again.
+    PauseChanged,
 }
 
 /// The transport is about to let a hand-over begun ([`begin_delivery`]) go to its
@@ -435,11 +464,14 @@ pub enum HandOver {
 /// does the brief of the chief's own step finished while it was on its way, in
 /// the finish's words (`withdrawn_late`): the transport asks again for an Enter
 /// that sends a paste left in the chief's input box, and a step accepted is no
-/// brief to send (the merge of main's field 3.0.6, T-392).
+/// brief to send (the merge of main's field 3.0.6, T-392). Before a new hand-over,
+/// a chief's answer to a tell goes back if its pause changed since the paste was
+/// prepared; a paste already handed retains its original words for an Enter.
 pub(crate) fn admit(
     store: &mut Store,
     message_id: i64,
     begun_with: &[i64],
+    again: bool,
 ) -> Result<HandOver, LedgerError> {
     store.write(|store| {
         let Some(message) = store.message(message_id)? else {
@@ -453,8 +485,9 @@ pub(crate) fn admit(
             return Ok(HandOver::Closed);
         }
         let mut stale = withdrawn_if_stale(store, &message)?;
-        for row in carried(store, message_id)? {
-            stale |= withdrawn_if_stale(store, &row)?;
+        let carried = carried(store, message_id)?;
+        for row in &carried {
+            stale |= withdrawn_if_stale(store, row)?;
         }
         if stale {
             return Ok(HandOver::Withdrawn);
@@ -471,6 +504,18 @@ pub(crate) fn admit(
             .collect::<rusqlite::Result<_>>()?;
         if message.state != "delivering" || begun_with.iter().any(|id| !riding.contains(id)) {
             return Ok(HandOver::Withdrawn);
+        }
+        // An adapter may wait after the paste is prepared. Recheck in this same write
+        // before a new hand-over, so the words match the pause then. A previous attempt's
+        // handover mark can outlive it, so only the engine's explicit Enter uses the
+        // original words without this check.
+        if !again
+            && message.recipient_role == "chief"
+            && (message.kind == "answer" || carried.iter().any(|row| row.kind == "answer"))
+            && paused_answers_in(store, &message, &carried)?
+                != super::paused_answers::tell_pause_ways_on(store, message_id)?
+        {
+            return Ok(HandOver::PauseChanged);
         }
         let at = store.at();
         store.db.execute(
@@ -640,6 +685,10 @@ pub(crate) fn confirm_delivery(
          WHERE carried_by = ? AND state = 'queued'",
             params![at, json!({ "carrier": message_id }).to_string(), message_id],
         )?;
+        crate::tasks::background_exchange(store, message_id, true)?;
+        for id in &rode {
+            crate::tasks::background_exchange(store, *id, true)?;
+        }
         // A row withdrawn after the paste that carried it was handed over (a pause
         // or a cancel took it back) went in the paste all the same: the record says
         // it arrived, and why it reads so (the chief's decision on Calliope's review
@@ -746,6 +795,9 @@ pub(crate) fn cancel_message(
         )?;
         if let Some(task) = message_task(store, message_id)? {
             release_carried(store, task.id)?;
+            if let ("answer", Some(tell)) = (message.kind.as_str(), message.reply_to) {
+                super::paused_answers::recover_after_lost_answer(store, &task, Some(tell), false)?;
+            }
         }
         known_message(store, message_id)
     })
@@ -834,6 +886,13 @@ pub(crate) fn retry_delivery(
         // Served whole to its recipient while it was on its way, it is read, as a queued
         // one served so is: not pasted again after the reader had it.
         if settle_when_given_back(store, message_id)? {
+            return known_message(store, message_id);
+        }
+        // A reminder that was handed before its hold ended may have come back. It is no
+        // longer handed now; neither it nor a returned row riding with it may go again.
+        withdraw_stale_among(store, &riding)?;
+        let returned = known_message(store, message_id)?;
+        if withdrawn_if_stale(store, &returned)? {
             return known_message(store, message_id);
         }
         adopt(store, message_id)?;
@@ -931,6 +990,14 @@ pub(crate) fn give_up_delivery(
             fail_for(store, &message, &task)?;
             if message.kind == "answer" {
                 tell_failed_answer(store, &message, &task, reason)?;
+                if let Some(tell) = message.reply_to {
+                    super::paused_answers::recover_after_lost_answer(
+                        store,
+                        &task,
+                        Some(tell),
+                        false,
+                    )?;
+                }
             }
         }
         Ok((known_message(store, message_id)?, GivenUp::Failed))

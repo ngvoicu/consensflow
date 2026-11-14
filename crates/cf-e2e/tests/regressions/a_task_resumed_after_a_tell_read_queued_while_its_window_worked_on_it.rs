@@ -13,8 +13,8 @@
 //! What the chief should have seen: the task `working` as soon as its window's record shows
 //! the window acting after the resume, with the resume's words still waiting for the window's
 //! rest; when the turn on the tell ends, that turn is not the task's result (the note of a task
-//! that has moved on tells the chief what it ended with), the resume's words go in, and the
-//! answer to them is the result.
+//! that has moved on holds what it ended with, shown when the tell was answered on the
+//! board), the resume's words go in, and the answer to them is the result.
 //!
 //! The stand-in answers the tell with `cf answer` and goes on working through twelve steps,
 //! three seconds apart (`REPLY … THEN PACED …`), writing a step into its record at each.
@@ -118,9 +118,9 @@ fn a_task_resumed_after_a_tell_reads_working_while_its_window_goes_on_with_the_t
         "the turn on the tell has not ended"
     );
 
-    // The turn on the tell ends: it is no result, and the chief is told what it ended with.
+    // The tell was answered; the note is shown when the turn ends after the resume.
     rig.wait_for(
-        "the words the turn ended with to reach the chief",
+        "the words the turn ended with to be in the inbox",
         secs(90),
         || {
             Ok(holding(&project, REPORT)?
@@ -128,6 +128,20 @@ fn a_task_resumed_after_a_tell_reads_working_while_its_window_goes_on_with_the_t
                 .any(|(kind, _)| kind == "note"))
         },
     )?;
+    let note = project
+        .inbox("chief")?
+        .into_iter()
+        .find(|message| {
+            message["kind"] == "note"
+                && message["body"]
+                    .as_str()
+                    .is_some_and(|body| body.contains(REPORT))
+        })
+        .expect("the note is in the inbox");
+    assert_eq!(note["state"], "read", "{note}");
+    assert!(!note["receipt"]["shown"].is_null(), "{note}");
+    assert!(!note["receipt"]["over"].is_null(), "{note}");
+    let note_id = note["id"].as_i64().expect("the note has an id");
     let results = |project: &Project| -> cf_e2e::Result<Vec<String>> {
         Ok(project
             .inbox("chief")?
@@ -154,6 +168,12 @@ fn a_task_resumed_after_a_tell_reads_working_while_its_window_goes_on_with_the_t
         "the answer to the resume's words is the result: {results:?}"
     );
     assert_eq!(project.task(1)?["state"], "done");
+    assert!(
+        rig.events().iter().all(|event| {
+            event["kind"] != "delivery.begun" || event["data"]["message"] != note_id
+        }),
+        "the shown note was pasted"
+    );
     rig.close()?;
     Ok(())
 }

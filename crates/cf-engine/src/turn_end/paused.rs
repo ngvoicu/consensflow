@@ -21,6 +21,8 @@
 //! note and keeps its words true as the task moves (`cf-ledger`'s `paused_answers`): a
 //! resume does not take it back unread, it says the task has moved on and that its result
 //! will be the next complete answer; Finish withdraws it.
+//! If the window has answered this tell on the board and the answer is with the chief or on
+//! its way, the ledger shows the note rather than typing it to that chief again (CLN-71).
 //!
 //! **What the window wrote first** (T-1151): a window answers a question before it works, so
 //! the note also holds what it wrote after the tell and before its first tool call, where it

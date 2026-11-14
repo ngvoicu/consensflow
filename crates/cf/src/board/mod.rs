@@ -47,10 +47,16 @@ const ANSWER: Shape = Shape {
     ..Shape::NUMBERED
 };
 
-/// The flags of `cf tell`, which names its task first.
+/// The flags of the chief's `cf tell`, which names its task first.
 const TELL: Shape = Shape {
     valued: &[brief::FILE],
     ..Shape::NUMBERED
+};
+
+/// The flags of a member's `cf tell`, whose words are all its text.
+const MEMBER_TELL: Shape = Shape {
+    valued: &[brief::FILE],
+    ..Shape::TEXT
 };
 
 /// The flags of `cf inbox read`, which names its message first.
@@ -371,15 +377,22 @@ fn note(
         return Ok(help_of(&["note"]));
     }
     let human = words.on("--human");
-    let mut body = Map::new();
-    body.insert(
-        "body".into(),
-        require_text(
-            brief::brief_of(&words, given, input)?,
-            "cf note \"what to know\"",
-        )?
-        .into(),
-    );
+    if !human {
+        board.require_writes()?;
+        if !caller_is_chief(board)? {
+            return Err(Failure::Usage("members use cf tell \"…\"".into()));
+        }
+    }
+    let what = require_text(
+        brief::brief_of(&words, given, input)?,
+        "cf note \"what to know\"",
+    )?;
+    send_note(board, what, human)
+}
+
+/// A note takes the daemon's existing route, which chooses its recipient and task.
+fn send_note(board: &Board, what: String, human: bool) -> Result<Said, Failure> {
+    let mut body = body_of(what);
     if human {
         body.insert("to".into(), "human".into());
     }
@@ -390,6 +403,23 @@ fn note(
         js::text(message.get("recipient"))
     );
     Ok(Said::new(message, text))
+}
+
+/// The daemon identifies the bearer token's participant, not an environment hint.
+fn caller_is_chief(board: &Board) -> Result<bool, Failure> {
+    let answer = board.get("/api/whoami")?;
+    let role = answer
+        .part("participant")?
+        .get("role")
+        .and_then(Value::as_str)
+        .ok_or_else(|| answer.lacks("participant.role"))?;
+    if role == "chief" {
+        Ok(true)
+    } else if cf_ledger::roles::is_role(role) {
+        Ok(false)
+    } else {
+        Err(answer.lacks("known participant.role").into())
+    }
 }
 
 fn ask(
@@ -428,13 +458,30 @@ fn tell(
     board: &Board,
     input: &mut dyn Read,
 ) -> Result<Said, Failure> {
-    let words = split(rest, TELL);
-    if words.asks_for_help() {
+    let number = task_number(rest.first().map(String::as_str)).ok();
+    let member_words = split(rest, MEMBER_TELL);
+    let chief_words = split(rest, TELL);
+    if member_words.asks_for_help() || (number.is_some() && chief_words.asks_for_help()) {
         return Ok(help_of(&["tell"]));
     }
-    let number = task_number(rest.first().map(String::as_str))?;
+    board.require_writes()?;
+    if !caller_is_chief(board)? {
+        // A lone "T-3" (or "3") is itself valid text, as it was for a note.
+        if number.is_some() && rest.len() > 1 {
+            return Err(Failure::Usage(
+                "members tell without a task number: cf tell \"…\"".into(),
+            ));
+        }
+        let what = require_text(
+            brief::brief_of(&member_words, given, input)?,
+            "cf tell \"what to know\"",
+        )?;
+        return send_note(board, what, false);
+    }
+    let number = number
+        .ok_or_else(|| Failure::Usage("the chief names the task: cf tell T-3 \"…\"".into()))?;
     let what = require_text(
-        brief::brief_of(&words, given, input)?,
+        brief::brief_of(&chief_words, given, input)?,
         "cf tell T-<n> \"what to put to its window now\"",
     )?;
     let sent = brief::sent(number, &what);
