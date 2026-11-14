@@ -62,6 +62,24 @@ async fn input_result(result: Result<PageInputCompletion, String>) -> Value {
     }
 }
 
+fn page_input_finished(
+    human: bool,
+    mut result: Value,
+    emit: impl FnOnce(&str, Value) -> tauri::Result<()>,
+    log: impl FnOnce(&str),
+) -> Value {
+    if human && result["ok"] == true {
+        if let Err(error) = emit(PAGE_STATE_EVENT, json!({"reason":"human-input"})) {
+            let warning = format!(
+                "ConsensFlow could not send the page the {PAGE_STATE_EVENT} event after human input reached the pane: {error}; the page's state may be out of date"
+            );
+            log(&warning);
+            result["warning"] = warning.into();
+        }
+    }
+    result
+}
+
 fn enqueue_page_input<R: Runtime>(
     app: AppHandle<R>,
     id: String,
@@ -126,10 +144,12 @@ pub async fn pane_input_wait<R: Runtime>(app: AppHandle<R>, ticket: String) -> V
         let completion = inputs.take_page_completion(&ticket);
         let human = completion.as_ref().is_ok_and(|completion| completion.human);
         let result = input_result(completion).await;
-        if human && result["ok"] == true {
-            let _ = app.emit(PAGE_STATE_EVENT, json!({"reason":"human-input"}));
-        }
-        result
+        page_input_finished(
+            human,
+            result,
+            |event, body| app.emit(event, body),
+            |said| eprintln!("{said}"),
+        )
     })
     .await
 }
@@ -407,6 +427,54 @@ mod tests {
     use cf_proto::bridge::Role;
 
     #[test]
+    fn notification_failure_reports_that_human_input_was_already_taken() {
+        let said = std::cell::RefCell::new(Vec::new());
+        let result = page_input_finished(
+            true,
+            json!({"ok":true}),
+            |event, body| {
+                assert_eq!(event, PAGE_STATE_EVENT);
+                assert_eq!(body, json!({"reason":"human-input"}));
+                Err(std::io::Error::other("webview gone").into())
+            },
+            |line| said.borrow_mut().push(line.to_owned()),
+        );
+        assert_eq!(result["ok"], true, "the pane already took the input");
+        let warning = result["warning"].as_str().expect("notification warning");
+        assert!(warning.contains(PAGE_STATE_EVENT), "{warning}");
+        assert!(warning.contains("human input"), "{warning}");
+        assert!(warning.contains("webview gone"), "{warning}");
+        assert_eq!(said.into_inner(), [warning]);
+    }
+
+    #[test]
+    fn only_successful_human_input_notifies_the_page() {
+        for (human, result) in [
+            (false, json!({"ok":true})),
+            (true, json!({"ok":false,"error":"input failed"})),
+        ] {
+            let answer = page_input_finished(
+                human,
+                result.clone(),
+                |_, _| panic!("no notification should be sent"),
+                |_| panic!("no notification failure should be logged"),
+            );
+            assert_eq!(answer, result);
+        }
+        let result = page_input_finished(
+            true,
+            json!({"ok":true}),
+            |event, body| {
+                assert_eq!(event, PAGE_STATE_EVENT);
+                assert_eq!(body, json!({"reason":"human-input"}));
+                Ok(())
+            },
+            |_| panic!("a sent event should not be logged"),
+        );
+        assert_eq!(result, json!({"ok":true}));
+    }
+
+    #[test]
     fn only_main_window_has_application_command_authority() {
         assert!(window_command_allowed("main", "daemon_request"));
         assert!(!window_command_allowed("p1-zeus", "daemon_request"));
@@ -596,6 +664,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn production_ipc_consumes_sequence_before_size_refusal() {
+        use tauri::Listener;
+
         let _pty_guard = cf_panes::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
@@ -640,6 +710,14 @@ mod tests {
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .expect("build mock webview");
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let heard = Arc::clone(&events);
+        app.listen_any(PAGE_STATE_EVENT, move |event| {
+            heard
+                .lock()
+                .expect("page events")
+                .push(serde_json::from_str::<Value>(event.payload()).expect("page event JSON"));
+        });
         let invoke = |command: &str, args: Value| {
             tauri::test::get_ipc_response(
                 &webview,
@@ -694,6 +772,10 @@ mod tests {
         );
         let first_completed = invoke("pane_input_wait", json!({"ticket":first["ticket"]}));
         assert_eq!(first_completed["ok"], true);
+        assert_eq!(
+            *events.lock().expect("page events"),
+            [json!({"reason":"human-input"})]
+        );
         // A rejected page input still consumes its sequence, so the next
         // sequence remains valid.
         let rejected = invoke(
@@ -711,6 +793,7 @@ mod tests {
 
         let completed = invoke("pane_input_wait", json!({"ticket":second["ticket"]}));
         assert_eq!(completed["ok"], true);
+        assert_eq!(events.lock().expect("page events").len(), 1);
         let mut output = Vec::new();
         reader
             .read_to_end(&mut output)
