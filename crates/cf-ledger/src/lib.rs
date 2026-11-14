@@ -70,7 +70,7 @@ pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;
 pub use projects::{
     launch_size, parse_advisor_tool, parse_compaction, parse_description, parse_name,
-    parse_prompt_suggestion, parse_staff_rules, NewChief, NewMember, NewProject,
+    parse_own_hands, parse_prompt_suggestion, parse_staff_rules, NewChief, NewMember, NewProject,
     COMPACTION_DEFAULT, COMPACTION_MAX, COMPACTION_MIN, STAFF_RULES_MAX_BYTES,
     STAFF_RULES_MAX_LINES,
 };

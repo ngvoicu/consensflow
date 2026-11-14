@@ -320,6 +320,12 @@ async function open(page, given = model()) {
   await page.addInitScript((data) => {
     window.__calls = []
     window.__model = data
+    const ownHandsKept = JSON.parse(sessionStorage.getItem('test-own-hands') ?? '{}')
+    for (const [id, on] of Object.entries(ownHandsKept)) {
+      const project = data.projects.find((item) => item.id === Number(id))
+      if (project && on) project.ownHands = true
+      if (data.boards[id]?.project && on) data.boards[id].project.ownHands = true
+    }
     // Every listener of each event, as the app keeps them: one registered twice hears it
     // twice. `__listeners.get(name)` says the event to all of them; an event no listener
     // is there for is heard by none, as the app says it.
@@ -623,6 +629,17 @@ async function open(page, given = model()) {
           if (promptSuggestion) shown.promptSuggestion = true
           else delete shown.promptSuggestion
         }
+        return answer({ project: shownProject(project)[0] })
+      },
+      'project.own_hands': ({ project, ownHands }) => {
+        if (window.__ownHandsFailure) return { ok: false, error: window.__ownHandsFailure }
+        if (typeof ownHands !== 'boolean') return { ok: false, error: 'expected a flag' }
+        for (const shown of shownProject(project)) {
+          if (ownHands) shown.ownHands = true
+          else delete shown.ownHands
+        }
+        ownHandsKept[project] = ownHands
+        sessionStorage.setItem('test-own-hands', JSON.stringify(ownHandsKept))
         return answer({ project: shownProject(project)[0] })
       },
       'wakeup.get': ({ project }) => answer({ wakeUp: wakeUpOf(project) }),
@@ -3251,6 +3268,80 @@ test("says on a Devin chief's card the id Devin lists after a switch to Devin, a
   await as({ harness: 'claude-code', model: 'claude-sonnet-5-5' })
   await expect(meta).toHaveText('Claude Code · claude-sonnet-5-5')
 })
+
+test('Do with your own hands appears on the chief in both pane states', async ({ page }) => {
+  const data = model()
+  await open(page, data)
+  const card = page.locator('#stage .terminal-card[data-handle="chief"]')
+  const control = card.getByRole('switch', { name: 'Do with your own hands' })
+  await expect(control).toHaveAttribute('aria-checked', 'false')
+  await expect(control).toHaveAttribute(
+    'title',
+    'The chief does the work itself and uses the board only when you ask. It hears of a change when it is next at rest.',
+  )
+  if (process.env.CF_OWN_HANDS_SCREENSHOTS) {
+    await card.screenshot({ path: `${process.env.CF_OWN_HANDS_SCREENSHOTS}/chief-off.png` })
+  }
+  await control.click()
+  await expect
+    .poll(() => calls(page, 'project.own_hands'))
+    .toEqual([{ project: 1, ownHands: true }])
+  await expect(control).toHaveAttribute('aria-checked', 'true')
+  if (process.env.CF_OWN_HANDS_SCREENSHOTS) {
+    await card.screenshot({ path: `${process.env.CF_OWN_HANDS_SCREENSHOTS}/chief-on.png` })
+  }
+  await page.reload()
+  await expect(control).toHaveAttribute('aria-checked', 'true')
+  await changed(page, () => {
+    const chief = window.__model.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+    chief.activity = { state: 'closed' }
+    chief.pane = null
+  })
+  await expect(card.getByRole('switch', { name: 'Do with your own hands' })).toHaveAttribute(
+    'aria-checked',
+    'true',
+  )
+  await card.getByRole('switch', { name: 'Do with your own hands' }).click()
+  await expect(card.getByRole('switch', { name: 'Do with your own hands' })).toHaveAttribute(
+    'aria-checked',
+    'false',
+  )
+})
+
+test('Do with your own hands shows an operation failure and keeps the saved state', async ({
+  page,
+}) => {
+  await open(page)
+  await page.evaluate(() => {
+    window.__ownHandsFailure = 'the change failed'
+  })
+  const control = page.getByRole('switch', { name: 'Do with your own hands' })
+  await control.click()
+  await expect(page.locator('#status')).toHaveText('the change failed')
+  await expect(control).toHaveAttribute('aria-checked', 'false')
+})
+
+for (const harness of ['claude-code', 'codex', 'pi', 'devin', 'muse']) {
+  test(`Do with your own hands is available on a ${harness} chief with and without a window`, async ({
+    page,
+  }) => {
+    const data = model()
+    const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+    chief.participant.harness = harness
+    chief.pane.harness = harness
+    await open(page, data)
+    const card = page.locator('#stage .terminal-card[data-handle="chief"]')
+    await expect(card.getByRole('switch', { name: 'Do with your own hands' })).toBeVisible()
+    await changed(page, () => {
+      const chief = window.__model.boards[1].lanes.find(
+        (lane) => lane.participant.handle === 'chief',
+      )
+      chief.activity = { state: 'closed' }
+      chief.pane = null
+    })
+    await expect(card.getByRole('switch', { name: 'Do with your own hands' })).toBeVisible()
+  })
+}
 
 test("keeps the chief's card in the dock while its window is down, and Switch chief is the way on", async ({
   page,
@@ -11761,10 +11852,10 @@ test("takes a closed window's card out of the dock: its lane says so and opens i
     .poll(() => calls(page, 'session.open'))
     .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
   // The chief's window opens and closes with the project: its card has no Open, only its
-  // History, Switch chief and Start meeting.
+  // Do with your own hands, History, Switch chief and Start meeting.
   await expect
     .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
-    .toEqual(['History', 'Switch chief', 'Start meeting'])
+    .toEqual(['Do with your own hands', 'History', 'Switch chief', 'Start meeting'])
 })
 
 /** A message for the chief that its meeting with the human holds: queued, as the daemon lists it. */
@@ -11808,7 +11899,7 @@ test('meets the chief from its card: Start holds what comes for it, the button c
   await expect.poll(() => calls(page, 'project.meeting')).toEqual([{ project: 1, on: true }])
   await expect
     .poll(() => named(card.locator('button')))
-    .toEqual(['History', 'Switch chief', 'Stop meeting (0)'])
+    .toEqual(['Do with your own hands', 'History', 'Switch chief', 'Stop meeting (0)'])
   await expect(status).toHaveText('In a meeting · nothing held yet')
   await expect(status).toHaveAttribute('data-state', 'meeting')
   // What comes for the chief now waits, as the daemon's next board says: a member's question
@@ -11825,7 +11916,7 @@ test('meets the chief from its card: Start holds what comes for it, the button c
   )
   await expect
     .poll(() => named(card.locator('button')))
-    .toEqual(['History', 'Switch chief', 'Stop meeting (2)'])
+    .toEqual(['Do with your own hands', 'History', 'Switch chief', 'Stop meeting (2)'])
   await expect(status).toHaveText('In a meeting · 2 messages held')
   const held = page.getByRole('list', { name: 'Held for your meeting' })
   await expect
@@ -11853,7 +11944,7 @@ test('meets the chief from its card: Start holds what comes for it, the button c
     ])
   await expect
     .poll(() => named(card.locator('button')))
-    .toEqual(['History', 'Switch chief', 'Start meeting'])
+    .toEqual(['Do with your own hands', 'History', 'Switch chief', 'Start meeting'])
   await expect(held).toHaveCount(0)
   await expect(status).toHaveText('Working')
   await expect(page.locator('.foryou-status')).toHaveText('1 waiting · 1 note')
@@ -11985,7 +12076,7 @@ test("keeps a session's terminal out of the dock until the human shows it, and t
   await expect(page.locator('tr[data-handle="chief"] .row-head button')).toHaveCount(0)
   await expect
     .poll(() => named(page.locator('#stage .terminal-card[data-handle="chief"] button')))
-    .toEqual(['History', 'Switch chief', 'Start meeting'])
+    .toEqual(['Do with your own hands', 'History', 'Switch chief', 'Start meeting'])
   // Out of the dock, a session's window is fed all the same: what it prints
   // is taken and acknowledged, so it never waits for a reader.
   expect(await page.evaluate(() => window.__emulators.length)).toBe(3)

@@ -21,6 +21,124 @@ fn given<'a>(folder: &'a str, variant: Variant, skill: &'a str) -> ProjectSpecs<
 
 const SKILL: &str = "/home/me/.consensflow/integrations/specmint/claude/core-0123abcd/.claude/skills/specmint-core/SKILL.md";
 
+#[test]
+fn own_hands_notice_gives_only_the_changed_parts() {
+    use cf_base::env::Env;
+    use cf_proto::cf_word::CfWord;
+    let specs = given("plans", Variant::Core, SKILL);
+    for on in [true, false] {
+        for chosen in [None, Some(&specs)] {
+            let instructions = crate::roles::role_instructions_for(
+                &Env::default(),
+                "chief",
+                &[],
+                &CfWord::bare(),
+                chosen,
+                on,
+            )
+            .unwrap();
+            let note = own_hands_said(on, &CfWord::bare(), chosen).unwrap();
+            let description = instructions
+                .lines()
+                .find(|line| line.starts_with("description: "))
+                .unwrap();
+            let opening = instructions
+                .split_once("# ConsensFlow Chief of Staff\n\n")
+                .unwrap()
+                .1
+                .split_once("\n\n")
+                .unwrap()
+                .0;
+            let never = instructions
+                .split_once("## What you never do\n\n")
+                .unwrap()
+                .1
+                .split_once("\n## ")
+                .unwrap()
+                .0;
+            assert!(
+                !note.contains(description),
+                "front matter is not a direction"
+            );
+            assert!(note.contains(opening));
+            assert!(note.contains(never.trim_end()));
+            assert!(note.contains("## What you do"));
+            assert!(note.contains("## What you never do"));
+            assert_eq!(note.contains("## This project's specs"), chosen.is_some());
+            assert!(!note.contains("1. The human works with you here"));
+            assert!(!note.contains("## Reviews"));
+            assert!(!note.contains("## The staff"));
+            assert!(note.lines().count() < 80, "{} lines", note.lines().count());
+        }
+    }
+}
+
+#[test]
+fn own_hands_news_has_each_changed_section_and_fits_in_one_piece() {
+    use cf_base::env::Env;
+    use cf_proto::cf_word::{CfWord, Shell};
+    let specs = given("plans", Variant::Core, SKILL);
+    for cf in [
+        CfWord::bare(),
+        CfWord::new(
+            "/box/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf",
+            Shell::Posix,
+        ),
+        CfWord::new(
+            r"C:\box\Program Files\ConsensFlow\resources\cli\bin\cf.exe",
+            Shell::PowerShell,
+        ),
+    ] {
+        for on in [true, false] {
+            let instructions = crate::roles::role_instructions_for(
+                &Env::default(),
+                "chief",
+                &[],
+                &cf,
+                Some(&specs),
+                on,
+            )
+            .unwrap();
+            let note = own_hands_said(on, &cf, Some(&specs)).unwrap();
+            assert!(note.starts_with(if on {
+                "The person turned \"Do with your own hands\" on:"
+            } else {
+                "The person turned \"Do with your own hands\" off:"
+            }));
+            assert!(note.contains("## What you do"));
+            let whole_duty = instructions
+                .split_once("## What you do\n")
+                .unwrap()
+                .1
+                .split_once("\n1. ")
+                .unwrap()
+                .0;
+            assert!(
+                note.contains(whole_duty.trim_end()),
+                "the changed duty replaces the earlier one"
+            );
+            assert!(!note.contains("## Reviews"));
+            assert!(note.contains("## This project's specs"));
+            assert!(note.contains(&specs.work_for(on)));
+            if on {
+                assert!(note.contains("A small ask is no spec: you do it yourself."));
+                assert!(note.contains(
+                    "Write the spec before you start its work, and do it in phase order."
+                ));
+            } else {
+                assert!(note
+                    .contains("A small ask is no spec: it goes straight on the board as a task."));
+                assert!(note.contains("Write the spec before any of its tasks go on the board."));
+            }
+            assert!(!note.contains("## The staff"));
+            assert!(!note.contains("## The project's rules for the staff"));
+            let complete = format!("{note}\n\n{CONTEXT}");
+            assert!(fits_whole(&complete), "{} bytes", complete.len());
+            assert!(cf_base::role_read::role_read_whole(&complete));
+        }
+    }
+}
+
 fn specs_note(was: Option<&SpecsSetting>, now: Option<&ProjectSpecs<'_>>) -> Option<String> {
     Change {
         specs: Some((was, now)),

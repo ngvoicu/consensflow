@@ -9,11 +9,103 @@ use cf_base::refusal::Refusal;
 use hyper::Method;
 use serde_json::json;
 
-use super::{get, post, refused};
+use super::{api, get, post, refused};
 use crate::api::routes::tests::support::{
     open_task, queued_task, read_while, state_of, through, with_body, working_task,
 };
 use crate::testing::scene;
+
+#[tokio::test]
+async fn own_hands_leaves_existing_tasks_and_answers_in_their_ordinary_flow() {
+    let scene = scene();
+    // Both tasks and the question existed before the person changed the switch.
+    let working = working_task(&scene);
+    let open = open_task(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .set_own_hands(scene.project.id, true)
+        .unwrap();
+
+    let answer = json!({"question": scene.question.id, "body": "Yes"}).to_string();
+    let (status, said) = api(&scene, Method::POST, "/api/answers", &scene.chief, &answer).await;
+    assert_eq!(status, 201, "{said}");
+    for (number, verb, body, state) in [
+        (open, "edit", r#"{"body":"An edited brief"}"#, "open"),
+        (open, "cancel", "{}", "cancelled"),
+        (
+            working,
+            "tell",
+            r#"{"body":"Please check this too"}"#,
+            "paused",
+        ),
+        (working, "resume", r#"{"body":"Go on"}"#, "working"),
+    ] {
+        let (status, said) = post(&scene, &scene.chief, &format!("{number}/{verb}"), body).await;
+        assert_eq!(status, 200, "{verb}: {said}");
+        if verb == "resume" {
+            assert_ne!(said["task"]["state"], "paused", "{verb}: {said}");
+        } else {
+            assert_eq!(said["task"]["state"], state, "{verb}: {said}");
+        }
+    }
+    let (status, said) = post(&scene, &scene.chief, &format!("{working}/cancel"), "{}").await;
+    assert_eq!(status, 200, "{said}");
+
+    let other = crate::testing::scene();
+    let finished = working_task(&other);
+    other
+        .context
+        .ledger
+        .borrow_mut()
+        .set_own_hands(other.project.id, true)
+        .unwrap();
+    let (status, said) = post(
+        &other,
+        &other.zeus,
+        &format!("{finished}/done"),
+        r#"{"body":"Done"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    let (status, said) = post(
+        &other,
+        &other.chief,
+        &format!("{finished}/reopen"),
+        r#"{"body":"One more thing"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    let (status, said) = post(&other, &other.chief, &format!("{finished}/cancel"), "{}").await;
+    assert_eq!(status, 200, "{said}");
+
+    let accepted = crate::testing::scene();
+    let finished = working_task(&accepted);
+    accepted
+        .context
+        .ledger
+        .borrow_mut()
+        .set_own_hands(accepted.project.id, true)
+        .unwrap();
+    let (status, said) = post(
+        &accepted,
+        &accepted.zeus,
+        &format!("{finished}/done"),
+        r#"{"body":"Done"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    let (status, said) = post(
+        &accepted,
+        &accepted.chief,
+        &format!("{finished}/accept"),
+        "{}",
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["task"]["state"], "accepted");
+}
 
 #[tokio::test]
 async fn the_body_is_read_before_it_is_decided_who_may_do_what() {

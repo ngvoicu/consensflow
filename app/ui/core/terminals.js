@@ -61,6 +61,7 @@ export class TerminalsView {
   #onHistory
   /** The human starting (`on`) or stopping a meeting with the chief, from its card. */
   #onMeeting
+  #onOwnHands
   /** The human trying the chief again before its quota resets, from its card. */
   #onTryAgain
   /** The human hiding a session's terminal, from its card: the page takes the card out and tells the daemon. */
@@ -95,6 +96,7 @@ export class TerminalsView {
       onSwitchChief = () => {},
       onHistory = () => {},
       onMeeting = () => {},
+      onOwnHands = () => {},
       onTryAgain = () => {},
       onHideTerminal = () => {},
     },
@@ -104,6 +106,7 @@ export class TerminalsView {
     this.#onSwitchChief = onSwitchChief
     this.#onHistory = onHistory
     this.#onMeeting = onMeeting
+    this.#onOwnHands = onOwnHands
     this.#onTryAgain = onTryAgain
     this.#onHideTerminal = onHideTerminal
     this.#registry = new EmulatorRegistry({
@@ -501,6 +504,7 @@ export class TerminalsView {
     // A button kept across redraws acts on the participant, and the meeting, as they are now.
     entry.participant = participant
     entry.meeting = Boolean(board.project?.meeting)
+    entry.ownHands = board.project?.ownHands === true
     const history = button(
       'History',
       'quiet-button',
@@ -510,7 +514,15 @@ export class TerminalsView {
     // The chief's buttons wrap together, at the head's end, when the card is narrow.
     const chiefTools = () => {
       const group = element('span', 'terminal-tools')
+      const ownHands = button('Do with your own hands', 'quiet-button own-hands', () =>
+        this.#onOwnHands(entry.participant, !entry.ownHands),
+      )
+      ownHands.setAttribute('role', 'switch')
+      ownHands.setAttribute('aria-checked', String(entry.ownHands))
+      ownHands.title =
+        'The chief does the work itself and uses the board only when you ask. It hears of a change when it is next at rest.'
       group.append(
+        ownHands,
         history,
         button(
           'Switch chief',

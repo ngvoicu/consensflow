@@ -11,7 +11,9 @@ use serde_json::Value;
 use super::*;
 use crate::deliveries::Delivering;
 use crate::delivery_text::{delivery_text, goes_whole};
-use crate::roles::{role_instructions, with_staff_rules, ProjectSpecs, StaffRow};
+use crate::roles::{
+    role_instructions, role_instructions_for, with_staff_rules, ProjectSpecs, StaffRow,
+};
 use crate::testing::Context;
 
 /// A note to the chief as the ledger would show it, saying `body`.
@@ -215,6 +217,48 @@ fn printed_by_cf(note: &MessageView, part: usize, cf: &CfWord) -> (String, usize
 fn read_in_one(note: &MessageView, cf: &CfWord) -> bool {
     let (printed, of) = printed_by_cf(note, 1, cf);
     of == 1 && role_read_whole(&printed)
+}
+
+#[test]
+fn own_hands_role_is_printed_in_one_piece_when_a_session_resumes() {
+    let staff: Vec<_> = (0..5)
+        .map(|at| StaffRow {
+            name: format!("gpt-6-1-sol-xhigh-{at}"),
+            model: None,
+            roles: vec!["worker".to_owned(), "reviewer".to_owned()],
+            work_tier: Some(WorkTier::Standard),
+        })
+        .collect();
+    let specs = ProjectSpecs {
+        variant: Variant::TddHtml,
+        folder: "docs/specs",
+        skill: "/Users/someone/.consensflow/integrations/specmint/codex/tdd-html-0123456789abcdef0123456789abcdef01234567/.claude/skills/specmint-tdd-html/SKILL.md",
+    };
+    for cf in [a_mac(), a_windows()] {
+        for specs_on in [false, true] {
+            let role = role_instructions_for(
+                &Env::default(),
+                "chief",
+                &staff,
+                &cf,
+                specs_on.then_some(&specs),
+                true,
+            )
+            .unwrap();
+            let ordinary = role_instructions(
+                &Env::default(),
+                "chief",
+                &staff,
+                &cf,
+                specs_on.then_some(&specs),
+            )
+            .unwrap();
+            assert!(role.len() < ordinary.len(), "{cf}, specs on: {specs_on}");
+            assert!(role.contains("project's own folder"));
+            let replacement = note(None, "note", body_of(&role, &cf));
+            assert!(read_in_one(&replacement, &cf), "{cf}, specs on: {specs_on}");
+        }
+    }
 }
 
 /// The real text of a chief with specs on is told whatever its staff and its rules: it is

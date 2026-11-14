@@ -262,6 +262,16 @@ pub(super) async fn prompt_suggestion(page: &Page, body: Body<'_>) -> Result<Fie
     one("project", project)
 }
 
+/// Only the person's page can switch how the chief works.
+pub(super) async fn own_hands(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let on = cf_ledger::parse_own_hands(body.get("ownHands"))?;
+    let project = page
+        .ledger
+        .borrow_mut()
+        .set_own_hands(body.whole("project")?, on)?;
+    one("project", project)
+}
+
 /// The request as the dispatcher takes it: read by the ledger (`NewProject::from_json`), whose
 /// words refuse what it cannot read. The page has already picked the chief and every member
 /// (`chief_asked`, `picked_member`), so the request holds what the ledger takes: a member with

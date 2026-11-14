@@ -32,6 +32,7 @@ pub(super) async fn serve(page: &Page, operation: PageOperation, body: Value) ->
         PageOperation::ProjectCompaction => projects::compaction(page, body).await,
         PageOperation::ProjectAdvisorTool => projects::advisor_tool(page, body).await,
         PageOperation::ProjectPromptSuggestion => projects::prompt_suggestion(page, body).await,
+        PageOperation::ProjectOwnHands => projects::own_hands(page, body).await,
         // The agents and the staff.
         PageOperation::HarnessesMissing => staff::missing(page).await,
         PageOperation::StaffLast => staff::last(page).await,
