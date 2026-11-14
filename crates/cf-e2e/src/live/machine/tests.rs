@@ -418,9 +418,8 @@ fn the_real_claudes_windows_run_on_the_config_folder_they_are_given_and_the_vari
 
 #[test]
 fn a_claude_config_the_run_was_given_wins_over_the_kits_own_copy_of_the_login() {
-    // The merge of live-keychain with the long run's `--claude-config`: a folder the run's
-    // caller made, the login copied into it, is where the windows keep their config, and
-    // the kit makes no copy of its own beside it.
+    // A folder the run's caller made, with the login copied into it, is where the windows keep
+    // their config, and the kit makes no copy of its own beside it.
     let claude = Installed::at(Harness::Claude, "/opt/bin/claude", "/machine")
         .with_claude_config(Arc::new(Kept));
     let debug = format!(
