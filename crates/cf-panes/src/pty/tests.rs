@@ -277,6 +277,34 @@ fn a_pane_whose_exit_watcher_could_not_retire_it_is_ended_all_the_same() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn an_exit_watcher_whose_wait_failed_leaves_a_working_pane_alone() {
+    let _serial = serial_pty_test();
+    let table = Arc::new(PaneTable::new());
+    let pane = open_shell(&table, "exec /bin/cat");
+    let asked = std::cell::Cell::new(false);
+    table.exit_watched(
+        &pane.key,
+        Err(io::Error::other("planted: the wait failed")),
+        |_, _| {
+            asked.set(true);
+            Ok(false)
+        },
+    );
+    assert!(!asked.get(), "a wait that failed still retired the pane");
+    assert_eq!(
+        table.pending().expect("what is left"),
+        super::Pending {
+            open: 1,
+            finishing: 0,
+            unconfirmed: 0
+        },
+        "a wait that failed ended a pane that is still working"
+    );
+    table.kill(&pane.key).expect("the pane ends");
+}
+
 #[test]
 fn an_unproven_teardown_holds_admission_closed_under_its_own_name() {
     let table = Arc::new(PaneTable::new());

@@ -290,7 +290,7 @@ impl PaneTable {
     /// A window whose end could not be seen does not open: its opener ends it.
     #[cfg(windows)]
     pub(super) fn watch_exit(self: &Arc<Self>, key: &PaneKey) -> Result<(), PaneError> {
-        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+        use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
         use windows_sys::Win32::System::Threading::{
             OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE,
         };
@@ -329,11 +329,16 @@ impl PaneTable {
                     .name("consensflow-pty-exit".to_string())
                     .spawn(move || {
                         // SAFETY: the handle stays open until `program` drops.
-                        unsafe { WaitForSingleObject(program.0, INFINITE) };
+                        let waited = unsafe { WaitForSingleObject(program.0, INFINITE) };
+                        let waited = if waited == WAIT_OBJECT_0 {
+                            Ok(())
+                        } else {
+                            Err(io::Error::other(format!("the wait answered {waited:#x}")))
+                        };
                         drop(program);
                         std::thread::sleep(EXIT_FLUSH);
                         if let Some(table) = table.upgrade() {
-                            table.retire_after_exit(&key);
+                            table.exit_watched(&key, waited, Self::retire_exited);
                         }
                     })
                     .map(|_| ())
@@ -341,16 +346,32 @@ impl PaneTable {
         watched.map_err(PaneError::Io)
     }
 
+    /// What an exit watcher does once its wait is over: `waited` is `Ok` only when the wait
+    /// said the program ended. A wait that failed says nothing about the program, so it is
+    /// said on the host's stderr and the pane is left alone, working as it may be.
+    #[cfg(any(windows, test))]
+    #[allow(clippy::print_stderr)] // The pane host's log is its error output.
+    pub(super) fn exit_watched(
+        &self,
+        key: &PaneKey,
+        waited: io::Result<()>,
+        retire: impl FnOnce(&Self, &PaneKey) -> Result<bool, PaneError>,
+    ) {
+        match waited {
+            Ok(()) => self.retire_after_exit_by(key, retire),
+            Err(error) => eprintln!(
+                "consensflow-bridge: pane {} generation {}: its exit watcher's wait failed ({error}); \
+                 the pane is left as it is",
+                key.id, key.generation
+            ),
+        }
+    }
+
     /// What an exit watcher does once its program has gone: the pane is retired. Where that
     /// fails, or the program is found to be running still, the pane is ended as a close ends
     /// one ([`PaneTable::kill_detached`]), which counts what it cannot prove gone as
     /// unconfirmed, and the host says so on its stderr: left in the table, the pane's
     /// output would never end on Windows.
-    #[cfg(windows)]
-    fn retire_after_exit(&self, key: &PaneKey) {
-        self.retire_after_exit_by(key, Self::retire_exited);
-    }
-
     #[cfg(any(windows, test))]
     #[allow(clippy::print_stderr)] // The pane host's log is its error output.
     pub(super) fn retire_after_exit_by(
