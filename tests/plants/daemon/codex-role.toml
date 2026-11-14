@@ -555,7 +555,7 @@ meant = "a_resumed_conversation_whose_harness_keeps_its_first_instructions_is_gi
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/comparison.rs"
 find = '''        if told.as_deref() == Some(role.instructions.as_str()) {'''
 replace = '''        if told.as_deref() == Some(role.instructions.as_str()) || true {'''
 
@@ -565,7 +565,7 @@ meant = "a_resumed_conversation_whose_role_did_not_change_is_given_nothing_extra
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/comparison.rs"
 find = '''        if told.as_deref() == Some(role.instructions.as_str()) {'''
 replace = '''        if false && told.as_deref() == Some(role.instructions.as_str()) {'''
 
@@ -587,7 +587,7 @@ meant = "a_resumed_conversation_whose_harness_keeps_its_first_instructions_is_gi
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/replacement.rs"
 find = '''        Ok(self.seams.ledger.borrow_mut().note_role(
             project.id,
             &participant.handle,
@@ -666,7 +666,7 @@ meant = "a_replacement_that_waited_for_a_conversation_is_withdrawn_when_the_chie
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/comparison.rs"
 find = '''        let withdrawn = self.withdraw_replacements(participant)?;'''
 replace = '''        let withdrawn = if resumed.is_some() {
             self.withdraw_replacements(participant)?
@@ -722,7 +722,7 @@ meant = "a_replacement_the_window_never_took_is_withdrawn_and_nothing_is_said_wh
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/comparison.rs"
 find = '''        let first = first.filter(|message| !withdrawn.contains(&message.id));'''
 replace = '''        let _ = &withdrawn;'''
 
@@ -742,7 +742,7 @@ meant = "a_harness_that_takes_its_role_at_every_launch_is_given_nothing_extra_wh
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/comparison.rs"
 find = '''            .filter(|adapter| adapter.keeps_first_instructions());'''
 replace = '''            .filter(|_| true);'''
 
@@ -752,7 +752,7 @@ meant = "a_resumed_conversation_whose_harness_keeps_its_first_instructions_is_gi
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/comparison.rs"
 find = '''            first: None,
             prelude: Some(prelude),'''
 replace = '''            first: Some(replacement),
@@ -777,7 +777,7 @@ meant = "a_replacement_goes_ahead_of_the_note_that_tells_the_chief_its_turn_was_
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/comparison.rs"
 find = '''            displaced: first.as_ref().map(|message| message.id),'''
 replace = '''            displaced: None,'''
 
@@ -799,7 +799,7 @@ meant = "a_replacement_the_window_never_took_leaves_the_record_as_it_was_and_the
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/replacement.rs"
 find = '''        for note in waiting {
             ledger.cancel_message(note.id, WITHDRAWN)?;'''
 replace = '''        for note in waiting.into_iter().filter(|_| false) {
@@ -811,7 +811,7 @@ meant = "a_conversation_whose_text_is_not_known_counts_as_changed_and_is_told_on
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/comparison.rs"
 find = '''        if told.as_deref() == Some(role.instructions.as_str()) {'''
 replace = '''        if told.is_none() || told.as_deref() == Some(role.instructions.as_str()) {'''
 
@@ -870,7 +870,7 @@ meant = "the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its
 runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '''
                 of_the_role =
                     header_id(&item.text).is_some_and(|message| replacements.contains(&message));
@@ -890,7 +890,7 @@ meant = "the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its
 runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '''
                 of_the_role =
                     header_id(&item.text).is_some_and(|message| replacements.contains(&message));
@@ -909,7 +909,7 @@ meant = "a_replacement_the_window_took_before_it_closed_is_what_the_conversation
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/replacement.rs"
 find = '''            if let Some(item) = shown {'''
 replace = '''            if let Some(item) = shown.filter(|_| false) {'''
 
@@ -929,7 +929,7 @@ meant = "a_replacement_the_window_took_before_it_closed_is_what_the_conversation
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/replacement.rs"
 find = '''                self.confirm_delivered(&begun.message, &json!({ "item": item }))?;
                 told.push(note.id);'''
 replace = '''                self.seams
@@ -1062,7 +1062,7 @@ meant = "a_replacement_is_confirmed_and_recorded_by_the_one_write_that_does_both
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/confirmation.rs"
 find = '''            ledger.confirm_delivery_telling(message.id, Some(receipt))?;'''
 replace = '''            ledger.confirm_delivery(message.id, Some(receipt))?;
             if let Some(conversation) = ledger.current_conversation(message.recipient_id)? {
@@ -1089,7 +1089,7 @@ meant = "a_role_too_long_for_one_message_goes_cut_with_the_word_to_read_the_rest
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/confirmation.rs"
 find = '''        Ok(says_a_role.then(|| goes_whole(message, &[], &cf)))'''
 replace = '''        Ok(says_a_role.then(|| goes_whole(message, &[], &cf) || true))'''
 
@@ -1099,7 +1099,7 @@ meant = "a_role_told_in_part_and_not_read_by_the_next_resume_is_said_again_and_t
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/comparison.rs"
 find = '''                to: "human".to_owned(),'''
 replace = '''                to: "chief".to_owned(),'''
 
@@ -1135,7 +1135,7 @@ meant = "words_the_human_types_that_quote_the_opening_of_a_replacement_do_not_su
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '''
                 of_the_role =
                     header_id(&item.text).is_some_and(|message| replacements.contains(&message));
@@ -1150,7 +1150,7 @@ meant = "a_turn_of_a_record_answers_a_replacement_by_the_id_in_its_header_and_no
 runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '''
                 of_the_role =
                     header_id(&item.text).is_some_and(|message| replacements.contains(&message));
@@ -1177,7 +1177,7 @@ meant = "a_replacement_goes_ahead_of_the_note_that_tells_the_chief_its_turn_was_
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/replacement.rs"
 find = '''            .filter(|message| message.state == "queued" && notes.contains(&message.id))'''
 replace = '''            .filter(|message| {
                 message.state == "queued"
@@ -1480,7 +1480,7 @@ runs = ["rig-codex-role"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/comparison.rs"
 find = '''        if told.as_deref() == Some(role.instructions.as_str()) {'''
 replace = '''        if told.as_deref() == Some(role.instructions.as_str()) || true {'''
 
@@ -1491,7 +1491,7 @@ runs = ["rig-regression-codex-role"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/comparison.rs"
 find = '''        if told.as_deref() == Some(role.instructions.as_str()) {'''
 replace = '''        if told.as_deref() == Some(role.instructions.as_str()) || true {'''
 
@@ -1532,7 +1532,7 @@ runs = ["rig-regression-codex-role"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/comparison.rs"
 find = '''        if told.as_deref() == Some(role.instructions.as_str()) {'''
 replace = '''        if false && told.as_deref() == Some(role.instructions.as_str()) {'''
 
@@ -1646,6 +1646,6 @@ meant = "a_role_told_in_part_and_not_read_by_the_next_resume_is_said_again_and_t
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/comparison.rs"
 find = '''went in cut at about 16,000 characters with'''
 replace = '''went in cut at 16,000 characters with'''

@@ -990,7 +990,7 @@ meant = "a_chief_that_came_up_and_ended_with_a_gone_models_words_on_its_screen_k
 runs = ["chm-dispatcher"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/confirmation.rs"
 find = '            record.window.borrow_mut().took = true;'
 replace = '            record.window.borrow_mut().took = false;'
 
