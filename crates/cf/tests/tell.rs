@@ -123,8 +123,8 @@ fn a_tell_to_a_task_at_work_says_it_goes_on_and_nothing_is_paused() {
 fn the_stopping_command_in_a_tell_reply_uses_the_windows_cf_without_rewriting_its_words() {
     for state in ["working", "waiting"] {
         for own in [
-            "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf",
-            "& 'C:/Program Files/ConsensFlow/bin/cf.exe'",
+            "/example/TestApp.app/Contents/Resources/cli/bin/cf",
+            "& 'C:/Test Tools/Example App/bin/cf.exe'",
         ] {
             let api = scripted(vec![
                 reply(200, json!({ "participant": { "role": "chief" } })),
