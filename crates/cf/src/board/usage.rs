@@ -120,7 +120,7 @@ mod tests {
         let cancel = of(&["task", "cancel"]);
         assert_eq!(
             cancel,
-            "  cf task accept|cancel T-3         move a task you asked for"
+            "  cf task accept|cancel T-3 T-4     decide several tasks together, all or none"
         );
         // Accept has a line of its own after it: a failed task takes the words of what was checked.
         let accept = of(&["task", "accept"]);

@@ -104,6 +104,20 @@ pub fn brief_of(
 /// refused only where it holds a NUL byte or an invalid sequence (any ASCII character gives a NUL;
 /// no rule over bytes can tell the rest apart, and no real writer produces it).
 pub(super) fn words_of(bytes: &[u8]) -> Result<String, String> {
+    let text = decode(bytes)?;
+    let text = text
+        .strip_suffix("\r\n")
+        .or_else(|| text.strip_suffix('\n'))
+        .unwrap_or(&text);
+    Ok(text.to_owned())
+}
+
+/// A plan's section briefs keep every line ending, including the last one.
+pub(super) fn plan_file(path: &Path) -> Result<String, String> {
+    decode(&read_brief(path)?)
+}
+
+fn decode(bytes: &[u8]) -> Result<String, String> {
     let (text, marked) = match bytes {
         [0xff, 0xfe, rest @ ..] => (utf16(rest, u16::from_le_bytes)?, true),
         [0xfe, 0xff, rest @ ..] => (utf16(rest, u16::from_be_bytes)?, true),
@@ -116,11 +130,7 @@ pub(super) fn words_of(bytes: &[u8]) -> Result<String, String> {
             "it begins with a UTF-16 byte order mark but holds a NUL character (UTF-32, or no text)",
         ));
     }
-    let text = text
-        .strip_suffix("\r\n")
-        .or_else(|| text.strip_suffix('\n'))
-        .unwrap_or(&text);
-    Ok(text.to_owned())
+    Ok(text)
 }
 
 /// What a refusal adds to what was found: what to do, and that nothing went.

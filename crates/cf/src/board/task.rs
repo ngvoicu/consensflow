@@ -7,6 +7,7 @@ use cf_base::js;
 use cf_board::Board;
 use cf_ledger::roles::{self, Role};
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 
 use super::lines::{
     a_pool, message_line, numbers, printed_body, task_head, task_line, tasks, waiting_answers,
@@ -27,6 +28,8 @@ const ADD: Shape<'static> = Shape {
         "--needs",
         "--before",
         brief::FILE,
+        "--plan",
+        "--key",
     ],
     leading: 0,
 };
@@ -105,6 +108,32 @@ pub fn command(
         }
     }
     let number = task_number(rest.first().map(String::as_str))?;
+    if matches!(action, Some("accept" | "cancel")) {
+        let extra = rest
+            .iter()
+            .skip(1)
+            .take_while(|word| task_number(Some(word)).is_ok())
+            .count();
+        if let Some(word) = rest.get(extra + 1).filter(|word| {
+            word.get(..2)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("T-"))
+                && !word.chars().any(char::is_whitespace)
+        }) {
+            // A misspelled task at the end of the task list is not a reason
+            // to decide the tasks before it. `--` starts words explicitly.
+            task_number(Some(word))?;
+        }
+        if extra > 0 {
+            return decide_many(
+                action.unwrap_or_default(),
+                &rest[..=extra],
+                &rest[extra + 1..],
+                given,
+                board,
+                input,
+            );
+        }
+    }
     match action {
         Some("get") => get(number, rest.get(1..).unwrap_or_default(), board),
         Some(action) if MOVES.contains(&action) => moved(
@@ -149,6 +178,12 @@ fn add(
     );
     if words.asks_for_help() {
         return Ok(help_of(&["task", "add"]));
+    }
+    if words.given("--plan") {
+        return add_plan(&words, given, board);
+    }
+    if words.given("--key") {
+        return Err(Failure::Usage("--key is for --plan".into()));
     }
     // Every role asked for by its switch. The board takes the task or refuses it in words that
     // name what was asked: `cf` drops no role for another (two roles, a role beside --self, a
@@ -265,6 +300,261 @@ fn add(
         )
     };
     Ok(Said::new(created.into_value(), format!("{text}\n{sent}")))
+}
+
+/// A plan file is read as a file of its own, preserving each brief as written.
+fn add_plan(words: &Split, given: &[OsString], board: &Board) -> Result<Said, Failure> {
+    let name = words
+        .value_back("--plan")?
+        .and_then(|back| given.len().checked_sub(back))
+        .and_then(|at| given.get(at))
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| Failure::Usage("--plan takes a file: --plan plan.md".into()))?;
+    let key = words.value("--key")?;
+    if words.given("--key") && key.is_none() {
+        return Err(Failure::Usage("--key takes one word".into()));
+    }
+    if !words.text.is_empty()
+        || words.stray_flag().is_some()
+        || add_switches().iter().any(|flag| words.on(flag))
+        || [
+            "--tier",
+            "--purpose",
+            "--after",
+            "--needs",
+            "--before",
+            brief::FILE,
+        ]
+        .iter()
+        .any(|flag| words.given(flag))
+    {
+        return Err(Failure::Usage(
+            "give --plan and its optional --key alone; put each task's flags in its section".into(),
+        ));
+    }
+    let path = std::path::Path::new(name);
+    let source = brief::plan_file(path).map_err(|cause| {
+        Failure::Failed(format!(
+            "cannot read {}{cause}",
+            quoted(&path.to_string_lossy())
+        ))
+    })?;
+    let sections = parse_plan(&source)?;
+    let mut body = Map::new();
+    body.insert("plan".into(), json!(sections));
+    body.insert(
+        "source".into(),
+        format!("{:x}", Sha256::digest(source.as_bytes())).into(),
+    );
+    if let Some(key) = key {
+        body.insert("key".into(), key.into());
+    }
+    let answer = board.post("/api/tasks", &Value::Object(body))?;
+    let tasks = answer.list(answer.value().get("tasks"), "tasks")?;
+    if tasks.len() != sections.len() {
+        return Err(Failure::Failed(
+            "the board returned the wrong number of plan tasks".into(),
+        ));
+    }
+    let mut output = Vec::new();
+    for (task, section) in tasks.iter().zip(&sections) {
+        let name = section["name"].as_str().unwrap_or_default();
+        let number = js::text(task.get("task").and_then(|task| task.get("number")));
+        let brief = section["body"].as_str().unwrap_or_default();
+        output.push(format!(
+            "{name} → T-{number}\n{}",
+            brief::sent(&number, brief)
+        ));
+    }
+    if js::truthy(answer.value().get("gated")) {
+        output.push("The human approves each message before it moves.".into());
+    }
+    Ok(Said::new(answer.into_value(), output.join("\n")))
+}
+
+/// Parse headers separately from the briefs: their line endings never pass
+/// through a shell or a whitespace join.
+fn parse_plan(source: &str) -> Result<Vec<Value>, Failure> {
+    let mut sections: Vec<(String, Vec<String>, String)> = Vec::new();
+    for line in source.split_inclusive('\n') {
+        let header = line.strip_suffix('\n').unwrap_or(line);
+        let header = header.strip_suffix('\r').unwrap_or(header);
+        if header == "===" || header.starts_with("=== ") || header.starts_with("===\t") {
+            let mut words = header[3..].split_whitespace();
+            let name = words
+                .next()
+                .ok_or_else(|| Failure::Usage("section (unnamed): give it a name".into()))?;
+            if name.chars().any(|c| {
+                c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+            }) {
+                return Err(Failure::Usage(
+                    "section name contains a control character".into(),
+                ));
+            }
+            if task_number(Some(name)).is_ok() {
+                return Err(Failure::Usage(format!(
+                    "section {name}: a name cannot be a task number"
+                )));
+            }
+            sections.push((
+                name.to_owned(),
+                words.map(str::to_owned).collect(),
+                String::new(),
+            ));
+        } else if let Some((_, _, brief)) = sections.last_mut() {
+            brief.push_str(line);
+        } else if !line.trim().is_empty() {
+            return Err(Failure::Usage(
+                "the plan starts with === name and its flags".into(),
+            ));
+        }
+    }
+    if sections.is_empty() {
+        return Err(Failure::Usage("the plan has no sections".into()));
+    }
+    sections
+        .into_iter()
+        .map(|(name, flags, brief)| {
+            plan_section(&name, &flags, &brief).map_err(|error| match error {
+                Failure::Usage(message) => Failure::Usage(format!("section {name}: {message}")),
+                Failure::Failed(message) => Failure::Failed(format!("section {name}: {message}")),
+            })
+        })
+        .collect()
+}
+
+fn plan_section(name: &str, flags: &[String], brief: &str) -> Result<Value, Failure> {
+    let switches = add_switches();
+    let words = split(
+        flags,
+        Shape {
+            switches: &switches,
+            ..ADD
+        },
+    );
+    if let Some(flag) = words.stray_flag() {
+        return Err(Failure::Usage(format!("unknown flag {}", quoted(flag))));
+    }
+    if !words.text.is_empty()
+        || words.given("--plan")
+        || words.given("--key")
+        || words.given(brief::FILE)
+    {
+        return Err(Failure::Usage(
+            "put only task flags on the section line and the brief below it".into(),
+        ));
+    }
+    let switched: Vec<&Role> = roles::all()
+        .iter()
+        .filter(|role| role.switch.is_some_and(|switch| words.on(switch)))
+        .collect();
+    let tier = words.value("--tier")?;
+    let purpose = words.value("--purpose")?;
+    let after = words
+        .value("--after")?
+        .map(|value| {
+            if !value
+                .get(..2)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("T-"))
+            {
+                return Err(Failure::Usage("--after takes a T-number".into()));
+            }
+            task_number(Some(value))
+        })
+        .transpose()?;
+    let lists = |flag| -> Result<Vec<Value>, Failure> {
+        let mut result = Vec::new();
+        for list in words.each(flag) {
+            for part in list.split(',').map(js::trim) {
+                if part.is_empty() {
+                    return Err(Failure::Usage(format!(
+                        "{flag} takes task numbers or names"
+                    )));
+                }
+                let value = task_number(Some(part))
+                    .map_or_else(|_| Value::String(part.to_owned()), |number| json!(number));
+                if !result.contains(&value) {
+                    result.push(value);
+                }
+            }
+        }
+        Ok(result)
+    };
+    let needs = lists("--needs")?;
+    let before = lists("--before")?;
+    let mine = words.on("--self");
+    if mine && switched.is_empty() && needs.is_empty() && before.is_empty() {
+        return Err(Failure::Usage(
+            "you are already at it: do it now, or give it --needs T-3".into(),
+        ));
+    }
+    let untiered = switched.iter().any(|role| !role.tiered);
+    if tier.is_none() && after.is_none() && !mine && !untiered && switched.len() < 2 {
+        return Err(Failure::Usage(ADD_USAGE.into()));
+    }
+    require_text(brief.to_owned(), ADD_USAGE)?;
+    let mut body = Map::new();
+    body.insert("name".into(), name.into());
+    let sends_tier = !(mine || after.is_some()) || untiered;
+    if mine {
+        body.insert("self".into(), true.into());
+    } else if let Some(after) = after {
+        body.insert("after".into(), after.into());
+    }
+    if let Some(tier) = tier.filter(|_| sends_tier) {
+        body.insert("tier".into(), tier.into());
+    }
+    for field in switched.iter().filter_map(|role| role.field()) {
+        body.insert(field.into(), true.into());
+    }
+    if let Some(purpose) = purpose.filter(|_| sends_tier) {
+        body.insert("purpose".into(), purpose.into());
+    }
+    if !needs.is_empty() {
+        body.insert("needs".into(), json!(needs));
+    }
+    if !before.is_empty() {
+        body.insert("before".into(), json!(before));
+    }
+    body.insert("body".into(), brief.into());
+    Ok(Value::Object(body))
+}
+
+fn decide_many(
+    action: &str,
+    numbers: &[String],
+    rest: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
+    let numbers: Vec<u64> = numbers
+        .iter()
+        .map(|number| task_number(Some(number)))
+        .collect::<Result<_, _>>()?;
+    let words = split(rest, FILED);
+    let text = brief::brief_of(&words, given, input)?;
+    let answer = board.post(
+        "/api/tasks",
+        &json!({ "action": action, "tasks": numbers, "body": text }),
+    )?;
+    let tasks = answer.list(answer.value().get("tasks"), "tasks")?;
+    let mut lines = Vec::new();
+    for result in tasks {
+        let task = result
+            .get("task")
+            .ok_or_else(|| Failure::Failed("the board returned no task".into()))?;
+        let number = task.get("number").and_then(Value::as_u64).unwrap_or(0);
+        let running = result
+            .get("running")
+            .map_or_else(String::new, |running| still_running(number, running));
+        let dropped = result
+            .get("dropped")
+            .and_then(Value::as_array)
+            .map_or_else(String::new, |dropped| went_with_it(dropped));
+        lines.push(format!("{}{running}{dropped}", task_line(task)));
+    }
+    Ok(Said::new(answer.into_value(), lines.join("\n")))
 }
 
 /// Whether a task no lane has waits for a member to take it: a task paused or
@@ -1131,6 +1421,61 @@ and 2 idle sessions (`cf task list --all`)";
                 "@claude-opus-5-5-high (worker)"
             ]
         );
+    }
+
+    #[test]
+    fn stc_crlf_plan_in_a_path_with_spaces_keeps_briefs() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("plan with spaces.md");
+        std::fs::write(&file, b"=== one --tier standard\r\nFirst\r\n=== two --tier standard --needs one\r\nSecond\r\n").unwrap();
+        let answer = json!({ "tasks": [
+            { "name": "one", "task": { "number": 1, "blockedBy": [] } },
+            { "name": "two", "task": { "number": 2, "blockedBy": [1] } }
+        ] });
+        let path = file.to_str().unwrap();
+        let (posted, said) = added(&["--plan", path, "--key", "crlf"], &answer);
+        let posted = posted.unwrap();
+        assert_eq!(posted["plan"][0]["body"], "First\r\n");
+        assert_eq!(posted["plan"][1]["body"], "Second\r\n");
+        assert_eq!(posted["plan"][1]["needs"], json!(["one"]));
+        assert!(said.contains("one") && said.contains("T-1"), "{said}");
+    }
+
+    #[test]
+    fn stc_every_plan_reply_names_its_task_and_the_end_of_its_brief() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("example plan.md");
+        std::fs::write(&file, "=== draft --tier standard\nDraft the parser.\n=== test --test --tier standard --needs draft\nTest the parser after the draft.\n=== review --review --tier standard --needs test\nReview the result.\n").unwrap();
+        let answer = json!({"tasks": [
+            {"name":"draft", "task":{"number":1}},
+            {"name":"test", "task":{"number":2}},
+            {"name":"review", "task":{"number":3}}
+        ]});
+        let (_, said) = added(
+            &["--plan", file.to_str().unwrap(), "--key", "parser"],
+            &answer,
+        );
+        assert_eq!(
+            said,
+            concat!(
+            "draft → T-1\nT-1: sent 18 characters, ending \"Draft the parser.\".\n",
+            "test → T-2\nT-2: sent 33 characters, ending \"Test the parser after the draft.\".\n",
+            "review → T-3\nT-3: sent 19 characters, ending \"Review the result.\"."
+        )
+        );
+    }
+
+    #[test]
+    fn stc_section_flags_keep_roles_names_numbers_and_briefs() {
+        let sections = parse_plan("=== first --tier critical --purpose architecture --before third\nFirst\n=== second --review --tier light --needs first,T-7\nSecond\n=== third --self --needs second\nThird\n").unwrap();
+        assert_eq!(sections[0]["purpose"], "architecture");
+        assert_eq!(sections[0]["before"], json!(["third"]));
+        assert_eq!(sections[1]["review"], true);
+        assert_eq!(sections[1]["needs"], json!(["first", 7]));
+        assert_eq!(sections[2]["self"], true);
+        assert_eq!(sections[2]["body"], "Third\n");
+        let error = parse_plan("=== next --after first\nNo\n").unwrap_err();
+        assert!(format!("{error:?}").contains("section next"));
     }
 
     /// What `cf task add words…` posted and printed, the board answering with `answer`.

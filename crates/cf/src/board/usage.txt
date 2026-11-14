@@ -25,15 +25,15 @@ cf inside a ConsensFlow window: the board's commands.
                                     keeps its context; only when that context matters;
                                     until T-3 and the window's done tasks are accepted it waits
   cf task add --self --needs T-3 "…" your own later step: its brief comes back to you when T-3 is accepted
-  … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted
-  … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task
+  cf task add --plan plan.md [--key word]  all or none; retry the same key; each === name flags is followed by its brief
+  … --needs T-3,T-4 · … --before T-9,T-10  this task waits for T-3,T-4; T-9,T-10 wait for it; in a plan, names work too
   cf task list [--all]              the board: what waits for a member, then the lanes
                                     with a task to look at; --all adds the idle sessions
   cf task get T-3                   one task and its whole thread
   cf task get T-3 --transcript      what its window did so far (the last 10 items; --last 30 for more)
                                     --page 2 for older ones, 50 a page; --find "…" for those that say it
   cf task done T-3 "…"              finish a task assigned to you (the chief)
-  cf task accept|cancel T-3         move a task you asked for
+  cf task accept|cancel T-3 T-4     decide several tasks together, all or none
   cf task accept T-3 "…"            accept a failed task you checked; your words are its result
   cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
   cf task edit T-3 "…" [--tier <tier>] [--needs T-4,T-5|+T-5|-T-5] [--before …]

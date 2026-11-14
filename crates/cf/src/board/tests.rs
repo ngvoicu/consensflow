@@ -1447,3 +1447,45 @@ fn the_staff_says_each_role_by_its_name() {
         )
     );
 }
+
+#[test]
+fn stc_several_decisions_are_one_request_with_the_words_preserved() {
+    for action in ["accept", "cancel"] {
+        let make = |number, state| json!({"task": {"number":number,"title":"Work","state":state,"requester":"chief","assignee":null,"pool":"worker","tier":"standard","blockedBy":[]}});
+        let state = if action == "accept" {
+            "accepted"
+        } else {
+            "cancelled"
+        };
+        let ran = cf(
+            &["task", action, "T-3", "T-4", "checked both"],
+            vec![reply(200, json!({"tasks":[make(3,state), make(4,state)]}))],
+        );
+        assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
+        assert_eq!(asked(&ran), [("POST", "/api/tasks")]);
+        assert_eq!(
+            ran.asked[0].2,
+            Some(json!({"action":action,"tasks":[3,4],"body":"checked both"}))
+        );
+        assert!(
+            ran.out.contains("T-3") && ran.out.contains("T-4"),
+            "{}",
+            ran.out
+        );
+    }
+}
+
+#[test]
+fn stc_a_malformed_task_in_a_decision_is_refused_before_any_request() {
+    for action in ["accept", "cancel"] {
+        for words in [
+            vec!["task", action, "T-3", "T-no"],
+            vec!["task", action, "T-3", "T-4", "T-no"],
+        ] {
+            let ran = cf(&words, vec![reply(200, json!({}))]);
+            assert_eq!(ran.code.unwrap(), 2, "{}", ran.err);
+            assert!(ran.err.contains("T-no"), "{}", ran.err);
+            assert!(ran.asked.is_empty(), "{:?}", ran.asked);
+        }
+    }
+}

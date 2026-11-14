@@ -26,7 +26,7 @@ use crate::views::TaskRow;
 /// a `pool` and `tier` of the staff, critical work naming its `purpose`;
 /// what it says; the tasks it `needs`, and those on the board that come
 /// `before` it is done (they wait for it).
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
 pub struct NewTask {
     pub from: String,
     pub to: Option<String>,
