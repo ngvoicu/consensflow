@@ -1,7 +1,7 @@
 # Mutations of the shared test rig and harness, caught by their own tests.
 [run]
 e2e-lib-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::left::"]
-e2e-lib-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine"]
+e2e-lib-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "a_harness_whose_version_leaves_a_process_holding_its_output_says_it_and_holds_nothing"]
 e2e-lib-process = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::"]
 e2e-lib-process-shell = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell::"]
 e2e-lib-report = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::report"]
