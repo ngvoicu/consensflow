@@ -414,7 +414,7 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
 fn a_members_real_text_with_the_most_rules_for_the_staff_goes_in_whole() {
     // As many units as bytes: the most units any rules can have.
     let most = "a".repeat(STAFF_RULES_MAX_BYTES);
-    for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+    for role in cf_ledger::roles::ids() {
         let text = role_instructions(
             &Env::default(),
             role,
@@ -1171,7 +1171,7 @@ fn the_largest_roles_are_given_to_a_muse_window_in_the_parts_its_hooks_say_and_e
             &chief(25, true, Some(&escaped)),
             3,
         );
-        for role in ["worker", "advisor", "reviewer", "tester", "designer"] {
+        for role in cf_ledger::roles::ids() {
             on(
                 &format!("the {role} with the most rules on {shape}"),
                 &member(role, &utf8),

@@ -275,6 +275,42 @@ fn teach_the_designer_only_the_board_s_commands() {
 }
 
 #[test]
+fn every_member_is_told_when_its_result_is_delivered_and_what_to_do_with_background_work() {
+    let rules = [
+        (
+            "delivery",
+            "Your answer ends your turn, and your result is delivered once it has ended and nothing you started is still running.",
+        ),
+        (
+            "background work",
+            "Before your last answer, end any background work you no longer need (a wait loop, a watcher); if you are still waiting on background work, say so in a line and your result follows when it ends.",
+        ),
+    ];
+    let mut missing = Vec::new();
+    for (shell, cf) in [
+        ("POSIX", CfWord::bare()),
+        (
+            "PowerShell",
+            CfWord::new("C:/Program Files/ConsensFlow/bin/cf.exe", Shell::PowerShell),
+        ),
+    ] {
+        for role in cf_ledger::roles::ids() {
+            let text = role_instructions(&Env::default(), role, &[], &cf, None)
+                .unwrap()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            for (name, rule) in rules {
+                if !text.contains(rule) {
+                    missing.push(format!("{role} ({shell}): {name}"));
+                }
+            }
+        }
+    }
+    assert!(missing.is_empty(), "missing rules: {}", missing.join(", "));
+}
+
+#[test]
 fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
     let shared = [
         "Run each of these in your shell (your Bash or terminal tool).",
@@ -283,10 +319,8 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         // A window the chief continues (`--after`) comes back on its own conversation: the text
         // does not tell it that nothing from an earlier task is there (T-1435).
         "A new window starts from nothing; one the chief continues\nhas its earlier conversation. Either way, finish with a result that stands on\nits own.",
-        // What the engine does since 0eec91d20 (T-1059's read, 2026-11-01): a
-        // turn's end ends no process itself, and a free window's close ends
-        // only what the host can tell is the window's — so nothing is left.
-        "Your answer\nends your turn: wait for what your result needs, and leave nothing running.",
+        // A turn's end does not end background work; the result waits for it.
+        "Your answer ends your turn, and your result is delivered once it has\nended and nothing you started is still running.",
     ];
     for (role, title) in [
         ("worker", "worker"),
@@ -303,7 +337,7 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         assert!(found(&format!(r"\n# ConsensFlow {title}\n"), &text));
         assert!(found(
             &format!(
-                r"leave\s+nothing running\.\s+Keep this {role} role for the whole session\.\n$"
+                r"your result follows when it ends\.\s+Keep this {role} role for the whole session\.\n$"
             ),
             &text
         ));
