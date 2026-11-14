@@ -745,6 +745,10 @@ pub fn require_watch_path(path: &Path, lookup: &str) {
         }
     }
     let normalize = |path: &Path| {
+        assert!(
+            !path.components().any(|part| part == Component::ParentDir),
+            "{lookup}: parent component in a stand-in path"
+        );
         let absolute =
             std::path::absolute(path).unwrap_or_else(|_| panic!("{lookup}: invalid path"));
         let mut clean = PathBuf::new();
@@ -821,6 +825,41 @@ pub fn require_watch_path(path: &Path, lookup: &str) {
 #[cfg(test)]
 mod tests {
     use super::safe_path_entry;
+
+    #[test]
+    fn standin_isolation_watch_refuses_parent_before_making_path_absolute() {
+        const CHILD: &str = "CF_T1647_WATCH_RAW_PARENT";
+        if let Some(path) = crate::process::own_var(CHILD) {
+            super::require_watch_path(std::path::Path::new(&path), "stand-in watch lookup");
+            panic!("the watch returned without refusing the parent component");
+        }
+
+        let root = crate::door::made("watch-raw-parent-").unwrap();
+        let echo = root.path().join("muse-echo");
+        let nested = echo.join("nested");
+        crate::door::make_dir(&nested).unwrap();
+        let watched = nested.join("..").join("sentinel");
+        let output = crate::process::Run::new(std::env::current_exe().unwrap())
+            .inheriting_env()
+            .args([
+                "--exact",
+                "standin_process::tests::standin_isolation_watch_refuses_parent_before_making_path_absolute",
+                "--nocapture",
+            ])
+            .var("GITHUB_ACTIONS", "true")
+            .var("CF_E2E_HOSTED_MUSE", "1")
+            .var("RUNNER_TEMP", root.path())
+            .var(CHILD, &watched)
+            .run()
+            .unwrap();
+        assert_ne!(output.code, Some(0), "the child did not refuse");
+        assert!(
+            format!("{}{}", output.stdout, output.stderr).contains("stand-in watch lookup: "),
+            "the watch accepted a parent component: {}{}",
+            output.stdout,
+            output.stderr
+        );
+    }
 
     #[cfg(unix)]
     #[test]
