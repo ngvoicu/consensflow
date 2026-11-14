@@ -6,7 +6,11 @@
 
 use cf_engine::testing::Context;
 
+use crate::chiefs::to_human;
+
 const CAUSE: &str = "the system gave no randomness: unavailable";
+
+const CHIEF_NOT_UP: &str = "The chief could not start: the launch failed (its cause is in ConsensFlow's log). What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief.";
 
 #[test]
 fn a_trace_that_could_not_forget_a_deleted_project_says_so_in_the_log_and_the_deletion_stands() {
@@ -28,11 +32,16 @@ fn a_trace_that_could_not_forget_a_deleted_project_says_so_in_the_log_and_the_de
 fn a_launch_whose_id_the_system_would_not_draw_opens_no_window_and_says_why() {
     let context = Context::new();
     *context.launch_ids.fails.borrow_mut() = Some(CAUSE.to_owned());
-    context.with_staff(&["zeus"]);
+    let project = context.with_staff(&["zeus"]);
 
     context.pass().unwrap();
 
     assert!(context.host.opened().is_empty());
+    assert_eq!(
+        to_human(&context, project.id),
+        [CHIEF_NOT_UP],
+        "the human is told, not left to a chief that never comes"
+    );
     let warnings = context.log.warnings.borrow().join("\n");
     assert!(warnings.contains(CAUSE), "{warnings}");
 }
@@ -41,11 +50,16 @@ fn a_launch_whose_id_the_system_would_not_draw_opens_no_window_and_says_why() {
 fn a_launch_whose_token_the_system_would_not_make_opens_no_window_and_forgets_its_files() {
     let context = Context::new();
     *context.credentials.fails.borrow_mut() = Some(CAUSE.to_owned());
-    context.with_staff(&["zeus"]);
+    let project = context.with_staff(&["zeus"]);
 
     context.pass().unwrap();
 
     assert!(context.host.opened().is_empty());
+    assert_eq!(
+        to_human(&context, project.id),
+        [CHIEF_NOT_UP],
+        "the human is told, not left to a chief that never comes"
+    );
     let warnings = context.log.warnings.borrow().join("\n");
     assert!(warnings.contains(CAUSE), "{warnings}");
     assert!(

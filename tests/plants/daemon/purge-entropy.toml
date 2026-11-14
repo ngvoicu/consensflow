@@ -1,0 +1,120 @@
+# A deleted project's trace lines that stay are said, and the system's randomness failing is an
+# error a person reads (T-1664, CLN-65): the trace's forget returns what failed and the engine
+# logs it where it deletes the project; a launch whose id or window token the system would not
+# make fails as a launch that did not come up (a note to the human, no window, the launch's files
+# forgotten); a UI token it would not make refuses the daemon's start. `cargo xtask plants daemon
+# "purge-entropy:"` runs them.
+
+[run]
+pe-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "purge_and_entropy::"]
+pe-trace = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "files::trace::"]
+pe-credentials = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::credentials::"]
+pe-seams = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "seams::tests::"]
+pe-start = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::a_system_that_gives_no_randomness"]
+
+[[plant]]
+name = "purge-entropy: the engine does not say a trace kept a deleted project's lines"
+meant = "a_trace_that_could_not_forget_a_deleted_project_says_so_in_the_log_and_the_deletion_stands"
+runs = ["pe-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        if let Err(cause) = self.seams.trace.forget(project) {"
+replace = "        if let Err(cause) = self.seams.trace.forget(project).or(Ok::<(), String>(())) {"
+
+[[plant]]
+name = "purge-entropy: the trace says it forgot when a file could not be read or rewritten"
+meant = "a_file_that_cannot_be_read_keeps_its_lines_and_says_so_while_the_other_is_still_done"
+runs = ["pe-trace"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/files/trace.rs"
+find = '''        failed
+    }
+}
+'''
+replace = '''        drop(failed);
+        Ok(())
+    }
+}
+'''
+
+[[plant]]
+name = "purge-entropy: a launch with no id from the system ends with no word to anyone"
+meant = "a_launch_whose_id_the_system_would_not_draw_opens_no_window_and_says_why"
+runs = ["pe-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                return self.launch_failed(record, project, participant, failing, &said);
+            }
+        };
+        // Boxed, so'''
+replace = '''                let _ = (&said, failing);
+                return Ok(());
+            }
+        };
+        // Boxed, so'''
+
+[[plant]]
+name = "purge-entropy: a launch with no token from the system ends with no word to anyone"
+meant = "a_launch_whose_token_the_system_would_not_make_opens_no_window_and_forgets_its_files"
+runs = ["pe-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                return self.launch_failed(record, project, participant, failing, &said);
+            }
+        };
+        let pane = Pane {'''
+replace = '''                let _ = (&said, failing);
+                return Ok(());
+            }
+        };
+        let pane = Pane {'''
+
+[[plant]]
+name = "purge-entropy: a launch with no token leaves the files its plan wrote"
+meant = "a_launch_whose_token_the_system_would_not_make_opens_no_window_and_forgets_its_files"
+runs = ["pe-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                // The plan wrote the launch's files; no window will read them.
+                self.seams.launch_files.forget(&launch_id);
+'''
+replace = ""
+
+[[plant]]
+name = "purge-entropy: a token is made of zeros where the system gave no randomness"
+meant = "a_system_that_gives_no_randomness_makes_no_token_and_says_so"
+runs = ["pe-credentials"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/credentials.rs"
+find = '''        .map_err(|failed| format!("the system gave no randomness: {failed}"))?;
+    Ok(random'''
+replace = '''        .unwrap_or(());
+    Ok(random'''
+
+[[plant]]
+name = "purge-entropy: a launch id is a fixed one where the system gave no randomness"
+meant = "a_system_that_gives_no_randomness_gives_no_launch_id_and_says_so"
+runs = ["pe-seams"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''        let drawn = uuid(self.entropy.as_ref())
+            .map_err(|failed| format!("the system gave no randomness: {failed}"))?;'''
+replace = '''        let drawn = uuid(self.entropy.as_ref())
+            .unwrap_or_else(|_| "00000000-0000-4000-8000-000000000000".to_owned());'''
+
+[[plant]]
+name = "purge-entropy: the UI token is empty where the system gave no randomness"
+meant = "a_system_that_gives_no_randomness_refuses_the_start_in_words_and_never_makes_an_empty_ui_token"
+runs = ["pe-start"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = "    random_hex(entropy, 24).map_err(StartError::System)"
+replace = "    Ok(random_hex(entropy, 24).unwrap_or_default())"
