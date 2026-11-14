@@ -88,7 +88,12 @@ impl Fixture {
     }
 
     fn build_folder(&self) -> std::path::PathBuf {
-        self.root.path().join("app/src-tauri/target/release")
+        self.root
+            .path()
+            .join("app")
+            .join("src-tauri")
+            .join("target")
+            .join("release")
     }
 
     fn run(&self, builds: bool, extra: &[(&str, &str)], args: &[&str]) -> std::process::Output {
