@@ -21,11 +21,12 @@ use std::sync::OnceLock;
 use std::thread::sleep;
 use std::time::Duration;
 
+use cf_e2e::door::{Door, Grounded};
 use cf_e2e::live::claude::Process;
 use cf_e2e::live::codex::kept_commands;
 use cf_e2e::live::members::{
-    descending_from, end_chosen, find, plus, shown, Account, Identity, Machine, MemberWindow,
-    Members, Running, ThisMachine,
+    descending_from, find, plus, shown, Account, Identity, Machine, MemberWindow, Members, Running,
+    ThisMachine,
 };
 use cf_e2e::live::tree;
 use cf_e2e::live::until;
@@ -92,13 +93,11 @@ pub struct Seen {
 /// own process is `own` (what descends from it) are added to `chosen`, and what of
 /// `chosen` runs now is what is seen of the command, each by which process it is, wherever
 /// it went since. A process outside the window is none of it.
-pub fn look(chosen: &mut Vec<Running>, all: &[Running], own: Option<Identity>) -> Seen {
+pub fn look(chosen: &mut Grounded, all: &[Running], own: Option<Identity>) -> Seen {
     if let Some(own) = own {
-        for one in of_the_command(&descending_from(all, own)) {
-            if !chosen.iter().any(|known| known.identity == one.identity) {
-                chosen.push(one);
-            }
-        }
+        let mut of_the_window = Grounded::descending_from(all, own);
+        of_the_window.retain_where(|one| !of_the_command(std::slice::from_ref(one)).is_empty());
+        chosen.add(of_the_window);
     }
     Seen {
         command: of_the_command(&still_running(chosen, all)),
@@ -116,7 +115,7 @@ fn still_running(chosen: &[Running], all: &[Running]) -> Vec<Running> {
 
 /// [`look`] at the machine now, the window of the member `agent` read again: none of the
 /// window's own where it has none (yet, or any more).
-fn look_now(members: &Members, agent: &str, chosen: &mut Vec<Running>) -> Result<Seen> {
+fn look_now(members: &Members, agent: &str, chosen: &mut Grounded) -> Result<Seen> {
     let own = members
         .window_of(agent)?
         .and_then(|window| members.window_process(&window));
@@ -214,9 +213,9 @@ const GONE: Duration = Duration::from_secs(5);
 /// still the one chosen, and waited for until none is there. What could not be ended, or
 /// was not gone in [`GONE`], fails the case (Astra and Sol on round 6: it was dropped).
 pub fn run(ctx: &Ctx, case: &mut Account, name: &str) -> Result<()> {
-    let mut chosen: Vec<Running> = Vec::new();
+    let mut chosen = Grounded::none();
     let ran = drive(ctx, case, name, &mut chosen);
-    for problem in end_chosen(&chosen).problems() {
+    for problem in Door::of_run().end(&chosen).problems() {
         case.fail(format!("what ignores the signals: {problem}"));
     }
     let mut last = Ok(Vec::new());
@@ -250,7 +249,7 @@ fn unended(last: &std::result::Result<Vec<Running>, String>) -> Option<String> {
 }
 
 /// The steps of the case: what it chose of the command in the window is in `chosen`.
-fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Vec<Running>) -> Result<()> {
+fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Grounded) -> Result<()> {
     let members: &Members = ctx.members;
     let number = members.give(ctx.agent, &brief())?;
     let state = || -> Result<String> {
@@ -586,7 +585,7 @@ mod tests {
             running(102, 12, 101, script),
             running(50, 1, 1, script),
         ];
-        let mut chosen = Vec::new();
+        let mut chosen = Grounded::none();
         let seen = look(&mut chosen, &all, Some(window));
         assert_eq!(pids(&seen.command), [102]);
         assert_eq!(pids(&chosen), [102]);

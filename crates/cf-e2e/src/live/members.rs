@@ -33,6 +33,7 @@ mod closing;
 mod command;
 mod descent;
 mod door;
+mod left;
 mod plan;
 #[cfg(test)]
 mod tests;
@@ -42,15 +43,15 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::door::Made;
 use serde_json::{json, Value};
-use tempfile::TempDir;
 
 use super::machine::{live_folder_in, Harness, Installed, ISOLATION};
 use super::window::trust_claude;
 use super::{agents, last_lines, rig, rig_with_stand_ins, Log};
 use crate::process::Run;
 use crate::rig::{Config, Project, Rig};
-use crate::{files, Error, Result};
+use crate::{Error, Result};
 
 use board::task_number;
 
@@ -59,12 +60,15 @@ pub use board::{
     answer_to, brief_delivered, delivered_result, find, first_answer, first_question, is_over,
     last_result, notes_of_work, session_of, MemberWindow, Paused,
 };
-pub use command::{quiet_command, runs_command, shown, ticking_command, LongCommand};
+pub use command::{
+    quiet_command, run_word, runs_command, shown, ticking_command, ticks_in, LongCommand, Moving,
+};
 pub use descent::{
     descending_from, end_chosen, holding, orphans_in_folder, pause_chosen, with_cygwin_parents,
-    working_folder, Ended, Identity, Machine, Pause, Running, ThisMachine,
+    working_folder, Ended, Identity, Machine, Pause, RunFolder, Running, ThisMachine,
 };
 pub use door::{judge, moves, ms_of, waited_then_worked, Finding, Judged, Seen};
+pub use left::{Swept, Watch};
 pub use plan::{
     member, member_as, question_brief, stand_in_chief, stand_in_question_brief, stand_in_worker,
     tier_flag, Plan, BENCH_BRIEF, BRIEF, STAND_IN_WORKER,
@@ -133,7 +137,7 @@ pub struct Members {
     /// by its model (harness-models), and a check names it by its agent.
     handles: BTreeMap<String, String>,
     /// Where the shim that starts Claude Code is, which the windows run through.
-    _shims: TempDir,
+    _shims: Made,
 }
 
 impl Members {
@@ -181,7 +185,7 @@ impl Members {
                 })?;
             isolation.write(file.variable, &file.name, &file.text)?;
         }
-        let shims = tempfile::tempdir().map_err(|source| Error::File {
+        let shims = crate::door::made("consensflow-live-shims-").map_err(|source| Error::File {
             action: "make a folder in",
             path: std::env::temp_dir(),
             source,
@@ -496,10 +500,8 @@ impl Members {
     /// Ends the program of the window `pane`, with whatever turn it has at work, as the
     /// app's quit does to every window (`pane.kill`): the daemon sees it exit.
     pub fn cut(&self, pane: &Value) -> Result<Value> {
-        self.rig.host(
-            "pane.kill",
-            json!({ "id": pane["id"], "generation": pane["generation"] }),
-        )
+        self.rig
+            .close_pane(json!({ "id": pane["id"], "generation": pane["generation"] }))
     }
 
     /// The human's Pause of the task, and when it was made.
@@ -582,14 +584,28 @@ impl Members {
     /// Ends the rig: the daemon, the pane host and their windows, and the
     /// records of the stand-ins. The harnesses' windows are given the time the
     /// host gives them to leave, and a rig that does not end says which of its
-    /// processes were left ([`closing`]).
+    /// processes were left ([`closing`]). What the windows left running once they
+    /// were closed is found and said ([`Watch`]), and never ended: the kit ends a
+    /// process only by descent from the run's window and, on the stand-in's rig, by the
+    /// stand-in's jobs and an orphan of a folder under the run's temp root, where a case
+    /// chose it.
     pub fn close(self) -> Result {
         self.close_within(closing::EXIT)
     }
 
     /// [`Members::close`], with `within` for the daemon and the pane host to end.
     pub fn close_within(self, within: Duration) -> Result {
-        closing::end_within(self.rig, within)
+        let (closed, swept) = self.close_and_sweep(within);
+        said(&swept);
+        closed
+    }
+
+    /// [`Members::close_within`], and what the windows left running once they were closed, found
+    /// and not ended, as a [`Swept`]: the close's own result, and what the sweep found.
+    pub fn close_and_sweep(self, within: Duration) -> (Result, Swept) {
+        let watch = Watch::of_rig(&self.rig, Some(&self.folder));
+        let closed = closing::end_within(self.rig, within);
+        (closed, watch.sweep())
     }
 
     /// [`Members::close_within`], with `within` counted from the moment `happened` says an
@@ -601,7 +617,20 @@ impl Members {
         happened: impl Fn(&Rig) -> bool,
         within: Duration,
     ) -> Result {
-        closing::end_after(self.rig, what, happened, within)
+        let watch = Watch::of_rig(&self.rig, Some(&self.folder));
+        let closed = closing::end_after(self.rig, what, happened, within);
+        said(&watch.sweep());
+        closed
+    }
+}
+
+/// What a close's sweep found ([`Swept`]), said on the error output where it found anything or
+/// could not look. It fails nothing: it ended nothing.
+fn said(swept: &Swept) {
+    use std::io::Write;
+
+    if !swept.is_clean() {
+        let _ = writeln!(std::io::stderr(), "live kit: {}", swept.said());
     }
 }
 
@@ -616,10 +645,10 @@ fn prepare(rig: &Rig, plan: &Plan) -> Result<PathBuf> {
         .ok_or_else(|| Error::Daemon("the rig gives its windows no home".to_owned()))?;
     let folder = live_folder_in(Path::new(home), &plan.folder)?;
     for name in ["AGENTS.md", "CLAUDE.md"] {
-        files::write(&folder.join(name), plan.brief)?;
+        crate::door::write(folder.join(name), plan.brief)?;
     }
     for (path, text) in &plan.files {
-        files::write(&folder.join(path), text)?;
+        crate::door::write(folder.join(path), text)?;
     }
     if plan.repository {
         let made = Run::new(Path::new("git"))

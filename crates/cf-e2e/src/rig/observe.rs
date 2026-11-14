@@ -231,6 +231,13 @@ impl Rig {
     /// [`Rig::tell`], waiting up to `idle` for the chief to be idle: a chief on
     /// a model that takes its time to come up, or to finish what it was at.
     pub fn tell_within(&self, project: i64, text: &str, idle: Duration) -> Result<()> {
+        self.tell_marked(project, text, idle).map(|_| ())
+    }
+
+    /// [`Rig::tell_within`], and how many events the daemon had written at the moment the
+    /// paste was written (after the wait for the chief to be idle, which anything the chief
+    /// did meanwhile falls in): what a look at whether the prompt was taken counts from.
+    pub fn tell_marked(&self, project: i64, text: &str, idle: Duration) -> Result<usize> {
         // The first lane of the chief's, as the page draws it.
         let chief = || -> Result<Value> {
             let board = Project::new(self, project).board()?;
@@ -249,6 +256,7 @@ impl Rig {
         })?;
         let pane = chief()?["pane"].clone();
         let typed = format!("\u{1b}[200~{text}\u{1b}[201~\r");
+        let mark = self.events().len();
         let answer = self.host(
             "pane.input",
             json!({
@@ -258,7 +266,7 @@ impl Rig {
             }),
         )?;
         if answer["ok"] == true {
-            Ok(())
+            Ok(mark)
         } else {
             Err(Error::Daemon(format!("pane.input was refused: {answer}")))
         }

@@ -84,6 +84,21 @@ pub fn record_of(chief: Harness, members: &Members) -> Result<Option<Record>> {
     }
 }
 
+/// How many user items the chief's own record holds: what a prompt the window took
+/// adds one of, whether or not the board read the chief working on it.
+pub fn user_items(chief: Harness, members: &Members) -> usize {
+    record_of(chief, members)
+        .ok()
+        .flatten()
+        .map_or(0, |record| {
+            record
+                .items
+                .iter()
+                .filter(|item| item.role == "user")
+                .count()
+        })
+}
+
 /// The notes the daemon pasted again, from what it wrote: a `delivery.retried` of
 /// each, and why.
 pub fn retried(events: &[Value], notes: &[Note]) -> Vec<String> {

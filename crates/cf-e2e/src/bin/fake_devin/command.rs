@@ -67,8 +67,8 @@ pub fn start(
         .closed_input()
         .spawn()
         .map_err(said)?;
-    std::fs::create_dir_all(jobs).map_err(said)?;
-    std::fs::write(
+    cf_e2e::door::make_dir(jobs).map_err(said)?;
+    cf_e2e::door::write(
         jobs.join(format!("job-{window}-1.pid")),
         format!("{}\n", shell.id()),
     )

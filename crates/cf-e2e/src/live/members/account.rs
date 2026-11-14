@@ -14,6 +14,9 @@ use super::super::seconds;
 pub struct Account {
     lines: Vec<String>,
     held: bool,
+    /// Whether the case could not be tried: what it needed to begin with never was
+    /// ([`Account::unmet`]). Such a case holds nothing and fails nothing.
+    unmet: bool,
 }
 
 impl Default for Account {
@@ -28,6 +31,7 @@ impl Account {
         Self {
             lines: Vec::new(),
             held: true,
+            unmet: false,
         }
     }
 
@@ -44,6 +48,15 @@ impl Account {
             if ok { "ok  " } else { "FAIL" }
         ));
         self.held &= ok;
+    }
+
+    /// The case's precondition was not met, so that what it is for was never tried: a line
+    /// of its own, `UNMET` and why. It is no failure (the case holds, as it would saying
+    /// nothing), and a run says it apart from the cases that held and those that failed
+    /// ([`Account::is_unmet`]).
+    pub fn unmet(&mut self, text: impl Display) {
+        self.lines.push(format!("UNMET {text}"));
+        self.unmet = true;
     }
 
     /// A check that did not hold, as a line of its own: `FAIL` and what was seen.
@@ -63,6 +76,7 @@ impl Account {
     pub fn absorb(&mut self, other: Self) {
         self.lines.extend(other.lines);
         self.held &= other.held;
+        self.unmet |= other.unmet;
     }
 
     /// What came of ending the rig the case ran in: a rig that would not end is a
@@ -76,6 +90,11 @@ impl Account {
     /// Whether every check held.
     pub const fn held(&self) -> bool {
         self.held
+    }
+
+    /// Whether the case's precondition was not met ([`Account::unmet`]).
+    pub const fn is_unmet(&self) -> bool {
+        self.unmet
     }
 
     /// What the case saw, a line to each.

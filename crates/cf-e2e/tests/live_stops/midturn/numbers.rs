@@ -13,12 +13,17 @@ use super::begin::Doing;
 use super::printed::{numbers_on, progress};
 use super::{screen_drawn, NUMBERS};
 
+/// The last number the member is asked to write: what only a member that wrote them says in
+/// its result.
+const LAST_NUMBER: &str = "5000";
+
 /// What the member is asked to do, in the words the case says it in.
 pub const DOING: Doing = Doing {
     to: "write its numbers",
     did: "wrote its numbers",
     doing: "writing its numbers",
     shown: "numbers on its screen",
+    word: Some(LAST_NUMBER),
 };
 
 /// How many numbers say the reply is being written: lines of numbers in the text of
@@ -71,6 +76,11 @@ pub fn writing(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_word_of_the_work_is_the_last_number_the_member_is_asked_to_write() {
+        assert_eq!(LAST_NUMBER, NUMBERS.to_string());
+    }
 
     #[test]
     fn a_member_is_writing_when_its_text_shows_numbers_its_screen_does_or_it_worked_long_enough() {

@@ -113,7 +113,9 @@ fn the_harnesses_own(change: &str) -> bool {
 
 #[test]
 fn a_full_round_writes_nothing_outside_the_home_and_the_projects_own_files() -> Outcome {
-    let outer = tempfile::tempdir().map_err(|source| Error::File {
+    // Made through the door: the stand-in Claude writes its transcripts and status files below the
+    // decoy home, and a run's programs write only below what the run made.
+    let outer = cf_e2e::door::made("cf-live-app-").map_err(|source| Error::File {
         action: "make",
         path: std::env::temp_dir(),
         source,

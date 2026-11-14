@@ -14,28 +14,23 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use tempfile::TempDir;
-
 use crate::process::{Ran, Run};
 use crate::{cf, stand_in, Error, Result};
 
 /// A throwaway home, removed when it goes out of scope.
 #[derive(Debug)]
 pub struct ScratchHome {
-    folder: TempDir,
+    folder: crate::door::Made,
 }
 
 impl ScratchHome {
     /// A new home, in a folder of its own under the system's temporary one.
     pub fn new() -> Result<Self> {
-        let folder = tempfile::Builder::new()
-            .prefix("cf-e2e-")
-            .tempdir()
-            .map_err(|source| Error::File {
-                action: "make a folder in",
-                path: std::env::temp_dir(),
-                source,
-            })?;
+        let folder = crate::door::made("cf-e2e-").map_err(|source| Error::File {
+            action: "make a folder in",
+            path: std::env::temp_dir(),
+            source,
+        })?;
         Ok(Self { folder })
     }
 

@@ -26,7 +26,7 @@ use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window};
 use cf_e2e::live::{self, ask, last_lines, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
-use cf_e2e::{files, Result};
+use cf_e2e::Result;
 
 /// The stand-in for Claude, which the rig puts first on the `PATH` of its windows:
 /// no window of this test runs it (each is opened on the real harness's own
@@ -91,7 +91,7 @@ fn why(flat: &str) -> Option<String> {
 /// `work`.
 fn make_labs(work: &Path) -> Result {
     for lab in LABS {
-        files::make_dir(&work.join(lab).join("deep"))?;
+        cf_e2e::door::make_dir(work.join(lab).join("deep"))?;
     }
     Ok(())
 }
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn the_folders_it_is_asked_to_remove_are_made_with_a_folder_in_each_and_are_gone_only_when_all_are(
     ) {
-        let work = tempfile::tempdir().unwrap();
+        let work = cf_e2e::door::made("live-asks-test-").unwrap();
         let work = work.path().join("windows-work");
         make_labs(&work).unwrap();
         for lab in LABS {
@@ -303,9 +303,13 @@ mod tests {
         // Made again, as every run makes them: nothing is lost.
         make_labs(&work).unwrap();
         assert!(!gone(&work));
-        std::fs::remove_dir_all(work.join("lab-a")).unwrap();
+        assert!(cf_e2e::door::Door::acting()
+            .remove_in_made(&work.join("lab-a"))
+            .is_gone());
         assert!(!gone(&work), "one of two is not both");
-        std::fs::remove_dir_all(work.join("lab-b")).unwrap();
+        assert!(cf_e2e::door::Door::acting()
+            .remove_in_made(&work.join("lab-b"))
+            .is_gone());
         assert!(gone(&work));
     }
 
@@ -400,7 +404,7 @@ mod tests {
                 });
                 thread::sleep(Duration::from_secs(5));
                 for lab in LABS {
-                    let _ = std::fs::remove_dir_all(work.join(lab));
+                    let _ = cf_e2e::door::Door::of_run().remove_in_made(&work.join(lab));
                 }
             });
             let seen = run(&ran, GUARDED, Duration::from_secs(60));

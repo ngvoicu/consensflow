@@ -14,6 +14,8 @@ use crate::Error;
 #[cfg(all(unix, not(target_os = "macos")))]
 use crate::Result;
 
+#[cfg(all(target_os = "macos", test))]
+pub(super) use mac::lstart_second;
 #[cfg(target_os = "macos")]
 pub(super) use mac::{identity, processes, working_folder};
 #[cfg(windows)]
@@ -67,6 +69,10 @@ impl Held for Number {
     }
 
     fn end(&self) -> io::Result<()> {
+        // Known limit (the chief's decision, T-1542): the check of its start and this signal are
+        // two calls, and a process that exits between them and whose number the system gives
+        // another at once would be the one signalled; macOS signals a process by its number
+        // alone, and Windows, which holds a handle, has no such gap.
         match crate::process::signal(self.0, crate::process::Signal::Kill) {
             // One that ended by itself in between is ended.
             Err(failed) if failed.raw_os_error() != Some(nix::libc::ESRCH) => Err(failed),
@@ -121,7 +127,19 @@ mod mac {
     /// Every process `ps` lists, each with when it began as the system says it to the
     /// microsecond.
     pub(in super::super) fn processes() -> Result<Vec<Running>> {
-        Ok(refined_by_bsd(ps(None)?, bsd))
+        Ok(refined_by_bsd(ps(None)?, bsd, lstart_second))
+    }
+
+    /// The second a start (`micros`, since 1970) falls in, as `ps`'s `lstart` says it: the
+    /// machine's own time of day, as `YYYYMMDDhhmmss` ([`super::super::ps`]). None where it is no
+    /// time.
+    pub(in super::super) fn lstart_second(micros: u64) -> Option<u64> {
+        let at = jiff::Timestamp::from_microsecond(i64::try_from(micros).ok()?).ok()?;
+        at.to_zoned(jiff::tz::TimeZone::system())
+            .strftime("%Y%m%d%H%M%S")
+            .to_string()
+            .parse()
+            .ok()
     }
 
     /// Which process has the number `pid` now: none where none has.

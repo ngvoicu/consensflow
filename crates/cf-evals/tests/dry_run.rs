@@ -74,7 +74,8 @@ fn play(words: &[&str]) -> Played {
     );
     files::make_dir(&home.join(".claude")).unwrap();
     // The `claude` of the run: the stand-in, on the Claude folder of the home it is run
-    // on, for a window that is given a conversation; and for the one the run opens to
+    // on, and handed that home to write below (the kit's door makes a program handed none write
+    // nowhere), for a window that is given a conversation; and for the one the run opens to
     // trust its workspace, which is given none, a Claude that has nothing to ask.
     files::write_executable(
         &bin.join("claude"),
@@ -83,7 +84,8 @@ fn play(words: &[&str]) -> Played {
              case \" $* \" in\n\
              \x20 *\" --session-id \"*|*\" --resume \"*)\n\
              \x20   CLAUDE_CONFIG_DIR=\"$HOME/.claude\"\n\
-             \x20   export CLAUDE_CONFIG_DIR\n\
+             \x20   CF_LIVE_MADE_ROOTS=\"$HOME${{CF_LIVE_MADE_ROOTS:+:$CF_LIVE_MADE_ROOTS}}\"\n\
+             \x20   export CLAUDE_CONFIG_DIR CF_LIVE_MADE_ROOTS\n\
              \x20   exec '{}' \"$@\" ;;\n\
              esac\n\
              echo 'Welcome back!'\n\

@@ -183,13 +183,14 @@ struct Folders {
     made: Vec<PathBuf>,
     // Last, as every temporary folder goes in what owns it (Windows removes none from under
     // a file still open in it).
-    parent: tempfile::TempDir,
+    parent: cf_e2e::door::Made,
 }
 
 impl Folders {
     fn new() -> Result<Self> {
         Ok(Self {
-            parent: tempfile::tempdir().map_err(io("make a folder", Path::new("tmp")))?,
+            parent: cf_e2e::door::made("live-keychain-")
+                .map_err(io("make a folder", Path::new("tmp")))?,
             made: Vec::new(),
         })
     }
@@ -198,7 +199,9 @@ impl Folders {
     /// (`<name>` at `<server>/<name>`), and a made-up login where `login` says so.
     fn config(&mut self, name: &str, servers: &[(&str, String)], login: bool) -> Result<PathBuf> {
         let folder = self.parent.path().join(name);
-        fs::create_dir_all(&folder).map_err(io("make", &folder))?;
+        cf_e2e::door::make_dir(&folder)
+            .map_err(std::io::Error::from)
+            .map_err(io("make", &folder))?;
         let mut config =
             serde_json::json!({"hasCompletedOnboarding": true, "hasSeenAutoDefaultNotice": true});
         if !servers.is_empty() {
@@ -213,10 +216,14 @@ impl Folders {
                 .collect::<serde_json::Map<_, _>>()
                 .into();
         }
-        fs::write(folder.join(".claude.json"), config.to_string()).map_err(io("write", &folder))?;
+        cf_e2e::door::write(folder.join(".claude.json"), config.to_string())
+            .map_err(std::io::Error::from)
+            .map_err(io("write", &folder))?;
         if login {
             let file = folder.join(".credentials.json");
-            fs::write(&file, FAKE_LOGIN).map_err(io("write", &file))?;
+            cf_e2e::door::write(&file, FAKE_LOGIN)
+                .map_err(std::io::Error::from)
+                .map_err(io("write", &file))?;
         }
         self.made.push(folder.clone());
         Ok(folder)
@@ -225,7 +232,9 @@ impl Folders {
     /// A project folder, with `.mcp.json` naming the servers of `servers` where there are any.
     fn project(&self, name: &str, servers: &[(&str, String)]) -> Result<PathBuf> {
         let folder = self.parent.path().join(name);
-        fs::create_dir_all(&folder).map_err(io("make", &folder))?;
+        cf_e2e::door::make_dir(&folder)
+            .map_err(std::io::Error::from)
+            .map_err(io("make", &folder))?;
         if !servers.is_empty() {
             let listed: serde_json::Map<_, _> = servers
                 .iter()
@@ -236,10 +245,11 @@ impl Folders {
                     )
                 })
                 .collect();
-            fs::write(
+            cf_e2e::door::write(
                 folder.join(".mcp.json"),
                 serde_json::json!({"mcpServers": listed}).to_string(),
             )
+            .map_err(std::io::Error::from)
             .map_err(io("write", &folder))?;
         }
         Ok(folder)
@@ -248,17 +258,21 @@ impl Folders {
     /// A plugin whose one server is `url`.
     fn plugin(&self, name: &str, url: &str) -> Result<PathBuf> {
         let folder = self.parent.path().join(name);
-        fs::create_dir_all(folder.join(".claude-plugin")).map_err(io("make", &folder))?;
-        fs::write(
+        cf_e2e::door::make_dir(folder.join(".claude-plugin"))
+            .map_err(std::io::Error::from)
+            .map_err(io("make", &folder))?;
+        cf_e2e::door::write(
             folder.join(".claude-plugin/plugin.json"),
             r#"{"name":"probe","version":"0.0.1","description":"T-1102"}"#,
         )
+        .map_err(std::io::Error::from)
         .map_err(io("write", &folder))?;
-        fs::write(
+        cf_e2e::door::write(
             folder.join(".mcp.json"),
             serde_json::json!({"mcpServers": {"plugsrv": {"type": "http", "url": url}}})
                 .to_string(),
         )
+        .map_err(std::io::Error::from)
         .map_err(io("write", &folder))?;
         Ok(folder)
     }
@@ -502,7 +516,8 @@ fn claude_code_leaves_no_keychain_item_for_a_throwaway_folder_when_the_kit_start
     }
 
     // 3. A probe that cannot take the flag.
-    let bare = tempfile::tempdir().map_err(io("make a folder", Path::new("tmp")))?;
+    let bare =
+        cf_e2e::door::made("live-keychain-").map_err(io("make a folder", Path::new("tmp")))?;
     let front = without_keychain(bare.path())?
         .ok_or_else(|| Error::Daemon("this machine has no Keychain to do without".to_owned()))?;
     let folder = folders.config("probe-no-keychain", &servers, false)?;

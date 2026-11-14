@@ -162,8 +162,8 @@ mod tests {
 
     /// A folder with the pictures a paste names: two PNGs, a text file, and a file
     /// that is called a PNG and is not one.
-    fn folder() -> tempfile::TempDir {
-        let folder = tempfile::tempdir().unwrap();
+    fn folder() -> cf_e2e::door::Made {
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         for name in ["desk.png", "hero.png"] {
             std::fs::write(folder.path().join(name), cf_e2e::png::SMALL).unwrap();
         }

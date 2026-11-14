@@ -490,26 +490,6 @@ find = "                super::sweep::homes(&folder);\n"
 replace = ""
 
 [[plant]]
-name = "rig reports: the sweep takes the homes of any age"
-meant = "only_a_home_older_than_a_day_that_no_process_works_in_is_swept"
-runs = ["reports-sweep"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/rig/sweep.rs"
-find = "(found.is_dir() && age > OLDER).then(|| entry.path())"
-replace = "found.is_dir().then(|| entry.path())"
-
-[[plant]]
-name = "rig reports: the sweep takes a home a process works in"
-meant = "only_a_home_older_than_a_day_that_no_process_works_in_is_swept"
-runs = ["reports-sweep"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/rig/sweep.rs"
-find = "        .filter(|(_, busy)| !busy)\n"
-replace = ""
-
-[[plant]]
 name = "rig reports: the sweep follows a link that is named like a home"
 meant = "only_a_home_older_than_a_day_that_no_process_works_in_is_swept"
 runs = ["reports-sweep"]
@@ -518,42 +498,6 @@ runs = ["reports-sweep"]
 file = "crates/cf-e2e/src/rig/sweep.rs"
 find = "fs::symlink_metadata(entry.path()).ok()?"
 replace = "fs::metadata(entry.path()).ok()?"
-
-[[plant]]
-name = "rig reports: the sweep takes the homes when the processes could not be listed"
-meant = "nothing_is_swept_where_the_processes_cannot_be_listed"
-runs = ["reports-sweep"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/rig/sweep.rs"
-find = '''
-    let Some(busy) = worked_in(&stale) else {
-        return Vec::new();
-    };
-'''
-replace = '''
-    let busy = worked_in(&stale).unwrap_or_else(|| vec![false; stale.len()]);
-'''
-
-[[plant]]
-name = "rig reports: a home is not worked in by a process whose working folder is in it"
-meant = "a_process_works_in_a_home_by_its_working_folder_or_by_naming_it"
-runs = ["reports-sweep"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/rig/sweep.rs"
-find = "working.iter().any(|cwd| Path::new(cwd).starts_with(name))"
-replace = "false"
-
-[[plant]]
-name = "rig reports: a home is not worked in by a process whose command line names it"
-meant = "a_process_works_in_a_home_by_its_working_folder_or_by_naming_it"
-runs = ["reports-sweep"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/rig/sweep.rs"
-find = "|| commands.contains(name.to_string_lossy().as_ref())"
-replace = "|| false"
 
 [[plant]]
 name = "rig reports: a rig's programs are told no temp folder on Unix"

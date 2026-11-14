@@ -23,7 +23,7 @@ fn result_of(project: &Project, number: i64) -> cf_e2e::Result<Value> {
 #[test]
 fn a_reviewer_that_is_the_scripted_stand_in_answers_each_review_with_the_next_result_of_its_folder_and_the_last_again(
 ) -> Outcome {
-    let folder = tempfile::tempdir()?;
+    let folder = cf_e2e::door::made("cf-scripted-")?;
     fs::write(folder.path().join(".eval-run"), "")?;
     fs::write(folder.path().join("1.md"), "REVIEW ONE: F1 blocks")?;
     fs::write(folder.path().join("2.md"), "REVIEW TWO: notes only")?;
@@ -64,7 +64,7 @@ fn a_reviewer_that_is_the_scripted_stand_in_answers_each_review_with_the_next_re
 fn a_reviewer_whose_folder_is_no_eval_runs_is_refused_and_says_so_instead_of_answering() -> Outcome
 {
     // A folder with the results and no marker: not an eval run's.
-    let folder = tempfile::tempdir()?;
+    let folder = cf_e2e::door::made("cf-scripted-")?;
     fs::write(folder.path().join("1.md"), "REVIEW ONE: F1 blocks")?;
     let rig = cf_e2e::rig::Rig::start(
         config().var("CF_TEST_SCRIPTED_RESULTS", folder.path().to_string_lossy()),
@@ -97,7 +97,7 @@ fn a_reviewer_whose_folder_is_no_eval_runs_is_refused_and_says_so_instead_of_ans
 #[test]
 fn a_worker_that_is_the_scripted_stand_in_writes_the_files_of_its_answer_in_the_project_and_answers(
 ) -> Outcome {
-    let folder = tempfile::tempdir()?;
+    let folder = cf_e2e::door::made("cf-scripted-")?;
     fs::write(folder.path().join(".eval-run"), "")?;
     for (number, result, page) in [
         (

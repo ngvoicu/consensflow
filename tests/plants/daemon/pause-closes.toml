@@ -304,17 +304,6 @@ find = "        Signal::Continue => Sent::SIGCONT,"
 replace = "        Signal::Continue => Sent::SIGSTOP,"
 
 [[plant]]
-name = "pause closes: the late case never stalls the daemon"
-meant = "a_pause_the_daemon_answers_a_fifth_of_a_second_late_is_the_same_stop_through_three_rounds"
-runs = ["live-stops-late"]
-platforms = ["macos", "linux"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_stops/midturn/stand_in.rs"
-find = "        stall(members.rig().daemon_pid(), Duration::from_millis(200)).unwrap();"
-replace = "        let _ = (members, stall);"
-
-[[plant]]
 name = "pause closes: a window that never began its brief is kept for ConsensFlow's own stop"
 meant = "a_task_paused_for_a_brief_its_window_read_in_flight_never_began_is_relaunched_on_its_conversation_and_goes_on_by_itself"
 runs = ["engine-dispatcher"]

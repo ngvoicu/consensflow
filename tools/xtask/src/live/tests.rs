@@ -26,20 +26,21 @@ fn words(line: &str) -> Vec<OsString> {
     line.split_whitespace().map(OsString::from).collect()
 }
 
-/// What `cargo xtask live <line>` runs, and the variables it sets.
+/// What `cargo xtask live <line>` runs, and the variables it sets (a variable it takes out of the
+/// program's environment is none it sets: the test of `CF_LIVE_MADE_ROOTS` reads those).
 fn runs(line: &str) -> Result<(String, Vec<(String, String)>), Failure> {
     let asked = parse(&words(line), &names())?;
     let invocation = invocation(&context(), &asked);
     let vars = invocation
         .vars
         .iter()
-        .map(|(name, value)| {
-            (
-                name.to_string_lossy().into_owned(),
-                value
-                    .as_ref()
-                    .map_or_else(String::new, |value| value.to_string_lossy().into_owned()),
-            )
+        .filter_map(|(name, value)| {
+            value.as_ref().map(|value| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.to_string_lossy().into_owned(),
+                )
+            })
         })
         .collect();
     Ok((invocation.display(), vars))
@@ -55,7 +56,9 @@ fn a_live_test_is_the_ignored_case_of_its_test_and_runs_only_when_asked_for() {
         let (line, vars) = runs(name).unwrap();
         assert_eq!(
             line,
-            format!("cargo test -p cf-e2e --test live_{name} -- --ignored --nocapture")
+            format!(
+                "cargo test -p cf-e2e --test live_{name} -- --ignored --nocapture --test-threads=1"
+            )
         );
         assert!(vars.is_empty());
     }
@@ -70,7 +73,7 @@ fn a_live_test_is_the_ignored_case_of_its_test_and_runs_only_when_asked_for() {
 fn a_test_is_named_by_its_file_with_dashes_or_underscores() {
     assert_eq!(
         runs("input-box").unwrap().0,
-        "cargo test -p cf-e2e --test live_input_box -- --ignored --nocapture"
+        "cargo test -p cf-e2e --test live_input_box -- --ignored --nocapture --test-threads=1"
     );
     assert_eq!(runs("input_box").unwrap().0, runs("input-box").unwrap().0);
 }
@@ -125,7 +128,7 @@ fn the_models_of_the_harnesses_reach_the_suites_as_they_were_given_with_claudes_
             .unwrap();
     assert_eq!(
         line,
-        "cargo test -p cf-e2e --test live_approval -- --ignored --nocapture"
+        "cargo test -p cf-e2e --test live_approval -- --ignored --nocapture --test-threads=1"
     );
     assert_eq!(
         vars,
@@ -189,7 +192,7 @@ fn keep_takes_no_value_so_what_follows_it_is_a_word_of_its_own() {
     );
     assert_eq!(
         line,
-        "cargo test -p cf-e2e --test live_approval -- --ignored --nocapture"
+        "cargo test -p cf-e2e --test live_approval -- --ignored --nocapture --test-threads=1"
     );
 }
 
@@ -198,7 +201,7 @@ fn cargos_own_flags_end_the_words_and_they_and_what_follows_are_cargos() {
     let (line, vars) = runs("approval --steps worker devin --keep --offline claude").unwrap();
     assert_eq!(
         line,
-        "cargo test -p cf-e2e --test live_approval --offline claude -- --ignored --nocapture"
+        "cargo test -p cf-e2e --test live_approval --offline claude -- --ignored --nocapture --test-threads=1"
     );
     assert_eq!(
         vars,
@@ -222,37 +225,40 @@ fn cargos_own_flags_end_the_words_and_they_and_what_follows_are_cargos() {
 fn what_follows_a_double_dash_goes_to_the_test_program_after_what_every_run_gives_it() {
     assert_eq!(
         runs("paste -- --list").unwrap().0,
-        "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --list"
+        "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --test-threads=1 --list"
     );
     assert_eq!(
         runs("paste claude -- --list --exact the_name").unwrap(),
         (
-            "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --list --exact the_name"
+            "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --test-threads=1 --list --exact the_name"
                 .to_owned(),
             vec![var("CONSENSFLOW_LIVE_HARNESS", "claude")]
         )
     );
     // Words of live's after it are the test program's, flags among them.
     let (line, vars) = runs("paste -- --keep").unwrap();
-    assert!(line.ends_with("-- --ignored --nocapture --keep"), "{line}");
+    assert!(
+        line.ends_with("-- --ignored --nocapture --test-threads=1 --keep"),
+        "{line}"
+    );
     assert!(vars.is_empty());
     // What every run is given is not given twice: the test program refuses a flag it is
     // given more than once (`-- --nocapture` is what the live tests have always been run with).
     assert_eq!(
         runs("paste -- --nocapture --list").unwrap().0,
-        "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --list"
+        "cargo test -p cf-e2e --test live_paste -- --ignored --test-threads=1 --nocapture --list"
     );
     assert_eq!(
         runs("approval claude -- --ignored --nocapture").unwrap().0,
-        "cargo test -p cf-e2e --test live_approval -- --ignored --nocapture"
+        "cargo test -p cf-e2e --test live_approval -- --test-threads=1 --ignored --nocapture"
     );
     assert_eq!(
         runs("paste --offline -- --ignored").unwrap().0,
-        "cargo test -p cf-e2e --test live_paste --offline -- --nocapture --ignored"
+        "cargo test -p cf-e2e --test live_paste --offline -- --nocapture --test-threads=1 --ignored"
     );
     assert_eq!(
         runs("paste --offline -- --list").unwrap().0,
-        "cargo test -p cf-e2e --test live_paste --offline -- --ignored --nocapture --list"
+        "cargo test -p cf-e2e --test live_paste --offline -- --ignored --nocapture --test-threads=1 --list"
     );
 }
 
@@ -428,5 +434,296 @@ fn a_set_that_is_none_or_words_after_its_name_are_refused_saying_which_sets_ther
     assert_eq!(
         refused("--set windows codex"),
         "--set takes the name of a set, and nothing after it: windows"
+    );
+}
+
+#[test]
+fn every_live_run_is_given_one_test_thread_unless_the_caller_gave_its_own() {
+    // A live binary's tests run on parallel threads by default, and a file with more than one
+    // seats two windows of Claude Code at once, which the one live Claude Code session at a time
+    // rule forbids (`live_finish` holds three).
+    for name in ["designer", "approval", "paste", "input-box"] {
+        let line = runs(name).unwrap().0;
+        assert!(
+            line.ends_with("-- --ignored --nocapture --test-threads=1"),
+            "{line}"
+        );
+    }
+    // The caller's words come after what is always given, and the flag is one of it.
+    assert_eq!(
+        runs("paste -- --list").unwrap().0,
+        "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --test-threads=1 --list"
+    );
+    // A run of a set is built the same way, so each of its runs has it.
+    for (set, _) in SETS {
+        let (_, runs) = set_runs(&words(&format!("--set {set}")), &checkout_tests()).unwrap();
+        assert!(!runs.is_empty(), "{set}");
+        for (_, asked) in &runs {
+            let line = invocation(&context(), asked).display();
+            assert!(
+                line.ends_with(" -- --ignored --nocapture --test-threads=1"),
+                "{line}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_test_threads_the_caller_gave_is_not_given_twice() {
+    // The test program refuses a flag given twice: the caller's own replaces the one given, in
+    // either spelling (`--test-threads=N`, or the flag and its number as two words).
+    assert_eq!(
+        runs("paste -- --test-threads=4").unwrap().0,
+        "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --test-threads=4"
+    );
+    assert_eq!(
+        runs("paste -- --test-threads 2").unwrap().0,
+        "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --test-threads 2"
+    );
+    assert_eq!(
+        runs("paste -- --test-threads=1 --list").unwrap().0,
+        "cargo test -p cf-e2e --test live_paste -- --ignored --nocapture --test-threads=1 --list"
+    );
+    // A word that only begins like it is another flag.
+    assert!(runs("paste -- --test-threads-more")
+        .unwrap()
+        .0
+        .contains("--test-threads=1"));
+}
+
+#[test]
+fn a_say_only_run_says_in_the_file_it_is_given_or_one_of_its_own_and_a_run_that_acts_in_none() {
+    assert_eq!(audit_file(&Env::default()), None);
+    assert_eq!(audit_file(&Env::default().with_var(AUDIT, "0")), None);
+    assert_eq!(audit_file(&Env::default().with_var(AUDIT, "")), None);
+    let own = audit_file(&Env::default().with_var(AUDIT, "1")).unwrap();
+    assert!(own.starts_with(std::env::temp_dir()), "{}", own.display());
+    let given = Env::default()
+        .with_var(AUDIT, "1")
+        .with_var(AUDIT_FILE, "/the/said.txt");
+    assert_eq!(audit_file(&given), Some(PathBuf::from("/the/said.txt")));
+}
+
+#[test]
+fn sweep_runs_the_kits_own_program_with_the_words_after_it() {
+    let ran = sweep(&context(), &words("--older-than 3 --home /h")).display();
+    assert!(
+        ran.ends_with("cargo run -q -p cf-e2e --bin live-sweep -- --older-than 3 --home /h"),
+        "{ran}"
+    );
+}
+
+#[test]
+fn a_set_under_audit_gives_each_run_a_file_of_its_own_beside_the_one_named() {
+    assert_eq!(
+        audit_file_of(Path::new("/a/said.txt"), 2),
+        PathBuf::from("/a/said-2.txt")
+    );
+    assert_eq!(
+        audit_file_of(Path::new("/a/said"), 1),
+        PathBuf::from("/a/said-1")
+    );
+}
+
+#[test]
+fn what_a_say_only_run_left_is_told_as_acts_without_its_first_lines_and_never_as_a_pass() {
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("said.txt");
+    fs::write(
+        &file,
+        "# say-only run of process 4\n# still acts: the product's own shutdown\nkill\tprocess 5\tground\nremove\t/x\tground\n",
+    )
+    .unwrap();
+    assert_eq!(said_acts(&fs::read_to_string(&file).unwrap()), 2);
+    let told = audit_report(&file);
+    assert!(told.contains("2 endings and removals"), "{told}");
+    assert!(told.contains("no pass"), "{told}");
+    // A run that made no file: nothing is known of what it did before, and the person is told that,
+    // not zero acts and not that it stopped before it acted.
+    let none = audit_report(&folder.path().join("none.txt"));
+    assert!(
+        none.contains("made no audit file")
+            && none.contains("what it did before is not known")
+            && !none.contains("stopped before it acted"),
+        "{none}"
+    );
+    assert!(none.contains("no pass"), "{none}");
+    // A file the run made that cannot be read says that what the run did is not known.
+    let unreadable = folder.path().join("unreadable.txt");
+    fs::write(&unreadable, [0xff, 0xfe, b'\n']).unwrap();
+    let told = audit_report(&unreadable);
+    assert!(
+        told.contains("the audit could not be read; what the run did is not known"),
+        "{told}"
+    );
+    assert!(
+        !told.contains("stopped before it acted") && !told.contains("ending"),
+        "{told}"
+    );
+    assert!(told.contains("no pass"), "{told}");
+}
+
+#[test]
+fn no_line_of_a_say_only_set_says_ok_and_the_line_of_any_other_is_ok_or_failed() {
+    // A say-only run leaves with 1 whatever it came to, and the line of its set reads one way.
+    for status in [0, 1, 101] {
+        let line = set_line(status, "parity claude", true);
+        assert_eq!(line, "said   live parity claude", "{status}");
+        assert!(!line.contains("ok") && !line.contains("FAILED"), "{line}");
+    }
+    assert_eq!(
+        set_line(0, "parity claude", false),
+        "ok     live parity claude"
+    );
+    assert_eq!(
+        set_line(1, "parity claude", false),
+        "FAILED live parity claude"
+    );
+}
+
+#[test]
+fn the_help_says_what_a_say_only_run_still_does_in_the_words_the_audit_file_does() {
+    // One reading: the sentences of `cf_e2e::door::STILL_ACTS`, which are the first lines of
+    // every audit file, are the ones the help gives (xtask does not link cf-e2e, so the test
+    // reads them from its source).
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/cf-e2e/src/door.rs"),
+    )
+    .unwrap();
+    let list = source
+        .split("pub const STILL_ACTS: &[&str] = &[")
+        .nth(1)
+        .and_then(|rest| rest.split("\n];").next())
+        .expect("STILL_ACTS in door.rs");
+    let sentences: Vec<&str> = list
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix('"')?.strip_suffix("\","))
+        .collect();
+    assert!(sentences.len() >= 7, "{sentences:?}");
+    let help = dispatch::command_help(&COMMANDS[0]);
+    for sentence in &sentences {
+        assert!(
+            help.contains(sentence),
+            "the help lacks: {sentence}\n{help}"
+        );
+    }
+}
+
+#[test]
+fn a_variable_that_hands_the_made_folders_on_is_never_a_persons_to_set_for_the_test_it_runs() {
+    let (_, vars) = {
+        let asked = parse(&words("paste"), &names()).unwrap();
+        let invocation = invocation(&context(), &asked);
+        (invocation.display(), invocation.vars)
+    };
+    assert!(
+        vars.iter()
+            .any(|(name, value)| name == "CF_LIVE_MADE_ROOTS" && value.is_none()),
+        "{vars:?}"
+    );
+}
+
+/// The words of `cargo` that `cargo xtask live <line>` hands its builds.
+fn build_lines(line: &str) -> Vec<String> {
+    let asked = parse(&words(line), &names()).unwrap();
+    builds(&context(), &asked)
+        .iter()
+        .map(Invocation::display)
+        .collect()
+}
+
+#[test]
+fn the_programs_a_case_can_need_are_built_apart_before_any_case_starts() {
+    let lines = build_lines("paste claude");
+    let shim = if cfg!(windows) { " --bin cf-shim" } else { "" };
+    assert_eq!(
+        lines,
+        [
+            format!("cargo build --release --locked -p cf --bin cf{shim}"),
+            "cargo build --release --locked -p cf-panes --bin consensflow-bridge".to_owned(),
+            "cargo build --release --locked -p cf-harness --bin harness-ask --features test-support"
+                .to_owned(),
+            "cargo build --release --locked -p cf-engine --bin engine-ask --features test-support"
+                .to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn the_builds_take_the_callers_switches_and_jobs_and_none_of_the_tests_own_words() {
+    let lines = build_lines("paste --offline -j 4 --no-fail-fast --features x -- --exact a_test");
+    assert!(!lines.is_empty());
+    for line in &lines {
+        assert!(line.contains(" --offline -j 4"), "{line}");
+        assert!(
+            !line.contains("--no-fail-fast") && !line.contains("--exact"),
+            "{line}"
+        );
+        assert_eq!(line.matches("--locked").count(), 1, "{line}");
+    }
+    let lines = build_lines("paste --locked --jobs=2 --frozen");
+    for line in &lines {
+        assert!(line.contains(" --jobs=2 --frozen"), "{line}");
+        assert_eq!(line.matches("--locked").count(), 1, "{line}");
+    }
+}
+
+#[test]
+fn a_started_case_is_told_where_its_programs_are_and_that_it_builds_none() {
+    let asked = parse(&words("paste"), &names()).unwrap();
+    let vars: Vec<(String, String)> = started(&context(), &asked)
+        .vars
+        .iter()
+        .filter_map(|(name, value)| {
+            value.as_ref().map(|value| {
+                (
+                    name.to_string_lossy().into_owned(),
+                    value.to_string_lossy().into_owned(),
+                )
+            })
+        })
+        .collect();
+    let folder = built_in(&context().root).to_string_lossy().into_owned();
+    assert!(
+        folder.ends_with(&format!(
+            "app{0}src-tauri{0}target{0}release",
+            std::path::MAIN_SEPARATOR
+        )),
+        "{folder}"
+    );
+    for (name, value) in [
+        ("CF_E2E_BUILT", folder.as_str()),
+        ("CF_E2E_HELPERS", folder.as_str()),
+        ("CF_E2E_NO_BUILD", "1"),
+    ] {
+        assert!(vars.contains(&var(name, value)), "{name}: {vars:?}");
+    }
+}
+
+#[test]
+fn the_variables_that_say_where_the_programs_are_are_the_builders_own() {
+    // xtask does not link cf-e2e: the names are read from its source.
+    let source = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/cf-e2e/src/cf.rs"),
+    )
+    .unwrap();
+    for (constant, name) in [
+        ("BUILT", BUILT),
+        ("HELPERS", HELPERS),
+        ("NO_BUILD", NO_BUILD),
+    ] {
+        assert!(
+            source.contains(&format!("pub const {constant}: &str = \"{name}\";")),
+            "{constant} = {name}"
+        );
+    }
+}
+
+#[test]
+fn the_help_says_a_build_is_the_checkouts_own_act_before_the_run() {
+    let help = dispatch::command_help(&COMMANDS[0]);
+    assert!(
+        help.contains("builds the programs its cases need first"),
+        "{help}"
     );
 }

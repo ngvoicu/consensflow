@@ -89,12 +89,44 @@ pub fn verdict(checks: &[Check]) -> Result {
 /// ones that did not hold ([`verdict`]).
 pub fn conclude(log: &Log, title: &str, checks: &[Check]) -> Result {
     log.report(title, &table(checks));
-    verdict(checks)
+    verdict_of(log, checks)
+}
+
+/// [`verdict`] for the run `log`: where every check held, the run came to a pass
+/// ([`Log::passed`]), and the project folders its cases made are taken with it.
+pub fn verdict_of(log: &Log, checks: &[Check]) -> Result {
+    let verdict = verdict(checks);
+    if verdict.is_ok() {
+        log.passed();
+    }
+    verdict
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_run_whose_checks_held_comes_to_a_pass_and_one_where_any_did_not_does_not() {
+        let held = Log::new("verdict held");
+        assert!(verdict_of(&held, &sample()[..1]).is_ok());
+        assert!(held.lease_has_passed());
+        // A scope of the run says it for the run.
+        let scoped = Log::new("verdict scoped");
+        assert!(verdict_of(&scoped.scoped("pi"), &sample()[..1]).is_ok());
+        assert!(scoped.lease_has_passed());
+        let failed = Log::new("verdict failed");
+        assert!(verdict_of(&failed, &sample()).is_err());
+        assert!(!failed.lease_has_passed());
+        // `passing` says it for a case that ends with what it returns, and not for an error.
+        let ended = Log::new("passing");
+        assert!(ended
+            .passing::<(), &str>(Err("it came to nothing"))
+            .is_err());
+        assert!(!ended.lease_has_passed());
+        assert!(ended.passing::<(), &str>(Ok(())).is_ok());
+        assert!(ended.lease_has_passed());
+    }
 
     fn sample() -> Vec<Check> {
         vec![
