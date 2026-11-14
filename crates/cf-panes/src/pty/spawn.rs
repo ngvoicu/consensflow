@@ -181,7 +181,7 @@ impl PaneTable {
         #[cfg(unix)]
         let pty_system = native_pty_system();
         #[cfg(windows)]
-        let pty_system = conpty::ConPty::joining(Arc::clone(&job));
+        let pty_system = super::conpty::ConPty::joining(Arc::clone(&job));
         let pair = pty_system
             .openpty(size)
             .map_err(|error| PaneError::Pty(error.to_string()))?;

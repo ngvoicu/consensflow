@@ -287,7 +287,7 @@ impl PaneTable {
     /// pseudoconsole, the output ends, and `pane.exit` follows as anywhere.
     /// A window whose end could not be seen does not open: its opener ends it.
     #[cfg(windows)]
-    fn watch_exit(self: &Arc<Self>, key: &PaneKey) -> Result<(), PaneError> {
+    pub(super) fn watch_exit(self: &Arc<Self>, key: &PaneKey) -> Result<(), PaneError> {
         use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
         use windows_sys::Win32::System::Threading::{
             OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE,
