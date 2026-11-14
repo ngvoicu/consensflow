@@ -161,8 +161,9 @@ pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError
             "WITH last_moves AS (
                SELECT CAST(json_extract(data, '$.task') AS INTEGER) AS number, max(id) AS event_id
                FROM event
-               WHERE project_id = ?1 AND json_valid(data)
+               WHERE project_id = ?1
                  AND kind IN ('task.opened', 'task.created', 'task.assigned', 'task.released', 'task.state')
+                 AND json_valid(data)
                  AND (kind IN ('task.opened', 'task.created')
                       OR json_extract(data, '$.from') IS NULL
                       OR json_extract(data, '$.to') IS NULL

@@ -63,8 +63,8 @@ meant = "board_state_time_uses_the_initial_event_even_when_the_row_was_written_e
 runs = ["state-timer"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/page_reads.rs"
-find = "WHERE project_id = ?1 AND json_valid(data)"
-replace = "WHERE json_valid(data)"
+find = "WHERE project_id = ?1"
+replace = "WHERE 1 = 1"
 
 [[plant]]
 name = "state timer: the first move is used instead of the last"
