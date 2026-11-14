@@ -335,6 +335,7 @@ async fn zeus_at_work() -> (Rig, Rc<Context>, String, Value) {
         cf: Rc::new(|participant| {
             crate::seams::cf_word_of(participant, "/bundle/bin/cf", cfg!(windows))
         }),
+        specs_folder: Rc::new(|_, _| None),
         tooling_calls: false,
     });
     (rig, context, token, pane)

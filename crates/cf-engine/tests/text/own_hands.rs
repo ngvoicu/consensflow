@@ -94,12 +94,15 @@ fn the_short_text_names_the_window_s_own_cf() {
 }
 
 #[test]
-fn the_staff_s_rules_are_not_in_the_short_text_and_the_specs_stay() {
+fn the_staff_s_rules_are_not_in_the_short_text_and_only_where_the_specs_are_stays() {
     let cf = CfWord::bare();
     let text = own(&cf, Some(&specs()));
     let section = text.split_once("## This project's specs\n\n").unwrap().1;
-    assert!(section.contains("A small ask is no spec: you do it yourself."));
-    assert!(section.contains("What Specmint calls research or implementation you do yourself"));
+    // Only where the skill and the specs are: what an ordinary chief is told of specs and the
+    // board is the guide's, for work put on the board.
+    assert!(section.starts_with("Specs are on in this project. Plan specs with the Specmint skill"));
+    assert!(section.ends_with("its paths name it.\n"), "{section}");
+    assert_eq!(section.lines().count(), 1);
     assert!(!own(&cf, None).contains("## This project's specs"));
 }
 
@@ -107,7 +110,7 @@ fn the_staff_s_rules_are_not_in_the_short_text_and_the_specs_stay() {
 fn the_guide_is_the_ordinary_text_with_its_four_parts_said_for_the_board() {
     let cf = CfWord::bare();
     let ordinary = role_instructions(&Env::default(), "chief", &[], &cf, None).unwrap();
-    let guide = guide_instructions(&[], &cf, None).unwrap();
+    let guide = guide_instructions(&[], &cf, None, None).unwrap();
     // Without the frontmatter and the three parts that differ, the two are one text.
     let ordinary_rest = ordinary.split_once("\n---\n\n").unwrap().1;
     let ordinary_rest = ordinary_rest
@@ -173,7 +176,7 @@ fn the_guide_has_the_staff_the_tiers_the_window_s_cf_and_the_staff_s_rules() {
         roles: vec!["worker".to_owned()],
         work_tier: Some(cf_proto::agents::WorkTier::Standard),
     }];
-    let guide = guide_instructions(&staff, &cf, Some("The person's exact rules.")).unwrap();
+    let guide = guide_instructions(&staff, &cf, None, Some("The person's exact rules.")).unwrap();
     assert!(guide.contains("crisp-comet"));
     assert!(guide.contains("/opt/cf/bin/cf task add --tier"));
     assert!(!guide.contains("{{"));
@@ -191,7 +194,7 @@ fn the_guide_has_the_staff_the_tiers_the_window_s_cf_and_the_staff_s_rules() {
         ordinary.split_once(heading).unwrap().1
     );
     assert_eq!(
-        guide_instructions(&staff, &cf, None).unwrap(),
+        guide_instructions(&staff, &cf, None, None).unwrap(),
         guide.split_once(&format!("\n{heading}")).unwrap().0
     );
 }
@@ -250,7 +253,7 @@ fn the_own_hands_texts_are_the_goldens() {
         let text = own(&cf, choice.as_ref());
         assert_same_text(&text, GOLDEN["ownHandsChief"][key].as_str().unwrap(), key);
     }
-    let guide = guide_instructions(&[], &cf, None).unwrap();
+    let guide = guide_instructions(&[], &cf, None, None).unwrap();
     assert_same_text(&guide, GOLDEN["ownHandsGuide"].as_str().unwrap(), "guide");
     assert!(guide
         .contains("A tier may be served by a member's backup while that member is out of quota"));
@@ -264,4 +267,25 @@ fn own_hands_changes_only_the_chief() {
         role_instructions_for(&Env::default(), "worker", &[], &CfWord::bare(), None, true).unwrap(),
         ordinary
     );
+}
+
+#[test]
+fn the_guide_of_a_project_with_specs_on_says_what_an_ordinary_chief_is_told_of_them_for_the_board()
+{
+    let cf = CfWord::bare();
+    let without = guide_instructions(&[], &cf, None, None).unwrap();
+    let with = guide_instructions(&[], &cf, Some("plans"), Some("A rule.")).unwrap();
+    let ordinary = role_instructions(&Env::default(), "chief", &[], &cf, Some(&specs())).unwrap();
+    let board = ordinary
+        .split_once("its paths name it.\n")
+        .expect("the section")
+        .1;
+    assert!(!without.contains("Use a spec when the human asks"));
+    assert!(
+        with.contains(board),
+        "the same words the ordinary chief has: {with}"
+    );
+    assert!(!with.contains("Specs are on in this project"));
+    // The rules stay last, as they are in every text that has them.
+    assert!(with.find(board).unwrap() < with.find("A rule.").unwrap());
 }

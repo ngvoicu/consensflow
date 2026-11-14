@@ -117,6 +117,18 @@ impl Dispatcher {
         project.specs_setting(&app)
     }
 
+    /// Where `project`'s specs are kept for `participant`, a chief, now: none where its
+    /// project has them off. The board's guide tells a chief with its own hands what an
+    /// ordinary chief's text says of specs and the board where this is some.
+    pub fn specs_folder(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+    ) -> Option<String> {
+        self.specs_setting(project, participant)
+            .map(|setting| setting.folder)
+    }
+
     /// The specs `participant`'s launch is given in `project`: none for any
     /// member, and none for a chief whose project has them off. What the app
     /// says (whether, the folder and the variant) is read from its settings unless

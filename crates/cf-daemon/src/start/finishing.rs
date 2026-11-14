@@ -46,6 +46,15 @@ pub(super) fn held(engine: &Rc<OnceCell<Rc<Dispatcher>>>) -> Rc<crate::api::cont
     })
 }
 
+/// Where the project's specs are kept for its chief, as the engine, once it exists, says
+/// ([`crate::api::context::Specing`]).
+pub(super) fn specs_folder(
+    engine: &Rc<OnceCell<Rc<Dispatcher>>>,
+) -> Rc<crate::api::context::Specing> {
+    let engine = Rc::clone(engine);
+    Rc::new(move |project, participant| engine.get()?.specs_folder(project, participant))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

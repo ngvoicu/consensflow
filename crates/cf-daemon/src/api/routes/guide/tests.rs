@@ -60,6 +60,36 @@ async fn the_project_s_rules_for_its_staff_are_in_the_guide_as_they_are_now() {
 }
 
 #[tokio::test]
+async fn where_the_project_has_specs_on_the_guide_tells_the_chief_what_an_ordinary_chief_is_told_of_them(
+) {
+    let scene = scene();
+    let text = guide(&scene.context, &scene.chief).await.1["text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert!(
+        !text.contains("Use a spec when the human asks"),
+        "off: {text}"
+    );
+    *scene.specs_folder.borrow_mut() = Some("docs/specs".to_owned());
+    write_rules(&scene, Some("- Push to origin only."));
+    let text = guide(&scene.context, &scene.chief).await.1["text"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let board = cf_engine::roles::ProjectSpecs::board_for("docs/specs");
+    let at = text.find(&board).expect("the specs and the board");
+    assert!(
+        text[at + board.len()..].contains("- Push to origin only."),
+        "the rules come after"
+    );
+    assert!(
+        !text.contains("Specs are on in this project"),
+        "where the skill is stays in the short text: {text}"
+    );
+}
+
+#[tokio::test]
 async fn a_member_is_told_the_guide_is_the_chief_s() {
     let scene = scene();
     let (status, said) = guide(&scene.context, &scene.zeus).await;

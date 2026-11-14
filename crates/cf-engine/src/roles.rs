@@ -165,15 +165,19 @@ pub fn role_instructions_for(
 
 /// The board's guide a chief that does the work with its own hands reads on demand
 /// (`cf guide`): the ordinary chief's text for the board, with the project's rules for its
-/// staff after it, as they are now and the staff as it is now. It is made from the same
-/// `chief.md` as the ordinary chief's text, so the two cannot drift.
+/// staff after it, as they are now and the staff as it is now; where the project has specs on
+/// (`specs_folder`, where they are kept), what the ordinary chief is told of specs and the
+/// board comes before the rules. It is made from the same `chief.md` and the same specs text
+/// as the ordinary chief's text, so the two cannot drift.
 pub fn guide_instructions(
     staff: &[StaffRow],
     cf: &CfWord,
+    specs_folder: Option<&str>,
     rules: Option<&str>,
 ) -> Result<String, RoleError> {
     let guide = filled(chief::guide()?, staff, cf)?;
-    Ok(with_staff_rules(guide, "chief", rules))
+    let specs = specs_folder.map_or_else(String::new, ProjectSpecs::board_for);
+    Ok(with_staff_rules(guide + &specs, "chief", rules))
 }
 
 /// `text`, a chief's, with the shell paragraph, the work tiers, the staff table and the

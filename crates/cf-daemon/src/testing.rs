@@ -124,6 +124,9 @@ pub struct Scene {
     /// What the scene's engine was asked to finish.
     pub finishings: Rc<Finishings>,
     pub project: ProjectView,
+    /// Where the scene's engine says the project's specs are kept for its chief: none, where
+    /// it has them off.
+    pub specs_folder: Rc<RefCell<Option<String>>>,
     /// The chief's window's token.
     pub chief: String,
     /// The worker `zeus`'s window's token.
@@ -291,6 +294,7 @@ pub fn scene() -> Scene {
     let ledger = Rc::new(RefCell::new(ledger));
     let finishings = Rc::new(Finishings::default());
     let finishing = (Rc::clone(&finishings), Rc::clone(&ledger));
+    let specs_folder: Rc<RefCell<Option<String>>> = Rc::default();
     let context = Rc::new(Context {
         ledger,
         credentials: Rc::new(credentials),
@@ -328,6 +332,10 @@ pub fn scene() -> Scene {
         cf: Rc::new(|participant| {
             crate::seams::cf_word_of(participant, "/bundle/bin/cf", cfg!(windows))
         }),
+        specs_folder: {
+            let folder = Rc::clone(&specs_folder);
+            Rc::new(move |_, _| folder.borrow().clone())
+        },
         tooling_calls: false,
     });
     Scene {
@@ -335,6 +343,7 @@ pub fn scene() -> Scene {
         context,
         kicks,
         finishings,
+        specs_folder,
         project,
         chief,
         zeus,

@@ -216,6 +216,7 @@ fn tooling(scene: &Scene, on: bool) -> Rc<context::Context> {
         log: Rc::clone(&given.log),
         trace: Rc::clone(&given.trace),
         cf: Rc::clone(&given.cf),
+        specs_folder: Rc::clone(&given.specs_folder),
         tooling_calls: on,
     })
 }
