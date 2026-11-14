@@ -237,8 +237,8 @@ runs = ["hd-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dialogs.rs"
-find = "        if starting || observed.unnamed || observed.switched.is_some() || sign == DialogSign::Shut {"
-replace = "        if starting || observed.unnamed || observed.switched.is_some() {"
+find = "        if observed.switched.is_some() || sign == DialogSign::Shut {"
+replace = "        if observed.switched.is_some() {"
 
 [[plant]]
 name = "harness dialogs: choices a conversation lists above the prompt are taken for a dialog"
@@ -477,8 +477,8 @@ runs = ["hd-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dialogs.rs"
-find = "        self.tell_dialog_with_disposition(project, participant, &body, true)\n    }\n\n    /// The task of"
-replace = "        let _ = body;\n        Ok(())\n    }\n\n    /// The task of"
+find = "        if let Some(id) = self.tell_dialog_with_disposition(project, participant, &body, true)? {\n            record.dialog.borrow_mut().shown_notes.push(id);\n        }"
+replace = "        let _ = &body;"
 
 [[plant]]
 name = "harness dialogs: Claude's list takes a permission rule's ask for a hook's"
@@ -1350,13 +1350,14 @@ find = '''
                 quoted(&decline.choice)
             ),
         };
-        self.tell_dialog_with_disposition(project, participant, &body, true)'''
+        if let Some(id) = self.tell_dialog_with_disposition(project, participant, &body, true)? {
+            record.dialog.borrow_mut().shown_notes.push(id);
+        }'''
 replace = '''
                 quoted(&decline.choice)
             ),
         };
-        let _ = &body;
-        Ok(())'''
+        let _ = &body;'''
 
 [[plant]]
 name = "harness dialogs: once: a second request under the status of the first is taken for the first, and never told"

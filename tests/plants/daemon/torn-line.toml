@@ -446,8 +446,8 @@ runs = ["engine-lost-lines"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = "                let aside = self.tell_it_goes_on(project, &thread, &said, &words)?;"
-replace = "                let aside = self.tell_it_goes_on(project, &thread, &said, &words_of(&answers.final_run))?;"
+find = "                next.aside = self.tell_it_goes_on(project, &thread, &said, &words)?;"
+replace = "                next.aside = self.tell_it_goes_on(project, &thread, &said, &words_of(&answers.final_run))?;"
 
 [[plant]]
 name = "torn line: a line the hold's note said is told again when the woken turn is under way"
