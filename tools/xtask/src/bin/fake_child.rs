@@ -50,7 +50,10 @@ fn main() -> ExitCode {
         _ => Ok(()),
     };
     if let Err(cause) = build {
-        eprintln!("fake cargo could not make its build products: {cause}");
+        let _ = writeln!(
+            io::stderr().lock(),
+            "fake cargo could not make its build products: {cause}"
+        );
         return ExitCode::FAILURE;
     }
     if let Some(probe) = env.text("FAKE_CHILD_PROBE") {
