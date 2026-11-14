@@ -257,6 +257,7 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "project.compaction",
     "project.advisor_tool",
     "project.prompt_suggestion",
+    "project.own_hands",
     "models.get",
     "member.edit",
 ];
