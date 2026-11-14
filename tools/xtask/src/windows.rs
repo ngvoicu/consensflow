@@ -212,11 +212,11 @@
 //! names another under it. Run one at a time: a live run's windows are the
 //! machine's.
 //!
-//! A run that ended there with a status then has what it left in `.runs/live-matrix` there
-//! brought back to the main checkout's `.runs/live-matrix` here, the files it lacks (the sweep of
-//! a later run removes what is older than two weeks from the
-//! machine's copy), and says so on the error stream; the status is the command's own either way
-//! ([`fetch`]). Only a run that began has anything to bring back: one that ended before the
+//! A run that ended there with a status has the files it left in `app/src-tauri/target/live-matrix`
+//! brought back to the same folder in the main checkout, where they are missing. Both folders
+//! stay with their respective build outputs and can be removed when those are cleaned. The fetch
+//! says what it did on the error stream; the status is the command's own either way ([`fetch`]).
+//! Only a run that began has anything to bring back: one that ended before the
 //! machine said its tree (its lock refused it, with 75; its unpack failed) asks nothing of the
 //! machine after it ([`run::Outcome::NotStarted`]).
 //!

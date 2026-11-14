@@ -102,7 +102,7 @@ impl Readers {
         reaches
             && !file.contains("node_modules/")
             && !file.starts_with("app/ui/vendor/")
-            && !file.starts_with(".runs/live-matrix/")
+            && !file.starts_with("app/src-tauri/target/live-matrix/")
     }
 }
 
@@ -349,7 +349,7 @@ fn the_files_that_reach_a_reader_are_the_texts_of_the_product_and_not_its_tests(
         "crates/cf/src/lib.toml",
         "app/ui/vendor/xterm.js",
         "app/ui/node_modules/x/index.js",
-        ".runs/live-matrix/run.md",
+        "app/src-tauri/target/live-matrix/run.md",
         "skill/chief.txt",
         "package.json",
     ] {

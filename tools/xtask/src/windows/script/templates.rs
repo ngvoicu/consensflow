@@ -356,7 +356,7 @@ if (-not $failed.Count) {
 /// The script that lists the reports, with a mark where the copy's folder goes.
 pub(super) const REPORTS: &str = r##"
 $ProgressPreference = 'SilentlyContinue'
-$reports = Join-Path (Join-Path $env:USERPROFILE '«dir»') '.runs\live-matrix'
+$reports = Join-Path (Join-Path $env:USERPROFILE '«dir»') 'app\src-tauri\target\live-matrix'
 if (Test-Path -LiteralPath $reports -PathType Container) {
   $folder = Get-Item -LiteralPath $reports
   if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) {

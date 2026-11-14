@@ -148,8 +148,8 @@ pub const KEPT: [&str; 19] = [
 /// the same age rule (a folder is judged by what is in it, a link is not entered). No run that
 /// is queued or going wants it: a run waits a day at most (`--wait`), and a task that has not
 /// written a log in two weeks has its facts in the brain, where the board's cleaning puts them. A
-/// job still writing keeps its log young. The same fortnight as the reports', which are the same
-/// kind of thing.
+/// job still writing keeps its log young. Live-matrix evidence is kept with the build folder
+/// instead and is not part of this age sweep.
 pub const RUNS_KEPT_DAYS: u32 = 14;
 
 /// What `--build` runs first: the packages, the page, a pane's cf.exe and the pane host.
@@ -599,7 +599,7 @@ pub fn stop_script(dir: &str, id: &str) -> String {
     )
 }
 
-/// What lists the reports a run left in `.runs/live-matrix` on the machine, to be brought back
+/// What lists the reports a run left in `app/src-tauri/target/live-matrix` on the machine, to be brought back
 /// ([`super::fetch`]): each file under it as `<path from it, with />` and a tab and its size. A folder that is
 /// not there lists nothing, nor does one that is itself a link (the prune refuses it too: it
 /// would be walked to where it goes).

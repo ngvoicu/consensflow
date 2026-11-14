@@ -1073,7 +1073,7 @@ file = "tools/xtask/src/windows/script/templates.rs"
 find = "  $folder = Get-Item -Force -LiteralPath $runs\n  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }\n"
 replace = "  $folder = Get-Item -Force -LiteralPath $runs\n  $null = Clear-Old $folder\n"
 
-# What a run leaves in `.runs/live-matrix` there is brought back here (T-141, P3-3),
+# What a run leaves in `app/src-tauri/target/live-matrix` there is brought back here (T-141, P3-3),
 # the files this checkout lacks and nothing it has, by names of a report's alone, whole.
 [[plant]]
 name = "windows runner: the reports a run left are not brought back"

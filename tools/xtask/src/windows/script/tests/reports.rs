@@ -1,4 +1,4 @@
-//! The script that lists what a run left in `.runs/live-matrix` there, to be brought back
+//! The script that lists what a run left in `app/src-tauri/target/live-matrix` there, to be brought back
 //! ([`reports_script`]): read in its text, and, on Windows, run by the machine's PowerShell on a
 //! profile made for it.
 
@@ -8,7 +8,7 @@ use super::*;
 fn the_listing_names_each_file_by_its_path_and_size() {
     let text = reports_script(DIR);
     assert!(
-        text.contains("$reports = Join-Path (Join-Path $env:USERPROFILE 'consensflow-build') '.runs\\live-matrix'\n"),
+        text.contains("$reports = Join-Path (Join-Path $env:USERPROFILE 'consensflow-build') 'app\\src-tauri\\target\\live-matrix'\n"),
         "{text}"
     );
     assert!(text.contains("\"$name`t$($file.Length)\""), "{text}");
@@ -16,10 +16,9 @@ fn the_listing_names_each_file_by_its_path_and_size() {
     assert!(text.is_ascii(), "{text}");
 }
 
-/// The prune refuses a reports folder that is itself a link (it would be walked to where it
-/// goes), and the listing does as well: a junction to a folder elsewhere would have that
-/// folder's files brought back as the reports (T-194, P3-6). A link under the folder is not
-/// entered by `Get-ChildItem -Recurse` of Windows PowerShell 5.1.
+/// The listing refuses a reports folder that is itself a link: a junction to a folder elsewhere
+/// would have that folder's files brought back as the reports (T-194, P3-6). A link under the
+/// folder is not entered by `Get-ChildItem -Recurse` of Windows PowerShell 5.1.
 #[test]
 fn the_listing_does_not_walk_a_reports_folder_that_is_itself_a_link() {
     let text = reports_script(DIR);
@@ -48,7 +47,10 @@ fn powershell_lists_the_reports_of_a_folder_and_none_of_a_link() {
 
     let profile = tempfile::tempdir().unwrap();
     let elsewhere = tempfile::tempdir().unwrap();
-    let reports = profile.path().join(DIR).join(".runs").join("live-matrix");
+    let reports = profile
+        .path()
+        .join(DIR)
+        .join("app/src-tauri/target/live-matrix");
     let list = |profile: &std::path::Path| {
         let vars: Vec<_> = Env::from_process()
             .iter()

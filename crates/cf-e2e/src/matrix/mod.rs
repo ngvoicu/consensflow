@@ -11,7 +11,7 @@
 //! - [`observe`]: the board, the events and the records, and the tasks bound by what they are;
 //! - [`scenario`]: the fixture, the asks and the milestones;
 //! - [`oracle`]: the checks;
-//! - [`evidence`]: the run's folder under `.runs/live-matrix/`, and the owner's files;
+//! - [`evidence`]: the run's folder under `app/src-tauri/target/live-matrix/`, and the owner's files;
 //! - [`run`]: one seating and one scenario, start to end.
 //!
 //! The live suite is `tests/live_matrix.rs` (`cargo xtask live matrix --board 0 --scenario
