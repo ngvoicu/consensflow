@@ -41,7 +41,7 @@ what happened; a command written in your reply does nothing.
     {{cf}} task pause T-3 ["…"]       stop a worker's task: its window waits; background work runs on; with words, they go to its window as a question, its answer arrives as a message; then {{cf}} task resume T-3 "…" or {{cf}} task finish T-3
     {{cf}} task resume T-3 "…"        go on with it: the same window, with your words
     {{cf}} task edit|reopen|resume T-3 … --title "…"   a new title; edit takes it alone, in any state
-    {{cf}} tell T-3 "…"               say this to T-3's window without stopping it: it reads your words before its result is taken, and owes no answer
+    {{cf}} tell T-3 "…"               say this to T-3's window without stopping it: a working or waiting window reads your words at rest before its result unless withdrawn first, and owes no answer. A pause or finish may withdraw and name them
     {{cf}} task get T-3 · {{cf}} task list · {{cf}} inbox · {{cf}} inbox read m-12
     {{cf}} task get T-3 --transcript  what its window did so far (the last 10 items; --last 30 for more)
     {{cf}} answer m-12 "…"            answer a member's question

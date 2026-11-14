@@ -153,6 +153,7 @@ const BOARD: [(&[&str], &str); 19] = [
             "                                    background work runs on; with words, they go to its window\n",
             "                                    as a question and its answer arrives as a message; then\n",
             "                                    cf task resume T-3 \"…\" or cf task finish T-3\n",
+            "                                    a pause withdraws and names your told words not yet in\n",
         ),
     ),
     (
@@ -168,13 +169,15 @@ const BOARD: [(&[&str], &str); 19] = [
         concat!(
             "  cf task finish T-3                take what a working, waiting or paused task's worker said last as its\n",
             "                                    result; what its turn left running is not ended\n",
+            "                                    a finish may withdraw and name told words not yet in\n",
         ),
     ),
     (
         &["tell"],
         concat!(
-            "  cf tell T-3 \"…\"                   say this to T-3's window without stopping it; it reads your\n",
-            "                                    words before its result is taken, and owes no answer\n",
+            "  cf tell T-3 \"…\"                   say this to T-3's window without stopping it; a working\n",
+            "                                    or waiting window reads your words at its next rest before its\n",
+            "                                    result, unless withdrawn first; it owes no answer\n",
             "                                    (queued or open: kept for its window, to go in with or after its brief)\n",
             "  cf tell \"…\"                       a member tells whoever gave its task; nothing waits\n",
         ),

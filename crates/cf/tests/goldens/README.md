@@ -35,6 +35,12 @@ the two sentences name the four in their parentheses (`or, with no tier, --front
 on 2026-11-11, with the daemon's traces of the same words (`cf-board-019`, `-021`, `-028`
 and `-029`).
 
+## Tell withdrawal guidance (T-1641)
+
+The six usage prints say a pause and finish can withdraw and name told words;
+the four prints with the chief's tell also say when it is read unless withdrawn.
+The working-tell reply names the same possibility. Changed in those lines alone.
+
 ## The usage after a tell could wait
 
 `cf tell` to a task still queued, its window not up yet, keeps its words for the window

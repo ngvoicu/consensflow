@@ -105,22 +105,45 @@ mod tests {
             "  cf note \"…\" [--human]             a note to the human; nothing waits on it"
         );
         let tell = of(&["tell"]);
-        assert_eq!(tell.lines().count(), 4);
+        assert_eq!(tell.lines().count(), 5);
         assert!(tell
             .lines()
-            .take(3)
+            .take(4)
             .skip(1)
             .all(|line| line.starts_with(&" ".repeat(CONTINUED))));
         assert!(tell.contains(
             "cf tell \"…\"                       a member tells whoever gave its task; nothing waits"
         ));
         assert!(tell.contains("without stopping it"));
-        assert!(tell.contains("words before its result is taken, and owes no answer"));
-        assert!(tell.lines().nth(2).is_some_and(|line| line
+        assert!(tell.contains("or waiting window reads your words at its next rest before its"));
+        assert!(tell.contains("result, unless withdrawn first; it owes no answer"));
+        assert!(tell.lines().nth(3).is_some_and(|line| line
             .ends_with("(queued or open: kept for its window, to go in with or after its brief)")));
         let pause = of(&["task", "pause"]);
         assert!(pause.contains("as a question and its answer arrives as a message"));
         assert!(pause.contains("cf task resume T-3 \"…\" or cf task finish T-3"));
+    }
+
+    #[test]
+    fn tell_pause_and_finish_help_explain_withdrawal() {
+        let tell = of(&["tell"]);
+        let pause = of(&["task", "pause"]);
+        let finish = of(&["task", "finish"]);
+        let missing: Vec<_> = [
+            ("tell", tell.contains("unless withdrawn first")),
+            (
+                "pause",
+                pause.contains("withdraws and names your told words"),
+            ),
+            ("finish", finish.contains("withdraw and name told words")),
+        ]
+        .into_iter()
+        .filter_map(|(name, present)| (!present).then_some(name))
+        .collect();
+        assert!(
+            missing.is_empty(),
+            "missing withdrawal guidance: {missing:?}"
+        );
     }
 
     #[test]

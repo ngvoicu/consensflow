@@ -518,7 +518,10 @@ fn tell(
             "T-{number} is queued: m-{id} waits for @{window}'s window and goes in after its brief. Nothing is paused, and nothing waits for an answer."
         ),
     };
-    Ok(Said::new(message, format!("{text}\n{sent}")))
+    Ok(Said::new(
+        message,
+        format!("{text} A pause or finish may withdraw it first and name it.\n{sent}"),
+    ))
 }
 
 fn answer(

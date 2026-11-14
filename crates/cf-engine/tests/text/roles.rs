@@ -582,9 +582,13 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
         r#"cf task edit T-3 "…" \[--tier <tier>\] \[--needs …\] \[--before …\]\s+change the brief, tier, needs or before of a task before any window has its brief \(open, queued, or paused\); T-4,T-5 replaces a list, \+T-5 adds, -T-5 removes"#,
         &text
     ));
+    assert!(
+        text.contains("A pause or finish may withdraw and name them"),
+        "the chief must know a tell can be withdrawn: {text}"
+    );
     // A tell is read before the result without stopping; pause with words asks instead.
     assert!(found(
-        r#"cf tell T-3 "…"\s+say this to T-3's window without stopping it: it reads your words before its result is taken, and owes no answer"#,
+        r#"cf tell T-3 "…"\s+say this to T-3's window without stopping it: a working or waiting window reads your words at rest before its result unless withdrawn first, and owes no answer\. A pause or finish may withdraw and name them"#,
         &text
     ));
     assert!(found(

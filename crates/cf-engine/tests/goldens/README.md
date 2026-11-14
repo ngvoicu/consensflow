@@ -13,6 +13,11 @@ release `v3.0.0-alpha.82`, and in `21297242`, the commit before it was deleted.
 
 ## Changed by hand after Node
 
+The twelve ordinary chief rows explain that a pending tell can be withdrawn
+and named by a pause or finish. The four `ownHandsChief` rows take the same
+pause and tell command text, which was newer than their own-hands recording
+(T-1641, `skill/core/chief.md`). Only those commands changed.
+
 The 27 member role texts say to wait for what the result needs, when it is
 delivered, and to end background leftovers (T-1644, `skill/core/staff.md`). Their
 shared paragraph was changed in those words alone; the other member roles have
