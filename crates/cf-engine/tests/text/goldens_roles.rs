@@ -4,7 +4,6 @@
 use cf_base::env::Env;
 use cf_engine::roles::{role_instructions, staff_of, team_table, work_tier_list, RoleError};
 use cf_proto::cf_word::{CfWord, Shell};
-use serde_json::Value;
 
 use super::support::{assert_same_text, participant_of, project_of, staff_row_of, table, GOLDEN};
 
