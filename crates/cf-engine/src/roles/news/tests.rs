@@ -81,11 +81,11 @@ fn own_hands_news_has_each_changed_section_and_fits_in_one_piece() {
     for cf in [
         CfWord::bare(),
         CfWord::new(
-            "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf",
+            "/box/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf",
             Shell::Posix,
         ),
         CfWord::new(
-            r"C:\Program Files\ConsensFlow\resources\cli\bin\cf.exe",
+            r"C:\box\Program Files\ConsensFlow\resources\cli\bin\cf.exe",
             Shell::PowerShell,
         ),
     ] {
