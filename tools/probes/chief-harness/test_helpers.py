@@ -1,7 +1,9 @@
 """Offline checks: python3 -I -B -m unittest discover -s tools/probes/chief-harness."""
 
 import ast
+from contextlib import ExitStack, redirect_stdout
 import hashlib
+import io
 import os
 from pathlib import Path
 import shutil
@@ -213,6 +215,61 @@ class ProbeHelpers(unittest.TestCase):
                                          cwd=folder, env=env, capture_output=True)
                     self.assertNotEqual(ran.returncode, 0)
                     self.assertIn(b"python3 -I tools/probes/chief-harness/", ran.stderr)
+
+    def test_stand_in_codex_runs_copy_check_and_cleanup_end_to_end(self):
+        for probe in self.probes:
+            with self.subTest(probe=probe.__name__), tempfile.TemporaryDirectory() as folder:
+                fixture_home = Path(folder) / "fixture-home"
+                login = fixture_home / ".codex" / "auth.json"
+                login.parent.mkdir(parents=True)
+                login.write_bytes(b"synthetic login")
+                scratch = Path(folder) / "scratch"
+                scratch.mkdir()
+                calls = []
+
+                def verify_copy(env):
+                    self.assertEqual(Path(env["CODEX_HOME"], "auth.json").read_bytes(), b"synthetic login")
+
+                class StandInLines:
+                    def __init__(self, argv, env, cwd):
+                        verify_copy(env)
+                        self.proc = object()
+                        self.replies = iter([{"id": 1}, {"id": 2, "result": {"data": []}}])
+
+                    def send(self, message):
+                        calls.append(message)
+
+                    def answer(self, wanted):
+                        answer = next(self.replies)
+                        if not wanted(answer):
+                            raise AssertionError("the stand-in sent the wrong response")
+                        return answer
+
+                def stand_in_run(argv, env, cwd, stdin=None):
+                    verify_copy(env)
+                    calls.append(argv)
+                    return {"code": 0, "seconds": 0, "out": '{"type":"thread.started","thread_id":"fixture"}\n',
+                            "err": ""}
+
+                output = io.StringIO()
+                with ExitStack() as stack:
+                    stack.enter_context(mock.patch.object(probe, "HOME", str(fixture_home)))
+                    stack.enter_context(mock.patch.object(probe, "HARNESS", "codex"))
+                    stack.enter_context(mock.patch.object(probe, "SIGNED_OUT", False, create=True))
+                    stack.enter_context(mock.patch.object(probe.tempfile, "mkdtemp", return_value=str(scratch)))
+                    stack.enter_context(mock.patch.object(probe.shutil, "which", return_value="stand-in"))
+                    stack.enter_context(mock.patch.object(probe, "Lines", StandInLines, create=True))
+                    stack.enter_context(mock.patch.object(probe, "stop", create=True))
+                    stack.enter_context(mock.patch.object(probe, "exe", return_value="stand-in", create=True))
+                    stack.enter_context(mock.patch.object(probe, "run", side_effect=stand_in_run, create=True))
+                    stack.enter_context(mock.patch.object(sys, "argv", [probe.__file__, "codex"]))
+                    stack.enter_context(redirect_stdout(output))
+                    probe.main()
+                self.assertFalse(scratch.exists())
+                self.assertIn("throwaway removed: True", output.getvalue())
+                self.assertIn("owner's logins unchanged: True", output.getvalue())
+                self.assertEqual(len(calls), 3 if probe.__name__ == "models" else 5)
+                self.assertEqual(login.read_bytes(), b"synthetic login")
 
 
 if __name__ == "__main__":

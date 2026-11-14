@@ -63,7 +63,9 @@ fn references_match(plain: &str, html: &str, differences: &[(&str, &str)]) -> bo
 
 #[test]
 fn paired_references_have_the_same_words() {
-    let pairs: [(&str, &str, &[(&str, &str)]); 3] = [
+    type Difference = (&'static str, &'static str);
+    type Pair = (&'static str, &'static str, &'static [Difference]);
+    let pairs: [Pair; 3] = [
         (
             "core/references/researcher.md",
             "core-html/references/researcher.md",
