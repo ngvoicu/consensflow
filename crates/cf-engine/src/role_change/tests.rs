@@ -403,7 +403,7 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
         .1
     };
     assert_eq!(
-        [parts(6), parts(143), parts(300)],
+        [parts(3), parts(143), parts(300)],
         [2, 2, 3],
         "docs: past one piece, 2 parts to 143 rows, 3 at 300"
     );

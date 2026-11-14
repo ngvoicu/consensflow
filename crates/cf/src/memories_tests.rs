@@ -266,3 +266,9 @@ fn a_board_command_of_a_window_with_a_codex_home_elsewhere_runs_in_the_folder_it
     assert_eq!(code, 0, "{}", String::from_utf8_lossy(&err));
     assert_eq!(window.asked(), ["GET /api/whoami", "POST /api/notes"]);
 }
+
+#[test]
+fn bkv05_chief_names_the_tier_even_when_a_backup_or_vacation_is_in_play() {
+    let chief = include_str!("../../../skill/core/chief.md");
+    assert!(chief.contains("A tier may be served by a member's backup while that member is out of quota; a member on Vacation takes no new tasks, and you still name only the tier."));
+}

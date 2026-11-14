@@ -60,8 +60,8 @@ runs = ["engine-no-adapter", "rig-regression-harness-gone"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = "whose windows ConsensFlow cannot open (remove @{} from the staff and add a member on another harness)\",\n                member.handle, member.handle\n"
-replace = "whose windows ConsensFlow cannot open\",\n                member.handle\n"
+find = "whose windows ConsensFlow cannot open (remove @{handle} from the staff and add a member on another harness)"
+replace = "whose windows ConsensFlow cannot open"
 
 [[plant]]
 name = "harness gone: a pause note says the resume whatever the member's harness"

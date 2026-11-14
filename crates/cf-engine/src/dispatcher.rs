@@ -32,7 +32,8 @@ use std::task::{Context, Poll, Waker};
 use cf_base::time::iso;
 use cf_harness::contract::{Observed, Pane};
 use cf_ledger::{
-    DeletedProject, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
+    DeletedProject, HoldKind, NewMember, NewProject, ParticipantView, ProjectView, RemovedMember,
+    TaskReleased,
 };
 use cf_proto::panes::PaneExit;
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
@@ -46,7 +47,7 @@ use crate::privacy::PrivacyState;
 use crate::record::Record;
 use crate::resume::{Closing, Closings, Coming, ResumeState};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
-use crate::scheduler::{busy_turn, moved_hold, out_words, News, SchedulerState, Unwell};
+use crate::scheduler::{busy_turn, moved_hold, out_words, Held, News, SchedulerState, Unwell};
 use crate::seams::{EngineError, Seams};
 use crate::shown::{Part, Shown};
 use crate::stalls::StallsState;
@@ -259,6 +260,27 @@ impl Dispatcher {
             self.require_adapter(&member.harness)?;
         }
         let project = self.seams.ledger.borrow_mut().create_project(&request)?;
+        if let Some(chief) = project.participants.iter().find(|p| p.handle == "chief") {
+            self.open_soon(chief.id, None).await;
+        }
+        self.project_now(project.id)
+    }
+
+    /// Open a project's validated staff while preserving its source backup links.
+    pub async fn open_project_with_staff(
+        self: &Rc<Self>,
+        request: NewProject,
+        source: serde_json::Value,
+    ) -> Result<Option<ProjectView>, EngineError> {
+        self.require_chief(&request.chief.harness, request.chief.model.as_deref())?;
+        for member in &request.staff {
+            self.require_adapter(&member.harness)?;
+        }
+        let project = self
+            .seams
+            .ledger
+            .borrow_mut()
+            .create_project_with_staff(&source)?;
         if let Some(chief) = project.participants.iter().find(|p| p.handle == "chief") {
             self.open_soon(chief.id, None).await;
         }
@@ -493,6 +515,162 @@ impl Dispatcher {
         }
     }
 
+    /// The member and the sessions of `member` in `found`: what leaves when it does.
+    fn rows_of(&self, found: &ProjectView, member: i64) -> Vec<i64> {
+        std::iter::once(member)
+            .chain(
+                found
+                    .participants
+                    .iter()
+                    .filter(|p| p.member_id == Some(member))
+                    .map(|p| p.id),
+            )
+            .collect()
+    }
+
+    /// The rows of the backup `member` has now, with its sessions: what leaves with it.
+    fn backup_rows(&self, found: &ProjectView, member: i64) -> Vec<i64> {
+        found
+            .participants
+            .iter()
+            .filter(|p| p.backup_of == Some(member) && p.left_at.is_none())
+            .flat_map(|backup| self.rows_of(found, backup.id))
+            .collect()
+    }
+
+    /// A member's backup is taken off the staff, and its sessions and the tasks in them go as
+    /// a member's own do: their windows close.
+    pub async fn remove_backup(
+        self: &Rc<Self>,
+        project: i64,
+        handle: &str,
+    ) -> Result<ParticipantView, EngineError> {
+        let before = self.known_project(project)?;
+        let removed = self
+            .seams
+            .ledger
+            .borrow_mut()
+            .remove_backup(project, handle)?;
+        self.forget(&self.rows_of(&before, removed.id)).await?;
+        self.changed();
+        Ok(removed)
+    }
+
+    /// A member's backup is replaced by another: the old one's windows close as it leaves.
+    pub async fn change_backup(
+        self: &Rc<Self>,
+        project: i64,
+        handle: &str,
+        backup: &NewMember,
+    ) -> Result<ParticipantView, EngineError> {
+        let before = self.known_project(project)?;
+        let old = before
+            .participants
+            .iter()
+            .find(|p| p.handle == handle)
+            .map(|member| self.backup_rows(&before, member.id))
+            .unwrap_or_default();
+        let added = self
+            .seams
+            .ledger
+            .borrow_mut()
+            .change_backup(project, handle, backup)?;
+        self.forget(&old).await?;
+        self.changed();
+        Ok(added)
+    }
+
+    /// The human sends a member, or a backup, on Vacation: it takes no task from now on. A task
+    /// it was given whose window never opened goes back to the board for another member; one in
+    /// a window it has, or was named for it, stays where it is. A session whose window may be
+    /// opening is proved unopened only while its step is held, so a launch that began is never
+    /// taken from under its window.
+    pub async fn send_on_vacation(
+        self: &Rc<Self>,
+        project: i64,
+        handle: &str,
+    ) -> Result<ParticipantView, EngineError> {
+        let found = self.known_project(project)?;
+        let member = found
+            .participants
+            .iter()
+            .find(|p| p.handle == handle && p.role != "human")
+            .ok_or_else(|| {
+                EngineError::said(
+                    "no-participant",
+                    format!("no @{handle} in project {project}"),
+                )
+            })?;
+        // The mark first: nothing is given it from here on, and the sessions are looked at one
+        // by one while their steps are held.
+        let sent = self
+            .seams
+            .ledger
+            .borrow_mut()
+            .send_on_vacation(project, handle, &[])?;
+        self.release_vacation_sessions(project, &found, member.id, handle)
+            .await?;
+        self.changed();
+        Ok(self
+            .project_now(project)?
+            .and_then(|now| now.participants.into_iter().find(|p| p.id == sent.id))
+            .unwrap_or(sent))
+    }
+
+    /// The never-opened tasks of a member's sessions on Vacation go back to the board, each
+    /// session looked at while its step is held. It sets no mark and does nothing for a member
+    /// brought back meanwhile, and it is safe to run again (the Resume runs it for a member
+    /// whose Vacation the app's stop cut short).
+    pub(crate) async fn release_vacation_sessions(
+        self: &Rc<Self>,
+        project: i64,
+        found: &ProjectView,
+        member: i64,
+        handle: &str,
+    ) -> Result<(), EngineError> {
+        for session in found
+            .participants
+            .iter()
+            .filter(|p| p.member_id == Some(member))
+            .map(|p| p.id)
+        {
+            let record = self.record_of(session);
+            let (this, held, handle) = (Rc::clone(self), Rc::clone(&record), handle.to_owned());
+            let work = async move {
+                if this.forgotten(&held) || !this.unopened(&held) {
+                    return Ok(());
+                }
+                this.seams
+                    .ledger
+                    .borrow_mut()
+                    .release_unopened(project, &handle, &[session])?;
+                Ok::<(), EngineError>(())
+            };
+            self.exclusive(&record, work).await.await?;
+        }
+        Ok(())
+    }
+
+    /// Whether a session has never had a window: none open, none being opened or ended, and no
+    /// message on its way. Asked only while its step is held.
+    fn unopened(&self, record: &Record) -> bool {
+        record.window.borrow().pane.is_none()
+            && record.window.borrow().abandoned.is_none()
+            && record.delivery.borrow().delivering.is_none()
+    }
+
+    /// The human brings a member, or a backup, back from Vacation: its quota hold is as it
+    /// was, and the next pass gives it tasks again.
+    pub fn bring_back_from_vacation(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Result<ParticipantView, EngineError> {
+        let back = self.seams.ledger.borrow_mut().bring_back(project, handle)?;
+        self.changed();
+        Ok(back)
+    }
+
     /// The human gives a task in a window to another member of its tier. Its
     /// window is stopped first, even one the human opened; one that would
     /// not stop keeps the task, and the human is told.
@@ -662,19 +840,19 @@ impl Dispatcher {
                     format!("@{handle} left the staff"),
                 ));
             }
-            let mut left = vec![member.id];
-            left.extend(
-                this.known_project(project)?
-                    .participants
-                    .iter()
-                    .filter(|p| p.member_id == Some(member.id))
-                    .map(|p| p.id),
-            );
+            let found = this.known_project(project)?;
+            let mut left = this.rows_of(&found, member.id);
+            // A backup leaves with its member, and so do its sessions.
+            left.extend(this.backup_rows(&found, member.id));
             let removed = this
                 .seams
                 .ledger
                 .borrow_mut()
                 .remove_member(project, &handle)?;
+            // What the ledger says departed is what is forgotten, with what was seen before.
+            left.extend(removed.departed.iter().copied());
+            left.sort_unstable();
+            left.dedup();
             Ok((removed, left))
         };
         let (removed, left) = self.exclusive(&record, work).await.await?;
@@ -1696,7 +1874,7 @@ impl Dispatcher {
         // A window of a member out for its busy model whose own record shows no refusal says
         // so too (T-1112).
         let words = match unwell {
-            None if self.busy_until(owner.id).as_deref() == Some(until.as_str()) => {
+            None if self.kind_of_hold(owner.id, &until) == Held::Busy => {
                 format!("model busy, tried again at {until}")
             }
             _ => out_words(&until, unwell),
@@ -1799,15 +1977,19 @@ impl Dispatcher {
         } else {
             self.reset_of(reported.as_deref())
         };
-        let marked = self.seams.ledger.borrow_mut().mark_out(
+        let kind = match unwell {
+            Some(Unwell::Account(_)) => HoldKind::Account,
+            Some(Unwell::Moved(_)) => HoldKind::Moved,
+            Some(Unwell::Busy(_)) => HoldKind::Busy,
+            None => HoldKind::Quota,
+        };
+        let marked = self.seams.ledger.borrow_mut().mark_out_with_kind(
             owner.id,
             &reset,
             unwell.map_or("out of quota", Unwell::hold),
+            kind,
         )?;
         let until = marked.out_until.clone().unwrap_or_default();
-        if let Some(Unwell::Busy(_)) = unwell {
-            self.marked_busy(owner.id, &until);
-        }
         self.set_activity(
             record,
             Activity::because(ActivityState::Out, out_words(&until, unwell)),

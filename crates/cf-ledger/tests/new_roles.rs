@@ -222,8 +222,20 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
         "every row of the two tables and the projects kept"
     );
     let wide = schema(&raw);
+    // The test helper reconstructs the old tables with today's columns and
+    // index, but drops the new triggers; migration 0039 puts them back.
+    // Compare every other schema object exactly as before.
+    let backup_triggers = [
+        "participant_backup_insert",
+        "participant_backup_update",
+        "participant_backup_owner_update",
+    ];
+    for name in backup_triggers {
+        assert!(wide.iter().any(|(found, _)| found == name));
+    }
     let narrowed: Vec<(String, String)> = wide
         .iter()
+        .filter(|(name, _)| !backup_triggers.contains(&name.as_str()))
         .map(|(name, sql)| {
             (
                 name.clone(),
