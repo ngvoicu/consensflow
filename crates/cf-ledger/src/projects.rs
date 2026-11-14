@@ -593,10 +593,36 @@ pub(crate) fn set_gate(store: &mut Store, id: i64, gate: bool) -> Result<Project
     })
 }
 
+/// End the shown notes of dialogs whose windows died with the daemon. Other
+/// asides, including the task's earlier background hold, stay as they were.
+fn end_restart_dialogs(store: &mut Store, at: &str) -> Result<(), LedgerError> {
+    store.db.execute(
+        "UPDATE message SET receipt = json_set(receipt, '$.over', ?1)
+         WHERE state = 'read' AND sender_id IS NULL AND kind = 'note'
+           AND json_valid(receipt) AND json_extract(receipt, '$.over') IS NULL
+           AND json_extract(receipt, '$.shown') LIKE 'dialog reported in @%''s window'",
+        [at],
+    )?;
+    Ok(())
+}
+
+/// An already suspended project can still have had a window that refused to close.
+fn restart_has_dialogs(store: &Store) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM message WHERE kind = 'note' AND state = 'read' AND sender_id IS NULL
+               AND json_valid(receipt) AND json_extract(receipt, '$.over') IS NULL
+               AND json_extract(receipt, '$.shown') LIKE 'dialog reported in @%''s window'",
+        )?
+        .exists([])?)
+}
+
 /// At daemon start: the panes of every open project died with the previous
 /// process, so each becomes suspended, as the human's Close leaves it, and
-/// stays so until the human resumes it. Its tasks and its messages are as they
-/// were: the board shows them so, and nothing is delivered meanwhile.
+/// stays so until the human resumes it. Its tasks and other messages are as they
+/// were: the board shows them so, and nothing is delivered meanwhile. A dialog
+/// of a window that died is over, even though the engine's watch died with it.
 pub(crate) fn suspend_for_restart(store: &mut Store) -> Result<Vec<ProjectView>, LedgerError> {
     store.write(|store| {
         let open = store
@@ -604,8 +630,11 @@ pub(crate) fn suspend_for_restart(store: &mut Store) -> Result<Vec<ProjectView>,
             .prepare("SELECT id FROM project WHERE state = 'open' ORDER BY id")?
             .query_map([], |row| row.get::<_, i64>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        for id in &open {
+        for (index, id) in open.iter().enumerate() {
             let at = store.at();
+            if index == 0 {
+                end_restart_dialogs(store, &at)?;
+            }
             store.db.execute(
                 "UPDATE project SET state = 'suspended', updated_at = ? WHERE id = ?",
                 params![at, id],
@@ -616,6 +645,10 @@ pub(crate) fn suspend_for_restart(store: &mut Store) -> Result<Vec<ProjectView>,
                 json!({ "from": "open", "to": "suspended" }),
             )?;
             withdraw_queued(store, *id, "ConsensFlow stopped")?;
+        }
+        if open.is_empty() && restart_has_dialogs(store)? {
+            let at = store.at();
+            end_restart_dialogs(store, &at)?;
         }
         // The app's quit ended every meeting: what each held goes in at the Resume.
         end_every_meeting(store)?;

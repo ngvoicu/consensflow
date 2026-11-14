@@ -685,6 +685,10 @@ pub(crate) fn confirm_delivery(
          WHERE carried_by = ? AND state = 'queued'",
             params![at, json!({ "carrier": message_id }).to_string(), message_id],
         )?;
+        crate::tasks::background_exchange(store, message_id, true)?;
+        for id in &rode {
+            crate::tasks::background_exchange(store, *id, true)?;
+        }
         // A row withdrawn after the paste that carried it was handed over (a pause
         // or a cancel took it back) went in the paste all the same: the record says
         // it arrived, and why it reads so (the chief's decision on Calliope's review
@@ -882,6 +886,13 @@ pub(crate) fn retry_delivery(
         // Served whole to its recipient while it was on its way, it is read, as a queued
         // one served so is: not pasted again after the reader had it.
         if settle_when_given_back(store, message_id)? {
+            return known_message(store, message_id);
+        }
+        // A reminder that was handed before its hold ended may have come back. It is no
+        // longer handed now; neither it nor a returned row riding with it may go again.
+        withdraw_stale_among(store, &riding)?;
+        let returned = known_message(store, message_id)?;
+        if withdrawn_if_stale(store, &returned)? {
             return known_message(store, message_id);
         }
         adopt(store, message_id)?;

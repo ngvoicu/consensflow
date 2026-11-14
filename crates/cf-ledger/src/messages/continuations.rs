@@ -260,6 +260,14 @@ fn stale(store: &Store, message: &MessageView) -> Result<Option<String>, LedgerE
     {
         return Ok(None);
     }
+    if message.task_number.is_some_and(|number| {
+        message.body.starts_with(&format!(
+            "T-{number} has been working in the background for "
+        ))
+    }) && crate::tasks::returned_background_reminder(store, message.id)?
+    {
+        return Ok(Some("its background-hold stretch ended".to_owned()));
+    }
     let Some(named) = continuation_tasks(&message.body) else {
         return Ok(None);
     };

@@ -48,6 +48,17 @@ pub fn claude_dialog_identity(dialog: &crate::contract::Dialog) -> crate::contra
     crate::claude::dialog_identity::identity(dialog)
 }
 
+/// The shared screen reader for a test window that supplies its own dialog properties.
+pub fn read_dialog(
+    screen: &[String],
+    shows_prompt: impl FnOnce(&[String]) -> bool,
+) -> Option<crate::contract::Dialog> {
+    crate::shared::dialog::read(screen).map(|shown| crate::contract::Dialog {
+        prompt_below: shows_prompt(&shown.below),
+        ..shown.dialog
+    })
+}
+
 /// Claude Code's decline of its Computer Use permission prompt
 /// ([`crate::contract::Window::safe_decline`]), for a test window that stands in for it, so that
 /// the engine's tests hold the real key, words and guards (T-1300).

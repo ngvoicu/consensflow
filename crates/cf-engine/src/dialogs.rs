@@ -36,6 +36,9 @@
 //! later look that still shows the dialog with that choice, by its one key, once: a look that
 //! finds it gone, or drawn otherwise, presses nothing, and a key the window did not take is not
 //! pressed again. A dialog that goes and comes again is told again.
+//! A member's dialog that ConsensFlow will decline, or whose harness says it closes by itself,
+//! asks its task's giver no decision: the note is shown to a chief, not typed. Other givers and
+//! the human receive it as before; a dialog in the chief's own window is unchanged (CLN-75).
 //!
 //! **A decline can be a key with no choice of its own** (T-1300): Claude Code's Computer Use
 //! permission prompt, which a member's `request_access` raises where ConsensFlow.app lacks
@@ -132,6 +135,8 @@ pub(crate) struct DialogWatch {
     /// and whether its key was pressed.
     decline: Option<Decline>,
     declined: bool,
+    /// Shown notes of this dialog, including a notice of a decline, until it is gone.
+    shown_notes: Vec<i64>,
 }
 
 impl Dispatcher {
@@ -154,7 +159,11 @@ impl Dispatcher {
         // says, which conversation it shows is between two.
         let starting = record.window.borrow().trust != Trusting::Past;
         let sign = window.dialog_sign(&observed);
-        if starting || observed.unnamed || observed.switched.is_some() || sign == DialogSign::Shut {
+        if starting || observed.unnamed {
+            return Ok(observed);
+        }
+        if observed.switched.is_some() || sign == DialogSign::Shut {
+            self.end_dialog_notes(project, record)?;
             *record.dialog.borrow_mut() = DialogWatch::default();
             return Ok(observed);
         }
@@ -174,18 +183,27 @@ impl Dispatcher {
             };
             watch.looked.is_none_or(|looked| now - looked >= every)
         };
+        let mut absent = false;
         if due {
             let answer = self.seams.host.screen(&pane).await;
             if self.forgotten(record) {
                 return Ok(observed);
             }
             let shown = answer.map(|answer| Shown::from_snapshot(&answer)).ok();
+            // If only the screen can tell, a refused snapshot or one without a tail
+            // says nothing about the dialog: keep its note and do not act on an old read.
+            // A harness's explicit Open is still told, even when no words can be read.
+            if sign == DialogSign::Screen && shown.as_ref().is_none_or(|shown| !shown.is_known()) {
+                record.dialog.borrow_mut().looked = Some(now);
+                return Ok(observed);
+            }
             let lines = shown.as_ref().map_or(&[][..], Shown::lines);
             // The question of trusting the folder is `trust`'s, whenever it is asked.
             let read = window
                 .dialog(lines)
                 .filter(|_| window.toward_trust(lines).is_none())
                 .filter(|dialog| sign == DialogSign::Open || (dialog.asks && !dialog.prompt_below));
+            absent = sign == DialogSign::Screen && shown.is_some() && read.is_none();
             let mut watch = record.dialog.borrow_mut();
             watch.looked = Some(now);
             watch.shown = read.map(|dialog| {
@@ -195,6 +213,9 @@ impl Dispatcher {
                 };
                 (dialog, looks)
             });
+        }
+        if absent {
+            self.end_dialog_notes(project, record)?;
         }
         let (counts, dialog) = {
             let watch = record.dialog.borrow();
@@ -264,6 +285,7 @@ impl Dispatcher {
             }
             return Ok(observed);
         }
+        self.end_dialog_notes(project, record)?;
         // The chief's window is the human's: a decline that is for a member's window alone is
         // not made there, and the dialog is told as any other (T-1300).
         let decline = dialog
@@ -271,6 +293,10 @@ impl Dispatcher {
             .and_then(|dialog| window.safe_decline(dialog))
             .filter(|decline| !(decline.members_only && participant.role == "chief"));
         let body = told(&participant.handle, dialog.as_ref(), decline.as_ref());
+        let ends_without_answer = decline.is_some()
+            || dialog
+                .as_ref()
+                .is_some_and(|dialog| dialog.closes_after_s.is_some());
         {
             let mut watch = record.dialog.borrow_mut();
             watch.told = Some(key);
@@ -279,8 +305,25 @@ impl Dispatcher {
             watch.told_at = Some(now);
             watch.told_as = identity;
         }
-        self.tell_dialog(project, participant, &body)?;
+        if let Some(id) =
+            self.tell_dialog_with_disposition(project, participant, &body, ends_without_answer)?
+        {
+            record.dialog.borrow_mut().shown_notes.push(id);
+        }
         Ok(observed)
+    }
+
+    /// End just this dialog's shown notes; a task's older background aside may still hold.
+    fn end_dialog_notes(&self, project: &ProjectView, record: &Record) -> Result<(), EngineError> {
+        let notes = record.dialog.borrow().shown_notes.clone();
+        for id in &notes {
+            self.seams.ledger.borrow_mut().end_aside(project.id, *id)?;
+        }
+        record.dialog.borrow_mut().shown_notes.clear();
+        if !notes.is_empty() {
+            self.changed();
+        }
+        Ok(())
     }
 
     /// The decline of the dialog told of in `record`'s window, pressed once, where it is on its
@@ -361,7 +404,10 @@ impl Dispatcher {
                 quoted(&decline.choice)
             ),
         };
-        self.tell_dialog(project, participant, &body)
+        if let Some(id) = self.tell_dialog_with_disposition(project, participant, &body, true)? {
+            record.dialog.borrow_mut().shown_notes.push(id);
+        }
+        Ok(())
     }
 
     /// The task of `participant`'s window whose giver hears of its dialogs: none for the chief's.
@@ -405,25 +451,47 @@ impl Dispatcher {
         participant: &ParticipantView,
         body: &str,
     ) -> Result<(), EngineError> {
+        self.tell_dialog_with_disposition(project, participant, body, false)?;
+        Ok(())
+    }
+
+    fn tell_dialog_with_disposition(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        body: &str,
+        ends_without_answer: bool,
+    ) -> Result<Option<i64>, EngineError> {
         let task = self.dialog_task(participant)?;
         let number = task.as_ref().map(|thread| thread.task.number);
         let requester = task
             .as_ref()
             .map(|thread| thread.task.requester.clone())
             .filter(|requester| requester != "human");
+        let mut shown_id = None;
         for to in requester.into_iter().chain(["human".to_owned()]) {
-            self.seams.ledger.borrow_mut().note(
-                project.id,
-                &NewNote {
-                    from: None,
-                    to,
-                    task: number,
-                    body: body.to_owned(),
-                },
-            )?;
+            let note = NewNote {
+                from: None,
+                to,
+                task: number,
+                body: body.to_owned(),
+            };
+            if ends_without_answer && note.to != "human" {
+                // `show` queues for a non-chief requester as before; the human's note is unchanged.
+                let shown = self.seams.ledger.borrow_mut().show(
+                    project.id,
+                    &note,
+                    &format!("dialog reported in @{}'s window", participant.handle),
+                )?;
+                if shown.receipt.get(cf_ledger::SHOWN).is_some() {
+                    shown_id = Some(shown.id);
+                }
+            } else {
+                self.seams.ledger.borrow_mut().note(project.id, &note)?;
+            }
         }
         self.changed();
-        Ok(())
+        Ok(shown_id)
     }
 }
 
@@ -482,7 +550,7 @@ pub(crate) fn told(handle: &str, dialog: Option<&Dialog>, decline: Option<&Decli
     let closes = dialog
         .and_then(|dialog| dialog.closes_after_s)
         .map_or_else(String::new, |seconds| {
-            format!(" Its harness closes it by itself {seconds} s after it opened.")
+            format!(" Its harness closes it by itself within {seconds} s.")
         });
     format!(
         "{shows} The window waits on it, and nothing is typed into it meanwhile. ConsensFlow presses nothing in it: answer it in that window, or leave it.{closes}"
