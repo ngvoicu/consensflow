@@ -284,7 +284,7 @@ replace = "       ORDER BY m.id DESC LIMIT 1\","
 
 [[plant]]
 name = "tell queued: a tell takes the way of the task as it was read before its words came in"
-meant = "a_tell_goes_the_way_its_task_is_on_once_its_words_are_in"
+meant = "a_queued_task_taken_back_to_the_board_while_its_words_come_in_is_told_as_an_open_one"
 runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
