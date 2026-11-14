@@ -71,7 +71,7 @@ pub(crate) fn daemon_command(
 
 /// The daemon `cf` makes: `cf ui --json --no-open`, with nothing of the app's
 /// own added to its environment.
-#[allow(clippy::disallowed_methods)] // The app starts its daemon itself, holding only its streams: older than cf-process's rule.
+#[allow(clippy::disallowed_methods)] // The daemon is a std `Command` the app finishes (the human's login environment added to its own) and starts itself, to hold its pipes, and it inherits the app's stderr; cf_process::spawn gives a tokio child a whole environment and never inherits stderr.
 fn command_for(cf: &Path) -> Command {
     let mut command = Command::new(cf);
     command.args(["ui", "--json", "--no-open"]);
@@ -406,7 +406,7 @@ fn marker(what: &str) -> String {
 /// from a shell that exits cleanly, all within `timeout` and before the app quits
 /// (`lookup`); none otherwise, and the shell is ended if it still runs. Only the
 /// shell: what its login files started is the user's ([`LoginLookup`]).
-#[allow(clippy::disallowed_methods)] // The app starts the login shell itself, holding only its streams: older than cf-process's rule.
+#[allow(clippy::disallowed_methods)] // The login shell is a std `Child` the app holds in `LoginLookup` to end it at its quit, started on the app's own environment; cf_process::spawn gives a tokio child a whole environment of its own.
 fn asked(
     shell: &Path,
     args: &[&str],

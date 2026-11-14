@@ -1,12 +1,12 @@
 //! ConsensFlow's desktop shell: the Tauri app that holds the page, its daemon and its panes.
 //!
 //! The crate answers to the workspace's lints (Cargo.toml: no `unwrap`, `expect` or print to
-//! stdout or stderr outside tests). A diagnostic is said through [`diag::say`], the one place the
-//! app writes to its stderr, which is its error log. Where the app reads its environment or
-//! starts a process itself, the item says so with its own `#[allow(clippy::disallowed_methods)]`
-//! and its reason (clippy.toml); the lints that refuse an HTTPS client are allowed only by the
-//! one constructor (update_page.rs) and never for the crate (tools/xtask/tests/tls_clients.rs,
-//! T-1253). The modules below that allow a lint for themselves each say why.
+//! stdout or stderr outside tests). A diagnostic is said through [`diag::say`], the app's door to
+//! its stderr, which is its error log; a module that still prints or unwraps allows that lint for
+//! itself on its `mod` line below, with its reason. Where the app reads its environment or starts
+//! a process itself, the item says so with its own `#[allow(clippy::disallowed_methods)]` and its
+//! reason (clippy.toml); the lints that refuse an HTTPS client are allowed only by the one
+//! constructor (update_page.rs) and never for the crate (tools/xtask/tests/tls_clients.rs, T-1253).
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder};

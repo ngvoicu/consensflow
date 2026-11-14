@@ -9,7 +9,7 @@ use std::fmt::Display;
 /// Writes `line` to the error log.
 #[allow(
     clippy::print_stderr,
-    reason = "this is the one place the app writes to its stderr, which is its error log"
+    reason = "this is the app's door to its stderr, which is its error log"
 )]
 pub(crate) fn say(line: impl Display) {
     #[cfg(test)]
