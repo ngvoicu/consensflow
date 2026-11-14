@@ -64,24 +64,27 @@ replace = '''
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-                Held::Quota => format!("@{} is out of quota until {until}", member.handle),
-            });
-        }
         None
     }
+
+    /// The member a session belongs to; a member or the chief is its own.
 '''
 replace = '''
-                Held::Quota => format!("@{} is out of quota until {until}", member.handle),
-            });
-        }
         let until = self
             .record(member.id)
             .and_then(|record| record.quota.borrow().low_until.clone());
         if self.out(until.as_deref()) {
-            return Some(format!("@{} is low on quota", member.handle));
+            return Some(NotFree::Out {
+                handle: member.handle.clone(),
+                held: Held::Quota,
+                kind: Some(HoldKind::Quota),
+                until: until.unwrap_or_default(),
+            });
         }
         None
     }
+
+    /// The member a session belongs to; a member or the chief is its own.
 '''
 
 [[plant.edit]]
@@ -119,24 +122,27 @@ replace = '''
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-                Held::Quota => format!("@{} is out of quota until {until}", member.handle),
-            });
-        }
         None
     }
+
+    /// The member a session belongs to; a member or the chief is its own.
 '''
 replace = '''
-                Held::Quota => format!("@{} is out of quota until {until}", member.handle),
-            });
-        }
         let until = self
             .record(member.id)
             .and_then(|record| record.quota.borrow().low_until.clone());
         if member.harness.as_deref() == Some("codex") && self.out(until.as_deref()) {
-            return Some(format!("@{} is low on quota", member.handle));
+            return Some(NotFree::Out {
+                handle: member.handle.clone(),
+                held: Held::Quota,
+                kind: Some(HoldKind::Quota),
+                until: until.unwrap_or_default(),
+            });
         }
         None
     }
+
+    /// The member a session belongs to; a member or the chief is its own.
 '''
 
 [[plant.edit]]
@@ -174,24 +180,27 @@ replace = '''
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-                Held::Quota => format!("@{} is out of quota until {until}", member.handle),
-            });
-        }
         None
     }
+
+    /// The member a session belongs to; a member or the chief is its own.
 '''
 replace = '''
-                Held::Quota => format!("@{} is out of quota until {until}", member.handle),
-            });
-        }
         let until = self
             .record(member.id)
             .and_then(|record| record.quota.borrow().low_until.clone());
         if member.harness.as_deref() == Some("muse") && self.out(until.as_deref()) {
-            return Some(format!("@{} is low on quota", member.handle));
+            return Some(NotFree::Out {
+                handle: member.handle.clone(),
+                held: Held::Quota,
+                kind: Some(HoldKind::Quota),
+                until: until.unwrap_or_default(),
+            });
         }
         None
     }
+
+    /// The member a session belongs to; a member or the chief is its own.
 '''
 
 [[plant.edit]]
@@ -497,10 +506,10 @@ runs = ["no-low-hold-renewed"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-                    self.out(Some(until)) && self.kind_of_hold(candidate.member.id, until) == held
+                    self.out(Some(until)) && held_of(until, candidate.out_kind) == held
 '''
 replace = '''
-                    self.kind_of_hold(candidate.member.id, until) == held
+                    held_of(until, candidate.out_kind) == held
 '''
 
 [[plant]]

@@ -15,6 +15,7 @@
 
 #![forbid(unsafe_code)]
 
+mod board;
 mod conversations;
 pub mod handles;
 mod ledger;
@@ -43,14 +44,14 @@ mod text;
 mod views;
 mod wake_ups;
 
+pub use board::Board;
 pub use cf_proto::ledger::{
-    Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationView, Cut,
-    DeletedProject, EventView, HeldTask, HistoryFrom, HistoryItem, HistoryKey, HistoryRead,
-    HistoryRow, ItemDetail, Lane, LastSwitch, LatestMessages, LatestTranscript, Links, MemberView,
-    MessageParties, MessageView, ParticipantView, ProjectView, Question, QuestionOption,
-    RemovedMember, Resume, Scanned, StaffMember, Stop, TaskCard, TaskCreated, TaskEdit, TaskEdited,
-    TaskMoved, TaskReleased, TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView,
-    TextCut, TextPart,
+    Begun, ChiefConversation, ChiefOpenWork, Claim, ConversationView, Cut, DeletedProject,
+    EventView, HeldTask, HistoryFrom, HistoryItem, HistoryKey, HistoryRead, HistoryRow, ItemDetail,
+    Lane, LastSwitch, LatestMessages, LatestTranscript, Links, MemberView, MessageParties,
+    MessageView, ParticipantView, ProjectView, Question, QuestionOption, RemovedMember, Resume,
+    Scanned, Stop, TaskCard, TaskCreated, TaskEdit, TaskEdited, TaskMoved, TaskReleased,
+    TaskRetiered, TaskThatFits, TaskThread, TaskTranscript, TaskView, TextCut, TextPart,
 };
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{
@@ -78,6 +79,7 @@ pub use queue::{OVER, SHOWN};
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
 pub use specs::SpecsChange;
 pub use staff::MemberEdit;
+pub use staff::{BackupCandidate, Candidate, HoldKind, StaffMember};
 pub use tasks::{
     asked_role, reopen_or_accept, window_closed, NewTask, RESUME_WORDS, SAME_ERROR_WITHIN_MS,
 };

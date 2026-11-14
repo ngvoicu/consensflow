@@ -3,12 +3,15 @@
 //! member out of quota (`quota`), and the sessions a member's tasks run in
 //! (`sessions`).
 
+mod backup;
 mod pools;
 mod quota;
 mod sessions;
+mod vacation;
 
-use cf_proto::ledger::{ParticipantView, RemovedMember, StaffMember};
+use cf_proto::ledger::{ParticipantView, RemovedMember};
 use rusqlite::{params, params_from_iter, OptionalExtension};
+use serde::Serialize;
 use serde_json::json;
 
 use crate::conversations::current_conversation;
@@ -21,13 +24,43 @@ use crate::store::Store;
 use crate::tasks::tell_stranded_waiters;
 use crate::views::{participant_view, ParticipantRow, TaskRow, PARTICIPANT_SELECT};
 
-pub(crate) use pools::{candidates, has_members_of_tier, holders_of_tier, members, nearest_tier};
-pub(crate) use quota::{mark_back, mark_out};
+pub(crate) use backup::{add_backup, change_backup, remove_backup};
+pub(crate) use pools::{
+    candidates, candidates_for, has_members_of_tier, holders_of_tier, members, nearest_tier,
+};
+pub use pools::{BackupCandidate, Candidate, HoldKind};
+pub(crate) use quota::{hold_kind, mark_back, mark_out, mark_out_kind};
 use sessions::close_session;
 pub(crate) use sessions::{
     bring_back, can_continue, end_session, follow_up_session, has_task_in_hand, require_free,
     start_session, undecided_results, Giving,
 };
+pub(crate) use vacation::{
+    bring_back as return_from_vacation, release_unopened, send as send_on_vacation,
+};
+
+/// A staff row from the last project. Ids are included for rows in a backup
+/// relationship so a new project can reconnect the two without guessing by model.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StaffMember {
+    pub harness: Option<String>,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub model_name: Option<String>,
+    pub designer: bool,
+    pub tier: Option<String>,
+    pub role: String,
+    pub roles: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup_of: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vacation_since: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub out_kind: Option<HoldKind>,
+}
 
 /// A participant joining a project: its handle, its role or its roles (the
 /// first leading), the harness, model and effort it runs on, the name its harness
@@ -42,6 +75,7 @@ pub(crate) struct NewParticipant<'a> {
     pub(crate) model_name: Option<&'a str>,
     pub(crate) designer: bool,
     pub(crate) tier: Option<&'a str>,
+    pub(crate) backup_of: Option<i64>,
 }
 
 impl<'a> NewParticipant<'a> {
@@ -57,6 +91,7 @@ impl<'a> NewParticipant<'a> {
             model_name: None,
             designer: false,
             tier: None,
+            backup_of: None,
         }
     }
 
@@ -77,6 +112,7 @@ impl<'a> NewParticipant<'a> {
             model_name: member.model_name.as_deref(),
             designer: member.designer,
             tier: Some(&member.tier),
+            backup_of: None,
         }
     }
 }
@@ -109,8 +145,8 @@ pub(crate) fn add_participant(
     }
     let at = store.at();
     store.db.execute(
-        "INSERT INTO participant (project_id, handle, role, roles, harness, model, effort, model_name, designer, tier, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO participant (project_id, handle, role, roles, harness, model, effort, model_name, designer, tier, created_at, backup_of)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         params![
             project_id,
             joining.handle,
@@ -123,6 +159,7 @@ pub(crate) fn add_participant(
             i64::from(joining.designer),
             joining.tier,
             at,
+            joining.backup_of,
         ],
     )?;
     let id = store.db.last_insert_rowid();
@@ -154,6 +191,7 @@ pub(crate) fn add_member(
                 "SELECT id, handle FROM participant
                  WHERE project_id = ? AND left_at IS NOT NULL AND member_id IS NULL
                    AND role NOT IN ('human', 'chief')
+                   AND backup_of IS NULL
                    AND harness = ? AND model IS ? AND effort IS ? AND designer = ?
                  ORDER BY id DESC LIMIT 1",
                 params![
@@ -227,6 +265,13 @@ pub(crate) fn set_roles<S: AsRef<str>>(
         let member = store.participant_by_handle(project_id, handle)?;
         require_member_row(store, member.id, "changes roles")?;
         require_staff_role(handle, &member)?;
+        if member.backup_of.is_some() {
+            return Err(LedgerError::refused_with(
+                "backup-roles",
+                format!("@{handle} is a backup: its roles follow its member"),
+                409,
+            ));
+        }
         let held: Vec<String> = serde_json::from_str(&member.roles)?;
         let gained: Vec<&str> = roles
             .iter()
@@ -237,6 +282,10 @@ pub(crate) fn set_roles<S: AsRef<str>>(
         let tier = tier_with_roles(handle, &held, &roles, &gained, tier, member.tier.as_deref())?;
         store.db.execute(
             "UPDATE participant SET role = ?, roles = ?, tier = ? WHERE id = ?",
+            params![roles[0], json!(roles).to_string(), tier, member.id],
+        )?;
+        store.db.execute(
+            "UPDATE participant SET role = ?, roles = ?, tier = ? WHERE backup_of = ? AND left_at IS NULL",
             params![roles[0], json!(roles).to_string(), tier, member.id],
         )?;
         store.log(
@@ -314,6 +363,19 @@ pub(crate) fn edit_member(
                 409,
             ));
         }
+        let tier = if let Some(owner) = member.backup_of {
+            let owner = store.participant_row(owner)?;
+            if owner.tier.as_deref().is_some_and(|tier| tier != edit.tier) {
+                return Err(LedgerError::refused_with(
+                    "backup-tier",
+                    format!("@{handle} is a backup: its tier follows @{}", owner.handle),
+                    409,
+                ));
+            }
+            owner.tier
+        } else {
+            Some(edit.tier.clone())
+        };
         store.db.execute(
             "UPDATE participant SET harness = ?, model = ?, effort = ?, model_name = ?, tier = ?,
                     needs_edit = 0
@@ -323,18 +385,24 @@ pub(crate) fn edit_member(
                 edit.model,
                 edit.effort,
                 edit.model_name,
-                edit.tier,
+                tier,
                 member.id,
                 member.id
             ],
         )?;
+        if member.backup_of.is_none() {
+            store.db.execute(
+                "UPDATE participant SET tier = ? WHERE backup_of = ? AND left_at IS NULL",
+                params![tier, member.id],
+            )?;
+        }
         store.log(
             project_id,
             "member.edited",
             json!({
                 "handle": handle,
                 "from": { "harness": member.harness, "model": member.model, "effort": member.effort, "tier": member.tier },
-                "to": { "harness": edit.harness, "model": edit.model, "effort": edit.effort, "tier": edit.tier },
+                "to": { "harness": edit.harness, "model": edit.model, "effort": edit.effort, "tier": tier },
             }),
         )?;
         // The name holds the model (HMD-12): a member on a model now is named by it, its
@@ -403,14 +471,29 @@ pub(crate) fn remove_member(
         let member = store.participant_by_handle(project_id, handle)?;
         require_member_row(store, member.id, "leaves the staff")?;
         require_staff_role(handle, &member)?;
+        // A backup leaves with its member. Its history stays on its own row;
+        // its active work and sessions leave together with the member's.
+        let backup: Option<(i64, String)> = store.db.query_row(
+            "SELECT id, handle FROM participant WHERE backup_of = ? AND left_at IS NULL",
+            [member.id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?;
+        let mut members = vec![member.id];
+        if let Some((id, backup_handle)) = &backup {
+            members.push(*id);
+            let at = store.at();
+            store.db.execute("UPDATE participant SET left_at = ? WHERE id = ?", params![at, id])?;
+            store.log(project_id, "backup.left", json!({ "handle": backup_handle, "member": handle }))?;
+        }
         let sessions = store
             .db
             .prepare(&format!(
-                "{PARTICIPANT_SELECT} WHERE p.member_id = ? AND p.left_at IS NULL ORDER BY p.id"
+                "{PARTICIPANT_SELECT} WHERE p.member_id IN ({}) AND p.left_at IS NULL ORDER BY p.id",
+                vec!["?"; members.len()].join(", ")
             ))?
-            .query_map([member.id], ParticipantRow::read)?
+            .query_map(params_from_iter(&members), ParticipantRow::read)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        let windows: Vec<i64> = std::iter::once(member.id)
+        let windows: Vec<i64> = members.iter().copied()
             .chain(sessions.iter().map(|session| session.id))
             .collect();
         let open = store
@@ -481,6 +564,7 @@ pub(crate) fn remove_member(
         // After that word, which names the tasks and never the words: each teller
         // hears of its own, the requester too, but the windows that left.
         let leaving: Vec<&str> = std::iter::once(handle)
+            .chain(backup.iter().map(|(_, handle)| handle.as_str()))
             .chain(sessions.iter().map(|session| session.handle.as_str()))
             .collect();
         for ((task, _), dropped) in open.iter().zip(&dropped) {
@@ -496,6 +580,7 @@ pub(crate) fn remove_member(
         Ok(RemovedMember {
             member: participant_view(&store.participant_row(member.id)?)?,
             cancelled,
+            departed: windows,
         })
     })
 }
@@ -510,7 +595,10 @@ pub(crate) fn last_staff(store: &Store) -> Result<Vec<StaffMember>, LedgerError>
     let rows = store
         .db
         .prepare(&format!(
-            "SELECT harness, model, effort, model_name, designer, tier, role, roles FROM participant
+            "SELECT id, harness, model, effort, model_name, designer, tier, role, roles,
+                    backup_of, vacation_since, out_kind,
+                    EXISTS (SELECT 1 FROM participant b WHERE b.backup_of = participant.id AND b.left_at IS NULL) AS has_backup
+             FROM participant
        WHERE project_id = (SELECT MAX(project_id) FROM participant WHERE {member})
          AND {member}
        ORDER BY id"
@@ -526,6 +614,12 @@ pub(crate) fn last_staff(store: &Store) -> Result<Vec<StaffMember>, LedgerError>
                     tier: row.get("tier")?,
                     role: row.get("role")?,
                     roles: Vec::new(),
+                    id: if row.get::<_, Option<i64>>("backup_of")?.is_some()
+                        || row.get::<_, i64>("has_backup")? != 0
+                    { Some(row.get("id")?) } else { None },
+                    backup_of: row.get("backup_of")?,
+                    vacation_since: row.get("vacation_since")?,
+                    out_kind: HoldKind::read(row.get::<_, Option<String>>("out_kind")?.as_deref()),
                 },
                 row.get::<_, String>("roles")?,
             ))

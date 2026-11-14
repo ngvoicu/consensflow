@@ -186,6 +186,11 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
         .chain(harness_models::COLUMNS)
         .chain(drawn_items::COLUMNS)
         .chain(former_handles::COLUMNS)
+        .chain([
+            ("participant", "backup_of"),
+            ("participant", "vacation_since"),
+            ("participant", "out_kind"),
+        ])
     {
         take_column_out(tables, table, column);
     }
@@ -257,6 +262,10 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
         entry["name"] != pasted_into::TRIGGER
             && entry["name"] != model_list::TABLE
             && entry["name"] != drawn_items::TABLE
+            && entry["name"] != "participant_one_live_backup"
+            && entry["name"] != "participant_backup_insert"
+            && entry["name"] != "participant_backup_update"
+            && entry["name"] != "participant_backup_owner_update"
     });
     for entry in schema {
         let name = entry["name"].as_str().map(str::to_owned);
@@ -270,7 +279,10 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
                     .replace(TESTER_IN_THE_CHECKS.0, TESTER_IN_THE_CHECKS.1)
                     .replace(harness_models::COLUMN_LINES, "")
                     .replace(chief_model::COLUMN_LINES, "")
-                    .replace(former_handles::COLUMN_LINES, "");
+                    .replace(former_handles::COLUMN_LINES, "")
+                    .replace(", backup_of INTEGER REFERENCES participant(id)", "")
+                    .replace(", vacation_since TEXT", "")
+                    .replace(", out_kind TEXT\n  CHECK (out_kind IS NULL OR out_kind IN ('quota', 'account', 'busy', 'moved'))", "");
             }
             Some("task") => {
                 *sql = sql
@@ -464,6 +476,60 @@ pub fn hold_apart_what_node_never_logs(events: &mut [Value]) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn node_recordings_compare_every_older_column_without_the_backup_migration() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        crate::migrate(&db, &crate::MIGRATIONS).unwrap();
+        let schema: Vec<Value> = db
+            .prepare("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name")
+            .unwrap()
+            .query_map([], |row| {
+                Ok(json!({"name": row.get::<_, String>(0)?, "sql": row.get::<_, String>(1)?}))
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        let mut dump = json!({"userVersion": 39, "schema": schema, "tables": {
+            "participant": {"columns": ["id", "backup_of", "vacation_since", "out_kind", "handle"],
+                            "rows": [["3", "NULL", "NULL", "NULL", "'alpha'"]]}
+        }});
+        hold_apart_what_node_never_writes(dump["tables"].as_object_mut().unwrap());
+        hold_apart_what_node_never_had_in_its_schema(&mut dump);
+        assert_eq!(
+            dump["tables"]["participant"]["columns"],
+            json!(["id", "handle"])
+        );
+        assert_eq!(
+            dump["tables"]["participant"]["rows"],
+            json!([["3", "'alpha'"]])
+        );
+        let schema = dump["schema"].as_array().unwrap();
+        let participant = schema
+            .iter()
+            .find(|item| item["name"] == "participant")
+            .unwrap()["sql"]
+            .as_str()
+            .unwrap();
+        for name in ["backup_of", "vacation_since", "out_kind"] {
+            assert!(
+                !participant.contains(name),
+                "{name} remained in {participant}"
+            );
+        }
+        for name in [
+            "participant_one_live_backup",
+            "participant_backup_insert",
+            "participant_backup_update",
+            "participant_backup_owner_update",
+        ] {
+            assert!(
+                !schema.iter().any(|item| item["name"] == name),
+                "{name} remained"
+            );
+        }
+        assert!(participant.contains("handle TEXT NOT NULL"));
+    }
 
     #[test]
     fn takes_the_stop_out_of_the_event_that_paused_a_task_and_nothing_else() {

@@ -1,0 +1,860 @@
+{
+  "events": [
+    {
+      "kind": "member.added",
+      "data": {
+        "handle": "zeus",
+        "role": "worker",
+        "roles": [
+          "worker"
+        ],
+        "harness": "claude-code"
+      }
+    },
+    {
+      "kind": "member.added",
+      "data": {
+        "handle": "diana",
+        "role": "worker",
+        "roles": [
+          "worker"
+        ],
+        "harness": "claude-code"
+      }
+    },
+    {
+      "kind": "member.added",
+      "data": {
+        "handle": "hera",
+        "role": "worker",
+        "roles": [
+          "worker"
+        ],
+        "harness": "claude-code"
+      }
+    },
+    {
+      "kind": "member.added",
+      "data": {
+        "handle": "calliope",
+        "role": "reviewer",
+        "roles": [
+          "reviewer"
+        ],
+        "harness": "claude-code"
+      }
+    },
+    {
+      "kind": "member.added",
+      "data": {
+        "handle": "astraeus",
+        "role": "reviewer",
+        "roles": [
+          "reviewer"
+        ],
+        "harness": "claude-code"
+      }
+    },
+    {
+      "kind": "project.created",
+      "data": {
+        "name": "app",
+        "directory": "/work/app"
+      }
+    },
+    {
+      "kind": "conversation.started",
+      "data": {
+        "participant": "chief",
+        "conversation": 1
+      }
+    },
+    {
+      "kind": "conversation.bound",
+      "data": {
+        "conversation": 1,
+        "nativeSession": "native-00000000-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "kind": "task.opened",
+      "data": {
+        "task": 1,
+        "from": "chief",
+        "pool": "worker",
+        "tier": "standard"
+      }
+    },
+    {
+      "kind": "session.started",
+      "data": {
+        "handle": "zeus-amber-pine",
+        "member": "zeus",
+        "role": "worker"
+      }
+    },
+    {
+      "kind": "task.assigned",
+      "data": {
+        "task": 1,
+        "from": "open",
+        "to": "queued",
+        "assignee": "zeus-amber-pine",
+        "member": "zeus",
+        "message": 1
+      }
+    },
+    {
+      "kind": "delivery.begun",
+      "data": {
+        "message": 1,
+        "attempt": 1
+      }
+    },
+    {
+      "kind": "conversation.started",
+      "data": {
+        "participant": "zeus-amber-pine",
+        "conversation": 2
+      }
+    },
+    {
+      "kind": "conversation.bound",
+      "data": {
+        "conversation": 2,
+        "nativeSession": "native-00000000-0000-4000-8000-000000000002"
+      }
+    },
+    {
+      "kind": "delivery.confirmed",
+      "data": {
+        "message": 1
+      }
+    },
+    {
+      "kind": "task.state",
+      "data": {
+        "task": 1,
+        "from": "queued",
+        "to": "working"
+      }
+    },
+    {
+      "kind": "member.out",
+      "data": {
+        "handle": "zeus",
+        "until": "2026-09-19T12:20:00.000Z",
+        "reason": "out of quota"
+      }
+    },
+    {
+      "kind": "task.state",
+      "data": {
+        "task": 1,
+        "from": "working",
+        "to": "paused",
+        "by": null,
+        "because": "out of quota",
+        "until": "2026-09-19T12:20:00.000Z"
+      }
+    },
+    {
+      "kind": "message.sent",
+      "data": {
+        "message": 2,
+        "kind": "note",
+        "from": null,
+        "to": "chief"
+      }
+    },
+    {
+      "kind": "delivery.begun",
+      "data": {
+        "message": 2,
+        "attempt": 1
+      }
+    },
+    {
+      "kind": "task.opened",
+      "data": {
+        "task": 2,
+        "from": "chief",
+        "pool": "worker",
+        "tier": "standard"
+      }
+    },
+    {
+      "kind": "session.started",
+      "data": {
+        "handle": "diana-brisk-birch",
+        "member": "diana",
+        "role": "worker"
+      }
+    },
+    {
+      "kind": "task.assigned",
+      "data": {
+        "task": 2,
+        "from": "open",
+        "to": "queued",
+        "assignee": "diana-brisk-birch",
+        "member": "diana",
+        "message": 3
+      }
+    },
+    {
+      "kind": "delivery.begun",
+      "data": {
+        "message": 3,
+        "attempt": 1
+      }
+    },
+    {
+      "kind": "delivery.confirmed",
+      "data": {
+        "message": 2
+      }
+    },
+    {
+      "kind": "conversation.started",
+      "data": {
+        "participant": "diana-brisk-birch",
+        "conversation": 3
+      }
+    },
+    {
+      "kind": "conversation.bound",
+      "data": {
+        "conversation": 3,
+        "nativeSession": "native-00000000-0000-4000-8000-000000000003"
+      }
+    },
+    {
+      "kind": "delivery.confirmed",
+      "data": {
+        "message": 3
+      }
+    },
+    {
+      "kind": "task.state",
+      "data": {
+        "task": 2,
+        "from": "queued",
+        "to": "working"
+      }
+    },
+    {
+      "kind": "member.out",
+      "data": {
+        "handle": "diana",
+        "until": "9999-12-31T23:59:59.998Z",
+        "reason": "account unavailable"
+      }
+    },
+    {
+      "kind": "task.state",
+      "data": {
+        "task": 2,
+        "from": "working",
+        "to": "paused",
+        "by": null,
+        "because": "account unavailable",
+        "until": "9999-12-31T23:59:59.998Z"
+      }
+    },
+    {
+      "kind": "message.sent",
+      "data": {
+        "message": 4,
+        "kind": "note",
+        "from": null,
+        "to": "chief"
+      }
+    },
+    {
+      "kind": "message.sent",
+      "data": {
+        "message": 5,
+        "kind": "note",
+        "from": null,
+        "to": "human"
+      }
+    },
+    {
+      "kind": "task.opened",
+      "data": {
+        "task": 3,
+        "from": "chief",
+        "pool": "worker",
+        "tier": "standard"
+      }
+    },
+    {
+      "kind": "message.sent",
+      "data": {
+        "message": 6,
+        "kind": "note",
+        "from": null,
+        "to": "chief"
+      }
+    },
+    {
+      "kind": "task.state",
+      "data": {
+        "task": 1,
+        "from": "paused",
+        "to": "queued",
+        "by": null,
+        "message": 7
+      }
+    },
+    {
+      "kind": "session.started",
+      "data": {
+        "handle": "zeus-calm-brook",
+        "member": "zeus",
+        "role": "worker"
+      }
+    },
+    {
+      "kind": "task.assigned",
+      "data": {
+        "task": 3,
+        "from": "open",
+        "to": "queued",
+        "assignee": "zeus-calm-brook",
+        "member": "zeus",
+        "message": 8
+      }
+    },
+    {
+      "kind": "delivery.begun",
+      "data": {
+        "message": 8,
+        "attempt": 1
+      }
+    },
+    {
+      "kind": "message.sent",
+      "data": {
+        "message": 9,
+        "kind": "note",
+        "from": null,
+        "to": "human"
+      }
+    },
+    {
+      "kind": "conversation.started",
+      "data": {
+        "participant": "zeus-calm-brook",
+        "conversation": 4
+      }
+    },
+    {
+      "kind": "conversation.bound",
+      "data": {
+        "conversation": 4,
+        "nativeSession": "native-00000000-0000-4000-8000-000000000004"
+      }
+    },
+    {
+      "kind": "message.sent",
+      "data": {
+        "message": 10,
+        "kind": "note",
+        "from": null,
+        "to": "chief"
+      }
+    },
+    {
+      "kind": "delivery.begun",
+      "data": {
+        "message": 7,
+        "attempt": 1
+      }
+    },
+    {
+      "kind": "delivery.confirmed",
+      "data": {
+        "message": 7
+      }
+    },
+    {
+      "kind": "task.state",
+      "data": {
+        "task": 1,
+        "from": "queued",
+        "to": "working"
+      }
+    },
+    {
+      "kind": "delivery.confirmed",
+      "data": {
+        "message": 8
+      }
+    },
+    {
+      "kind": "task.state",
+      "data": {
+        "task": 3,
+        "from": "queued",
+        "to": "working"
+      }
+    },
+    {
+      "kind": "member.back",
+      "data": {
+        "handle": "diana",
+        "because": "by @human"
+      }
+    },
+    {
+      "kind": "task.state",
+      "data": {
+        "task": 2,
+        "from": "paused",
+        "to": "queued",
+        "by": null,
+        "message": 11
+      }
+    },
+    {
+      "kind": "delivery.begun",
+      "data": {
+        "message": 11,
+        "attempt": 1
+      }
+    },
+    {
+      "kind": "member.out",
+      "data": {
+        "handle": "zeus",
+        "until": "2026-09-19T13:21:00.000Z",
+        "reason": "model busy"
+      }
+    },
+    {
+      "kind": "task.opened",
+      "data": {
+        "task": 4,
+        "from": "chief",
+        "pool": "worker",
+        "tier": "standard"
+      }
+    },
+    {
+      "kind": "session.started",
+      "data": {
+        "handle": "diana-coral-canyon",
+        "member": "diana",
+        "role": "worker"
+      }
+    },
+    {
+      "kind": "task.assigned",
+      "data": {
+        "task": 4,
+        "from": "open",
+        "to": "queued",
+        "assignee": "diana-coral-canyon",
+        "member": "diana",
+        "message": 12
+      }
+    },
+    {
+      "kind": "delivery.begun",
+      "data": {
+        "message": 12,
+        "attempt": 1
+      }
+    },
+    {
+      "kind": "delivery.confirmed",
+      "data": {
+        "message": 11
+      }
+    },
+    {
+      "kind": "task.state",
+      "data": {
+        "task": 2,
+        "from": "queued",
+        "to": "working"
+      }
+    },
+    {
+      "kind": "conversation.started",
+      "data": {
+        "participant": "diana-coral-canyon",
+        "conversation": 5
+      }
+    },
+    {
+      "kind": "conversation.bound",
+      "data": {
+        "conversation": 5,
+        "nativeSession": "native-00000000-0000-4000-8000-000000000005"
+      }
+    },
+    {
+      "kind": "member.out",
+      "data": {
+        "handle": "diana",
+        "until": "2026-09-19T13:21:00.000Z",
+        "reason": "model busy"
+      }
+    },
+    {
+      "kind": "task.opened",
+      "data": {
+        "task": 5,
+        "from": "chief",
+        "pool": "worker",
+        "tier": "standard"
+      }
+    },
+    {
+      "kind": "message.sent",
+      "data": {
+        "message": 13,
+        "kind": "note",
+        "from": null,
+        "to": "chief"
+      }
+    },
+    {
+      "kind": "message.sent",
+      "data": {
+        "message": 14,
+        "kind": "note",
+        "from": null,
+        "to": "human"
+      }
+    }
+  ],
+  "messages": {
+    "human": [
+      {
+        "id": 5,
+        "projectId": 1,
+        "recipient": "human",
+        "recipientId": 1,
+        "recipientRole": "human",
+        "sender": null,
+        "kind": "note",
+        "taskNumber": null,
+        "replyTo": null,
+        "body": "@diana-brisk-birch's account is unavailable: the login was refused. Nothing is sent to it until you say it works again: press Try again now on @diana once it does.",
+        "state": "queued",
+        "attempts": 0,
+        "reason": null,
+        "receipt": null,
+        "questions": null,
+        "choices": null,
+        "urgent": false,
+        "createdAt": "2026-09-19T12:00:00.000Z",
+        "deliveredAt": null
+      },
+      {
+        "id": 9,
+        "projectId": 1,
+        "recipient": "human",
+        "recipientId": 1,
+        "recipientRole": "human",
+        "sender": null,
+        "kind": "note",
+        "taskNumber": 2,
+        "replyTo": null,
+        "body": "m-4, a note from ConsensFlow on T-2, has waited 21 minutes for @chief's window, held: its window reads at work.",
+        "state": "queued",
+        "attempts": 0,
+        "reason": null,
+        "receipt": null,
+        "questions": null,
+        "choices": null,
+        "urgent": false,
+        "createdAt": "2026-09-19T12:21:00.000Z",
+        "deliveredAt": null
+      },
+      {
+        "id": 14,
+        "projectId": 1,
+        "recipient": "human",
+        "recipientId": 1,
+        "recipientRole": "human",
+        "sender": null,
+        "kind": "note",
+        "taskNumber": null,
+        "replyTo": null,
+        "body": "@diana-coral-canyon's model is busy, and m-12 (the words of T-4) waits for it, as does whatever is sent to it until ConsensFlow tries it again at 2026-09-19T13:21:00.000Z.",
+        "state": "queued",
+        "attempts": 0,
+        "reason": null,
+        "receipt": null,
+        "questions": null,
+        "choices": null,
+        "urgent": false,
+        "createdAt": "2026-09-19T12:21:00.000Z",
+        "deliveredAt": null
+      }
+    ],
+    "chief": [
+      {
+        "id": 2,
+        "projectId": 1,
+        "recipient": "chief",
+        "recipientId": 2,
+        "recipientRole": "chief",
+        "sender": null,
+        "kind": "note",
+        "taskNumber": 1,
+        "replyTo": null,
+        "body": "T-1 waits with @zeus-amber-pine: out of quota until 2026-09-19T12:20:00.000Z, or sooner if its account has quota again; it goes on by itself.",
+        "state": "delivered",
+        "attempts": 1,
+        "reason": null,
+        "receipt": {
+          "item": "i-3"
+        },
+        "questions": null,
+        "choices": null,
+        "urgent": false,
+        "createdAt": "2026-09-19T12:00:00.000Z",
+        "deliveredAt": "2026-09-19T12:00:00.000Z"
+      },
+      {
+        "id": 4,
+        "projectId": 1,
+        "recipient": "chief",
+        "recipientId": 2,
+        "recipientRole": "chief",
+        "sender": null,
+        "kind": "note",
+        "taskNumber": 2,
+        "replyTo": null,
+        "body": "T-2 waits with @diana-brisk-birch: its account is unavailable (the login was refused), and nothing resets that; it goes on when the human says the account works again.",
+        "state": "cancelled",
+        "attempts": 0,
+        "reason": "T-2 resumed",
+        "receipt": null,
+        "questions": null,
+        "choices": null,
+        "urgent": false,
+        "createdAt": "2026-09-19T12:00:00.000Z",
+        "deliveredAt": null
+      },
+      {
+        "id": 6,
+        "projectId": 1,
+        "recipient": "chief",
+        "recipientId": 2,
+        "recipientRole": "chief",
+        "sender": null,
+        "kind": "note",
+        "taskNumber": 3,
+        "replyTo": null,
+        "body": "T-3 waits for a free standard worker: @zeus is out of quota until 2026-09-19T12:20:00.000Z; @diana's account is unavailable (its billing or login was refused). If the quota was renewed early, the human presses Try again now on @zeus. If the login or the billing was fixed, the human presses Try again now on @diana.",
+        "state": "cancelled",
+        "attempts": 0,
+        "reason": "T-3 was taken by @zeus",
+        "receipt": null,
+        "questions": null,
+        "choices": null,
+        "urgent": false,
+        "createdAt": "2026-09-19T12:00:00.000Z",
+        "deliveredAt": null
+      },
+      {
+        "id": 10,
+        "projectId": 1,
+        "recipient": "chief",
+        "recipientId": 2,
+        "recipientRole": "chief",
+        "sender": null,
+        "kind": "note",
+        "taskNumber": 1,
+        "replyTo": null,
+        "body": "A turn of T-1's window failed while T-1 was queued, as it stays: @zeus-amber-pine's harness reported a failure; its screen could not be read.",
+        "state": "queued",
+        "attempts": 0,
+        "reason": null,
+        "receipt": null,
+        "questions": null,
+        "choices": null,
+        "urgent": false,
+        "createdAt": "2026-09-19T12:21:00.000Z",
+        "deliveredAt": null
+      },
+      {
+        "id": 13,
+        "projectId": 1,
+        "recipient": "chief",
+        "recipientId": 2,
+        "recipientRole": "chief",
+        "sender": null,
+        "kind": "note",
+        "taskNumber": 5,
+        "replyTo": null,
+        "body": "T-5 waits for a free standard worker: @zeus's model is busy (ConsensFlow tries it again at 2026-09-19T13:21:00.000Z); @diana's model is busy (ConsensFlow tries it again at 2026-09-19T13:21:00.000Z).",
+        "state": "queued",
+        "attempts": 0,
+        "reason": null,
+        "receipt": null,
+        "questions": null,
+        "choices": null,
+        "urgent": false,
+        "createdAt": "2026-09-19T12:21:00.000Z",
+        "deliveredAt": null
+      }
+    ],
+    "zeus": [],
+    "diana": [],
+    "hera": [],
+    "calliope": [],
+    "astraeus": [],
+    "zeus-amber-pine": [
+      {
+        "id": 1,
+        "projectId": 1,
+        "recipient": "zeus-amber-pine",
+        "recipientId": 8,
+        "recipientRole": "worker",
+        "sender": "chief",
+        "kind": "task",
+        "taskNumber": 1,
+        "replyTo": null,
+        "body": "Write the parser",
+        "state": "delivered",
+        "attempts": 1,
+        "reason": null,
+        "receipt": {
+          "item": "i-1"
+        },
+        "questions": null,
+        "choices": null,
+        "urgent": false,
+        "createdAt": "2026-09-19T12:00:00.000Z",
+        "deliveredAt": "2026-09-19T12:00:00.000Z"
+      },
+      {
+        "id": 7,
+        "projectId": 1,
+        "recipient": "zeus-amber-pine",
+        "recipientId": 8,
+        "recipientRole": "worker",
+        "sender": null,
+        "kind": "task",
+        "taskNumber": 1,
+        "replyTo": null,
+        "body": "Resumed: Go on where you stopped.",
+        "state": "delivered",
+        "attempts": 1,
+        "reason": null,
+        "receipt": {
+          "item": "i-7"
+        },
+        "questions": null,
+        "choices": null,
+        "urgent": false,
+        "createdAt": "2026-09-19T12:21:00.000Z",
+        "deliveredAt": "2026-09-19T12:21:00.000Z"
+      }
+    ],
+    "diana-brisk-birch": [
+      {
+        "id": 3,
+        "projectId": 1,
+        "recipient": "diana-brisk-birch",
+        "recipientId": 9,
+        "recipientRole": "worker",
+        "sender": "chief",
+        "kind": "task",
+        "taskNumber": 2,
+        "replyTo": null,
+        "body": "Write the lexer",
+        "state": "delivered",
+        "attempts": 1,
+        "reason": null,
+        "receipt": {
+          "item": "i-4"
+        },
+        "questions": null,
+        "choices": null,
+        "urgent": false,
+        "createdAt": "2026-09-19T12:00:00.000Z",
+        "deliveredAt": "2026-09-19T12:00:00.000Z"
+      },
+      {
+        "id": 11,
+        "projectId": 1,
+        "recipient": "diana-brisk-birch",
+        "recipientId": 9,
+        "recipientRole": "worker",
+        "sender": null,
+        "kind": "task",
+        "taskNumber": 2,
+        "replyTo": null,
+        "body": "Resumed: Go on where you stopped.",
+        "state": "delivered",
+        "attempts": 1,
+        "reason": null,
+        "receipt": {
+          "item": "i-8"
+        },
+        "questions": null,
+        "choices": null,
+        "urgent": false,
+        "createdAt": "2026-09-19T12:21:00.000Z",
+        "deliveredAt": "2026-09-19T12:21:00.000Z"
+      }
+    ],
+    "zeus-calm-brook": [
+      {
+        "id": 8,
+        "projectId": 1,
+        "recipient": "zeus-calm-brook",
+        "recipientId": 10,
+        "recipientRole": "worker",
+        "sender": "chief",
+        "kind": "task",
+        "taskNumber": 3,
+        "replyTo": null,
+        "body": "Write the printer",
+        "state": "delivered",
+        "attempts": 1,
+        "reason": null,
+        "receipt": {
+          "item": "i-6"
+        },
+        "questions": null,
+        "choices": null,
+        "urgent": false,
+        "createdAt": "2026-09-19T12:21:00.000Z",
+        "deliveredAt": "2026-09-19T12:21:00.000Z"
+      }
+    ],
+    "diana-coral-canyon": [
+      {
+        "id": 12,
+        "projectId": 1,
+        "recipient": "diana-coral-canyon",
+        "recipientId": 11,
+        "recipientRole": "worker",
+        "sender": "chief",
+        "kind": "task",
+        "taskNumber": 4,
+        "replyTo": null,
+        "body": "Write the checker",
+        "state": "delivering",
+        "attempts": 1,
+        "reason": null,
+        "receipt": null,
+        "questions": null,
+        "choices": null,
+        "urgent": false,
+        "createdAt": "2026-09-19T12:21:00.000Z",
+        "deliveredAt": null
+      }
+    ]
+  }
+}

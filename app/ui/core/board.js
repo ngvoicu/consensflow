@@ -507,7 +507,11 @@ export function laneStatus(lane, board, now) {
     ]
   }
   const out = outWords(lane, now)
-  if (out !== null) return ['out', lane.holding ? `${out}. ${holding}` : out]
+  if (out !== null) {
+    const backup = lane.backupReady?.[participant.role]
+    const covered = backup ? `${out}; @${backup}, its backup, takes its tasks` : out
+    return ['out', lane.holding ? `${covered}. ${holding}` : covered]
+  }
   if (lane.holding) return ['holding', holding]
   const state = activity?.state ?? 'closed'
   if (state === 'waiting' && activity.reason) return [state, `Waiting: ${activity.reason}`]
@@ -536,6 +540,15 @@ export const tryAgain = (participant, action) =>
       : unavailable(participant)
         ? `Try ${laneName(participant)} again now, once its account works`
         : `Try ${laneName(participant)} again now, before its quota resets`,
+  )
+
+/** The same Vacation control on the board and in the staff dialogs. */
+export const vacationButton = (name, resting, action) =>
+  button(
+    resting ? 'Bring back' : 'Send on Vacation',
+    'quiet-button',
+    action,
+    resting ? `Bring ${name} back from Vacation` : `Send ${name} on Vacation`,
   )
 
 /** A participant's lamp: what its window is doing, at a glance, or that it is out of quota. */
@@ -600,6 +613,7 @@ export class BoardView {
   #stacked = null
   /** The members' rows the human unfolded, by foldKey: every other is folded. */
   #unfolded = new Set()
+  #vacationErrors = new Map()
   /** What the board was drawn from last, to draw it again when a row folds. */
   #drawn = null
 
@@ -965,8 +979,17 @@ export class BoardView {
     // The chief's row only holds its tasks: what it is doing, what it runs on
     // and Switch chief are on its card in the dock.
     if (participant.role === 'chief') return head
-    head.append(identityLine(participant, 'row-meta'))
-    const said = laneStatus(lane, board, now)
+    const owner = board.lanes.find((other) => other.participant.id === participant.backupOf)
+    head.append(
+      owner
+        ? element('span', 'row-meta', `backup of @${owner.participant.handle}`)
+        : identityLine(participant, 'row-meta'),
+    )
+    if (isMember(participant) && participant.vacationSince) {
+      head.append(element('span', 'row-status', 'on Vacation'))
+    }
+    const idleBackup = owner && ['closed', 'idle'].includes(lane.activity?.state ?? 'closed')
+    const said = idleBackup ? null : laneStatus(lane, board, now)
     if (said !== null) {
       const [state, text] = said
       const status = element('span', 'row-status', text)
@@ -1013,6 +1036,19 @@ export class BoardView {
     const session = participant.member !== null
     const acting = acts(board)
     const name = laneName(participant)
+    if (isMember(participant) && acting) {
+      const key = `${participant.projectId}:${participant.handle}`
+      tools.append(
+        vacationButton(name, Boolean(participant.vacationSince), async () => {
+          const refused = await this.#actions.onVacation(this.#lane(participant).participant)
+          if (refused) this.#vacationErrors.set(key, refused)
+          else this.#vacationErrors.delete(key)
+          this.render(this.#drawn)
+        }),
+      )
+      const refused = this.#vacationErrors.get(key)
+      if (refused) tools.append(element('span', 'row-status', refused))
+    }
     if (session && acting) {
       tools.append(
         this.#shows(participant)

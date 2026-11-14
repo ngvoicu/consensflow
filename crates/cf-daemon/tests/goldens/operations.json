@@ -50,7 +50,12 @@
     "project.prompt_suggestion",
     "models.get",
     "member.edit",
-    "project.own_hands"
+    "project.own_hands",
+    "backup.add",
+    "backup.change",
+    "backup.remove",
+    "member.vacation",
+    "member.vacation_back"
   ],
   "ping": "{\"ok\":true}"
 }

@@ -20,17 +20,21 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         .get_mut("lanes")
         .and_then(Value::as_array_mut)
         .ok_or_else(|| Said::from("the board has no lanes"))?;
-    let participants = page
-        .ledger
-        .borrow()
-        .project(body.whole("project")?)?
-        .map(|found| found.participants)
+    let project = page.ledger.borrow().project(body.whole("project")?)?;
+    let ready = project
+        .as_ref()
+        .map(|found| page.engine.backup_ready(found))
+        .transpose()?
         .unwrap_or_default();
+    let participants = project.map(|found| found.participants).unwrap_or_default();
     for (lane, drawn) in board.lanes.iter().zip(lanes) {
         let Some(fields) = drawn.as_object_mut() else {
             continue;
         };
         let id = lane.participant.id;
+        if let Some(backups) = ready.get(&id) {
+            fields.insert("backupReady".to_owned(), json!(backups));
+        }
         fields.insert("activity".to_owned(), page.engine.activity(id));
         fields.insert(
             "pane".to_owned(),

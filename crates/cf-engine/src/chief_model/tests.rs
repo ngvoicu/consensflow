@@ -30,6 +30,8 @@ fn chief(model: Option<&str>, launched: Option<&str>) -> ParticipantView {
         roles: Vec::new(),
         out_until: None,
         out_since: None,
+        backup_of: None,
+        vacation_since: None,
         member_id: None,
         member: None,
         session: None,

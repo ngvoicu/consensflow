@@ -440,8 +440,8 @@ runs = ["cw-page"]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''          (member.model || member.designer) && !this.#missing.includes(harnessOf(member.harness)),'''
-replace = '''          member.model && !this.#missing.includes(harnessOf(member.harness)),'''
+find = '''        (member.model || member.designer) && !this.#missing.includes(harnessOf(member.harness)),'''
+replace = '''        member.model && !this.#missing.includes(harnessOf(member.harness)),'''
 
 [[plant]]
 name = "chief-words: the last staff's designer is picked with its model"
@@ -452,10 +452,10 @@ runs = ["cw-page"]
 file = "app/ui/core/dialogs.js"
 find = '''          member.designer
             ? // An image designer runs on its harness's own model, at no effort and in no tier.
-              { harness: member.harness, role }'''
+              { harness: member.harness, role, _id: id, vacationSince: member.vacationSince }'''
 replace = '''          false
             ? // An image designer runs on its harness's own model, at no effort and in no tier.
-              { harness: member.harness, role }'''
+              { harness: member.harness, role, _id: id, vacationSince: member.vacationSince }'''
 
 [[plant]]
 name = "chief-words: a designer's staff line says its tier"

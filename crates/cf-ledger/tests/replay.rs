@@ -438,12 +438,13 @@ fn departure(node: &str, at: usize) -> Option<String> {
     }
 }
 
-/// How many replays run at once.
-const AT_ONCE: usize = 4;
+/// How many replays run at once inside each test. The test runner can run two
+/// replay tests together, so each test runs one CPU-heavy trace at a time.
+const AT_ONCE: usize = 1;
 
 /// `work` of each of `items`, a few at a time, the answers in the order of
 /// `items`. A replay opens a ledger of its own in a folder of its own and shares
-/// nothing with another, so the replays go four at a time: Windows' runner spent
+/// nothing with another; each test replays them in order. Windows' runner spent
 /// four minutes of its step on the 425 of them, one after another.
 fn alongside<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Vec<R> {
     let threads = thread::available_parallelism().map_or(1, |count| count.get().min(AT_ONCE));
@@ -538,6 +539,23 @@ fn the_replays_are_shared_out_once_each_and_answered_in_the_order_they_came() {
         items.iter().map(|item| item * 2).collect::<Vec<_>>()
     );
     assert!(made.iter().all(|times| times.load(Ordering::Relaxed) == 1));
+}
+
+#[test]
+fn only_the_new_typed_hold_field_is_held_apart_from_nodes_staff_reads() {
+    let mut candidates =
+        json!([{ "handle": "alpha", "outKind": "quota", "backup": {"outKind": "busy"} }]);
+    hold_apart_the_new_hold_kind("candidates", &mut candidates);
+    assert_eq!(
+        candidates,
+        json!([{ "handle": "alpha", "backup": {"outKind": "busy"} }])
+    );
+    let mut board = json!({"lanes": [{"participant": {"handle": "alpha", "outKind": "quota"}, "tasks": [{"outKind": "kept"}]}]});
+    hold_apart_the_new_hold_kind("board", &mut board);
+    assert_eq!(
+        board,
+        json!({"lanes": [{"participant": {"handle": "alpha"}, "tasks": [{"outKind": "kept"}]}]})
+    );
 }
 
 /// A trace is named in [`DEPARTED`] because it differs from Node's, and
@@ -1093,7 +1111,38 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
         ),
         other => unreachable!("{other} is checked before the replay"),
     };
-    Ok(answered.unwrap_or_else(|error| failure(&error)))
+    let mut answered = answered.unwrap_or_else(|error| failure(&error));
+    hold_apart_the_new_hold_kind(method, &mut answered);
+    Ok(answered)
+}
+
+/// Node's recordings predate the typed hold returned by the staff reads.
+/// Hold apart only this additive field in those specific reads; every other
+/// field, including an unexpected backup or Vacation, is still compared.
+fn hold_apart_the_new_hold_kind(method: &str, answer: &mut Value) {
+    match method {
+        "candidates" => {
+            if let Some(candidates) = answer.as_array_mut() {
+                for candidate in candidates {
+                    if let Some(row) = candidate.as_object_mut() {
+                        row.remove("outKind");
+                    }
+                }
+            }
+        }
+        "board" => {
+            if let Some(lanes) = answer.get_mut("lanes").and_then(Value::as_array_mut) {
+                for lane in lanes {
+                    if let Some(participant) =
+                        lane.get_mut("participant").and_then(Value::as_object_mut)
+                    {
+                        participant.remove("outKind");
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Why a trace that has Node's ledger follow its members' tiers departs at that call.

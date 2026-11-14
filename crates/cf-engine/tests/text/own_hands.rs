@@ -252,6 +252,8 @@ fn the_own_hands_texts_are_the_goldens() {
     }
     let guide = guide_instructions(&[], &cf, None).unwrap();
     assert_same_text(&guide, GOLDEN["ownHandsGuide"].as_str().unwrap(), "guide");
+    assert!(guide
+        .contains("A tier may be served by a member's backup while that member is out of quota"));
 }
 
 #[test]

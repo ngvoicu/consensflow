@@ -19,13 +19,15 @@
 //! dispatcher's does (the scenario of `corners-page-002` gives `since`, a pane
 //! `title` and `size`) is then held to the byte too.
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use cf_engine::seams::EngineError;
 use cf_engine::{Activity, ActivityState, Dispatcher, Finished, SwitchTo, SwitchWhen};
 use cf_harness::contract::{Pane, Work};
 use cf_ledger::{
-    DeletedProject, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
+    DeletedProject, NewMember, NewProject, ParticipantView, ProjectView, RemovedMember,
+    TaskReleased,
 };
 use serde_json::{json, Map, Value};
 
@@ -37,6 +39,15 @@ pub trait Engine {
         &self,
         request: NewProject,
     ) -> Work<'_, Result<Option<ProjectView>, EngineError>>;
+
+    /// A project whose source staff may contain backup links.
+    fn open_project_with_staff(
+        &self,
+        request: NewProject,
+        _source: Value,
+    ) -> Work<'_, Result<Option<ProjectView>, EngineError>> {
+        self.open_project(request)
+    }
 
     /// The human's Resume (`resumeProject`).
     fn resume_project(&self, project: i64) -> Work<'_, Result<Option<ProjectView>, EngineError>>;
@@ -85,6 +96,43 @@ pub trait Engine {
         project: i64,
         handle: &'a str,
     ) -> Work<'a, Result<RemovedMember, EngineError>>;
+
+    /// Replace a backup, closing and forgetting the old one's windows.
+    fn change_backup<'a>(
+        &'a self,
+        project: i64,
+        handle: &'a str,
+        backup: &'a NewMember,
+    ) -> Work<'a, Result<ParticipantView, EngineError>>;
+
+    /// Remove a backup, closing and forgetting its windows.
+    fn remove_backup<'a>(
+        &'a self,
+        project: i64,
+        handle: &'a str,
+    ) -> Work<'a, Result<ParticipantView, EngineError>>;
+
+    /// Send a member on Vacation, returning its unopened pool work to the board.
+    fn send_on_vacation<'a>(
+        &'a self,
+        project: i64,
+        handle: &'a str,
+    ) -> Work<'a, Result<ParticipantView, EngineError>>;
+
+    /// Bring a member back from Vacation.
+    fn bring_back_from_vacation(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Result<ParticipantView, EngineError>;
+
+    /// The scheduler's currently eligible backup for each affected role.
+    fn backup_ready(
+        &self,
+        _project: &ProjectView,
+    ) -> Result<BTreeMap<i64, BTreeMap<String, String>>, EngineError> {
+        Ok(BTreeMap::new())
+    }
 
     /// A task given to another member of its tier (`reassignTask`).
     fn reassign_task(
@@ -186,6 +234,14 @@ impl Engine for Rc<Dispatcher> {
         Box::pin(Dispatcher::open_project(self, request))
     }
 
+    fn open_project_with_staff(
+        &self,
+        request: NewProject,
+        source: Value,
+    ) -> Work<'_, Result<Option<ProjectView>, EngineError>> {
+        Box::pin(Dispatcher::open_project_with_staff(self, request, source))
+    }
+
     fn resume_project(&self, project: i64) -> Work<'_, Result<Option<ProjectView>, EngineError>> {
         Box::pin(Dispatcher::resume_project(self, project))
     }
@@ -238,6 +294,46 @@ impl Engine for Rc<Dispatcher> {
         handle: &'a str,
     ) -> Work<'a, Result<RemovedMember, EngineError>> {
         Box::pin(Dispatcher::remove_member(self, project, handle))
+    }
+
+    fn change_backup<'a>(
+        &'a self,
+        project: i64,
+        handle: &'a str,
+        backup: &'a NewMember,
+    ) -> Work<'a, Result<ParticipantView, EngineError>> {
+        Box::pin(Dispatcher::change_backup(self, project, handle, backup))
+    }
+
+    fn remove_backup<'a>(
+        &'a self,
+        project: i64,
+        handle: &'a str,
+    ) -> Work<'a, Result<ParticipantView, EngineError>> {
+        Box::pin(Dispatcher::remove_backup(self, project, handle))
+    }
+
+    fn send_on_vacation<'a>(
+        &'a self,
+        project: i64,
+        handle: &'a str,
+    ) -> Work<'a, Result<ParticipantView, EngineError>> {
+        Box::pin(Dispatcher::send_on_vacation(self, project, handle))
+    }
+
+    fn bring_back_from_vacation(
+        &self,
+        project: i64,
+        handle: &str,
+    ) -> Result<ParticipantView, EngineError> {
+        Dispatcher::bring_back_from_vacation(self, project, handle)
+    }
+
+    fn backup_ready(
+        &self,
+        project: &ProjectView,
+    ) -> Result<BTreeMap<i64, BTreeMap<String, String>>, EngineError> {
+        Dispatcher::backup_ready(self, project)
     }
 
     fn reassign_task(

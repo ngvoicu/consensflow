@@ -260,6 +260,11 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "project.prompt_suggestion",
     "models.get",
     "member.edit",
+    "backup.add",
+    "backup.change",
+    "backup.remove",
+    "member.vacation",
+    "member.vacation_back",
 ];
 
 #[tauri::command]
