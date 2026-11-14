@@ -74,7 +74,16 @@ pub const POWERSHELL_LIMIT: Duration = Duration::from_secs(120);
 /// (T-848); a rig case's own is [`crate::rig::nested::case_of`]. The words after are the
 /// caller's, and so is the environment (none of the test's unless it asks).
 pub fn case_of(binary: impl AsRef<OsStr>, case: &str, limit: Duration) -> Run {
-    Run::new(binary).args(["--exact", case]).limit(limit)
+    let run = Run::new(binary).args(["--exact", case]).limit(limit);
+    if own_var("CF_E2E_STAND_IN").as_deref() == Some("1") {
+        let temp = std::env::temp_dir();
+        run.var("CF_E2E_STAND_IN", "1")
+            .var("TMPDIR", &temp)
+            .var("TMP", &temp)
+            .var("TEMP", &temp)
+    } else {
+        run
+    }
 }
 
 /// How often a program that has not ended is looked at again.

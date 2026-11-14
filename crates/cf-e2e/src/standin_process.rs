@@ -6,7 +6,12 @@ use std::sync::{Mutex, OnceLock};
 use crate::door::Made;
 
 static ROOT: OnceLock<Mutex<Option<Made>>> = OnceLock::new();
+static FIXTURE_ROOT: OnceLock<Option<PathBuf>> = OnceLock::new();
 static BUILD_COMPILER: OnceLock<Option<PathBuf>> = OnceLock::new();
+static INHERITED_HARNESS_HOMES: OnceLock<Vec<PathBuf>> = OnceLock::new();
+
+/// A layout fixture's home, handed only to its test subprocess.
+pub const FIXTURE_HOME: &str = "CF_E2E_STANDIN_FIXTURE_HOME";
 
 extern "C" {
     fn atexit(callback: extern "C" fn()) -> i32;
@@ -24,7 +29,7 @@ extern "C" fn clean_up() {
             let left = std::fs::read_dir(root.path())
                 .ok()
                 .is_some_and(|entries| entries.flatten().any(|entry| entry.file_name() != "home"));
-            if left {
+            if left || crate::door::Door::of_run().says_only() {
                 root.keep();
             }
         }
@@ -63,10 +68,15 @@ pub fn start(allow_live_matrix: bool) {
         return;
     }
 
-    let (path, compiler) = bounded_path();
+    let fixture_home = std::env::var_os(FIXTURE_HOME).map(PathBuf::from);
+    std::env::remove_var(FIXTURE_HOME);
+    let (path, compiler, inherited_homes) = bounded_path();
     BUILD_COMPILER
         .set(compiler)
         .unwrap_or_else(|_| panic!("stand-in compiler was selected twice"));
+    INHERITED_HARNESS_HOMES
+        .set(inherited_homes)
+        .unwrap_or_else(|_| panic!("stand-in inherited homes were recorded twice"));
 
     // The top-level process does not inherit another run's ownership claims.
     // A test's child retains what that test handed it through the door.
@@ -74,18 +84,35 @@ pub fn start(allow_live_matrix: bool) {
         std::env::remove_var(crate::door::MADE_ROOTS);
     }
     let parent = process_temp_parent();
+    let fixture_root = fixture_home.as_deref().map(|home| {
+        fixture_root(
+            home,
+            &parent,
+            INHERITED_HARNESS_HOMES
+                .get()
+                .unwrap_or_else(|| panic!("stand-in inherited homes were not recorded")),
+        )
+    });
     let root = crate::door::made_in(&parent, "h-")
         .unwrap_or_else(|error| panic!("make stand-in process home: {error}"));
-    let home = root.path().join("home");
+    let home = fixture_home.unwrap_or_else(|| root.path().join("home"));
     crate::door::make_dir(&home).unwrap_or_else(|error| panic!("make stand-in home: {error}"));
     for (name, value) in home_vars(&home) {
         std::env::set_var(name, value);
     }
     std::env::set_var("PATH", path);
-    std::env::set_var("TMPDIR", root.path());
-    std::env::set_var("TMP", root.path());
-    std::env::set_var("TEMP", root.path());
+    let temp = if fixture_root.is_some() {
+        &parent
+    } else {
+        root.path()
+    };
+    std::env::set_var("TMPDIR", temp);
+    std::env::set_var("TMP", temp);
+    std::env::set_var("TEMP", temp);
     std::env::set_var("CF_E2E_STAND_IN", "1");
+    FIXTURE_ROOT
+        .set(fixture_root)
+        .unwrap_or_else(|_| panic!("stand-in fixture was selected twice"));
     ROOT.set(Mutex::new(Some(root)))
         .unwrap_or_else(|_| panic!("stand-in process began twice"));
     // This registration and all environment changes happen before test threads.
@@ -96,10 +123,40 @@ pub fn start(allow_live_matrix: bool) {
     );
 }
 
+/// The layout test's subprocess may use only a layout actually handed down by
+/// its parent through the door. Check its spelling before consulting the disk.
+#[allow(clippy::disallowed_methods)]
+fn fixture_root(home: &Path, temp: &Path, forbidden: &[PathBuf]) -> PathBuf {
+    assert!(
+        std::env::var_os("CF_E2E_STAND_IN").as_deref() == Some(std::ffi::OsStr::new("1")),
+        "stand-in fixture home lookup: no stand-in parent"
+    );
+    let root = home
+        .parent()
+        .unwrap_or_else(|| panic!("stand-in fixture home lookup: no root"));
+    assert!(
+        home.file_name().is_some_and(|name| name == "home")
+            && temp.file_name().is_some_and(|name| name == "temp")
+            && temp.parent() == Some(root)
+            && safe_path_entry(root, forbidden),
+        "stand-in fixture home lookup: invalid or linked layout"
+    );
+    let handed = std::env::var_os(crate::door::MADE_ROOTS)
+        .map(|value| std::env::split_paths(&value).any(|made| same_or_inside(root, &made)))
+        .unwrap_or(false);
+    assert!(
+        handed,
+        "stand-in fixture home lookup: layout not handed down"
+    );
+    crate::door::writable(root, true)
+        .unwrap_or_else(|error| panic!("stand-in fixture home lookup: {error}"));
+    root.to_path_buf()
+}
+
 /// A stand-in must not search inherited PATH entries in a harness home. Do
 /// this before replacing the variables that name the person's directories.
 #[allow(clippy::disallowed_methods)] // Read the inherited paths before replacing the environment.
-fn bounded_path() -> (std::ffi::OsString, Option<PathBuf>) {
+fn bounded_path() -> (std::ffi::OsString, Option<PathBuf>, Vec<PathBuf>) {
     let mut forbidden: Vec<PathBuf> = [
         "CLAUDE_CONFIG_DIR",
         "CODEX_HOME",
@@ -156,10 +213,66 @@ fn bounded_path() -> (std::ffi::OsString, Option<PathBuf>) {
     let inherited = std::env::var_os("PATH").unwrap_or_default();
     let safe =
         std::env::split_paths(&inherited).filter(|folder| safe_path_entry(folder, &forbidden));
-    (
-        std::env::join_paths(safe).unwrap_or_else(|_| panic!("stand-in PATH lookup: invalid path")),
-        compiler,
-    )
+    let path =
+        std::env::join_paths(safe).unwrap_or_else(|_| panic!("stand-in PATH lookup: invalid path"));
+    (path, compiler, forbidden)
+}
+
+/// Match names as a child process's environment does on the current platform.
+#[cfg(windows)]
+pub(crate) fn same_environment_name(left: &str, right: &str) -> bool {
+    let left: Vec<u16> = left.encode_utf16().collect();
+    let right: Vec<u16> = right.encode_utf16().collect();
+    windows_ordinal_eq(&left, &right)
+}
+
+#[cfg(not(windows))]
+pub(crate) fn same_environment_name(left: &str, right: &str) -> bool {
+    left == right
+}
+
+#[cfg(windows)]
+#[allow(unsafe_code)] // The counted UTF-16 slices remain valid for this call.
+fn windows_ordinal_eq(left: &[u16], right: &[u16]) -> bool {
+    use windows_sys::Win32::Globalization::{CompareStringOrdinal, CSTR_EQUAL};
+    if left.is_empty() || right.is_empty() {
+        return left.is_empty() && right.is_empty();
+    }
+    let (Ok(left_len), Ok(right_len)) = (i32::try_from(left.len()), i32::try_from(right.len()))
+    else {
+        return false;
+    };
+    // SAFETY: both pointers name initialized slices of the supplied lengths,
+    // and CompareStringOrdinal does not retain them.
+    unsafe {
+        CompareStringOrdinal(left.as_ptr(), left_len, right.as_ptr(), right_len, 1) == CSTR_EQUAL
+    }
+}
+
+/// Refuse a rig's PATH override before a child can search an inherited harness home.
+pub(crate) fn require_search_path(value: &str, lookup: &str, system: &[String]) {
+    if crate::process::own_var("CF_E2E_STAND_IN").as_deref() != Some("1") {
+        return;
+    }
+    let forbidden = INHERITED_HARNESS_HOMES
+        .get()
+        .unwrap_or_else(|| panic!("{lookup}: no inherited-home boundary"));
+    for entry in std::env::split_paths(value) {
+        assert!(
+            safe_path_entry(&entry, forbidden),
+            "{lookup}: forbidden, linked, relative or ambiguous directory"
+        );
+        let system_folder = system.iter().any(|folder| {
+            let folder = Path::new(folder);
+            same_or_inside(&entry, folder) && same_or_inside(folder, &entry)
+        });
+        if !system_folder {
+            // An arbitrary directory can itself contain a launcher link into
+            // an inherited home. Only the run, its built tools, and the named
+            // hosted Muse are allowed besides the system's command folders.
+            require_watch_path(&entry, lookup);
+        }
+    }
 }
 
 fn plain_absolute(folder: &Path) -> bool {
@@ -186,10 +299,18 @@ fn plain_absolute(folder: &Path) -> bool {
 fn same_or_inside(folder: &Path, home: &Path) -> bool {
     #[cfg(windows)]
     {
-        let folder = folder.to_string_lossy().replace('/', "\\").to_lowercase();
-        let home = home.to_string_lossy().replace('/', "\\").to_lowercase();
-        let home = home.strip_prefix(r"\\?\").unwrap_or(&home);
-        folder == home || folder.starts_with(&format!("{}\\", home.trim_end_matches('\\')))
+        let folder = folder.to_string_lossy().replace('/', "\\");
+        let home = home.to_string_lossy().replace('/', "\\");
+        let home = home
+            .strip_prefix(r"\\?\")
+            .unwrap_or(&home)
+            .trim_end_matches('\\');
+        let folder: Vec<u16> = folder.encode_utf16().collect();
+        let home: Vec<u16> = home.encode_utf16().collect();
+        folder.get(..home.len()).is_some_and(|prefix| {
+            windows_ordinal_eq(prefix, &home)
+                && (folder.len() == home.len() || folder.get(home.len()) == Some(&(b'\\' as u16)))
+        })
     }
     #[cfg(target_os = "macos")]
     {
@@ -331,10 +452,19 @@ pub fn require_home(path: &Path, lookup: &str) {
         .as_ref()
         .unwrap_or_else(|| panic!("stand-in lookup after home cleanup"));
     let absolute = std::path::absolute(path).unwrap_or_else(|_| PathBuf::from(path));
+    let base = if absolute.starts_with(root.path()) {
+        root.path()
+    } else {
+        FIXTURE_ROOT
+            .get()
+            .and_then(Option::as_deref)
+            .filter(|fixture| absolute.starts_with(fixture))
+            .unwrap_or_else(|| panic!("{lookup}: outside the stand-in run"))
+    };
     let suffix = absolute
-        .strip_prefix(root.path())
-        .unwrap_or_else(|_| panic!("{lookup}: outside the stand-in run"));
-    let mut checked = root.path().to_path_buf();
+        .strip_prefix(base)
+        .unwrap_or_else(|_| panic!("{lookup}: invalid root"));
+    let mut checked = base.to_path_buf();
     for part in suffix.components() {
         match part {
             Component::Normal(name) => checked.push(name),
@@ -372,6 +502,9 @@ pub fn require_watch_path(path: &Path, lookup: &str) {
         .as_ref()
         .unwrap_or_else(|| panic!("stand-in lookup after home cleanup"));
     let mut roots = vec![root.path().to_path_buf()];
+    if let Some(Some(fixture)) = FIXTURE_ROOT.get() {
+        roots.push(fixture.clone());
+    }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(target) = exe.parent().and_then(Path::parent) {
             roots.push(target.to_path_buf());
@@ -455,6 +588,36 @@ pub fn require_watch_path(path: &Path, lookup: &str) {
 #[cfg(test)]
 mod tests {
     use super::safe_path_entry;
+
+    #[test]
+    fn standin_isolation_fixture_home_must_be_handed_down() {
+        let temp = std::env::temp_dir();
+        let foreign = temp.parent().unwrap().join("synthetic-foreign-layout");
+        let output = crate::process::Run::new(std::env::current_exe().unwrap())
+            .inheriting_env()
+            .args([
+                "--exact",
+                "standin_process::tests::standin_isolation_fixture_home_must_be_handed_down",
+            ])
+            .var("CF_E2E_STAND_IN", "1")
+            .var(super::FIXTURE_HOME, foreign.join("home"))
+            .var("HOME", foreign.join("home"))
+            .var("USERPROFILE", foreign.join("home"))
+            .var("TMPDIR", foreign.join("temp"))
+            .var("TMP", foreign.join("temp"))
+            .var("TEMP", foreign.join("temp"))
+            .run()
+            .unwrap();
+        assert_ne!(output.code, Some(0), "unowned fixture was accepted");
+        assert!(
+            output
+                .stderr
+                .contains("stand-in fixture home lookup: layout not handed down"),
+            "{}{}",
+            output.stdout,
+            output.stderr
+        );
+    }
 
     #[test]
     fn standin_isolation_toolchain_paths_refuse_harness_homes() {

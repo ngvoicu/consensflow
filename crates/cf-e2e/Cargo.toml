@@ -155,7 +155,7 @@ nix = { workspace = true, features = ["fs"] }
 # to a process a live check ends, on which its creation time is read and through which
 # it is ended.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Console", "Win32_System_Threading"] }
 
 [lints]
 workspace = true
