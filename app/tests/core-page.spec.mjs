@@ -1140,6 +1140,73 @@ test('card state clocks follow the ledger time, tick, and reset only on a move',
   await expect(timer(43)).toHaveText('3h 06m')
 })
 
+for (const [seconds, before, after] of [
+  [9, '9s', '10s'],
+  [59, '59s', '1m'],
+  [599, '9m', '10m'],
+  [3599, '59m', '1h 00m'],
+  [86399, '23h 59m', '1d 0h'],
+]) {
+  test(`a card clock does not move the card below at ${before} to ${after}`, async ({ page }) => {
+    const now = Date.parse('2026-11-14T12:00:00.000Z')
+    const data = model()
+    const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+    chief.tasks = [
+      task(42, 'First', 'queued', 'chief', 'chief', 0, {
+        stateSince: new Date(now - seconds * 1_000).toISOString(),
+      }),
+      task(41, 'Second', 'queued', 'chief', 'chief', 0, {
+        stateSince: new Date(now - 20_000).toISOString(),
+      }),
+    ]
+    await page.clock.install({ time: now })
+    await open(page, data)
+    const card = page.locator('button.card[data-task="42"]')
+    const below = page.locator('button.card[data-task="41"]')
+    const timer = card.locator('.card-age')
+    await expect(timer).toHaveText(before)
+
+    // In the narrow card layout, use a width between the two unwrapped status
+    // strings. Before the fix, exactly one fits and the tick changes the height.
+    await card
+      .locator('..')
+      .locator('..')
+      .evaluate(
+        (list, [oldAge, newAge]) => {
+          const status = list.querySelector('.card-status')
+          const canvas = document.createElement('canvas')
+          const context = canvas.getContext('2d')
+          context.font = getComputedStyle(status).font
+          const oldWidth = context.measureText(`Queued · ${oldAge}`).width
+          const newWidth = context.measureText(`Queued · ${newAge}`).width
+          // 6px padding on each side plus the card's two 1px borders.
+          list.style.width = `${(oldWidth + newWidth) / 2 + 14}px`
+        },
+        [before, after],
+      )
+    const measure = async () => ({
+      height: (await card.boundingBox()).height,
+      belowTop: (await below.boundingBox()).y,
+    })
+    const ageIsVisible = () =>
+      timer.evaluate((age) => {
+        const range = document.createRange()
+        range.selectNodeContents(age)
+        const text = range.getBoundingClientRect()
+        const card = age.closest('.card').getBoundingClientRect()
+        return text.left >= card.left && text.right <= card.right
+      })
+    const first = await measure()
+    expect(await ageIsVisible(), 'the initial time fits in the card').toBe(true)
+    await page.clock.fastForward(1_000)
+    await expect(timer).toHaveText(after)
+    const second = await measure()
+    expect(await ageIsVisible(), 'the new time fits in the card').toBe(true)
+    expect.soft(second.height, 'the ticking card keeps its height').toBe(first.height)
+    expect.soft(second.belowTop, 'the card below stays in place').toBe(first.belowTop)
+  })
+}
+
 test('draws the kanban: a row per participant, a column per state, and cards that stay when done', async ({
   page,
 }) => {

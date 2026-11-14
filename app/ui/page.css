@@ -505,6 +505,8 @@ tr[data-session] .row-name { font-weight: 500; }
 /* What a task that goes on in the background waits on, on its card. */
 .card-held { color: var(--amber); font-weight: 600; }
 .card-status { grid-area: status; padding-bottom: 6px; font: 11px var(--mono); color: var(--foam); }
+/* The longest duration representable by Date fits, without ticks changing wrapping. */
+.card-age { display: inline-block; width: 14ch; max-width: 100%; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .card:has(.card-result) .card-status { padding-bottom: 0; }
 .card-result {
   grid-area: result;
