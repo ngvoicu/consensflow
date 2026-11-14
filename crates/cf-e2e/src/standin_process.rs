@@ -539,6 +539,40 @@ pub(crate) fn require_unlinked_safe_path(path: &Path, lookup: &str) {
     );
 }
 
+/// A PATH candidate may be a link, but only where the run can safely follow
+/// it. Check the containing path and the candidate itself before `is_file`.
+#[allow(clippy::disallowed_methods)] // The process mode is set before test threads.
+pub(crate) fn require_search_candidate(path: &Path, lookup: &str) {
+    if std::env::var_os("CF_E2E_STAND_IN").as_deref() != Some(std::ffi::OsStr::new("1")) {
+        return;
+    }
+    let forbidden = INHERITED_HARNESS_HOMES
+        .get()
+        .unwrap_or_else(|| panic!("{lookup}: no inherited-home boundary"));
+    let parent = path
+        .parent()
+        .unwrap_or_else(|| panic!("{lookup}: no parent folder"));
+    assert!(
+        plain_absolute(path)
+            && !forbidden.iter().any(|home| same_or_inside(path, home))
+            && safe_path_entry(parent, forbidden),
+        "{lookup}: forbidden, linked or ambiguous path"
+    );
+    if let Ok(entry) = std::fs::symlink_metadata(path) {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            assert!(
+                entry.file_attributes() & 0x400 == 0 || entry.file_type().is_symlink(),
+                "{lookup}: unsupported reparse point"
+            );
+        }
+        if entry.file_type().is_symlink() {
+            require_watch_path(path, lookup);
+        }
+    }
+}
+
 /// The compiler of the Cargo that built this test, if its complete path was
 /// safe to inspect before the inherited homes were discarded.
 pub(crate) fn build_compiler() -> Option<&'static Path> {

@@ -196,3 +196,27 @@ runs = ["standin-home-unit"]
 file = "crates/cf-e2e/src/live/machine.rs"
 find = '''    crate::standin_process::require_watch_path(&install.command, "Muse launcher lookup");'''
 replace = '''    // The plant searches the launcher before checking it.'''
+
+[[plant]]
+name = "standin homes: PATH candidate link enters an inherited harness home"
+meant = "standin_isolation_path_candidate_refuses_a_link_into_an_inherited_home"
+platforms = ["macos", "linux"]
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/path.rs"
+find = '''                    crate::standin_process::require_search_candidate(
+                        candidate,
+                        "harness search lookup",
+                    );'''
+replace = '''                    // The plant follows the candidate without checking it.'''
+
+[[plant]]
+name = "standin homes: Muse version path enters an inherited harness home"
+meant = "standin_isolation_muse_version_refuses_a_path_into_an_inherited_home"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''    crate::standin_process::require_watch_path(&binary, "Muse binary lookup");'''
+replace = '''    // The plant trusts the version file's path.'''

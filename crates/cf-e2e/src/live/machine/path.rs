@@ -121,12 +121,19 @@ fn candidates(command: &str, path: &str, extensions: Option<&str>) -> Vec<PathBu
         vec![""]
     };
     std::env::split_paths(path)
+        .filter(|folder| !folder.as_os_str().is_empty())
         .filter(|folder| !holds_no_harness(folder))
         .filter_map(|folder| {
             suffixes
                 .iter()
                 .map(|suffix| folder.join(format!("{command}{suffix}")))
-                .find(|candidate| candidate.is_file())
+                .find(|candidate| {
+                    crate::standin_process::require_search_candidate(
+                        candidate,
+                        "harness search lookup",
+                    );
+                    candidate.is_file()
+                })
         })
         .collect()
 }
@@ -153,6 +160,42 @@ mod tests {
     use std::fs;
 
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn standin_isolation_path_candidate_refuses_a_link_into_an_inherited_home() {
+        const CHILD: &str = "CF_T1647_SEARCH_LINK";
+        if let Some(folder) = own_var(CHILD) {
+            let _ = find("codex", &folder, None);
+            panic!("the PATH search returned without refusing the linked harness home");
+        }
+        let root = crate::door::made("search-link-").unwrap();
+        let codex = root.path().join("pretend-owner-codex");
+        let bin = root.path().join("safe-bin");
+        crate::door::make_dir(&codex).unwrap();
+        crate::door::make_dir(&bin).unwrap();
+        let target = codex.join("codex");
+        crate::door::write(&target, "synthetic executable").unwrap();
+        crate::door::symlink(&target, bin.join("codex")).unwrap();
+        let output = Run::new(std::env::current_exe().unwrap())
+            .inheriting_env()
+            .args([
+                "--exact",
+                "live::machine::path::tests::standin_isolation_path_candidate_refuses_a_link_into_an_inherited_home",
+                "--nocapture",
+            ])
+            .var("CODEX_HOME", &codex)
+            .var(CHILD, &bin)
+            .run()
+            .unwrap();
+        assert_ne!(output.code, Some(0), "the child did not refuse");
+        assert!(
+            format!("{}{}", output.stdout, output.stderr).contains("harness search lookup: "),
+            "the linked PATH candidate did not fail closed: {}{}",
+            output.stdout,
+            output.stderr
+        );
+    }
 
     /// The name a command's file has on this platform.
     fn file_of(command: &str) -> String {
@@ -197,7 +240,8 @@ mod tests {
     fn a_folder_of_the_name_is_no_command_and_a_command_that_is_not_there_is_none() {
         let folder = tempfile::tempdir().unwrap();
         fs::create_dir(folder.path().join(file_of("codex"))).unwrap();
-        let path = path_of(&[folder.path(), Path::new("no-such-folder")]);
+        let missing = folder.path().join("no-such-folder");
+        let path = path_of(&[folder.path(), &missing]);
         assert_eq!(find("codex", &path, None), None);
         assert_eq!(find("claude", &path, None), None);
         assert_eq!(find("codex", "", None), None);
