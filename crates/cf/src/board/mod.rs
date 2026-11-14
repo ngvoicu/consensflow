@@ -518,7 +518,32 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
             .to_string(),
         all => all
             .iter()
+            .filter(|member| member.get("backupOf").is_none_or(Value::is_null))
+            .flat_map(|member| {
+                let handle = member.get("handle");
+                std::iter::once(member).chain(all.iter().filter(move |backup| {
+                    backup
+                        .get("backupOf")
+                        .is_some_and(|owner| !owner.is_null() && Some(owner) == handle)
+                }))
+            })
             .map(|member| {
+                let vacation = if member
+                    .get("vacationSince")
+                    .is_some_and(|value| !value.is_null())
+                {
+                    " · on Vacation"
+                } else {
+                    ""
+                };
+                if let Some(owner) = member.get("backupOf").and_then(Value::as_str) {
+                    return format!(
+                        "  @{} · backup of @{owner} · {} · {}{vacation}",
+                        js::text(member.get("handle")),
+                        js::text(member.get("harnessName")),
+                        runs_on(member)
+                    );
+                }
                 // A name that holds the model and effort says no more of them: the member's
                 // roles, its tier and its harness follow it. One whose name holds none (a
                 // designer on its harness's default, a member that needs an edit) says what
@@ -545,7 +570,7 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
                     .collect::<Vec<_>>()
                     .join("+");
                 format!(
-                    "@{}{runs} · {roles}{tier} · {}",
+                    "@{}{runs} · {roles}{tier} · {}{vacation}",
                     js::text(member.get("handle")),
                     js::text(member.get("harnessName"))
                 )
