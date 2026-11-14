@@ -173,17 +173,17 @@ fn own_hands_selects_the_chiefs_text_and_keeps_the_members_text() {
     let member = texts.instructions(&worker, &project, None).unwrap();
     project.own_hands = true;
     let own = texts.instructions(&chief, &project, None).unwrap();
+    assert!(own.contains("project's own folder"), "{own}");
+    assert!(own.contains("run `/bundle/bin/cf guide`"), "{own}");
+    assert!(own.lines().count() < 40, "{own}");
     assert!(
-        own.contains("is for work the human explicitly asks you to put there"),
+        !own.contains("## Reviews") && !own.contains("| zeus |"),
         "{own}"
     );
-    assert!(own.contains("project's own folder"), "{own}");
     assert!(
         !own.contains("You do not change the project yourself"),
         "{own}"
     );
-    assert!(own.contains("## Reviews"));
-    assert!(own.contains("| zeus | worker | Standard work |"));
     assert_eq!(texts.instructions(&worker, &project, None).unwrap(), member);
     project.own_hands = false;
     assert_eq!(

@@ -59,6 +59,9 @@ cf inside a ConsensFlow window: the board's commands.
   cf history [--page 2] [--find "…"] [--tools]
                                     the chief's: what the human and the chiefs before you
                                     said, newest page first (after the chief was switched)
+  cf guide [--part 2]               the chief's: the board's guide, in parts; each ends with the
+                                    command for the next (read before the first board command
+                                    of a chief that does the work with its own hands)
 
 Any "…" can be - to read the text from standard input, as written (not PowerShell: use --file):
   cf task add --tier standard - <<'BRIEF'   (then the text, then a line BRIEF)

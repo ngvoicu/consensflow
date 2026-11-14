@@ -72,9 +72,25 @@ pub struct Part<'a> {
 /// of a line (never of a character) only where a line is longer than a part. No words are
 /// one part, of none.
 pub fn role_parts(words: &str) -> Vec<Part<'_>> {
+    parts_within(words, ROLE_READ_WHOLE_BYTES, ROLE_READ_WHOLE_LINES)
+}
+
+/// The most bytes `cf guide` prints in a part, with its own line: the 10,000 bytes
+/// every harness shows whole (`cf`'s `cut`), which is what a chief on any of the five is
+/// proven to read. A part's words take what is left once its line is printed with them.
+pub const GUIDE_PART_BYTES: usize = 10_000;
+
+/// The parts `cf guide` prints `words` in, cut as [`role_parts`] cuts a role but within the
+/// bound every harness shows whole, not the larger one measured on two of them: the guide
+/// is read by a chief on any harness.
+pub fn guide_parts(words: &str) -> Vec<Part<'_>> {
+    parts_within(words, GUIDE_PART_BYTES, 500)
+}
+
+/// [`role_parts`] for printed pieces of fewer than `bound_bytes` bytes and `bound_lines` lines.
+fn parts_within(words: &str, bound_bytes: usize, bound_lines: usize) -> Vec<Part<'_>> {
     let fits = |room: (usize, usize), text: &str| {
-        text.len() + room.0 < ROLE_READ_WHOLE_BYTES
-            && text.matches('\n').count() + room.1 < ROLE_READ_WHOLE_LINES
+        text.len() + room.0 < bound_bytes && text.matches('\n').count() + room.1 < bound_lines
     };
     if fits(ONE_ROOM, words) {
         return vec![Part {
@@ -82,8 +98,8 @@ pub fn role_parts(words: &str) -> Vec<Part<'_>> {
             table_goes_on: false,
         }];
     }
-    let bytes = ROLE_READ_WHOLE_BYTES - PART_ROOM.0 - 1;
-    let lines = ROLE_READ_WHOLE_LINES - PART_ROOM.1 - 1;
+    let bytes = bound_bytes - PART_ROOM.0 - 1;
+    let lines = bound_lines - PART_ROOM.1 - 1;
     let mut parts = Vec::new();
     let mut start = 0;
     while start < words.len() {
@@ -220,6 +236,34 @@ pub fn printed_part(
     ))
 }
 
+/// What `cf guide` prints of part `part` (the first is 1) of the guide `words`, in the window
+/// whose `cf` is `cf`, and how many parts there are; none where it has no such part. A guide
+/// of one part is printed as it is; a part of more has its own line under it, which names
+/// the command for the next.
+pub fn guide_part(words: &str, part: usize, cf: &str) -> Option<(String, usize)> {
+    let parts = guide_parts(words);
+    let of = parts.len();
+    let this = parts.get(part.checked_sub(1)?)?;
+    if of == 1 {
+        return Some((this.words.to_owned(), 1));
+    }
+    let under = if part >= of {
+        format!("(Part {part} of {of} of the guide, the last: you have read all of it once you have read every part.)")
+    } else {
+        let next = part + 1;
+        let table = if this.table_goes_on {
+            format!(" The table above goes on in part {next}.")
+        } else {
+            String::new()
+        };
+        format!("(Part {part} of {of} of the guide.{table} Print part {next} with: {cf} guide --part {next})")
+    };
+    Some((
+        format!("{}\n\n{under}", this.words.trim_end_matches('\n')),
+        of,
+    ))
+}
+
 /// The line `cf inbox read` prints under part `part` (the first is 1) of `of` of the note
 /// `id`, read in the window whose `cf` is `cf`: which part it is and the command that prints
 /// the next, or that it is the last. A part that ends in a table says the table goes on.
@@ -248,6 +292,45 @@ mod tests {
         assert!(!role_read_whole(&"\n".repeat(ROLE_READ_WHOLE_LINES)));
         // Bytes, not characters: 15,000 two-byte characters are 30,000 bytes.
         assert!(!role_read_whole(&"é".repeat(15_000)));
+    }
+
+    #[test]
+    fn the_guide_is_cut_to_what_every_harness_shows_whole_with_the_command_for_the_next() {
+        let guide = paragraphs(40, 900);
+        let parts = guide_parts(&guide);
+        assert!(parts.len() > 1);
+        assert_eq!(
+            parts.iter().map(|part| part.words).collect::<String>(),
+            guide
+        );
+        for at in 1..=parts.len() {
+            let (printed, of) = guide_part(&guide, at, "/opt/cf").unwrap();
+            assert_eq!(of, parts.len());
+            // The smallest cut a harness makes: Codex's 10,000 tokens, never fewer bytes.
+            assert!(
+                printed.len() < GUIDE_PART_BYTES,
+                "part {at}: {}",
+                printed.len()
+            );
+            if at < of {
+                assert!(printed.ends_with(&format!(
+                    "Print part {} with: /opt/cf guide --part {})",
+                    at + 1,
+                    at + 1
+                )));
+            } else {
+                assert!(printed.ends_with(
+                    "the last: you have read all of it once you have read every part.)"
+                ));
+            }
+        }
+        assert!(guide_part(&guide, 0, "cf").is_none());
+        assert!(guide_part(&guide, parts.len() + 1, "cf").is_none());
+        // A guide that is read whole is printed as it is.
+        assert_eq!(
+            guide_part("short\n", 1, "cf"),
+            Some(("short\n".to_owned(), 1))
+        );
     }
 
     /// What `cf` prints of part `at` of `parts` of the note 12: the message's line, the

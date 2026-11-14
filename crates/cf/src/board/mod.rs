@@ -23,7 +23,7 @@ use cf_proto::questions::ASKED_THEN_END_THE_TURN;
 use serde_json::{json, Map, Value};
 
 use cf_base::js;
-use cf_base::role_read::{printed_part, role_read_whole};
+use cf_base::role_read::{guide_part, printed_part, role_read_whole};
 use lines::{list, message_line, printed_body};
 use usage::usage;
 use words::{message_id, quoted, require_text, split, task_number, Shape};
@@ -57,6 +57,13 @@ const TELL: Shape = Shape {
 const INBOX_READ: Shape = Shape {
     valued: &["--part"],
     ..Shape::NUMBERED
+};
+
+/// The flags of `cf guide`.
+const GUIDE: Shape = Shape {
+    valued: &["--part"],
+    switches: &[],
+    leading: 0,
 };
 
 /// The flags of `cf history`.
@@ -266,6 +273,7 @@ fn command(
         "answer" => answer(rest, given, board, input),
         "staff" => staff(rest, board),
         "history" => history(rest, board),
+        "guide" => guide(rest, board),
         "whoami" => whoami(rest, board),
         other => Err(Failure::Usage(format!(
             "unknown command {}: use task, inbox, ask, note, tell, answer, staff, whoami or history",
@@ -601,6 +609,37 @@ fn history(rest: &[String], board: &Board) -> Result<Said, Failure> {
     let page = board.get(&path)?.into_value();
     let text = js::text(page.get("text")).into_owned();
     Ok(Said::new(page, text))
+}
+
+/// `cf guide`: the board's guide, which a chief that does the work with its own hands reads
+/// before its first board command. It prints in parts, each within what every harness shows
+/// whole, with the command for the next under it (`--part N`, the first by default).
+fn guide(rest: &[String], board: &Board) -> Result<Said, Failure> {
+    let words = split(rest, GUIDE);
+    if words.asks_for_help() {
+        return Ok(help_of(&["guide"]));
+    }
+    let part = match words.value("--part")? {
+        None => 1,
+        Some(word) => word
+            .parse::<usize>()
+            .ok()
+            .filter(|&part| part > 0)
+            .ok_or_else(|| a_guide_part_there_is_not(word))?,
+    };
+    let answer = board.get("/api/guide")?.into_value();
+    let guide = js::text(answer.get("text")).into_owned();
+    let (text, _) = guide_part(&guide, part, board.cf().as_str())
+        .ok_or_else(|| a_guide_part_there_is_not(&part.to_string()))?;
+    Ok(Said::new(answer, text))
+}
+
+/// `--part` named a part the guide does not have.
+fn a_guide_part_there_is_not(word: &str) -> Failure {
+    Failure::Usage(format!(
+        "--part {} is no part of the guide: it takes the number of a part, the first 1, as the line under each part says",
+        quoted(word)
+    ))
 }
 
 fn whoami(rest: &[String], board: &Board) -> Result<Said, Failure> {

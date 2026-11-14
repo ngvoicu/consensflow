@@ -12,10 +12,9 @@
 //! ([`OPENING`](crate::role_change::OPENING)): the window says in one line that it has
 //! it, and waits for the next message.
 
-use cf_proto::cf_word::CfWord;
 use cf_proto::specs::SpecsSetting;
 
-use super::{chief, with_staff_rules, ProjectSpecs, RoleError};
+use super::{with_staff_rules, ProjectSpecs};
 
 /// What a note that tells a running chief of a change ends with.
 pub(crate) const CONTEXT: &str = "This is context, not a task: say in one short line that you have it, and wait for the next message.";
@@ -107,30 +106,16 @@ fn specs_said(
     }
 }
 
-/// The changed parts of the role, without the staff table or the person's rules.
-pub(crate) fn own_hands_said(
-    on: bool,
-    cf: &CfWord,
-    specs: Option<&ProjectSpecs<'_>>,
-) -> Result<String, RoleError> {
-    let intro = if on {
-        "The person turned \"Do with your own hands\" on: do the work yourself in the project's folder; put work on the board only when the person explicitly asks."
-    } else {
-        "The person turned \"Do with your own hands\" off: return to your ordinary chief role and put work on the board as your instructions say."
-    };
-    let part = |name| Ok::<_, RoleError>(chief::part(on, name)?.replace("{{cf}}", cf.as_str()));
-    let opening = part("opening")?;
-    let duty = part("duty")?;
-    let never = part("never")?;
-    let specs = specs.map_or_else(String::new, |specs| {
-        format!(
-            "\n\n## This project's specs\n\n{}\n\n{}\n\n{}",
-            ProjectSpecs::small_ask_for(on),
-            specs.work_for(on),
-            ProjectSpecs::phases_for(on)
-        )
-    });
-    Ok(format!("{intro}\n\nThese replace the earlier directions on how you work and use the board:\n\n{opening}\n\n## What you do\n\n{duty}\n\n## What you never do\n\n{never}{specs}"))
+/// What a running chief is told when the human turns "Do with your own hands" on, before
+/// its role as it now is, the short text, in full: that text is what the conversation holds
+/// once the note is in. (Off, it is told its ordinary role whole, in the words of every role
+/// that is said again: `role_change`.)
+const OWN_HANDS_ON: &str = "The person turned \"Do with your own hands\" on. The instructions below replace the ones you were given before: follow these from now on. Do the work yourself in the project's folder; put work on the board only when the person explicitly asks, and read the board's guide before your first board command.";
+
+/// The note that tells a running chief its switch went on: `instructions` is its role as it
+/// now is, the short text and the section of its specs.
+pub(crate) fn own_hands_on(instructions: &str) -> String {
+    format!("{OWN_HANDS_ON}\n\n{instructions}\n\n{CONTEXT}")
 }
 
 /// What the human changed of the project's rules for its staff.

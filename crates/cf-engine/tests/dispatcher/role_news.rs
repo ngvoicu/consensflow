@@ -28,6 +28,11 @@ const DOCS_SKILL: &str =
 const PLANS_SKILL: &str =
     "/consensflow/integrations/specmint/fake/core-plans/.claude/skills/specmint-core/SKILL.md";
 
+/// What a note that gives a chief its ordinary role again begins with, as every note that says
+/// a role anew does.
+const OPENING: &str =
+    "Your ConsensFlow role instructions have changed since this conversation began.";
+
 /// Rules a human writes.
 const RULES: &str = "- Push to origin only, never to upstream.";
 
@@ -50,12 +55,12 @@ fn own_hands_switch_is_told_once_each_way_on_every_harness() {
             let on = told(&context, chief);
             assert_eq!(on.len(), 1, "{harness}: {first:?}");
             assert!(
-                on[0].starts_with("The person turned \"Do with your own hands\" on:"),
+                on[0].starts_with("The person turned \"Do with your own hands\" on."),
                 "{}",
                 on[0]
             );
             assert!(on[0].contains("only when"));
-            assert_eq!(said_to_the_chief(&context.adapter).iter().filter(|line| line.contains("The person turned \"Do with your own hands\" on:")).count(), 1);
+            assert_eq!(said_to_the_chief(&context.adapter).iter().filter(|line| line.contains("The person turned \"Do with your own hands\" on.")).count(), 1);
             rests(&context, &project);
             passes(&context);
             assert_eq!(told(&context, chief).len(), 1);
@@ -67,17 +72,11 @@ fn own_hands_switch_is_told_once_each_way_on_every_harness() {
             passes(&context);
             let off = told(&context, chief);
             assert_eq!(off.len(), 2, "{harness}: {first:?}");
-            assert!(
-                off[1].starts_with("The person turned \"Do with your own hands\" off:"),
-                "{}",
-                off[1]
-            );
+            assert!(off[1].starts_with(OPENING), "{}", off[1]);
             assert_eq!(
                 said_to_the_chief(&context.adapter)
                     .iter()
-                    .filter(
-                        |line| line.contains("The person turned \"Do with your own hands\" off:")
-                    )
+                    .filter(|line| line.contains(OPENING))
                     .count(),
                 1
             );
@@ -134,8 +133,11 @@ fn own_hands_changed_in_a_turn_is_told_once_at_the_next_rest_on_every_harness() 
 
                 answers(&context, &project);
                 let told_now = told(&context, chief);
-                let direction = if was_on { "off" } else { "on" };
-                let prefix = format!("The person turned \"Do with your own hands\" {direction}:");
+                let prefix = if was_on {
+                    OPENING.to_owned()
+                } else {
+                    "The person turned \"Do with your own hands\" on.".to_owned()
+                };
                 assert_eq!(told_now.len(), notes + 1, "{label}: one note at rest");
                 assert!(
                     told_now.last().unwrap().starts_with(&prefix),
@@ -252,6 +254,147 @@ fn own_hands_is_in_the_chiefs_next_launch_on_every_harness() {
                 .contains("own hands"),
             "{harness}"
         );
+    }
+}
+
+#[test]
+fn own_hands_going_off_gives_the_ordinary_role_whole_cut_for_cf_inbox_read_on_every_harness() {
+    // The ordinary chief's text is longer than a window is given in one message at any staff
+    // (16,000 units): the fake texts carry a real-sized role as words a release added.
+    let role: String = (0..900)
+        .map(|at| format!("Line {at} of the ordinary chief's role, which the board gave it.\n\n"))
+        .collect();
+    for harness in HARNESSES {
+        let context = made(FirstMessage::Delivered);
+        let project = project_on(&context, harness);
+        let chief = at_rest(&context, &project);
+        context
+            .ledger
+            .borrow_mut()
+            .set_own_hands(project.id, true)
+            .unwrap();
+        passes(&context);
+        rests(&context, &project);
+        let short = told(&context, chief);
+        assert_eq!(short.len(), 1, "{harness}");
+        // On, the note carries the short text word for word: the conversation holds it.
+        assert!(
+            short[0].contains("instructions for chief own hands"),
+            "{}",
+            short[0]
+        );
+        context.roles.rewritten.replace(format!("\n\n{role}"));
+        context
+            .ledger
+            .borrow_mut()
+            .set_own_hands(project.id, false)
+            .unwrap();
+        passes(&context);
+        let notes = role_notes(&context, chief);
+        assert_eq!(notes.len(), 2, "{harness}");
+        let off = &notes[1].body;
+        assert!(
+            off.starts_with(OPENING) && off.contains("too long for one message"),
+            "{harness}: {}",
+            &off[..300.min(off.len())]
+        );
+        // The ledger holds the whole role, not the opening: `cf inbox read` prints all of it.
+        assert!(
+            off.contains(&role),
+            "{harness}: the whole ordinary role is the note"
+        );
+        assert!(
+            !off.contains("own hands"),
+            "{harness}: the ordinary role says no own hands"
+        );
+        assert!(cf_base::role_read::role_parts(off).len() > 1, "{harness}");
+        // What the window was typed is cut to its opening, with the way to read the rest.
+        let typed = said_to_the_chief(&context.adapter).pop().unwrap();
+        assert!(
+            typed.contains(OPENING),
+            "{harness}: {}",
+            &typed[..200.min(typed.len())]
+        );
+        assert!(typed.len() < off.len(), "{harness}: cut");
+        context.close();
+    }
+}
+
+#[test]
+fn rules_changed_while_own_hands_is_on_tell_the_chief_nothing_and_the_guide_has_them() {
+    for harness in HARNESSES {
+        let context = made(FirstMessage::Delivered);
+        let project = project_on(&context, harness);
+        let chief = at_rest(&context, &project);
+        context
+            .ledger
+            .borrow_mut()
+            .set_own_hands(project.id, true)
+            .unwrap();
+        passes(&context);
+        rests(&context, &project);
+        let notes = role_notes(&context, chief).len();
+        context
+            .ledger
+            .borrow_mut()
+            .set_staff_rules(project.id, Some(RULES))
+            .unwrap();
+        passes(&context);
+        rests(&context, &project);
+        passes(&context);
+        assert_eq!(
+            role_notes(&context, chief).len(),
+            notes,
+            "{harness}: its role has no rules"
+        );
+        context.close();
+    }
+}
+
+#[test]
+fn the_rules_for_the_staff_are_in_a_chiefs_launch_only_while_own_hands_is_off() {
+    for harness in HARNESSES {
+        let context = made(FirstMessage::Delivered);
+        let project = project_on(&context, harness);
+        context
+            .ledger
+            .borrow_mut()
+            .set_staff_rules(project.id, Some(RULES))
+            .unwrap();
+        let chief = at_rest(&context, &project);
+        let instructions = |context: &Context| {
+            chief_launches(&context.adapter).last().unwrap()["instructions"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        assert!(instructions(&context).contains(RULES), "{harness}: off");
+        context
+            .ledger
+            .borrow_mut()
+            .set_own_hands(project.id, true)
+            .unwrap();
+        relaunch(&context, project.id);
+        passes(&context);
+        let own = instructions(&context);
+        assert!(
+            own.contains("own hands") && !own.contains(RULES),
+            "{harness}: on: {own}"
+        );
+        // A member's text has them either way: they bind its work.
+        let _ = chief;
+        context
+            .ledger
+            .borrow_mut()
+            .set_own_hands(project.id, false)
+            .unwrap();
+        relaunch(&context, project.id);
+        passes(&context);
+        assert!(
+            instructions(&context).contains(RULES),
+            "{harness}: off again"
+        );
+        context.close();
     }
 }
 

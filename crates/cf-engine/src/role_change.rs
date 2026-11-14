@@ -683,7 +683,7 @@ impl Dispatcher {
 
 /// What a note that replaces the role with `instructions` says, in the window whose `cf`
 /// is `cf`: the words that say so, and the text in full.
-fn body_of(instructions: &str, cf: &CfWord) -> String {
+pub(crate) fn body_of(instructions: &str, cf: &CfWord) -> String {
     note_of(Telling::Replaces, instructions, cf)
 }
 

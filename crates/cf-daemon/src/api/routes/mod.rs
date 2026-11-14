@@ -20,6 +20,7 @@
 
 mod answers;
 mod door;
+mod guide;
 mod history;
 mod inbox;
 mod message;
@@ -80,6 +81,8 @@ pub enum Route {
     Whoami,
     /// `GET /api/history`.
     History,
+    /// `GET /api/guide`: the board's guide, which only a chief reads.
+    Guide,
     /// `GET /api/staff`.
     Staff,
     /// `GET /api/tasks`.
@@ -119,6 +122,9 @@ pub fn recognize(method: &Method, path: &str) -> Option<Route> {
     }
     if get && path == "/api/history" {
         return Some(Route::History);
+    }
+    if get && path == "/api/guide" {
+        return Some(Route::Guide);
     }
     if get && path == "/api/staff" {
         return Some(Route::Staff);
@@ -199,6 +205,7 @@ pub async fn dispatch(
     match route {
         Route::Whoami => whoami::handle(context, caller, request).await,
         Route::History => history::handle(context, caller, request).await,
+        Route::Guide => guide::handle(context, caller, request).await,
         Route::Staff => staff::handle(context, caller, request).await,
         Route::Tasks => tasks::list(context, caller, request).await,
         Route::CreateTask => tasks::create(context, caller, request).await,

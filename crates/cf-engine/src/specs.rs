@@ -82,11 +82,13 @@ impl Dispatcher {
             .roles
             .instructions(participant, project, told.as_ref())
             .map_err(|cause| EngineError::said("no-role-text", cause))?;
-        let instructions = with_staff_rules(
-            instructions,
-            &participant.role,
-            project.staff_rules.as_deref(),
-        );
+        // A chief that does the work with its own hands has the rules in the board's guide
+        // (`cf guide`), not in its role: they bind the staff's work, not its own.
+        let rules = project
+            .staff_rules
+            .as_deref()
+            .filter(|_| !(participant.role == "chief" && project.own_hands));
+        let instructions = with_staff_rules(instructions, &participant.role, rules);
         Ok(RoleText {
             specs,
             instructions,

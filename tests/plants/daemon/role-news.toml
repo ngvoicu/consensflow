@@ -157,7 +157,7 @@ runs = ["rn-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_news.rs"
-find = "            specs: self.specs_setting(project, participant),\n            rules: project.staff_rules.clone(),"
+find = "            specs: self.specs_setting(project, participant),\n            rules: rules_told(project),"
 replace = "            specs: self.specs_setting(project, participant),\n            rules: None,"
 
 [[plant]]
@@ -167,8 +167,8 @@ runs = ["rn-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_news.rs"
-find = "            specs: self.specs_setting(project, participant),\n            rules: project.staff_rules.clone(),"
-replace = "            specs: None,\n            rules: project.staff_rules.clone(),"
+find = "            specs: self.specs_setting(project, participant),\n            rules: rules_told(project),"
+replace = "            specs: None,\n            rules: rules_told(project),"
 
 [[plant]]
 name = "role news: a member is launched as a chief is, to be told"

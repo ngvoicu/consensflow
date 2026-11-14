@@ -151,8 +151,35 @@ pub fn role_instructions_for(
         let card = PathBuf::from(card.to_string_lossy().into_owned());
         return Ok(String::from_utf8_lossy(&read_file_sync(&card)?).into_owned());
     }
-    // The `cf` goes in last, so nothing in a path is read as a slot.
-    let chief = chief::text(own_hands)?
+    if own_hands {
+        // The short text has no table, no tiers and no shell paragraph to fill: those are the
+        // guide's (`guide_instructions`). The `cf` goes in last, so nothing in a path is read
+        // as a slot.
+        let chief = chief::text(true)?.replace("{{cf}}", cf.as_str());
+        let specs = specs.map_or_else(String::new, |specs| specs.section_for(true));
+        return Ok(chief + &specs);
+    }
+    let chief = filled(chief::text(false)?, staff, cf)?;
+    Ok(chief + &specs.map_or_else(String::new, ProjectSpecs::section))
+}
+
+/// The board's guide a chief that does the work with its own hands reads on demand
+/// (`cf guide`): the ordinary chief's text for the board, with the project's rules for its
+/// staff after it, as they are now and the staff as it is now. It is made from the same
+/// `chief.md` as the ordinary chief's text, so the two cannot drift.
+pub fn guide_instructions(
+    staff: &[StaffRow],
+    cf: &CfWord,
+    rules: Option<&str>,
+) -> Result<String, RoleError> {
+    let guide = filled(chief::guide()?, staff, cf)?;
+    Ok(with_staff_rules(guide, "chief", rules))
+}
+
+/// `text`, a chief's, with the shell paragraph, the work tiers, the staff table and the
+/// window's `cf` put in its slots. The `cf` goes in last, so nothing in a path is read as a slot.
+fn filled(text: String, staff: &[StaffRow], cf: &CfWord) -> Result<String, RoleError> {
+    Ok(text
         .replacen(
             "{{chief_input}}",
             shells::paragraph(cf.shell(), "chief_input")?,
@@ -160,15 +187,7 @@ pub fn role_instructions_for(
         )
         .replacen("{{tiers}}", &work_tier_list(), 1)
         .replacen("{{staff}}", &team_table(staff)?, 1)
-        .replace("{{cf}}", cf.as_str());
-    let specs = specs.map_or_else(String::new, |specs| {
-        if own_hands {
-            specs.section_for(true)
-        } else {
-            specs.section()
-        }
-    });
-    Ok(chief + &specs)
+        .replace("{{cf}}", cf.as_str()))
 }
 
 /// The heading of the project's rules for its staff, in every text that has them.

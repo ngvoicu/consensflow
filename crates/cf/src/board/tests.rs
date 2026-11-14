@@ -1447,3 +1447,84 @@ fn the_staff_says_each_role_by_its_name() {
         )
     );
 }
+
+/// `cf guide` prints the board's guide in parts, each within what every harness shows whole,
+/// the command for the next under it.
+#[test]
+fn the_guide_is_printed_in_parts_each_ending_with_the_command_for_the_next() {
+    let guide = (0..60)
+        .map(|at| {
+            let words = format!("Guide paragraph {at} ").repeat(50);
+            if at % 6 == 0 {
+                format!("## Heading {at}\n\n{words}")
+            } else {
+                words
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let reply = || reply(200, json!({ "text": guide }));
+    let first = cf_as(WORD, &["guide"], false, vec![reply()]);
+    assert_eq!(first.code.unwrap(), 0, "{}", first.err);
+    assert_eq!(asked(&first), [("GET", "/api/guide")]);
+    assert!(first.out.len() < 10_000, "{}", first.out.len());
+    assert!(first
+        .out
+        .contains(&format!("Print part 2 with: {WORD} guide --part 2)")));
+    let mut printed = first.out.clone();
+    let mut part = 2;
+    loop {
+        let next = cf_as(
+            WORD,
+            &["guide", "--part", &part.to_string()],
+            false,
+            vec![reply()],
+        );
+        assert_eq!(next.code.unwrap(), 0, "{}", next.err);
+        assert!(next.out.len() < 10_000, "{}", next.out.len());
+        printed.push_str(&next.out);
+        if next.out.contains("the last: you have read all of it") {
+            break;
+        }
+        part += 1;
+        assert!(part < 10);
+    }
+    assert!(printed.contains("Guide paragraph 59"));
+    let past = cf(&["guide", "--part", "99"], vec![reply()]);
+    assert_eq!(past.code.unwrap(), 2);
+    assert!(
+        past.err.contains("--part \"99\" is no part of the guide"),
+        "{}",
+        past.err
+    );
+    let zero = cf(&["guide", "--part", "0"], vec![]);
+    assert_eq!(zero.code.unwrap(), 2);
+}
+
+#[test]
+fn a_guide_that_is_short_is_printed_as_it_is_with_no_part_line() {
+    let ran = cf(
+        &["guide"],
+        vec![reply(200, json!({ "text": "# Guide\n\nShort.\n" }))],
+    );
+    assert_eq!(ran.code.unwrap(), 0);
+    assert!(ran.out.starts_with("# Guide\n\nShort.\n"), "{:?}", ran.out);
+    assert!(!ran.out.contains("(Part"));
+}
+
+#[test]
+fn the_guide_is_refused_to_a_member_in_the_board_s_words() {
+    let ran = cf(
+        &["guide"],
+        vec![reply(
+            403,
+            json!({ "error": "not-the-chief", "message": "the board's guide is the chief's to read" }),
+        )],
+    );
+    assert_eq!(ran.code.unwrap(), 1);
+    assert!(
+        ran.err.contains("the board's guide is the chief's to read"),
+        "{}",
+        ran.err
+    );
+}

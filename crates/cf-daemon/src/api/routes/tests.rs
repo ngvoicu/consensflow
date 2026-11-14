@@ -19,6 +19,7 @@ fn task(number: &str, action: Option<TaskAction>) -> Option<Route> {
 fn each_route_is_the_one_node_matches_for_its_method_and_path() {
     assert_eq!(route(Method::GET, "/api/whoami"), Some(Route::Whoami));
     assert_eq!(route(Method::GET, "/api/history"), Some(Route::History));
+    assert_eq!(route(Method::GET, "/api/guide"), Some(Route::Guide));
     assert_eq!(route(Method::GET, "/api/staff"), Some(Route::Staff));
     assert_eq!(route(Method::GET, "/api/tasks"), Some(Route::Tasks));
     assert_eq!(route(Method::POST, "/api/tasks"), Some(Route::CreateTask));
@@ -222,6 +223,7 @@ async fn every_route_is_answered_by_a_handler_of_its_own() {
     for (method, path, route, status) in [
         (Method::GET, "/api/whoami", Route::Whoami, 200),
         (Method::GET, "/api/history", Route::History, 403),
+        (Method::GET, "/api/guide", Route::Guide, 403),
         (Method::GET, "/api/staff", Route::Staff, 200),
         (Method::GET, "/api/tasks", Route::Tasks, 200),
         (Method::POST, "/api/tasks", Route::CreateTask, 403),

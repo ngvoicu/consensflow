@@ -279,8 +279,8 @@ runs = ["engine-dispatcher-rules"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/specs.rs"
-find = '''            project.staff_rules.as_deref(),'''
-replace = '''            None,'''
+find = '''with_staff_rules(instructions, &participant.role, rules)'''
+replace = '''with_staff_rules(instructions, &participant.role, None)'''
 
 [[plant]]
 name = "staff rules: only the chief's window is given the rules"
@@ -289,8 +289,8 @@ runs = ["engine-dispatcher-rules"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/specs.rs"
-find = '''            project.staff_rules.as_deref(),'''
-replace = '''            project.staff_rules.as_deref().filter(|_| participant.role == "chief"),'''
+find = '''with_staff_rules(instructions, &participant.role, rules)'''
+replace = '''with_staff_rules(instructions, &participant.role, rules.filter(|_| participant.role == "chief"))'''
 
 [[plant]]
 name = "staff rules: a Codex chief resumed is not told them"
@@ -299,8 +299,8 @@ runs = ["engine-dispatcher-rules"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/specs.rs"
-find = '''            project.staff_rules.as_deref(),'''
-replace = '''            project.staff_rules.as_deref().filter(|_| participant.role != "chief"),'''
+find = '''with_staff_rules(instructions, &participant.role, rules)'''
+replace = '''with_staff_rules(instructions, &participant.role, rules.filter(|_| participant.role != "chief"))'''
 
 [[plant]]
 name = "staff rules: a member's session is not given the rules"
@@ -309,8 +309,8 @@ runs = ["engine-dispatcher-rules"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/specs.rs"
-find = '''            project.staff_rules.as_deref(),'''
-replace = '''            project.staff_rules.as_deref().filter(|_| participant.member_id.is_none()),'''
+find = '''with_staff_rules(instructions, &participant.role, rules)'''
+replace = '''with_staff_rules(instructions, &participant.role, rules.filter(|_| participant.member_id.is_none()))'''
 
 # --- the page's operation ---
 
