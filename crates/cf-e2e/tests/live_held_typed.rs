@@ -348,7 +348,7 @@ fn a_chief_at_rest_that_claude_shows_its_suggestion_and_recap_is_handed_its_work
         })?
         .folder()?;
     let settings = json!({ "promptSuggestionEnabled": true, "awaySummaryEnabled": true });
-    fs::write(config.join("settings.json"), settings.to_string())
+    cf_e2e::door::write(config.join("settings.json"), settings.to_string())
         .map_err(|failed| Error::Daemon(format!("the run's Claude settings.json: {failed}")))?;
     let rig = Rig::start(live::rig(std::slice::from_ref(&install), FAKE_AGENT))?;
     let mut checks = probe(&rig, &install, &log)

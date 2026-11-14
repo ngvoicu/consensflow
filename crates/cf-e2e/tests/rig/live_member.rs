@@ -64,7 +64,9 @@ fn a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversati
 ) -> Outcome {
     // Built before the first question, which a run asks for first of all.
     ask::prepare()?;
-    let stand_in = tempfile::tempdir()?;
+    // A folder the run made through the door: the stand-in `cf` is written there and its log kept
+    // beside it.
+    let stand_in = cf_e2e::door::made("cf-stand-in-")?;
     calls::install(stand_in.path(), Path::new(FAKE_CF))?;
     let rig = Rig::start(devin_config(FAKE_DEVIN).first_on_path(stand_in.path()))?;
     let home = rig.var("HOME").unwrap_or_default().to_owned();
@@ -498,10 +500,11 @@ fn the_check_ends_the_command_its_window_runs_and_nothing_outside_the_window_tha
     let home = rig.var("HOME").unwrap_or_default().to_owned();
     let install = Installed::at(Harness::Devin, FAKE_DEVIN, &home);
     // What the window's command and the process outside it both say: the stand-in's command
-    // is `sleep <seconds>; true` in a shell.
+    // is `sleep <seconds>; true` in a shell. The outsider's shell becomes its `sleep` (`exec`), so
+    // the test's handle holds all of it, and its drop leaves nothing running.
     let command = LongCommand::new("sleep 613");
     let mut outsider = Run::new("/bin/sh")
-        .args(["-c", "sleep 613; true"])
+        .args(["-c", "exec sleep 613"])
         .inheriting_env()
         .spawn()?;
     let window = Open::new(&rig, &install, "work", "work-devin")
@@ -554,8 +557,74 @@ fn the_check_ends_the_command_its_window_runs_and_nothing_outside_the_window_tha
         outsider.wait(Duration::from_millis(500))?.is_none(),
         "the process outside the window runs on"
     );
+    // The outsider is the test's own, and goes whole with its handle: nothing of it is left to
+    // run for ten minutes with its folder in the tree (a `sleep` its shell started was).
+    let all = ThisMachine.processes()?;
+    let outside = all
+        .iter()
+        .find(|process| process.identity.pid == outsider.id())
+        .map(|process| process.identity)
+        .ok_or("the process outside the window is not listed")?;
+    let started: Vec<_> = std::iter::once(outside)
+        .chain(
+            cf_e2e::live::members::descending_from(&all, outside)
+                .iter()
+                .map(|process| process.identity),
+        )
+        .collect();
+    drop(outsider);
+    let left: Vec<_> = ThisMachine
+        .processes()?
+        .into_iter()
+        .filter(|process| started.contains(&process.identity))
+        .collect();
+    assert!(
+        left.is_empty(),
+        "what the test started outside the window is left running: {left:#?}"
+    );
     drop(window);
     rig.close()?;
+    Ok(())
+}
+
+/// A window the case opened itself (not the daemon: the rig has no request of its) is watched by
+/// the folder the case gives, from the process the pane host named, and what its tree ran is seen
+/// while it runs: what the live cases that open windows do to find what a closed window left
+/// (`Watch::of_rig`).
+#[test]
+fn a_window_the_case_opened_is_watched_with_what_its_tree_runs_and_found_clean_once_it_is_closed(
+) -> Outcome {
+    use cf_e2e::live::members::Watch;
+
+    ask::prepare()?;
+    let rig = Rig::start(devin_config(FAKE_DEVIN))?;
+    let home = rig.var("HOME").unwrap_or_default().to_owned();
+    let install = Installed::at(Harness::Devin, FAKE_DEVIN, &home);
+    let window = Open::new(&rig, &install, "work", "work-devin")
+        .agent(json!({ "kind": "devin", "model": "fake" }))
+        .member(Member::new("worker", "# ConsensFlow worker\n").first_message(
+            "[ConsensFlow m-1 · T-1 · task from @chief]\nBACKGROUND 614 Reply with exactly: LEFT_IT",
+        ))
+        .open(&Log::new("live member"))?;
+    // Looked at until the window's command is in its tree: the watch keeps what it saw.
+    let mut watch = Watch::of_rig(&rig, Some(window.workspace()));
+    let saw = until(secs(30), Duration::from_millis(200), || {
+        watch.look_now();
+        (watch.seen() >= 2).then_some(())
+    });
+    assert!(
+        saw.is_some(),
+        "the window's tree was never seen to run its command"
+    );
+    assert_eq!(watch.windows(), 1, "the case's own window is watched");
+    drop(window);
+    rig.close()?;
+    let swept = watch.sweep();
+    assert!(swept.problems().is_empty(), "{}", swept.said());
+    // Whatever the window's close did not end is found and said, never ended, and the watch is of
+    // the one window.
+    assert_eq!(swept.watched.0, 1, "{}", swept.said());
+    assert!(swept.watched.1 >= 2, "{}", swept.said());
     Ok(())
 }
 

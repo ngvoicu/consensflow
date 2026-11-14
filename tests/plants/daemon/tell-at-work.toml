@@ -1,0 +1,164 @@
+# `cf tell` to a task at work (T-1616, spec tell-and-note TAN-02, TAN-03): the words are a note kept
+# for the window, which goes in at rest before anything is taken as the task's result. It presses no
+# key, moves no state and asks no stop; the stop is `cf task pause T-n "…"`, today's old tell.
+# The route is `tell`/`pause_with_words` in `crates/cf-daemon/src/api/routes/task.rs` and
+# `tell_queued` in `crates/cf-ledger/src/messages/told.rs`; the engine's tests are
+# `crates/cf-engine/tests/dispatcher/tell_at_work.rs`.
+#
+# One plant for each new rule: the route for a task at work; the tell given up that fails nothing;
+# the short result a turn ended on before the tell went in (kept in front of the last words); the two
+# times that tell a tell sent at work from one sent before the brief; Finish withdrawing the words
+# that wait; the footer; the pause's refusal for a queued task; and the pause's words reaching the
+# question. Every name holds `tell at work`, so `npm run plants:daemon -- "tell at work"` runs them.
+
+[run]
+engine-tell-at-work = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "tell_at_work"]
+engine-resume-first-message = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "never_comes_up"]
+ledger-queued-tells = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "queued_tells::"]
+daemon-routes-task-tell = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::task::tests::verbs::a_"]
+
+[[plant]]
+name = "tell at work: a task at work refuses the words, as a queued one once did"
+meant = "a_tell_to_a_working_task_presses_no_key_moves_no_state_and_asks_no_stop"
+runs = ["engine-tell-at-work", "ledger-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = """            &["queued", "working", "waiting", "paused"],
+            "keep words for the window of","""
+replace = """            &["queued", "paused"],
+            "keep words for the window of","""
+
+[[plant]]
+name = "tell at work: a tell given up at its window fails the task at work"
+meant = "a_tell_whose_delivery_is_given_up_fails_nothing_on_a_working_task_and_releases_its_result"
+runs = ["engine-tell-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = """    if sent_at_work_of(store, message, task)? {
+        return Ok(());
+    }
+    store.move_task"""
+replace = """    store.move_task"""
+
+[[plant]]
+name = "tell at work: a short result the turn ended on before the tell is dropped with the wrapper lines"
+meant = "a_report_of_any_length_that_ended_the_turn_before_the_tell_went_in_is_in_the_result_in_front_of_the_last_words"
+runs = ["engine-tell-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/earlier_turns.rs"
+find = "                Why::Told(_) => false,"
+replace = "                Why::Told(_) => true,"
+
+[[plant]]
+name = "tell at work: a tell is at work whatever the brief's time, so a tell before the brief fails nothing"
+meant = "a_member_whose_window_never_comes_up_and_is_never_killed_has_the_note_told_it_fail_after_the_wait"
+runs = ["engine-resume-first-message", "engine-tell-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "        .is_some_and(|delivered| created_at > delivered)"
+replace = "        .is_some_and(|delivered| created_at <= delivered)"
+
+[[plant]]
+name = "tell at work: Finish leaves the words that wait, and the finish is refused for them"
+meant = "a_tell_held_at_its_window_is_said_on_the_board_and_finish_withdraws_the_words_and_says_so"
+runs = ["engine-tell-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "            withdrawn = withdraw_at_work(store, &task, assignee)?;"
+replace = "            withdrawn = Vec::new();"
+
+[[plant]]
+name = "tell at work: the window is not told it goes on"
+meant = "the_words_of_a_tell_at_work_go_in_at_the_first_rest_before_anything_is_the_result_and_the_turn_after_them_is_the_tasks"
+runs = ["engine-tell-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = "                if ledger.sent_at_work(message)? {"
+replace = "                if !ledger.sent_at_work(message)? {"
+
+[[plant]]
+name = "tell at work: a pause with words is not refused for a queued task"
+meant = "a_pause_with_words_is_refused_for_a_queued_or_an_open_task_and_names_the_tell"
+runs = ["daemon-routes-task-tell"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "    if matches!(telling.state.as_str(), OPEN | QUEUED) {"
+replace = "    if matches!(telling.state.as_str(), OPEN) {"
+
+[[plant]]
+name = "tell at work: a pause with words puts another text to the window"
+meant = "a_pause_with_words_pauses_the_task_for_the_question_it_puts_to_the_window"
+runs = ["daemon-routes-task-tell"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "                body: Some(words.to_owned()),"
+replace = "                body: Some(\"Stop\".to_owned()),"
+
+[[plant]]
+name = "tell at work: a window at work reads at rest, so the words go to its adapter"
+meant = "a_tell_at_work_asks_the_adapter_of_every_harness_for_nothing_until_the_window_rests_and_then_once"
+runs = ["engine-tell-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/pacing.rs"
+find = """        let Some(rest) = rest else {
+            let unrest = record.delivery.borrow().unrest.clone();
+            return Ok(Pace::Wait("""
+replace = """        let Some(rest) = rest else {
+            let unrest = record.delivery.borrow().unrest.clone();
+            return Ok(Pace::Go);
+            #[allow(unreachable_code)]
+            return Ok(Pace::Wait("""
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        let idle = free && !drawing;"
+replace = "        let idle = !drawing;"
+
+[[plant]]
+name = "tell at work: Finish withdraws the words kept for a paused task no more, and is refused for them for good"
+meant = "finish_withdraws_a_tell_kept_for_a_paused_task_as_it_does_for_one_at_work"
+runs = ["engine-tell-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if let (true, Some(assignee)) = (finished_by_word, task.assignee_id) {\n            withdrawn = withdraw_at_work"
+replace = "        if let (true, Some(assignee), \"working\" | \"waiting\") =\n            (finished_by_word, task.assignee_id, task.state.as_str())\n        {\n            withdrawn = withdraw_at_work"
+
+[[plant]]
+name = "tell at work: a pause withdraws the tell and the reply does not name it"
+meant = "a_pause_with_or_without_words_names_the_tell_it_withdraws"
+runs = ["daemon-routes-task-tell"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "    if !told_withdrawn.is_empty() {\n        answer.insert(\"toldWithdrawn\".to_owned(), json!(told_withdrawn));\n    }\n"
+replace = ""
+
+[[plant]]
+name = "tell at work: a pause cancels a tell and the ledger gives back no id"
+meant = "a_chiefs_pause_gives_back_the_told_notes_it_cancelled_whatever_the_task_is_at_and_the_humans_none"
+runs = ["ledger-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "                if kind == \"note\" && !urgent {"
+replace = "                if false && kind == \"note\" && !urgent {"
+
+[[plant]]
+name = "tell at work: the person's Finish withdraws the chief's tell and tells the chief nothing"
+meant = "the_persons_finish_tells_the_chief_once_that_its_tell_had_not_gone_in_and_the_chiefs_own_says_it_in_its_reply"
+runs = ["engine-tell-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = "        self.tell_the_withdrawn(project, number, by, &moved.withdrawn)?;\n"
+replace = ""

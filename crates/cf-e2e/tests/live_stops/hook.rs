@@ -11,9 +11,10 @@
 use std::thread::sleep;
 use std::time::Duration;
 
-use cf_e2e::live::claude::{processes_with, runs, Process};
+use cf_e2e::live::claude::{runs, Process};
 use cf_e2e::live::members::{
-    answer_to, find, first_answer, first_question, is_over, last_result, plus, plus_maybe, Account,
+    answer_to, find, first_answer, first_question, holding, is_over, last_result, plus, plus_maybe,
+    Account, Identity, Machine, Running, ThisMachine,
 };
 use cf_e2e::Result;
 use serde_json::{json, Value};
@@ -25,6 +26,9 @@ use crate::{now_ms, Ctx, STOP, WORK};
 /// A member's question that waits on the board, and the hook that waits for its
 /// answer.
 pub struct Asked {
+    /// The member's window's process, as the host opened it: the hook is one of what descends
+    /// from it ([`hooks`]).
+    pub window: Option<Identity>,
     pub number: i64,
     pub question: Value,
     pub watched: Watched,
@@ -36,10 +40,26 @@ const ATTEMPTS: usize = 3;
 /// How often the board is looked at while the member is waited for.
 const LOOK: Duration = Duration::from_millis(500);
 
-/// The processes of the hook of the member's question: `cf hook claude`, which
-/// polls the board until the answer is there.
-pub fn hooks() -> Result<Vec<Process>> {
-    processes_with("hook claude")
+/// The processes of the hook of the member's question: `cf hook claude`, which polls the board
+/// until the answer is there, that run in the member's window (`window`, its process): what
+/// descends from it. A `cf hook claude` of another tree's run has the same command line and is
+/// none of this one's (T-635); a window the run never saw the process of has none.
+pub fn hooks(window: Option<Identity>) -> Result<Vec<Process>> {
+    Ok(hooks_in(&ThisMachine.processes()?, window))
+}
+
+/// The hooks of `window` among the processes of a machine (`all`): see [`hooks`].
+fn hooks_in(all: &[Running], window: Option<Identity>) -> Vec<Process> {
+    window
+        .map(|window| holding(all, window, "hook claude"))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|process| Process {
+            pid: process.identity.pid,
+            ppid: process.ppid,
+            command: process.command,
+        })
+        .collect()
 }
 
 /// A member's question waits on the board: its hook polls. A model may answer on
@@ -80,8 +100,12 @@ pub fn asking_member(ctx: &Ctx, case: &mut Account) -> Result<Option<Asked>> {
             continue;
         };
         let watched = watch(ctx.members, ctx.agent)?;
+        let window = ctx
+            .members
+            .window_of(ctx.agent)?
+            .and_then(|window| ctx.members.window_process(&window));
         sleep(Duration::from_secs(3));
-        let hooks = hooks()?;
+        let hooks = hooks(window)?;
         case.say(format!(
             "T-{number}: m-{} is on the board and the hook waits for it ({})",
             question["id"],
@@ -99,6 +123,7 @@ pub fn asking_member(ctx: &Ctx, case: &mut Account) -> Result<Option<Asked>> {
             }
         ));
         return Ok(Some(Asked {
+            window,
             number,
             question,
             watched,
@@ -129,7 +154,7 @@ pub fn after_stop(ctx: &Ctx, case: &mut Account, asked: &Asked, made: i64) -> Re
         STOP,
         Duration::from_millis(100),
         || {
-            if hook_gone_at.is_none() && hooks()?.is_empty() {
+            if hook_gone_at.is_none() && hooks(asked.window)?.is_empty() {
                 hook_gone_at = Some(now_ms());
             }
             Ok(idle_after(&asked.watched.status.samples(), made))
@@ -398,6 +423,91 @@ fn field(message: Option<&Value>, name: &str) -> String {
 mod tests {
     use super::*;
 
+    fn running(pid: u32, started: u64, ppid: u32, command: &str) -> Running {
+        Running {
+            identity: Identity { pid, started },
+            ppid,
+            command: command.to_owned(),
+            exe: None,
+        }
+    }
+
+    #[test]
+    fn the_hooks_of_a_window_are_the_hook_processes_that_descend_from_it_and_no_other_trees() {
+        let window = Identity {
+            pid: 100,
+            started: 10,
+        };
+        let all = vec![
+            running(100, 10, 1, "claude --settings s"),
+            running(101, 11, 100, "/bin/sh -c cf hook claude"),
+            running(102, 12, 101, "/usr/bin/cf hook claude"),
+            // The same command line of another tree's run, under a Claude of its own.
+            running(200, 9, 1, "claude --settings s"),
+            running(201, 13, 200, "/usr/bin/cf hook claude"),
+            // One that stands alone, and one that has nothing to do with it.
+            running(300, 14, 1, "/bin/sh -c sleep 30; : hook claude"),
+            running(103, 15, 100, "node server.js"),
+        ];
+        let pids = |found: Vec<Process>| -> Vec<u32> { found.iter().map(|one| one.pid).collect() };
+        assert_eq!(pids(hooks_in(&all, Some(window))), [101, 102]);
+        // A window the run never saw has no hook of the run's.
+        assert!(hooks_in(&all, None).is_empty());
+        // A window that has gone (its number has another process, begun later) has none either.
+        let gone = Identity {
+            pid: 100,
+            started: 8,
+        };
+        assert!(hooks_in(&all, Some(gone)).is_empty());
+    }
+
+    /// A `cf hook claude` of another tree's run, on this machine, is the same command line as this
+    /// run's hook, and is no hook of this run's window (T-635: a lookup across the machine took
+    /// another worker's for its own). A real one, started here and outside any window of the case.
+    #[cfg(unix)]
+    #[test]
+    fn a_hook_of_another_run_on_the_machine_is_not_the_hook_the_case_waits_for() {
+        use cf_e2e::live::claude::processes_with;
+
+        let mut decoy = cf_e2e::process::Run::new("/bin/sh")
+            .args(["-c", "read line; : hook claude"])
+            .inheriting_env()
+            .spawn()
+            .unwrap();
+        let pid = decoy.id();
+        // The case's window: another process, which the decoy does not descend from.
+        let mut window = cf_e2e::process::Run::new("sleep")
+            .arg("30")
+            .inheriting_env()
+            .spawn()
+            .unwrap();
+        let own = ThisMachine.identity(window.id()).unwrap();
+        let mut listed = false;
+        let mut found = Vec::new();
+        for _ in 0..50 {
+            listed = processes_with("hook claude")
+                .unwrap()
+                .iter()
+                .any(|process| process.pid == pid);
+            found = hooks(own).unwrap();
+            if listed {
+                break;
+            }
+            sleep(Duration::from_millis(100));
+        }
+        decoy.kill();
+        window.kill();
+        assert!(own.is_some(), "the window is not among the processes");
+        assert!(
+            listed,
+            "the decoy {pid} was never listed: the test proves nothing"
+        );
+        assert!(
+            found.iter().all(|process| process.pid != pid),
+            "the decoy {pid} is taken for the case's hook: {found:#?}"
+        );
+    }
+
     /// The first step of both hook cases against the stand-in, which asks through the hook of
     /// its settings as Claude's tool does: its question is on the board, the window is watched,
     /// and the process of the hook that waits for the answer is there for the check to find
@@ -436,7 +546,7 @@ mod tests {
             )),
             "{said}"
         );
-        assert!(!hooks().unwrap().is_empty(), "{said}");
+        assert!(!hooks(asked.window).unwrap().is_empty(), "{said}");
         // The answer, given as the chief gives it, ends the wait, and the task its work.
         let id = format!("m-{}", asked.question["id"]);
         let given = members.as_chief(["answer", id.as_str(), "blue"]).unwrap();

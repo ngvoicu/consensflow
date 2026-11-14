@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use cf_e2e::live::agents;
 use cf_e2e::live::members::{stand_in_worker, STAND_IN_WORKER};
 use cf_e2e::rig::{Project, Rig};
-use cf_e2e::{files, Result};
+use cf_e2e::Result;
 use serde_json::{json, Value};
 
 use crate::plan::{Chosen, Planned};
@@ -101,8 +101,8 @@ pub fn folder(rig: &Rig, planned: &Planned) -> Result<PathBuf> {
         .workspace()
         .join(format!("p{}-{}", planned.number, planned.chief.name()));
     cf_e2e::live::git_repository(&folder)?;
-    files::write(
-        &folder.join("README.md"),
+    cf_e2e::door::write(
+        folder.join("README.md"),
         format!(
             "# Specs test, project {}\n\nA demo project: its chief is {}.\n",
             planned.number,
@@ -110,7 +110,7 @@ pub fn folder(rig: &Rig, planned: &Planned) -> Result<PathBuf> {
         ),
     )?;
     for name in ["AGENTS.md", "CLAUDE.md"] {
-        files::write(&folder.join(name), BRIEF)?;
+        cf_e2e::door::write(folder.join(name), BRIEF)?;
     }
     Ok(folder)
 }

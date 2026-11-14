@@ -30,6 +30,60 @@ fn lines(text: &str) -> Vec<String> {
     text.lines().map(str::to_owned).collect()
 }
 
+#[test]
+fn cln75_a_recorded_permission_prompt_reads_the_time_claude_has_left() {
+    use cf_harness::testing::screens::CLAUDE_RM_PROMPT_LIVE;
+    let home = Home::new();
+    let plan = prepare(&home.adapter(), &Request::default()).unwrap();
+    let recorded: Vec<String> = CLAUDE_RM_PROMPT_LIVE
+        .iter()
+        .map(|line| (*line).to_owned())
+        .collect();
+    let read = |screen: &[String]| plan.window.dialog(screen).expect("the prompt");
+    assert_eq!(read(&recorded).closes_after_s, Some(119));
+    for (clock, seconds) in [
+        ("1:57", 117),
+        ("0:03", 3),
+        ("0:00", 0),
+        ("about 2 minutes", 120),
+        ("about 57 seconds", 57),
+    ] {
+        let at: Vec<String> = recorded
+            .iter()
+            .map(|row| row.replace("1:59", clock))
+            .collect();
+        assert_eq!(read(&at).closes_after_s, Some(seconds), "{clock}");
+        assert_eq!(
+            plan.window.dialog_identity(&read(&recorded)),
+            plan.window.dialog_identity(&read(&at)),
+            "the clock does not create another dialog"
+        );
+    }
+    for other in ["1:99", "99999999999999999999:00", "1:57, quoted"] {
+        let at: Vec<String> = recorded
+            .iter()
+            .map(|row| row.replace("1:59", other))
+            .collect();
+        assert_eq!(read(&at).closes_after_s, None, "{other}");
+    }
+    let mut quoted = recorded.clone();
+    quoted.insert(
+        8,
+        " A line from the command after the quoted warning".to_owned(),
+    );
+    assert_eq!(
+        read(&quoted).closes_after_s,
+        None,
+        "a warning that is not the last block is not the harness's warning"
+    );
+    let framed = lines(" Bash command\n │ A command or hook reason quotes:\n │ ⚠ Claude Code will automatically block this request in 1:57, to avoid holding up an unattended session\n Do you want to proceed?\n ❯ 1. Yes\n   2. No");
+    assert_eq!(
+        read(&framed).closes_after_s,
+        None,
+        "the request's own framed words are not a harness deadline"
+    );
+}
+
 /// Claude Code 2.1.317's offer to install an LSP plugin, as a live member's window drew it.
 const LSP: &str = " LSP plugin recommendation\n   Plugin: clangd-lsp\n   Triggered by: .c files\n\n   Would you like to install this LSP plugin?\n\n   \u{276f} 1. Yes, install\n     2. No, not now\n     3. Never for this plugin\n     4. Disable all LSP recommendations\n\n\u{273d} Honking\u{2026} (2s \u{b7} \u{2193} 55 tokens)";
 

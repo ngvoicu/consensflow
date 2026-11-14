@@ -1,0 +1,83 @@
+# A live run builds its programs before any case starts, and a case builds nothing (T-1631, CLN-73,
+# finding 6.1 of T-1629). `cargo xtask live` runs one `cargo build --release` for each program a case
+# can need (`cf`, the pane host, `harness-ask`, `engine-ask`) in the checkout's own build folder, then
+# starts the case told where they are (`CF_E2E_BUILT`, `CF_E2E_HELPERS`) and that it builds nothing
+# (`CF_E2E_NO_BUILD`); a program a case finds missing is an error that names it, never a `cargo` the
+# case starts, which would cut the checkout's programs out from under another run. One plant takes one
+# rule out; a test of it fails. Every name holds `kit builds first`.
+
+[run]
+builder-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "cf::tests"]
+live-xtask = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--lib", "live::"]
+
+[[plant]]
+name = "kit builds first: a case that finds a program missing builds it"
+meant = "a_live_run_that_finds_a_program_missing_names_it_and_starts_no_cargo"
+runs = ["builder-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/cf.rs"
+find = '''        None if builds_nothing => Err(format!('''
+replace = '''        None if false && builds_nothing => Err(format!('''
+
+[[plant]]
+name = "kit builds first: harness-ask is built by the case and not taken from the folder named"
+meant = "a_process_of_a_live_run_takes_every_program_from_the_folders_named_and_builds_none"
+runs = ["builder-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/cf.rs"
+find = '''        "harness-ask",
+        &["--features", "test-support"],
+        given_in(HELPERS),'''
+replace = '''        "harness-ask",
+        &["--features", "test-support"],
+        None,'''
+
+[[plant]]
+name = "kit builds first: engine-ask is built by the case and not taken from the folder named"
+meant = "a_process_of_a_live_run_takes_every_program_from_the_folders_named_and_builds_none"
+runs = ["builder-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/cf.rs"
+find = '''        "engine-ask",
+        &["--features", "test-support"],
+        given_in(HELPERS),'''
+replace = '''        "engine-ask",
+        &["--features", "test-support"],
+        None,'''
+
+[[plant]]
+name = "kit builds first: a started case is not told that it builds nothing"
+meant = "a_started_case_is_told_where_its_programs_are_and_that_it_builds_none"
+runs = ["live-xtask"]
+
+[[plant.edit]]
+file = "tools/xtask/src/live.rs"
+find = '''        .var(NO_BUILD, "1")'''
+replace = '''        .var(NO_BUILD, "0")'''
+
+[[plant]]
+name = "kit builds first: the helpers' folder is not handed to the case"
+meant = "a_started_case_is_told_where_its_programs_are_and_that_it_builds_none"
+runs = ["live-xtask"]
+
+[[plant.edit]]
+file = "tools/xtask/src/live.rs"
+find = '''        .var(HELPERS, &folder)'''
+replace = '''        .var(HELPERS, "")'''
+
+[[plant]]
+name = "kit builds first: the test binaries the cases ask are not built before the run"
+meant = "the_programs_a_case_can_need_are_built_apart_before_any_case_starts"
+runs = ["live-xtask"]
+
+[[plant.edit]]
+file = "tools/xtask/src/live.rs"
+find = '''        (
+            "cf-engine",
+            "engine-ask",
+            vec!["--features", "test-support"],
+        ),'''
+replace = ''''''

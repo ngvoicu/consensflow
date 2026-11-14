@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use cf_e2e::live::calls;
 use cf_e2e::live::machine::live_folder;
-use cf_e2e::{files, Result};
+use cf_e2e::Result;
 
 /// The files an earlier version of the home wrote and this one does not, taken away by their
 /// own paths when the home is made: `.zshenv`, which every zsh reads, a plain `zsh -c` too, and
@@ -123,24 +123,22 @@ pub fn make(program: &Path) -> Result<Home> {
         calls::install(&decoy.folder, program)?;
         let log = decoy.folder.join(calls::LOG);
         if log.exists() {
-            std::fs::remove_file(&log).map_err(|source| cf_e2e::Error::File {
-                action: "remove",
-                path: log.clone(),
-                source,
-            })?;
+            let removed = cf_e2e::door::Door::of_run().remove_in_made(&log);
+            if !removed.is_gone() {
+                return Err(cf_e2e::Error::Daemon(removed.to_string()));
+            }
         }
     }
     for (name, text) in profiles(&decoys, windows) {
-        files::write(&root.join(name), text)?;
+        cf_e2e::door::write(root.join(name), text)?;
     }
     for name in STALE {
         let stale = root.join(name);
         if stale.exists() {
-            std::fs::remove_file(&stale).map_err(|source| cf_e2e::Error::File {
-                action: "remove",
-                path: stale.clone(),
-                source,
-            })?;
+            let removed = cf_e2e::door::Door::of_run().remove_in_made(&stale);
+            if !removed.is_gone() {
+                return Err(cf_e2e::Error::Daemon(removed.to_string()));
+            }
         }
     }
     Ok(Home { root, decoys })

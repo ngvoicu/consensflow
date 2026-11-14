@@ -151,23 +151,28 @@ fn each_harness_lists_its_models_with_no_model_turn_and_no_login_of_the_owner_s_
     let harnesses = named()?;
     let mut checks = Vec::new();
     for harness in harnesses {
-        let scratch = machine::live_folder("models")?.join(format!(
-            "{}-{}",
-            harness.name(),
-            std::process::id()
-        ));
+        let made = cf_e2e::door::made_in(
+            &machine::live_folder("models")?,
+            &format!("{}-", harness.name()),
+        )
+        .map_err(|source| Error::File {
+            action: "make a folder in",
+            path: machine::live_folder("models").unwrap_or_default(),
+            source,
+        })?;
+        let scratch = made.hand_on();
         let installed = machine::installed(harness)?;
         let listed = env(&installed, &scratch).and_then(|env| {
             ask::question(&json!({ "op": "models", "kind": harness.kind(), "env": env }))
         });
         let kept = installed.finish_homes();
         drop(installed);
-        let removed = std::fs::remove_dir_all(&scratch);
+        let removed = cf_e2e::door::Door::of_run().remove_made(&scratch);
         log.say(format!(
             "{}: its throwaway {} removed: {}",
             harness.name(),
             scratch.display(),
-            removed.is_ok()
+            removed.is_gone()
         ));
         checks.push(Check::new(
             harness.name(),

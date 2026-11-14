@@ -6,7 +6,7 @@
 //!
 //! The shape of T-442 (T-429 on 3.0.5; T-534's live runs on 3.0.6-alpha.2 on Claude Code and
 //! Codex): a worker runs a long command, and the chief tells its window
-//! `cf tell T-1 "…"`, which pauses the task, stops the command and puts the words to the
+//! `cf task pause T-1 "…"` (once `cf tell`), which pauses the task, stops the command and puts the words to the
 //! window as a question. The words ask the window to write one word as its answer, run a
 //! short command, and end its reply with another. A window answered the question with `cf
 //! answer` and went on to that final word in the same turn, and the final word reached
@@ -306,7 +306,11 @@ fn drive(mut members: Members, agent: &str, turn: Turn, log: &Log) -> Result<Acc
     sleep(Duration::from_secs(3));
 
     let target = format!("T-{number}");
-    chief(&members, &mut case, &["tell", &target, &turn.told()])?;
+    chief(
+        &members,
+        &mut case,
+        &["task", "pause", &target, &turn.told()],
+    )?;
     case.check(
         "the tell paused the task",
         state(&members, number) == "paused",

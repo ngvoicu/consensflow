@@ -22,6 +22,9 @@
 //! the code it exits with (0 when it is not a number or not there). With
 //! `FAKE_CHILD_QUIET` set it reports nothing: for a test that lets it write where
 //! the test's own output goes.
+//! With `FAKE_CHILD_BUILD_DIR` naming a test's own folder, a successful `build` makes an empty
+//! file there for each `--bin` it was asked for, with this platform's executable suffix. Other
+//! commands and a build told to fail make no files.
 
 #![forbid(unsafe_code)]
 
@@ -32,6 +35,27 @@ use cf_base::env::Env;
 
 fn main() -> ExitCode {
     let env = Env::from_process();
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    let exit = env
+        .text("FAKE_CHILD_EXIT")
+        .and_then(|code| code.parse::<i32>().ok());
+    let build = match (
+        exit.unwrap_or(0),
+        args.first(),
+        env.path("FAKE_CHILD_BUILD_DIR"),
+    ) {
+        (0, Some(word), Some(folder)) if word == "build" && !folder.as_os_str().is_empty() => {
+            make_build_products(folder, &args)
+        }
+        _ => Ok(()),
+    };
+    if let Err(cause) = build {
+        let _ = writeln!(
+            io::stderr().lock(),
+            "fake cargo could not make its build products: {cause}"
+        );
+        return ExitCode::FAILURE;
+    }
     if let Some(probe) = env.text("FAKE_CHILD_PROBE") {
         if std::env::args_os().any(|arg| arg == "ServerAliveCountMax=1") {
             let _ = writeln!(io::stdout().lock(), "{probe}");
@@ -80,11 +104,42 @@ fn main() -> ExitCode {
     if let Some(text) = env.text("FAKE_CHILD_STDERR") {
         let _ = writeln!(io::stderr().lock(), "{text}");
     }
-    match env
-        .text("FAKE_CHILD_EXIT")
-        .and_then(|code| code.parse::<i32>().ok())
-    {
+    match exit {
         Some(code) => u8::try_from(code).map_or_else(|_| std::process::exit(code), ExitCode::from),
         None => ExitCode::SUCCESS,
     }
+}
+
+/// The caller gives this test-only stand-in a folder of the test's own. Do not interpret a binary
+/// name as a path: each `--bin` is a single file in that folder, never a write outside it.
+fn make_build_products(folder: &std::path::Path, args: &[std::ffi::OsString]) -> io::Result<()> {
+    use std::path::Component;
+
+    let mut words = args.iter();
+    while let Some(word) = words.next() {
+        let name = if word == "--bin" {
+            words
+                .next()
+                .ok_or_else(|| io::Error::other("--bin needs a name"))?
+                .as_os_str()
+        } else if let Some(name) = word.to_str().and_then(|word| word.strip_prefix("--bin=")) {
+            std::ffi::OsStr::new(name)
+        } else {
+            continue;
+        };
+        let mut components = std::path::Path::new(name).components();
+        if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+            return Err(io::Error::other("--bin needs a single file name"));
+        }
+        std::fs::create_dir_all(folder)?;
+        std::fs::write(
+            folder.join(format!(
+                "{}{}",
+                name.to_string_lossy(),
+                std::env::consts::EXE_SUFFIX
+            )),
+            [],
+        )?;
+    }
+    Ok(())
 }

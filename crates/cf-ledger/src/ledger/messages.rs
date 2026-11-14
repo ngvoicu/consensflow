@@ -35,8 +35,9 @@ impl Ledger {
     }
 
     /// A note from ConsensFlow that asks its reader no decision: to a chief it is shown, not
-    /// typed, and `aside` is what its task's line says of it until the task moves on
-    /// ([`crate::TaskView::aside`]); to anyone else it goes as [`Ledger::note`]'s does.
+    /// typed, and `aside` is what its task's line says of it until the task moves on or the
+    /// thing described ends ([`crate::TaskView::aside`]); to anyone else it goes as
+    /// [`Ledger::note`]'s does.
     pub fn show(
         &mut self,
         project_id: i64,
@@ -57,8 +58,13 @@ impl Ledger {
         crate::tasks::aside_note(&self.store, project_id, number)
     }
 
-    /// The shown note `aside` says `said` on its task's line from now, counted from now:
-    /// what it tells of goes on in new words, nothing typed. False where it no longer holds.
+    /// End this shown note when what it describes ends; other asides stay active.
+    pub fn end_aside(&mut self, project_id: i64, aside: i64) -> Result<(), LedgerError> {
+        crate::tasks::end_aside(&mut self.store, project_id, aside)
+    }
+
+    /// A worker held again: update the shown line and count the re-hold, without
+    /// restarting its stretch. False where the shown note no longer holds.
     pub fn renew_aside(
         &mut self,
         project_id: i64,
@@ -68,6 +74,29 @@ impl Ledger {
         crate::tasks::renew_aside(&mut self.store, project_id, aside, said)
     }
 
+    /// The worker exchanged a message and held: start a new stretch on the same line.
+    /// False where the shown note no longer holds.
+    pub fn restart_aside(
+        &mut self,
+        project_id: i64,
+        aside: i64,
+        said: &str,
+    ) -> Result<bool, LedgerError> {
+        crate::tasks::restart_aside(&mut self.store, project_id, aside, said)
+    }
+
+    /// Carry an existing hold stretch into a newly shown note after a typed hold.
+    pub fn carry_aside(
+        &mut self,
+        project_id: i64,
+        aside: i64,
+        since: &str,
+        reholds: i64,
+        previous: Option<(i64, &str)>,
+    ) -> Result<bool, LedgerError> {
+        crate::tasks::carry_aside(&mut self.store, project_id, aside, since, reholds, previous)
+    }
+
     /// The shown note `aside`, whose line a move of its task ended, says it again on the
     /// task's line from now, nothing typed and no row more (a wait of many tries, told
     /// once). False where it holds already, or it was never shown.
@@ -75,18 +104,19 @@ impl Ledger {
         crate::tasks::show_again(&mut self.store, project_id, aside)
     }
 
-    /// `note`, sent once (queued, and so typed) about the shown note `aside` that has held
-    /// too long to be left to its task's line; none where it was sent already or `aside` no
-    /// longer holds.
+    /// Send a due reminder if `stretch` and `previous` still match the shown note.
+    /// None if a new stretch began, another look sent one, or the aside no longer holds.
     pub fn remind_of_aside(
         &mut self,
         project_id: i64,
         aside: i64,
+        stretch: i64,
+        previous: Option<i64>,
         note: &NewNote,
     ) -> Result<Option<MessageView>, LedgerError> {
         #[cfg(feature = "test-support")]
         self.watched("note", None)?;
-        crate::tasks::remind_of_aside(&mut self.store, project_id, aside, note)
+        crate::tasks::remind_of_aside(&mut self.store, project_id, aside, stretch, previous, note)
     }
 
     /// [`Ledger::tell_closed`], shown and not typed to a chief, `aside` its words on the
@@ -239,6 +269,15 @@ impl Ledger {
         messages::ask(&mut self.store, project_id, question)
     }
 
+    /// [`Ledger::ask`], and with the question the told notes its pause cancelled.
+    pub fn ask_naming(
+        &mut self,
+        project_id: i64,
+        question: &NewQuestion,
+    ) -> Result<(MessageView, Vec<MessageView>), LedgerError> {
+        messages::ask_naming(&mut self.store, project_id, question)
+    }
+
     /// `from` tells the window of T-`number`, still queued for it, `body`: kept
     /// for the window, it goes in after the brief, and nothing is paused.
     pub fn tell_queued(
@@ -275,6 +314,18 @@ impl Ledger {
         )
     }
 
+    /// The task an answer's tell still has paused for the chief, if that can
+    /// be proved from the ledger. Used for the answer's delivery footer.
+    pub fn answer_to_current_pause(&self, answer: i64) -> Result<Option<i64>, LedgerError> {
+        messages::answer_to_current_pause(&self.store, answer)
+    }
+
+    /// The tasks whose tell-answer ways on were included when this paste began. This stays
+    /// true after those tasks move, so the paste can be recognised on its window's screen.
+    pub fn tell_pause_ways_on(&self, paste: i64) -> Result<Vec<i64>, LedgerError> {
+        messages::tell_pause_ways_on(&self.store, paste)
+    }
+
     /// The newest note that gave T-`number`'s requester the answer of its window's turn on a
     /// tell, or is to give it, its words not taken as the result, since the task's last result
     /// to that requester before `result`: what `result`'s paste names. None where there is none.
@@ -298,6 +349,28 @@ impl Ledger {
     /// result until each is in.
     pub fn notes_waiting(&self, participant_id: i64, task_id: i64) -> Result<bool, LedgerError> {
         messages::notes_waiting(&self.store, participant_id, task_id)
+    }
+
+    /// [`Ledger::notes_waiting`] for the chief's Finish of T-`number`: the words told to
+    /// its window at work that wait are not counted, as Finish withdraws them.
+    pub fn notes_waiting_for_finish(
+        &self,
+        project_id: i64,
+        number: i64,
+        participant_id: i64,
+    ) -> Result<bool, LedgerError> {
+        let task = self.store.task_row(project_id, number)?;
+        messages::notes_waiting_for_finish(&self.store, participant_id, &task)
+    }
+
+    /// Whether `message`, told words, was sent while its task's window was at work, not
+    /// before the brief went in (`told_at_work`).
+    pub fn sent_at_work(&self, message: &MessageView) -> Result<bool, LedgerError> {
+        let Some(number) = message.task_number else {
+            return Ok(false);
+        };
+        let task = self.store.task_row(message.project_id, number)?;
+        messages::sent_at_work_of(&self.store, message, &task)
     }
 
     /// A launch whose first message was `carrier` is over before its window
@@ -505,7 +578,17 @@ impl Ledger {
     /// row of `carried` (what its paste was begun with) still riding in it: then
     /// they are the window's, marked handed in this write.
     pub fn admit(&mut self, message_id: i64, carried: &[i64]) -> Result<HandOver, LedgerError> {
-        messages::admit(&mut self.store, message_id, carried)
+        messages::admit(&mut self.store, message_id, carried, false)
+    }
+
+    /// Whether an Enter may send a paste already handed over: its words cannot be
+    /// prepared again, even if a tell's pause changed after the hand-over.
+    pub fn admit_again(
+        &mut self,
+        message_id: i64,
+        carried: &[i64],
+    ) -> Result<HandOver, LedgerError> {
+        messages::admit(&mut self.store, message_id, carried, true)
     }
 
     /// The first row of `carried` (what the paste of `message_id`, handed over

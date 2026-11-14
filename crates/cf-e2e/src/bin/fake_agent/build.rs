@@ -20,7 +20,6 @@
 //! none of its client's: a PowerShell waits for the output of the command it runs to end.
 
 use std::ffi::OsString;
-use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -125,9 +124,9 @@ fn leave_a_daemon(seconds: &str, build: &Path, daemon: &Path) -> Result<(), Stri
         PathBuf::from(name)
     };
     let written = |file: PathBuf, text: String| {
-        fs::write(&file, text).map_err(|failed| format!("{}: {failed}", file.display()))
+        cf_e2e::door::write(&file, text).map_err(|failed| format!("{}: {failed}", file.display()))
     };
-    cf_e2e::files::say_its_process(build)
+    cf_e2e::door::say_its_process(build)
         .map_err(|failed| format!("{}: {failed}", build.display()))?;
     #[cfg(windows)]
     keep_own_handles();

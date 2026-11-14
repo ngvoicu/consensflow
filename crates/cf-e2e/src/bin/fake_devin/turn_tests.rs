@@ -208,7 +208,7 @@ fn a_background_line_leaves_a_command_running_that_long_and_does_what_the_words_
 /// A window on a store and a wire of a folder of its own, and what it said on its screen.
 struct Case {
     window: Window<Vec<u8>>,
-    folder: tempfile::TempDir,
+    folder: cf_e2e::door::Made,
 }
 
 fn case() -> Case {
@@ -216,7 +216,7 @@ fn case() -> Case {
 }
 
 fn case_at(pace: Pace) -> Case {
-    let folder = tempfile::tempdir().unwrap();
+    let folder = cf_e2e::door::made("cf-test-").unwrap();
     let store = Store::open(&folder.path().join("sessions.db"), "calm-river").unwrap();
     let wire = Wire::open(&folder.path().join("wire.jsonl"), "calm-river").unwrap();
     let window = Window::new(store, wire, Arc::new(Stop::default()), Vec::new(), pace);
@@ -552,7 +552,7 @@ fn the_turns_after_a_new_conversation_go_into_it_and_the_ones_before_stay_in_the
 
 /// A case whose wire is written in `shape`.
 fn case_in(shape: Shape, pace: Pace) -> Case {
-    let folder = tempfile::tempdir().unwrap();
+    let folder = cf_e2e::door::made("cf-test-").unwrap();
     let store = Store::open(&folder.path().join("sessions.db"), "calm-river").unwrap();
     let wire = Wire::open(&folder.path().join("wire.jsonl"), "calm-river")
         .unwrap()

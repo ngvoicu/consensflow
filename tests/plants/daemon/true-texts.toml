@@ -5,7 +5,7 @@
 # otherwise the answer is the result, and the free worker's window then closes, which ends only
 # what the host can tell is the window's, so a detached job can run on. `skill/core/staff.md`
 # said "anything you left running is stopped then": the member is now told to wait for what its
-# result needs and leave nothing running, held by `crates/cf-engine/tests/text/roles.rs` and the
+# result needs and end background leftovers before its final answer, held by the role tests and the
 # 27 members' rows of `crates/cf-engine/tests/goldens/text.json` (the golden of Node's texts,
 # `goldens_roles`, holds them word for word and is left out of the runs here).
 #
@@ -21,5 +21,5 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = "ends your turn: wait for what your result needs, and leave nothing running."
-replace = "ends your turn's work: anything you left running is stopped then, so wait for what your result needs."
+find = "Your answer ends your turn: wait for what your result needs. Your result\nis delivered once your turn has ended and nothing you started is still running,\nso before your last answer end what you left in the background (a wait loop, a\nwatcher)."
+replace = "Your answer ends your turn's work: anything you left running is stopped then, so wait for what your result needs."

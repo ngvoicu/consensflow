@@ -185,14 +185,40 @@ pub fn run(run: &Run, case: Case) -> Done {
                 );
             }
             // What the case made, and the launches' files with the copies of the owner's
-            // config, go with it, unless the run is to be looked at.
-            if !keep_requested() {
-                let _ = std::fs::remove_dir_all(&workspace);
+            // config, go with it once it held, unless the run is to be looked at; a case that
+            // did not hold keeps them for the person who reads what it saw.
+            if let Settled::Kept = settle(&workspace, done.account.held(), keep_requested()) {
+                run.log.say(format!(
+                    "{}: the workspace stays, marked kept: {}",
+                    case.name(),
+                    workspace.display()
+                ));
             }
         }
         Err(failed) => done.account.fail(failed),
     }
     done
+}
+
+/// What became of a case's workspace.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Settled {
+    /// Taken away: the case held and the run is not to be looked at.
+    Taken,
+    /// Left, marked kept ([`cf_e2e::door::KEPT`]).
+    Kept,
+}
+
+/// The workspace a case ran in, which this run made (a receipt of the door): taken away once the
+/// case `held`, unless `keep` (the run is to be looked at). Where it did not hold or `keep` is
+/// given it is left, marked kept, for the person who reads what the case saw.
+pub fn settle(workspace: &Path, held: bool, keep: bool) -> Settled {
+    let door = cf_e2e::door::Door::of_run();
+    if held && !keep && door.remove_made(workspace).is_gone() {
+        return Settled::Taken;
+    }
+    door.keep_made(workspace);
+    Settled::Kept
 }
 
 /// The steps of a case, in `workspace`, the folder its windows run in.
@@ -413,6 +439,32 @@ fn ask_all(run: &Run, case: Case, scene: &mut Scene, place: &Place, done: &mut D
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_workspace_of_a_case_that_held_is_taken_and_one_that_did_not_or_a_run_to_look_at_is_kept() {
+        let folder = cf_e2e::door::made("live-devin-resume-test-").unwrap();
+        let mut places = Vec::new();
+        for name in ["held", "failed", "looked-at"] {
+            let place = cf_e2e::door::made_in(folder.path(), &format!("{name}-"))
+                .unwrap()
+                .hand_on();
+            cf_e2e::door::write(place.join("notes.txt"), "what the case made").unwrap();
+            places.push(place);
+        }
+        assert_eq!(settle(&places[0], true, false), Settled::Taken);
+        assert!(!places[0].exists());
+        assert_eq!(settle(&places[1], false, false), Settled::Kept);
+        assert_eq!(settle(&places[2], true, true), Settled::Kept);
+        for kept in &places[1..] {
+            assert!(kept.join("notes.txt").is_file(), "{kept:?}");
+            assert!(kept.join(cf_e2e::door::KEPT).is_file(), "{kept:?}");
+        }
+        // What this run did not make is never taken, held or not.
+        let theirs = tempfile::tempdir().unwrap();
+        std::fs::write(theirs.path().join("mine.txt"), "a person's").unwrap();
+        assert_eq!(settle(theirs.path(), true, false), Settled::Kept);
+        assert!(theirs.path().join("mine.txt").is_file());
+    }
 
     #[test]
     fn the_wire_log_is_beside_the_config_the_launch_names() {

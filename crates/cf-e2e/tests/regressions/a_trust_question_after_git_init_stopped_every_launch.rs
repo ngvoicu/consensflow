@@ -250,7 +250,7 @@ fn outside_answered_by_the_human(vars: &[(&str, &str)]) -> Outcome {
     // Past the time a launch has, nothing failed, and nothing said yes for the human.
     // The chief tells T-1's window something meanwhile: it waits for the window to
     // be past the question, whose Enter would choose "No, exit".
-    rig.tell(project.id(), "CF tell T-1 :: KEEP_THIS_IN_MIND")?;
+    rig.tell(project.id(), "CF task pause T-1 :: KEEP_THIS_IN_MIND")?;
     sleep(Duration::from_secs(if leaves { 1 } else { 12 }));
     for number in [1, 2] {
         let state = project.task(number)?["state"].clone();
@@ -753,7 +753,7 @@ fn a_window_opened_again_that_asks_is_given_nothing_until_the_human_has_answered
     rig.wait_for("the window opened again to ask", secs(60), || {
         Ok(!notes_of(&project, &root)?.is_empty() && workers(&rig, &project).len() > opened)
     })?;
-    rig.tell(project.id(), "CF tell T-2 :: KEEP_THIS_IN_MIND")?;
+    rig.tell(project.id(), "CF task pause T-2 :: KEEP_THIS_IN_MIND")?;
     sleep(Duration::from_secs(6));
     let window = workers(&rig, &project)
         .last()

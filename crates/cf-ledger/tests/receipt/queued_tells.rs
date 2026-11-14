@@ -108,7 +108,7 @@ fn words_told_once_the_brief_is_on_its_way_go_in_next_and_the_answer_after_them_
 }
 
 #[test]
-fn only_a_queued_task_of_a_members_window_keeps_words_and_no_words_are_none() {
+fn only_a_task_of_a_members_window_that_is_not_over_keeps_words_and_no_words_are_none() {
     let mut w = world();
     let (task, _, brief) = queued(&mut w);
     let blank = w
@@ -117,15 +117,28 @@ fn only_a_queued_task_of_a_members_window_keeps_words_and_no_words_are_none() {
         .unwrap_err();
     assert_eq!(blank.code(), Some("invalid-text"));
 
+    // A task at work keeps words as a queued one does: they go in at rest.
     w.deliver(brief);
     let working = w
         .ledger
+        .tell_queued(w.project, task, "chief", "In time")
+        .unwrap();
+    assert_eq!(
+        (working.kind.as_str(), working.state.as_str()),
+        ("note", "queued")
+    );
+    assert_eq!(w.state(task), "working", "nothing is moved");
+
+    // A task that is over has no window to keep them for.
+    w.ledger.cancel_task(w.project, task, "chief").unwrap();
+    let over = w
+        .ledger
         .tell_queued(w.project, task, "chief", "Too late")
         .unwrap_err();
-    assert_eq!(working.code(), Some("invalid-transition"));
+    assert_eq!(over.code(), Some("invalid-transition"));
     assert_eq!(
-        working.to_string(),
-        format!("cannot keep words for the window of T-{task}: it is working")
+        over.to_string(),
+        format!("cannot keep words for the window of T-{task}: it is cancelled")
     );
 
     let open = w.open("Lexer").task.number;
@@ -304,4 +317,41 @@ fn a_task_taken_back_to_the_board_carries_the_words_into_the_next_windows_brief(
         )),
         "{body}"
     );
+}
+
+#[test]
+fn a_chiefs_pause_gives_back_the_told_notes_it_cancelled_whatever_the_task_is_at_and_the_humans_none(
+) {
+    // A task still queued: the brief and the tell go with the pause, and only the tell is named.
+    let mut w = world();
+    let (task, _, brief) = queued(&mut w);
+    let told = tell(&mut w, task, "Use the v2 grammar");
+    let (_, named) = w
+        .ledger
+        .pause_task_naming(w.project, task, Some("chief"), None)
+        .expect("the chief pauses");
+    assert_eq!(ids(&named), [told.id], "the tell, not the brief");
+    assert_eq!(w.states(&[brief, told.id]), ["cancelled", "cancelled"]);
+
+    // A task at work: the same, with the words that resumed it among what goes.
+    let mut w = world();
+    let (task, _, brief) = queued(&mut w);
+    w.deliver(brief);
+    let told = tell(&mut w, task, "Use the v2 grammar");
+    let (_, named) = w
+        .ledger
+        .pause_task_naming(w.project, task, Some("chief"), None)
+        .expect("the chief pauses");
+    assert_eq!(ids(&named), [told.id]);
+
+    // The human's pause takes nothing back and names nothing.
+    let mut w = world();
+    let (task, _, _) = queued(&mut w);
+    let told = tell(&mut w, task, "Use the v2 grammar");
+    let (_, named) = w
+        .ledger
+        .pause_task_naming(w.project, task, Some("human"), None)
+        .expect("the human pauses");
+    assert!(named.is_empty());
+    assert_eq!(w.states(&[told.id]), ["queued"]);
 }

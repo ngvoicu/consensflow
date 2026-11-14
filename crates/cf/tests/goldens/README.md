@@ -35,6 +35,12 @@ the two sentences name the four in their parentheses (`or, with no tier, --front
 on 2026-11-11, with the daemon's traces of the same words (`cf-board-019`, `-021`, `-028`
 and `-029`).
 
+## Tell withdrawal guidance (T-1641)
+
+The six usage prints say a pause and finish can withdraw and name told words;
+the four prints with the chief's tell also say when it is read unless withdrawn.
+The working-tell reply names the same possibility. Changed in those lines alone.
+
 ## The usage after a tell could wait
 
 `cf tell` to a task still queued, its window not up yet, keeps its words for the window
@@ -133,7 +139,7 @@ of the same words (`crates/cf-daemon/tests/goldens/cf-board-028.json.gz`).
 ## `cf task finish` takes a paused task too
 
 Board task T-442 (3.0.6): the chief's `cf task finish T-3` takes what a worker said last as
-the task's result for a paused task as well as a working one, since a tell pauses a task and
+the task's result for a paused task as well as a working one, since a pause with words (`cf task pause T-n "…"`) pauses a task and
 the window's last complete answer, written after it, would otherwise reach nobody. The
 usage's entry says it, `take what a working or paused task's worker said last as its
 result`, in the six prints of `board.json` that hold it (`cf`, `cf help`, `cf --help`, `cf
@@ -230,3 +236,13 @@ The first line of the footer that teaches a text from standard input reads, sinc
 --file):", where it ended "as written:" (the heredoc is not PowerShell's; the
 footer line about a file, and the commands it names, did not change). Changed by hand in the
 4 prints of `board.json` that hold the footer.
+
+On 2026-11-13 (T-1609), the four prints of board usage gained the member's
+`cf tell "…"`, the note line names the human, and the footer's character count
+is the chief's tell. The stdin note case is now a member tell; it, the chief's
+numbered tell and the two empty commands first read `/api/whoami` for the calling
+role. Their existing posts, output and refusals are unchanged.
+
+T-1641 also qualifies queued and paused tells and explains the pause-with-words
+exception while resume words have yet to go in. The same lines were updated in the
+six pause-help and four tell-help prints.

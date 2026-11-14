@@ -84,7 +84,7 @@ impl Window {
 
 /// Every command that changes the board, written right: the board's write verbs, `cf task`'s
 /// moves among them.
-const WRITES: [&[&str]; 14] = [
+const WRITES: [&[&str]; 17] = [
     &[
         "task",
         "add",
@@ -102,20 +102,24 @@ const WRITES: [&[&str]; 14] = [
     &["task", "reopen", "T-3", "a follow-up"],
     &["task", "edit", "T-3", "a new brief"],
     &["task", "pause", "T-3"],
+    &["task", "pause", "T-3", "Which one?"],
     &["task", "resume", "T-3", "go on"],
     &["note", "to the chief"],
+    &["note", "--human", "to the human"],
     &["ask", "which one?"],
-    &["tell", "T-3", "wait"],
+    &["tell", "T-3", "use the v2 grammar"],
+    &["tell", "to the chief"],
     &["answer", "m-12", "this one"],
 ];
 
 /// The usage of the commands above, which `--help` and `-h` answer.
-const HELPS: [&[&str]; 9] = [
+const HELPS: [&[&str]; 10] = [
     &["--help"],
     &["task", "--help"],
     &["task", "add", "--help"],
     &["task", "accept", "-h"],
     &["task", "finish", "--help"],
+    &["task", "pause", "--help"],
     &["note", "--help"],
     &["ask", "-h"],
     &["tell", "--help"],
@@ -146,15 +150,19 @@ fn a_command_that_changes_the_board_is_refused_in_the_memories_folder_in_the_wor
 #[test]
 fn the_same_commands_are_taken_from_the_project_and_from_where_the_system_gave_no_folder() {
     for folder in [Some("project"), Some(""), None] {
-        let window = Window::new(vec![reply(
-            200,
-            json!({ "message": { "id": 1, "recipient": "chief" } }),
-        )]);
+        let window = Window::new(vec![
+            reply(200, json!({ "participant": { "role": "worker" } })),
+            reply(200, json!({ "message": { "id": 1, "recipient": "chief" } })),
+        ]);
         let at = folder.map(|folder| window.at(folder));
-        let (code, out, err) = window.run(at.as_deref(), &["note", "to the chief"]);
+        let (code, out, err) = window.run(at.as_deref(), &["tell", "to the chief"]);
         assert_eq!(code, 0, "{folder:?}: {err}");
         assert!(out.contains("noted to @chief"), "{out}");
-        assert_eq!(window.asked(), ["POST /api/notes"], "{folder:?}");
+        assert_eq!(
+            window.asked(),
+            ["GET /api/whoami", "POST /api/notes"],
+            "{folder:?}"
+        );
     }
 }
 
@@ -231,10 +239,10 @@ fn an_inbox_read_there_prints_the_message_and_does_not_receive_it_for_the_window
 #[test]
 fn a_board_command_of_a_window_with_a_codex_home_elsewhere_runs_in_the_folder_it_always_did() {
     // The window's Codex home is its own: the default `~/.codex/memories` is no job's folder.
-    let window = Window::new(vec![reply(
-        200,
-        json!({ "message": { "id": 1, "recipient": "chief" } }),
-    )]);
+    let window = Window::new(vec![
+        reply(200, json!({ "participant": { "role": "worker" } })),
+        reply(200, json!({ "message": { "id": 1, "recipient": "chief" } })),
+    ]);
     let elsewhere = tempfile::tempdir().unwrap();
     let home = fs::canonicalize(elsewhere.path()).unwrap();
     fs::create_dir_all(home.join(".codex/memories")).unwrap();
@@ -244,7 +252,7 @@ fn a_board_command_of_a_window_with_a_codex_home_elsewhere_runs_in_the_folder_it
         ("CODEX_HOME", window.at("project").to_str().unwrap()),
         ("HOME", home.to_str().unwrap()),
     ]);
-    let args: Vec<OsString> = ["note", "x"].iter().map(OsString::from).collect();
+    let args: Vec<OsString> = ["tell", "x"].iter().map(OsString::from).collect();
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let code = run_in(
         Some(&home.join(".codex/memories")),
@@ -256,7 +264,7 @@ fn a_board_command_of_a_window_with_a_codex_home_elsewhere_runs_in_the_folder_it
     )
     .unwrap();
     assert_eq!(code, 0, "{}", String::from_utf8_lossy(&err));
-    assert_eq!(window.asked(), ["POST /api/notes"]);
+    assert_eq!(window.asked(), ["GET /api/whoami", "POST /api/notes"]);
 }
 
 #[test]

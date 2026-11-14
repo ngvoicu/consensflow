@@ -106,7 +106,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent/status_line.rs"
-find = '''        fs::write(&git, GIT_SCRIPT).map_err(|failed| format!("{}: {failed}", git.display()))?;'''
+find = '''        cf_e2e::door::write(&git, GIT_SCRIPT)
+            .map_err(|failed| format!("{}: {failed}", git.display()))?;'''
 replace = '''        let _ = GIT_SCRIPT;'''
 
 [[plant]]

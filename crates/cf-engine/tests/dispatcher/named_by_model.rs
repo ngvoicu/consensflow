@@ -43,6 +43,7 @@ fn a_window_paused_across_the_migration_is_resumed_finishes_its_task_and_is_deli
     // (Opus 5.5 at high on Claude Code), and its window, named after it.
     context.edit_ledger(|file| {
         let db = rusqlite::Connection::open(file).unwrap();
+        cf_ledger::testing::undo_migration_0040(&db).unwrap();
         cf_ledger::testing::undo_migration_0038(&db).unwrap();
         cf_ledger::testing::undo_migration_0036(&db).unwrap();
         cf_ledger::testing::undo_migration_0035(&db).unwrap();

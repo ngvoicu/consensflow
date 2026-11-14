@@ -60,28 +60,32 @@ pub struct World {
 }
 
 pub fn world() -> World {
-    World::on(Box::new(Ticks(1_790_000_000_000)), false)
+    World::on(Box::new(Ticks(1_790_000_000_000)), false, Box::new(|_| {}))
 }
 
 /// A project whose human approves every hand-off between agents.
 pub fn gated_world() -> World {
-    World::on(Box::new(Ticks(1_790_000_000_000)), true)
+    World::on(Box::new(Ticks(1_790_000_000_000)), true, Box::new(|_| {}))
 }
 
 /// A project on a clock that never moves.
 pub fn frozen_world() -> World {
-    World::on(Box::new(Fixed), false)
+    World::on(Box::new(Fixed), false, Box::new(|_| {}))
 }
 
 impl World {
-    fn on(clock: Box<dyn Clock>, gate: bool) -> Self {
+    pub fn traced(trace: Box<dyn FnMut(&cf_ledger::Event)>) -> Self {
+        Self::on(Box::new(Ticks(1_790_000_000_000)), false, trace)
+    }
+
+    fn on(clock: Box<dyn Clock>, gate: bool, trace: Box<dyn FnMut(&cf_ledger::Event)>) -> Self {
         let dir = tempfile::tempdir().expect("a home");
         let mut ledger = open_ledger(
             &dir.path().join("consensflow.db"),
             Options {
                 clock,
                 names: session_names(),
-                trace: Box::new(|_| {}),
+                trace,
             },
         )
         .expect("a ledger");

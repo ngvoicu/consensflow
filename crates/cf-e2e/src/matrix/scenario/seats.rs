@@ -3,8 +3,8 @@
 //! Claude Code's, where the older scenarios use words of the Claude-shaped stand-in alone
 //! (`PACED`, `CLAUDE-JOB`, `REPLY … THEN`).
 //!
-//! - `seat-tell`: the chief tells a worker at work something; its answer comes back to the
-//!   chief as an answer, and the task resumed goes on to its result.
+//! - `seat-tell`: the chief pauses a worker at work with a question; its answer comes back to
+//!   the chief, and the task resumed goes on to its result. The scenario keeps its historic name.
 //! - `seat-finish`: a worker's turn ends on a question; the chief finishes the task with what
 //!   it said (a known red until T-1119).
 
@@ -47,12 +47,12 @@ pub fn seats() -> Vec<Scenario> {
                     |snapshot, bindings| since(snapshot, bindings, "A", "working")
                         .is_some_and(|seconds| seconds >= 5)
                 ),
-                // The words told are the worker's own call of `cf answer` (the tell is m-2 on the
-                // board this starts), as an agent answers a tell: the Devin and Codex stand-ins
-                // run a `CF` line, and answer no question by themselves.
+                // The pause's words are the worker's own call of `cf answer` (the question is m-2
+                // on this board): the Devin and Codex stand-ins run a `CF` line and do not answer
+                // questions by themselves.
                 run!(
-                    "tell A",
-                    "tell {A} :: CF answer m-2 :: TOLD",
+                    "pause A",
+                    "task pause {A} :: CF answer m-2 :: TOLD",
                     |snapshot, bindings| {
                         bindings.nth("A", 0).is_some_and(|number| {
                             snapshot.chief_inbox.iter().any(|message| {
@@ -84,13 +84,13 @@ pub fn seats() -> Vec<Scenario> {
                 vec![
                     Check::new(
                         "A",
-                        "the tell's stop stopped its window's turn, which was kept",
+                        "the pause stopped its window's turn, which was kept",
                         ignored == 0,
                         format!("{ignored} note(s) of a window that did not stop"),
                     ),
                     Check::new(
                         "A",
-                        "its window's answer to the tell reached the chief once",
+                        "its window's answer to the pause reached the chief once",
                         answers.len() == 1 && answers[0].contains("TOLD"),
                         format!("{answers:?}"),
                     ),

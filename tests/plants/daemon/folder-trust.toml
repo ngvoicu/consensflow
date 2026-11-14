@@ -886,18 +886,6 @@ replace = '''
                 .contains(&(project, folder.to_owned(), false));'''
 
 [[plant]]
-name = "folder trust: the live suite leaves what a window wrote when it goes (round 6, T-299)"
-meant = "what_a_window_of_the_resumed_part_wrote_goes_with_it"
-runs = ["folder-trust-live-sweep"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_folder_trust.rs"
-find = '''
-        let _ = fs::remove_dir_all(&self.0);'''
-replace = '''
-        let _ = &self.0;'''
-
-[[plant]]
 name = "folder trust: the question's hint line counts anywhere on the screen (round 7, T-325)"
 meant = "a_conversation_that_lists_the_choices_above_the_input_box_asks_nothing"
 runs = ["folder-trust-readers"]

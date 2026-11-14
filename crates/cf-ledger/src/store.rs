@@ -4,6 +4,7 @@
 //! it privately; nothing outside the crate reaches the connection.
 
 use std::panic::{self, AssertUnwindSafe};
+use std::{cell::RefCell, rc::Rc};
 
 use cf_base::time::{iso, Clock};
 use cf_proto::ledger::MessageView;
@@ -72,6 +73,40 @@ impl Store {
                 let _ = self.db.execute_batch("ROLLBACK");
                 panic::resume_unwind(unwound)
             }
+        }
+    }
+
+    /// A batch is one visible operation: do not send its tentative events to
+    /// the external trace unless the enclosing transaction actually commits.
+    pub(crate) fn write_batch<T>(
+        &mut self,
+        work: impl FnOnce(&mut Self) -> Result<T, LedgerError>,
+    ) -> Result<T, LedgerError> {
+        if !self.db.is_autocommit() {
+            return Err(LedgerError::refused(
+                "nested-batch",
+                "a batch needs its own transaction",
+            ));
+        }
+        let events = Rc::new(RefCell::new(Vec::<Event>::new()));
+        let pending = Rc::clone(&events);
+        let trace = std::mem::replace(
+            &mut self.trace,
+            Box::new(move |event| {
+                pending.borrow_mut().push(event.clone());
+            }),
+        );
+        let result = panic::catch_unwind(AssertUnwindSafe(|| self.write(work)));
+        self.trace = trace;
+        match result {
+            Ok(Ok(value)) => {
+                for event in events.borrow().iter() {
+                    (self.trace)(event);
+                }
+                Ok(value)
+            }
+            Ok(Err(cause)) => Err(cause),
+            Err(unwound) => panic::resume_unwind(unwound),
         }
     }
 

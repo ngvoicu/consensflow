@@ -102,7 +102,7 @@ impl Store {
     /// where its chain ends.
     pub fn open(file: &Path, session: &str) -> Result<Self, String> {
         if let Some(folder) = file.parent() {
-            std::fs::create_dir_all(folder).map_err(|failed| format!("{folder:?}: {failed}"))?;
+            cf_e2e::door::make_dir(folder).map_err(|failed| format!("{folder:?}: {failed}"))?;
         }
         let db = Connection::open(file).map_err(said)?;
         db.busy_timeout(Duration::from_secs(5)).map_err(said)?;
@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn a_session_is_a_chain_of_nodes_each_below_the_one_before_and_the_session_names_the_last() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let file = folder
             .path()
             .join("data")
@@ -381,7 +381,7 @@ mod tests {
     #[test]
     fn a_compaction_begins_a_chain_of_its_own_with_the_turns_steps_copied_and_the_users_message_left_out(
     ) {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let file = folder.path().join("sessions.db");
         let mut store = Store::open(&file, "calm-river").unwrap();
         store.user("before", "client-1").unwrap();
@@ -423,7 +423,7 @@ mod tests {
 
     #[test]
     fn a_reply_that_was_cancelled_is_kept_with_no_end_to_its_turn() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let file = folder.path().join("sessions.db");
         let mut store = Store::open(&file, "calm-river").unwrap();
         store.user("SLEEP 60 x", "client-1").unwrap();
@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn a_session_that_is_there_goes_on_from_where_its_chain_ends_and_another_has_a_chain_of_its_own(
     ) {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let file = folder.path().join("sessions.db");
         Store::open(&file, "calm-river")
             .unwrap()
@@ -455,7 +455,7 @@ mod tests {
 
     #[test]
     fn a_session_opened_again_says_whether_a_turn_of_it_ended_and_the_message_a_quit_cut() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let file = folder.path().join("sessions.db");
         let fresh = Store::open(&file, "calm-river").unwrap();
         assert!(!fresh.finished_a_turn());
@@ -486,7 +486,7 @@ mod tests {
 
     #[test]
     fn what_is_written_is_there_for_a_reader_while_the_writer_is_open() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let file = folder.path().join("sessions.db");
         let mut store = Store::open(&file, "calm-river").unwrap();
         store.user("hello", "client-1").unwrap();
@@ -510,7 +510,7 @@ mod tests {
 
     #[test]
     fn a_store_another_window_holds_while_it_makes_it_is_made_once_that_window_lets_go() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let file = folder.path().join("sessions.db");
         let holder = Connection::open(&file).unwrap();
         holder.execute_batch("BEGIN EXCLUSIVE").unwrap();
@@ -541,7 +541,7 @@ mod tests {
 
     #[test]
     fn a_store_is_written_with_no_wait_for_the_disk() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let file = folder.path().join("sessions.db");
         let mut store = Store::open(&file, "calm-river").unwrap();
         store.user("hello", "client-1").unwrap();
@@ -556,7 +556,7 @@ mod tests {
 
     #[test]
     fn a_store_another_window_holds_for_longer_than_sqlite_waits_is_waited_out() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let file = folder.path().join("sessions.db");
         let mut writing = Store::open(&file, "calm-river").unwrap();
         // A window whose commit waits for a slow disk holds the write lock for seconds, and
@@ -611,7 +611,7 @@ mod tests {
                 let failed = &failed;
                 scope.spawn(move || {
                     for round in 0..rounds {
-                        let folder = tempfile::tempdir().unwrap();
+                        let folder = cf_e2e::door::made("cf-test-").unwrap();
                         let file = folder.path().join("cli").join("sessions.db");
                         let start = std::sync::Arc::new(std::sync::Barrier::new(6));
                         let opened: Vec<Result<(), String>> = (0..6)

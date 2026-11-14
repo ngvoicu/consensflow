@@ -1,0 +1,16 @@
+# A chief telling a working or waiting task is told how to stop and ask instead
+# (T-1622): without the command, a chief expecting the old tell has no way on.
+
+[run]
+cf-tell = ["cargo", "test", "--offline", "-p", "cf", "--test", "tell"]
+
+[[plant]]
+name = "tell stop hint: the reply names no command to stop and ask"
+meant = "a_tell_to_a_task_at_work_says_it_goes_on_and_nothing_is_paused"
+runs = ["cf-tell"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = '''            "T-{number} goes on working; your words go in before its result is taken: m-{id} waits for @{window}'s window. Nothing is paused, and nothing waits for an answer. To stop it and ask: {} task pause T-{number} \"…\".",
+            board.cf()'''
+replace = '''            "T-{number} goes on working; your words go in before its result is taken: m-{id} waits for @{window}'s window. Nothing is paused, and nothing waits for an answer."'''

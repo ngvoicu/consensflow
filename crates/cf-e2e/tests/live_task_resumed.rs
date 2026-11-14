@@ -31,7 +31,7 @@
 //!   `project.resume`): the task the Close paused goes on with the project
 //! - `pause-close`  the task is paused, the project closed and resumed (the task stays
 //!   paused), and then the chief resumes the task with words
-//! - `tell`         the chief tells the window (`cf tell T-n "…"`, which pauses the task and puts
+//! - `tell`         the chief tells the window (`cf task pause T-n "…"`, once `cf tell`, which pauses the task and puts
 //!   the words to its window); the window answers and is told to go on with its work in the same
 //!   turn; the chief resumes the task as soon as it has the answer (T-1139, field bug 8). A
 //!   harness that keeps working after the tell has its words wait behind the turn, and the
@@ -649,9 +649,9 @@ fn tell(run: &Run<'_>, case: &mut Account) -> Result<()> {
     let (number, handle) = inside_the_command(run)?;
     let told = run
         .members
-        .as_chief(["tell", &format!("T-{number}"), &tell_words()])?;
+        .as_chief(["task", "pause", &format!("T-{number}"), &tell_words()])?;
     case.say(format!(
-        "cf tell T-{number}: exit {:?}, {}",
+        "cf task pause T-{number}: exit {:?}, {}",
         told.code,
         told.stdout.trim()
     ));

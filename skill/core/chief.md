@@ -32,16 +32,16 @@ what happened; a command written in your reply does nothing.
     {{cf}} task add --integrate "…"   accepted work for the integrator: merged, checked, landed; no behaviour changed
     {{cf}} task add --design "…"      an image from the image designer, to a drawing order (below)
     {{cf}} task add --after T-3 "…"   a follow-up for the window that did T-3
-    … --needs T-3,T-4             the task waits on the board until T-3 and T-4 are accepted
-    … --before T-9,T-10           T-9 and T-10, still on the board, wait for this task
+    {{cf}} task add --plan plan.md [--key word]  === name flags, then brief (or --file); names work in needs/before; all or none, retry the same key
+    … --needs T-3,T-4 · … --before T-9,T-10  this task waits for T-3,T-4; T-9,T-10, still on the board, wait for it
     {{cf}} task add --self --needs T-3 "…"  your own later step: its brief comes back to you when T-3 is accepted
     {{cf}} task done T-3 "…"          finish your own task with its result
-    {{cf}} task accept T-3 · {{cf}} task reopen T-3 "…" · {{cf}} task cancel T-3
+    {{cf}} task accept T-3 T-4 · {{cf}} task reopen T-3 "…" · {{cf}} task cancel T-3 T-4
     {{cf}} task edit T-3 "…" [--tier <tier>] [--needs …] [--before …]  change the brief, tier, needs or before of a task before any window has its brief (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes
-    {{cf}} task pause T-3             stop a worker's task: its window waits; background work runs on
+    {{cf}} task pause T-3 ["…"]       stop a worker's task: its window waits; background work runs on; with words, they go to its window as a question, its answer arrives as a message; then {{cf}} task resume T-3 "…" or {{cf}} task finish T-3. If shown working before its resume words go in, a pause with words sends a note: no stop or answer.
     {{cf}} task resume T-3 "…"        go on with it: the same window, with your words
     {{cf}} task edit|reopen|resume T-3 … --title "…"   a new title; edit takes it alone, in any state
-    {{cf}} tell T-3 "…"               stop T-3 and put this to its window: its answer arrives as a message; then resume it (queued or open: kept for its window; no answer, nothing to resume)
+    {{cf}} tell T-3 "…"               say this to T-3's window without stopping it: a working or waiting window reads your words at rest before its result unless withdrawn first, and owes no answer. A pause or finish may withdraw and name them
     {{cf}} task get T-3 · {{cf}} task list · {{cf}} inbox · {{cf}} inbox read m-12
     {{cf}} task get T-3 --transcript  what its window did so far (the last 10 items; --last 30 for more)
     {{cf}} answer m-12 "…"            answer a member's question
@@ -114,6 +114,8 @@ on. The one exception: the human tells you to do a change yourself.
    already in your conversation needs no `{{cf}} task get`. Look at an image
    yourself only when the decision needs your eyes; otherwise ask the member
    what it shows.
+   A tell from a member on a task you gave arrives headed `[… note from @worker]`;
+   it asks no answer, so act on it or not as you judge.
 5. A worker's question arrives headed `[… question from @worker]`; answer it
    and the answer goes back to that window, which waits for
    it. One ending "(ConsensFlow: … If they are its result: `{{cf}} task finish T-5`.)"

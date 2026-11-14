@@ -14,8 +14,8 @@
 # (`giving.rs`). A hold is the exception: its first note to a chief is typed, once a task and
 # hold, and the same hold said again is shown (`holds.rs`, `told_this_hold`, read from the
 # ledger's notes: a withdrawn or shown note told nobody, and a note that the task went on ends
-# the hold). A task held in the background an hour with no turn of its own is told once,
-# typed (`STILL_WORKING_REMINDED_AFTER_MS`). A shown close still joins a typed failure of the
+# the hold). A task held in the background is typed after an hour in one stretch and
+# every three hours thereafter, irrespective of re-holds. A shown close still joins a typed failure of the
 # same window (`outage.rs`, `queued_closes`). Every note typed is its own paste, as before
 # RS-25. A hold is its window's: another window's first refusal is another hold (`hold_of`). A
 # chief that takes over is told in its handoff each task it gave that holds (`chief.rs`,
@@ -98,16 +98,16 @@ replace = '''
 
 [[plant]]
 name = "chief-notes: a task held in the background an hour is never told"
-meant = "shown_notes::one_note_is_typed_when_a_task_is_held_an_hour_with_no_turn_of_its_own_and_one_only"
+meant = "shown_notes::a_single_long_hold_is_typed_at_one_hour_and_again_at_four_hours"
 runs = ["chief-notes-engine-shown"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-        if now - since < STILL_WORKING_REMINDED_AFTER_MS {
+            since + STILL_WORKING_REMINDED_AFTER_MS
 '''
 replace = '''
-        if now - since < STILL_WORKING_REMINDED_AFTER_MS * 1000 {
+            since + STILL_WORKING_REMINDED_AFTER_MS * 1000
 '''
 
 [[plant]]
