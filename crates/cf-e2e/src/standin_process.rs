@@ -162,7 +162,7 @@ fn bounded_path() -> (std::ffi::OsString, Option<PathBuf>) {
     )
 }
 
-fn safe_path_entry(folder: &Path, forbidden: &[PathBuf]) -> bool {
+fn plain_absolute(folder: &Path) -> bool {
     if !folder.is_absolute()
         || folder
             .components()
@@ -170,19 +170,41 @@ fn safe_path_entry(folder: &Path, forbidden: &[PathBuf]) -> bool {
     {
         return false;
     }
-    let inside = forbidden.iter().any(|home| {
-        #[cfg(windows)]
-        {
-            let folder = folder.to_string_lossy().replace('/', "\\").to_lowercase();
-            let home = home.to_string_lossy().replace('/', "\\").to_lowercase();
-            folder == home || folder.starts_with(&format!("{}\\", home.trim_end_matches('\\')))
-        }
-        #[cfg(not(windows))]
-        {
-            folder.starts_with(home)
-        }
-    });
-    if inside {
+    // A verbatim, UNC or DOS short-name path may spell a different inherited
+    // home without looking like it lexically. Do not inspect it at all.
+    #[cfg(windows)]
+    if folder.components().any(|part| match part {
+        Component::Prefix(prefix) => !matches!(prefix.kind(), std::path::Prefix::Disk(_)),
+        Component::Normal(name) => name.to_string_lossy().contains('~'),
+        _ => false,
+    }) {
+        return false;
+    }
+    true
+}
+
+fn same_or_inside(folder: &Path, home: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        let folder = folder.to_string_lossy().replace('/', "\\").to_lowercase();
+        let home = home.to_string_lossy().replace('/', "\\").to_lowercase();
+        let home = home.strip_prefix(r"\\?\").unwrap_or(&home);
+        folder == home || folder.starts_with(&format!("{}\\", home.trim_end_matches('\\')))
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let folder = folder.to_string_lossy().to_lowercase();
+        let home = home.to_string_lossy().to_lowercase();
+        folder == home || folder.starts_with(&format!("{}/", home.trim_end_matches('/')))
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        folder.starts_with(home)
+    }
+}
+
+fn safe_path_entry(folder: &Path, forbidden: &[PathBuf]) -> bool {
+    if !plain_absolute(folder) || forbidden.iter().any(|home| same_or_inside(folder, home)) {
         return false;
     }
     let mut checked = PathBuf::new();
@@ -252,20 +274,16 @@ fn process_temp_parent() -> PathBuf {
     };
     let parent = std::path::absolute(&parent)
         .unwrap_or_else(|_| panic!("stand-in temporary lookup: invalid path"));
+    assert!(
+        plain_absolute(&parent),
+        "stand-in temporary lookup: aliased or invalid path"
+    );
     for name in ["HOME", "USERPROFILE"] {
         if let Some(home) = std::env::var_os(name).filter(|home| !home.is_empty()) {
             let home = std::path::absolute(home)
                 .unwrap_or_else(|_| panic!("stand-in home lookup: invalid path"));
-            #[cfg(windows)]
-            let inside = {
-                let parent = parent.to_string_lossy().replace('/', "\\").to_lowercase();
-                let home = home.to_string_lossy().replace('/', "\\").to_lowercase();
-                parent == home || parent.starts_with(&format!("{}\\", home.trim_end_matches('\\')))
-            };
-            #[cfg(not(windows))]
-            let inside = parent.starts_with(home);
             assert!(
-                !inside,
+                !same_or_inside(&parent, &home),
                 "stand-in temporary lookup: inside the inherited {name}"
             );
         }
@@ -454,5 +472,34 @@ mod tests {
                 std::slice::from_ref(&forbidden)
             ));
         }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn standin_isolation_path_refuses_case_aliases() {
+        let root = crate::door::made("path-case-").unwrap();
+        let forbidden = root.path().join("synthetic-owner/.codex");
+        crate::door::make_dir(&forbidden).unwrap();
+        let alias = root.path().join("SYNTHETIC-OWNER/.CODEX/bin");
+        assert!(super::same_or_inside(&alias, &forbidden));
+        assert!(!safe_path_entry(&alias, &[forbidden]));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn standin_isolation_path_refuses_windows_aliases() {
+        let root = crate::door::made("path-alias-").unwrap();
+        let forbidden = root.path().join("synthetic-owner/.codex");
+        crate::door::make_dir(&forbidden).unwrap();
+        let extended =
+            std::path::PathBuf::from(format!(r"\\?\{}", forbidden.display())).join("bin");
+        assert!(!safe_path_entry(
+            &extended,
+            std::slice::from_ref(&forbidden)
+        ));
+        let extended_home = std::path::PathBuf::from(format!(r"\\?\{}", forbidden.display()));
+        assert!(!safe_path_entry(&forbidden.join("bin"), &[extended_home]));
+        let shortened = std::path::Path::new(r"C:\synthetic\OWNER~1\.codex\bin");
+        assert!(!safe_path_entry(shortened, &[forbidden]));
     }
 }
