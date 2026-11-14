@@ -8,6 +8,14 @@
 //! plant). `cargo build` knows when the build is up to date, and then it takes
 //! a moment.
 //!
+//! **A live run builds nothing.** `cargo xtask live` builds the programs a live case can need (`cf`,
+//! the pane host and the two test binaries) before any case starts, in the checkout's own build
+//! folder, and names the folder (`BUILT`, `HELPERS`) and that no case builds (`NO_BUILD`). A case
+//! then takes the programs from there; one that is missing is an error that names it and says to
+//! run through `cargo xtask live`, never a `cargo` the case starts: a build there cuts the
+//! programs of the checkout out from under whoever else runs them, and writes where no run of the
+//! kit made anything.
+//!
 //! A run that built `cf` and the pane host before it, from the sources as they
 //! are, says where (`BUILT`), and they are taken from there and not built: under
 //! nextest each test is a process of its own, which would build them for itself,
@@ -37,6 +45,15 @@ use crate::{checkout, files, Error, Result};
 /// The variable that names the folder `cf` and the pane host were built in for
 /// the run, before it, from the sources as they are.
 pub const BUILT: &str = "CF_E2E_BUILT";
+
+/// The variable that names the folder the test binaries the live tests ask (`harness-ask`,
+/// `engine-ask`) were built in for the run, before it.
+pub const HELPERS: &str = "CF_E2E_HELPERS";
+
+/// The variable that says a run builds nothing: set by `cargo xtask live`, which builds the
+/// programs of its cases first. A program of such a run that is not where [`BUILT`] or [`HELPERS`]
+/// says is an error, never a build.
+pub const NO_BUILD: &str = "CF_E2E_NO_BUILD";
 
 /// The variable that names the run: nextest gives each run an id of its own, the
 /// same to every test's process of it. A run that is not nextest's has none.
@@ -81,7 +98,7 @@ pub fn pane_host() -> Result<&'static Path> {
 /// The test binary `harness-ask`, which answers what a live test asks of the
 /// harness code of the product: the harness crate's own, built with the feature
 /// that makes it (it ships with nothing). Built as `cf` is, once for a run, and
-/// the first time a test asks; never before the run.
+/// the first time a test asks; or, in a run that built it before ([`HELPERS`]), that one.
 pub fn harness_ask() -> Result<&'static Path> {
     static BUILT: Built = OnceLock::new();
     built(
@@ -89,13 +106,13 @@ pub fn harness_ask() -> Result<&'static Path> {
         "cf-harness",
         "harness-ask",
         &["--features", "test-support"],
-        None,
+        given_in(HELPERS),
     )
 }
 
 /// The test binary `engine-ask`, which answers what a live test asks of the
 /// engine's texts (the note a window the human's Resume brings back is given): the
-/// engine crate's own, built as `harness-ask` is, once for a run and never before it.
+/// engine crate's own, built as `harness-ask` is.
 pub fn engine_ask() -> Result<&'static Path> {
     static BUILT: Built = OnceLock::new();
     built(
@@ -103,7 +120,7 @@ pub fn engine_ask() -> Result<&'static Path> {
         "cf-engine",
         "engine-ask",
         &["--features", "test-support"],
-        None,
+        given_in(HELPERS),
     )
 }
 
@@ -121,10 +138,20 @@ pub fn fake_agent() -> Result<&'static Path> {
 }
 
 /// The folder the run built `cf` and the pane host in before it, where it says one.
-fn given() -> Option<PathBuf> {
-    own_var(BUILT)
+fn given() -> Option<(&'static str, PathBuf)> {
+    given_in(BUILT)
+}
+
+/// The folder the variable `name` names, where it names one, with the name.
+fn given_in(name: &'static str) -> Option<(&'static str, PathBuf)> {
+    own_var(name)
         .filter(|folder| !folder.is_empty())
-        .map(PathBuf::from)
+        .map(|folder| (name, PathBuf::from(folder)))
+}
+
+/// Whether the run builds nothing ([`NO_BUILD`]).
+fn builds_nothing() -> bool {
+    own_var(NO_BUILD).is_some_and(|said| !said.is_empty() && said != "0")
 }
 
 /// The build of the binary `bin` of the package `package`, with the cargo words
@@ -135,28 +162,36 @@ fn built(
     package: &str,
     bin: &str,
     more: &[&str],
-    before: Option<PathBuf>,
+    before: Option<(&'static str, PathBuf)>,
 ) -> Result<&'static Path> {
     built_by(
         cell,
         Run::cargo(),
         &checkout::root(),
         (package, bin, more),
-        before,
+        (before, builds_nothing()),
     )
 }
 
 /// [`built`] with the cargo that builds and the checkout it builds in given, and
-/// the program as its package, its name and the cargo words after the rest.
+/// the program as its package, its name and the cargo words after the rest; and with where the
+/// run built it before, and whether the run builds nothing: then a program that is not there is an
+/// error, and `cargo` is never started.
 fn built_by(
     cell: &'static Built,
     cargo: Run,
     root: &Path,
     (package, bin, more): (&str, &str, &[&str]),
-    before: Option<PathBuf>,
+    (before, builds_nothing): (Option<(&'static str, PathBuf)>, bool),
 ) -> Result<&'static Path> {
     cell.get_or_init(|| match before {
-        Some(folder) => taken(&folder, bin),
+        Some((variable, folder)) => taken(variable, &folder, bin),
+        None if builds_nothing => Err(format!(
+            "{bin} was not built before this run, and a live run builds nothing: run it through \
+             `cargo xtask live <name>`, which builds the programs of its cases first, or build \
+             {bin} (cargo build --release -p {package} --bin {bin}) and name its folder in \
+             {BUILT} (cf, the pane host) or {HELPERS} (the test binaries)"
+        )),
         None => made(cargo, root, package, bin, more, own_var(RUN).as_deref()),
     })
     .as_deref()
@@ -165,13 +200,13 @@ fn built_by(
 
 /// The binary `bin` the run built in `folder` before it: an error where it is not
 /// there, which no build is made for.
-fn taken(folder: &Path, bin: &str) -> std::result::Result<PathBuf, String> {
+fn taken(variable: &str, folder: &Path, bin: &str) -> std::result::Result<PathBuf, String> {
     let built = folder.join(exe(bin));
     if built.is_file() {
         Ok(built)
     } else {
         Err(format!(
-            "{BUILT} says {bin} was built in {}, and there is none there",
+            "{variable} says {bin} was built in {}, and there is none there",
             folder.display()
         ))
     }
@@ -438,10 +473,162 @@ mod tests {
         );
     }
 
+    /// The programs a live case asks, as the functions above ask them: their package, their
+    /// name and the cargo words after the rest.
+    const LIVE_PROGRAMS: [(&str, &str, &[&str]); 4] = [
+        ("cf", "cf", WITH_SHIM),
+        ("cf-panes", "consensflow-bridge", &[]),
+        ("cf-harness", "harness-ask", &["--features", "test-support"]),
+        ("cf-engine", "engine-ask", &["--features", "test-support"]),
+    ];
+
+    /// A `cargo` that says it was started, and fails.
+    const CARGO_THAT_MUST_NOT_RUN: &str = "echo started >> cargo-calls; exit 101";
+
+    #[test]
+    fn a_live_run_told_where_its_programs_are_starts_no_cargo_for_any_of_them() {
+        // Each program has a cell of its own, as each function has; a cargo that ran would write
+        // `cargo-calls` and fail the build.
+        static CELLS: [Built; 4] = [
+            OnceLock::new(),
+            OnceLock::new(),
+            OnceLock::new(),
+            OnceLock::new(),
+        ];
+        let root = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        for (_, bin, _) in LIVE_PROGRAMS {
+            files::write(&folder.path().join(exe(bin)), "").unwrap();
+        }
+        for (cell, (package, bin, more)) in CELLS.iter().zip(LIVE_PROGRAMS) {
+            let (_own, cargo) = cargo(CARGO_THAT_MUST_NOT_RUN);
+            let taken = built_by(
+                cell,
+                cargo,
+                root.path(),
+                (package, bin, more),
+                (
+                    Some((
+                        if bin.ends_with("-ask") {
+                            HELPERS
+                        } else {
+                            BUILT
+                        },
+                        folder.path().to_path_buf(),
+                    )),
+                    true,
+                ),
+            )
+            .unwrap();
+            assert_eq!(taken, folder.path().join(exe(bin)));
+        }
+        assert_eq!(calls(root.path()), 0, "a cargo was started");
+    }
+
+    #[test]
+    fn a_live_run_that_finds_a_program_missing_names_it_and_starts_no_cargo() {
+        static CELLS: [Built; 4] = [
+            OnceLock::new(),
+            OnceLock::new(),
+            OnceLock::new(),
+            OnceLock::new(),
+        ];
+        let root = tempfile::tempdir().unwrap();
+        for (cell, (package, bin, more)) in CELLS.iter().zip(LIVE_PROGRAMS) {
+            let (_own, cargo) = cargo(CARGO_THAT_MUST_NOT_RUN);
+            let failed = built_by(cell, cargo, root.path(), (package, bin, more), (None, true))
+                .unwrap_err()
+                .to_string();
+            assert!(failed.contains(&format!("{bin} was not built")), "{failed}");
+            assert!(failed.contains("cargo xtask live"), "{failed}");
+        }
+        assert_eq!(calls(root.path()), 0, "a cargo was started");
+        assert!(
+            !target(root.path()).exists(),
+            "a build folder was made in the checkout"
+        );
+    }
+
+    /// Run by the tests below in a process of its own: says what each program of a live case is
+    /// asked for as, in the variables the process was given.
+    #[test]
+    #[ignore = "a program the tests of cf start"]
+    fn helper_says_every_program_of_a_live_case() {
+        for (name, asked) in [
+            ("cf", binary()),
+            ("pane host", pane_host()),
+            ("harness-ask", harness_ask()),
+            ("engine-ask", engine_ask()),
+        ] {
+            match asked {
+                Ok(path) => println!("{name}: {}", path.display()),
+                Err(failed) => println!("{name} failed: {failed}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_process_of_a_live_run_takes_every_program_from_the_folders_named_and_builds_none() {
+        let folder = tempfile::tempdir().unwrap();
+        for (_, bin, _) in LIVE_PROGRAMS {
+            files::write(&folder.path().join(exe(bin)), "").unwrap();
+        }
+        // A build would fail at once: no compiler is there.
+        let ran = crate::process::case_of(
+            std::env::current_exe().unwrap(),
+            "cf::tests::helper_says_every_program_of_a_live_case",
+            crate::process::LIMIT,
+        )
+        .args(["--ignored", "--nocapture"])
+        .var(BUILT, folder.path())
+        .var(HELPERS, folder.path())
+        .var(NO_BUILD, "1")
+        .var("RUSTC", folder.path().join("no-rustc"))
+        .run()
+        .unwrap();
+        assert_eq!(ran.code, Some(0), "{}", ran.output());
+        for name in ["cf", "pane host", "harness-ask", "engine-ask"] {
+            assert!(
+                ran.stdout
+                    .contains(&format!("{name}: {}", folder.path().display())),
+                "{name}: {}",
+                ran.output()
+            );
+        }
+    }
+
+    #[test]
+    fn a_process_of_a_live_run_without_the_folders_is_refused_a_build_by_name() {
+        let folder = tempfile::tempdir().unwrap();
+        let ran = crate::process::case_of(
+            std::env::current_exe().unwrap(),
+            "cf::tests::helper_says_every_program_of_a_live_case",
+            crate::process::LIMIT,
+        )
+        .args(["--ignored", "--nocapture"])
+        .var(NO_BUILD, "1")
+        .var("RUSTC", folder.path().join("no-rustc"))
+        .run()
+        .unwrap();
+        assert_eq!(ran.code, Some(0), "{}", ran.output());
+        for name in ["cf", "pane host", "harness-ask", "engine-ask"] {
+            assert!(
+                ran.stdout.contains(&format!("{name} failed: ")),
+                "{name}: {}",
+                ran.output()
+            );
+        }
+        assert!(
+            ran.stdout.contains("a live run builds nothing"),
+            "{}",
+            ran.output()
+        );
+    }
+
     #[test]
     fn a_program_the_run_says_it_built_and_did_not_is_an_error_and_is_not_built() {
         let folder = tempfile::tempdir().unwrap();
-        let failed = taken(folder.path(), "cf").unwrap_err();
+        let failed = taken(BUILT, folder.path(), "cf").unwrap_err();
         assert_eq!(
             failed,
             format!(
@@ -450,10 +637,22 @@ mod tests {
             )
         );
         static CELL: Built = OnceLock::new();
-        let failed = built(&CELL, "cf", "cf", &[], Some(folder.path().to_path_buf()))
-            .unwrap_err()
-            .to_string();
+        let failed = built(
+            &CELL,
+            "cf",
+            "cf",
+            &[],
+            Some((BUILT, folder.path().to_path_buf())),
+        )
+        .unwrap_err()
+        .to_string();
         assert!(failed.contains("and there is none there"), "{failed}");
+        // A helper the run says is in its folder of test binaries is said under that variable.
+        let failed = taken(HELPERS, folder.path(), "harness-ask").unwrap_err();
+        assert!(
+            failed.starts_with("CF_E2E_HELPERS says harness-ask was built in "),
+            "{failed}"
+        );
     }
 
     #[test]
@@ -518,7 +717,7 @@ mod tests {
         static CELL: Built = OnceLock::new();
         let root = PathBuf::from(own_var(ROOT).unwrap());
         let cargo = Run::new("/bin/sh").arg(own_var(CARGO).unwrap());
-        match built_by(&CELL, cargo, &root, ("cf", "cf", &[]), None) {
+        match built_by(&CELL, cargo, &root, ("cf", "cf", &[]), (None, false)) {
             Ok(path) => {
                 let there: std::result::Result<bool, String> = if own_var(RUN).is_some() {
                     std::thread::sleep(std::time::Duration::from_millis(500));

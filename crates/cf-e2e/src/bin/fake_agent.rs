@@ -269,9 +269,10 @@ fn fail(failed: &str) -> ExitCode {
     ExitCode::FAILURE
 }
 
-/// Ends the window with `code`, after taking its status file away.
+/// Ends the window with `code`, after taking its status file away, through the door (the file
+/// is below a folder of the run's own, which the rig handed down to the stand-in).
 fn leave(status_file: &Path, code: i32) -> ! {
-    let _ = std::fs::remove_file(status_file);
+    let _ = cf_e2e::door::Door::of_run().remove_in_made(status_file);
     std::process::exit(code)
 }
 
@@ -1191,7 +1192,7 @@ mod tests {
 
     /// The records `text` is written as, in a conversation of its own.
     fn recorded(text: &str, launched: bool) -> Vec<serde_json::Value> {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "s", 7).unwrap();
         record_message(&mut records, 7, launched, false, text).unwrap();
         written_from(config.path(), 0)
@@ -1203,7 +1204,7 @@ mod tests {
         // argument of the program (the probe of 2026-10-22, T-265): a window the kit seeds so
         // (`Open::seed`) keeps it as it was. ConsensFlow's windows are handed their brief once up,
         // as a paste (T-432), whose pictures are attached (T-681).
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let picture = folder.path().join("reference.png");
         std::fs::write(&picture, cf_e2e::png::SMALL).unwrap();
         let brief = format!("Reply with exactly: DONE\n{}", picture.display());
@@ -1219,7 +1220,7 @@ mod tests {
         // Alpha.3 merged the notification's records (turn-end) with the images a paste is
         // made into (T-215): a notification is a turn Claude Code begins by itself, so
         // the path in its report is no attachment, where the same words pasted are one.
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let picture = folder.path().join("hero.png");
         std::fs::write(&picture, cf_e2e::png::SMALL).unwrap();
         let report = format!("Saved:\n{}\nDone", picture.display());
@@ -1304,7 +1305,7 @@ mod tests {
 
     #[test]
     fn a_compaction_writes_claude_2_1_303s_records_each_the_child_of_the_one_before_and_no_turn() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "s", 7).unwrap();
         told(&mut records);
         compact(&mut records, 7, COMPACT, || false).unwrap();
@@ -1344,7 +1345,7 @@ mod tests {
     #[test]
     fn a_compaction_cancelled_writes_the_words_before_a_command_beside_the_bare_command_and_no_more(
     ) {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "s", 7).unwrap();
         told(&mut records);
         let before = records.last_uuid(7);
@@ -1389,7 +1390,7 @@ mod tests {
 
     #[test]
     fn a_compaction_with_nothing_said_since_the_last_writes_what_claude_2_1_304_does_and_no_turn() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "s", 7).unwrap();
         let refused = [
             "user <local-command-caveat",
@@ -1511,7 +1512,7 @@ mod tests {
 
     #[test]
     fn an_answer_says_its_model_and_effort_and_a_typed_model_switches_them_naming_none_itself() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "s", 7).unwrap();
         records.runs_on(Some("fake-chief".to_owned()), Some("high".to_owned()));
         let answer =

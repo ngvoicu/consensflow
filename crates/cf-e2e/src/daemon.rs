@@ -50,8 +50,8 @@ impl Home {
     /// ([`crate::stand_in_lists`]): the members a case seats, which the daemon checks against
     /// what their harness lists. The case's own file beside the home, never the daemon's.
     pub fn stand_ins(&self, roster: &Value) -> Result<()> {
-        files::write(
-            &self.scratch.root().join(crate::stand_in_lists::ROSTER),
+        crate::door::write(
+            self.scratch.root().join(crate::stand_in_lists::ROSTER),
             format!("{roster}\n"),
         )
     }
@@ -237,6 +237,13 @@ impl Daemon {
     /// Sends it SIGKILL.
     pub fn kill(&mut self) {
         self.process.kill();
+    }
+
+    /// Stops it where it is and lets it go on after `span`, through the door: whether it was
+    /// stopped.
+    #[cfg(unix)]
+    pub fn stall(&self, span: Duration) -> bool {
+        self.process.stall(span)
     }
 
     /// Whether it has ended.

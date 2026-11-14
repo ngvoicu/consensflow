@@ -351,10 +351,11 @@ const SPELLING_INSTALLED: [(&str, &str); 9] = [
 ];
 
 /// The files whose words are rules of the kind, or plants of them: they name what they refuse.
-const RULES: [&str; 4] = [
+const RULES: [&str; 5] = [
     "tools/xtask/tests/live_app.rs",
     "tests/plants/release/live-app.toml",
     "crates/cf-e2e/src/live/members/descent/tests.rs",
+    "crates/cf-e2e/src/door/rule.rs",
     "crates/cf-evals/tests/long_run/signals.rs",
 ];
 
@@ -380,7 +381,7 @@ fn read_of<'a>(path: &str, text: &'a str) -> &'a str {
 /// The files of the tools and of the rig that start a program a caller names (std's
 /// `Command::new` of a value, not of a name written there), and what holds them to no app
 /// of the live app's identity: the gate each calls (`cf_base::bundle`), or what they start.
-const STARTERS: [(&str, &str); 4] = [
+const STARTERS: [(&str, &str); 5] = [
     (
         "tools/cf-publish/src/process.rs",
         "curl, gh and tar alone, which its callers name; it is built on serde_json and sha2 alone",
@@ -392,6 +393,10 @@ const STARTERS: [(&str, &str); 4] = [
     (
         "crates/cf-e2e/src/process/tests.rs",
         "the test's own program, started again",
+    ),
+    (
+        "crates/cf-e2e/src/door/tests.rs",
+        "the test's own program, started again as a child the door's cases end or leave",
     ),
     (
         "tools/cf-publish/tests/release_build.rs",

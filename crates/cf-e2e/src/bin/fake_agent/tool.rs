@@ -88,26 +88,11 @@ fn run(command: &Command, window: &Window) -> Result<Reply, String> {
 /// Ends the shell and the program it runs, as a harness that kills the tool it cancels
 /// does: on Unix the group the shell leads, which holds both; on Windows the shell's
 /// tree.
+///
+/// Both go through the door, the group by [`Spawned::end_group`] and the shell by
+/// [`Spawned::kill`]: a say-only run says them and ends none.
 fn end(shell: &mut Spawned) {
-    #[cfg(unix)]
-    {
-        use nix::sys::signal::{killpg, Signal};
-        use nix::unistd::Pid;
-
-        if let Ok(leader) = i32::try_from(shell.id()) {
-            let _ = killpg(Pid::from_raw(leader), Signal::SIGKILL);
-        }
-    }
-    #[cfg(windows)]
-    {
-        use cf_e2e::process::{own_var, Run};
-
-        let root = own_var("SystemRoot").unwrap_or_else(|| r"C:\Windows".to_owned());
-        let _ = Run::new(format!(r"{root}\System32\taskkill.exe"))
-            .args(["/T", "/F", "/PID"])
-            .arg(shell.id().to_string())
-            .run();
-    }
+    shell.end_group();
     shell.kill();
 }
 

@@ -118,13 +118,14 @@ impl StatusLine {
     /// The user's script and the `git` it runs written in `config`: the script's path.
     fn install(self, config: &Path) -> Result<std::path::PathBuf, String> {
         let (script, git) = (config.join(SCRIPT), config.join(GIT));
-        fs::write(&script, self.script())
+        cf_e2e::door::write(&script, self.script())
             .map_err(|failed| format!("{}: {failed}", script.display()))?;
-        fs::write(&git, GIT_SCRIPT).map_err(|failed| format!("{}: {failed}", git.display()))?;
+        cf_e2e::door::write(&git, GIT_SCRIPT)
+            .map_err(|failed| format!("{}: {failed}", git.display()))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&git, fs::Permissions::from_mode(0o755))
+            cf_e2e::door::set_permissions(&git, fs::Permissions::from_mode(0o755))
                 .map_err(|failed| format!("{}: {failed}", git.display()))?;
         }
         Ok(script)
@@ -165,8 +166,7 @@ impl StatusLine {
                 thread::sleep(LOOK);
             }
             let lived = began.elapsed().as_millis();
-            let _ =
-                cf_e2e::files::write_whole(&file.with_extension("lived"), &format!("{lived}\n"));
+            let _ = cf_e2e::door::write_whole(file.with_extension("lived"), &format!("{lived}\n"));
         });
         Ok(())
     }
@@ -225,9 +225,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_run_says_how_long_it_lived_beside_its_pid_once_it_has_ended() {
-        let home = tempfile::tempdir().unwrap();
+        let home = cf_e2e::door::made("cf-test-").unwrap();
         let jobs = Jobs::new(&home.path().join("consensflow"), 7);
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let script = StatusLine::InAGroupOfItsOwn.install(config.path()).unwrap();
         StatusLine::InAGroupOfItsOwn.run(&script, &jobs).unwrap();
         let folder = home.path().join("jobs");
@@ -257,11 +257,11 @@ mod tests {
     {
         use std::os::unix::fs::PermissionsExt;
 
-        let machine = tempfile::tempdir().unwrap();
+        let machine = cf_e2e::door::made("cf-test-").unwrap();
         let slow = machine.path().join("git");
         fs::write(&slow, "#!/bin/sh\n/bin/sleep 3\necho machine\n").unwrap();
         fs::set_permissions(&slow, fs::Permissions::from_mode(0o755)).unwrap();
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let script = StatusLine::InAGroupOfItsOwn.install(config.path()).unwrap();
         let ran = Run::new("/bin/bash")
             .arg(&script)

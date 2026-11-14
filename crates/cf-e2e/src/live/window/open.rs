@@ -74,6 +74,27 @@ pub fn pasted_installs(log: &Log) -> Result<Vec<Installed>> {
 
 /// What a run says of what came of asking Claude to trust the folder of the
 /// window of `who`: `claude: trust: trusted`.
+/// The `pane.open` request of a window the kit opens: as the engine's, with how the window's
+/// harness reads a paste (`silent`, [`ask::silent_paste`]) where it declares one, and only
+/// then, so that every other open is as it was.
+pub(super) fn open_request(
+    id: &str,
+    workspace: &Path,
+    argv: &[String],
+    (env, drop_env): (&serde_json::Map<String, Value>, &[String]),
+    silent: Option<Value>,
+) -> Value {
+    let mut request = json!({
+        "id": id, "generation": 1, "cwd": workspace, "argv": argv,
+        "env": env, "dropEnv": drop_env,
+        "size": { "rows": 40, "cols": 120 },
+    });
+    if let Some(silent) = silent {
+        request["silentPaste"] = silent;
+    }
+    request
+}
+
 pub(super) fn trust_line(who: &str, trust: &str) -> String {
     format!("{who}: trust: {trust}")
 }
@@ -446,11 +467,13 @@ impl<'a> Open<'a> {
         let opened_at_ms = jiff::Timestamp::now().as_millisecond();
         let opened = self.rig.host(
             "pane.open",
-            json!({
-                "id": self.id, "generation": 1, "cwd": workspace, "argv": argv,
-                "env": window_vars, "dropEnv": drop_env,
-                "size": { "rows": 40, "cols": 120 },
-            }),
+            open_request(
+                &self.id,
+                &workspace,
+                &argv,
+                (&window_vars, &drop_env),
+                ask::silent_paste(harness.kind())?,
+            ),
         )?;
         if opened["ok"] != true {
             return Err(Error::Daemon(format!(
@@ -514,7 +537,7 @@ pub(super) fn with_hooks(settings: &[String], hooks: &Value) -> Result<Vec<Strin
         .map_err(|failed| Error::Daemon(format!("the launch's settings are no JSON: {failed}")))?;
     add_hooks(&mut config, hooks);
     let written = Path::new(file).with_extension("hooks.json");
-    files::write(&written, config.to_string())?;
+    crate::door::write(&written, config.to_string())?;
     Ok(vec![flag.clone(), written.to_string_lossy().into_owned()])
 }
 
@@ -573,7 +596,7 @@ fn keep_only_consensflows_hooks(args: &[String], cf: &Path) -> Result<()> {
     let mut config: Value = serde_json::from_str(&files::read_string(path)?)
         .map_err(|failed| Error::Daemon(format!("the launch's config is no JSON: {failed}")))?;
     consensflows_hooks_of(&mut config, &ask::devin_hooks(cf, true)?);
-    files::write(path, config.to_string())
+    crate::door::write(path, config.to_string())
 }
 
 /// The program a window of `harness` opened here starts on: the one the kit found (`found`),

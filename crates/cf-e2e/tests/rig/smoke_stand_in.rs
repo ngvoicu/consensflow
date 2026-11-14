@@ -38,7 +38,7 @@ fn result_for(project: &Project, number: i64) -> cf_e2e::Result<Option<Value>> {
 
 #[test]
 fn the_smokes_stand_in_takes_its_brief_and_its_result_reaches_the_chief() -> Outcome {
-    let folder = tempfile::tempdir()?;
+    let folder = cf_e2e::door::made("cf-stand-in-")?;
     let claude = install(folder.path())?;
     let pids = folder.path().join("pids");
     let rig = Rig::start(

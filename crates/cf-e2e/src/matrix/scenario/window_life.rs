@@ -329,7 +329,7 @@ pub fn window_life() -> Vec<Scenario> {
             vec![
                 human(
                     "the worker's account is out",
-                    |members| crate::files::write(&members.folder().join(SPENT), ""),
+                    |members| crate::door::write(members.folder().join(SPENT), ""),
                     |_, _| true,
                 ),
                 run!(
@@ -341,7 +341,7 @@ pub fn window_life() -> Vec<Scenario> {
                     "the human logs the worker into another account, and tries it again",
                     |members| {
                         let spent = members.folder().join(SPENT);
-                        std::fs::remove_file(&spent).map_err(crate::Error::file("remove", &spent))?;
+                        super::taken(&spent)?;
                         members.page("member.back", json!({ "participant": "matrix-worker" })).map(|_| ())
                     },
                     |snapshot, bindings| answered(snapshot, bindings, "A", 0) && crate::matrix::run::settled(snapshot),
@@ -374,14 +374,14 @@ pub fn window_life() -> Vec<Scenario> {
                 ),
                 human(
                     "the account the chief and the worker share runs out",
-                    |members| crate::files::write(&members.folder().join(SPENT), ""),
+                    |members| crate::door::write(members.folder().join(SPENT), ""),
                     |snapshot, bindings| is(snapshot, bindings, "A", 0, &["paused"]),
                 ),
                 human(
                     "the human switches the account and tries the worker again: its turn gets through, and the chief on the same account is back",
                     |members| {
                         let spent = members.folder().join(SPENT);
-                        std::fs::remove_file(&spent).map_err(crate::Error::file("remove", &spent))?;
+                        super::taken(&spent)?;
                         members.page("member.back", json!({ "participant": "matrix-worker" })).map(|_| ())
                     },
                     |snapshot, bindings| answered(snapshot, bindings, "A", 0) && crate::matrix::run::settled(snapshot),

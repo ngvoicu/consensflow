@@ -18,6 +18,7 @@
 //! | `claude_settings` | `env`, `launch`, `boardQuestions`, `cf`, `compaction` (tokens) where the window is a member's of a project that chose a size, and `advisorOff` and `suggestionOff` (flags, off when absent) where the launch is told to switch Claude Code's advisor tool and prompt suggestion off: the settings file of a Claude window, its hooks run by the `cf` at that path | `["--settings", file]`, the file written |
 //! | `interrupt` | `kind`: the keys that interrupt a turn in the harness's window | `{presses, closeAfterMs}`: Escape that many times in a row and, where `closeAfterMs` is not null, once more that long after |
 //! | `input` | `kind`: how the harness's windows take what they are handed | `{pasted, clear}`: whether it is pasted into the window's input box, and the keys that empty the box (null for a harness whose windows take it over a channel) |
+//! | `silent_paste` | `kind`: how the harness's windows read a paste on this machine, as the engine declares it when it opens a window (`pane.open`'s `silentPaste`) | the adapter's declaration as the pane host takes it (`paceUsPerCharacter`, `drawnAfterMs`, `quietMs`, `mostMs`, `mostUsPerCharacter`), or null for a harness that reads a paste as it comes |
 //! | `program` | `argv`, `env`: a program and its arguments to open a window on (the program's absolute path first) | the argv the pane host is asked to open: an npm shim (a `.cmd` on Windows) as the node and the script it runs, anything else as it is; an error for a script of another shape, or a shim that has no node |
 //! | `newest_session` | `kind`, `workspace`, `since`, `env`: the newest top-level conversation a harness of that kind (Devin, Codex or Muse) opened in `workspace` at or after `since` (milliseconds), from its own store | the session's id, or null while there is none |
 //! | `specmint` | `kind`, `variant`, `env`: where the harness has the Specmint variant installed for its user (the adapter's own look, in the places the harness reads), with a home that is the one `env` names | `{installed, skill}`: whether the harness has it, and the file of its `SKILL.md` (where ConsensFlow's own copy would be written, for a launch of a made-up id, where it has none) |
@@ -86,6 +87,7 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "claude_settings" => claude_settings(question),
         "interrupt" => interrupt(question),
         "input" => input(question),
+        "silent_paste" => silent_paste(question),
         "program" => program(question),
         "newest_session" => newest_session(question),
         "specmint" => specmint(question),
@@ -105,7 +107,7 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "models" => models::models(question),
         "last_used" => models::last_used(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, turn_cut, claude_prefixes, start, window_text, console_text, claude_settings, interrupt, input, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, muse_models, muse_usage, input_box, unsent, codex_agent_types, models and last_used"
+            "the question asks for {other}, which is none of records, turn_cut, claude_prefixes, start, window_text, console_text, claude_settings, interrupt, input, silent_paste, program, newest_session, specmint, devin_launch, pi_launch, devin_ready, devin_took, devin_readiness, devin_hooks, devin_config, trust, muse_models, muse_usage, input_box, unsent, codex_agent_types, models and last_used"
         )),
     }
 }
@@ -406,6 +408,16 @@ fn input(question: &Value) -> Result<Value, String> {
             Input::Pasted { clear } => json!({ "pasted": true, "clear": clear }),
         },
     )
+}
+
+/// How the harness's windows read a paste on this machine, as its adapter declares it to the
+/// pane host (`silent_paste`): what the engine opens a window with, so that a window the live
+/// tests open themselves has its pastes held for the Enter as the app's are.
+fn silent_paste(question: &Value) -> Result<Value, String> {
+    let env = Env::from_vars::<&str, &str>([]);
+    let services = Fakes::new(&env).services(&env, Path::new(""));
+    let declared = adapter(harness(text(question, "kind")?)?, &services).silent_paste();
+    serde_json::to_value(declared).map_err(|failed| failed.to_string())
 }
 
 /// Codex's own agent types as a window's supervisor defines them again for its sub-agents.

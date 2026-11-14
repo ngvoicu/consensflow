@@ -39,7 +39,6 @@
 //! status goes back to `busy` while the screen still shows the prompt for some seconds more, and
 //! then the window goes back to its prompt. Nothing typed into it answers it.
 
-use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -211,10 +210,7 @@ pub fn survey_in(text: &str) -> bool {
 
 /// Appends `line` to the file `name` of the config folder `config`.
 fn note(config: &Path, name: &str, line: &str) -> io::Result<()> {
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(config.join(name))?;
+    let mut file = cf_e2e::door::append(config.join(name)).map_err(std::io::Error::from)?;
     file.write_all(format!("{line}\n").as_bytes())
 }
 

@@ -85,10 +85,20 @@ use run::Machine;
 /// Claude Code in it never starts.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
-/// Where the run keeps what it makes outside its rigs' homes: the wrapper that
-/// starts Claude Code.
-fn kept() -> PathBuf {
-    Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-approval")
+/// Where the run keeps what it makes outside its rigs' homes: the wrapper that starts Claude
+/// Code, in a new folder of the run's own in the build's temp folder (a folder of a run before,
+/// at the same place, is never written into), taken away with the run.
+fn kept() -> Result<cf_e2e::door::Made> {
+    kept_in(Path::new(env!("CARGO_TARGET_TMPDIR")))
+}
+
+/// [`kept`] in the folder `parent`, which every run makes its own in.
+fn kept_in(parent: &Path) -> Result<cf_e2e::door::Made> {
+    cf_e2e::door::made_in(parent, "live-approval-").map_err(|source| Error::File {
+        action: "make a folder in",
+        path: parent.to_path_buf(),
+        source,
+    })
 }
 
 /// The harnesses and the steps the run is limited to: the words of the
@@ -114,17 +124,19 @@ fn machine(plan: &[plan::Planned], log: &Log) -> Result<Machine> {
     for harness in needed {
         installed.push(log.found(harness)?);
     }
+    let shims = kept()?;
     let claude = match installed
         .iter()
         .find(|found| found.harness() == Harness::Claude)
     {
-        Some(found) => Some(live::isolated_claude(&kept(), found.command())?),
+        Some(found) => Some(live::isolated_claude(shims.path(), found.command())?),
         None => None,
     };
     Ok(Machine {
         installed,
         claude,
         stand_in: PathBuf::from(FAKE_AGENT),
+        _shims: shims,
     })
 }
 
@@ -196,6 +208,7 @@ fn the_gate_sends_what_the_human_approves_between_real_harnesses_in_every_seat()
                 .filter(|row| matches!(row.outcome, Outcome::Skipped(_)))
                 .count()
         ));
+        log.passed();
         return Ok(());
     }
     Err(Error::Daemon(format!(
@@ -204,4 +217,46 @@ fn the_gate_sends_what_the_human_approves_between_real_harnesses_in_every_seat()
         rows.len(),
         report::table(&rows)
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cf_e2e::live::layout::Layout;
+
+    #[test]
+    fn two_runs_each_make_the_folder_of_their_wrapper_new_and_an_earlier_ones_is_as_it_was() {
+        // The build's temp folder holds an earlier run's folder of the same kind, which is no
+        // run of this one's to write into.
+        let mut layout = Layout::new().unwrap();
+        let parent = layout.home().join("target-tmp");
+        layout
+            .plant_tree(
+                &parent.join("live-approval-Earlier"),
+                &[("claude-isolated", "an earlier run's wrapper\n")],
+            )
+            .unwrap();
+        let first = kept_in(&parent).unwrap();
+        let second = kept_in(&parent).unwrap();
+        assert_ne!(first.path(), second.path());
+        for kept in [&first, &second] {
+            assert!(kept.path().starts_with(&parent), "{:?}", kept.path());
+            // The wrapper that starts Claude Code is written there through the door, for the run's own windows.
+            let program = live::isolated_claude(kept.path(), Path::new("/the/claude")).unwrap();
+            assert!(program.starts_with(kept.path()), "{program:?}");
+            assert!(program.exists(), "{program:?}");
+        }
+        layout.untouched().unwrap();
+        // Taken away with the run, the earlier run's left.
+        let (a, b) = (first.path().to_path_buf(), second.path().to_path_buf());
+        drop((first, second));
+        if cf_e2e::door::Door::audit_asked() {
+            // A say-only run takes nothing away: its folders stay, and the earlier run's are as they were.
+            assert!(a.is_dir() && b.is_dir());
+        } else {
+            assert!(!a.exists() && !b.exists());
+        }
+        layout.untouched().unwrap();
+        cf_e2e::door::again_under_audit("tests::two_runs_each_make_the_folder_of_their_wrapper_new_and_an_earlier_ones_is_as_it_was").unwrap();
+    }
 }

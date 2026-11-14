@@ -64,7 +64,7 @@ pub fn calls(folder: &Path) -> Vec<Call> {
 /// starts: the path it is at. Its log is beside it.
 pub fn install(folder: &Path, program: &Path) -> Result<PathBuf> {
     let installed = folder.join(format!("cf{}", std::env::consts::EXE_SUFFIX));
-    files::write_executable(&installed, files::read(program)?)?;
+    crate::door::write_executable(&installed, files::read(program)?)?;
     Ok(installed)
 }
 
@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn the_stand_in_is_installed_as_cf_and_its_calls_are_read_from_the_log_beside_it() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-test-").unwrap();
         let program = root.path().join("fake-cf-program");
         files::write(&program, "the program").unwrap();
         let folder = root.path().join("not").join("yet");

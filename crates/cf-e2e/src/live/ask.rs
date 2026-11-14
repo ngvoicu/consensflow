@@ -334,6 +334,15 @@ pub fn interrupt(kind: &str) -> Result<Interrupt> {
     })
 }
 
+/// How the windows of a harness of the kind `kind` read a paste on this machine, as the engine
+/// declares it when it opens a window (`pane.open`'s `silentPaste`, from the adapter): none for a
+/// harness that takes a paste and its Enter as they come. A window the kit opens itself is
+/// opened with it, so that the pane host holds the Enter of a paste for it as it does the app's.
+pub fn silent_paste(kind: &str) -> Result<Option<Value>> {
+    let answer = question(&json!({ "op": "silent_paste", "kind": kind }))?;
+    Ok(answer.is_object().then_some(answer))
+}
+
 /// The keys the app empties the input box of a window of the harness kind `kind`
 /// with: none for a harness whose windows take what they are handed over a
 /// channel of their own.

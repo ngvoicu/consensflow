@@ -31,6 +31,17 @@ fn good() -> Left {
     }
 }
 
+/// A folder of a run's own for a test's table of processes: made under a root of the test's, as
+/// the rig makes the run's under its temp root ([`RunFolder::under`] reads both); kept while the
+/// root is.
+fn run_folder(name: &str) -> (tempfile::TempDir, RunFolder) {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join(name);
+    std::fs::create_dir(&path).unwrap();
+    let folder = RunFolder::under(root.path(), &path).expect("under the root");
+    (root, folder)
+}
+
 #[test]
 fn a_task_done_with_the_command_listed_gone_and_the_chief_told_of_the_close_passes() {
     assert_eq!(judge(&good(), Expect::Ended), Ok(()));
@@ -92,15 +103,18 @@ fn a_command_the_host_never_listed_that_still_runs_on_the_machine_escaped_and_fa
 #[test]
 fn the_command_of_a_harness_is_found_by_the_command_and_the_stand_ins_job_by_its_words() {
     // A harness's is the command itself, as this machine's shells know it: on Windows a
-    // ping, whose seconds are not its last word (zeewin, round 7). The rig's stand-in starts
-    // a job of its own, whose command line holds the seconds too.
+    // ping, whose seconds are not its last word (zeewin, round 7), and the run's word in its
+    // timeout. The rig's stand-in starts a job of its own, whose command line holds the seconds.
     let harness = if cfg!(windows) {
-        format!("ping -n {SECONDS} 127.0.0.1")
+        format!("ping -n {} -w {} 127.0.0.1", seconds(), word())
     } else {
-        format!("sleep {SECONDS}")
+        format!("sleep {}", word())
     };
     assert_eq!(wanted(Who::Harness(Harness::Pi)), harness);
-    assert_eq!(wanted(Who::StandIn), format!("--background-job {SECONDS}"));
+    assert_eq!(
+        wanted(Who::StandIn),
+        format!("--background-job {}", seconds())
+    );
 }
 
 /// A process `pid`, begun at `started`, started by `ppid`.
@@ -150,9 +164,21 @@ fn a_stand_in_job_is_taken_by_its_own_file_at_the_first_look_and_its_number_neve
     // A job is the process of its number that holds its file, which is the rig's own.
     let wanted = "--background-job 4711";
     let job = |pid: u32, n: u32| (pid, format!("/rig/jobs/job-100-{n}"));
-    let jobs = [job(200, 1), job(201, 2), job(202, 3)];
+    let jobs = [job(200, 1), job(201, 2), job(202, 3), job(203, 4)];
+    let window = Identity {
+        pid: 100,
+        started: 10,
+    };
     let all = vec![
         running(100, 10, 1, "fake-agent"),
+        // The number and the file of a job, in a process begun before the run's window: none of
+        // the run's.
+        running(
+            203,
+            5,
+            1,
+            "fake-agent --background-job 4711 /rig/jobs/job-100-4",
+        ),
         // The job the stand-in detached, which has no window to descend from.
         running(
             200,
@@ -177,7 +203,7 @@ fn a_stand_in_job_is_taken_by_its_own_file_at_the_first_look_and_its_number_neve
             .collect()
     };
     let mut chosen = Chosen::default();
-    chosen.choose(&all, None, &jobs, wanted);
+    chosen.choose(&all, Some(window), &jobs, wanted);
     assert_eq!(pids(&chosen), [200]);
     // Later, 200's job has gone and another process has its number, the job's file in its
     // words: the job was taken once, as the process it was, and nothing is taken for it
@@ -197,7 +223,7 @@ fn a_stand_in_job_is_taken_by_its_own_file_at_the_first_look_and_its_number_neve
             "fake-agent --background-job 4711 /rig/jobs/job-100-2",
         ),
     ];
-    chosen.choose(&later, None, &jobs, wanted);
+    chosen.choose(&later, Some(window), &jobs, wanted);
     assert_eq!(
         chosen
             .processes
@@ -487,7 +513,7 @@ fn a_harness_is_asked_to_start_the_command_in_the_background_and_answer_and_the_
     let asked = brief(Who::Harness(Harness::Devin));
     assert!(
         asked.starts_with("Start the command `")
-            && asked.contains(&format!(" {SECONDS}"))
+            && asked.contains(&format!(" {}", word()))
             && asked.contains("in the background")
             && asked.contains("Do not wait for it")
             && asked.contains("reply with one line"),
@@ -497,19 +523,39 @@ fn a_harness_is_asked_to_start_the_command_in_the_background_and_answer_and_the_
     // The stand-in leaves its job in a shell that waits for it, or detached from it.
     assert_eq!(
         brief(Who::StandIn),
-        format!("BACKGROUND {SECONDS} left a job running")
+        format!("BACKGROUND {} left a job running", seconds())
     );
     assert_eq!(
         stand_in_brief(true),
-        format!("BACKGROUND --detach {SECONDS} left a job running")
+        format!("BACKGROUND --detach {} left a job running", seconds())
     );
-    // The command is the platform's own.
+    // The command is the platform's own, and carries the run's word as a whole argument in
+    // every form the worker is given.
     assert!(
-        command() == format!("sleep {SECONDS}")
-            || command() == format!("ping -n {SECONDS} 127.0.0.1"),
+        command() == format!("sleep {}", word())
+            || command() == format!("ping -n {} -w {} 127.0.0.1", seconds(), word()),
         "{}",
         command()
     );
+    assert!(has_arg(&command(), word()), "{}", command());
+    assert!(
+        detach().contains(&format!("'{}'", word())) || detach().contains(&command()),
+        "{}",
+        detach()
+    );
+}
+
+#[test]
+fn the_runs_word_is_its_seconds_and_twenty_digits_made_once() {
+    let (seconds_part, digits) = word().split_once('.').expect("a point");
+    assert_eq!(seconds_part, seconds().to_string());
+    assert_eq!(digits.len(), 20, "{}", word());
+    assert!(
+        digits.bytes().all(|digit| digit.is_ascii_digit()),
+        "{}",
+        word()
+    );
+    assert_eq!(word(), word());
 }
 
 #[test]
@@ -760,7 +806,8 @@ fn a_worker_is_expected_to_come_to_the_limit_for_pi_and_devin_on_a_mac_and_to_th
 
 #[test]
 fn what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_when_it_is_not() {
-    let folder = Path::new("/runs/leaving-pi");
+    let (root, own) = run_folder("leaving-pi");
+    let folder = own.real();
     let window = Identity {
         pid: 100,
         started: 10,
@@ -788,12 +835,10 @@ fn what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_
             .map(|one| one.identity.pid)
             .collect()
     };
-    let mut chosen = Chosen {
-        strays_matter: true,
-        ..Chosen::default()
-    };
+    let mut chosen = Chosen::default();
     chosen.choose(&all, Some(window), &[], "sleep 4711");
     assert_eq!(chosen.window_began, Some(10), "the window's start is kept");
+    assert_eq!(chosen.window, Some(window), "so is the window's process");
     // The first look's, whatever a later one says of the number.
     chosen.choose(
         &all,
@@ -809,32 +854,37 @@ fn what_escaped_every_window_is_ended_when_it_is_provably_the_runs_own_and_said_
         chosen.processes.is_empty(),
         "nothing descends from the window"
     );
-    let found = chosen.take_orphans(&all, folder, "sleep 4711", folder_of);
+    // A folder outside the run's temp root (a live rig's project folder is in the person's home)
+    // is no ground of the run's: nothing is taken by it.
+    let elsewhere = tempfile::tempdir().unwrap();
+    let outside = RunFolder::under(root.path(), elsewhere.path());
+    assert_eq!(outside, None, "a folder outside the run's root is refused");
+    let mut live = Chosen::default();
+    live.choose(&all, Some(window), &[], "sleep 4711");
+    assert!(live
+        .take_orphans(&all, outside.as_ref(), "sleep 4711", folder_of)
+        .is_empty());
+    assert!(live.processes.is_empty());
+    let found = chosen.take_orphans(&all, Some(&own), "sleep 4711", folder_of);
     assert_eq!(pids(&chosen), [300]);
     assert_eq!(found.len(), 1, "what the folder found is answered");
     // Once, however often it looks, and what the folder found is answered each time.
-    let again = chosen.take_orphans(&all, folder, "sleep 4711", folder_of);
+    let again = chosen.take_orphans(&all, Some(&own), "sleep 4711", folder_of);
     assert_eq!(pids(&chosen), [300]);
     assert_eq!(again.len(), 1);
-    // The other is not ended, and is a problem of the run: it may still run.
-    assert_eq!(
-        chosen.problems(&Ended::default()),
-        ["the command escaped the window and cannot be proved the run's own (only an orphan that began after the worker's window and runs in the run's folder is), so it was not ended and may still run: 301 sleep 4711; 303 sleep 4711"]
-    );
-    // The stand-in's strays are other rigs' jobs, which tell their own by their files: they
-    // are looked at and are no problem of the run.
-    chosen.strays_matter = false;
+    // The others are not ended, and are none of the run's either: they may be another run's,
+    // which holds the same words, and a run that fails on them fails on a stranger's.
+    assert_eq!(chosen.unproven, ["301 sleep 4711", "303 sleep 4711"]);
     assert!(chosen.problems(&Ended::default()).is_empty());
     // A run that never saw its window's process proves nothing its own.
-    let mut blind = Chosen {
-        strays_matter: true,
-        ..Chosen::default()
-    };
-    blind.take_orphans(&all, folder, "sleep 4711", folder_of);
+    let mut blind = Chosen::default();
+    blind.take_orphans(&all, Some(&own), "sleep 4711", folder_of);
     assert!(blind.processes.is_empty());
-    assert_eq!(blind.problems(&Ended::default()).len(), 1);
-    assert!(blind.problems(&Ended::default())[0]
-        .ends_with("300 sleep 4711; 301 sleep 4711; 303 sleep 4711"));
+    assert_eq!(
+        blind.unproven,
+        ["300 sleep 4711", "301 sleep 4711", "303 sleep 4711"]
+    );
+    assert!(blind.problems(&Ended::default()).is_empty());
 }
 
 #[cfg(target_os = "macos")]
@@ -845,6 +895,7 @@ fn a_job_a_shell_detached_and_left_is_found_by_the_runs_folder_and_ended_by_whic
     // the window's start, and ended through the descent as any process the run chose.
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().canonicalize().unwrap();
+    let own = RunFolder::under(dir.path(), dir.path()).expect("the root itself");
     let began = ThisMachine
         .identity(std::process::id())
         .unwrap()
@@ -864,15 +915,15 @@ fn a_job_a_shell_detached_and_left_is_found_by_the_runs_folder_and_ended_by_whic
     let mut found = Vec::new();
     for _ in 0..100 {
         let all = ThisMachine.processes().unwrap();
-        chosen.take_orphans(&all, &folder, "sleep 25", working_folder);
-        found = chosen.processes.clone();
+        chosen.take_orphans(&all, Some(&own), "sleep 25", working_folder);
+        found = chosen.processes.processes();
         if !found.is_empty() {
             break;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
     // Ended whatever came of the assertions below: the sleep is short, and this ends it now.
-    let ended = end_chosen(&found);
+    let ended = Door::acting().end(&chosen.processes);
     assert_eq!(found.len(), 1, "the one orphan of the folder: {found:#?}");
     assert!(found[0].command.contains("sleep 25"), "{found:#?}");
     assert_eq!(ended.ended.len(), 1, "{ended:#?}");
@@ -899,10 +950,632 @@ fn the_run_looks_for_its_own_orphans_only_where_it_expects_the_limit_and_somethi
     assert!(!looks_for_its_own_orphans(Expect::Ended, &ran_on));
 }
 
+/// The processes of the machine that hold the command's words (`sleep 4711`, or the stand-in's
+/// `--background-job 4711`) are of every tree's run that uses them, and a case that took them
+/// all for its own failed a gate (T-592: another tree's `--background-job 4711`, pid 1832). A real
+/// one, started here in a folder that is not the case's and by no window of it, is none of what
+/// escaped, whichever way the run's own are told.
+#[cfg(unix)]
 #[test]
-fn a_stray_orphan_fails_the_run_of_a_harness_and_not_the_rigs_stand_in() {
-    for harness in Harness::ALL {
-        assert!(strays_matter(Who::Harness(harness)), "{harness:?}");
+fn a_process_of_another_run_that_holds_the_commands_words_is_not_among_what_escaped() {
+    let elsewhere = tempfile::tempdir().unwrap();
+    let mut decoy = cf_e2e::process::Run::new("sleep")
+        .arg("4711")
+        .cwd(elsewhere.path())
+        .inheriting_env()
+        .spawn()
+        .unwrap();
+    let pid = decoy.id();
+    let began = ThisMachine
+        .identity(std::process::id())
+        .unwrap()
+        .expect("this process is there")
+        .started;
+    let folder = tempfile::tempdir().unwrap();
+    let own = RunFolder::under(folder.path(), folder.path()).expect("the root itself");
+    // The run's window began before the decoy did, and has a folder that is another.
+    let chosen = Chosen {
+        window_began: Some(began),
+        ..Chosen::default()
+    };
+    let mut found = Vec::new();
+    let mut seen = false;
+    for _ in 0..50 {
+        // Whether the decoy is among the processes at all, so that a look that never reads it is
+        // not what passes.
+        seen = ThisMachine
+            .processes()
+            .unwrap()
+            .iter()
+            .any(|process| process.identity.pid == pid);
+        found = on_the_machine(|all| {
+            chosen.of_the_run(
+                all,
+                (Some(&own), "sleep 4711", Some("/the-rigs-own/jobs/")),
+                working_folder,
+            )
+        });
+        if seen {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
     }
-    assert!(!strays_matter(Who::StandIn));
+    decoy.kill();
+    assert!(
+        seen,
+        "the decoy {pid} was never listed: the test proves nothing"
+    );
+    assert!(
+        found.is_empty(),
+        "the decoy {pid} of another folder is taken for what the case's window left: {found:#?}"
+    );
+}
+
+#[test]
+fn what_escaped_is_what_the_window_held_an_orphan_of_its_folder_since_it_began_and_what_holds_the_rigs_own_folder(
+) {
+    let (_root, own) = run_folder("leaving-claude");
+    let folder = own.real();
+    let window = Identity {
+        pid: 100,
+        started: 10,
+    };
+    let jobs = "/rig-7/jobs/";
+    let all = vec![
+        running(100, 10, 1, "claude"),
+        // The window's own: the shell its tool ran, and the command.
+        running(101, 11, 100, "/bin/sh -c sleep 4711"),
+        running(102, 12, 101, "sleep 4711"),
+        // The job the agent detached: an orphan, in the run's folder, begun after the window.
+        running(300, 20, 1, "sleep 4711"),
+        // Another tree's run of the same command: a folder of its own, and one that began
+        // before the window.
+        running(301, 21, 1, "sleep 4711"),
+        running(302, 5, 1, "sleep 4711"),
+        // A child of a shell of another tree.
+        running(303, 22, 50, "sleep 4711"),
+        // The stand-in's jobs: this rig's, and another tree's with the same number.
+        running(
+            400,
+            23,
+            1,
+            "fake-agent --background-job 4711 /rig-7/jobs/job-100-1",
+        ),
+        running(
+            401,
+            24,
+            1,
+            "fake-agent --background-job 4711 /rig-8/jobs/job-9-1",
+        ),
+    ];
+    let folder_of = |pid: u32| match pid {
+        300 | 302 => Some(folder.to_path_buf()),
+        301 => Some(PathBuf::from("/elsewhere")),
+        _ => None,
+    };
+    let mut chosen = Chosen::default();
+    chosen.choose(&all, Some(window), &[], "sleep 4711");
+    let pids =
+        |found: Vec<Running>| -> Vec<u32> { found.iter().map(|one| one.identity.pid).collect() };
+    assert_eq!(
+        pids(chosen.of_the_run(&all, (Some(&own), "sleep 4711", None), folder_of)),
+        [101, 102, 300]
+    );
+    assert_eq!(
+        pids(chosen.of_the_run(
+            &all,
+            (Some(&own), "--background-job 4711", Some(jobs)),
+            folder_of
+        )),
+        [400]
+    );
+    // A run that never saw its window has none of it.
+    assert!(Chosen::default()
+        .of_the_run(&all, (Some(&own), "sleep 4711", None), folder_of)
+        .is_empty());
+}
+
+/// Ends what it holds, each by which process it is, when the test ends however it does.
+#[cfg(unix)]
+struct Reaper(Grounded);
+
+#[cfg(unix)]
+impl Drop for Reaper {
+    fn drop(&mut self) {
+        let _ = Door::acting().end(&self.0);
+    }
+}
+
+/// A command of this run's own word that detached out of every look (its shell ended before the
+/// host listed it, and the window has gone), in a folder that is none of the run's, escaped the
+/// ending as surely as one the window held: the folder and the descent cannot see it, and Windows
+/// has no folder to read at all. The word is in its command line wherever it went.
+#[cfg(unix)]
+#[test]
+fn a_command_of_this_runs_word_that_detached_unseen_and_runs_in_another_folder_escaped_and_fails_the_verdict(
+) {
+    let elsewhere = tempfile::tempdir().unwrap();
+    let ran = cf_e2e::process::Run::new("/bin/sh")
+        .args(["-c", &format!("{} > /dev/null 2>&1 & echo $!", command())])
+        .cwd(elsewhere.path())
+        .inheriting_env()
+        .run()
+        .unwrap();
+    let pid: u32 = ran.stdout.trim().parse().unwrap();
+    let mut reaper = Reaper(Grounded::none());
+    let began = ThisMachine
+        .identity(std::process::id())
+        .unwrap()
+        .expect("this process is there")
+        .started;
+    // The run's window began before it and has gone; no look saw the command under it.
+    let chosen = Chosen {
+        window_began: Some(began),
+        ..run_chosen()
+    };
+    let wanted = wanted(Who::Harness(Harness::Claude));
+    let mut found = Vec::new();
+    for _ in 0..50 {
+        if let Some(own) = ThisMachine
+            .processes()
+            .unwrap()
+            .into_iter()
+            .find(|one| one.identity.pid == pid)
+        {
+            reaper.0 = Grounded::read_here(&own).expect("the command began after this test");
+            found =
+                on_the_machine(|all| chosen.of_the_run(all, (None, &wanted, None), working_folder));
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        !reaper.0.is_empty(),
+        "the command {pid} never ran: the test proves nothing"
+    );
+    assert!(
+        found
+            .iter()
+            .any(|line| line.starts_with(&format!("{pid} "))),
+        "the command {pid} of the run's own word is not among what escaped: {found:#?}"
+    );
+    let mut left = good();
+    left.listed.clear();
+    left.notes.clear();
+    left.escaped = found;
+    let problems = judge(&left, Expect::Ended).unwrap_err();
+    assert!(
+        problems
+            .iter()
+            .any(|problem| problem.starts_with("the command escaped the ending")),
+        "{problems:#?}"
+    );
+}
+
+/// The platform's own command, started here and under no window: `sleep`, or on Windows
+/// `ping -n … -w`, with a run's word as a whole argument. Found by the word alone; one of another
+/// run's word, of the same seconds and started beside it, is not found. The word ends neither: the
+/// test ends both by their own handles.
+#[test]
+fn the_command_of_this_runs_word_is_found_by_it_anywhere_and_another_runs_word_is_none_of_it() {
+    use cf_e2e::process::Run;
+
+    // Words of this test's own, made as the run's is: the run's own command of the other tests
+    // runs beside it, and what finds the run's word ends it.
+    let a_word = || {
+        let (high, low) = uuid::Uuid::new_v4().as_u64_pair();
+        format!("{}.{:020}", seconds(), high ^ low)
+    };
+    let spawn = |word: &str| {
+        let (program, args): (&str, Vec<String>) = if cfg!(windows) {
+            (
+                "ping",
+                ["-n", &seconds().to_string(), "-w", word, "127.0.0.1"]
+                    .map(str::to_owned)
+                    .to_vec(),
+            )
+        } else {
+            ("sleep", vec![word.to_owned()])
+        };
+        Run::new(program)
+            .args(args)
+            .inheriting_env()
+            .spawn()
+            .unwrap()
+    };
+    let began = ThisMachine
+        .identity(std::process::id())
+        .unwrap()
+        .expect("this process is there")
+        .started;
+    let (own_word, other_word) = (a_word(), a_word());
+    let mut own = spawn(&own_word);
+    let mut other = spawn(&other_word);
+    let chosen = Chosen {
+        word: Some(own_word.clone()),
+        window_began: Some(began),
+        ..Chosen::default()
+    };
+    let mut found = Vec::new();
+    for _ in 0..100 {
+        found = chosen.by_word(&ThisMachine.processes().unwrap());
+        if found.iter().any(|one| one.identity.pid == own.id()) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert!(
+        found.iter().any(|one| one.identity.pid == own.id()),
+        "the command of the run's word is not found by it: {found:#?}"
+    );
+    assert!(
+        found.iter().all(|one| one.identity.pid != other.id()),
+        "another run's word is taken for this one's: {found:#?}"
+    );
+    other.kill();
+    own.kill();
+}
+
+/// What holds the command's words in its own command line, and is not the command: the window,
+/// whose brief names the command (T-548), another process of the window's program, anybody's `sleep`
+/// of the same seconds, another run's word, and a program that quotes the run's word. The word
+/// finds the command's own program alone, `sleep` (on Windows `ping`, which that table lists by the
+/// path of its image): on a Mac 300, on Windows 302.
+#[test]
+fn the_window_and_its_program_hold_the_commands_words_in_their_own_command_line_and_are_none_of_what_the_word_finds(
+) {
+    let words = command();
+    let all = vec![
+        running(10, 1, 1, "pane-host"),
+        running(
+            100,
+            10,
+            10,
+            &format!("claude -p Start the command {words} now"),
+        ),
+        // A process of the window's own program, which holds the words too.
+        running(
+            101,
+            11,
+            1,
+            &format!("claude --resume Start the command {words} now"),
+        ),
+        running(300, 20, 1, &format!("sleep {}", word())),
+        // Another run's word, and anybody's `sleep` of the same seconds.
+        running(301, 21, 1, &format!("sleep {}.1", seconds())),
+        running(304, 24, 1, &format!("sleep {}", seconds())),
+        // Windows' table lists a ping by the path of its image: the words are not its line.
+        running(
+            302,
+            22,
+            1,
+            &format!(
+                "\"C:\\Windows\\system32\\PING.EXE\" -n {} -w {} 127.0.0.1",
+                seconds(),
+                word()
+            ),
+        ),
+        // The same words in a program that is none of the command's, and not the window's.
+        running(303, 23, 1, &format!("editor notes {}", word())),
+        running(305, 25, 1, &format!("/usr/bin/grep -F {words}")),
+    ];
+    let chosen = Chosen {
+        window_began: Some(10),
+        window: Some(Identity {
+            pid: 100,
+            started: 10,
+        }),
+        ..run_chosen()
+    };
+    let pids: Vec<u32> = chosen
+        .by_word(&all)
+        .iter()
+        .map(|one| one.identity.pid)
+        .collect();
+    assert_eq!(pids, [if cfg!(windows) { 302 } else { 300 }]);
+}
+
+/// The run's own command, as the member is told to run it, and an unrelated one of the same seconds
+/// (anybody's `sleep`, or `ping -n` on Windows, begun after the run's word was made and after the
+/// run's window), neither under a window of the run's: what the run counts as escaped is its own
+/// command alone (T-1538's fifth finding), and the run ends neither (T-1557's first finding: the
+/// word makes nothing the run's own to end). The test ends both by their own handles.
+/// The table the run reads is cut to these two processes, so that nothing else on the machine is
+/// reached.
+#[test]
+fn an_unrelated_command_of_the_same_seconds_begun_after_the_runs_word_is_none_of_the_run_and_runs_on(
+) {
+    use cf_e2e::process::Run;
+
+    let spawn = |line: &str| {
+        let mut words = line.split_whitespace();
+        let program = words.next().unwrap().to_owned();
+        Run::new(program)
+            .args(words)
+            .inheriting_env()
+            .spawn()
+            .unwrap()
+    };
+    // The run's window began before either.
+    let began = ThisMachine
+        .identity(std::process::id())
+        .unwrap()
+        .expect("this process is there")
+        .started;
+    let own_line = command();
+    let unrelated_line = if cfg!(windows) {
+        format!("ping -n {} 127.0.0.1", seconds())
+    } else {
+        format!("sleep {}", seconds())
+    };
+    let mut own = spawn(&own_line);
+    let mut unrelated = spawn(&unrelated_line);
+    let ours = |all: &[Running]| -> Vec<Running> {
+        all.iter()
+            .filter(|one| one.identity.pid == own.id() || one.identity.pid == unrelated.id())
+            .cloned()
+            .collect()
+    };
+    let mut table = Vec::new();
+    for _ in 0..100 {
+        table = ours(&ThisMachine.processes().unwrap());
+        if table.len() == 2 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(table.len(), 2, "both commands run: {table:#?}");
+    let mut chosen = Chosen {
+        window_began: Some(began),
+        ..run_chosen()
+    };
+    let wanted = wanted(Who::Harness(Harness::Claude));
+    chosen.choose(&table, None, &[], &wanted);
+    let escaped =
+        on_the_machine(|all| chosen.of_the_run(&ours(all), (None, &wanted, None), working_folder));
+    let ended = Door::acting().end(&chosen.processes);
+    let own_runs_on = own.wait(Duration::from_millis(500)).unwrap().is_none();
+    let runs_on = unrelated
+        .wait(Duration::from_millis(500))
+        .unwrap()
+        .is_none();
+    unrelated.kill();
+    own.kill();
+    assert!(
+        escaped
+            .iter()
+            .all(|line| !line.starts_with(&format!("{} ", unrelated.id()))),
+        "an unrelated `{unrelated_line}` is among what escaped: {escaped:#?}"
+    );
+    assert!(
+        ended
+            .ended
+            .iter()
+            .all(|one| one.identity.pid != unrelated.id()),
+        "an unrelated `{unrelated_line}` was ended: {ended:#?}"
+    );
+    assert!(runs_on, "an unrelated `{unrelated_line}` was ended");
+    assert!(
+        escaped
+            .iter()
+            .any(|line| line.starts_with(&format!("{} ", own.id()))),
+        "the run's own `{own_line}` is not among what escaped: {escaped:#?}"
+    );
+    assert!(
+        own_runs_on,
+        "the run's own `{own_line}`, found by its word alone, was ended: {ended:#?}"
+    );
+}
+
+/// What holds the run's word but began before the run's first window is none of the run's: the
+/// word is made for the run, and nothing of the run's runs before its window does.
+#[test]
+fn what_holds_the_runs_word_but_began_before_the_runs_window_is_none_of_the_run() {
+    let line = command();
+    let all = vec![running(300, 5, 1, &line), running(301, 30, 1, &line)];
+    let chosen = Chosen {
+        window_began: Some(20),
+        ..run_chosen()
+    };
+    let found: Vec<u32> = chosen
+        .by_word(&all)
+        .iter()
+        .map(|one| one.identity.pid)
+        .collect();
+    assert_eq!(found, [301]);
+}
+
+/// A process of the test's own, begun after the run's window, that watches for the run's command:
+/// `grep -F '<the command>'` (on Windows `findstr /C:"<the command>"`) reading a pipe that stays
+/// empty, as an owner's log filter does. Its command line holds the whole command with the run's
+/// word between blanks (`ps` shows `grep -F sleep 4711.<digits>`, T-1557's probe), and it is none
+/// of the run's: it is not chosen for ending, the word does not find it, and it is not said to have
+/// escaped. The table the run reads is cut to it, so that nothing else on the machine is reached;
+/// the test ends it by its own handle.
+#[test]
+fn an_observer_begun_after_the_window_that_quotes_the_whole_command_with_the_runs_word_is_none_of_the_run(
+) {
+    use cf_e2e::process::Run;
+
+    let began = ThisMachine
+        .identity(std::process::id())
+        .unwrap()
+        .expect("this process is there")
+        .started;
+    let line = command();
+    // Held by its handle from here: dropped, it is ended.
+    let observer = if cfg!(windows) {
+        Run::new("findstr").arg(format!("/C:{line}"))
+    } else {
+        Run::new("grep").args(["-F", line.as_str()])
+    }
+    .inheriting_env()
+    .spawn()
+    .unwrap();
+    let ours = |all: &[Running]| -> Vec<Running> {
+        all.iter()
+            .filter(|one| one.identity.pid == observer.id())
+            .cloned()
+            .collect()
+    };
+    let mut table = Vec::new();
+    for _ in 0..100 {
+        table = ours(&ThisMachine.processes().unwrap());
+        if !table.is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(table.len(), 1, "the observer runs: {table:#?}");
+    assert!(
+        has_arg(&table[0].command, word()),
+        "the observer's command line does not hold the run's word between blanks, and the test proves nothing: {}",
+        table[0].command
+    );
+    let mut chosen = Chosen {
+        window_began: Some(began),
+        ..run_chosen()
+    };
+    let wanted = wanted(Who::Harness(Harness::Claude));
+    chosen.choose(&table, None, &[], &wanted);
+    assert!(
+        chosen.processes.is_empty(),
+        "an observer that quotes the run's command is chosen for ending: {:#?}",
+        chosen.processes
+    );
+    assert!(
+        chosen.by_word(&table).is_empty(),
+        "the run's word finds an observer that quotes it"
+    );
+    let escaped =
+        on_the_machine(|all| chosen.of_the_run(&ours(all), (None, &wanted, None), working_folder));
+    assert!(
+        escaped.is_empty(),
+        "an observer that quotes the run's command is said to have escaped: {escaped:#?}"
+    );
+    drop(observer);
+}
+
+/// The run's own command, as the member is told to run it, under no window of the run's (a
+/// harness detached it, and its shell has gone): the word finds it, the run does not end it, and
+/// it is said to have escaped, which fails the case, as a line that says the kit left it to end by
+/// itself. It still runs after the run's ending; the test ends it by its own handle.
+#[test]
+fn a_detached_command_of_the_runs_word_is_said_to_have_escaped_and_runs_on_after_the_runs_ending() {
+    use cf_e2e::process::Run;
+
+    let began = ThisMachine
+        .identity(std::process::id())
+        .unwrap()
+        .expect("this process is there")
+        .started;
+    let line = command();
+    let mut words = line.split_whitespace();
+    let mut own = Run::new(words.next().unwrap())
+        .args(words)
+        .inheriting_env()
+        .spawn()
+        .unwrap();
+    let pid = own.id();
+    let ours = |all: &[Running]| -> Vec<Running> {
+        all.iter()
+            .filter(|one| one.identity.pid == pid)
+            .cloned()
+            .collect()
+    };
+    let mut table = Vec::new();
+    for _ in 0..100 {
+        table = ours(&ThisMachine.processes().unwrap());
+        if !table.is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(table.len(), 1, "the command runs: {table:#?}");
+    let mut chosen = Chosen {
+        window_began: Some(began),
+        ..run_chosen()
+    };
+    chosen.choose(&table, None, &[], &wanted(Who::Harness(Harness::Claude)));
+    let ended = Door::acting().end(&chosen.processes);
+    let runs_on = own.wait(Duration::from_millis(500)).unwrap().is_none();
+    assert!(
+        runs_on,
+        "the run ended a command it found by its word alone: {ended:#?}"
+    );
+    let after = ours(&ThisMachine.processes().unwrap());
+    let said = chosen.escaped_the_ending(&after);
+    own.kill();
+    // The line as the machine lists it: Windows' table quotes the program (`"ping" -n …`).
+    assert_eq!(after.len(), 1, "the command runs on: {after:#?}");
+    assert!(has_arg(&after[0].command, word()), "{after:#?}");
+    assert_eq!(
+        said,
+        [format!(
+            "the command escaped the ending: pid {pid}, `{}`; the kit did not end it, it ends by itself within {} s",
+            after[0].command,
+            seconds()
+        )],
+    );
+}
+
+/// What the run chooses with, as `run_asked` makes it for a harness's worker.
+fn run_chosen() -> Chosen {
+    Chosen {
+        word: Some(word().to_owned()),
+        ..Chosen::default()
+    }
+}
+
+/// What the run's word finds once the windows have closed: a command the run chose (by its window)
+/// and could not end is failed by its ending ([`Chosen::problems`]) and not said again; one it never
+/// chose escaped, and is said with its number and line. Neither is ended here.
+#[test]
+fn what_escaped_the_ending_is_what_the_word_finds_that_the_run_never_chose() {
+    let line = command();
+    let chosen_one = running(300, 20, 1, &line);
+    let all = vec![chosen_one.clone(), running(301, 21, 1, &line)];
+    let chosen = Chosen {
+        window_began: Some(10),
+        processes: Grounded::tree(&all, chosen_one.identity),
+        ..run_chosen()
+    };
+    assert_eq!(
+        chosen.escaped_the_ending(&all),
+        [format!(
+            "the command escaped the ending: pid 301, `{line}`; the kit did not end it, it ends by itself within {} s",
+            seconds()
+        )]
+    );
+}
+
+/// What escaped the ending fails the case, but under the known macOS limit of Pi and Devin
+/// (`Expect::OwnSession`), which `judge` lets pass, where it is said and fails nothing: a live Pi or
+/// Devin `finish` on the Mac is not red for the limit it is known to have.
+#[test]
+fn what_escaped_fails_the_case_but_under_the_known_limit_of_a_session_of_its_own_where_it_is_said()
+{
+    let line = command();
+    let chosen = Chosen {
+        window_began: Some(10),
+        ..run_chosen()
+    };
+    let found = chosen.escaped_the_ending(&[running(301, 21, 1, &line)]);
+    assert_eq!(found.len(), 1, "{found:#?}");
+
+    let ended = Escaped::of(found.clone(), Expect::Ended);
+    assert_eq!(ended.failed, found);
+    assert!(ended.said.is_empty(), "{ended:#?}");
+
+    let own_session = Escaped::of(found.clone(), Expect::OwnSession);
+    assert!(own_session.failed.is_empty(), "{own_session:#?}");
+    assert_eq!(own_session.said.len(), 1, "{own_session:#?}");
+    assert!(
+        own_session.said[0].starts_with(&found[0]),
+        "{own_session:#?}"
+    );
+    assert!(
+        own_session.said[0].contains("said, not failed"),
+        "{own_session:#?}"
+    );
 }

@@ -296,12 +296,12 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bundle.rs"
-find = '''    files::make_dir(folder)?;
+find = '''    crate::door::make_dir(folder)?;
     let name = program'''
 replace = '''    if program.exists() {
         return Ok(program.to_path_buf());
     }
-    files::make_dir(folder)?;
+    crate::door::make_dir(folder)?;
     let name = program'''
 
 # --- T-643: five more tests of the same kind ---

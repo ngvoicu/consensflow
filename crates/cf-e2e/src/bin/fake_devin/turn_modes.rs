@@ -18,11 +18,11 @@ use crate::permission::{Answer, CANCELED, SKIPPED};
 struct Case {
     permission: Arc<Permission>,
     window: Window<Vec<u8>>,
-    folder: tempfile::TempDir,
+    folder: cf_e2e::door::Made,
 }
 
 fn case(bypass: bool) -> Case {
-    let folder = tempfile::tempdir().unwrap();
+    let folder = cf_e2e::door::made("cf-test-").unwrap();
     let store = Store::open(&folder.path().join("sessions.db"), "calm-river").unwrap();
     let wire = Wire::open(&folder.path().join("wire.jsonl"), "calm-river").unwrap();
     let permission = Arc::new(Permission::new(bypass));
@@ -200,7 +200,7 @@ fn a_pasted_call_in_the_normal_mode_waits_at_its_dialog_until_enter_or_escape() 
 
 #[test]
 fn the_note_of_a_quit_goes_on_with_the_message_of_the_turn_it_cut_without_its_wait() {
-    let folder = tempfile::tempdir().unwrap();
+    let folder = cf_e2e::door::made("cf-test-").unwrap();
     let db = folder.path().join("sessions.db");
     // The quit cut the first turn: its message is in the store, and no end of it.
     Store::open(&db, "calm-river")

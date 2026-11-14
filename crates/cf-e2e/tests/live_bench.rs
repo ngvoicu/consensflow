@@ -194,7 +194,7 @@ fn the_core_delivers_between_a_real_chief_and_real_workers_and_comes_back_after_
     log.report("what each check came to", &report::table(&checks));
     // A rig that would not end fails the run after what the checks came to is said.
     closed?;
-    report::verdict(&checks)
+    report::verdict_of(&log, &checks)
 }
 
 #[cfg(test)]

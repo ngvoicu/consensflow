@@ -208,7 +208,7 @@ pub fn seat_fields() -> Vec<Scenario> {
             "field-devin-quota",
             vec![
                 Step {
-                    human: Some(|members| crate::files::write(&members.folder().join(SPENT), "")),
+                    human: Some(|members| crate::door::write(members.folder().join(SPENT), "")),
                     restarts: false,
                     name: "the worker's account is out",
                     asks: |_| String::new(),
@@ -223,7 +223,7 @@ pub fn seat_fields() -> Vec<Scenario> {
                 Step {
                     human: Some(|members| {
                         let spent = members.folder().join(SPENT);
-                        std::fs::remove_file(&spent).map_err(crate::Error::file("remove", &spent))?;
+                        super::taken(&spent)?;
                         members.page("member.back", serde_json::json!({ "participant": "matrix-worker" })).map(|_| ())
                     }),
                     restarts: false,

@@ -4,7 +4,7 @@
 //! test to be ignored unless asked for.
 
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde_json::Value;
 
@@ -38,13 +38,20 @@ pub fn login_in_keychain(auth: &str) -> std::result::Result<(), String> {
     }
 }
 
-/// The scratch folder of a run, removed when it is dropped: whether the run ended or failed on an
-/// assertion, a copy of the human's Muse config is never left in the temporary folder.
-pub struct Scratch(pub PathBuf);
+/// The scratch folder of a run, a folder the door made ([`crate::door::made`]) and removed through
+/// it when it is dropped: whether the run ended or failed on an assertion, a copy of the human's
+/// Muse config is never left in the temporary folder.
+pub struct Scratch(crate::door::Made);
 
 impl Scratch {
-    pub fn at(folder: PathBuf) -> Self {
-        Self(folder)
+    /// A folder of its own in the machine's temp folder, its name begun with `prefix`.
+    pub fn made(prefix: &str) -> io::Result<Self> {
+        crate::door::made(prefix).map(Self)
+    }
+
+    /// Where it is.
+    pub fn path(&self) -> &Path {
+        self.0.path()
     }
 }
 
@@ -53,20 +60,10 @@ impl Scratch {
 /// in folders only the owner enters.
 pub fn copy_kept(from: &Path, to: &Path) -> io::Result<()> {
     if let Some(folder) = to.parent() {
-        owner_only_folders(folder)?;
+        crate::door::make_dir_private(folder)?;
     }
-    // `std::fs::copy` opens the target with the source's mode and copies its permission bits.
-    std::fs::copy(from, to).map(|_| ())
-}
-
-/// `folder` and the folders above it that are not there yet made, readable by their owner alone
-/// (where the system has modes).
-fn owner_only_folders(folder: &Path) -> io::Result<()> {
-    let mut made = std::fs::DirBuilder::new();
-    made.recursive(true);
-    #[cfg(unix)]
-    std::os::unix::fs::DirBuilderExt::mode(&mut made, 0o700);
-    made.create(folder)
+    // `fs::copy` opens the target with the source's mode and copies its permission bits.
+    Ok(crate::door::copy_keeping_mode(from, to)?)
 }
 
 /// The folder `from` copied to `to` the same way, the files under it too.
@@ -97,13 +94,6 @@ pub fn copy_muse_into(home: &Path, scratch: &Path) -> io::Result<()> {
     )
 }
 
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        // The folder this run made, by its own name: nothing else is removed.
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,21 +122,24 @@ mod tests {
 
     #[test]
     fn the_scratch_folder_goes_when_the_run_fails_as_when_it_ends() {
-        let root = tempfile::tempdir().unwrap();
-        let folder = root.path().join("muse-reads-1");
-        let made = || {
+        let fill = |folder: &Path| {
             std::fs::create_dir_all(folder.join("config/muse")).unwrap();
             std::fs::write(folder.join("config/muse/auth.json"), "{}").unwrap();
         };
-        made();
-        drop(Scratch::at(folder.clone()));
+        let scratch = Scratch::made("muse-reads-test-").unwrap();
+        let folder = scratch.path().to_path_buf();
+        fill(&folder);
+        drop(scratch);
         assert!(!folder.exists(), "removed at the end");
-        made();
         let failing = std::panic::catch_unwind(|| {
-            let _scratch = Scratch::at(folder.clone());
-            panic!("an assertion of the run failed");
+            let scratch = Scratch::made("muse-reads-test-").unwrap();
+            fill(scratch.path());
+            std::panic::panic_any(scratch.path().to_path_buf());
         });
-        assert!(failing.is_err());
+        let folder = failing
+            .unwrap_err()
+            .downcast::<std::path::PathBuf>()
+            .unwrap();
         assert!(!folder.exists(), "removed on a failed assertion too");
     }
 
@@ -155,7 +148,7 @@ mod tests {
     fn a_file_is_copied_with_the_mode_it_had_into_folders_only_its_owner_enters() {
         use std::os::unix::fs::PermissionsExt;
         let mode = |path: &Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-test-").unwrap();
         let source = root.path().join("auth.json");
         std::fs::write(&source, "{}").unwrap();
         std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o600)).unwrap();
@@ -184,7 +177,7 @@ mod tests {
 
     #[test]
     fn a_run_of_muse_copies_the_login_file_and_the_model_catalog_and_nothing_else_of_the_config() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-test-").unwrap();
         let (home, scratch) = (root.path().join("home"), root.path().join("scratch"));
         let config = home.join(".config/muse");
         let catalog = home.join(".local/share/muse/model-catalog");

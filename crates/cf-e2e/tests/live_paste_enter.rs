@@ -396,6 +396,8 @@ fn probe_the_gap_a_window_loses() -> Result {
         }
         members.close()?;
     }
+    // It judges nothing: a probe that went to its end is a run that came to a pass.
+    log.passed();
     Ok(())
 }
 

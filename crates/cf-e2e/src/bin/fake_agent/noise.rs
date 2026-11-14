@@ -5,7 +5,6 @@
 //! text until it has printed `<bytes>`, then [`DONE`] on a line of its own, writes
 //! `<done file>`, and waits to be ended.
 
-use std::fs;
 use std::io::{self, Write};
 use std::process::ExitCode;
 use std::thread;
@@ -40,7 +39,7 @@ pub fn run(args: &[String]) -> ExitCode {
     if write!(out, "{DONE}\r\n")
         .and_then(|()| out.flush())
         .is_err()
-        || fs::write(done, "").is_err()
+        || cf_e2e::door::write(done, "").is_err()
     {
         return ExitCode::FAILURE;
     }

@@ -170,7 +170,7 @@ fn muse_allowance() -> String {
     let read = || -> Result<String> {
         let install = muse::installed().map_err(Error::Daemon)?;
         let home = muse::real_home().map_err(Error::Daemon)?;
-        let folder = tempfile::tempdir().map_err(|source| Error::File {
+        let folder = cf_e2e::door::made("live-seat-").map_err(|source| Error::File {
             action: "make a folder in",
             path: std::env::temp_dir(),
             source,
@@ -421,7 +421,7 @@ fn every_harness_sits_in_a_seat_of_one_rig_takes_a_short_task_and_returns_its_re
         checks.push(Check::new(harness.name(), CHECKED, account.held(), version));
     }
     log.report("what each seat came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::verdict_of(&log, &checks)
 }
 
 #[cfg(test)]

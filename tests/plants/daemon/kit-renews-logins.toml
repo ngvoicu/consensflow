@@ -429,3 +429,25 @@ runs = ["renew-lib"]
 file = "crates/cf-e2e/src/live/renew.rs"
 find = '''    if ran.code == Some(0) {'''
 replace = '''    if ran.code.is_some() {'''
+
+# ---------------------------------------------------------------------------- a say-only run renews nothing
+
+[[plant]]
+name = "kit renews logins: a say-only run renews a Claude Code login"
+meant = "a_say_only_run_never_renews_a_login_on_a_test_machine_and_leaves_the_original_as_it_was"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        if self.door.says_only() {'''
+replace = '''        if false && self.door.says_only() {'''
+
+[[plant]]
+name = "kit renews logins: a say-only run renews a Pi login"
+meant = "a_say_only_run_never_renews_a_pi_login_on_a_test_machine_and_leaves_the_original_as_it_was"
+runs = ["renew-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/renew.rs"
+find = '''        if self.door.says_only() {'''
+replace = '''        if false && self.door.says_only() {'''

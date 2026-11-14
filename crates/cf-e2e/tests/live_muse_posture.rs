@@ -146,9 +146,12 @@ fn script(port: u16, cf: &Path, outside: &Path) -> String {
 /// Makes `work` a git work tree of a repository beside it, `main`, with one commit.
 fn work_tree(root: &Path) -> Result<(), String> {
     let (main, work) = (root.join("main"), root.join("work"));
-    fs::remove_dir_all(&work).map_err(|error| error.to_string())?;
-    fs::create_dir_all(&main).map_err(|error| error.to_string())?;
-    fs::write(main.join("README.md"), "A throwaway project.\n")
+    let removed = cf_e2e::door::Door::of_run().remove_in_made(&work);
+    if !removed.is_gone() {
+        return Err(removed.to_string());
+    }
+    cf_e2e::door::make_dir(&main).map_err(|error| error.to_string())?;
+    cf_e2e::door::write(main.join("README.md"), "A throwaway project.\n")
         .map_err(|error| error.to_string())?;
     let who = [
         "-c",
@@ -202,19 +205,17 @@ fn printed(log: &str) -> String {
 /// Runs one posture's turn in a home of its own under `under`, and reads what came of it.
 fn run(name: &str, posture: &[&str], under: &Path, log: &Log) -> Result<Done, String> {
     let binary = binary()?;
-    let root = tempfile::Builder::new()
-        .prefix(&format!("live-muse-posture-{name}-"))
-        .tempdir_in(under)
+    let mut root = cf_e2e::door::made_in(under, &format!("live-muse-posture-{name}-"))
         .map_err(|error| error.to_string())?;
     let root_path = root.path().to_path_buf();
     set_up(&root_path)?;
     work_tree(&root_path)?;
     let outside = root_path.join("outside");
-    fs::create_dir_all(&outside).map_err(|error| error.to_string())?;
+    cf_e2e::door::make_dir(&outside).map_err(|error| error.to_string())?;
     let (port, heard) = listen()?;
     let work = root_path.join("work");
     let cf = cf::binary().map_err(|failed| failed.to_string())?;
-    fs::write(work.join("probe.sh"), script(port, cf, &outside))
+    cf_e2e::door::write(work.join("probe.sh"), script(port, cf, &outside))
         .map_err(|error| error.to_string())?;
     let env = environment(&root_path);
     let (spent, _) = usage(&binary, &env, &root_path, log)?;
@@ -339,5 +340,6 @@ fn only_full_permission_lets_a_muse_member_reach_the_daemon_commit_and_write_out
             "a softer posture did all three: the member's posture is due another look: {said}"
         ));
     }
+    log.passed();
     Ok(())
 }

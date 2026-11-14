@@ -627,7 +627,7 @@ const HELD_AGENT: &str = "a7c1e5d90b2f43386";
 fn hold(window: &Window, agent_only: bool, report: &str) -> Result<Vec<Step>, String> {
     thread::sleep(THINKING);
     let gates = window.jobs.file("held")?;
-    cf_e2e::files::write_whole(&beside(&gates, "pid"), &format!("{}\n", std::process::id()))
+    cf_e2e::door::write_whole(beside(&gates, "pid"), &format!("{}\n", std::process::id()))
         .map_err(|failed| format!("{}: {failed}", gates.display()))?;
     let mut steps: Vec<Step> = (1..=HELD_PROGRESS)
         .map(|at| Step::progress(at, HELD_PROGRESS))
@@ -1089,7 +1089,7 @@ mod tests {
         );
         assert_eq!(record["toolUseResult"]["isAsync"], true);
         assert_eq!(record["toolUseResult"]["agentId"], "a7c1e5d90b2f43386");
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "sess-1", 4242).unwrap();
         write(&mut records, 4242, "sess-1", &[step]).unwrap();
         let text = std::fs::read_to_string(config.path().join("projects/integration/sess-1.jsonl"))
@@ -1104,7 +1104,7 @@ mod tests {
 
     #[test]
     fn a_notification_taken_into_a_turn_is_queued_attached_and_taken_back_with_no_user_record() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "sess-1", 4242).unwrap();
         let said = monitor_ended("b1", "Its stream ended.");
         write(
@@ -1161,7 +1161,7 @@ mod tests {
 
     #[test]
     fn a_held_line_leaves_an_agent_and_two_monitors_running_or_the_agent_alone() {
-        let home = tempfile::tempdir().unwrap();
+        let home = cf_e2e::door::made("cf-test-").unwrap();
         let mut held = window();
         held.jobs = Arc::new(Jobs::new(&home.path().join("home"), 1));
         let (worked, answer) = reply("CLAUDE-HELD The survey runs :: The report", &held)
@@ -1296,7 +1296,7 @@ mod tests {
 
     #[test]
     fn the_steps_of_a_turn_are_a_message_and_its_result_each_and_the_job_says_its_id() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "sess-1", 4242).unwrap();
         write(
             &mut records,
@@ -1342,7 +1342,7 @@ mod tests {
     #[test]
     fn a_notification_is_written_as_claude_code_writes_it_queued_and_then_the_users_own_from_the_system(
     ) {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "sess-1", 4242).unwrap();
         let said = notification("b1", "Done");
         write_notification(&mut records, 4242, &said).unwrap();

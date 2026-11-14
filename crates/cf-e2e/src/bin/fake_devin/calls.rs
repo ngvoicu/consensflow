@@ -69,7 +69,7 @@ impl<W: Write> Said<'_, W> {
     pub fn make(&mut self, folder: &Path, name: &str) -> Result<(), String> {
         let what = format!("write {name}");
         self.wire.called(&what, self.client).map_err(said)?;
-        std::fs::write(folder.join(name), MADE).map_err(said)?;
+        cf_e2e::door::write(folder.join(name), MADE).map_err(said)?;
         self.store
             .tool(&format!("File created successfully at: {name}"))?;
         self.show(&format!("⏺ Wrote {name}\n"))
@@ -88,11 +88,11 @@ mod tests {
         wire: Wire,
         store: Store,
         screen: Vec<u8>,
-        folder: tempfile::TempDir,
+        folder: cf_e2e::door::Made,
     }
 
     fn parts(bypass: bool) -> Parts {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let wire = Wire::open(&folder.path().join("wire.jsonl"), "calm-river").unwrap();
         let store = Store::open(&folder.path().join("sessions.db"), "calm-river").unwrap();
         Parts {

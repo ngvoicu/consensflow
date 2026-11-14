@@ -109,6 +109,7 @@ pub mod checkout;
 pub mod daemon;
 pub mod daemon_log;
 pub mod devin_store;
+pub mod door;
 mod error;
 pub mod files;
 pub mod http;

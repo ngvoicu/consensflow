@@ -169,9 +169,9 @@ mod on_a_claude_config_of_the_cases_own {
         let machine = tempfile::tempdir()?;
         let persons = machine.path().join(".claude");
         cf_e2e::files::write(&persons.join("history.jsonl"), "{}\n")?;
-        let kept = tempfile::tempdir()?;
+        let kept = cf_e2e::door::made("cf-live-base-")?;
         let folder = Kept::new(kept.path().join("claude-config"), None);
-        let shims = tempfile::tempdir()?;
+        let shims = cf_e2e::door::made("cf-live-base-")?;
         let rig = started(machine.path(), shims.path(), &folder)?;
         assert_eq!(
             rig.var("CLAUDE_CONFIG_DIR"),
@@ -221,10 +221,10 @@ mod on_a_claude_config_of_the_cases_own {
     fn a_rig_that_ends_fails_with_what_its_claude_config_says_the_run_did_and_one_dropped_is_asked_once(
     ) -> Outcome {
         let machine = tempfile::tempdir()?;
-        let kept = tempfile::tempdir()?;
+        let kept = cf_e2e::door::made("cf-live-base-")?;
         let said = "the run touched the person's settings";
         let folder = Kept::new(kept.path().join("claude-config"), Some(said));
-        let shims = tempfile::tempdir()?;
+        let shims = cf_e2e::door::made("cf-live-base-")?;
         let rig = started(machine.path(), shims.path(), &folder)?;
         let failed = rig.close().unwrap_err().to_string();
         assert!(failed.contains(said), "{failed}");
@@ -241,9 +241,9 @@ mod on_a_claude_config_of_the_cases_own {
     fn a_rig_whose_home_is_kept_is_told_to_keep_the_records_of_its_claude_config_in_the_home_before_it_is_asked_what_the_run_came_to(
     ) -> Outcome {
         let machine = tempfile::tempdir()?;
-        let kept = tempfile::tempdir()?;
+        let kept = cf_e2e::door::made("cf-live-base-")?;
         let folder = Kept::new(kept.path().join("claude-config"), None);
-        let shims = tempfile::tempdir()?;
+        let shims = cf_e2e::door::made("cf-live-base-")?;
         let mut rig = started(machine.path(), shims.path(), &folder)?;
         let home = rig.keep_home();
         // Not before the windows are gone.
@@ -276,9 +276,9 @@ mod on_a_claude_config_of_the_cases_own {
     #[test]
     fn a_rig_whose_home_goes_with_it_is_told_to_keep_nothing() -> Outcome {
         let machine = tempfile::tempdir()?;
-        let kept = tempfile::tempdir()?;
+        let kept = cf_e2e::door::made("cf-live-base-")?;
         let folder = Kept::new(kept.path().join("claude-config"), None);
-        let shims = tempfile::tempdir()?;
+        let shims = cf_e2e::door::made("cf-live-base-")?;
         let rig = started(machine.path(), shims.path(), &folder)?;
         rig.close()?;
         assert_eq!(folder.asked(), ["finish"]);
@@ -292,7 +292,7 @@ mod on_a_claude_config_of_the_cases_own {
         let file = machine.path().join("a-file");
         std::fs::write(&file, "")?;
         let folder = Kept::new(file.join("claude-config"), None);
-        let shims = tempfile::tempdir()?;
+        let shims = cf_e2e::door::made("cf-live-base-")?;
         let Err(failed) = started(machine.path(), shims.path(), &folder) else {
             panic!("a rig started on a Claude config that cannot be made");
         };
@@ -313,11 +313,17 @@ fn a_window_opens_as_the_app_opens_one_takes_a_paste_answers_and_is_read_through
     let window = Open::new(&rig, &install, "paste", "paste-claude")
         .without_trust()
         .open_telling(&live::Log::new("a window"), "claude")?;
-    let folder = Path::new(&home)
-        .join(".consensflow-candidate")
-        .join("live")
-        .join("paste");
+    // The folder of the case is one this process allocated in the live folder (a name of its
+    // own, `paste-<random>`), and every ask of the same name is given the same.
+    let folder = live::machine::live_folder_in(Path::new(&home), "paste")?;
     assert_eq!(window.workspace(), folder);
+    assert_eq!(
+        folder.parent(),
+        Some(live::machine::live_root(Path::new(&home)).as_path())
+    );
+    assert!(folder
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with("paste-")));
     assert!(
         window.session().is_some(),
         "Claude is opened on an id it is given"

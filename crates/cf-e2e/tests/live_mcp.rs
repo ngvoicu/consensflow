@@ -54,7 +54,7 @@ use cf_e2e::live::members::{delivered_result, notes_of_work};
 use cf_e2e::live::tree;
 use cf_e2e::live::{self, text, wait, Harness, Log};
 use cf_e2e::rig::{Project, Rig, OPEN};
-use cf_e2e::{files, Error, Result};
+use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
 
 use cf_e2e::live::mcp_server::{self as server, Runtime, Server};
@@ -215,11 +215,11 @@ fn attempt(rig: &Rig, project: &Project, server: &Server, seen: &mut Seen, log: 
 fn folder() -> Result<PathBuf> {
     let folder = live_folder("mcp")?;
     live::git_repository(&folder)?;
-    files::write(
-        &folder.join("README.md"),
+    cf_e2e::door::write(
+        folder.join("README.md"),
         "# MCP check\n\nA demo project for the live check of a worker that has an MCP server.\n",
     )?;
-    files::write(&folder.join("CLAUDE.md"), BRIEF)?;
+    cf_e2e::door::write(folder.join("CLAUDE.md"), BRIEF)?;
     Ok(folder)
 }
 
@@ -230,8 +230,14 @@ fn a_real_claude_worker_with_an_mcp_server_finishes_its_task_and_the_chief_gets_
     let log = Log::begin("live mcp")?;
     let claude = log.found(Harness::Claude)?;
     let runtime = Runtime::of_machine()?;
-    let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-mcp");
-    files::make_dir(&made)?;
+    cf_e2e::door::make_dir(Path::new(env!("CARGO_TARGET_TMPDIR")))?;
+    let made_here = cf_e2e::door::made_in(Path::new(env!("CARGO_TARGET_TMPDIR")), "live-mcp-")
+        .map_err(|source| cf_e2e::Error::File {
+            action: "make a folder in",
+            path: Path::new(env!("CARGO_TARGET_TMPDIR")).to_path_buf(),
+            source,
+        })?;
+    let made = made_here.path().to_path_buf();
     let server = Server::write(&made, &runtime)?;
     let shim = live::shimmed_claude_with_servers(
         &made,
@@ -288,5 +294,6 @@ fn a_real_claude_worker_with_an_mcp_server_finishes_its_task_and_the_chief_gets_
         ANSWER,
         server::NAME
     ));
+    log.passed();
     Ok(())
 }

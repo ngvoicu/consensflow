@@ -18,6 +18,9 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
+use cf_e2e::door::Door;
+#[cfg(unix)]
+use cf_e2e::door::Grounded;
 use cf_e2e::live::ask;
 use cf_e2e::live::machine::{home, live_folder};
 #[cfg(unix)]
@@ -133,7 +136,7 @@ fn copy_tree(from: &Path, to: &Path) -> Result {
     if !from.is_dir() {
         return Ok(());
     }
-    files::make_dir(to)?;
+    cf_e2e::door::make_dir(to)?;
     for entry in fs::read_dir(from).map_err(|source| Error::File {
         action: "read",
         path: from.to_owned(),
@@ -148,7 +151,7 @@ fn copy_tree(from: &Path, to: &Path) -> Result {
         if source.is_dir() {
             copy_tree(&source, &target)?;
         } else if source.is_file() {
-            files::copy(&source, &target)?;
+            cf_e2e::door::copy(&source, &target)?;
         }
     }
     Ok(())
@@ -166,16 +169,16 @@ fn throwaway_config(
     login: &Value,
     folder: &Path,
 ) -> Result {
-    files::make_dir(throwaway)?;
-    files::write(
-        &throwaway.join(".credentials.json"),
+    cf_e2e::door::make_dir(throwaway)?;
+    cf_e2e::door::write(
+        throwaway.join(".credentials.json"),
         json!({ "claudeAiOauth": login }).to_string(),
     )?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(throwaway, fs::Permissions::from_mode(0o700));
-        let _ = fs::set_permissions(
+        let _ = cf_e2e::door::set_permissions(throwaway, fs::Permissions::from_mode(0o700));
+        let _ = cf_e2e::door::set_permissions(
             throwaway.join(".credentials.json"),
             fs::Permissions::from_mode(0o600),
         );
@@ -184,8 +187,8 @@ fn throwaway_config(
         if let Ok(Value::Object(mut settings)) = serde_json::from_str::<Value>(&text) {
             settings.remove("hooks");
             settings.remove("statusLine");
-            files::write(
-                &throwaway.join("settings.json"),
+            cf_e2e::door::write(
+                throwaway.join("settings.json"),
                 Value::Object(settings).to_string(),
             )?;
         }
@@ -210,8 +213,8 @@ fn throwaway_config(
     projects.insert(name, entry);
     configuration.insert("projects".to_owned(), Value::Object(projects));
     configuration.insert("hasCompletedOnboarding".to_owned(), Value::Bool(true));
-    files::write(
-        &throwaway.join(".claude.json"),
+    cf_e2e::door::write(
+        throwaway.join(".claude.json"),
         Value::Object(configuration).to_string(),
     )
 }
@@ -242,7 +245,7 @@ fn rename_in_json_under(folder: &Path, from: &str, to: &str) -> Result {
         {
             let text = files::read_string(&path)?;
             if text.contains(&from_json) {
-                files::write(&path, text.replace(&from_json, &to_json))?;
+                cf_e2e::door::write(&path, text.replace(&from_json, &to_json))?;
             }
         }
     }
@@ -259,8 +262,8 @@ fn member_words(made: &Path) -> Result<Vec<String>> {
         .join("skills")
         .join("consensflow-worker")
         .join("SKILL.md");
-    files::make_dir(skill.parent().unwrap_or(&role))?;
-    files::write(
+    cf_e2e::door::make_dir(skill.parent().unwrap_or(&role))?;
+    cf_e2e::door::write(
         &skill,
         "# ConsensFlow worker\n\nThe live parity check's role.\n",
     )?;
@@ -363,8 +366,18 @@ fn opened(
     // a session of its own is no process the pane table may signal (`cf-panes`' test guard).
     #[cfg(unix)]
     let ended = ended_by_its_debug_log(debug);
-    let _ = table.kill(&pane.key);
-    let _ = drain.join();
+    let named = format!("pane {}#{}", pane.key.id, pane.key.generation);
+    let closed = Door::of_run().close_own_terminal(&named, || {
+        let _ = table.kill(&pane.key);
+    });
+    if closed {
+        let _ = drain.join();
+    } else {
+        // A say-only door left the pane open: the table is not dropped, which would close it
+        // (the system hangs a terminal's program up with it), so what the audit says is what
+        // the case did.
+        std::mem::forget(table);
+    }
     #[cfg(unix)]
     ended?;
     let log = files::read_string(debug).unwrap_or_default();
@@ -378,7 +391,7 @@ fn opened(
 }
 
 /// Ends the Claude this case started with `--debug-file debug`, and what it started, by
-/// the one way a live check ends a process ([`members::end_chosen`]): chosen from this
+/// the one way a live check ends a process ([`Door::end`]): chosen from this
 /// test's own tree of processes by that path, which no other command names. What may
 /// still run is the error.
 #[cfg(unix)]
@@ -388,8 +401,8 @@ fn ended_by_its_debug_log(debug: &Path) -> Result {
         .identity(std::process::id())?
         .ok_or_else(|| Error::Daemon("this test's own process is not listed".to_owned()))?;
     let all = machine.processes()?;
-    let chosen = members::holding(&all, me, &format!("--debug-file {}", debug.display()));
-    let problems = members::end_chosen(&chosen).problems();
+    let chosen = Grounded::holding(&all, me, &format!("--debug-file {}", debug.display()));
+    let problems = Door::of_run().end(&chosen).problems();
     if problems.is_empty() {
         Ok(())
     } else {
@@ -486,9 +499,17 @@ pub fn run(log: &Log) -> Result {
     let own = home()?.join(".claude");
     let own_json = home()?.join(".claude.json");
     let folder = live_folder("parity-claude")?;
-    let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-parity-claude");
-    let _ = fs::remove_dir_all(&made);
-    files::make_dir(&made)?;
+    cf_e2e::door::make_dir(Path::new(env!("CARGO_TARGET_TMPDIR")))?;
+    let made_here = cf_e2e::door::made_in(
+        Path::new(env!("CARGO_TARGET_TMPDIR")),
+        "live-parity-claude-",
+    )
+    .map_err(|source| Error::File {
+        action: "make a folder in",
+        path: Path::new(env!("CARGO_TARGET_TMPDIR")).to_path_buf(),
+        source,
+    })?;
+    let made = made_here.path().to_path_buf();
     let before = own_state(&own, &own_json, &folder);
     let login = login(&own)?;
     let left = login["expiresAt"].as_i64().unwrap_or(0) - now_ms();
@@ -527,7 +548,7 @@ pub fn run(log: &Log) -> Result {
             )
         });
         // The copy of the login goes with the run, whatever came of it.
-        let _ = fs::remove_file(config.join(".credentials.json"));
+        let _ = Door::of_run().remove_in_made(&config.join(".credentials.json"));
         match result {
             Ok(loaded) => {
                 log.say(format!("{name}: {}", said(&loaded)));
@@ -539,8 +560,8 @@ pub fn run(log: &Log) -> Result {
             }
         }
     }
-    let _ = fs::remove_dir_all(made.join("config-terminal"));
-    let _ = fs::remove_dir_all(made.join("config-member"));
+    let _ = Door::of_run().remove_in_made(&made.join("config-terminal"));
+    let _ = Door::of_run().remove_in_made(&made.join("config-member"));
     if own_state(&own, &own_json, &folder) != before {
         return Err(Error::Daemon(
             "!!! the machine's own Claude config changed during the run".to_owned(),

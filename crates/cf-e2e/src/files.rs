@@ -7,14 +7,34 @@ use std::{fs, io};
 
 use crate::{Error, Result};
 
+/// Whether a live case may make something at `path`: refused where `path` is in the live zone
+/// every run shares (`<home>/.consensflow-candidate/live`) and not below a folder this run made
+/// through the door ([`crate::door::writable`]). Every write, copy and folder of the kit's files
+/// goes through here: a case's project folder is the run's own, and the others' are not its to
+/// change (T-1592).
+pub fn guard(path: &Path) -> Result {
+    guarded(path, false)
+}
+
+fn guarded(path: &Path, folder: bool) -> Result {
+    if !crate::door::in_live_zone(path) {
+        return Ok(());
+    }
+    crate::door::writable(path, folder).map_err(|why| {
+        Error::file("write", path)(io::Error::new(io::ErrorKind::PermissionDenied, why))
+    })
+}
+
 /// Makes the folder `path`, and the ones above it that are not there.
 pub fn make_dir(path: &Path) -> Result {
+    guarded(path, true)?;
     fs::create_dir_all(path).map_err(Error::file("make", path))
 }
 
 /// Writes `contents` to the file `path`, in a folder made for it if it is not
 /// there, over whatever the file held.
 pub fn write(path: &Path, contents: impl AsRef<[u8]>) -> Result {
+    guard(path)?;
     if let Some(dir) = path.parent() {
         make_dir(dir)?;
     }
@@ -22,7 +42,8 @@ pub fn write(path: &Path, contents: impl AsRef<[u8]>) -> Result {
 }
 
 /// Writes `text` to the file `file` whole or not at all, for a program to say something to
-/// a case that waits for the file and reads it at once: under another name, then renamed
+/// a case that waits for the file and reads it at once (the stand-in programs' own helper, which
+/// writes where the case that started it says, and no case of a live run calls): under another name, then renamed
 /// into place. `fs::write` makes the file before it writes into it, and what a case reads
 /// in that moment is nothing, which is no pid.
 pub fn write_whole(file: &Path, text: &str) -> io::Result<()> {
@@ -44,6 +65,7 @@ pub fn say_its_process(file: &Path) -> io::Result<()> {
 /// program a system will start: executable on Unix, where a script is no
 /// program without that. Windows starts a file by its name's extension.
 pub fn write_executable(path: &Path, contents: impl AsRef<[u8]>) -> Result {
+    guard(path)?;
     if let Some(dir) = path.parent() {
         make_dir(dir)?;
     }

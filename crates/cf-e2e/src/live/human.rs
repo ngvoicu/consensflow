@@ -31,8 +31,62 @@ const SETTLE: Duration = Duration::from_secs(30);
 const TAKES: Duration = Duration::from_secs(5);
 const ENTERS: usize = 3;
 
+/// How long the chief is waited for to be idle at the paste ([`Rig::tell`]'s own minute).
+const TELLS_IDLE: Duration = Duration::from_secs(60);
+
 /// The key Enter sends.
 const ENTER: u8 = 13;
+
+/// What became of a prompt typed into a chief's window, by what was seen after it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Taken {
+    /// The window took it and is at work on it: the board read the chief working (or
+    /// waiting), or its lane does now.
+    AtWork,
+    /// The window took it and its turn is already over: nothing read the chief working (the
+    /// board samples a window, and a short turn falls between two looks), but something
+    /// only a turn leaves came after it.
+    AndOver,
+    /// Nothing says the window took it: it may keep the text in its input box. The only
+    /// outcome that is answered with another Enter.
+    NotTaken,
+}
+
+impl Taken {
+    /// Whether the human presses Enter again: only for a prompt nothing says was taken.
+    pub fn presses_again(self) -> bool {
+        self == Taken::NotTaken
+    }
+}
+
+/// What became of a prompt typed to the chief: `after` are the daemon's events written
+/// since the prompt was pasted (oldest first, counted from the mark [`Rig::tell_marked`]
+/// takes at the paste itself, never from before the wait for the chief to be idle), `lane` what the chief's lane reads now, and
+/// `recorded` whether the chief's own record holds the typed words as a user item since (a
+/// caller that cannot read the record says false).
+pub fn taken(after: &[Value], lane: &str, recorded: bool) -> Taken {
+    let worked = after.iter().any(|event| {
+        event["kind"] == "window.activity"
+            && event["participant"] == "chief"
+            && matches!(event["state"].as_str(), Some("working" | "waiting"))
+    });
+    if worked || lane != "idle" {
+        return Taken::AtWork;
+    }
+    // Known limit: a chief turn that is not this prompt's (a result delivered to it between the idle
+    // read and the look) would read as taken. The suites that use this give the chief nothing else to
+    // answer; see issues/the-live-kits-known-limits-on-taken-prompts-and-pi-declines.md.
+    // The ledger's events carry who made the call in `from` (`task.created`, `message.sent`…):
+    // a chief that gave a task or sent a message since the prompt was typed took the prompt.
+    let acted = after
+        .iter()
+        .any(|event| event["kind"] != "window.activity" && event["data"]["from"] == "chief");
+    if recorded || acted {
+        Taken::AndOver
+    } else {
+        Taken::NotTaken
+    }
+}
 
 /// The human at a project.
 pub struct Human<'a> {
@@ -87,14 +141,28 @@ impl<'a> Human<'a> {
             "the human types into the chief's window: {}",
             cut(words, 200)
         ));
-        let mark = Trace::read(self.rig).len();
-        self.rig.tell(self.project.id(), words)?;
+        // The mark is the daemon's event count at the paste itself, taken after the wait for
+        // the chief to be idle: what the chief did before the paste is no answer to it.
+        let mark = self.rig.tell_marked(self.project.id(), words, TELLS_IDLE)?;
         let pane = self.chief()?["pane"].clone();
         for again in 0..=ENTERS {
             sleep(TAKES);
-            let worked = Trace::read(self.rig).worked_after("chief", mark);
-            if worked || self.chief_is()? != "idle" {
-                return Ok(again);
+            let trace = Trace::read(self.rig);
+            let lane = self.chief_is()?;
+            // The human reads the daemon's events only: the chief's own record is not
+            // reachable from here (which harness it is, and where its store is, are the
+            // suite's), and the events a chief's calls leave are the same for all five.
+            match taken(trace.after(mark), &lane, false) {
+                Taken::AtWork => return Ok(again),
+                Taken::AndOver => {
+                    self.log.say(
+                        "the prompt was taken and its turn is over, but the board never read the \
+                         chief working (an activity mismatch: a turn that began and ended between \
+                         two looks)",
+                    );
+                    return Ok(again);
+                }
+                Taken::NotTaken => {}
             }
             if again == ENTERS {
                 break;
@@ -223,5 +291,69 @@ impl<'a> Human<'a> {
                 since = Instant::now();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::live::trace::Trace;
+
+    const IDLE: &str =
+        r#"{"at":"t","kind":"window.activity","participant":"chief","state":"idle"}"#;
+    const MEMBER_WORKS: &str =
+        r#"{"at":"t","kind":"window.activity","participant":"zeus","state":"working"}"#;
+    const CHIEF_WORKS: &str =
+        r#"{"at":"t","kind":"window.activity","participant":"chief","state":"working"}"#;
+    const CHIEF_GAVE_A_TASK: &str = r#"{"at":"t","kind":"task.created","project":1,"data":{"task":1,"from":"chief","to":"zeus","message":3}}"#;
+
+    /// The events of `lines`, of which the first `before` came before the prompt.
+    fn after(lines: &[&str], before: usize) -> Vec<Value> {
+        let trace = Trace::of(&lines.join("\n"));
+        trace.after(before).to_vec()
+    }
+
+    #[test]
+    fn a_prompt_taken_and_finished_between_two_looks_is_taken() {
+        // The board never read the chief working: its turn began and ended between two
+        // looks. The chief gave a task in it, and its lane reads idle again.
+        let seen = after(&[IDLE, CHIEF_GAVE_A_TASK, IDLE], 1);
+        assert_eq!(taken(&seen, "idle", false), Taken::AndOver);
+        assert!(!taken(&seen, "idle", false).presses_again());
+        // Or its record holds the typed words, and the daemon saw nothing of it.
+        assert_eq!(taken(&[], "idle", true), Taken::AndOver);
+    }
+
+    #[test]
+    fn a_chief_call_before_the_paste_is_no_answer_to_it_and_the_prompt_is_pressed_again() {
+        // The chief's call landed while the human waited for it to be idle; the paste came
+        // after it, and nothing followed the paste.
+        let lines = [IDLE, CHIEF_GAVE_A_TASK];
+        // Counted from before the wait (the mark of the old code), it read as the answer.
+        assert_eq!(taken(&after(&lines, 1), "idle", false), Taken::AndOver);
+        // Counted from the paste (`Rig::tell_marked`), nothing followed it: pressed again.
+        let seen = after(&lines, 2);
+        assert_eq!(taken(&seen, "idle", false), Taken::NotTaken);
+        assert!(taken(&seen, "idle", false).presses_again());
+    }
+
+    #[test]
+    fn a_prompt_that_nothing_followed_is_not_taken_and_is_pressed_again() {
+        // Only the member's window moved, and an old event of the chief's came before the mark.
+        let seen = after(&[CHIEF_GAVE_A_TASK, IDLE, MEMBER_WORKS], 1);
+        assert_eq!(taken(&seen, "idle", false), Taken::NotTaken);
+        assert!(taken(&seen, "idle", false).presses_again());
+        assert_eq!(taken(&[], "idle", false), Taken::NotTaken);
+    }
+
+    #[test]
+    fn a_chief_read_working_is_at_work_and_not_pressed_again() {
+        let seen = after(&[IDLE, CHIEF_WORKS], 1);
+        assert_eq!(taken(&seen, "idle", false), Taken::AtWork);
+        assert_eq!(taken(&[], "working", false), Taken::AtWork);
+        assert!(!Taken::AtWork.presses_again());
+        // A chief's task from before the prompt is not this prompt's.
+        let old = after(&[CHIEF_GAVE_A_TASK, IDLE], 1);
+        assert_eq!(taken(&old, "idle", false), Taken::NotTaken);
     }
 }

@@ -48,7 +48,7 @@ const RIG: &str = "crates/cf-e2e/src/rig/install.rs";
 
 /// The sources that name the `cf` under test and set no variable themselves: the
 /// kit whose environment their `cf` is given, or none where it looks for no harness.
-const THROUGH: [(&str, Option<&str>); 14] = [
+const THROUGH: [(&str, Option<&str>); 15] = [
     ("app/tests/agents-server.mjs", Some("tests/helpers.mjs")),
     // Its probe names the cf a copy is made of, and starts only cargo.
     ("crates/cf-e2e/src/bundle.rs", None),
@@ -68,6 +68,8 @@ const THROUGH: [(&str, Option<&str>); 14] = [
     ),
     ("crates/cf-e2e/tests/rig/cf_native.rs", Some(SCRATCH)),
     ("crates/cf-e2e/tests/rig/codex_session.rs", None),
+    // It names the folder of the cf under test to the cases it runs again, which start a rig.
+    ("crates/cf-e2e/tests/rig/layout.rs", Some(RIG)),
     ("crates/cf/tests/cli_goldens/names.rs", None),
     ("tests/choice.mjs", None),
 ];

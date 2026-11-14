@@ -1078,6 +1078,52 @@ fn a_codex_run_is_given_the_login_alone_and_what_it_configures_goes_in_its_own_h
     assert!(isolation.finish().is_ok());
 }
 
+#[test]
+fn a_pi_run_is_set_in_its_own_folder_and_the_owners_pi_settings_and_the_one_a_caller_names_are_as_they_were(
+) {
+    // `live compaction-screens`: Pi is told to keep one token (`settings.json`). It used to be a
+    // flag naming a Pi folder; no flag names one now, and the settings go in the folder the kit
+    // made for the run, whatever the owner's shell or a caller's folder holds.
+    let owner = Owner::new();
+    let caller = tempfile::tempdir().unwrap();
+    let callers = caller.path().join("agent");
+    write(&callers.join("settings.json"), "{\"theirs\":true}");
+    write(&callers.join("sessions/a.jsonl"), "a session of theirs");
+    let before = (
+        fs::read(callers.join("settings.json")).unwrap(),
+        fs::read(callers.join("sessions/a.jsonl")).unwrap(),
+        fs::read(owner.path(".pi/agent/settings.json")).unwrap(),
+    );
+    let isolation = owner.pi("openrouter/x", hours(1));
+    let home = isolation.made_at(at(NOW)).unwrap();
+    let settings = "{\"compaction\":{\"keepRecentTokens\":1}}\n";
+    isolation
+        .write("PI_CODING_AGENT_DIR", "settings.json", settings)
+        .unwrap();
+    let vars = isolation.vars_in(&home);
+    let folder = vars
+        .iter()
+        .find(|(name, _)| name == "PI_CODING_AGENT_DIR")
+        .map(|(_, folder)| PathBuf::from(folder))
+        .unwrap();
+    assert!(folder.starts_with(&home), "{folder:?} is not in {home:?}");
+    assert_eq!(
+        fs::read_to_string(folder.join("settings.json")).unwrap(),
+        settings
+    );
+    assert_eq!(
+        before,
+        (
+            fs::read(callers.join("settings.json")).unwrap(),
+            fs::read(callers.join("sessions/a.jsonl")).unwrap(),
+            fs::read(owner.path(".pi/agent/settings.json")).unwrap(),
+        ),
+        "a file of the owner's or a caller's was written"
+    );
+    assert!(isolation.finish().is_ok());
+    crate::door::again_under_audit("live::isolation::tests::a_pi_run_is_set_in_its_own_folder_and_the_owners_pi_settings_and_the_one_a_caller_names_are_as_they_were").unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn a_home_made_in_a_folder_reached_through_a_link_is_named_through_the_link() {
@@ -1446,7 +1492,7 @@ fn a_home_never_made_has_nothing_to_say_and_the_words_never_hold_a_login() {
 }
 
 #[test]
-fn a_home_a_killed_run_left_is_taken_away_by_the_next_that_is_made() {
+fn a_home_a_killed_run_left_is_left_by_the_next_that_is_made_and_no_run_takes_it() {
     let owner = Owner::new();
     // A process id nothing has: a child that ended and was waited for.
     let mut child = Run::new("/usr/bin/true").spawn().unwrap();
@@ -1460,9 +1506,11 @@ fn a_home_a_killed_run_left_is_taken_away_by_the_next_that_is_made() {
         .join(format!("{PREFIX}{}-xyz789", std::process::id()));
     write(&running.join("codex/auth.json"), "{}");
     owner.codex().made_at(at(NOW)).unwrap();
+    // A home that looks left may be a person's to look at: a start takes none (T-1592), and
+    // `live sweep` lists it.
     assert!(
-        !left.exists(),
-        "the home of a run that is gone is taken away"
+        left.join("pi/agent/auth.json").is_file(),
+        "the home of a run that is gone is left where it is"
     );
     assert!(running.exists(), "a process that is there keeps its own");
 }
@@ -1674,6 +1722,33 @@ fn the_renewal_runs_pi_with_pi_offline_so_it_installs_nothing_in_the_owners_fold
     assert!(
         started.iter().any(|line| line == "PI_OFFLINE=1"),
         "the renewal's Pi was started with: {started:?}"
+    );
+}
+
+#[test]
+fn a_say_only_run_never_renews_a_pi_login_on_a_test_machine_and_leaves_the_original_as_it_was() {
+    let run = Renewing::new();
+    let original = fs::read(run.owner.path(".pi/agent/auth.json")).unwrap();
+    let mut isolation = run.pi("openai/gpt-6-luna", Some(zeewin2()), &run.renews(), 0);
+    let audit_folder = crate::door::made("cf-test-").unwrap();
+    let audit = audit_folder.path().join("audit.txt");
+    let door = crate::door::Door::asked(Some("1".as_ref()), Some(audit.as_os_str()), None).unwrap();
+    isolation.renewal = isolation.renewal.take().map(|renewal| renewal.under(door));
+    let said = isolation.made_at(at(NOW)).unwrap_err().to_string();
+    let line = "say only: the login of Pi would be renewed here; a say-only run renews nothing";
+    assert!(said.contains(line), "{said}");
+    assert!(!said_anywhere(&said), "{said}");
+    assert!(run.started().is_none(), "the stand-in was started");
+    assert_eq!(
+        fs::read(run.owner.path(".pi/agent/auth.json")).unwrap(),
+        original,
+        "the original login changed"
+    );
+    assert_eq!(run.owner.made(), 0);
+    let text = fs::read_to_string(&audit).unwrap();
+    assert!(
+        text.lines().any(|said| said == format!("# {line}")),
+        "{text}"
     );
 }
 

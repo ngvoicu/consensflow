@@ -26,13 +26,38 @@ use crate::{now_ms, Ctx, WORK};
 /// How many seconds the hook ignores the signals for.
 pub const IGNORE_S: u64 = 100;
 
-/// What the hook's command line holds that nothing else of the machine does.
+/// What the mark of every hook's command line begins with. The word alone was every tree's
+/// stops run's, and a lookup of it across the machine took another worker's hook for the case's
+/// (T-635): the mark of a run is [`hook_mark`].
 pub const HOOK_MARK: &str = "cf-stops-live-ignoring-hook";
+
+/// The mark of the hook of `variant` in this run: `<HOOK_MARK>-<variant>-<pid>-<time>`, the time
+/// the run's first call to it, so that no other run of the kit, on this machine or another
+/// tree's, and no other variant of this run (whose hook of a hundred seconds may still run
+/// when the next case begins), has it in a command line.
+pub fn hook_mark(variant: &Variant) -> String {
+    static BEGAN: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    let began = BEGAN.get_or_init(|| jiff::Timestamp::now().as_millisecond());
+    format!(
+        "{HOOK_MARK}-{}-{}-{began}",
+        variant.name,
+        std::process::id()
+    )
+}
+
+/// The processes of the hook of `variant` that run now, by the mark this run made for it
+/// ([`hook_mark`]), which is in the command line of no other run's.
+fn running_hooks(variant: &Variant) -> Result<Vec<cf_e2e::live::claude::Process>> {
+    processes_with(&hook_mark(variant))
+}
 
 /// The hook: it ignores the signals Claude ends a hook with and runs for a while,
 /// and ends with a command that names the mark.
-fn slow_hook() -> String {
-    format!("trap '' INT TERM HUP; sleep {IGNORE_S}; : {HOOK_MARK}")
+fn slow_hook(variant: &Variant) -> String {
+    format!(
+        "trap '' INT TERM HUP; sleep {IGNORE_S}; : {}",
+        hook_mark(variant)
+    )
 }
 
 /// Where the hook runs, and what the member is asked to do to get there.
@@ -94,7 +119,7 @@ pub fn settings_of(variant: &Variant) -> Value {
     }
     entry.insert(
         "hooks".to_owned(),
-        json!([{ "type": "command", "command": slow_hook(), "timeout": IGNORE_S + 120 }]),
+        json!([{ "type": "command", "command": slow_hook(variant), "timeout": IGNORE_S + 120 }]),
     );
     json!({ "hooks": { variant.event: [Value::Object(entry)] } })
 }
@@ -220,7 +245,7 @@ pub fn run(ctx: &Ctx, case: &mut Account, variant: &Variant) -> Result<()> {
         &format!("the {} hook that ignores signals to run", variant.event),
         WORK,
         Duration::from_millis(250),
-        || Ok((!processes_with(HOOK_MARK)?.is_empty()).then_some(())),
+        || Ok((!running_hooks(variant)?.is_empty()).then_some(())),
     )?;
     if running.is_none() {
         case.fail(format!(
@@ -234,7 +259,7 @@ pub fn run(ctx: &Ctx, case: &mut Account, variant: &Variant) -> Result<()> {
     sleep(Duration::from_secs(1));
     let paused = ctx.members.pause(number)?;
     let made = paused.made_ms;
-    let pids = processes_with(HOOK_MARK)?
+    let pids = running_hooks(variant)?
         .iter()
         .map(|process| process.pid.to_string())
         .collect::<Vec<_>>()
@@ -248,7 +273,7 @@ pub fn run(ctx: &Ctx, case: &mut Account, variant: &Variant) -> Result<()> {
     let lane = watch_the_lane(ctx.members, ctx.agent, &watched.status, made)?;
     sleep(ctx.rest / 2);
     let presses = watched.escapes(ctx.members);
-    let hook_alive = !processes_with(HOOK_MARK)?.is_empty();
+    let hook_alive = !running_hooks(variant)?.is_empty();
     let human_inbox = ctx.members.inbox(None)?;
     let requester_inbox = ctx.members.inbox(Some("chief"))?;
     let (human, requester) = (
@@ -382,12 +407,57 @@ pub fn run(ctx: &Ctx, case: &mut Account, variant: &Variant) -> Result<()> {
 mod tests {
     use super::*;
 
+    /// A process of another tree's run that holds the word the hook of this one held (it was a
+    /// fixed word: every tree's stops run had it) is no hook of this run's.
+    #[cfg(unix)]
+    #[test]
+    fn a_process_of_another_run_that_holds_the_hooks_old_word_is_not_the_hook_the_case_looks_for() {
+        let mut decoy = cf_e2e::process::Run::new("/bin/sh")
+            .args(["-c", &format!("read line; : {HOOK_MARK}")])
+            .inheriting_env()
+            .spawn()
+            .unwrap();
+        let pid = decoy.id();
+        let mut listed = false;
+        let mut found = Vec::new();
+        for _ in 0..50 {
+            listed = processes_with(HOOK_MARK)
+                .unwrap()
+                .iter()
+                .any(|process| process.pid == pid);
+            found = running_hooks(&variant("stop").unwrap()).unwrap();
+            if listed {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        decoy.kill();
+        assert!(
+            listed,
+            "the decoy {pid} was never listed: the test proves nothing"
+        );
+        assert!(
+            found.iter().all(|process| process.pid != pid),
+            "the decoy {pid} is taken for the case's hook: {found:#?}"
+        );
+    }
+
     #[test]
     fn the_hook_that_ignores_the_signals_claude_ends_a_hook_with_names_a_mark_only_it_has() {
+        let stop = variant("stop").unwrap();
+        let mark = hook_mark(&stop);
         assert_eq!(
-            slow_hook(),
-            "trap '' INT TERM HUP; sleep 100; : cf-stops-live-ignoring-hook"
+            slow_hook(&stop),
+            format!("trap '' INT TERM HUP; sleep 100; : {mark}")
         );
+        // Made for the run: this process's, and the variant's.
+        assert!(
+            mark.starts_with(&format!("{HOOK_MARK}-stop-{}-", std::process::id())),
+            "{mark}"
+        );
+        assert_eq!(mark, hook_mark(&stop), "the same one at each call");
+        assert_ne!(mark, hook_mark(&variant("pretool").unwrap()));
+        assert_ne!(mark, HOOK_MARK);
     }
 
     #[test]
@@ -421,7 +491,7 @@ mod tests {
             settings_of(&variant("pretool").unwrap()),
             json!({ "hooks": { "PreToolUse": [{
                 "matcher": "Bash",
-                "hooks": [{ "type": "command", "command": slow_hook(), "timeout": 220 }],
+                "hooks": [{ "type": "command", "command": slow_hook(&variant("pretool").unwrap()), "timeout": 220 }],
             }] } })
         );
         let stop = settings_of(&variant("stop").unwrap());

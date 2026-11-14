@@ -226,10 +226,10 @@ fn at_path(folder: &Path, name: &str) -> PathBuf {
 /// The files a shape names, written into `folder`: the images are whole PNGs.
 fn write_files(folder: &Path) -> Result {
     for image in IMAGES {
-        files::write(&at_path(folder, image), cf_e2e::png::SMALL)?;
+        cf_e2e::door::write(at_path(folder, image), cf_e2e::png::SMALL)?;
     }
-    files::write(&at_path(folder, SPACED), cf_e2e::png::SMALL)?;
-    files::write(&at_path(folder, TEXT), "Notes on the desk scene.\n")
+    cf_e2e::door::write(at_path(folder, SPACED), cf_e2e::png::SMALL)?;
+    cf_e2e::door::write(at_path(folder, TEXT), "Notes on the desk scene.\n")
 }
 
 /// A shape's body, with the paths filled in from `folder`.
@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn the_files_the_shapes_name_are_written_whole_but_for_the_image_that_is_not_there() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         write_files(folder.path()).unwrap();
         for image in IMAGES.iter().chain(&[SPACED]) {
             let bytes = std::fs::read(at_path(folder.path(), image)).unwrap();

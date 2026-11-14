@@ -34,6 +34,11 @@ fn machine_text(lasting: Duration) -> String {
     .to_string()
 }
 
+/// [`oauth_with`] for the login the machine keeps.
+fn oauth(text: &str, now: i64, left: Duration) -> Result<Value> {
+    oauth_with(text, now, left, &MACHINES)
+}
+
 fn hours(hours: u64) -> Duration {
     Duration::from_secs(hours * 3600)
 }
@@ -112,8 +117,8 @@ fn a_login_that_ends_within_the_two_hours_is_refused_and_one_that_lasts_longer_i
 
 #[test]
 fn a_run_that_states_its_own_length_is_refused_a_login_that_would_end_before_it_does() {
-    let home = tempfile::tempdir().unwrap();
-    let parent = tempfile::tempdir().unwrap();
+    let home = crate::door::made("cf-test-").unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
     // A login with five hours left: a live suite (two hours) takes it, a six-hour eval does not.
     let text = machine_text(hours(5));
     let suite = login(&text, home.path(), parent.path());
@@ -286,7 +291,7 @@ impl Drop for Item {
 fn a_run_whose_claude_code_moved_the_login_into_the_keychain_is_told_so_and_not_that_it_refreshed_it(
 ) {
     let person = Person::new();
-    let parent = tempfile::tempdir().unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
     let login = login(&machine_text(hours(5)), person.home.path(), parent.path());
     let folder = login.folder_at(at(NOW)).unwrap();
     // What Claude Code did to a folder in the probe of T-1102: its secure storage into the
@@ -309,8 +314,8 @@ fn a_run_whose_claude_code_moved_the_login_into_the_keychain_is_told_so_and_not_
 
 #[test]
 fn the_folder_holds_the_login_alone_for_the_user_alone_and_is_the_same_each_time_it_is_asked_for() {
-    let home = tempfile::tempdir().unwrap();
-    let parent = tempfile::tempdir().unwrap();
+    let home = crate::door::made("cf-test-").unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
     let login = login(&machine_text(hours(5)), home.path(), parent.path());
     let folder = login.folder_at(at(NOW)).unwrap();
     assert!(folder.starts_with(parent.path()));
@@ -342,10 +347,167 @@ fn the_folder_holds_the_login_alone_for_the_user_alone_and_is_the_same_each_time
     assert!(!said_anywhere(&debug), "{debug}");
 }
 
+/// A Claude config folder a caller made and copied a login into, with files of its own beside
+/// it, as a person has one.
+fn callers_folder(login: &str) -> (crate::door::Made, Vec<(PathBuf, Vec<u8>)>) {
+    let folder = crate::door::made("cf-test-").unwrap();
+    let planted: Vec<(&str, &str)> = vec![
+        (".credentials.json", login),
+        (
+            ".claude.json",
+            r#"{"hasCompletedOnboarding":true,"callers-mark":"CALLERS-CLAUDE-JSON","projects":{"/callers/work":{"hasTrustDialogAccepted":true}}}"#,
+        ),
+        ("settings.json", r#"{"model":"callers-model"}"#),
+        ("projects/-callers-work/s1.jsonl", "{\"type\":\"user\"}\n"),
+        ("history.jsonl", "{\"display\":\"callers prompt\"}\n"),
+    ];
+    let mut kept = Vec::new();
+    for (name, text) in planted {
+        let file = folder.path().join(name);
+        crate::door::write(&file, text).unwrap();
+        kept.push((file, text.as_bytes().to_vec()));
+    }
+    (folder, kept)
+}
+
+/// The caller's files, each byte for byte as planted.
+fn assert_untouched(kept: &[(PathBuf, Vec<u8>)]) {
+    for (file, bytes) in kept {
+        assert_eq!(
+            &std::fs::read(file).unwrap(),
+            bytes,
+            "{} was written",
+            file.display()
+        );
+    }
+}
+
+#[test]
+fn a_login_copied_from_a_folder_the_caller_made_is_read_there_and_the_folder_is_never_written() {
+    let home = crate::door::made("cf-test-").unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
+    let (callers, kept) = callers_folder(&machine_text(hours(5)));
+    let login = Login::of_folder_in(
+        callers.path(),
+        home.path().to_path_buf(),
+        parent.path().to_path_buf(),
+        LEFT,
+    )
+    .unwrap();
+    let folder = login.folder_at(at(NOW)).unwrap();
+    // The windows run on a folder of the run's own, below the run's parent.
+    assert!(folder.starts_with(parent.path()), "{}", folder.display());
+    assert_ne!(folder, callers.path());
+    // It holds the login alone, without the refresh token, and the trust of the live folders
+    // as a person's own config has it; nothing of the caller's other files.
+    let held: Value =
+        serde_json::from_str(&std::fs::read_to_string(folder.join(".credentials.json")).unwrap())
+            .unwrap();
+    assert_eq!(held["claudeAiOauth"]["accessToken"], ACCESS);
+    assert!(held["claudeAiOauth"].get("refreshToken").is_none());
+    let config = std::fs::read_to_string(folder.join(".claude.json")).unwrap();
+    let config: Value = serde_json::from_str(&config).unwrap();
+    let root = super::super::machine::claude_project_key(
+        &super::super::machine::live_root(home.path()).to_string_lossy(),
+    );
+    assert_eq!(
+        config["projects"][root.as_str()]["hasTrustDialogAccepted"],
+        true
+    );
+    assert!(config.get("callers-mark").is_none(), "{config}");
+    for left_behind in ["settings.json", "history.jsonl", "projects"] {
+        assert!(!folder.join(left_behind).exists(), "{left_behind}");
+    }
+    // What the run held the login to when it ended: as it was.
+    login.finish().unwrap();
+    assert_untouched(&kept);
+    crate::door::again_under_audit("live::login::tests::a_login_copied_from_a_folder_the_caller_made_is_read_there_and_the_folder_is_never_written").unwrap();
+}
+
+#[test]
+fn the_callers_folder_is_held_to_what_it_was_and_a_login_of_it_that_moved_fails_the_run() {
+    let home = crate::door::made("cf-test-").unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
+    let (callers, _) = callers_folder(&machine_text(hours(5)));
+    let login = Login::of_folder_in(
+        callers.path(),
+        home.path().to_path_buf(),
+        parent.path().to_path_buf(),
+        LEFT,
+    )
+    .unwrap();
+    login.folder_at(at(NOW)).unwrap();
+    // Something else writes the caller's login while the run goes on.
+    crate::door::write(
+        callers.path().join(".credentials.json"),
+        machine_text(hours(9)).replace(ACCESS, "sk-ant-oat01-ANOTHER-0000"),
+    )
+    .unwrap();
+    let said = login.finish().unwrap_err().to_string();
+    assert!(said.contains(".credentials.json"), "{said}");
+    assert!(!said_anywhere(&said), "{said}");
+    crate::door::again_under_audit("live::login::tests::the_callers_folder_is_held_to_what_it_was_and_a_login_of_it_that_moved_fails_the_run").unwrap();
+}
+
+#[test]
+fn a_callers_copy_without_a_refresh_token_is_used_and_one_with_no_login_or_no_file_is_refused() {
+    let home = crate::door::made("cf-test-").unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
+    let mut text: Value = serde_json::from_str(&machine_text(hours(5))).unwrap();
+    text["claudeAiOauth"]
+        .as_object_mut()
+        .unwrap()
+        .remove("refreshToken");
+    let (callers, kept) = callers_folder(&text.to_string());
+    let login = Login::of_folder_in(
+        callers.path(),
+        home.path().to_path_buf(),
+        parent.path().to_path_buf(),
+        LEFT,
+    )
+    .unwrap();
+    let held = login.folder_at(at(NOW)).unwrap();
+    assert!(held.join(".credentials.json").is_file());
+    assert_untouched(&kept);
+    // A folder with no .credentials.json is refused before anything acts, saying why and what to do.
+    let empty = crate::door::made("cf-test-").unwrap();
+    let refused = Login::of_folder_in(
+        empty.path(),
+        home.path().to_path_buf(),
+        parent.path().to_path_buf(),
+        LEFT,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("--claude-config"), "{refused}");
+    assert!(refused.contains("Keychain"), "{refused}");
+    // A login that is none, or that has run short, is refused as the machine's is, and no folder is made.
+    let (bad, _) = callers_folder("not json");
+    let login = Login::of_folder_in(
+        bad.path(),
+        home.path().to_path_buf(),
+        parent.path().to_path_buf(),
+        LEFT,
+    )
+    .unwrap();
+    assert!(login.folder_at(at(NOW)).is_err());
+    let short = machine_text(Duration::from_secs(600));
+    let (ending, _) = callers_folder(&short);
+    let login = Login::of_folder_in(
+        ending.path(),
+        home.path().to_path_buf(),
+        parent.path().to_path_buf(),
+        LEFT,
+    )
+    .unwrap();
+    assert!(login.folder_at(at(NOW)).is_err());
+    crate::door::again_under_audit("live::login::tests::a_callers_copy_without_a_refresh_token_is_used_and_one_with_no_login_or_no_file_is_refused").unwrap();
+}
+
 #[test]
 fn a_login_refused_leaves_no_folder_and_a_login_that_cannot_be_read_says_where_it_looked() {
-    let home = tempfile::tempdir().unwrap();
-    let parent = tempfile::tempdir().unwrap();
+    let home = crate::door::made("cf-test-").unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
     let refused = login(
         &machine_text(Duration::from_secs(600)),
         home.path(),
@@ -366,8 +528,8 @@ fn a_login_refused_leaves_no_folder_and_a_login_that_cannot_be_read_says_where_i
 
 #[test]
 fn the_folder_goes_when_the_login_is_dropped_and_when_the_run_panics() {
-    let home = tempfile::tempdir().unwrap();
-    let parent = tempfile::tempdir().unwrap();
+    let home = crate::door::made("cf-test-").unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
     let kept = login(&machine_text(hours(5)), home.path(), parent.path());
     let folder = kept.folder_at(at(NOW)).unwrap();
     assert!(folder.join(".credentials.json").is_file());
@@ -391,8 +553,8 @@ fn the_folder_goes_when_the_login_is_dropped_and_when_the_run_panics() {
 }
 
 #[test]
-fn a_folder_a_killed_run_left_is_taken_away_and_a_folder_of_a_run_that_is_there_is_not() {
-    let parent = tempfile::tempdir().unwrap();
+fn the_folders_earlier_runs_left_are_only_counted_and_none_is_taken() {
+    let parent = crate::door::made("cf-test-").unwrap();
     // A process id nothing has: a child that ended and was waited for.
     let mut child = Run::new("/usr/bin/true").spawn().unwrap();
     let gone = child.id();
@@ -409,25 +571,24 @@ fn a_folder_a_killed_run_left_is_taken_away_and_a_folder_of_a_run_that_is_there_
     let no_process = make(format!("{PREFIX}not-a-number-1"));
     let file = parent.path().join(format!("{PREFIX}{gone}-file"));
     std::fs::write(&file, "").unwrap();
-    sweep(parent.path(), PREFIX);
-    assert!(
-        !left.exists(),
-        "the folder of a run that is gone is taken away"
-    );
-    for kept in [&running, &others, &no_process, &file] {
-        assert!(kept.exists(), "{} is nobody's to take away", kept.display());
+    // The copies of earlier runs: the one of a run that is gone and the one with no run's
+    // number; not the one of this run, nor a rig's folder, nor a file. Said once.
+    assert_eq!(crate::rig::sweep::say_copies(parent.path()), 2);
+    assert_eq!(crate::rig::sweep::say_copies(parent.path()), 0, "said once");
+    for kept in [&left, &running, &others, &no_process, &file] {
+        assert!(kept.exists(), "{} is another run's to take", kept.display());
     }
 }
 
 /// A person's home with a setup in it, and what `Owner` sees of it.
 struct Person {
     owner: Owner,
-    home: tempfile::TempDir,
+    home: crate::door::Made,
 }
 
 impl Person {
     fn new() -> Self {
-        let home = tempfile::tempdir().unwrap();
+        let home = crate::door::made("cf-test-").unwrap();
         let owner = Owner {
             home: home.path().to_path_buf(),
         };
@@ -607,7 +768,7 @@ fn the_evals_workspace_is_a_runs_folder_too_and_what_a_run_of_theirs_left_in_the
 
 #[test]
 fn a_person_with_no_claude_setup_has_nothing_a_run_could_change_and_nothing_to_look_at() {
-    let home = tempfile::tempdir().unwrap();
+    let home = crate::door::made("cf-test-").unwrap();
     let owner = Owner {
         home: home.path().to_path_buf(),
     };
@@ -620,7 +781,7 @@ fn a_person_with_no_claude_setup_has_nothing_a_run_could_change_and_nothing_to_l
 #[test]
 fn a_run_that_left_the_persons_setup_and_its_login_be_ends_with_nothing_to_say() {
     let person = Person::new();
-    let parent = tempfile::tempdir().unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
     let login = login(&machine_text(hours(5)), person.home.path(), parent.path());
     // A rig that never asked for the folder has nothing to be asked about.
     assert!(login.finish().is_ok());
@@ -632,7 +793,7 @@ fn a_run_that_left_the_persons_setup_and_its_login_be_ends_with_nothing_to_say()
 #[test]
 fn a_run_that_wrote_in_the_persons_setup_fails_with_where_and_says_it_loudly() {
     let person = Person::new();
-    let parent = tempfile::tempdir().unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
     let login = login(&machine_text(hours(5)), person.home.path(), parent.path());
     login.folder_at(at(NOW)).unwrap();
     person.write(".claude/settings.json", r#"{"model":"changed"}"#);
@@ -652,7 +813,7 @@ fn a_run_that_wrote_in_the_persons_setup_fails_with_where_and_says_it_loudly() {
 #[test]
 fn a_copy_that_was_refreshed_or_lost_fails_with_a_warning_that_the_machines_login_may_be_stale() {
     let person = Person::new();
-    let parent = tempfile::tempdir().unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
     let login = login(&machine_text(hours(5)), person.home.path(), parent.path());
     let folder = login.folder_at(at(NOW)).unwrap();
     let credentials = folder.join(".credentials.json");
@@ -688,7 +849,7 @@ fn a_copy_that_was_refreshed_or_lost_fails_with_a_warning_that_the_machines_logi
 fn the_login_the_machine_keeps_changed_while_the_run_went_on_is_said_and_the_mcp_tokens_beside_it_are_not_held_to_it(
 ) {
     let person = Person::new();
-    let parent = tempfile::tempdir().unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
     let text = machine_text(hours(5));
     let login = login(&text, person.home.path(), parent.path());
     login.folder_at(at(NOW)).unwrap();
@@ -817,15 +978,15 @@ fn after_a_run(login: &Login) -> PathBuf {
 
 #[test]
 fn a_kept_home_is_given_the_conversations_and_the_sessions_and_never_the_login() {
-    let home = tempfile::tempdir().unwrap();
-    let parent = tempfile::tempdir().unwrap();
+    let home = crate::door::made("cf-test-").unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
     let login = login(&machine_text(hours(5)), home.path(), parent.path());
     let folder = after_a_run(&login);
     // The login and the rest of the folder are there to be left out.
     assert!(folder.join(".credentials.json").is_file());
     assert!(folder.join(".claude.json").is_file());
 
-    let kept = tempfile::tempdir().unwrap();
+    let kept = crate::door::made("cf-test-").unwrap();
     let into = kept.path().join("home").join(".claude");
     login.keep_records(&into).unwrap();
     assert_eq!(
@@ -866,9 +1027,9 @@ fn a_kept_home_is_given_the_conversations_and_the_sessions_and_never_the_login()
 
 #[test]
 fn a_run_with_no_folder_or_a_folder_with_no_records_has_nothing_to_keep() {
-    let home = tempfile::tempdir().unwrap();
-    let parent = tempfile::tempdir().unwrap();
-    let kept = tempfile::tempdir().unwrap();
+    let home = crate::door::made("cf-test-").unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
+    let kept = crate::door::made("cf-test-").unwrap();
     let into = kept.path().join("home").join(".claude");
     // The folder was never asked for.
     let login = login(&machine_text(hours(5)), home.path(), parent.path());
@@ -883,8 +1044,8 @@ fn a_run_with_no_folder_or_a_folder_with_no_records_has_nothing_to_keep() {
 #[cfg(unix)]
 #[test]
 fn a_link_in_the_folder_is_not_followed_out_of_it() {
-    let home = tempfile::tempdir().unwrap();
-    let parent = tempfile::tempdir().unwrap();
+    let home = crate::door::made("cf-test-").unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
     let login = login(&machine_text(hours(5)), home.path(), parent.path());
     let folder = after_a_run(&login);
     // A link to the login, in a place that is kept.
@@ -893,7 +1054,7 @@ fn a_link_in_the_folder_is_not_followed_out_of_it() {
         folder.join("projects/-Users-me-work/link.jsonl"),
     )
     .unwrap();
-    let kept = tempfile::tempdir().unwrap();
+    let kept = crate::door::made("cf-test-").unwrap();
     login.keep_records(kept.path()).unwrap();
     assert!(!files_below(kept.path())
         .iter()
@@ -929,16 +1090,16 @@ fn zeewin2() -> TestMachine {
 /// theirs: it writes down how it was started, does what `body` says, and ends with `status`.
 struct Renewing {
     person: Person,
-    parent: tempfile::TempDir,
-    tools: tempfile::TempDir,
+    parent: crate::door::Made,
+    tools: crate::door::Made,
 }
 
 impl Renewing {
     fn new() -> Self {
         Self {
             person: Person::new(),
-            parent: tempfile::tempdir().unwrap(),
-            tools: tempfile::tempdir().unwrap(),
+            parent: crate::door::made("cf-test-").unwrap(),
+            tools: crate::door::made("cf-test-").unwrap(),
         }
     }
 
@@ -1027,6 +1188,35 @@ fn a_login_that_ended_on_a_test_machine_is_renewed_by_claude_code_once_and_the_r
 }
 
 #[test]
+fn a_say_only_run_never_renews_a_login_on_a_test_machine_and_leaves_the_original_as_it_was() {
+    let run = Renewing::new();
+    let ended = login_ending(at(NOW - 3600), ACCESS);
+    // The stand-in would renew the login: a run that says only never starts it.
+    let mut login = run.login(&ended, Some(zeewin2()), &run.renews(), 0);
+    let audit = run.parent.path().join("audit.txt");
+    let door = crate::door::Door::asked(Some("1".as_ref()), Some(audit.as_os_str()), None).unwrap();
+    login.renewal = login.renewal.take().map(|renewal| renewal.under(door));
+    let said = login.folder_at(at(NOW)).unwrap_err().to_string();
+    let line =
+        "say only: the login of Claude Code would be renewed here; a say-only run renews nothing";
+    assert!(said.contains(line), "{said}");
+    assert!(!said_anywhere(&said), "{said}");
+    assert!(run.started().is_none(), "the stand-in was started");
+    assert_eq!(
+        std::fs::read_to_string(run.file()).unwrap(),
+        ended,
+        "the original login changed"
+    );
+    // Nothing of the run was made, and the audit file holds the line.
+    assert_eq!(std::fs::read_dir(run.parent.path()).unwrap().count(), 1);
+    let text = std::fs::read_to_string(&audit).unwrap();
+    assert!(
+        text.lines().any(|said| said == format!("# {line}")),
+        "{text}"
+    );
+}
+
+#[test]
 fn a_renewal_that_fails_refuses_the_run_in_words_that_say_so_and_makes_no_folder() {
     let run = Renewing::new();
     let ended = login_ending(at(NOW - 3600), ACCESS);
@@ -1093,12 +1283,14 @@ fn a_login_with_more_than_five_minutes_left_is_not_renewed_by_running_claude_cod
 /// What Claude Code keeps of the folder it was started in, in the owner's projects, is the
 /// renewal's own: it is taken away when the renewal is over, and nothing else of the owner's is
 /// (zeewin2: `projects/C--Users-AGV-AppData-Local-Temp-consensflow-integration-renew-…/memory`).
+/// The stand-in names it as Claude Code does, by the folder's real path, every character that
+/// is no letter or digit a dash.
 #[test]
 fn a_renewal_takes_away_the_record_claude_code_kept_of_its_own_folder_and_no_other() {
     let run = Renewing::new();
     let projects = run.person.home.path().join(".claude/projects");
     let body = format!(
-        "{}\nown=\"{}/C--tmp-$(basename \"$PWD\")\"\nmkdir -p \"$own\" && echo x > \"$own/memory\"",
+        "{}\nown=\"{}/$(pwd -P | sed 's/[^A-Za-z0-9]/-/g')\"\nmkdir -p \"$own\" && echo x > \"$own/memory\"",
         run.renews(),
         projects.display()
     );
@@ -1253,7 +1445,7 @@ fn a_run_is_given_the_access_token_and_nothing_that_renews_it_and_the_machines_l
     // Measured on zeewin2 (Claude Code 2.1.316): a copy with no refresh token runs, is never
     // refreshed, and fails with a 401 where the server refuses its access token.
     let person = Person::new();
-    let parent = tempfile::tempdir().unwrap();
+    let parent = crate::door::made("cf-test-").unwrap();
     let text = json!({
         "claudeAiOauth": {
             "accessToken": ACCESS, "refreshToken": REFRESH, "refreshTokenExpiresAt": at(NOW + 90 * 86_400),

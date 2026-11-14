@@ -7,9 +7,10 @@
 //! harness found has a home of the run's own, which holds a copy of the machine's login
 //! and is removed with the run: Claude Code's is a config folder ([`login`]), Codex's,
 //! Pi's and Devin's are made by [`isolation`], and the rig sets their variables last,
-//! over its own and the case's. A run given a Claude config folder of its own
-//! (`--claude-config`) has its windows keep their config there instead: its caller made
-//! it and copied the login into it. What a window is given of the machine is what
+//! over its own and the case's. A run given a Claude config folder (`--claude-config`)
+//! takes the login from the folder its caller copied one into, which is read and never
+//! written: the windows still run on a config folder of the run's own ([`Login::of_folder`]).
+//! What a window is given of the machine is what
 //! [`rig`] says: the person's home, for the project folders below it, and the variables
 //! the harness reads its login by where it has no home of its own, the folders it and
 //! Node are in, a locale that draws its screen, and the user's name, which a harness
@@ -422,49 +423,37 @@ const REPORTS: &str = "app/src-tauri/target/live-reports";
 /// given, none twice), and the variables they read their logins by are the
 /// machine's. The windows of the machine's Claude Code run on a config folder of
 /// the run's own, with a copy of its login ([`Installed::claude_config`]), which is
-/// the one the daemon reads Claude's records in as well; where the run was given a
-/// folder of its own for it (`--claude-config`: one its caller made and copied a login
-/// into), they keep their config there instead. A Claude that has neither (a stand-in,
-/// or a machine's whose login is none the kit can copy) reads its config where
-/// `CLAUDE_CONFIG_DIR` does not point, so a rig that has it has the variable unset. The
-/// windows have a locale that draws their screens, and the user's name, which a harness
-/// may ask the system's keychain by; on Windows they also have the machine's own folders
-/// for settings and programs ([`WINDOWS`]).
+/// the one the daemon reads Claude's records in as well: a copy of the machine's login,
+/// or of the one a run's caller copied into a folder it named (`--claude-config`, read in
+/// [`installed_for`] and nowhere else; that folder is read and never written). A Claude
+/// that has none (a stand-in, or a machine's whose login is none the kit can copy) reads its
+/// config where `CLAUDE_CONFIG_DIR` does not point, so a rig that has it has the variable
+/// unset. The windows have a locale that draws their screens, and the user's name, which a
+/// harness may ask the system's keychain by; on Windows they also have the machine's own
+/// folders for settings and programs ([`WINDOWS`]).
 ///
-/// Either config is seeded first with the trust a person's own has for the run's folders
-/// ([`seed_claude_trust`]).
+/// The kit's own copy of the login is seeded with the trust a person's own has for the run's
+/// folders ([`seed_claude_trust`]).
 pub fn rig(installs: &[Installed], stand_in: impl Into<PathBuf>) -> Config {
-    let claude_config = super::option("claude-config");
-    let home = own_var("HOME").or_else(|| own_var("USERPROFILE"));
-    if let (Some(config), Some(home)) = (&claude_config, &home) {
-        if installs
-            .iter()
-            .any(|install| install.harness == Harness::Claude)
-        {
-            if let Err(failed) = seed_claude_trust(Path::new(config), Path::new(home)) {
-                panic!("the run's Claude config {config} could not be seeded: {failed}");
-            }
-        }
-    }
-    let config = rig_keeping_claude_in(installs, stand_in, claude_config);
-    keeping_pi_in(config, installs, super::option("pi-agent-dir"))
+    rig_keeping_claude_in(installs, stand_in, None)
 }
 
 /// The folder below `home` that a run's live folders are made in ([`live_folder_in`]).
-fn live_root(home: &Path) -> PathBuf {
+pub fn live_root(home: &Path) -> PathBuf {
     home.join(".consensflow-candidate").join("live")
 }
 
-/// Seeds the Claude config folder `config`, the run's own (the kit's copy of the login,
-/// [`super::login::Login`], or one the run was given, `--claude-config`), with what
-/// a person's own config holds of the folders a run's windows open in: they are below
-/// a folder the person said yes to (the owner's `~/.claude.json` keeps
-/// `projects["<home>"].hasTrustDialogAccepted`, T-629), so Claude Code asks in a new
-/// repository there and not in a plain folder. A config made fresh trusts nothing, and
-/// asked even in a plain folder (`live folder-trust`'s fresh case, T-523). Its
-/// `.claude.json` is given the live folders' root as trusted, merged into what it holds.
-/// The owner's own is never written: `home` itself, and a folder inside `home`'s
-/// `.claude`, are refused.
+/// Seeds the Claude config folder `config`, the kit's copy of the login ([`super::login::Login`],
+/// a folder this run made through the door) with what a person's own config holds of the folders
+/// a run's windows open in: they are below a folder the person said yes to (the owner's
+/// `~/.claude.json` keeps `projects["<home>"].hasTrustDialogAccepted`, T-629), so Claude Code
+/// asks in a new repository there and not in a plain folder. A config made fresh trusts nothing,
+/// and asked even in a plain folder (`live folder-trust`'s fresh case, T-523). Its `.claude.json`
+/// is given the live folders' root as trusted, merged into what it holds.
+///
+/// It writes only in a folder this run made, and never through a link at the file: the owner's
+/// own config, a folder another run made and one a person made are refused, and so is a
+/// `.claude.json` that is a link.
 pub fn seed_claude_trust(config: &Path, home: &Path) -> Result {
     let real = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let (config, owners) = (real(config), real(&home.join(".claude")));
@@ -474,7 +463,19 @@ pub fn seed_claude_trust(config: &Path, home: &Path) -> Result {
             config.display()
         )));
     }
+    if !crate::door::is_made_or_below(&config) {
+        return Err(Error::Daemon(format!(
+            "{} is no folder this run made, so its trust is not written",
+            config.display()
+        )));
+    }
     let file = config.join(".claude.json");
+    if fs::symlink_metadata(&file).is_ok_and(|found| found.file_type().is_symlink()) {
+        return Err(Error::Daemon(format!(
+            "{} is a link, which a write would go through",
+            file.display()
+        )));
+    }
     let mut held: serde_json::Value = files::read_string(&file)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
@@ -485,7 +486,7 @@ pub fn seed_claude_trust(config: &Path, home: &Path) -> Result {
     }
     let root = claude_project_key(&live_root(home).to_string_lossy());
     held["projects"][&root]["hasTrustDialogAccepted"] = serde_json::Value::Bool(true);
-    files::write(&file, held.to_string())
+    crate::door::write(&file, held.to_string())
 }
 
 /// A folder as Claude Code keeps it in the record of its projects (the keys of `projects` in
@@ -507,23 +508,6 @@ fn project_key(folder: &str, windows: bool) -> String {
             .replace('\\', "/")
     } else {
         folder.to_owned()
-    }
-}
-
-/// `config`, whose Pi windows keep their login, settings and sessions in `agent_dir`
-/// where it names a folder (`--pi-agent-dir`: one the run's caller made and copied
-/// Pi's login into, which keeps the owner's own folder out of the run). The daemon
-/// reads Pi's sessions by the same variable.
-fn keeping_pi_in(config: Config, installs: &[Installed], agent_dir: Option<String>) -> Config {
-    match agent_dir {
-        Some(folder)
-            if installs
-                .iter()
-                .any(|install| install.harness == Harness::Pi) =>
-        {
-            config.var("PI_CODING_AGENT_DIR", folder)
-        }
-        _ => config,
     }
 }
 
@@ -723,10 +707,16 @@ pub fn installed_for(harness: Harness, planned: Duration) -> Result<Installed> {
 /// case has to make one, or can forget to.
 fn with_homes(mut installed: Installed, planned: Duration) -> Result<Installed> {
     let harness = installed.harness;
-    if let Some(login) =
-        Login::of_machine_lasting(lasting(planned)).filter(|_| harness == Harness::Claude)
-    {
-        installed = installed.with_claude_config(Arc::new(login));
+    if harness == Harness::Claude {
+        // The one place the flag is read: a folder the run's caller copied a login into is the
+        // login's source, in place of the machine's, and is never written.
+        let login = match super::option("claude-config") {
+            Some(folder) => Some(Login::of_folder(Path::new(&folder), lasting(planned))?),
+            None => Login::of_machine_lasting(lasting(planned)),
+        };
+        if let Some(login) = login {
+            installed = installed.with_claude_config(Arc::new(login));
+        }
     }
     if let Some(isolation) = Isolation::of_machine_lasting(harness, installed.home(), planned)? {
         installed = installed.with_isolation(Arc::new(isolation));
@@ -895,17 +885,82 @@ pub fn home() -> Result<PathBuf> {
         })
 }
 
-/// A live test's own folder, `~/.consensflow-candidate/live/<name>`, made: where
-/// a harness's window runs, so that what Claude Code asks of a folder (its trust)
-/// is asked once and kept.
+/// A live test's own folder, `~/.consensflow-candidate/live/<name>-<random>/...`, made: where
+/// a harness's window runs, so that what Claude Code asks of a folder (its trust) is asked once
+/// and kept. See [`live_folder_in`].
 pub fn live_folder(name: &str) -> Result<PathBuf> {
     live_folder_in(&home()?, name)
 }
 
-/// [`live_folder`] under the home `home`: the home a rig gives its windows, which
-/// is the machine's where the windows run the machine's harnesses.
+/// What this process's runs share of the live folder: the folders allocated in it, and who still
+/// works in them ([`super::folders`]).
+pub(super) static POOL: super::folders::Pool = super::folders::Pool::new();
+
+/// Where a case's folder `name` is in the live folder of `home`, the folder made: the first name
+/// of `name` is allocated in the live folder as a folder of a random name this process made
+/// through the door ([`crate::door::made_in`], `<first>-<random>`), once for this process, so
+/// that every step of the case that asks for the same name again, a restart, a resumed window
+/// or a second step, is given the same path; the names after it (`a/b`) are made inside it.
+///
+/// The live folder is shared by every run on the machine and by every harness's trust of it (the
+/// owner's Claude trusts the folder above, and a folder below is asked of no more), so a folder of
+/// a name another run used is another run's: nothing is made or written there, and a second
+/// invocation of the same case, beside the first or after it, has a folder of its own
+/// ([`crate::files::guard`] holds every write to that). A run that came to a pass takes the folder
+/// away when it is done, and one that did not, or `--keep`, leaves it, marked kept, for a person to
+/// look at ([`super::folders`]); `cargo xtask live sweep` lists what is left.
 pub fn live_folder_in(home: &Path, name: &str) -> Result<PathBuf> {
-    let folder = live_root(home).join(name);
-    files::make_dir(&folder)?;
+    let (first, rest) = split_name(name)?;
+    let root = allocate_in(home, &first)?;
+    let folder = rest.iter().fold(root, |folder, part| folder.join(part));
+    crate::door::make_dir(&folder)?;
     Ok(folder)
+}
+
+/// [`live_folder_in`]'s path, where the folder is not to be made: a case that needs the path of
+/// a folder inside the one it asked for (a worktree git makes) says it by this, and makes it
+/// itself.
+pub fn live_path_in(home: &Path, name: &str) -> Result<PathBuf> {
+    let (first, rest) = split_name(name)?;
+    let root = allocate_in(home, &first)?;
+    Ok(rest.iter().fold(root, |folder, part| folder.join(part)))
+}
+
+/// The first name of a case's folder `name`, and the names after it. A name that is empty, leads
+/// up (`..`) or is a drive or a root has no place in the live folder.
+fn split_name(name: &str) -> Result<(String, Vec<String>)> {
+    let mut parts = name.split(['/', '\\']).filter(|part| !part.is_empty());
+    let wrong = |why: &str| Error::Daemon(format!("the live folder {name:?} {why}"));
+    let first = parts.next().ok_or_else(|| wrong("has no name"))?.to_owned();
+    let rest: Vec<String> = parts.map(str::to_owned).collect();
+    for part in std::iter::once(&first).chain(&rest) {
+        if part == "." || part == ".." || part.contains(':') {
+            return Err(wrong("leads out of the live folder"));
+        }
+    }
+    Ok((first, rest))
+}
+
+/// The folder of this process for `first` in the live folder of `home`, made at the first ask.
+/// One in the live folder of the machine's own home is taken or kept with the run that made it
+/// ([`super::folders`]).
+fn allocate_in(home: &Path, first: &str) -> Result<PathBuf> {
+    let root = live_root(home);
+    // The shared folder itself is made empty, if it is not there: the one place a case's live
+    // folder makes anything that is not its own, and a person's own `mkdir` makes the same.
+    crate::door::make_place(&root).map_err(Error::file("make", &root))?;
+    let own = self::home().is_ok_and(|own| same_place(&live_root(&own), &root));
+    POOL.folder(&root, first, own, || {
+        crate::door::made_in(&root, &format!("{first}-"))
+            .map(crate::door::Made::hand_on)
+            .map_err(Error::file("make a folder in", &root))
+    })
+}
+
+/// Whether `a` and `b` are one place, by their real paths.
+fn same_place(a: &Path, b: &Path) -> bool {
+    match (fs::canonicalize(a), fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
 }

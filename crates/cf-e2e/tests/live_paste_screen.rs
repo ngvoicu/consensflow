@@ -398,7 +398,7 @@ fn what_each_harness_shows_of_a_long_message_once_it_is_sent() -> Result {
         checks.push(check);
     }
     log.report("what each screen showed", &report::table(&checks));
-    report::verdict(&checks)
+    report::verdict_of(&log, &checks)
 }
 
 #[cfg(test)]
