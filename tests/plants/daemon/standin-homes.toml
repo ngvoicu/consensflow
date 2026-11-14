@@ -82,3 +82,13 @@ find = '''    assert!(
         "stand-in run attempted Pi provider lookup"
     );'''
 replace = '''    // The plant lets provider discovery read the stand-in's decoy.'''
+
+[[plant]]
+name = "standin homes: audit lookup may open an unowned file"
+meant = "standin_isolation_unowned_audit_file_is_refused_before_it_is_opened"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''            && handed.iter().any(|root| same_or_inside(&file, root)),'''
+replace = '''            && (handed.iter().any(|root| same_or_inside(&file, root)) || true),'''
