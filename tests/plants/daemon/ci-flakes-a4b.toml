@@ -61,7 +61,7 @@ find = '''        let _active_write = ActiveWrite(active_writes);
         let mut writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;'''
 replace = '''        let _active_write = ActiveWrite(active_writes);
         static EVERY_PANE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _every_pane = EVERY_PANE.lock().unwrap_or_else(PoisonError::into_inner);
+        let _every_pane = EVERY_PANE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;'''
 
 [[plant]]
