@@ -5,6 +5,12 @@
 # one rule took out, or takes one rule out, and a test of the rule fails.
 
 [run]
+# The full dispatcher exceeded the five-minute plant limit on a hosted runner.
+# Try the named test's whole module first; keep the full dispatcher as a fallback.
+pause-carriers = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "carriers::"]
+pause-receipts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "receipts::"]
+pause-launch-stops = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "launch_stops::"]
+pause-stops = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "stops::"]
 # What the engine writes a window, and reads of it, as text.
 engine-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text"]
 codex-session-lib-broker-tests-questions = ["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "broker::tests::questions"]
@@ -144,7 +150,7 @@ replace = '''     AND kind IN ('task', 'answer', 'note') AND state IN ('queued',
 [[plant]]
 name = "pause: a carrier stores the text of what it carries"
 meant = "a_hold_ends_in_one_paste_with_what_was_kept_and_then_the_words_and_one_marker"
-runs = ["engine-dispatcher"]
+runs = ["pause-carriers", "engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/carrying.rs"
@@ -166,7 +172,7 @@ replace = '''
 [[plant]]
 name = "pause: a claim is not voided when its window is seen at rest"
 meant = "an_unacknowledged_claim_is_voided_at_the_look_that_finds_the_window_at_rest_and_the_answer_is_pasted_once"
-runs = ["engine-dispatcher"]
+runs = ["pause-receipts", "engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
@@ -176,7 +182,7 @@ replace = "            Look::Rest => None,"
 [[plant]]
 name = "pause: a claim is not voided when its window exits"
 meant = "an_unacknowledged_claim_is_voided_when_the_window_exits_and_the_answer_comes_with_the_words"
-runs = ["engine-dispatcher"]
+runs = ["pause-receipts", "engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
@@ -190,7 +196,7 @@ replace = ""
 [[plant]]
 name = "pause: a claim is not voided when the daemon starts"
 meant = "an_unacknowledged_claim_is_voided_when_the_daemon_starts"
-runs = ["engine-dispatcher"]
+runs = ["pause-receipts", "engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
@@ -200,7 +206,7 @@ replace = ""
 [[plant]]
 name = "pause: payment of a stop is forgiven at launch"
 meant = "a_pause_while_the_pane_opens_stays_owed_and_the_first_look_interrupts"
-runs = ["engine-dispatcher"]
+runs = ["pause-launch-stops", "engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
@@ -218,7 +224,7 @@ replace = '''
 [[plant]]
 name = "pause: a pause while a launch is prepared is not seen"
 meant = "a_pause_during_a_launchs_preparation_opens_no_pane_and_the_message_is_given_back_and_carried"
-runs = ["engine-dispatcher"]
+runs = ["pause-launch-stops", "engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
@@ -228,7 +234,7 @@ replace = "            on_its_way"
 [[plant]]
 name = "pause: a delivery withdrawn while its window got ready is handed over"
 meant = "a_pause_while_the_window_gets_ready_hands_it_nothing"
-runs = ["engine-dispatcher"]
+runs = ["pause-launch-stops", "engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
@@ -264,7 +270,7 @@ replace = '''        if !self.in_open_project(message.project_id)? {
 [[plant]]
 name = "pause: what the activity says gates the interrupt again"
 meant = "a_pause_of_a_window_at_work_whose_member_goes_out_meanwhile_is_pressed_while_its_activity_says_it_is_out"
-runs = ["engine-dispatcher"]
+runs = ["pause-stops", "engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
@@ -283,7 +289,7 @@ replace = '''
 [[plant]]
 name = "pause: a stop is tried once, not in three rounds"
 meant = "three_rounds_ignored_keep_the_window_said_once_its_task_paused_and_asked_again_every_minute"
-runs = ["engine-dispatcher"]
+runs = ["pause-stops", "engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/stops.rs"
@@ -293,7 +299,7 @@ replace = "const ROUNDS: u32 = 1;"
 [[plant]]
 name = "pause: a launch prepends a brief nobody received"
 meant = "a_gated_first_launch_gives_its_window_nothing_until_the_human_passes_the_brief_on_and_then_one_paste"
-runs = ["engine-dispatcher", "engine-text"]
+runs = ["pause-carriers", "engine-dispatcher", "engine-text"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
