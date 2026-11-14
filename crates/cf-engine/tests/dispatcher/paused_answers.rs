@@ -189,8 +189,11 @@ fn an_answered_tells_turn_is_shown_and_the_answer_tells_the_paused_chief_both_wa
         .find(|text| text.contains(ANSWER))
         .expect("the answer was typed");
     assert!(answer.ends_with(&format!("T-1 is paused. To take its window's last complete answer as the result: {cf} task finish T-1. To send it on: {cf} task resume T-1 \"…\".")), "{answer}");
+    let rendered_note = cf.in_text(&note.body);
     assert!(
-        !pastes.iter().any(|text| text.contains(&note.body)),
+        !pastes
+            .iter()
+            .any(|text| text.contains(rendered_note.as_ref())),
         "the note was not typed"
     );
 }
