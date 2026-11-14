@@ -132,11 +132,8 @@ pub const KEPT: [&str; 19] = [
     // copies it sets aside, as Windows refuses to delete a `cf.exe` a hook still runs.
     "bin/cf.exe",
     "bin/cf.exe.old-*",
-    // What a run there writes for the one who reads it afterwards: the evals' reports and
-    // ledgers (a long run's are `evals/reports/long/...`). They are no file of the tree, so
-    // the next run's sweep took a long run's from the copy (zeewin, 2026-10-20). What is
-    // older than [`REPORTS_KEPT_DAYS`] is removed there, by its own pass of the sweep.
-    "evals/reports",
+    // Historical data may be present from an older checkout. The sweep must never delete it.
+    "evals",
     // The logs of the tasks, `.runs/<task>`, which the tree of a task holds untracked (so they go
     // over with its files) and which a job on the machine writes into as well. The copy is one
     // folder that every tree's runs share and it cannot tell which tree wrote a file that is no
@@ -146,20 +143,9 @@ pub const KEPT: [&str; 19] = [
     ".runs",
 ];
 
-/// How long what a run left in `evals/reports` stays there, in days: a file or a folder last
-/// written longer ago than this is removed by the next run's sweep. The folder is
-/// [`KEPT`], so the sweep does not judge its files as the tree's, and with no bound it
-/// held every matrix run's logs and every long run's report and ledger from then on
-/// (T-34, P3-6). The rule is age and not a count of runs: a run's files (a long run's
-/// `.md`, `.json` and ledger, a matrix run's folder) are written within hours of each
-/// other and age out together, and no file written within the limit is ever touched, a
-/// run going on among them; none does while the sweep runs, which is under the lock,
-/// before the run's script does anything else.
-pub const REPORTS_KEPT_DAYS: u32 = 14;
-
 /// How long what a task left in `.runs` stays there, in days (T-1342): a file or a folder last
 /// written longer ago than this is removed by the next run's sweep, by the rule of
-/// [`REPORTS_KEPT_DAYS`] (a folder is judged by what is in it, a link is not entered). No run that
+/// the same age rule (a folder is judged by what is in it, a link is not entered). No run that
 /// is queued or going wants it: a run waits a day at most (`--wait`), and a task that has not
 /// written a log in two weeks has its facts in the brain, where the board's cleaning puts them. A
 /// job still writing keeps its log young. The same fortnight as the reports', which are the same
@@ -515,14 +501,6 @@ fn limits_of(limits: Option<Limits>) -> String {
 ///   run on zeewin, 2026-10-16), a file's read-only mark taken away first.
 /// - A folder [`KEPT`] names is not walked: the build folder holds hundreds of thousands
 ///   of files.
-/// - Then `evals/reports`, which is kept, is pruned by age ([`REPORTS_KEPT_DAYS`]): a file
-///   last written before the cutoff goes, and a folder that was old itself and has nothing
-///   left in it. Every folder is walked, whatever its own time: a folder's time is when an
-///   entry was last added to it, so a `long` folder that a recent run wrote into would
-///   otherwise keep every old report in it for ever. A link is not walked, nor is the reports
-///   folder itself when it is one. What cannot be removed there is said and does not end
-///   the run: it is no file of the tree. (The matrix's `windows/` folders are written on the
-///   Mac, not here.)
 /// - And `.runs`, which is kept as well ([`RUNS_KEPT_DAYS`]), by the same pass with its own
 ///   cutoff: the logs of the tasks that share the copy are not taken by the run of another
 ///   tree, and are not kept for ever. Only the folder named `.runs` is: `.runs-other` is no
@@ -572,7 +550,6 @@ pub fn sweep_script() -> String {
             ("tree_file", TREE),
             ("kept", &kept.join(", ")),
             ("excluded", &excluded.join(", ")),
-            ("days", &REPORTS_KEPT_DAYS.to_string()),
             ("runs_days", &RUNS_KEPT_DAYS.to_string()),
         ],
     )
@@ -622,9 +599,8 @@ pub fn stop_script(dir: &str, id: &str) -> String {
     )
 }
 
-/// What lists the reports a run left in `evals/reports` on the machine, to be brought back
-/// ([`super::fetch`]): each file under it as `<path from it, with />` and a tab and its size, but
-/// for what is under `windows/`, which the matrix writes here and not there. A folder that is
+/// What lists the reports a run left in `.runs/live-matrix` on the machine, to be brought back
+/// ([`super::fetch`]): each file under it as `<path from it, with />` and a tab and its size. A folder that is
 /// not there lists nothing, nor does one that is itself a link (the prune refuses it too: it
 /// would be walked to where it goes).
 pub fn reports_script(dir: &str) -> String {

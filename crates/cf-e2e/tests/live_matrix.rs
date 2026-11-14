@@ -12,10 +12,10 @@
 //! cargo xtask live matrix --board 3 --scenario core -- --test-threads 1      one board, 0 to 4
 //! cargo xtask live matrix --seats chief=claude,worker=devin,reviewer=codex,advisor=pi,tester=muse
 //! cargo xtask live matrix --plan cells                                       the 50 cells, nothing run
-//! cargo xtask live matrix --replay evals/reports/live-matrix/<run>/manifest.json
+//! cargo xtask live matrix --replay .runs/live-matrix/<run>/manifest.json
 //! ```
 //!
-//! The evidence of a run is under `evals/reports/live-matrix/<run-id>/`.
+//! The evidence of a run is under `.runs/live-matrix/<run-id>/`.
 
 use std::path::Path;
 
@@ -206,7 +206,7 @@ mod tests {
     }
 
     /// A test's reports folder: a fresh temporary one, kept where a person reads a real run's
-    /// evidence (`evals/reports/live-matrix`, which CI uploads) when the test fails:
+    /// evidence (`.runs/live-matrix`, which CI uploads) when the test fails:
     /// each window's last screen, the records, the ledger, the events and the daemon's last lines
     /// of the run that went red. Two reds of the field6 pair on GitHub's Windows runner kept
     /// nothing of their windows (CI runs 41787972093 and 41792519144, T-1226).

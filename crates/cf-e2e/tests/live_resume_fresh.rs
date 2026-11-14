@@ -25,7 +25,7 @@
 //! whether the window opened on a conversation of its own. What is typed is a
 //! line the window's input box shows whole, pasted as the daemon pastes, and Enter
 //! is pressed again while the window keeps it (Devin's prompt box waited for an
-//! Enter of its own, as the evals' owner finds too). In the second a turn
+//! Enter of its own). In the second a turn
 //! is typed into the window that gives it a key, and the project is closed as soon
 //! as the harness's record has the turn and its answer: what is judged
 //! ([`continued`]) is that the window opened again on the conversation the turn was

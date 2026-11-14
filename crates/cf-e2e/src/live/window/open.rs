@@ -85,9 +85,8 @@ pub(super) fn new_session() -> String {
 
 /// The conversation id a window of the harness kind `kind` is opened on: a new
 /// one for Claude Code and Pi, which open on an id they are given, and none for
-/// the others, which name their own. A run that opens a window of its own, as the
-/// evals' bare arm does, draws its id here.
-pub fn session_for(kind: &str) -> Option<String> {
+/// the others, which name their own.
+pub(super) fn session_for(kind: &str) -> Option<String> {
     (kind == "claude-code" || kind == "pi").then(new_session)
 }
 

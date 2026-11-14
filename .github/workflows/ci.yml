@@ -106,7 +106,7 @@ jobs:
         timeout-minutes: 15
       - run: cargo clippy -p cf-bridge --features local --all-targets -- -D warnings
       # What a failed live case kept: the rig's report of a case that could not close
-      # (target/live-reports), and a live matrix case's evidence (evals/reports/live-matrix:
+      # (target/live-reports), and a live matrix case's evidence (.runs/live-matrix:
       # each window's last screen, the records, the ledger, the events), which a matrix test
       # keeps only when it fails, a FLAKY case's first run too. Two field6 reds on Windows kept
       # nothing to read (T-1226).
@@ -116,7 +116,7 @@ jobs:
           name: live-reports-checks-${{ matrix.os }}
           path: |
             app/src-tauri/target/live-reports/
-            evals/reports/live-matrix/
+            .runs/live-matrix/
           if-no-files-found: ignore
           retention-days: 7
 
@@ -150,8 +150,8 @@ jobs:
       # median before, 232 after): the clock ran out there. What grew, binary by
       # binary: the dispatcher's schedule exploring (B5, 2026-10-18, +170 s, more
       # since), the history viewer (2026-10-21: the daemon's tests +160 s, its
-      # whole-history tests +115 s), the long run (2026-10-19, +110 s) and the
-      # release commands' tests (2026-10-21, +60 s). Much of it was the commits of
+      # whole-history tests +115 s) and the release commands' tests (2026-10-21,
+      # +60 s). Much of it was the commits of
       # ledgers made for a test, each a flush on Windows, which wait for no disk
       # now (cf-ledger's `synchronous`), and the replay of Node's recordings runs
       # four at a time. On zeewin the binaries took 645 s before and 443 s after;
@@ -318,7 +318,7 @@ jobs:
           path: ${{ env.MATRIX_RIG_TEMP }}/consensflow-integration-*-left.txt
           if-no-files-found: ignore
           retention-days: 7
-      # A matrix case's evidence (evals/reports/live-matrix: each window's last screen and its
+      # A matrix case's evidence (.runs/live-matrix: each window's last screen and its
       # input as the pane host held it, the stand-ins' reads, the records, the ledger, the
       # events), which a case keeps only when it fails: uploaded whenever there is any, as a
       # FLAKY case's first run passes the job (T-1226), from the job the matrix runs in.
@@ -326,7 +326,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: matrix-evidence-${{ matrix.os }}-${{ strategy.job-index }}
-          path: evals/reports/live-matrix/
+          path: .runs/live-matrix/
           if-no-files-found: ignore
           retention-days: 7
 

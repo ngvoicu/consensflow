@@ -46,10 +46,6 @@ impl cf_e2e::rig::ClaudeConfig for Folder {
     fn finish(&self) -> cf_e2e::Result {
         Ok(())
     }
-
-    fn keeps_its_findings(&self) -> bool {
-        true
-    }
 }
 
 /// A lock between the cases that make an item in the machine's Keychain (exclusive) and the cases whose
@@ -262,21 +258,5 @@ fn a_run_whose_claude_code_left_an_item_in_the_keychain_fails_the_rig_that_ends_
     );
     // The launcher is as it was: only the Keychain is said.
     assert!(!failed.contains("LAUNCHER"), "{failed}");
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-#[test]
-fn a_claude_whose_config_keeps_its_findings_is_not_listed_by_the_guard_and_its_rig_ignores_another_processs_item(
-) -> Outcome {
-    // An eval's config names the item of its own folder, and keeps what it finds for its report:
-    // a rig that failed as well, for an item some other process made (the Keychain is the whole
-    // machine's), would end an eval with `closed?` and cost it the report (T-1044, T-1102).
-    let owner = Owner::new()?;
-    let rig = Rig::start(live::rig(&[owner.claude()], FAKE_AGENT))?;
-    // An item made for a folder that is none of the run's.
-    let other = tempfile::tempdir()?;
-    let _item = Item::make(other.path())?;
-    rig.close()?;
     Ok(())
 }

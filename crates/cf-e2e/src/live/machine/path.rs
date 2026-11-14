@@ -122,10 +122,7 @@ fn candidates(command: &str, path: &str, extensions: Option<&str>) -> Vec<PathBu
 
 /// Whether a folder of the `PATH` holds a stand-in for a harness and not the
 /// harness. A terminal app's shims come first on the `PATH` inside its panes
-/// (cmux has its own `claude`) and start nothing outside it: an eval window on
-/// one printed nothing for five minutes (2026-10-01). And the evals' own wrappers
-/// (`evals/bin`) are first on the `PATH` of a run's children, and a wrapper
-/// that found itself would start itself.
+/// (cmux has its own `claude`) and start nothing outside it.
 fn holds_no_harness(folder: &Path) -> bool {
     let names: Vec<String> = folder
         .components()
@@ -134,7 +131,6 @@ fn holds_no_harness(folder: &Path) -> bool {
     names
         .iter()
         .any(|name| name == "cmux-cli-shims" || name == "cmux.app")
-        || names.ends_with(&["evals".to_owned(), "bin".to_owned()])
 }
 
 #[cfg(test)]
@@ -212,28 +208,26 @@ mod tests {
     }
 
     #[test]
-    fn a_terminal_apps_shims_and_the_evals_wrappers_are_no_harness_of_the_machine() {
+    fn a_terminal_apps_shims_are_no_harness_of_the_machine() {
         let root = tempfile::tempdir().unwrap();
         let name = file_of("claude");
-        let (cmux, app, wrappers, real) = (
+        let (cmux, app, real) = (
             root.path().join("cmux-cli-shims"),
             root.path().join("cmux.app").join("Contents").join("bin"),
-            root.path().join("evals").join("bin"),
             root.path().join("real"),
         );
-        for folder in [&cmux, &app, &wrappers, &real] {
+        for folder in [&cmux, &app, &real] {
             fs::create_dir_all(folder).unwrap();
             fs::write(folder.join(&name), "").unwrap();
         }
         // Each is first on the path, and none of them is the command.
-        let path = path_of(&[&cmux, &app, &wrappers, &real]);
+        let path = path_of(&[&cmux, &app, &real]);
         assert_eq!(find("claude", &path, Some(".cmd")), Some(real.join(&name)));
         // Without a real one there is none: a shim is not taken for a harness.
-        let only = path_of(&[&cmux, &app, &wrappers]);
+        let only = path_of(&[&cmux, &app]);
         assert_eq!(find("claude", &only, Some(".cmd")), None);
         // A folder of another name that ends in `bin` is as good as any.
         assert!(!holds_no_harness(&root.path().join("tools").join("bin")));
-        assert!(holds_no_harness(&root.path().join("EVALS").join("Bin")));
     }
 
     /// A program of the name `command` in `folder` that says `said` and ends `code`: a

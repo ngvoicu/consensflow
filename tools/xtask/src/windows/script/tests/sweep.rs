@@ -51,7 +51,7 @@ fn the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else() {
             "app/src-tauri/gen/schemas",
             "bin/cf.exe",
             "bin/cf.exe.old-*",
-            "evals/reports",
+            "evals",
             ".runs",
         ][..]
     );
@@ -110,16 +110,13 @@ fn a_folder_that_is_a_link_is_not_looked_into_and_one_left_empty_is_removed() {
         )
         .count();
     assert_eq!(walks, 2, "{text}");
-    // Nor is the reports folder itself, when it is one: it would be walked to where it goes
-    // (T-141, P3-8).
-    // The same line guards the logs' folder (`.runs`), so it stands twice: counted, or the one that
-    // is left would satisfy a `contains` for the one that is gone.
+    // Nor is the logs' folder itself, when it is one: it would be walked to where it goes.
     assert_eq!(
         text.matches(
             "  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }\n"
         )
         .count(),
-        2,
+        1,
         "{text}"
     );
     // A folder is walked, and kept only where something is left in it.
@@ -350,38 +347,15 @@ fn powershell_makes_the_copy_a_checkout_whose_one_commit_is_what_went_over() {
     );
 }
 
-/// The reports a run leaves (`evals/reports`) are kept from one run to the next, and there
-/// were no bounds to what that kept (T-34, P3-6): the sweep removes, in that folder alone,
-/// what was last written more than two weeks before it. It runs under the lock, before
-/// the run's script does anything else, so no run is going on; and what is newer than the
-/// limit is never touched, a run's own files being written now.
+/// The shared old-file walk is used for task logs.
 #[test]
 fn the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched() {
     let text = sweep_script();
-    // The reports' limit stands before the walk's own function. The logs' limit (`runs.rs`) is as
-    // old and stands after the reports' block, and must not stand in for this one.
-    let (before_walk, _) = text.split_once("function Clear-Old").unwrap();
+    assert!(text.contains("$runs = Join-Path $dir '.runs'"), "{text}");
     assert!(
-        before_walk.contains("$cutoff = (Get-Date).ToUniversalTime().AddDays(-14)"),
+        text.contains("$cutoff = (Get-Date).ToUniversalTime().AddDays(-14)"),
         "{text}"
     );
-    // Only that folder is walked, and only what is in it is removed, never the folder.
-    assert!(
-        text.contains("$reports = Join-Path $dir 'evals/reports'\n"),
-        "{text}"
-    );
-    // After the tree's stale files, and before what was removed is said: the reports' own prune,
-    // which stands before the logs' block, where the same line stands again.
-    let reports = text
-        .find("$reports = Join-Path $dir 'evals/reports'\n")
-        .unwrap();
-    let (stale, old, runs, said) = (
-        text.find("$null = Clear-Stale $root").unwrap(),
-        reports + text[reports..].find("$null = Clear-Old $folder").unwrap(),
-        text.find("$runs = Join-Path $dir '.runs'").unwrap(),
-        text.find("foreach ($name in $removed)").unwrap(),
-    );
-    assert!(stale < reports && old < runs && runs < said, "{text}");
     // A file or a folder as new as the limit stays, and so does a folder with something
     // left in it. Every folder is walked first, whatever its own time, which is when an entry
     // was last added to it: a `long` folder a recent run wrote into holds old reports too.
@@ -412,8 +386,7 @@ fn the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched() 
         text.contains("if ($unpruned.Count) { Write-Output \"What the reports and the logs of the tasks held past their age could not be removed: $($unpruned -join '; ')\" }"),
         "{text}"
     );
-    // The limit is the sweep's own to say.
-    assert!(!text.contains("«days»"), "{text}");
+    assert!(!text.contains("«runs_days»"), "{text}");
 }
 
 #[test]
@@ -567,7 +540,7 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
 
 /// The sweep's prune of the reports run by the machine's PowerShell: what was last written
 /// more than the limit ago goes (a file, and a folder left empty that was old itself, but not
-/// `evals/reports`); every folder is walked, one written within the limit too (a `long` folder
+/// `.runs/live-matrix`); every folder is walked, one written within the limit too (a `long` folder
 /// that a recent run wrote into holds old reports), and stays where something newer is left in
 /// it; and nothing outside the reports is judged by its age.
 #[cfg(windows)]
@@ -583,28 +556,28 @@ fn powershell_removes_reports_past_their_age_and_nothing_newer_or_outside_them()
     let elsewhere = tempfile::tempdir().unwrap();
     let dir = copy.path();
     let old = [
-        "evals/reports/2026-09-25T20-09-20-351Z-six-decisions.json",
-        "evals/reports/long/2026-09-26T04-46-26-635Z-long.md",
-        "evals/reports/long/2026-09-26T04-46-26-635Z-long.json",
-        "evals/reports/long/2026-09-26T04-46-26-635Z-long-ledger.db",
-        "evals/reports/runs/2026-09-26T10-02-54-255Z/run.json",
-        "evals/reports/runs/2026-09-27T10-02-54-255Z/old.json",
-        "evals/reports/runs/2026-09-28T10-02-54-255Z/old.json",
+        ".runs/live-matrix/2026-09-25T20-09-20-351Z-six-decisions.json",
+        ".runs/live-matrix/long/2026-09-26T04-46-26-635Z-long.md",
+        ".runs/live-matrix/long/2026-09-26T04-46-26-635Z-long.json",
+        ".runs/live-matrix/long/2026-09-26T04-46-26-635Z-long-ledger.db",
+        ".runs/live-matrix/runs/2026-09-26T10-02-54-255Z/run.json",
+        ".runs/live-matrix/runs/2026-09-27T10-02-54-255Z/old.json",
+        ".runs/live-matrix/runs/2026-09-28T10-02-54-255Z/old.json",
     ];
     let new = [
-        "evals/reports/2026-10-20T20-09-20-351Z-six-decisions.json",
-        "evals/reports/long/2026-10-20T12-25-35-830Z-long.md",
-        "evals/reports/long/2026-10-20T12-25-35-830Z-long-ledger.db",
-        "evals/reports/runs/2026-09-27T10-02-54-255Z/new.json",
-        "evals/reports/runs/2026-09-28T10-02-54-255Z/new.json",
+        ".runs/live-matrix/2026-10-20T20-09-20-351Z-six-decisions.json",
+        ".runs/live-matrix/long/2026-10-20T12-25-35-830Z-long.md",
+        ".runs/live-matrix/long/2026-10-20T12-25-35-830Z-long-ledger.db",
+        ".runs/live-matrix/runs/2026-09-27T10-02-54-255Z/new.json",
+        ".runs/live-matrix/runs/2026-09-28T10-02-54-255Z/new.json",
     ];
     for name in old.iter().chain(&new) {
         write(dir, name);
     }
     // Not a report, and old: outside the reports it is the list's to keep.
     write(dir, "notes.txt");
-    fs::create_dir_all(dir.join("evals/reports/runs/empty-old")).unwrap();
-    fs::create_dir_all(dir.join("evals/reports/runs/empty-new")).unwrap();
+    fs::create_dir_all(dir.join(".runs/live-matrix/runs/empty-old")).unwrap();
+    fs::create_dir_all(dir.join(".runs/live-matrix/runs/empty-new")).unwrap();
     fs::write(dir.join(SYNCED), "notes.txt\n").unwrap();
     say_the_tree(dir, &["notes.txt"]);
     fs::write(dir.join(SWEEP), sweep_script()).unwrap();
@@ -612,7 +585,7 @@ fn powershell_removes_reports_past_their_age_and_nothing_newer_or_outside_them()
     // not walk into it, and what it points at is no report of the copy (T-141, P3-8).
     write(elsewhere.path(), "outside-old.txt");
     let junction = Invocation::new("cmd", dir)
-        .args(["/c", "mklink", "/J", "evals\\reports\\linked"])
+        .args(["/c", "mklink", "/J", ".runs\\live-matrix\\linked"])
         .arg(elsewhere.path());
     assert_eq!(
         process::capture(&junction, &Env::from_process())
@@ -637,9 +610,9 @@ fn powershell_removes_reports_past_their_age_and_nothing_newer_or_outside_them()
         aged(&old),
         aged(&["notes.txt"]),
         aged(&[
-            "evals/reports/runs/empty-old",
-            "evals/reports/runs/2026-09-26T10-02-54-255Z",
-            "evals/reports/runs/2026-09-28T10-02-54-255Z",
+            ".runs/live-matrix/runs/empty-old",
+            ".runs/live-matrix/runs/2026-09-26T10-02-54-255Z",
+            ".runs/live-matrix/runs/2026-09-28T10-02-54-255Z",
         ])
     );
     let set = powershell(&times);
@@ -648,41 +621,41 @@ fn powershell_removes_reports_past_their_age_and_nothing_newer_or_outside_them()
     let ran = run_sweep(dir);
     assert_eq!(ran.code, 0, "{}", said(&ran));
     for gone in [
-        "evals/reports/2026-09-25T20-09-20-351Z-six-decisions.json",
-        "evals/reports/long/2026-09-26T04-46-26-635Z-long.md",
-        "evals/reports/long/2026-09-26T04-46-26-635Z-long.json",
-        "evals/reports/long/2026-09-26T04-46-26-635Z-long-ledger.db",
-        "evals/reports/runs/2026-09-26T10-02-54-255Z/run.json",
+        ".runs/live-matrix/2026-09-25T20-09-20-351Z-six-decisions.json",
+        ".runs/live-matrix/long/2026-09-26T04-46-26-635Z-long.md",
+        ".runs/live-matrix/long/2026-09-26T04-46-26-635Z-long.json",
+        ".runs/live-matrix/long/2026-09-26T04-46-26-635Z-long-ledger.db",
+        ".runs/live-matrix/runs/2026-09-26T10-02-54-255Z/run.json",
         // The folder it leaves empty, old itself, goes with it; so does an empty old one.
-        "evals/reports/runs/2026-09-26T10-02-54-255Z",
-        "evals/reports/runs/empty-old",
+        ".runs/live-matrix/runs/2026-09-26T10-02-54-255Z",
+        ".runs/live-matrix/runs/empty-old",
         // An old file in a folder that something newer is left in, whether the folder is old
         // itself (`2026-09-28`) or was written within the limit (`2026-09-27`).
-        "evals/reports/runs/2026-09-28T10-02-54-255Z/old.json",
-        "evals/reports/runs/2026-09-27T10-02-54-255Z/old.json",
+        ".runs/live-matrix/runs/2026-09-28T10-02-54-255Z/old.json",
+        ".runs/live-matrix/runs/2026-09-27T10-02-54-255Z/old.json",
     ] {
         assert!(!dir.join(gone).exists(), "{gone}: {}", ran.stdout);
     }
     assert!(
         ran.stdout
-            .contains("== removed evals/reports/long/2026-09-26T04-46-26-635Z-long-ledger.db"),
+            .contains("== removed .runs/live-matrix/long/2026-09-26T04-46-26-635Z-long-ledger.db"),
         "{}",
         ran.stdout
     );
     for kept in [
-        "evals/reports/2026-10-20T20-09-20-351Z-six-decisions.json",
-        "evals/reports/long/2026-10-20T12-25-35-830Z-long.md",
-        "evals/reports/long/2026-10-20T12-25-35-830Z-long-ledger.db",
-        "evals/reports/long",
-        "evals/reports/runs/2026-09-28T10-02-54-255Z/new.json",
-        "evals/reports/runs/2026-09-28T10-02-54-255Z",
-        "evals/reports/runs/2026-09-27T10-02-54-255Z/new.json",
-        "evals/reports/runs",
+        ".runs/live-matrix/2026-10-20T20-09-20-351Z-six-decisions.json",
+        ".runs/live-matrix/long/2026-10-20T12-25-35-830Z-long.md",
+        ".runs/live-matrix/long/2026-10-20T12-25-35-830Z-long-ledger.db",
+        ".runs/live-matrix/long",
+        ".runs/live-matrix/runs/2026-09-28T10-02-54-255Z/new.json",
+        ".runs/live-matrix/runs/2026-09-28T10-02-54-255Z",
+        ".runs/live-matrix/runs/2026-09-27T10-02-54-255Z/new.json",
+        ".runs/live-matrix/runs",
         // New, though nothing is in it.
-        "evals/reports/runs/empty-new",
-        "evals/reports",
+        ".runs/live-matrix/runs/empty-new",
+        ".runs/live-matrix",
         // The link is new, and what it points at was not walked: its old file is there.
-        "evals/reports/linked",
+        ".runs/live-matrix/linked",
         "notes.txt",
         SYNCED,
         SWEEP,
@@ -718,9 +691,9 @@ fn powershell_does_not_prune_what_a_reports_folder_that_is_a_link_goes_to() {
     write(elsewhere.path(), "folder/old.json");
     // The list of what went over is never empty (a run sends the tree): one file is in it.
     write(dir, "keep.txt");
-    fs::create_dir_all(dir.join("evals")).unwrap();
+    fs::create_dir_all(dir.join(".runs")).unwrap();
     let junction = Invocation::new("cmd", dir)
-        .args(["/c", "mklink", "/J", "evals\\reports"])
+        .args(["/c", "mklink", "/J", ".runs\\live-matrix"])
         .arg(elsewhere.path());
     assert_eq!(
         process::capture(&junction, &Env::from_process())
@@ -743,7 +716,7 @@ fn powershell_does_not_prune_what_a_reports_folder_that_is_a_link_goes_to() {
     for kept in ["old.json", "folder/old.json", "folder"] {
         assert!(elsewhere.path().join(kept).exists(), "{kept}");
     }
-    assert!(dir.join("evals/reports").exists());
+    assert!(dir.join(".runs/live-matrix").exists());
 }
 
 /// The sweep's hash, made by the machine's PowerShell, is the one the Mac makes of the same

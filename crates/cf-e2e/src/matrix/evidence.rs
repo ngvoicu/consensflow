@@ -1,5 +1,5 @@
 //! What a run leaves to be read and run again: a folder of its own,
-//! `evals/reports/live-matrix/<run-id>/` (ignored by git, and kept by the Windows runner),
+//! `.runs/live-matrix/<run-id>/` (ignored by git, and kept by the Windows runner),
 //! written before the rig's homes are dropped. It holds the seats and the models, the
 //! scenario and its bounds, the human's lines with their times, each task's binding, each
 //! window's last lines and turns, and every check. And the owner's files the run must never
@@ -15,7 +15,7 @@ use crate::live::report::Check;
 use crate::{files, Error, Result};
 
 /// The folder of the reports, from the checkout's root.
-pub const REPORTS: &str = "evals/reports/live-matrix";
+pub const REPORTS: &str = ".runs/live-matrix";
 
 /// What the owner's files were at a moment: each path with what it was (a link's target, a
 /// file's hash, or that it was not there).
@@ -306,6 +306,11 @@ pub fn run_id(label: &str, scenario: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn t1655_the_matrix_keeps_evidence_with_the_live_test_reports() {
+        assert_eq!(REPORTS, ".runs/live-matrix");
+    }
 
     #[test]
     fn the_owners_files_are_unchanged_until_one_is_written_or_a_link_moved() {

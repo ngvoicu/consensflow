@@ -2,7 +2,7 @@
 //! review, T-1377).
 //!
 //! The sweep removes from the build copy every file the tree it was sent does not list, and prunes
-//! `evals/reports` and `.runs` by age. A folder that is a link leads somewhere else: if the copy's
+//! `.runs` by age, and keeps legacy records. A folder that is a link leads somewhere else: if the copy's
 //! root, or the profile above it, is one (a junction a person made to put the build on another disk,
 //! a link a program left), the files the sweep takes are the folder's it leads to, not the copy's, and
 //! "the tree does not list it" is no reason to remove what was never sent there. So the sweep looks at
@@ -126,7 +126,8 @@ fn a_copy_under_a_real_profile_is_swept_as_it_always_was() {
     assert!(out.contains("== removed stray.txt"), "{out}");
     assert!(out.contains("== removed someones"), "{out}");
     assert!(out.contains("== removed .runs/old/task.log"), "{out}");
-    assert!(out.contains("== removed evals/reports/old.json"), "{out}");
+    assert!(!out.contains("== removed evals/reports/old.json"), "{out}");
+    assert!(copy.join("evals/reports/old.json").is_file());
     assert!(copy.join("listed.txt").is_file());
     assert!(!copy.join("stray.txt").exists());
 }

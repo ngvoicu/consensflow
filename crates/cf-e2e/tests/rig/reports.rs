@@ -1247,7 +1247,7 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
         "if-no-files-found: ignore",
         "retention-days: 7",
         "app/src-tauri/target/live-reports/",
-        "evals/reports/live-matrix/",
+        ".runs/live-matrix/",
     ] {
         assert!(
             checks_upload.iter().any(|have| have == line),
@@ -1267,7 +1267,7 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
         "if: always()",
         "if-no-files-found: ignore",
         "retention-days: 7",
-        "path: evals/reports/live-matrix/",
+        "path: .runs/live-matrix/",
     ] {
         assert!(
             matrix_evidence.iter().any(|have| have == line),

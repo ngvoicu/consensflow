@@ -53,8 +53,7 @@
 //! window is told of. So is `stranger`: the rig keeps a process that is none of any
 //! window's beside them, which every case that ends a window holds the pane host to
 //! leaving as it was, and whose end of its own is no end the pane host gave it. So is
-//! `last_exits`: the exits the pane host tells as a rig closes, which the long run of
-//! the evals reads after the close. So is `reports`: a rig keeps a report of a case
+//! `reports`: a rig keeps a report of a case
 //! that failed and none of one that passed, and every case here and in the
 //! regressions that starts a rig closes it. So is `smoke_stand_in`: the packaged
 //! smoke's stand-in harness taking its brief and handing back its result on the
@@ -120,8 +119,6 @@ mod homes;
 mod kept_config;
 #[path = "rig/kit_efforts.rs"]
 mod kit_efforts;
-#[path = "rig/last_exits.rs"]
-mod last_exits;
 #[path = "rig/live_base.rs"]
 mod live_base;
 #[path = "rig/live_member.rs"]
@@ -150,8 +147,6 @@ mod printed_output;
 mod prompt_suggestion_off;
 #[path = "rig/reports.rs"]
 mod reports;
-#[path = "rig/scripted_reviewer.rs"]
-mod scripted_reviewer;
 #[path = "rig/specs.rs"]
 mod specs;
 // The packaged smoke's stand-in is a shell script.

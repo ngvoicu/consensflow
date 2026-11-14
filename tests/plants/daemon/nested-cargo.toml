@@ -50,16 +50,6 @@ find = "    let built = nested_cargo::cargo()"
 replace = '    let built = std::process::Command::new(env!("CARGO"))'
 
 [[plant]]
-name = "nested cargo: a dry run builds its stand-in with the tests' variables"
-meant = "the_cargo_a_test_starts_is_named_in_one_file_and_has_none_of_the_variables_cargo_gave_the_test"
-runs = ["nested-cargo-rule"]
-
-[[plant.edit]]
-file = "crates/cf-evals/tests/dry_run.rs"
-find = "    let ran = Run::cargo()"
-replace = '    let ran = Run::new(env!("CARGO")).inheriting_env()'
-
-[[plant]]
 name = "nested cargo: a crate keeps a copy of the file of the cargo a test starts"
 meant = "a_crate_that_uses_the_one_file_includes_that_file_and_not_a_copy_of_it"
 runs = ["nested-cargo-rule"]

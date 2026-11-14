@@ -4,7 +4,7 @@
 # a member of roles with no tier is held to, or makes one role's text another's, and the test
 # written for it fails. Since the review T-1453: what a task asks of the staff is refused, not
 # dropped, by the ledger and sent whole by the CLI; a follow-up for a role goes only to a window
-# of it; and the evals class a task by the role it is for, its window's where it has no pool.
+# of it.
 #
 # Every name holds `new roles`, so `npm run plants:daemon -- "new roles"` runs them all.
 
@@ -17,9 +17,6 @@ nr-cf-board = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::"]
 nr-engine-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "new_roles::"]
 nr-engine-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles::"]
 nr-engine-skill = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "skill::"]
-nr-evals-measure = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "measure", "rounds::"]
-nr-evals-review-loops = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "review_loops"]
-nr-evals-card = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "run::card::"]
 
 # Pools.
 
@@ -260,28 +257,6 @@ find = '''            .map(|role| cf_ledger::roles::name_of(role))'''
 replace = '''            .map(String::as_str)'''
 
 [[plant]]
-name = "new roles: an architect's task is counted as work"
-meant = "work_is_a_workers_or_a_frontend_designers_and_no_other_roles"
-runs = ["nr-evals-measure"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/measure/metrics.rs"
-find = '''    matches!(role, None | Some("worker" | "frontend"))'''
-replace = '''    matches!(role, None | Some("worker" | "frontend" | "architect"))'''
-
-[[plant]]
-name = "new roles: a frontend designer's task is not counted as work"
-meant = "work_is_a_workers_or_a_frontend_designers_and_no_other_roles"
-runs = ["nr-evals-measure"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/measure/metrics.rs"
-find = '''    matches!(role, None | Some("worker" | "frontend"))'''
-replace = '''    matches!(role, None | Some("worker"))'''
-
-# What a task asks of the staff (the review T-1453).
-
-[[plant]]
 name = "new roles: a task that asks for two roles is taken as the first of them"
 meant = "a_task_that_asks_for_two_roles_is_refused_naming_each_and_one_alone_is_its_roles"
 runs = ["nr-daemon-tasks"]
@@ -391,53 +366,3 @@ file = "crates/cf-ledger/src/tasks/giving.rs"
 find = '''            .filter(|(field, _)| given(field))'''
 replace = '''            .filter(|(field, _)| given(field))
             .take(1)'''
-
-[[plant]]
-name = "new roles: the evals read a task with no pool as no role"
-meant = "a_task_with_no_pool_is_the_role_its_window_began_for_in_the_rounds_and_the_tasks"
-runs = ["nr-evals-measure"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/measure/board.rs"
-find = '''pub(super) const ROLE_OF_TASK: &str = "COALESCE(t.pool, a.role)";'''
-replace = '''pub(super) const ROLE_OF_TASK: &str = "t.pool";'''
-
-[[plant]]
-name = "new roles: a researcher's long result is the worker's longest"
-meant = "the_longest_result_of_a_worker_is_of_work_alone"
-runs = ["nr-evals-measure"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/measure.rs"
-find = '''            worker: longest_result(&mine, |row| row.task.is_work()),'''
-replace = '''            worker: longest_result(&mine, |row| !row.pool_is("advisor") && !row.pool_is("reviewer")),'''
-
-[[plant]]
-name = "new roles: an architect's follow-up after two blocking reviews is a change of the work"
-meant = "a_follow_up_for_a_window_of_another_role_after_the_second_blocking_review_is_no_change_of_the_work"
-runs = ["nr-evals-review-loops"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/measure/metrics.rs"
-find = '''        is_work_role(self.pool.as_deref().or(self.role.as_deref()))'''
-replace = '''        is_work_role(self.pool.as_deref())'''
-
-[[plant]]
-name = "new roles: a card in an architect's lane is taken for T-1's result"
-meant = "t_1_s_result_is_in_once_the_first_worker_task_is_done_or_accepted"
-runs = ["nr-evals-card"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/run/card.rs"
-find = '''is_work_role(card["pool"].as_str().or(*lane)))'''
-replace = '''is_work_role(card["pool"].as_str()))'''
-
-[[plant]]
-name = "new roles: a lane's role is read beside its participant, where board.get says none"
-meant = "t_1_s_result_is_in_once_the_first_worker_task_is_done_or_accepted"
-runs = ["nr-evals-card"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/run/card.rs"
-find = '''(card, lane["participant"]["role"].as_str())'''
-replace = '''(card, lane["role"].as_str())'''

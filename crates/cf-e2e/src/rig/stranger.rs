@@ -8,9 +8,9 @@
 //! which is what a wrong selection of what to end would take the human's work with.
 //!
 //! It reads its input to the end, and the rig holds its input open, so it lives as
-//! long as the rig does, however long that is: a rig of the long-run suite lives for
-//! hours, and a stranger that slept ten minutes ran out by itself under a live suite
-//! and was read as ended with the windows (2026-10-15). A test that ends without
+//! long as the rig does, however long that is: a stranger that slept ten minutes
+//! ran out by itself under a live suite and was read as ended with the windows
+//! (2026-10-15). A test that ends without
 //! closing its rig takes the stranger with it, its input closing with the test's
 //! process. Its own end, which only its input's end brings, is told from an end it
 //! was given by whether the rig ended its input: any end before that was given,

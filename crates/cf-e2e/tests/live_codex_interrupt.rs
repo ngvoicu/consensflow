@@ -15,7 +15,7 @@
 //! next 20 seconds: the turn's end and its status, the thread's status, and whether
 //! the pending question was resolved (`serverRequest/resolved`). The thread is
 //! ephemeral, the folder the check's own, and every MCP server is switched off for
-//! the run, as the evals do. No rig is in it: Codex's app-server is spoken to
+//! the run. No rig is in it: Codex's app-server is spoken to
 //! directly.
 //!
 //! ```text

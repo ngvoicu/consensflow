@@ -16,7 +16,7 @@
 //!   words and the task (`\n` in it becomes a line break), with this window's
 //!   own token, the way a chief hands out work. Each such line of a message is
 //!   run, in order, so that one turn puts several tasks on the board at once, as
-//!   a chief does that plans (the long run's stand-in chief).
+//!   a chief does that plans.
 //! - A line `CF <words>` runs any other `cf` with those words as they stand
 //!   (`CF task cancel T-3`), and `CF <words> :: <text>` with the text, spaces
 //!   and all, as one last word (`CF tell T-1 :: Stop now`): the chief's own
@@ -31,8 +31,7 @@
 //! - A result delivered to the chief's window started with `CF_TEST_ACCEPT_RESULTS`
 //!   set is accepted, `cf task accept` of the task its envelope (its first line, the
 //!   result's header) names, and nothing else in it is done: a chief that takes its
-//!   staff's results, as the long run's dry run needs to reach its end (every task
-//!   accepted). A result header its words quote, a note's or a result's, is none.
+//!   staff's results. A result header its words quote, a note's or a result's, is none.
 //!   Without it a result is answered as any message is.
 //! - A line `SLEEP <seconds> <words>` is a turn that works that long before it
 //!   does what the words say: a window a chief can still tell, or a chief
@@ -110,10 +109,6 @@
 //!   PreToolUse hook of the settings file this window was launched with runs on
 //!   a synthetic AskUserQuestion event, and the turn answers with what the hook
 //!   handed back.
-//! - A window started with `CF_TEST_SCRIPTED_RESULTS` set (a folder of an eval run's, the
-//!   evals' stand-in reviewer or worker) answers each task brief with the next result of the
-//!   folder, after writing the files of that result in its own folder, and nothing else of what
-//!   is written here (`scripted`).
 //! - A question whose text says `REPLY <words>` is answered with `cf answer`.
 //! - `REPLY <words> THEN <line>` answers it so and goes on, in the same turn, with `line`
 //!   as the line it was given, and ends with what that answers: a window that answers
@@ -133,7 +128,6 @@ use serde_json::{json, Value};
 
 use crate::agents::Agents;
 use crate::background::{until_up, Detach, Jobs, Server, THINKING};
-use crate::scripted;
 use crate::steps::{Step, Tasks};
 use crate::stop::Stop;
 
@@ -358,12 +352,6 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
 
     if spent(window) {
         return Ok(Reply::Refused);
-    }
-    if let Some(folder) = own_var(scripted::FOLDER) {
-        let here = std::env::current_dir().map_err(|failed| failed.to_string())?;
-        if let Some(result) = scripted::answer(Path::new(&folder), text, &here)? {
-            return Ok(Reply::Text(result));
-        }
     }
     let accepts = accepting(
         own_var("CF_TEST_ACCEPT_RESULTS").as_deref(),

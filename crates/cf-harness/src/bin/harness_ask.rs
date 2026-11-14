@@ -1,4 +1,4 @@
-//! What the evals and the live tests ask of the harness code
+//! What the live tests ask of the harness code
 //! (`cf_harness::tooling`), through `live::ask` of `crates/cf-e2e`. It is no
 //! adapter, and ships with nothing: it is built only with the `test-support`
 //! feature.

@@ -1,4 +1,4 @@
-//! `windows`, `windows-matrix` and `scrub-transcript` as a person starts them: the
+//! `windows` and `scrub-transcript` as a person starts them: the
 //! xtask program, on a checkout made for the case (a git repository in a
 //! temporary folder, named to xtask the way `cargo run` names its own), with the
 //! fake child for the machine's `scp` and `ssh`. What a run does with its words
@@ -223,24 +223,6 @@ fn the_commands_refuse_the_words_they_do_not_take_and_start_nothing() {
             "xtask: --env is NAME=VALUE, a variable's name and what to give it: NOVALUE\n",
         ),
         (
-            vec!["windows-matrix", "--host", "zeewin"],
-            "xtask: windows-matrix takes a --scenario <name> and a --pair <chief>:<staff> (each \
-             as many times as there are): cargo xtask windows-matrix [--machine zeewin2|zeewin | \
-             --host <ssh host>] [--wait MINUTES] [--env NAME=VALUE] --scenario <name>... --pair <chief>:<staff>...\n",
-        ),
-        (
-            vec![
-                "windows-matrix",
-                "--host",
-                "zeewin",
-                "--scenario",
-                "round-trip",
-                "--pair",
-                "devin",
-            ],
-            "xtask: a pair is chief:staff, not devin\n",
-        ),
-        (
             vec!["scrub-transcript", "a.jsonl"],
             "xtask: scrub-transcript takes the transcript to scrub and the fixture to make: \
              <transcript.jsonl> <fixture.jsonl>\n",
@@ -260,7 +242,7 @@ fn the_commands_refuse_the_words_they_do_not_take_and_start_nothing() {
 #[test]
 fn the_commands_say_so_in_their_help_that_they_run_in_rust() {
     let nothing = tempfile::tempdir().unwrap();
-    for command in ["windows", "windows-matrix", "scrub-transcript"] {
+    for command in ["windows", "scrub-transcript"] {
         let ran = xtask(&checkout(), nothing.path(), &[], &[command, "--help"]);
         assert!(ran.status.success(), "{command}: {}", err(&ran));
         let help = out(&ran);
@@ -497,72 +479,6 @@ fn a_run_asks_for_the_folder_the_build_and_the_variables_it_was_given() {
     assert!(asked.contains("'npm ci --no-audit --no-fund', "));
     assert!(asked.contains("$env:CONSENSFLOW_TEST_DAEMON = 'native'\n"));
     assert!(asked.contains("'cargo test'"));
-}
-
-#[test]
-fn a_matrix_runs_each_pair_on_the_machine_builds_it_once_and_keeps_a_log_of_each() {
-    let fakes = programs(&["scp", "ssh"]);
-    // The logs of the runs are written into the checkout, as ignored files are.
-    let tree = tree(&[("keep.txt", "kept"), (".gitignore", "evals/reports\n")]);
-    let kept = tempfile::tempdir().unwrap();
-    let ran = on(
-        &tree,
-        fakes.path(),
-        &[
-            ("FAKE_CHILD_FIRST", &tree_line(&tree)),
-            ("FAKE_CHILD_KEEP", kept.path().to_str().unwrap()),
-            ("FAKE_CHILD_LAST", "== exit 0"),
-        ],
-        &[
-            "windows-matrix",
-            "--host",
-            "zeewin",
-            "--build",
-            "--scenario",
-            "round-trip",
-            "--pair",
-            "devin:devin",
-            "--pair",
-            "claude:devin,pi",
-            "--claude-model",
-            "claude-sonnet-5",
-        ],
-    );
-    // The fake child says what it was asked and no check of an eval: no verdict.
-    assert_eq!(ran.status.code(), Some(1), "{}", err(&ran));
-    let said = out(&ran);
-    let logs = tree.path().join("evals").join("reports").join("windows");
-    let folder = fs::read_dir(&logs).unwrap().next().unwrap().unwrap().path();
-    for name in ["round-trip devin:devin…", "round-trip claude:devin,pi…"] {
-        assert!(
-            said.contains(&format!("{name}\n  no verdict (exit 0): see ")),
-            "{said}"
-        );
-    }
-    assert!(
-        said.contains(&format!("\nlogs: {}\n", folder.display())),
-        "{said}"
-    );
-
-    // What each run is asked for is in the tarball it sent, the first run's first.
-    let first = run_script_kept(kept.path(), 1);
-    let second = run_script_kept(kept.path(), 2);
-    assert!(
-        first.contains(
-            "'cargo xtask eval --scenario round-trip --chief devin --staff devin --timeout-min 30'"
-        ),
-        "{first}"
-    );
-    assert!(
-        second.contains("'cargo xtask eval --scenario round-trip --chief claude --staff devin,pi --timeout-min 30 --model claude-sonnet-5'"),
-        "{second}"
-    );
-    // Built once: before the first run, and not before the second.
-    assert!(first.contains("'npm ci --no-audit --no-fund', "), "{first}");
-    assert!(second.contains("$steps = @()\n"), "{second}");
-    // And what a run that did not build stands on is held to the lockfiles (T-1333).
-    assert!(!first.contains("# packages: begin"), "{first}");
-    assert!(second.contains("# packages: begin"), "{second}");
 }
 
 /// A program of a folder that is this script (the system's shell runs it).

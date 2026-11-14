@@ -1,20 +1,17 @@
-//! The script that lists what a run left in `evals/reports` there, to be brought back
+//! The script that lists what a run left in `.runs/live-matrix` there, to be brought back
 //! ([`reports_script`]): read in its text, and, on Windows, run by the machine's PowerShell on a
 //! profile made for it.
 
 use super::*;
 
 #[test]
-fn the_listing_names_each_file_by_its_path_and_size_and_leaves_the_matrixs_folder_out() {
+fn the_listing_names_each_file_by_its_path_and_size() {
     let text = reports_script(DIR);
     assert!(
-        text.contains("$reports = Join-Path (Join-Path $env:USERPROFILE 'consensflow-build') 'evals\\reports'\n"),
+        text.contains("$reports = Join-Path (Join-Path $env:USERPROFILE 'consensflow-build') '.runs\\live-matrix'\n"),
         "{text}"
     );
-    assert!(
-        text.contains("if ($name -notlike 'windows/*') { \"$name`t$($file.Length)\" }"),
-        "{text}"
-    );
+    assert!(text.contains("\"$name`t$($file.Length)\""), "{text}");
     assert!(!text.contains('«'), "{text}");
     assert!(text.is_ascii(), "{text}");
 }
@@ -51,7 +48,7 @@ fn powershell_lists_the_reports_of_a_folder_and_none_of_a_link() {
 
     let profile = tempfile::tempdir().unwrap();
     let elsewhere = tempfile::tempdir().unwrap();
-    let reports = profile.path().join(DIR).join("evals").join("reports");
+    let reports = profile.path().join(DIR).join(".runs").join("live-matrix");
     let list = |profile: &std::path::Path| {
         let vars: Vec<_> = Env::from_process()
             .iter()
@@ -72,8 +69,7 @@ fn powershell_lists_the_reports_of_a_folder_and_none_of_a_link() {
 
     // A profile with no folder lists none.
     assert_eq!(list(profile.path()), "");
-    // A folder lists its files by their paths with `/` and their sizes, and what is under `windows`
-    // is left out.
+    // A folder lists its files by their paths with `/` and their sizes.
     for (name, text) in [
         ("long/2026-10-20T12-00-00-000Z-long.md", "report"),
         ("top.json", "{}"),
@@ -87,7 +83,11 @@ fn powershell_lists_the_reports_of_a_folder_and_none_of_a_link() {
     lines.sort();
     assert_eq!(
         lines,
-        ["long/2026-10-20T12-00-00-000Z-long.md\t6", "top.json\t2"]
+        [
+            "long/2026-10-20T12-00-00-000Z-long.md\t6",
+            "top.json\t2",
+            "windows/2026-10-20T10-00-00/run.log\t6"
+        ]
     );
     // The same folder made a junction to one elsewhere that holds reports: none is listed.
     fs::write(elsewhere.path().join("outside.json"), "{}").unwrap();

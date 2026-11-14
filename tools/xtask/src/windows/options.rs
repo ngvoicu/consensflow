@@ -1,4 +1,4 @@
-//! The words of `windows` and `windows-matrix`, read as the JavaScript tools read
+//! The words of `windows`, read as the JavaScript tools read
 //! theirs (Node's `parseArgs`): long options only, `--name value` or
 //! `--name=value`, and the first `--` ends them. A value may not begin with a
 //! dash (`--host=-x` says one that does). Where the JavaScript took options and
@@ -39,30 +39,6 @@ pub struct Options {
     pub wait: u32,
 }
 
-/// What a matrix of evals on the machine is asked for.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MatrixOptions {
-    /// As [`Options`]'s.
-    pub machine: Option<Machine>,
-    pub build: bool,
-    pub env: Vec<(String, String)>,
-    pub scenarios: Vec<String>,
-    pub pairs: Vec<Pair>,
-    /// A Claude chief's model; the eval's own default when none.
-    pub claude_model: Option<String>,
-    /// A Pi member's model, on the machine's own signed-in provider.
-    pub pi_model: Option<String>,
-    /// As [`Options`]'s: how long each run waits for its turn.
-    pub wait: u32,
-}
-
-/// A chief and the staff it works with: `devin:devin`, `claude:devin,pi`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Pair {
-    pub chief: String,
-    pub staff: String,
-}
-
 impl Options {
     /// Reads the words after `windows`.
     pub fn parse(args: &[OsString]) -> Result<Self, String> {
@@ -93,50 +69,8 @@ impl Options {
     }
 }
 
-impl MatrixOptions {
-    /// Reads the words after `windows-matrix`.
-    pub fn parse(args: &[OsString]) -> Result<Self, String> {
-        let words = read(args, &MATRIX_OPTIONS, Command::Refused)?;
-        let machine = machine_of(&words)?;
-        let scenarios = words.many("scenario");
-        let pairs = words.many("pair");
-        if scenarios.is_empty() || pairs.is_empty() {
-            return Err(MATRIX_USAGE.into());
-        }
-        // Said well before the first run, not by the first one that fails on it.
-        let env = named(&words)?;
-        let wait = wait_of(&words)?;
-        let pairs = pairs
-            .iter()
-            .map(|pair| {
-                pair.split_once(':')
-                    .filter(|(chief, staff)| !chief.is_empty() && !staff.is_empty())
-                    .map(|(chief, staff)| Pair {
-                        chief: chief.to_owned(),
-                        staff: staff.to_owned(),
-                    })
-                    .ok_or_else(|| format!("a pair is chief:staff, not {pair}"))
-            })
-            .collect::<Result<_, _>>()?;
-        Ok(Self {
-            machine,
-            build: words.flag("build"),
-            env,
-            scenarios,
-            pairs,
-            claude_model: words.one("claude-model").map(str::to_owned),
-            pi_model: words.one("pi-model").map(str::to_owned),
-            wait,
-        })
-    }
-}
-
 const USAGE: &str = "windows takes the command to run there after a --: \
     cargo xtask windows [--machine zeewin2|zeewin | --host <ssh host>] [--build] [--wait MINUTES] [--env NAME=VALUE] -- <command>";
-
-const MATRIX_USAGE: &str = "windows-matrix takes a --scenario <name> and a \
-    --pair <chief>:<staff> (each as many times as there are): cargo xtask windows-matrix \
-    [--machine zeewin2|zeewin | --host <ssh host>] [--wait MINUTES] [--env NAME=VALUE] --scenario <name>... --pair <chief>:<staff>...";
 
 /// The machine the words name: by `--machine`, one of [`NAMES`]; by `--host`, an ssh host
 /// reached as zeewin is (it is given to `ssh` and `scp` as a word, so it may not be one that
@@ -204,7 +138,6 @@ enum Takes {
 #[derive(Clone, Copy)]
 enum Command {
     Allowed,
-    Refused,
 }
 
 const HOST_OPTIONS: [(&str, Takes); 7] = [
@@ -213,18 +146,6 @@ const HOST_OPTIONS: [(&str, Takes); 7] = [
     ("build", Takes::Nothing),
     ("dir", Takes::One),
     ("in", Takes::One),
-    ("env", Takes::Many),
-    ("wait", Takes::One),
-];
-
-const MATRIX_OPTIONS: [(&str, Takes); 9] = [
-    ("machine", Takes::One),
-    ("host", Takes::One),
-    ("build", Takes::Nothing),
-    ("scenario", Takes::Many),
-    ("pair", Takes::Many),
-    ("claude-model", Takes::One),
-    ("pi-model", Takes::One),
     ("env", Takes::Many),
     ("wait", Takes::One),
 ];
@@ -290,7 +211,6 @@ fn read(args: &[OsString], options: &[(&str, Takes)], command: Command) -> Resul
                         .collect();
                     Ok(read)
                 }
-                Command::Refused => Err(format!("unexpected argument: {word}")),
             };
         };
         let (name, inline) = match spelled.split_once('=') {

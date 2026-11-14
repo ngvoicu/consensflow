@@ -70,7 +70,7 @@ fn commands() -> Result<Commands, Box<dyn Error>> {
 
 /// Which files have words that reach a model or a person: the native crates'
 /// sources and texts (the daemon, the engine's role texts, the cf usages, the
-/// agents pages), the host extensions, role texts, the eval prompts, the page,
+/// agents pages), the host extensions, role texts, the page,
 /// the readme. A crate's own tests are left out, since they say what cf
 /// refuses too.
 struct Readers {
@@ -102,7 +102,7 @@ impl Readers {
         reaches
             && !file.contains("node_modules/")
             && !file.starts_with("app/ui/vendor/")
-            && !file.starts_with("evals/reports/")
+            && !file.starts_with(".runs/live-matrix/")
     }
 }
 
@@ -111,7 +111,7 @@ impl Readers {
 fn files_that_reach_a_reader() -> Result<Vec<String>, Box<dyn Error>> {
     let readers = Readers::new()?;
     let mut found = vec!["README.md".to_owned()];
-    for root in ["crates", "hosts", "skill", "app/ui", "evals"] {
+    for root in ["crates", "hosts", "skill", "app/ui"] {
         for file in checkout::files_below(&checkout::path(root), &["node_modules"])? {
             found.push(checkout::relative(&file));
         }
@@ -349,7 +349,7 @@ fn the_files_that_reach_a_reader_are_the_texts_of_the_product_and_not_its_tests(
         "crates/cf/src/lib.toml",
         "app/ui/vendor/xterm.js",
         "app/ui/node_modules/x/index.js",
-        "evals/reports/run.md",
+        ".runs/live-matrix/run.md",
         "skill/chief.txt",
         "package.json",
     ] {

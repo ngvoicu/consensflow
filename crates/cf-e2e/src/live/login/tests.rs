@@ -561,46 +561,10 @@ fn a_prompt_typed_in_a_folder_of_the_run_and_a_conversation_kept_of_it_are_found
 }
 
 #[test]
-fn the_evals_workspace_is_a_runs_folder_too_and_what_a_run_of_theirs_left_in_the_persons_config_is_found_out(
-) {
-    let person = Person::new();
-    let before = person.owner.look();
-    person.append(
-        ".claude/history.jsonl",
-        "{\"display\":\"x\",\"project\":\"/Users/me/.consensflow-candidate/evals/workspace\",\"sessionId\":\"e\"}\n",
-    );
-    std::fs::create_dir_all(
-        person
-            .home
-            .path()
-            .join(".claude/projects/-Users-me--consensflow-candidate-evals-workspace"),
-    )
-    .unwrap();
-    person.write(
-        ".claude.json",
-        &json!({
-            "projects": { "/Users/me/.consensflow-candidate/evals/workspace": { "hasTrustDialogAccepted": true } },
-        })
-        .to_string(),
-    );
-    assert_eq!(
-        person.owner.changes_since(&before),
-        [
-            "~/.claude.json gained the project /Users/me/.consensflow-candidate/evals/workspace",
-            "~/.claude/projects gained -Users-me--consensflow-candidate-evals-workspace",
-            "~/.claude/history.jsonl gained 1 prompt(s) typed in a folder of the run",
-        ]
-    );
-    assert!(is_run_folder(
-        "/Users/me/.consensflow-candidate/evals/workspace"
-    ));
+fn live_and_rig_folders_are_runs_folders_but_the_owners_are_not() {
     assert!(is_run_folder("/Users/me/.consensflow-candidate/live/paste"));
     assert!(is_run_folder("/var/T/consensflow-integration-AB/workspace"));
-    assert!(is_run_name(
-        "-Users-me--consensflow-candidate-evals-workspace"
-    ));
     assert!(is_run_name("-Users-me--consensflow-candidate-live-paste"));
-    // The person's own folders are none of a run's.
     assert!(!is_run_folder("/Users/me/work"));
     assert!(!is_run_name("-Users-me-work"));
 }

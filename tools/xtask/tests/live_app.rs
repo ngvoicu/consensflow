@@ -351,11 +351,10 @@ const SPELLING_INSTALLED: [(&str, &str); 9] = [
 ];
 
 /// The files whose words are rules of the kind, or plants of them: they name what they refuse.
-const RULES: [&str; 4] = [
+const RULES: [&str; 3] = [
     "tools/xtask/tests/live_app.rs",
     "tests/plants/release/live-app.toml",
     "crates/cf-e2e/src/live/members/descent/tests.rs",
-    "crates/cf-evals/tests/long_run/signals.rs",
 ];
 
 /// The starts held to `cf_base::bundle`, whose tests hand a stand-in the very words they
@@ -404,7 +403,7 @@ const STARTERS: [(&str, &str); 4] = [
 const GATE: &str = "_startable_by_a_test";
 
 /// Whether `relative` is of the tests and the tools: everything of `tools`, `tests`,
-/// `bin` and the app's scripts, the end-to-end and the evals crates, and the tests and
+/// `bin` and the app's scripts, the end-to-end crate, and the tests and
 /// test support of every other crate and of the app.
 fn of_tests_and_tools(relative: &str) -> bool {
     let tooling = [
@@ -414,7 +413,6 @@ fn of_tests_and_tools(relative: &str) -> bool {
         "app/scripts/",
         ".github/",
         "crates/cf-e2e/",
-        "crates/cf-evals/",
     ]
     .iter()
     .any(|folder| relative.starts_with(folder));

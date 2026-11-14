@@ -4,7 +4,7 @@ node_modules
 /deliveries/d-*.md
 test-results/
 .idea
-evals/reports/
+/.runs/live-matrix/
 # The native cf, built into bin/ by npm run build:cf (and set aside there on Windows while one ran).
 /bin/cf
 /bin/cf.exe

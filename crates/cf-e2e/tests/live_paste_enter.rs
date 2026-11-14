@@ -4,7 +4,7 @@
 //! named, and needs each one installed and logged in, so it is ignored unless asked for and is
 //! no part of `check` or of CI.
 //!
-//! Seen on zeewin (2026-10-03): the evals' runner typed the owner's prompt into a Codex chief as
+//! Seen on zeewin (2026-10-03): a prompt typed into a Codex chief as
 //! a bracketed paste with its Enter, and every Codex chief on Windows needed a second Enter; in
 //! two runs even the later ones did not send it, and the screen ended with the prompt still in
 //! Codex's input (`[Pasted Content 7726 chars]`). The daemon never pastes into Codex (its
@@ -16,7 +16,7 @@
 //! (`pane.typed`, which the pane host takes as the page's). Each case is a paste once the chief
 //! is idle, in one of two shapes:
 //!
-//! - **at once**: the paste and its Enter in one write, as the evals' runner types it;
+//! - **at once**: the paste and its Enter in one write;
 //! - **then Enter**: the paste, and Enter a second later, as a person presses it.
 //!
 //! and three lengths: a line, a few lines, and one of about 7,700 characters, which Codex folds
@@ -24,7 +24,7 @@
 //! A case's paste went when the board shows the chief at work after it (the daemon's own
 //! `window.activity`), or the window drew the chief's answer, that word alone on a line (the
 //! daemon can miss a turn of less than a second); where neither comes within five seconds, the
-//! human presses Enter again, up to three times, as the evals' runner does.
+//! human presses Enter again, up to three times.
 //!
 //! ```text
 //! cargo xtask live paste-enter                     Codex
@@ -76,7 +76,7 @@ const IDLE: Duration = Duration::from_secs(180);
 /// How a paste and its Enter reach the window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shape {
-    /// In one write, as the evals' runner types them.
+    /// In one write.
     AtOnce,
     /// The paste, then Enter a beat later, as a person presses it.
     ThenEnter,

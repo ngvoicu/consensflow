@@ -102,13 +102,3 @@ fn the_last_words_a_result_takes_say_so_above_them_and_no_other_words_do() {
     assert_eq!(words_of(&[&said]), "Let me check the tests");
     assert_eq!(words_of(&answered.after_the_last_tool), WITHOUT_ANSWER);
 }
-
-#[test]
-fn the_long_runs_oracle_judges_a_result_by_the_engines_own_words() {
-    // cf-evals depends on no crate of the product, so it keeps the engine's lines in its own
-    // words (`long_run::invariants::order`): held to them here.
-    let oracle = include_str!("../../../cf-evals/src/long_run/invariants/order.rs");
-    for line in [LAST_WORDS, WITHOUT_ANSWER] {
-        assert!(oracle.contains(&format!("{line:?}")), "{line}");
-    }
-}

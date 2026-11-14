@@ -37,7 +37,7 @@ fn a_folder_of_a_run_is_known_by_the_separator_windows_wrote_it_with_as_well_as_
         "/home/me/.consensflow-candidate/live/first-message",
         "C:/Users/AGV/.consensflow-candidate/live/first-message",
         r"C:\Users\AGV\.consensflow-candidate\live\first-message",
-        r"C:\Users\AGV\.consensflow-candidate\evals\run-1",
+        r"C:\Users\AGV\.consensflow-candidate\live\run-1",
         r"C:\Users\AGV\AppData\Local\Temp\consensflow-integration-ab12",
     ] {
         assert!(is_run_folder(folder), "{folder}");
