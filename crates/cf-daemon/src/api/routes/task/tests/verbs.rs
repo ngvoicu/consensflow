@@ -31,6 +31,7 @@ async fn own_hands_leaves_existing_tasks_and_answers_in_their_ordinary_flow() {
     let answer = json!({"question": scene.question.id, "body": "Yes"}).to_string();
     let (status, said) = api(&scene, Method::POST, "/api/answers", &scene.chief, &answer).await;
     assert_eq!(status, 201, "{said}");
+    let mut told = None;
     for (number, verb, body, state) in [
         (open, "edit", r#"{"body":"An edited brief"}"#, "open"),
         (open, "cancel", "{}", "cancelled"),
@@ -38,8 +39,9 @@ async fn own_hands_leaves_existing_tasks_and_answers_in_their_ordinary_flow() {
             working,
             "tell",
             r#"{"body":"Please check this too"}"#,
-            "paused",
+            "working",
         ),
+        (working, "pause", "{}", "paused"),
         (working, "resume", r#"{"body":"Go on"}"#, "working"),
     ] {
         let (status, said) = post(&scene, &scene.chief, &format!("{number}/{verb}"), body).await;
@@ -48,6 +50,13 @@ async fn own_hands_leaves_existing_tasks_and_answers_in_their_ordinary_flow() {
             assert_ne!(said["task"]["state"], "paused", "{verb}: {said}");
         } else {
             assert_eq!(said["task"]["state"], state, "{verb}: {said}");
+        }
+        if verb == "tell" {
+            assert_eq!(said["message"]["kind"], "note", "{said}");
+            told = Some(said["message"]["id"].clone());
+        }
+        if verb == "pause" {
+            assert_eq!(said["toldWithdrawn"], json!([told.take().unwrap()]), "{said}");
         }
     }
     let (status, said) = post(&scene, &scene.chief, &format!("{working}/cancel"), "{}").await;
