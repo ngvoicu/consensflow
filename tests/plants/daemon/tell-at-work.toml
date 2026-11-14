@@ -140,5 +140,25 @@ runs = ["daemon-routes-task-tell"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "    if !withdrawn.is_empty() {\n        answer.insert(\"toldWithdrawn\".to_owned(), json!(withdrawn));\n    }\n    if !dropped.is_empty() {"
-replace = "    if !dropped.is_empty() {"
+find = "    if !told_withdrawn.is_empty() {\n        answer.insert(\"toldWithdrawn\".to_owned(), json!(told_withdrawn));\n    }\n"
+replace = ""
+
+[[plant]]
+name = "tell at work: a pause cancels a tell and the ledger gives back no id"
+meant = "a_chiefs_pause_gives_back_the_told_notes_it_cancelled_whatever_the_task_is_at_and_the_humans_none"
+runs = ["ledger-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "                if kind == \"note\" && !urgent {"
+replace = "                if false && kind == \"note\" && !urgent {"
+
+[[plant]]
+name = "tell at work: the person's Finish withdraws the chief's tell and tells the chief nothing"
+meant = "the_persons_finish_tells_the_chief_once_that_its_tell_had_not_gone_in_and_the_chiefs_own_says_it_in_its_reply"
+runs = ["engine-tell-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = "        self.tell_the_withdrawn(project, number, by, &moved.withdrawn)?;\n"
+replace = ""

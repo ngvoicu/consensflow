@@ -482,6 +482,30 @@ async fn a_pause_with_or_without_words_names_the_tell_it_withdraws() {
 }
 
 #[tokio::test]
+async fn a_pause_of_a_queued_task_names_the_tell_it_withdraws_and_not_the_brief() {
+    let scene = scene();
+    let (number, brief) = queued_task(&scene);
+    let (_, told) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/tell"),
+        r#"{"body":"Use v2"}"#,
+    )
+    .await;
+    let id = told["message"]["id"].as_i64().expect("the tell's id");
+    let (status, said) = post(&scene, &scene.chief, &format!("{number}/pause"), "{}").await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["toldWithdrawn"], json!([id]), "{said}");
+    let ledger = scene.context.ledger.borrow();
+    for cancelled in [id, brief] {
+        assert_eq!(
+            ledger.message(cancelled).unwrap().unwrap().state,
+            "cancelled"
+        );
+    }
+}
+
+#[tokio::test]
 async fn a_pause_with_words_is_refused_for_a_queued_or_an_open_task_and_names_the_tell() {
     let scene = scene();
     let (queued, _) = queued_task(&scene);

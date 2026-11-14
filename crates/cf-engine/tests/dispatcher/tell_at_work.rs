@@ -531,16 +531,6 @@ fn a_pause_takes_back_the_tell_waiting_for_the_window_with_the_rest_the_chief_wr
         let context = Context::new();
         let (tiers, told) = told_at_work(&context, "Use the v2 grammar");
         context.advance(1_000);
-        assert_eq!(
-            context
-                .ledger
-                .borrow()
-                .told_waiting_at_work(tiers.project.id, 1)
-                .unwrap()
-                .len(),
-            1,
-            "the ledger names the tell the pause is to withdraw ({words:?})"
-        );
         context
             .ledger
             .borrow_mut()
@@ -552,4 +542,45 @@ fn a_pause_takes_back_the_tell_waiting_for_the_window_with_the_rest_the_chief_wr
             "a pause takes back what the chief wrote for the window ({words:?})"
         );
     }
+}
+
+#[test]
+fn the_persons_finish_tells_the_chief_once_that_its_tell_had_not_gone_in_and_the_chiefs_own_says_it_in_its_reply(
+) {
+    // The person finishes: the chief is told in a note, once.
+    let context = Context::new();
+    let (tiers, told) = told_at_work(&context, "Use the v2 grammar");
+    context.adapter.answer("zeus", DONE);
+    let finished = context
+        .finish_task(tiers.project.id, 1, "human")
+        .expect("the person finishes");
+    assert_eq!(
+        finished.withdrawn.iter().map(|m| m.id).collect::<Vec<_>>(),
+        [told.id]
+    );
+    let notes: Vec<String> = chief_notes(&tiers)
+        .into_iter()
+        .filter(|note| note.contains("had not gone in"))
+        .collect();
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(
+        notes[0].contains(&format!("m-{}", told.id)) && notes[0].contains("@human finished T-1"),
+        "{}",
+        notes[0]
+    );
+
+    // The chief finishes: its reply names the words, and no note says them again.
+    let context = Context::new();
+    let (tiers, _) = told_at_work(&context, "Use the v2 grammar");
+    context.adapter.answer("zeus", DONE);
+    context
+        .finish_task(tiers.project.id, 1, "chief")
+        .expect("the chief finishes");
+    assert!(
+        chief_notes(&tiers)
+            .iter()
+            .all(|note| !note.contains("had not gone in")),
+        "{:?}",
+        chief_notes(&tiers)
+    );
 }

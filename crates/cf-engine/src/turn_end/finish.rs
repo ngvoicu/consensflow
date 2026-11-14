@@ -55,7 +55,7 @@
 use std::rc::Rc;
 
 use cf_base::refusal::Refusal;
-use cf_ledger::{MessageView, ParticipantView, TaskThread, TaskView};
+use cf_ledger::{MessageView, NewNote, ParticipantView, TaskThread, TaskView};
 
 use super::earlier_turns::with_earlier;
 use super::{
@@ -289,6 +289,10 @@ impl Dispatcher {
             &body,
             (pending.jobs, pending.agents),
         )?;
+        // The words withdrawn are told to whoever told them but the one who finished (its own
+        // reply names them): once, in a note about the task. The chief whose tell went with the
+        // person's Finish reads the result knowing its words were not read.
+        self.tell_the_withdrawn(project, number, by, &moved.withdrawn)?;
         self.settle_at_departure(record, owed.as_ref());
         record.held.borrow_mut().reset();
         self.changed();
@@ -298,5 +302,45 @@ impl Dispatcher {
             agents: pending.agents,
             withdrawn: moved.withdrawn,
         })
+    }
+
+    /// Tells each who told the `withdrawn` words, but `by` (who finished the task, and whose
+    /// reply says which), that its Finish withdrew them: a note about the task, once.
+    fn tell_the_withdrawn(
+        &self,
+        project: i64,
+        number: i64,
+        by: &str,
+        withdrawn: &[MessageView],
+    ) -> Result<(), EngineError> {
+        let mut senders: Vec<&str> = Vec::new();
+        for sender in withdrawn.iter().filter_map(|told| told.sender.as_deref()) {
+            if sender != by && !senders.contains(&sender) {
+                senders.push(sender);
+            }
+        }
+        for sender in senders {
+            let ids: Vec<String> = withdrawn
+                .iter()
+                .filter(|told| told.sender.as_deref() == Some(sender))
+                .map(|told| format!("m-{}", told.id))
+                .collect();
+            let (what, verb, them) = match ids.as_slice() {
+                [one] => (one.clone(), "is", "it"),
+                several => (several.join(", "), "are", "them"),
+            };
+            self.seams.ledger.borrow_mut().note(
+                project,
+                &NewNote {
+                    from: None,
+                    to: sender.to_owned(),
+                    body: format!(
+                        "@{by} finished T-{number}. What you told its window, {what}, had not gone in and {verb} withdrawn: the result is what it said before {them}."
+                    ),
+                    task: Some(number),
+                },
+            )?;
+        }
+        Ok(())
     }
 }

@@ -318,3 +318,40 @@ fn a_task_taken_back_to_the_board_carries_the_words_into_the_next_windows_brief(
         "{body}"
     );
 }
+
+#[test]
+fn a_chiefs_pause_gives_back_the_told_notes_it_cancelled_whatever_the_task_is_at_and_the_humans_none(
+) {
+    // A task still queued: the brief and the tell go with the pause, and only the tell is named.
+    let mut w = world();
+    let (task, _, brief) = queued(&mut w);
+    let told = tell(&mut w, task, "Use the v2 grammar");
+    let (_, named) = w
+        .ledger
+        .pause_task_naming(w.project, task, Some("chief"), None)
+        .expect("the chief pauses");
+    assert_eq!(ids(&named), [told.id], "the tell, not the brief");
+    assert_eq!(w.states(&[brief, told.id]), ["cancelled", "cancelled"]);
+
+    // A task at work: the same, with the words that resumed it among what goes.
+    let mut w = world();
+    let (task, _, brief) = queued(&mut w);
+    w.deliver(brief);
+    let told = tell(&mut w, task, "Use the v2 grammar");
+    let (_, named) = w
+        .ledger
+        .pause_task_naming(w.project, task, Some("chief"), None)
+        .expect("the chief pauses");
+    assert_eq!(ids(&named), [told.id]);
+
+    // The human's pause takes nothing back and names nothing.
+    let mut w = world();
+    let (task, _, _) = queued(&mut w);
+    let told = tell(&mut w, task, "Use the v2 grammar");
+    let (_, named) = w
+        .ledger
+        .pause_task_naming(w.project, task, Some("human"), None)
+        .expect("the human pauses");
+    assert!(named.is_empty());
+    assert_eq!(w.states(&[told.id]), ["queued"]);
+}

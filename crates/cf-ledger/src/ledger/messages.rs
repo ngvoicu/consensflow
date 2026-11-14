@@ -239,6 +239,15 @@ impl Ledger {
         messages::ask(&mut self.store, project_id, question)
     }
 
+    /// [`Ledger::ask`], and with the question the told notes its pause cancelled.
+    pub fn ask_naming(
+        &mut self,
+        project_id: i64,
+        question: &NewQuestion,
+    ) -> Result<(MessageView, Vec<MessageView>), LedgerError> {
+        messages::ask_naming(&mut self.store, project_id, question)
+    }
+
     /// `from` tells the window of T-`number`, still queued for it, `body`: kept
     /// for the window, it goes in after the brief, and nothing is paused.
     pub fn tell_queued(
@@ -322,21 +331,6 @@ impl Ledger {
     ) -> Result<bool, LedgerError> {
         let task = self.store.task_row(project_id, number)?;
         messages::notes_waiting_for_finish(&self.store, participant_id, &task)
-    }
-
-    /// The words told to T-`number`'s window while it was at work that have not gone in:
-    /// what Finish withdraws, and a pause of the chief's, which takes back what the chief
-    /// wrote for its window that it had not read, withdraws too.
-    pub fn told_waiting_at_work(
-        &self,
-        project_id: i64,
-        number: i64,
-    ) -> Result<Vec<MessageView>, LedgerError> {
-        let task = self.store.task_row(project_id, number)?;
-        match task.assignee_id {
-            Some(assignee) => messages::waiting_at_work(&self.store, assignee, &task),
-            None => Ok(Vec::new()),
-        }
     }
 
     /// Whether `message`, told words, was sent while its task's window was at work, not

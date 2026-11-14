@@ -341,21 +341,21 @@ fn pause_with_words(
         ));
     }
     let window = reaching(&telling)?;
-    let waiting = told_waiting(context, caller, number)?;
     let behind_words = context
         .ledger
         .borrow()
         .resume_words_not_in(caller.project.id, number)?
         .is_some();
-    let told = if behind_words {
-        context.ledger.borrow_mut().tell_queued(
+    let (told, withdrawn) = if behind_words {
+        let told = context.ledger.borrow_mut().tell_queued(
             caller.project.id,
             number,
             &caller.participant.handle,
             words,
-        )?
+        )?;
+        (told, Vec::new())
     } else {
-        context.ledger.borrow_mut().ask(
+        context.ledger.borrow_mut().ask_naming(
             caller.project.id,
             &NewQuestion {
                 from: Some(caller.participant.handle.clone()),
@@ -368,7 +368,8 @@ fn pause_with_words(
         )?
     };
     (context.kick)();
-    let withdrawn = withdrawn_by_pause(context, &waiting)?;
+    // The words the pause took back: what the ledger's own statement cancelled.
+    let withdrawn: Vec<i64> = withdrawn.iter().map(|told| told.id).collect();
     told_back(context, caller, number, &told, &withdrawn)
 }
 
@@ -432,33 +433,6 @@ fn told_back(
         answer.insert("toldWithdrawn".to_owned(), json!(withdrawn));
     }
     Ok(Answer::ok(Value::Object(answer)))
-}
-
-/// The words told to T-`number`'s window at work that have not gone in, before a pause takes
-/// back what the chief wrote for it.
-fn told_waiting(context: &Context, caller: &Caller, number: i64) -> Result<Vec<i64>, Failure> {
-    Ok(context
-        .ledger
-        .borrow()
-        .told_waiting_at_work(caller.project.id, number)?
-        .iter()
-        .map(|told| told.id)
-        .collect())
-}
-
-/// Which of the messages `before` the pause withdrew: the reply and the chief's `cf` name each.
-fn withdrawn_by_pause(context: &Context, before: &[i64]) -> Result<Vec<i64>, Failure> {
-    let ledger = context.ledger.borrow();
-    let mut withdrawn = Vec::new();
-    for &id in before {
-        if ledger
-            .message(id)?
-            .is_some_and(|message| message.state == "cancelled")
-        {
-            withdrawn.push(id);
-        }
-    }
-    Ok(withdrawn)
 }
 
 /// `POST /api/tasks/<n>/finish`: what the worker of a working task said last is its result,
@@ -527,7 +501,7 @@ fn moved(
     let mut ledger = context.ledger.borrow_mut();
     let mut dropped = Vec::new();
     let mut running = (0, 0);
-    let mut told_before: Vec<i64> = Vec::new();
+    let mut told_withdrawn: Vec<i64> = Vec::new();
     let moved = match action {
         TaskAction::Accept => {
             // Read before the accept, whose close of the window ends what it still runs.
@@ -569,12 +543,9 @@ fn moved(
                 .and_then(|assignee| (context.held)(assignee.id))
                 .filter(|held| held.0 == number)
                 .map_or((0, 0), |held| (held.1 as i64, held.2 as i64));
-            told_before = ledger
-                .told_waiting_at_work(project, number)?
-                .iter()
-                .map(|told| told.id)
-                .collect();
-            ledger.pause_task(project, number, Some(by), None)?
+            let (paused, withdrawn) = ledger.pause_task_naming(project, number, Some(by), None)?;
+            told_withdrawn = withdrawn.iter().map(|told| told.id).collect();
+            paused
         }
         TaskAction::Resume => ledger.resume_task(project, number, Some(by), words)?.task,
         // `reopen`; and what Node's last branch took any other word for, which
@@ -590,11 +561,10 @@ fn moved(
     };
     drop(ledger);
     (context.kick)();
-    let withdrawn = withdrawn_by_pause(context, &told_before)?;
     let mut answer = Map::new();
     answer.insert("task".to_owned(), value(&TaskSummary::from(&moved))?);
-    if !withdrawn.is_empty() {
-        answer.insert("toldWithdrawn".to_owned(), json!(withdrawn));
+    if !told_withdrawn.is_empty() {
+        answer.insert("toldWithdrawn".to_owned(), json!(told_withdrawn));
     }
     if !dropped.is_empty() {
         answer.insert("dropped".to_owned(), json!(dropped));
