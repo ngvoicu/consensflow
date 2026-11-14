@@ -118,11 +118,14 @@ replace = '''
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-            .any(|member| member.member.id != owner.id && self.why_not_free(member).is_none()))
+        Ok(candidates.iter().any(|member| {
+            member.member.id != owner.id && self.not_free(&Seat::of(member)).is_none()
+        }))
 '''
 replace = '''
-            .any(|member| member.member.id != owner.id && self.why_not_free(member).is_none())
-            || true)
+        Ok(candidates.iter().any(|member| {
+            member.member.id != owner.id && self.not_free(&Seat::of(member)).is_none()
+        }) || true)
 '''
 
 [[plant]]
