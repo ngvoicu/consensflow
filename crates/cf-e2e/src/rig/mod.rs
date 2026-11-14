@@ -96,9 +96,6 @@ const GONE: Duration = Duration::from_secs(3);
 #[cfg(windows)]
 const GONE: Duration = Duration::from_secs(10);
 
-/// How long the router is given to read what the pane host wrote last, once the
-/// host has gone.
-
 /// How long a window's first frame is waited for by default.
 pub const OPEN: Duration = Duration::from_secs(10);
 
