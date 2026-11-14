@@ -17,6 +17,7 @@ use cf_base::env::{path_with_folders, Env, TERMINAL_ENV};
 use tauri::{AppHandle, Manager};
 
 use crate::daemon::DaemonFailure;
+use crate::diag;
 
 /// How long the human's login shell has to say its PATH. One answers in well
 /// under a second on a machine at rest; on the owner's, at load 17–18 from
@@ -47,11 +48,11 @@ pub(crate) fn daemon_command(
         cause,
         retry: false,
     })?;
-    eprintln!("consensflow: {}", starting(&cf));
+    diag::say(format!("consensflow: {}", starting(&cf)));
     let mut command = command_for(&cf);
     let env = Env::from_process();
     if let Some(said) = on_login_environment(&mut command, &env, LOGIN_PATH_TIMEOUT, lookup) {
-        eprintln!("consensflow: {said}");
+        diag::say(format!("consensflow: {said}"));
     }
     // cf.exe is a console program: started from a windowed app it gets a
     // console window of its own, and every console program it starts shows in
@@ -92,7 +93,9 @@ pub(crate) fn bundled_cf(app: &AppHandle) -> Result<PathBuf, String> {
     if let Some(runtime) = portable_runtime(app)? {
         // The terminals' console host is in the runtime; without it Windows' own serves.
         if let Err(error) = crate::portable::find_libraries_in(&plain_path(runtime.clone())) {
-            eprintln!("consensflow: the runtime's console host is not found ({error}); Windows' own serves");
+            diag::say(format!(
+                "consensflow: the runtime's console host is not found ({error}); Windows' own serves"
+            ));
         }
         return present(cf_in(&runtime));
     }
@@ -403,7 +406,16 @@ impl LoginLookup {
         if asking.ended {
             return None;
         }
-        let mut started = shell.spawn().ok()?;
+        let mut started = match shell.spawn() {
+            Ok(started) => started,
+            Err(error) => {
+                diag::say(format!(
+                    "consensflow: the login shell could not be started ({}): {error}",
+                    Path::new(shell.get_program()).display()
+                ));
+                return None;
+            }
+        };
         let Some(output) = started.stdout.take() else {
             let _ = started.kill();
             let _ = started.wait();

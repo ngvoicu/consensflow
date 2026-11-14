@@ -337,11 +337,15 @@ runs = ["app-end-descriptors"]
 file = "app/src-tauri/src/lib.rs"
 find = """
     if let Err(failed) = cf_process::close_all_on_exec() {
-        eprintln!("ConsensFlow ends holding descriptors it could not mark close-on-exec: {failed}");
+        diag::say(format!(
+            "ConsensFlow ends holding descriptors it could not mark close-on-exec: {failed}"
+        ));
     }"""
 replace = """
     if let Err(failed) = Ok::<(), std::io::Error>(()) {
-        eprintln!("ConsensFlow ends holding descriptors it could not mark close-on-exec: {failed}");
+        diag::say(format!(
+            "ConsensFlow ends holding descriptors it could not mark close-on-exec: {failed}"
+        ));
     }"""
 
 [[plant]]

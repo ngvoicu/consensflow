@@ -129,10 +129,10 @@ runs = ["app-daemon-path"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
-find = "        let mut started = shell.spawn().ok()?;"
+find = "        let mut started = match shell.spawn() {"
 replace = '''
         std::os::unix::process::CommandExt::process_group(shell, 0);
-        let mut started = shell.spawn().ok()?;'''
+        let mut started = match shell.spawn() {'''
 
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
@@ -151,10 +151,10 @@ runs = ["app-daemon-path"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
-find = "        let mut started = shell.spawn().ok()?;"
+find = "        let mut started = match shell.spawn() {"
 replace = '''
         std::os::unix::process::CommandExt::process_group(shell, 0);
-        let mut started = shell.spawn().ok()?;'''
+        let mut started = match shell.spawn() {'''
 
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"

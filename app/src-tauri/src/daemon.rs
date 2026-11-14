@@ -16,6 +16,7 @@ use cf_panes::headless::{reap_until_clean, Reaped};
 use cf_panes::pty::PaneTable;
 
 use crate::daemon_command::LoginLookup;
+use crate::diag;
 use crate::runtime::SHUTDOWN_REAP;
 
 /// How long the daemon gets to stop on its own before it is killed.
@@ -379,7 +380,7 @@ impl Daemon {
     }
 
     fn fail(&self, failure: &DaemonFailure) {
-        eprintln!("consensflow: {}", failure.cause);
+        diag::say(format!("consensflow: {}", failure.cause));
         self.tell(DaemonStatus::down(&failure.cause, failure.retry));
     }
 
@@ -396,7 +397,7 @@ impl Daemon {
     /// app starts it again ([`Daemon::restart`]) unless it has stopped again and again
     /// ([`Backoff::restarts`]), when the person is asked to quit.
     fn stopped(self: &Arc<Self>, mut state: MutexGuard<'_, DaemonState>) {
-        eprintln!("consensflow: {DAEMON_STOPPED}");
+        diag::say(format!("consensflow: {DAEMON_STOPPED}"));
         let Some(restart) = state.restart.clone() else {
             self.change(&mut state, DaemonStatus::down(DAEMON_STOPPED, false));
             return;
@@ -448,7 +449,7 @@ impl Daemon {
             Reaped::TooLate | Reaped::Unconfirmed => {
                 // The end of the windows is not confirmed: that is what is said, and the
                 // person is asked to quit.
-                eprintln!("consensflow: {DAEMON_NOT_CONFIRMED}");
+                diag::say(format!("consensflow: {DAEMON_NOT_CONFIRMED}"));
                 self.tell(DaemonStatus::not_confirmed());
                 return;
             }

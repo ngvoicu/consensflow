@@ -1,15 +1,12 @@
-// The app unwraps and prints where it needs to: it is older than the rewrite's
-// rules (clippy.toml, the workspace's lints) and not moved onto them yet. Where
-// it reads its environment or starts a process itself, the item says so with
-// its own `#[allow(clippy::disallowed_methods)]` and its reason; the lints that
-// refuse an HTTPS client are allowed only by the one constructor (update_page.rs)
-// and never for the crate (tools/xtask/tests/tls_clients.rs, T-1253).
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::print_stdout,
-    clippy::print_stderr
-)]
+//! ConsensFlow's desktop shell: the Tauri app that holds the page, its daemon and its panes.
+//!
+//! The crate answers to the workspace's lints (Cargo.toml: no `unwrap`, `expect` or print to
+//! stdout or stderr outside tests). A diagnostic is said through [`diag::say`], the one place the
+//! app writes to its stderr, which is its error log. Where the app reads its environment or
+//! starts a process itself, the item says so with its own `#[allow(clippy::disallowed_methods)]`
+//! and its reason (clippy.toml); the lints that refuse an HTTPS client are allowed only by the
+//! one constructor (update_page.rs) and never for the crate (tools/xtask/tests/tls_clients.rs,
+//! T-1253). The modules below that allow a lint for themselves each say why.
 
 use std::io::{BufRead, Write};
 
@@ -19,10 +16,19 @@ use tauri::{AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuil
 pub mod commands;
 mod daemon;
 mod daemon_command;
+mod diag;
 mod file_drop;
+#[allow(
+    clippy::print_stderr,
+    reason = "its repair failures are lines of the error log written straight to stderr, not through diag::say"
+)]
 mod launcher;
 mod link;
 #[cfg(windows)]
+#[allow(
+    clippy::print_stderr,
+    reason = "its reload and give-up lines are lines of the error log written straight to stderr, not through diag::say"
+)]
 mod page_crash;
 mod panics;
 // Only the Windows app loads a failed page again; tested everywhere.
@@ -31,6 +37,10 @@ mod page_reloads;
 // Only the Windows app reads a runtime from its own exe; tested everywhere.
 #[cfg_attr(not(windows), allow(dead_code))]
 mod portable;
+#[allow(
+    clippy::print_stderr,
+    reason = "its page-event, bridge and quit failures are lines of the error log written straight to stderr, not through diag::say"
+)]
 pub mod runtime;
 // The build script's reading of the identity a build is made with, tested with the app's tests.
 #[cfg(test)]
@@ -42,8 +52,17 @@ mod test_manifest;
 mod testing;
 mod tls;
 #[cfg(target_os = "macos")]
+#[allow(
+    clippy::print_stderr,
+    reason = "its install failure is a line of the error log written straight to stderr, not through diag::say"
+)]
 mod update_install;
 mod update_page;
+#[allow(
+    clippy::print_stderr,
+    clippy::unwrap_used,
+    reason = "its check, download and install failures are lines of the error log written straight to stderr, not through diag::say; it parses the feed's URL built from a literal and serializes its own plain snapshot with unwrap"
+)]
 pub mod updates;
 
 use runtime::AppRuntime;
@@ -562,7 +581,7 @@ pub fn run() {
         Ok(Some(isolated)) => std::env::set_var("CONSENSFLOW_HOME", isolated),
         Ok(None) => {}
         Err(message) => {
-            eprintln!("consensflow: {message}");
+            diag::say(format!("consensflow: {message}"));
             std::process::exit(1);
         }
     }
@@ -631,8 +650,8 @@ pub fn run() {
         let _ = window;
         Ok(())
     })
-    .build(context)
-    .expect("error while building the ConsensFlow app");
+    .build(context);
+    let app = built(app);
 
     app.run(|handle, event| {
         panics::contained("the app's handler of its event loop", || {
@@ -650,6 +669,15 @@ pub fn run() {
     });
 }
 
+/// The app a build made: an error a build ends in (a webview the system cannot give, a
+/// configuration it cannot read) is said in the error log and ends the app with status 1.
+fn built<R: Runtime>(built: tauri::Result<tauri::App<R>>) -> tauri::App<R> {
+    built.unwrap_or_else(|error| {
+        diag::say(format!("consensflow: the app could not be built: {error}"));
+        std::process::exit(1)
+    })
+}
+
 /// The app's last code, on the main thread, as its event loop ends: `shutdown`, then every
 /// descriptor it holds made close-on-exec. After this Tauri ends the process, or the app an update
 /// installed is started: `app.restart()` called off the main thread (the update's install is an
@@ -663,7 +691,9 @@ fn at_exit(shutdown: impl FnOnce()) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(shutdown));
     #[cfg(target_os = "macos")]
     if let Err(failed) = cf_process::close_all_on_exec() {
-        eprintln!("ConsensFlow ends holding descriptors it could not mark close-on-exec: {failed}");
+        diag::say(format!(
+            "ConsensFlow ends holding descriptors it could not mark close-on-exec: {failed}"
+        ));
     }
 }
 
@@ -688,6 +718,30 @@ mod tests {
             "{}",
             config["build"]
         );
+    }
+
+    /// A build that fails is said in the error log and ends the app with status 1: the person who
+    /// reads the log finds the cause in a line of its own, not a panic's report. The test runs in
+    /// a child, its own binary again, since the end is the process's.
+    #[test]
+    #[allow(clippy::disallowed_methods)] // The test tells itself it is its own child by a CONSENSFLOW_TEST_* variable.
+    fn a_build_that_fails_is_said_and_ends_the_app_without_a_panic() {
+        const NAME: &str = "tests::a_build_that_fails_is_said_and_ends_the_app_without_a_panic";
+        const MARKER: &str = "CONSENSFLOW_TEST_BUILD_FAILS";
+        if std::env::var_os(MARKER).is_some() {
+            let failed = tauri::Error::Io(std::io::Error::other("no window system"));
+            built::<tauri::test::MockRuntime>(Err(failed));
+            return;
+        }
+        let ran = crate::testing::in_a_child(NAME, MARKER);
+        let said = crate::testing::said(&ran);
+        assert_eq!(ran.status.code(), Some(1), "{said}");
+        assert!(
+            said.contains("consensflow: the app could not be built: ")
+                && said.contains("no window system"),
+            "{said}"
+        );
+        assert!(!said.contains("panicked"), "{said}");
     }
 
     #[test]

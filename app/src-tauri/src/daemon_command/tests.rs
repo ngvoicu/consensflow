@@ -296,6 +296,27 @@ fn on_windows_no_login_shell_is_asked_and_the_daemon_keeps_the_apps_path() {
 /// of the quit, the start and the holding of the shell are one step, so none
 /// is started that the quit has missed.
 #[cfg(unix)]
+/// A login shell that cannot be started is said in the error log with its cause: it used to be
+/// the same silence as a shell that never answers, and the log then blamed the PATH's wait.
+#[test]
+fn a_login_shell_that_cannot_be_started_is_said_with_its_cause() {
+    let home = tempfile::tempdir().expect("home");
+    let shell = home.path().join("no-such-login-shell");
+    let mut asked = crate::testing::command(&shell);
+    let lookup = LoginLookup::default();
+    assert!(lookup.start(&mut asked).is_none(), "a shell was started");
+    let said = crate::diag::said();
+    let line = said
+        .iter()
+        .find(|line| line.contains(&*shell.to_string_lossy()));
+    assert!(
+        line.is_some_and(
+            |line| line.starts_with("consensflow: the login shell could not be started")
+        ),
+        "{said:?}"
+    );
+}
+
 #[test]
 fn a_lookup_the_app_has_quit_starts_no_shell() {
     let home = tempfile::tempdir().expect("home");
