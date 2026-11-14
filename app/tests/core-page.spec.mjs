@@ -6040,7 +6040,7 @@ test('New project has Staff, the rules for the staff, compaction, the advisor to
     await markup('new-project-dialog'),
     await markup('project-settings-dialog'),
   ]
-  expect(here).toHaveLength(8)
+  expect(here).toHaveLength(9)
   expect(here).toEqual(there)
   // Left as it opened, the start says nothing of what a project has anyway: the request is the one it was.
   await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
@@ -6584,7 +6584,7 @@ test('New project holds every section Project settings holds, in its order, but 
     expect(reason.length, `${legend} has no reason`).toBeGreaterThan(20)
   }
   expect(made).toEqual(settings.filter((legend) => !(legend in NEW_PROJECT_LACKS)))
-  expect(made).toHaveLength(9)
+  expect(made).toHaveLength(10)
 })
 
 test('New project: the rules for the staff and the compaction are written as they are in Project settings, counted and checked as typed, and start with the project', async ({
