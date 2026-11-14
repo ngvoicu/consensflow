@@ -276,6 +276,70 @@ mod tests {
             .filter(|line| !line.trim_start().starts_with('#'))
     }
 
+    #[derive(Debug, PartialEq, Eq)]
+    enum RustupLine {
+        TargetAdd,
+        Install,
+        Refused,
+    }
+
+    fn rustup_line(line: &str) -> RustupLine {
+        let words: Vec<_> = line.split_whitespace().collect();
+        if let ["rustup", "target", "add", target] = words.as_slice() {
+            // A target is added to the default toolchain; this does not install Rust.
+            // Accept only a target name, with no option, toolchain, or second command.
+            if target.starts_with(|c: char| c.is_ascii_alphabetic())
+                && target.contains('-')
+                && !target.contains("stable")
+                && !target.starts_with("nightly")
+                && !target.starts_with("beta")
+                && target
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+            {
+                return RustupLine::TargetAdd;
+            }
+        }
+        if line.contains(INSTALL) && line.contains(DEFAULT) && !line.contains("stable") {
+            RustupLine::Install
+        } else {
+            RustupLine::Refused
+        }
+    }
+
+    #[test]
+    fn a_plain_target_add_uses_the_default_and_is_not_an_install() {
+        assert_eq!(
+            rustup_line("          rustup target add x86_64-pc-windows-msvc"),
+            RustupLine::TargetAdd
+        );
+        let files = github();
+        let suite = &files["workflows/suites.yml"];
+        let setup = suite.find("uses: ./.github/actions/setup").unwrap();
+        let target = suite
+            .find("rustup target add x86_64-pc-windows-msvc")
+            .unwrap();
+        assert!(setup < target, "the pinned setup precedes the target add");
+    }
+
+    #[test]
+    fn a_target_add_with_a_toolchain_and_a_stable_install_are_still_refused() {
+        for line in [
+            "rustup target add --toolchain stable x86_64-pc-windows-msvc",
+            "rustup target add --toolchain 1.99.1 x86_64-pc-windows-msvc",
+            "rustup toolchain install stable",
+            "rustup target add stable",
+            "rustup target add nightly-2026-11-14",
+            "rustup target add x86_64-pc-windows-msvc; rustup toolchain install stable",
+        ] {
+            assert_eq!(rustup_line(line), RustupLine::Refused, "{line}");
+        }
+        assert_eq!(
+            rustup_line(&format!("{INSTALL} && {DEFAULT}")),
+            RustupLine::Install
+        );
+    }
+
     /// T-1523: a runner's `stable` moved to 1.100.0 between two runs of one day, and the
     /// lower-casing golden went red on both platforms. Every step that installs Rust installs
     /// the version the file names and makes it the default, a release's builds included (a
@@ -298,11 +362,13 @@ mod tests {
         let mut installs = BTreeMap::new();
         for (file, text) in &files {
             for line in code(text).filter(|line| line.contains("rustup")) {
-                assert!(
-                    line.contains(INSTALL) && line.contains(DEFAULT) && !line.contains("stable"),
-                    "{file} installs a Rust that is not the one {FILE} names:\n{line}"
-                );
-                *installs.entry(file.as_str()).or_insert(0) += 1;
+                match rustup_line(line) {
+                    RustupLine::TargetAdd => {}
+                    RustupLine::Install => *installs.entry(file.as_str()).or_insert(0) += 1,
+                    RustupLine::Refused => {
+                        panic!("{file} installs a Rust that is not the one {FILE} names:\n{line}")
+                    }
+                }
             }
             let builds = code(text).any(|line| line.contains("cargo "));
             let set_up = text.contains("uses: ./.github/actions/setup");
