@@ -324,6 +324,21 @@ impl Ledger {
         messages::notes_waiting_for_finish(&self.store, participant_id, &task)
     }
 
+    /// The words told to T-`number`'s window while it was at work that have not gone in:
+    /// what Finish withdraws, and a pause of the chief's, which takes back what the chief
+    /// wrote for its window that it had not read, withdraws too.
+    pub fn told_waiting_at_work(
+        &self,
+        project_id: i64,
+        number: i64,
+    ) -> Result<Vec<MessageView>, LedgerError> {
+        let task = self.store.task_row(project_id, number)?;
+        match task.assignee_id {
+            Some(assignee) => messages::waiting_at_work(&self.store, assignee, &task),
+            None => Ok(Vec::new()),
+        }
+    }
+
     /// Whether `message`, told words, was sent while its task's window was at work, not
     /// before the brief went in (`told_at_work`).
     pub fn sent_at_work(&self, message: &MessageView) -> Result<bool, LedgerError> {

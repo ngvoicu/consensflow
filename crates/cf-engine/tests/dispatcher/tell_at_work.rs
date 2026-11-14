@@ -500,3 +500,56 @@ fn a_tell_at_work_asks_the_adapter_of_every_harness_for_nothing_until_the_window
         context.close();
     }
 }
+
+#[test]
+fn finish_withdraws_a_tell_kept_for_a_paused_task_as_it_does_for_one_at_work() {
+    let context = Context::new();
+    let tiers = working(&context);
+    context.adapter.answer("zeus", "Parser, a first draft");
+    context.pause_task(tiers.project.id, 1);
+    let told = tell(&context, &tiers, "Use the v2 grammar");
+    assert_eq!(
+        context.message(told.id).state,
+        "queued",
+        "kept for the resume"
+    );
+    let finished = context
+        .finish_task(tiers.project.id, 1, "chief")
+        .expect("finish takes the paused task's answer, the kept tell withdrawn");
+    assert_eq!(finished.task.state, "done");
+    assert_eq!(
+        finished.withdrawn.iter().map(|m| m.id).collect::<Vec<_>>(),
+        [told.id],
+        "the reply says which words were withdrawn"
+    );
+    assert_eq!(context.message(told.id).state, "cancelled");
+}
+
+#[test]
+fn a_pause_takes_back_the_tell_waiting_for_the_window_with_the_rest_the_chief_wrote_for_it() {
+    for words in [None, Some("Stop and say where you are")] {
+        let context = Context::new();
+        let (tiers, told) = told_at_work(&context, "Use the v2 grammar");
+        context.advance(1_000);
+        assert_eq!(
+            context
+                .ledger
+                .borrow()
+                .told_waiting_at_work(tiers.project.id, 1)
+                .unwrap()
+                .len(),
+            1,
+            "the ledger names the tell the pause is to withdraw ({words:?})"
+        );
+        context
+            .ledger
+            .borrow_mut()
+            .pause_task(tiers.project.id, 1, Some("chief"), words)
+            .expect("the chief pauses");
+        assert_eq!(
+            context.message(told.id).state,
+            "cancelled",
+            "a pause takes back what the chief wrote for the window ({words:?})"
+        );
+    }
+}

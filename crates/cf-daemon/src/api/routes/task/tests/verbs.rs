@@ -462,6 +462,26 @@ async fn a_pause_with_words_pauses_the_task_for_the_question_it_puts_to_the_wind
 }
 
 #[tokio::test]
+async fn a_pause_with_or_without_words_names_the_tell_it_withdraws() {
+    for words in [r#"{"body":"Stop: use v2"}"#, "{}"] {
+        let scene = scene();
+        let number = working_task(&scene);
+        let (_, told) = post(
+            &scene,
+            &scene.chief,
+            &format!("{number}/tell"),
+            r#"{"body":"Use v2"}"#,
+        )
+        .await;
+        let id = told["message"]["id"].as_i64().expect("the tell's id");
+        let (status, said) = post(&scene, &scene.chief, &format!("{number}/pause"), words).await;
+        assert_eq!(status, 200, "{said}");
+        assert_eq!(said["task"]["state"], "paused", "{words}");
+        assert_eq!(said["toldWithdrawn"], json!([id]), "{words}: {said}");
+    }
+}
+
+#[tokio::test]
 async fn a_pause_with_words_is_refused_for_a_queued_or_an_open_task_and_names_the_tell() {
     let scene = scene();
     let (queued, _) = queued_task(&scene);

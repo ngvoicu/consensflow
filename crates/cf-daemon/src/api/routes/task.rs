@@ -311,7 +311,7 @@ fn tell(
         words.unwrap_or_default(),
     )?;
     (context.kick)();
-    told_back(context, caller, number, &told)
+    told_back(context, caller, number, &told, &[])
 }
 
 /// `cf task pause T-n "…"`: stop the task and put the words to its window as a question. The
@@ -341,6 +341,7 @@ fn pause_with_words(
         ));
     }
     let window = reaching(&telling)?;
+    let waiting = told_waiting(context, caller, number)?;
     let behind_words = context
         .ledger
         .borrow()
@@ -367,7 +368,8 @@ fn pause_with_words(
         )?
     };
     (context.kick)();
-    told_back(context, caller, number, &told)
+    let withdrawn = withdrawn_by_pause(context, &waiting)?;
+    told_back(context, caller, number, &told, &withdrawn)
 }
 
 /// The task as the tell reads it: as it is now, where a tell reaches it, else as it was read
@@ -414,6 +416,7 @@ fn told_back(
     caller: &Caller,
     number: i64,
     told: &MessageView,
+    withdrawn: &[i64],
 ) -> Result<Answer, Failure> {
     let now = context
         .ledger
@@ -425,7 +428,37 @@ fn told_back(
     let mut answer = Map::new();
     answer.insert("message".to_owned(), value(&MessageSummary::from(told))?);
     answer.insert("task".to_owned(), value(&TaskSummary::from(&now.task))?);
+    if !withdrawn.is_empty() {
+        answer.insert("toldWithdrawn".to_owned(), json!(withdrawn));
+    }
     Ok(Answer::ok(Value::Object(answer)))
+}
+
+/// The words told to T-`number`'s window at work that have not gone in, before a pause takes
+/// back what the chief wrote for it.
+fn told_waiting(context: &Context, caller: &Caller, number: i64) -> Result<Vec<i64>, Failure> {
+    Ok(context
+        .ledger
+        .borrow()
+        .told_waiting_at_work(caller.project.id, number)?
+        .iter()
+        .map(|told| told.id)
+        .collect())
+}
+
+/// Which of the messages `before` the pause withdrew: the reply and the chief's `cf` name each.
+fn withdrawn_by_pause(context: &Context, before: &[i64]) -> Result<Vec<i64>, Failure> {
+    let ledger = context.ledger.borrow();
+    let mut withdrawn = Vec::new();
+    for &id in before {
+        if ledger
+            .message(id)?
+            .is_some_and(|message| message.state == "cancelled")
+        {
+            withdrawn.push(id);
+        }
+    }
+    Ok(withdrawn)
 }
 
 /// `POST /api/tasks/<n>/finish`: what the worker of a working task said last is its result,
@@ -494,6 +527,7 @@ fn moved(
     let mut ledger = context.ledger.borrow_mut();
     let mut dropped = Vec::new();
     let mut running = (0, 0);
+    let mut told_before: Vec<i64> = Vec::new();
     let moved = match action {
         TaskAction::Accept => {
             // Read before the accept, whose close of the window ends what it still runs.
@@ -535,6 +569,11 @@ fn moved(
                 .and_then(|assignee| (context.held)(assignee.id))
                 .filter(|held| held.0 == number)
                 .map_or((0, 0), |held| (held.1 as i64, held.2 as i64));
+            told_before = ledger
+                .told_waiting_at_work(project, number)?
+                .iter()
+                .map(|told| told.id)
+                .collect();
             ledger.pause_task(project, number, Some(by), None)?
         }
         TaskAction::Resume => ledger.resume_task(project, number, Some(by), words)?.task,
@@ -551,8 +590,12 @@ fn moved(
     };
     drop(ledger);
     (context.kick)();
+    let withdrawn = withdrawn_by_pause(context, &told_before)?;
     let mut answer = Map::new();
     answer.insert("task".to_owned(), value(&TaskSummary::from(&moved))?);
+    if !withdrawn.is_empty() {
+        answer.insert("toldWithdrawn".to_owned(), json!(withdrawn));
+    }
     if !dropped.is_empty() {
         answer.insert("dropped".to_owned(), json!(dropped));
     }

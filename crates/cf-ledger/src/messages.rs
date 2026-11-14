@@ -85,8 +85,8 @@ pub(crate) use roles::{note_role, role_notes_to, role_of_note};
 pub(crate) use taken_back::take_back;
 pub(crate) use told::{
     drop_queued_but_told, kept_through_leaving, launch_called_off, notes_waiting,
-    notes_waiting_for_finish, sent_at_work_of, tell_queued, told_unreceived, withdraw_at_work,
-    Dropped,
+    notes_waiting_for_finish, sent_at_work_of, tell_queued, told_unreceived, waiting_at_work,
+    withdraw_at_work, Dropped,
 };
 pub use told::{is_told, sent_at_work, told_at_work, waiting_for_the_reopen};
 

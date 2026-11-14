@@ -122,3 +122,23 @@ replace = """        let Some(rest) = rest else {
 file = "crates/cf-engine/src/dispatcher.rs"
 find = "        let idle = free && !drawing;"
 replace = "        let idle = !drawing;"
+
+[[plant]]
+name = "tell at work: Finish withdraws the words kept for a paused task no more, and is refused for them for good"
+meant = "finish_withdraws_a_tell_kept_for_a_paused_task_as_it_does_for_one_at_work"
+runs = ["engine-tell-at-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if let (true, Some(assignee)) = (finished_by_word, task.assignee_id) {\n            withdrawn = withdraw_at_work"
+replace = "        if let (true, Some(assignee), \"working\" | \"waiting\") =\n            (finished_by_word, task.assignee_id, task.state.as_str())\n        {\n            withdrawn = withdraw_at_work"
+
+[[plant]]
+name = "tell at work: a pause withdraws the tell and the reply does not name it"
+meant = "a_pause_with_or_without_words_names_the_tell_it_withdraws"
+runs = ["daemon-routes-task-tell"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "    if !withdrawn.is_empty() {\n        answer.insert(\"toldWithdrawn\".to_owned(), json!(withdrawn));\n    }\n    if !dropped.is_empty() {"
+replace = "    if !dropped.is_empty() {"

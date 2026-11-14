@@ -164,9 +164,7 @@ fn record_counted(
         // The chief's Finish takes the result as it stands: the words told to the window at
         // work that have not gone in are withdrawn, and the reply says which.
         let mut withdrawn = Vec::new();
-        if let (true, Some(assignee), "working" | "waiting") =
-            (finished_by_word, task.assignee_id, task.state.as_str())
-        {
+        if let (true, Some(assignee)) = (finished_by_word, task.assignee_id) {
             withdrawn = withdraw_at_work(store, &task, assignee)?;
         }
         if let Some(assignee) = task.assignee_id {
