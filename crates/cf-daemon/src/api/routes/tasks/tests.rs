@@ -1365,3 +1365,31 @@ async fn stc_accept_moves_several_done_tasks_together() {
         );
     }
 }
+
+#[tokio::test]
+async fn stc_a_key_refuses_a_changed_source_even_when_the_sections_are_the_same() {
+    let scene = scene();
+    let mut plan = stc_plan();
+    plan["key"] = json!("source-boundaries");
+    plan["source"] = json!("plan-without-blank-boundaries");
+    let first = stc_post(&scene, &plan).await;
+    assert_eq!(first.0, 201, "{}", first.1);
+    let repeated = stc_post(&scene, &plan).await;
+    assert_eq!(repeated.0, 200, "{}", repeated.1);
+    assert_eq!(repeated.1["tasks"], first.1["tasks"]);
+    plan["source"] = json!("plan-with-blank-boundaries");
+    let different = stc_post(&scene, &plan).await;
+    assert_eq!(different.0, 409, "{}", different.1);
+    assert_eq!(different.1["error"], "key-used");
+    assert_eq!(
+        scene
+            .context
+            .ledger
+            .borrow()
+            .board(scene.project.id)
+            .unwrap()
+            .open
+            .len(),
+        3
+    );
+}

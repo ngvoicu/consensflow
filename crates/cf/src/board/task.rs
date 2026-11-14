@@ -357,17 +357,18 @@ fn add_plan(words: &Split, given: &[OsString], board: &Board) -> Result<Said, Fa
         ));
     }
     let mut output = Vec::new();
+    let gated = js::truthy(answer.value().get("gated"));
     for (task, section) in tasks.iter().zip(&sections) {
         let name = section["name"].as_str().unwrap_or_default();
         let number = js::text(task.get("task").and_then(|task| task.get("number")));
         let brief = section["body"].as_str().unwrap_or_default();
-        output.push(format!(
-            "{name} → T-{number}\n{}",
-            brief::sent(&number, brief)
-        ));
-    }
-    if js::truthy(answer.value().get("gated")) {
-        output.push("The human approves each message before it moves.".into());
+        output.push(format!("{name} → T-{number}"));
+        if gated && !js::truthy(section.get("self")) {
+            output.push(format!(
+                "T-{number}: The human approves each message before it moves."
+            ));
+        }
+        output.push(brief::sent(&number, brief));
     }
     Ok(Said::new(answer.into_value(), output.join("\n")))
 }
@@ -463,7 +464,23 @@ fn header_words(line: &str) -> Result<Vec<String>, &'static str> {
     Ok(words)
 }
 
+/// Boundary blank lines separate sections; the lines inside the brief stay as written.
+fn plan_brief(brief: &str) -> &str {
+    let mut offset = 0;
+    let mut first = None;
+    let mut last = 0;
+    for line in brief.split_inclusive('\n') {
+        if !line.trim().is_empty() {
+            first.get_or_insert(offset);
+            last = offset + line.len();
+        }
+        offset += line.len();
+    }
+    &brief[first.unwrap_or(0)..last]
+}
+
 fn plan_section(name: &str, flags: &[String], brief: &str) -> Result<Value, Failure> {
+    let brief = plan_brief(brief);
     let switches = add_switches();
     let words = split(
         flags,
@@ -1511,6 +1528,145 @@ and 2 idle sessions (`cf task list --all`)";
             "review → T-3\nT-3: sent 19 characters, ending \"Review the result.\"."
         )
         );
+    }
+
+    #[test]
+    fn stc_review_approval_is_reported_only_for_each_non_self_section() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("plan.md");
+        let answer = json!({"gated": true, "tasks": [
+            {"name":"first", "task":{"number":1}},
+            {"name":"second", "task":{"number":2}}
+        ]});
+        let cases = [
+            (
+                "=== first --tier standard\nWork\n=== second --self --needs first\nOwn\n",
+                concat!(
+                    "first → T-1\n",
+                    "T-1: The human approves each message before it moves.\n",
+                    "T-1: sent 5 characters, ending \"Work\".\n",
+                    "second → T-2\nT-2: sent 4 characters, ending \"Own\"."
+                ),
+            ),
+            (
+                "=== first --tier standard\nWork\n=== second --tier light\nOwn\n",
+                concat!(
+                    "first → T-1\n",
+                    "T-1: The human approves each message before it moves.\n",
+                    "T-1: sent 5 characters, ending \"Work\".\n",
+                    "second → T-2\n",
+                    "T-2: The human approves each message before it moves.\n",
+                    "T-2: sent 4 characters, ending \"Own\"."
+                ),
+            ),
+            (
+                "=== first --self --needs T-3\nWork\n=== second --self --needs first\nOwn\n",
+                concat!(
+                    "first → T-1\nT-1: sent 5 characters, ending \"Work\".\n",
+                    "second → T-2\nT-2: sent 4 characters, ending \"Own\"."
+                ),
+            ),
+        ];
+        for (plan, expected) in cases {
+            std::fs::write(&file, plan).unwrap();
+            let (_, said) = added(&["--plan", file.to_str().unwrap()], &answer);
+            assert_eq!(said, expected, "{plan}");
+        }
+        std::fs::write(
+            &file,
+            "=== first --tier standard\nWork\n=== second --tier light\nOwn\n",
+        )
+        .unwrap();
+        let mut ungated = answer;
+        ungated["gated"] = json!(false);
+        let (_, said) = added(&["--plan", file.to_str().unwrap()], &ungated);
+        assert!(!said.contains("human approves"), "{said}");
+    }
+
+    #[test]
+    fn stc_review_blank_boundaries_are_not_brief_lines() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("draft brief.md");
+        std::fs::write(&file, "File brief\n").unwrap();
+        for ending in ["\n", "\r\n"] {
+            let plan = format!(
+                "{ending}  {ending}=== draft --tier standard --file \"{}\"{ending}{ending} \t{ending}\
+                 === next --tier standard{ending}{ending}First{ending}{ending}  Second  {ending}{ending}\
+                 === last --tier standard --file \"{}\"{ending}{ending} \t{ending}",
+                file.display(), file.display()
+            );
+            let sections = parse_plan(&plan).unwrap();
+            assert_eq!(sections[0]["body"], "File brief");
+            assert_eq!(
+                sections[1]["body"],
+                format!("First{ending}{ending}  Second  {ending}")
+            );
+            assert_eq!(sections[2]["body"], "File brief");
+
+            let mixed = format!(
+                "=== draft --tier standard --file \"{}\"{ending}{ending}Real words{ending}{ending}",
+                file.display()
+            );
+            let error = parse_plan(&mixed).unwrap_err();
+            assert!(format!("{error:?}").contains("section draft"));
+        }
+    }
+
+    #[test]
+    fn stc_plan_fingerprint_keeps_the_source_even_when_blank_boundaries_are_not_brief() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("plan.md");
+        let answer = json!({"tasks": [{"name":"first", "task":{"number":1}}]});
+        std::fs::write(&file, "=== first --tier standard\nFirst\n").unwrap();
+        let (plain, _) = added(
+            &["--plan", file.to_str().unwrap(), "--key", "same"],
+            &answer,
+        );
+        std::fs::write(&file, "\n=== first --tier standard\n\nFirst\n\n").unwrap();
+        let (spaced, _) = added(
+            &["--plan", file.to_str().unwrap(), "--key", "same"],
+            &answer,
+        );
+        let plain = plain.unwrap();
+        let spaced = spaced.unwrap();
+        assert_eq!(plain["plan"], spaced["plan"]);
+        assert_eq!(plain["plan"][0]["body"], "First\n");
+        assert_ne!(plain["source"], spaced["source"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn stc_windows_section_file_paths_resolve_as_windows_paths() {
+        use std::path::{Component, Path, Prefix};
+
+        let cwd = std::env::current_dir().unwrap();
+        let drive = match cwd.components().next() {
+            Some(Component::Prefix(prefix)) => match prefix.kind() {
+                Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => drive as char,
+                other => panic!("test needs a drive current directory, got {other:?}"),
+            },
+            other => panic!("test needs a drive current directory, got {other:?}"),
+        };
+        let relative = format!("{drive}:relative folder\\brief.md");
+        let words = header_words(&format!("draft --file \"{relative}\"")).unwrap();
+        assert_eq!(words[2], relative);
+        let path = Path::new(&words[2]);
+        assert!(!path.is_absolute());
+        assert_eq!(
+            std::path::absolute(path).unwrap(),
+            std::path::absolute(cwd.join("relative folder").join("brief.md")).unwrap()
+        );
+
+        let unc = r"\\server\share\folder name\brief.md";
+        let words = header_words(&format!("draft --file \"{unc}\"")).unwrap();
+        assert_eq!(words[2], unc);
+        let path = Path::new(&words[2]);
+        assert!(path.is_absolute());
+        assert!(matches!(
+            path.components().next(),
+            Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::UNC(_, _))
+        ));
+        assert_eq!(std::path::absolute(path).unwrap(), path);
     }
 
     #[test]
