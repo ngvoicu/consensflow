@@ -223,7 +223,7 @@ runs = ["rest-rig-detached-job"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/process/pid.rs"
-find = "        .limit(STARTED_LIMIT)"
+find = "        .limit(super::POWERSHELL_LIMIT)"
 replace = "        .limit(std::time::Duration::from_millis(1))"
 
 # --- the page's bound (state-list-grows-toward-frame-cap) ---
