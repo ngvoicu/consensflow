@@ -114,6 +114,7 @@ const task = (number, title, state, requester, assignee, minutesAgo = 3, extra =
   deletedAt: null,
   createdAt: at(minutesAgo + 1),
   updatedAt: at(minutesAgo),
+  stateSince: at(minutesAgo),
   ...extra,
 })
 /** A message of a task's thread as the daemon reads it: delivered, sent `minutesAgo`. */
@@ -1051,6 +1052,159 @@ async function pickDesigner(dialog) {
   const add = dialog.locator('.staff-add')
   await add.locator('[name="role"]').selectOption('designer')
   await expect(add.locator('[name="memberHarness"]')).toHaveValue('codex')
+}
+
+test('card state clocks follow the ledger time, tick, and reset only on a move', async ({
+  page,
+}) => {
+  const now = Date.parse('2026-11-14T12:00:00.000Z')
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  chief.tasks = [
+    task(41, 'Queued', 'queued', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 45_000).toISOString(),
+    }),
+    task(42, 'Working', 'working', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 12 * 60_000).toISOString(),
+    }),
+    task(43, 'Waiting', 'waiting', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 185 * 60_000).toISOString(),
+    }),
+    task(44, 'Done', 'done', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 52 * 3_600_000).toISOString(),
+    }),
+    task(45, 'Accepted', 'accepted', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 59_000).toISOString(),
+    }),
+    task(46, 'Paused', 'paused', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 8 * 60_000).toISOString(),
+    }),
+    task(47, 'Failed', 'failed', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 5_000).toISOString(),
+    }),
+    task(48, 'Cancelled', 'cancelled', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 6_000).toISOString(),
+    }),
+  ]
+  data.boards[1].open.push(
+    task(49, 'Open', 'open', 'chief', null, 0, { stateSince: new Date(now - 7_000).toISOString() }),
+  )
+  await page.clock.install({ time: now })
+  await open(page, data)
+  const timer = (n) => page.locator(`button.card[data-task="${n}"] .card-age`)
+  await expect(timer(41)).toHaveText('45s')
+  await expect(page.locator('button.card[data-task="41"]')).toHaveAccessibleDescription(
+    'Queued for 45s',
+  )
+  await expect(timer(42)).toHaveText('12m')
+  await expect(timer(43)).toHaveText('3h 05m')
+  await expect(timer(44)).toHaveText('2d 4h')
+  await expect(timer(45)).toHaveText('59s')
+  for (const [number, age] of [
+    [46, '8m'],
+    [47, '5s'],
+    [48, '6s'],
+    [49, '7s'],
+  ]) {
+    await expect(timer(number)).toHaveText(age)
+    await expect(timer(number)).toBeVisible()
+  }
+  await page.reload()
+  await expect(timer(41)).toHaveText('45s')
+  await page.clock.fastForward(1_000)
+  await expect(timer(41)).toHaveText('46s')
+  await expect(page.locator('button.card[data-task="41"]')).toHaveAccessibleDescription(
+    'Queued for 46s',
+  )
+  await expect(timer(45)).toHaveText('1m')
+  await page.evaluate(() => {
+    const task = window.__model.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+      .tasks[0]
+    task.title = 'Edited'
+    task.updatedAt = new Date().toISOString()
+    window.__listeners.get('state-changed')()
+  })
+  await expect(page.locator('button.card[data-task="41"] .card-title')).toHaveText('Edited')
+  await expect(timer(41)).toHaveText('46s')
+  await page.evaluate(() => {
+    const task = window.__model.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+      .tasks[0]
+    task.state = 'working'
+    task.stateSince = new Date().toISOString()
+    window.__listeners.get('state-changed')()
+  })
+  await expect(timer(41)).toHaveText('0s')
+  await page.clock.fastForward(60_000)
+  await expect(timer(41)).toHaveText('1m')
+  await expect(timer(42)).toHaveText('13m')
+  await expect(timer(43)).toHaveText('3h 06m')
+})
+
+for (const [seconds, before, after] of [
+  [9, '9s', '10s'],
+  [59, '59s', '1m'],
+  [599, '9m', '10m'],
+  [3599, '59m', '1h 00m'],
+  [86399, '23h 59m', '1d 0h'],
+]) {
+  test(`a card clock does not move the card below at ${before} to ${after}`, async ({ page }) => {
+    const now = Date.parse('2026-11-14T12:00:00.000Z')
+    const data = model()
+    const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+    chief.tasks = [
+      task(42, 'First', 'queued', 'chief', 'chief', 0, {
+        stateSince: new Date(now - seconds * 1_000).toISOString(),
+      }),
+      task(41, 'Second', 'queued', 'chief', 'chief', 0, {
+        stateSince: new Date(now - 20_000).toISOString(),
+      }),
+    ]
+    await page.clock.install({ time: now })
+    await open(page, data)
+    const card = page.locator('button.card[data-task="42"]')
+    const below = page.locator('button.card[data-task="41"]')
+    const timer = card.locator('.card-age')
+    await expect(timer).toHaveText(before)
+
+    // In the narrow card layout, use a width between the two unwrapped status
+    // strings. Before the fix, exactly one fits and the tick changes the height.
+    await card
+      .locator('..')
+      .locator('..')
+      .evaluate(
+        (list, [oldAge, newAge]) => {
+          const status = list.querySelector('.card-status')
+          const canvas = document.createElement('canvas')
+          const context = canvas.getContext('2d')
+          context.font = getComputedStyle(status).font
+          const oldWidth = context.measureText(`Queued · ${oldAge}`).width
+          const newWidth = context.measureText(`Queued · ${newAge}`).width
+          // 6px padding on each side plus the card's two 1px borders.
+          list.style.width = `${(oldWidth + newWidth) / 2 + 14}px`
+        },
+        [before, after],
+      )
+    const measure = async () => ({
+      height: (await card.boundingBox()).height,
+      belowTop: (await below.boundingBox()).y,
+    })
+    const ageIsVisible = () =>
+      timer.evaluate((age) => {
+        const range = document.createRange()
+        range.selectNodeContents(age)
+        const text = range.getBoundingClientRect()
+        const card = age.closest('.card').getBoundingClientRect()
+        return text.left >= card.left && text.right <= card.right
+      })
+    const first = await measure()
+    expect(await ageIsVisible(), 'the initial time fits in the card').toBe(true)
+    await page.clock.fastForward(1_000)
+    await expect(timer).toHaveText(after)
+    const second = await measure()
+    expect(await ageIsVisible(), 'the new time fits in the card').toBe(true)
+    expect.soft(second.height, 'the ticking card keeps its height').toBe(first.height)
+    expect.soft(second.belowTop, 'the card below stays in place').toBe(first.belowTop)
+  })
 }
 
 test('draws the kanban: a row per participant, a column per state, and cards that stay when done', async ({

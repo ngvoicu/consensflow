@@ -469,7 +469,7 @@ tr[data-session] .row-name { font-weight: 500; }
   width: 100%;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  grid-template-areas: "number title" "number route" "number result";
+  grid-template-areas: "number title" "number route" "number status" "number result";
   column-gap: 10px;
   row-gap: 2px;
   padding: 0 10px 0 0;
@@ -504,7 +504,10 @@ tr[data-session] .row-name { font-weight: 500; }
 .card-route { grid-area: route; font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 /* What a task that goes on in the background waits on, on its card. */
 .card-held { color: var(--amber); font-weight: 600; }
-.card-state { display: none; }
+.card-status { grid-area: status; padding-bottom: 6px; font: 11px var(--mono); color: var(--foam); }
+/* The longest duration representable by Date fits, without ticks changing wrapping. */
+.card-age { display: inline-block; width: 14ch; max-width: 100%; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.card:has(.card-result) .card-status { padding-bottom: 0; }
 .card-result {
   grid-area: result;
   padding-bottom: 6px;
@@ -514,11 +517,9 @@ tr[data-session] .row-name { font-weight: 500; }
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.card:not(:has(.card-result)) .card-route { padding-bottom: 6px; }
 .card[data-state="working"] { --state: var(--seafoam); --state-ink: var(--ink); }
 .card[data-state="waiting"] { --state: var(--amber); --state-ink: var(--ink); }
 .card[data-state="paused"] { --state: var(--slate); opacity: .7; }
-.card[data-state="paused"] .card-state { display: block; grid-area: route; }
 .card[data-state="paused"] .card-route { display: none; }
 .card[data-state="done"] { --state: var(--foam); --state-ink: var(--ink); }
 .card[data-state="failed"] { --state: var(--buoy); --state-ink: var(--ink); }
@@ -527,9 +528,9 @@ tr[data-session] .row-name { font-weight: 500; }
 /* A column too narrow for the number beside the title: the number heads
    the card, and the title has the card's whole width. */
 @container (max-width: 150px) {
-  .card { grid-template-columns: minmax(0, 1fr); grid-template-areas: "number" "title" "route" "result"; padding: 0; }
+  .card { grid-template-columns: minmax(0, 1fr); grid-template-areas: "number" "title" "route" "status" "result"; padding: 0; }
   .card-number { padding: 3px 6px; }
-  .card-title, .card-route, .card-result { padding-left: 6px; padding-right: 6px; }
+  .card-title, .card-route, .card-status, .card-result { padding-left: 6px; padding-right: 6px; }
   .card-title { padding-top: 4px; -webkit-line-clamp: 4; }
 }
 

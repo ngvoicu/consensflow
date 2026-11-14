@@ -1118,6 +1118,7 @@ fn answer(ledger: &mut Ledger, call: &Value) -> Result<Value, String> {
     };
     let mut answered = answered.unwrap_or_else(|error| failure(&error));
     hold_apart_the_new_hold_kind(method, &mut answered);
+    hold_apart_the_new_card_clock(method, &mut answered);
     Ok(answered)
 }
 
@@ -1148,6 +1149,42 @@ fn hold_apart_the_new_hold_kind(method: &str, answer: &mut Value) {
         }
         _ => {}
     }
+}
+
+/// Node's recordings predate the board card's state clock. Compare every other
+/// field as recorded; the clock itself is checked against the ledger's events.
+fn hold_apart_the_new_card_clock(method: &str, answer: &mut Value) {
+    if method != "board" {
+        return;
+    }
+    let cards = |value: Option<&mut Value>| {
+        if let Some(cards) = value.and_then(Value::as_array_mut) {
+            for card in cards {
+                if let Some(card) = card.as_object_mut() {
+                    card.remove("stateSince");
+                }
+            }
+        }
+    };
+    cards(answer.get_mut("open"));
+    if let Some(lanes) = answer.get_mut("lanes").and_then(Value::as_array_mut) {
+        for lane in lanes {
+            cards(lane.get_mut("tasks"));
+        }
+    }
+}
+
+#[test]
+fn only_the_new_card_clock_is_held_apart_from_nodes_board() {
+    let mut board = json!({"stateSince": "keep", "open": [{"stateSince": "drop", "title": "open"}], "lanes": [{"participant": {"stateSince": "keep"}, "tasks": [{"stateSince": "drop", "title": "done"}]}]});
+    let original = board.clone();
+    hold_apart_the_new_card_clock("task", &mut board);
+    assert_eq!(board, original);
+    hold_apart_the_new_card_clock("board", &mut board);
+    assert_eq!(
+        board,
+        json!({"stateSince": "keep", "open": [{"title": "open"}], "lanes": [{"participant": {"stateSince": "keep"}, "tasks": [{"title": "done"}]}]})
+    );
 }
 
 /// Why a trace that has Node's ledger follow its members' tiers departs at that call.
