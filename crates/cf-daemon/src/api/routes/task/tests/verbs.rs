@@ -56,7 +56,11 @@ async fn own_hands_leaves_existing_tasks_and_answers_in_their_ordinary_flow() {
             told = Some(said["message"]["id"].clone());
         }
         if verb == "pause" {
-            assert_eq!(said["toldWithdrawn"], json!([told.take().unwrap()]), "{said}");
+            assert_eq!(
+                said["toldWithdrawn"],
+                json!([told.take().unwrap()]),
+                "{said}"
+            );
         }
     }
     let (status, said) = post(&scene, &scene.chief, &format!("{working}/cancel"), "{}").await;
