@@ -25,7 +25,7 @@ cf inside a ConsensFlow window: the board's commands.
                                     keeps its context; only when that context matters;
                                     until T-3 and the window's done tasks are accepted it waits
   cf task add --self --needs T-3 "…" your own later step: its brief comes back to you when T-3 is accepted
-  cf task add --plan plan.md [--key word]  all or none; retry the same key; each === name flags is followed by its brief
+  cf task add --plan plan.md [--key word]  all or none; retry the same key; each === name flags is followed by its brief (or --file)
   … --needs T-3,T-4 · … --before T-9,T-10  this task waits for T-3,T-4; T-9,T-10 wait for it; in a plan, names work too
   cf task list [--all]              the board: what waits for a member, then the lanes
                                     with a task to look at; --all adds the idle sessions

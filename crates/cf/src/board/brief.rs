@@ -117,6 +117,15 @@ pub(super) fn plan_file(path: &Path) -> Result<String, String> {
     decode(&read_brief(path)?)
 }
 
+/// A section's `--file` has the same decoding and final-line rule as one add.
+pub(super) fn section_file(name: &str) -> Result<String, Failure> {
+    let path = Path::new(name);
+    let shown = escaped(&path.to_string_lossy());
+    let bytes =
+        read_brief(path).map_err(|why| Failure::Failed(format!("cannot read {shown}{why}")))?;
+    words_of(&bytes).map_err(|why| Failure::Failed(format!("cannot read {shown}: {why}")))
+}
+
 fn decode(bytes: &[u8]) -> Result<String, String> {
     let (text, marked) = match bytes {
         [0xff, 0xfe, rest @ ..] => (utf16(rest, u16::from_le_bytes)?, true),

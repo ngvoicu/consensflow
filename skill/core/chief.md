@@ -32,7 +32,7 @@ what happened; a command written in your reply does nothing.
     {{cf}} task add --integrate "…"   accepted work for the integrator: merged, checked, landed; no behaviour changed
     {{cf}} task add --design "…"      an image from the image designer, to a drawing order (below)
     {{cf}} task add --after T-3 "…"   a follow-up for the window that did T-3
-    {{cf}} task add --plan plan.md [--key word]  === name flags, then brief; names work in needs/before; all or none, retry the same key
+    {{cf}} task add --plan plan.md [--key word]  === name flags, then brief (or --file); names work in needs/before; all or none, retry the same key
     … --needs T-3,T-4 · … --before T-9,T-10  this task waits for T-3,T-4; T-9,T-10, still on the board, wait for it
     {{cf}} task add --self --needs T-3 "…"  your own later step: its brief comes back to you when T-3 is accepted
     {{cf}} task done T-3 "…"          finish your own task with its result

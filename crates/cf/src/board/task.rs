@@ -380,9 +380,12 @@ fn parse_plan(source: &str) -> Result<Vec<Value>, Failure> {
         let header = line.strip_suffix('\n').unwrap_or(line);
         let header = header.strip_suffix('\r').unwrap_or(header);
         if header == "===" || header.starts_with("=== ") || header.starts_with("===\t") {
-            let mut words = header[3..].split_whitespace();
-            let name = words
-                .next()
+            let words = header_words(&header[3..]).map_err(|message| {
+                let name = header[3..].split_whitespace().next().unwrap_or("(unnamed)");
+                Failure::Usage(format!("section {name}: {message}"))
+            })?;
+            let (name, flags) = words
+                .split_first()
                 .ok_or_else(|| Failure::Usage("section (unnamed): give it a name".into()))?;
             if name.chars().any(|c| {
                 c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
@@ -396,11 +399,7 @@ fn parse_plan(source: &str) -> Result<Vec<Value>, Failure> {
                     "section {name}: a name cannot be a task number"
                 )));
             }
-            sections.push((
-                name.to_owned(),
-                words.map(str::to_owned).collect(),
-                String::new(),
-            ));
+            sections.push((name.to_owned(), flags.to_vec(), String::new()));
         } else if let Some((_, _, brief)) = sections.last_mut() {
             brief.push_str(line);
         } else if !line.trim().is_empty() {
@@ -423,6 +422,47 @@ fn parse_plan(source: &str) -> Result<Vec<Value>, Failure> {
         .collect()
 }
 
+/// Split a section line into flag words, allowing a quoted path with spaces.
+/// Backslashes remain path characters except before the closing quote itself.
+fn header_words(line: &str) -> Result<Vec<String>, &'static str> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quote = None;
+    let mut active = false;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match quote {
+            Some(mark) if c == mark => quote = None,
+            Some(mark) if c == '\\' && chars.peek() == Some(&mark) => {
+                word.push(mark);
+                chars.next();
+            }
+            Some(_) => word.push(c),
+            None if c == '\'' || c == '"' => {
+                quote = Some(c);
+                active = true;
+            }
+            None if c.is_whitespace() => {
+                if active {
+                    words.push(std::mem::take(&mut word));
+                    active = false;
+                }
+            }
+            None => {
+                word.push(c);
+                active = true;
+            }
+        }
+    }
+    if quote.is_some() {
+        return Err("a quoted flag value is not closed");
+    }
+    if active {
+        words.push(word);
+    }
+    Ok(words)
+}
+
 fn plan_section(name: &str, flags: &[String], brief: &str) -> Result<Value, Failure> {
     let switches = add_switches();
     let words = split(
@@ -435,11 +475,7 @@ fn plan_section(name: &str, flags: &[String], brief: &str) -> Result<Value, Fail
     if let Some(flag) = words.stray_flag() {
         return Err(Failure::Usage(format!("unknown flag {}", quoted(flag))));
     }
-    if !words.text.is_empty()
-        || words.given("--plan")
-        || words.given("--key")
-        || words.given(brief::FILE)
-    {
+    if !words.text.is_empty() || words.given("--plan") || words.given("--key") {
         return Err(Failure::Usage(
             "put only task flags on the section line and the brief below it".into(),
         ));
@@ -492,7 +528,19 @@ fn plan_section(name: &str, flags: &[String], brief: &str) -> Result<Value, Fail
     if tier.is_none() && after.is_none() && !mine && !untiered && switched.len() < 2 {
         return Err(Failure::Usage(ADD_USAGE.into()));
     }
-    require_text(brief.to_owned(), ADD_USAGE)?;
+    let text = if words.given(brief::FILE) {
+        let file = words
+            .value(brief::FILE)?
+            .filter(|file| !file.is_empty())
+            .ok_or_else(|| Failure::Usage("--file takes the file to read the words from".into()))?;
+        if !brief.is_empty() {
+            return Err(Failure::Usage("give the brief or --file, not both".into()));
+        }
+        brief::section_file(file)?
+    } else {
+        brief.to_owned()
+    };
+    let text = require_text(text, ADD_USAGE)?;
     let mut body = Map::new();
     body.insert("name".into(), name.into());
     let sends_tier = !(mine || after.is_some()) || untiered;
@@ -516,7 +564,7 @@ fn plan_section(name: &str, flags: &[String], brief: &str) -> Result<Value, Fail
     if !before.is_empty() {
         body.insert("before".into(), json!(before));
     }
-    body.insert("body".into(), brief.into());
+    body.insert("body".into(), text.into());
     Ok(Value::Object(body))
 }
 
@@ -1476,6 +1524,30 @@ and 2 idle sessions (`cf task list --all`)";
         assert_eq!(sections[2]["body"], "Third\n");
         let error = parse_plan("=== next --after first\nNo\n").unwrap_err();
         assert!(format!("{error:?}").contains("section next"));
+    }
+
+    #[test]
+    fn stc_a_section_can_take_its_brief_from_a_file_with_spaces() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("brief with spaces.md");
+        std::fs::write(&path, "A brief\n").unwrap();
+        let header = format!("=== first --tier standard --file \"{}\"\n", path.display());
+        let sections = parse_plan(&header).unwrap();
+        assert_eq!(sections[0]["body"], "A brief");
+        let with_inline = format!("{header}Also inline\n");
+        let refused = parse_plan(&with_inline).unwrap_err();
+        assert!(format!("{refused:?}").contains("section first"));
+        let duplicate = format!(
+            "=== first --tier standard --file \"{}\" --file \"{}\"\n",
+            path.display(),
+            path.display()
+        );
+        assert!(parse_plan(&duplicate).is_err());
+        assert_eq!(
+            header_words(r#"first --file "C:\My Files\brief.md""#).unwrap(),
+            ["first", "--file", r"C:\My Files\brief.md"]
+        );
+        assert!(header_words("first --file \"unfinished").is_err());
     }
 
     /// What `cf task add words…` posted and printed, the board answering with `answer`.
