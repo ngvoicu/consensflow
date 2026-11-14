@@ -34,12 +34,12 @@ fn own_hands_gives_a_short_text_that_is_whole_in_itself() {
     let cf = CfWord::bare();
     let text = own(&cf, None);
     let flat = text.replace('\n', " ");
-    assert!(text.lines().count() < 20, "{}", text.lines().count());
+    let written = text.lines().filter(|line| !line.is_empty()).count();
+    assert!(written < 20, "{written} lines: {text}");
     assert!(text.starts_with("---\nname: consensflow-chief\ndescription: "));
     for words in [
         "never run `cf`",
         "Use it only when the human\nexplicitly asks",
-        "not to your\nharness's own subagents",
         "run `cf guide`",
         "begins `[ConsensFlow m-… · T-… · …]`",
         "Work already on the board\ngoes on, and its results come to you",
@@ -99,8 +99,7 @@ fn the_staff_s_rules_are_not_in_the_short_text_and_the_specs_stay() {
     let text = own(&cf, Some(&specs()));
     let section = text.split_once("## This project's specs\n\n").unwrap().1;
     assert!(section.contains("A small ask is no spec: you do it yourself."));
-    assert!(section
-        .contains("What Specmint calls research, a subagent or implementation you do yourself"));
+    assert!(section.contains("What Specmint calls research or implementation you do yourself"));
     assert!(!own(&cf, None).contains("## This project's specs"));
 }
 

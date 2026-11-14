@@ -31,12 +31,10 @@ your file tool and pass it with `--file brief.md` instead: a shell can cut a lon
 about 8.1k characters (the field report of 2026-10-15, B6). Changed by hand, in those
 words alone, on 2026-10-16.
 
-The same twelve rows end the chief's opening with "you never type into another window or launch
-agents to do the work" (`skill/core/chief.md`), where Node's said "or launch agents": the chief's
-own rule about its harness's subagents allows them for searching and reading, which the opening
-forbade (the review T-1447 of T-1435, finding 3); the sentence before it lost "here" ("the work
-the human gives you is yours to plan"), which "here in your terminal" below it says, to pay for the
-words. Changed by hand, in those words alone.
+The same twelve rows end the chief's opening with "you never type into another window, and
+ConsensFlow, not you, starts the staff" (`skill/core/chief.md`), where Node's said "or launch agents to do
+the work": no text of ours speaks of a harness's own subagents (the owner's rule of 2026-11-14).
+Changed by hand, in those words alone.
 
 The members' text (worker, advisor, reviewer and image designer), in each of the 27
 `roleInstructions` rows that hold it, has one sentence Node's did not, the last but one of
@@ -291,5 +289,5 @@ one with a member in mind." (T-1513, changed by hand on 2026-11-12 with the file
 taken the ban out to pay for the four roles' words, and what was left of it no longer banned a
 brief written for one member (review T-1510). The same task has `cf inbox read` print a role
 past the bound a role is read whole at in parts (`cf_base::role_read::role_parts`): it prints in
-one piece to 141 rows with specs on (166 without), and to 5 and 30 with the most rules for the
+one piece to 144 rows with specs on (169 without), and to 8 and 33 with the most rules for the
 staff, and in parts past that, so no staff is too large to be read.

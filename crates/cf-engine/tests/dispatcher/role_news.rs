@@ -59,7 +59,7 @@ fn own_hands_switch_is_told_once_each_way_on_every_harness() {
                 "{}",
                 on[0]
             );
-            assert!(on[0].contains("only when"));
+            assert!(on[0].contains("explicit asks only"));
             assert_eq!(said_to_the_chief(&context.adapter).iter().filter(|line| line.contains("The person turned \"Do with your own hands\" on.")).count(), 1);
             rests(&context, &project);
             passes(&context);
@@ -356,12 +356,14 @@ fn the_rules_for_the_staff_are_in_a_chiefs_launch_only_while_own_hands_is_off() 
     for harness in HARNESSES {
         let context = made(FirstMessage::Delivered);
         let project = project_on(&context, harness);
+        let chief = at_rest(&context, &project);
         context
             .ledger
             .borrow_mut()
             .set_staff_rules(project.id, Some(RULES))
             .unwrap();
-        let chief = at_rest(&context, &project);
+        relaunch(&context, project.id);
+        passes(&context);
         let instructions = |context: &Context| {
             chief_launches(&context.adapter).last().unwrap()["instructions"]
                 .as_str()

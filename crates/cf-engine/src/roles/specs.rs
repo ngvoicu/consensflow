@@ -83,9 +83,9 @@ impl ProjectSpecs<'_> {
     pub(super) fn work_for(&self, own_hands: bool) -> String {
         let folder = self.folder;
         if own_hands {
-            format!("You write the spec and its registry in `{folder}` yourself. What Specmint calls research, a subagent or implementation you do yourself, unless the human explicitly asks to put that work on the board.")
+            format!("You write the spec and its registry in `{folder}` yourself. What Specmint calls research or implementation you do yourself, unless the human explicitly asks to put that work on the board.")
         } else {
-            format!("The spec is a second exception to changing nothing yourself: you write the spec and its registry in `{folder}` with your own tools, and never give that writing to the staff. Everything Specmint calls research beyond searching and reading, or implementation, goes on the board as tasks for the staff, and you do none of it yourself or in a subagent.")
+            format!("The spec is a second exception to changing nothing yourself: you write the spec and its registry in `{folder}` with your own tools, and never give that writing to the staff. Everything Specmint calls research beyond searching and reading, or implementation, goes on the board as tasks for the staff, and you do none of it yourself.")
         }
     }
 }

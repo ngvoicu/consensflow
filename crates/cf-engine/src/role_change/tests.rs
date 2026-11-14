@@ -369,23 +369,23 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     );
     assert_eq!(
         rows_while(true, None, &one),
-        141,
-        "docs: one piece to 141 rows with specs on"
+        144,
+        "docs: one piece to 144 rows with specs on"
     );
     assert_eq!(
         rows_while(false, None, &one),
-        166,
-        "docs: one piece to 166 rows without"
+        169,
+        "docs: one piece to 169 rows without"
     );
     assert_eq!(
         rows_while(true, Some(&most), &one),
-        5,
-        "docs: one piece to 5 rows with specs on and the most rules"
+        8,
+        "docs: one piece to 8 rows with specs on and the most rules"
     );
     assert_eq!(
         rows_while(false, Some(&most), &one),
-        30,
-        "docs: one piece to 30 rows without specs and the most rules"
+        33,
+        "docs: one piece to 33 rows without specs and the most rules"
     );
     let parts = |rows| {
         printed_by_cf(
@@ -400,7 +400,7 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
         .1
     };
     assert_eq!(
-        [parts(6), parts(143), parts(300)],
+        [parts(9), parts(143), parts(300)],
         [2, 2, 3],
         "docs: past one piece, 2 parts to 143 rows, 3 at 300"
     );

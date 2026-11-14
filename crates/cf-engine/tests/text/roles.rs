@@ -278,7 +278,7 @@ fn teach_the_designer_only_the_board_s_commands() {
 fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
     let shared = [
         "Run each of these in your shell (your Bash or terminal tool).",
-        "Do not hand out tasks, launch other agents or type into other windows, and\nnever read another agent's session files: the board is your only channel.",
+        "Do not hand out tasks or type into other windows, and\nnever read another agent's session files: the board is your only channel.",
         "This window is for one task: it opened with the task and closes when the task\nleaves your hands.",
         // A window the chief continues (`--after`) comes back on its own conversation: the text
         // does not tell it that nothing from an earlier task is there (T-1435).
@@ -697,11 +697,17 @@ fn never_gives_a_task_to_a_member_by_name_nor_writes_one_with_a_member_in_mind()
 }
 
 #[test]
-fn gives_the_chief_s_subagents_if_its_harness_has_them_nothing_beyond_searching_and_reading() {
-    assert!(found(
-        r"Hand your harness's subagents or task tool, if it has them, any work\s+beyond searching and reading: the board, the human and the staff never see\s+that work",
-        &instructions("chief", &[])
-    ));
+fn no_text_tells_a_chief_or_a_member_to_use_or_not_to_use_its_harness_s_subagents() {
+    for role in ["chief", "worker", "reviewer", "advisor"] {
+        let text = instructions(role, &[]);
+        assert!(
+            !found(
+                r"(?i)subagents? (or|and) task tool|harness's (own )?subagents|launch (other )?agents",
+                &text
+            ),
+            "{role}"
+        );
+    }
 }
 
 /// harness-models removed the saved agent: a member is a harness, a model it lists, an
@@ -778,7 +784,8 @@ fn keeps_the_authorization_boundary_in_the_chief_text_ships_no_harness_payload_a
     ));
     assert!(skill.contains("however small"));
     assert!(skill.contains("the human tells you to do a change yourself"));
-    assert!(skill.contains("never type into another window or launch agents"));
+    assert!(skill
+        .contains("never type into another window, and ConsensFlow, not you, starts the staff"));
     assert!(skill.contains("only the human gives you work, here in your terminal"));
     assert!(skill.contains("the human never accepts work on the board"));
     // One role text per role, read by the daemon: no host payload carries a second copy.

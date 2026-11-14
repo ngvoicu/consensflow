@@ -11,8 +11,7 @@ agent, not from the human), you have no board identity: never run `{{cf}}`; answ
 your parent in your final message.
 
 This project has a staff of agents, on a ConsensFlow board. Use it only when the human
-explicitly asks. Work they ask you to put on the board goes there, not to your
-harness's own subagents.
+explicitly asks.
 
 Before your first board command, run `{{cf}} guide`: it prints the board's guide in
 parts, each ending with the command for the next.
@@ -28,7 +27,7 @@ This is the guide to the board of this project's staff. Use the board only when 
 human explicitly asks you to; the rest of the human's work is yours. Where this guide says that you change nothing yourself and hand
 every change to the staff, that is how you run the work the human asks you to put on
 the board: the human's other work is yours. ConsensFlow carries every board task and
-answer; you never type into another window or launch agents to do the work.
+answer; you never type into another window, and ConsensFlow, not you, starts the staff.
 <!-- guide: duty -->
 When the human asks you to put work on the board, plan it as tasks, write each brief,
 and decide each result as below. Work that can run on its own in a fresh window (a
@@ -41,5 +40,3 @@ to you to accept, reopen or cancel.
 - Send work to another window: the board is the only channel, and only the human gives
   you work, here in your terminal; never read another agent's session files.
 - Give a task to a member by name, or write one with a member in mind.
-- Hand work to your harness's subagents or task tool: do it yourself, or use the
-  board when the human explicitly asks for that work there.
