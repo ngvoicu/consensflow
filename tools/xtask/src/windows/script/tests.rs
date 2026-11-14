@@ -1137,9 +1137,7 @@ fn a_mark_in_a_value_is_only_text_and_no_template_has_a_mark_nothing_fills() {
     assert_eq!(fill("a «b» «c»", &[("b", "x")]), "a x «c»");
 }
 
-/// The longest run there is: the build, and the matrix's longest eval line (a claude
-/// chief with a model, a staff with pi and its model, a chief switch), and as many
-/// variables as a run is likely to name.
+/// A long run: a workspace build and test, with as many variables as a run is likely to name.
 fn longest(env: &[&str]) -> Script<'static> {
     let env: &'static [(String, String)] =
         Box::leak(parse_env(&strings(env)).unwrap().into_boxed_slice());

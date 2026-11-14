@@ -1391,7 +1391,7 @@ replace = '''        (Some(name), Some(_)) => Ok(Machine::named(name)),'''
 # - The disk script ends with `exit 0`: with no owner file `Get-Content` fails, `$?` stays false, and the
 #   script's last statement (an `if` that runs nothing) left the exit status 1 (the live run on zeewin2).
 # - A Ctrl-C ends the probes with the program: a stop, not a zeelin that did not answer; a refused
-#   run asks nothing more of the machine, and stops a matrix, whose later evals are `not run`.
+#   run asks nothing more of the machine.
 
 [[plant]]
 name = "windows runner: --host zeewin2 is reached as any host, without the laptop's guards"

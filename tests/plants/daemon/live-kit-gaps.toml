@@ -7,13 +7,10 @@
 #   `cf whoami` proves the window's `cf`, and the run's home puts the decoys first;
 # - `live paste-enter`: a paste the human sends with Enter goes on that Enter
 #   (`codex-windows-ignores-enter-after-paste`): the two shapes of typing, and the verdict;
-# - `eval chiefs`: the `conversation` eval for each chief harness (`chief-does-the-work-itself`);
 # - `live resume-cut`: a cut that found the turn over cut nothing, and the case was not run
 #   (`live-resume-cut-codex-never-reaches-the-cut`);
 # - the kit: a window on a home of the run's own is given the person's home, never the folder
 #   its harness reads its login from (Codex's `~/.codex`, where project folders were made);
-# - the `conversation` eval's expectations: only the owner's changes count, the English task names
-#   the evaluation page, a chief's own edits are none (`chief-does-the-work-itself`);
 # - `live --set windows`: the regular Windows live run, the typed marks of `live parity` in it
 #   (`human-typing-loses-marks-in-devin-codex-on-windows`).
 #

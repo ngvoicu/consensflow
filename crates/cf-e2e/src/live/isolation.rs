@@ -444,7 +444,7 @@ pub struct Isolation {
 
 impl Isolation {
     /// The home of `harness` for a run that takes `run` (a live case states its planned length,
-    /// [`super::Log::lasting`], and an eval its own), copying the login of the owner whose
+    /// [`super::Log::lasting`]), copying the login of the owner whose
     /// home is `home` (Codex's: its own folder, `CODEX_HOME`); none for Claude Code, whose config
     /// folder is [`super::login`]'s, and where the platform's layout is not known (Devin's on
     /// Windows). A login that would end before the run and [`MARGIN`] is refused when the home is made.
@@ -482,7 +482,7 @@ impl Isolation {
                     .map_or_else(|| home.join(".pi").join("agent"), PathBuf::from);
                 let mut made = Self::pi_on(home, &agent, pi, run);
                 // A test machine renews a login that has run short by a turn of Pi on the run's
-                // first Pi model (an eval's chief's, where its staff is on another).
+                // first Pi model.
                 made.renewal = test_machine.zip(pi.first()).map(|(machine, model)| {
                     pi::renewal(machine, home, &agent, model, || {
                         super::machine::command(Harness::Pi.name())
@@ -540,9 +540,8 @@ impl Isolation {
         Self::pi_on(home, agent, &[model.to_owned()], run)
     }
 
-    /// [`Isolation::pi`], for a run whose Pi windows are on the models `models` (an eval's chief
-    /// and staff may be on two): the logins of each one's provider, or every login that is fit
-    /// where one of them names none.
+    /// [`Isolation::pi`], for a run whose Pi windows are on the models `models`: the logins
+    /// of each one's provider, or every login that is fit where one of them names none.
     pub fn pi_on(home: &Path, agent: &Path, models: &[String], run: Duration) -> Self {
         let mut providers: Option<Vec<String>> = Some(Vec::new());
         for model in models {
@@ -824,8 +823,7 @@ impl Isolation {
         let provider = match providers {
             Some([provider]) => provider,
             // The renewal runs Pi once on one model, for one login: a run whose windows are on two
-            // providers (an eval's chief and staff) is not renewed, and says so (no eval or live
-            // case seats two on a test machine, T-1373).
+            // providers is not renewed, and says so (T-1373).
             Some(many)
                 if many.len() > 1
                     && self.renewal.is_some()

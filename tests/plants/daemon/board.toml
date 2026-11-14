@@ -4,8 +4,8 @@
 # any member had it, one called off or failed before any member had it, and
 # the tasks of a member the human removed. One plant takes one case out of the
 # board, or one rule out of what draws it; a test of it fails: the ledger's own,
-# which holds the board to the placements, or the page's, the eval's and the
-# list's. A run written `{ node: [...] }` is `node --test`.
+# which holds the board to the placements, or the page's and the list's. A run written
+# `{ node: [...] }` is `node --test`.
 
 [run]
 # The ledger's board, on a ledger of its own: held to the placements.

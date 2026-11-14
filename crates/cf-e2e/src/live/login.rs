@@ -613,9 +613,8 @@ pub struct Login {
 impl Login {
     /// The login of this machine's Claude Code, for a run that takes `left` at the most, margin
     /// included: the folder is made only if the access token lasts that much more (a live case
-    /// states its planned length and the margin, [`super::Log::lasting`]; an eval, hours long,
-    /// its own). Claude Code refreshes a token when five minutes of it are left, so a run that is
-    /// shorter than the token has left never does. None where the run has no home to look for it in.
+    /// states its planned length and the margin, [`super::Log::lasting`]). Claude Code refreshes a
+    /// token when five minutes of it are left, so a run shorter than the token has left never does. None where the run has no home to look for it in.
     pub fn of_machine_lasting(left: Duration) -> Option<Self> {
         Self::of_machine_on(TestMachine::detect(), left)
     }

@@ -104,7 +104,7 @@ file = "crates/cf-ledger/src/messages.rs"
 find = "AND a.state NOT IN ('cancelled', 'failed')\""
 replace = "AND a.state NOT IN ('failed')\""
 
-# --- round 2: the answer, and the eval's counts ---
+# --- round 2: the answer ---
 
 [[plant]]
 name = "handoff questions: an accepted or failed task takes an answer, as only a cancelled one is refused"

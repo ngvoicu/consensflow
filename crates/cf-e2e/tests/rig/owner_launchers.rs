@@ -28,9 +28,8 @@ use crate::{Outcome, FAKE_AGENT};
 #[cfg(unix)]
 mod links;
 
-/// A config of the kit's that keeps its findings for the report (an eval's): a folder of the case's own,
-/// and nothing to say when the run ends. The guard leaves the Keychain to such a config, so a rig
-/// that seats a Claude Code on it does not depend on what other processes do to the machine's Keychain.
+/// A config folder of the case's own, with nothing to say when the run ends. The launcher guard
+/// is seated even when the case gives the rig its own config.
 #[derive(Debug)]
 pub(crate) struct Folder(pub(crate) PathBuf);
 

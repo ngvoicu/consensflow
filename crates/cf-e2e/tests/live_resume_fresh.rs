@@ -143,7 +143,7 @@ fn answered(members: &Members, harness: Harness, thread: &str, token: &str) -> O
 /// Types `text` into the chief's window as the human does (a bracketed paste, and
 /// Enter once the window has drawn it, [`Members::paste`]), and presses Enter again,
 /// three times at most, while the window keeps it: Devin takes a pasted prompt into
-/// its box and waits for an Enter of its own, as the eval runner's owner finds too.
+/// its box and waits for an Enter of its own.
 /// The window took it once the harness's record holds a message of the human's with
 /// `mark` in it, or the chief reads at work.
 fn types(

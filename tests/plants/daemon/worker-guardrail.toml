@@ -1,19 +1,16 @@
 # The staff's guardrail (the owner's Windows machine, 2026-10-15, ConsensFlow 3.0.4: a worker
 # overwrote a file that held uncommitted work with `git checkout`, and other workers said they had
-# restored files they had not). Two rules stand in 3.0.5, each held by tests:
+# restored files they had not). The rule is held by tests:
 #
-# - every member's text (`skill/core/staff.md`) says others work in the same folder, never to throw
-#   away a change it did not make (no `git checkout` or `git restore` that overwrites a file, while
-#   `git restore --staged` of its own change is fine; no `git reset --hard`, `git stash` or
-#   `git clean` over work that is not committed), and to say a file is restored only once it has
-#   checked it (`crates/cf-engine/tests/text/roles.rs`, and the 27 members' rows of
-#   `crates/cf-engine/tests/goldens/text.json`, moved by hand);
+# Every member's text (`skill/core/staff.md`) says others work in the same folder, never to throw
+# away a change it did not make (no `git checkout` or `git restore` that overwrites a file, while
+# `git restore --staged` of its own change is fine; no `git reset --hard`, `git stash` or
+# `git clean` over work that is not committed), and to say a file is restored only once it has
+# checked it (`crates/cf-engine/tests/text/roles.rs`, and the 27 members' rows of
+# `crates/cf-engine/tests/goldens/text.json`, moved by hand).
 #
-# One plant takes one rule out, or puts one wrong; a test fails. Every name holds
-# `worker guardrail`, so `npm run plants:daemon -- "worker guardrail"` runs them all. The setup's
-# empty hook folder, its `commit.gpgsign=false` and its `--no-verify` have no plant: with every
-# configuration channel and the template folder cut off, nothing is left to name a hook or ask
-# for signing, so taking one of them out changes nothing a test could see.
+# One plant takes a rule out, or puts it wrong; a test fails. Every name holds
+# `worker guardrail`, so `npm run plants:daemon -- "worker guardrail"` runs them all.
 
 [run]
 # The texts of the roles, without the golden of Node's texts, which the whole `text` test holds.
@@ -82,5 +79,3 @@ runs = ["engine-text-roles-guardrail"]
 file = "skill/core/staff.md"
 find = " (`git restore --staged` of your own change is fine)"
 replace = ""
-
-# The eval's expectations.
