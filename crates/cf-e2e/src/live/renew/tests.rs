@@ -371,3 +371,40 @@ fn a_harness_that_ended_badly_after_it_renewed_its_login_has_renewed_it_and_one_
         "{said}"
     );
 }
+
+/// The name Claude Code gives the record of the folder `path`, as the test reads it: the folder's
+/// real path, with Windows' `\\?\` taken off, every character that is no letter or digit a dash.
+fn record_name_of(path: &std::path::Path) -> String {
+    let real = path.canonicalize().unwrap().display().to_string();
+    let real = real.strip_prefix(r"\\?\").unwrap_or(&real).to_owned();
+    crate::rig::project_name(&real)
+}
+
+/// A renewal takes out of the owner's records (here a folder that stands for
+/// `~/.claude/projects`, never the real one) the one record Claude Code made for the renewal's own
+/// folder, by its whole name, and nothing else: another record whose name ends the same is the
+/// owner's (T-1557, finding 5).
+#[test]
+fn a_renewal_takes_out_of_the_records_only_the_one_named_for_its_own_folder() {
+    let records = tempfile::tempdir().unwrap();
+    let own = tempfile::Builder::new().prefix(FOLDER).tempdir().unwrap();
+    let its = records.path().join(record_name_of(own.path()));
+    std::fs::create_dir_all(its.join("memory")).unwrap();
+    let tail = own
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let other = records.path().join(format!("-Users-someone-work-{tail}"));
+    std::fs::create_dir_all(other.join("memory")).unwrap();
+    std::fs::write(other.join("memory").join("note.md"), "the owner's").unwrap();
+
+    forget(&[records.path()], own.path());
+
+    assert!(!its.exists(), "the renewal's own record is left");
+    assert!(
+        other.join("memory").join("note.md").is_file(),
+        "a record of the owner's whose name ends the same was taken"
+    );
+}

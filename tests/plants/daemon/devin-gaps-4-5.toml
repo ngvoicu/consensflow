@@ -31,8 +31,8 @@ runs = ["engine-restart", "ledger-told-edges"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/told.rs"
-find = "                AND m.kind = 'note' AND m.urgent = 0\n"
-replace = "                AND m.kind = 'note' AND m.urgent = 0 AND m.sender_id IS NOT NULL\n"
+find = "            \"SELECT CASE WHEN m.sender_id IS NULL THEN m.body END FROM message m\n              WHERE m.task_id = ? AND m.recipient_id = ?\n                AND m.kind = 'note' AND m.urgent = 0\n"
+replace = "            \"SELECT CASE WHEN m.sender_id IS NULL THEN m.body END FROM message m\n              WHERE m.task_id = ? AND m.recipient_id = ?\n                AND m.kind = 'note' AND m.urgent = 0 AND m.sender_id IS NOT NULL\n"
 
 [[plant]]
 name = "devin gaps 4 5: a continuation still queued holds its task's result"
@@ -41,8 +41,8 @@ runs = ["ledger-continuations"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/told.rs"
-find = "            .is_none_or(|body| continuation_tasks(body).is_none())"
-replace = "            .is_none_or(|body| continuation_tasks(body).is_none() || !body.is_empty())"
+find = "    Ok(waiting.iter().any(|own| {\n        own.as_deref()\n            .is_none_or(|body| continuation_tasks(body).is_none())"
+replace = "    Ok(waiting.iter().any(|own| {\n        own.as_deref()\n            .is_none_or(|body| continuation_tasks(body).is_none() || !body.is_empty())"
 
 [[plant]]
 name = "devin gaps 4 5: a start's sweep keeps nothing of a Devin launch"

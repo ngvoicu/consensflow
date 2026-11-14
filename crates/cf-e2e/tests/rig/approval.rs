@@ -708,7 +708,7 @@ fn a_note_a_member_writes_waits_at_the_gate_the_human_can_only_pass_it_on_and_so
     rig.tell(
         project.id(),
         &format!(
-            "DISPATCH --tier {} CF note :: Mind the tests",
+            "DISPATCH --tier {} CF tell :: Mind the tests",
             tier(&project)?
         ),
     )?;
@@ -1017,7 +1017,7 @@ fn a_tell_stops_the_window_at_work_and_waits_at_the_gate_the_human_passes_it_on_
     cf(
         &rig,
         &chief,
-        &["tell", "T-1", "Reply with exactly: TOLD_OK"],
+        &["task", "pause", "T-1", "Reply with exactly: TOLD_OK"],
     )?;
     let told = the_one_held(&rig, &project, "the tell to be held")?;
     assert_eq!(

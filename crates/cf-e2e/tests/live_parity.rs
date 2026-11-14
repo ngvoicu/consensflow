@@ -102,19 +102,19 @@ mod codex_devin;
 fn a_codex_or_devin_worker_has_what_its_harness_has_in_a_terminal_and_takes_its_interrupt_after_typing(
 ) -> Result {
     let log = Log::begin("live parity")?;
-    codex_devin::run(&log, &workers()?)
+    log.passing(codex_devin::run(&log, &workers()?))
 }
 
 #[test]
 #[ignore = "opt-in: opens the machine's Claude Code twice on a copy of its own config, no message given; cargo xtask live parity -- a_claude_member"]
 fn a_claude_member_window_loads_what_the_same_claude_loads_in_a_terminal() -> Result {
     let log = Log::begin("live parity (Claude Code)")?;
-    claude::run(&log)
+    log.passing(claude::run(&log))
 }
 
 #[test]
 #[ignore = "opt-in: spends the machine's Claude quota on one one-word task; cargo xtask live parity -- a_real_claude_member"]
 fn a_real_claude_member_window_has_the_terminals_lang_and_its_rcs_export() -> Result {
     let log = Log::begin("live parity (the terminal's environment)")?;
-    terminal_env::run(&log)
+    log.passing(terminal_env::run(&log))
 }

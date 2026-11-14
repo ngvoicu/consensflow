@@ -10,8 +10,6 @@ use std::time::{Duration, Instant};
 
 use cf_e2e::live::members::{stand_in_chief, stand_in_worker, Account, Members, Plan};
 use cf_e2e::live::Log;
-#[cfg(unix)]
-use cf_e2e::process::stall;
 
 use super::begin::{begin, Begun};
 use super::judge::lane_went_working_and_was_kept;
@@ -152,7 +150,7 @@ fn a_stand_in_that_goes_on_through_three_rounds_is_a_stop_the_case_fails_and_say
 #[test]
 fn a_pause_the_daemon_answers_a_fifth_of_a_second_late_is_the_same_stop_through_three_rounds() {
     let said = goes_on_through_three_rounds("stops-midturn-ignored-late-test", |members| {
-        stall(members.rig().daemon_pid(), Duration::from_millis(200)).unwrap();
+        assert!(members.rig().stall_daemon(Duration::from_millis(200)));
     });
     // The stall was there: the look the lane was first read at came after it.
     assert!(

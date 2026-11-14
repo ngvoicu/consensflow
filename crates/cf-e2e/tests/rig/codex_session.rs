@@ -10,13 +10,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use cf_base::startup::StartKind;
+use cf_e2e::door::Made;
 use cf_e2e::http::server::{Answer, Response, Server};
 use cf_e2e::ports;
 use cf_e2e::process::{alive_among, end_all, is_alive, Run, Signal, Spawned};
 use cf_e2e::{cf, files, serial, wire, Error, Result};
 use regex::Regex;
 use serde_json::{json, Value};
-use tempfile::TempDir;
 
 use crate::{secs, Outcome};
 
@@ -46,7 +46,22 @@ struct Supervised {
     child: Spawned,
     log: PathBuf,
     /// The folder of the window's home: ConsensFlow's home too.
-    root: TempDir,
+    root: Home,
+}
+
+/// The home of a window: a folder of its own in a folder the run made, as the rig's is, because the
+/// stand-in Codex keeps its jobs' files beside the home (`jobs/`), and what it writes there is below
+/// what the run made too.
+struct Home {
+    /// The folder the run made; it goes with this.
+    _outer: Made,
+    home: PathBuf,
+}
+
+impl Home {
+    fn path(&self) -> &Path {
+        &self.home
+    }
 }
 
 impl Supervised {
@@ -69,14 +84,19 @@ impl Supervised {
         vars: &[(&str, String)],
         codex: Option<&dyn Fn(&Path) -> PathBuf>,
     ) -> Result<Self> {
-        let root = tempfile::Builder::new()
-            .prefix(prefix)
-            .tempdir()
-            .map_err(|source| Error::File {
-                action: "make a folder in",
-                path: std::env::temp_dir(),
-                source,
-            })?;
+        // A folder the run made through the door: the stand-in Codex writes below it (its log, its
+        // marks), as a program of a run writes only below what the run made.
+        let outer = cf_e2e::door::made(prefix).map_err(|source| Error::File {
+            action: "make a folder in",
+            path: std::env::temp_dir(),
+            source,
+        })?;
+        let home = outer.path().join("home");
+        cf_e2e::door::make_dir(&home)?;
+        let root = Home {
+            _outer: outer,
+            home,
+        };
         let program = codex.map_or_else(|| PathBuf::from(FAKE_CODEX), |named| named(root.path()));
         let port = ports::free().map_err(|source| Error::File {
             action: "find a port on",

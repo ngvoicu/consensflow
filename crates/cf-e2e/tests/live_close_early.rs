@@ -24,11 +24,20 @@
 //! cargo xtask live close-early claude                  one harness
 //! cargo xtask live close-early claude --at-ms 0,2000   the moments named
 //! cargo xtask live close-early claude --claude-config <folder>
-//!                                                      Claude on a config of the run's own
+//!                                                      the login copied from that folder
 //! ```
 //!
 //! Codex reads its login from `CODEX_HOME`, which the run's caller points at a home of
 //! the run's own.
+//!
+//! A config folder given with `--claude-config` is its caller's and is **read, never written**
+//! (T-1592): the run takes the login from the folder's `.credentials.json` (the access token is
+//! enough; a refresh token is never copied on), makes a config folder of its own with that copy
+//! of the login, and seeds it with the trust a person's own config has for the live folders, as
+//! it does for the machine's login. The folder's own `.claude.json`, settings and records are not
+//! carried over, and the run holds the folder's login to what it was when the run is over. A folder
+//! with no `.credentials.json` (on a Mac a Claude Code that ran on it keeps its login in the
+//! Keychain) stops the run before it acts.
 
 use std::path::Path;
 use std::thread::sleep;
@@ -248,7 +257,7 @@ fn a_close_while_a_workers_brief_is_on_its_way_fails_nothing_and_the_resume_deli
         }
     }
     log.report("what each worker came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::verdict_of(&log, &checks)
 }
 
 #[cfg(test)]

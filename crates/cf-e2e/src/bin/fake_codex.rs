@@ -62,7 +62,6 @@ mod terminal;
 #[path = "fake_codex/typed.rs"]
 mod typed;
 
-use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::process::ExitCode;
@@ -114,10 +113,8 @@ fn write_names(log: &str, args: &[String]) {
         .collect();
     names.sort();
     let line = json!({ "pid": std::process::id(), "args": args, "names": names });
-    let wrote = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(log)
+    let wrote = cf_e2e::door::append(log)
+        .map_err(std::io::Error::from)
         .and_then(|mut file| writeln!(file, "{line}"));
     if let Err(failed) = wrote {
         fail(&format!("{log}: {failed}"));
@@ -144,10 +141,8 @@ fn record(entry: Value) {
                 .map(|(name, value)| (name.clone(), value.clone())),
         );
     }
-    let wrote = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(&log)
+    let wrote = cf_e2e::door::append(&log)
+        .map_err(std::io::Error::from)
         .and_then(|mut file| writeln!(file, "{line}"));
     if let Err(failed) = wrote {
         fail(&format!("{log}: {failed}"));
@@ -224,8 +219,8 @@ fn lock_the_socket_folder(args: &[String]) {
 
     let socket = option(args, "--listen").and_then(|listen| listen.strip_prefix("unix://"));
     if let Some(folder) = socket.and_then(|socket| std::path::Path::new(socket).parent()) {
-        let _ = std::fs::write(folder.join("left"), "");
-        let _ = std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o500));
+        let _ = cf_e2e::door::write(folder.join("left"), "");
+        let _ = cf_e2e::door::set_permissions(folder, std::fs::Permissions::from_mode(0o500));
     }
 }
 

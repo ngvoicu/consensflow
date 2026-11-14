@@ -64,8 +64,8 @@ pub use ledger::{open_ledger, Event, Ledger, Options};
 pub use meeting::{CHIEF_CUT, HANDOFF_TITLE, LEAD_HANDOFF_TITLE, SWITCH_ASKED};
 pub use messages::{
     continuation, continuation_in, continuation_tasks, cut_turn, cut_turn_unquoted, is_busy_note,
-    is_told, waiting_for_the_reopen, GivenUp, HandOver, NewNote, NewQuestion, Read, MAY_STILL_RUN,
-    NOT_PROVEN_GONE, WITHDRAWN_AFTER_HANDED,
+    is_told, sent_at_work, told_at_work, waiting_for_the_reopen, GivenUp, HandOver, NewNote,
+    NewQuestion, Read, MAY_STILL_RUN, NOT_PROVEN_GONE, WITHDRAWN_AFTER_HANDED,
 };
 pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;
@@ -81,7 +81,8 @@ pub use specs::SpecsChange;
 pub use staff::MemberEdit;
 pub use staff::{BackupCandidate, Candidate, HoldKind, StaffMember};
 pub use tasks::{
-    asked_role, reopen_or_accept, window_closed, NewTask, RESUME_WORDS, SAME_ERROR_WITHIN_MS,
+    asked_role, reopen_or_accept, window_closed, NewTask, PlanCreated, PlanTask, RESUME_WORDS,
+    SAME_ERROR_WITHIN_MS,
 };
 pub use tasks::{resumed_in_vain, NEVER_BEGAN};
 pub use wake_ups::{NewWakeUp, WakeUpSetting, WakeUpUnit, DEFAULT_WAKE_UP_TEXT, WAKE_UP_FLOOR_MS};

@@ -78,17 +78,28 @@ pub fn inbox_lines(who: &str, inbox: &[Value], most: usize) -> Vec<String> {
     lines
 }
 
-/// What the chief was told of the task that is over, in the daemon's words: the
-/// first note of its inbox that begins with the task (`T-1 failed: the window never
-/// showed its first message; its screen ended with: "…"`). None where it was told
-/// nothing of it.
+/// What the chief was told of the task that is over, in the daemon's words: the first note
+/// of its inbox that is of the task, by what the row says and not by how its words begin
+/// (`kind` is `note` and `taskNumber` is the task's: the daemon words its notes as it likes,
+/// and the ones that quote less no longer begin with `T-1 `), with the state the note is
+/// in (generated, queued, delivered, read or cancelled), as the board has it. None where it
+/// was told nothing of it.
 pub fn told_why(number: i64, chief: &[Value]) -> Option<String> {
-    let begins = format!("T-{number} ");
     chief
         .iter()
-        .filter_map(|message| message["body"].as_str())
-        .find(|body| body.starts_with(&begins))
-        .map(|body| squash(body, WORDS))
+        .find(|message| {
+            message["kind"] == "note"
+                && message["taskNumber"] == number
+                // The daemon's own notes have no sender; a note a participant wrote is theirs.
+                && message["sender"].is_null()
+        })
+        .map(|note| {
+            let body = squash(note["body"].as_str().unwrap_or_default(), WORDS);
+            match note["state"].as_str() {
+                Some(state) => format!("{body} (the note is {state})"),
+                None => body,
+            }
+        })
 }
 
 /// The daemon's log, in lines: the warnings and errors before its last `most`
@@ -195,16 +206,34 @@ mod tests {
     }
 
     #[test]
-    fn the_daemons_words_of_a_task_are_the_chiefs_first_note_that_begins_with_it() {
-        let chief = [
-            json!({ "body": "T-10 failed: not this one" }),
-            json!({ "kind": "note" }),
-            json!({ "body": "T-1 failed: the window never showed its first message; its screen ended with: \"No API key\". Reopen it with: cf task reopen T-1" }),
-            json!({ "body": "T-1 was reopened" }),
-        ];
+    fn a_note_about_the_task_whose_body_does_not_start_with_its_number_is_what_the_chief_was_told()
+    {
+        let chief = [json!({
+            "kind": "note", "taskNumber": 1, "state": "queued",
+            "body": "The window of T-1 never showed its first message"
+        })];
         assert_eq!(
             told_why(1, &chief).as_deref(),
-            Some("T-1 failed: the window never showed its first message; its screen ended with: \"No API key\". Reopen it with: cf task reopen T-1")
+            Some("The window of T-1 never showed its first message (the note is queued)")
+        );
+    }
+
+    #[test]
+    fn a_note_of_the_task_in_other_words_is_what_the_chief_was_told() {
+        let chief = [
+            // Another task's note, and a task's own result: neither is this task's note.
+            json!({ "kind": "note", "taskNumber": 10, "state": "delivered", "body": "T-1 failed: not this one" }),
+            json!({ "kind": "result", "taskNumber": 1, "state": "delivered", "body": "T-1 failed" }),
+            json!({ "kind": "note", "state": "delivered" }),
+            // A note a member wrote of the task is not what the daemon told.
+            json!({ "kind": "note", "taskNumber": 1, "sender": "zeus", "state": "delivered", "body": "T-1 is going well" }),
+            json!({ "kind": "note", "taskNumber": 1, "state": "cancelled", "body": "T-1 failed: the window never showed its first message; its screen ended with: \"No API key\". Reopen it with: cf task reopen T-1" }),
+            json!({ "kind": "note", "taskNumber": 1, "state": "read", "body": "T-1 was reopened" }),
+        ];
+        // The first note of the task, and the state it was left in said as it is.
+        assert_eq!(
+            told_why(1, &chief).as_deref(),
+            Some("T-1 failed: the window never showed its first message; its screen ended with: \"No API key\". Reopen it with: cf task reopen T-1 (the note is cancelled)")
         );
         assert_eq!(told_why(2, &chief), None);
         assert_eq!(told_why(1, &[]), None);

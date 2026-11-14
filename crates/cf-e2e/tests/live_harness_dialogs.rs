@@ -42,7 +42,7 @@ use cf_e2e::live::members::{member, stand_in_chief, Account, Members, Plan};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, text, Harness, Log};
 use cf_e2e::process::own_var;
-use cf_e2e::{files, Error, Result};
+use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -70,6 +70,13 @@ fn seed_marketplace(config: &Path) -> Result {
     let home = own_var("HOME")
         .map(std::path::PathBuf::from)
         .unwrap_or_default();
+    seed_marketplace_from(&home, config)
+}
+
+/// [`seed_marketplace`] from the marketplace the Claude Code of `home` knows: read there, written
+/// only in `config`, and only where the run made it (the door refuses another folder, a caller's
+/// among them).
+fn seed_marketplace_from(home: &Path, config: &Path) -> Result {
     let from = home.join(".claude/plugins/marketplaces").join(MARKETPLACE);
     let plugins = config.join("plugins");
     let to = plugins.join("marketplaces").join(MARKETPLACE);
@@ -81,15 +88,15 @@ fn seed_marketplace(config: &Path) -> Result {
             "lastUpdated": "2026-11-03T00:00:00.000Z",
         }
     });
-    files::write(
-        &plugins.join("known_marketplaces.json"),
+    cf_e2e::door::write(
+        plugins.join("known_marketplaces.json"),
         format!("{known}\n"),
     )
 }
 
 /// Copies the folder `from` into `to`, its files and folders, links left out.
 fn copy_tree(from: &Path, to: &Path) -> Result {
-    files::make_dir(to)?;
+    cf_e2e::door::make_dir(to)?;
     let entries = fs::read_dir(from)
         .map_err(|failed| Error::Daemon(format!("{}: {failed}", from.display())))?;
     for entry in entries.flatten() {
@@ -100,7 +107,7 @@ fn copy_tree(from: &Path, to: &Path) -> Result {
         if kind.is_dir() {
             copy_tree(&entry.path(), &target)?;
         } else if kind.is_file() {
-            files::copy(&entry.path(), &target)?;
+            cf_e2e::door::copy(entry.path(), &target)?;
         }
     }
     Ok(())
@@ -368,4 +375,67 @@ fn claude_codes_offer_to_install_an_lsp_plugin_mid_turn_is_told_to_the_human_and
         version,
     )];
     report::conclude(&log, "what the offer came to", &checks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cf_e2e::live::layout::Layout;
+
+    /// A person's home with the marketplace their Claude Code knows, below the layout.
+    fn owners_home(layout: &mut Layout) -> std::path::PathBuf {
+        let home = layout.home().join("owner");
+        let marketplace = home.join(".claude/plugins/marketplaces").join(MARKETPLACE);
+        let files = [
+            ("README.md", "the marketplace's readme"),
+            ("plugins/lsp/plugin.json", "{\"name\":\"lsp\"}"),
+        ];
+        layout.plant_tree(&marketplace, &files).unwrap();
+        home
+    }
+
+    #[test]
+    fn the_marketplace_is_copied_into_the_config_the_run_made_and_the_owners_is_read_only() {
+        let mut layout = Layout::new().unwrap();
+        let home = owners_home(&mut layout);
+        let own = cf_e2e::door::made("live-harness-dialogs-test-").unwrap();
+        seed_marketplace_from(&home, own.path()).unwrap();
+        let copied = own.path().join("plugins/marketplaces").join(MARKETPLACE);
+        assert_eq!(
+            fs::read_to_string(copied.join("plugins/lsp/plugin.json")).unwrap(),
+            "{\"name\":\"lsp\"}"
+        );
+        let known = fs::read_to_string(own.path().join("plugins/known_marketplaces.json")).unwrap();
+        assert!(known.contains(MARKETPLACE), "{known}");
+        // The owner's marketplace is as it was, byte for byte.
+        layout.untouched().unwrap();
+        cf_e2e::door::again_under_audit("tests::the_marketplace_is_copied_into_the_config_the_run_made_and_the_owners_is_read_only").unwrap();
+    }
+
+    #[test]
+    fn a_claude_config_a_caller_named_is_never_the_one_the_marketplace_is_written_in() {
+        let mut layout = Layout::new().unwrap();
+        let home = owners_home(&mut layout);
+        // A caller's config folder, with files in it, that no run made: a person's own.
+        let callers = tempfile::tempdir().unwrap();
+        let (settings, record) = (
+            callers.path().join("settings.json"),
+            callers.path().join(".claude.json"),
+        );
+        fs::write(&settings, "{\"theme\":\"dark\"}").unwrap();
+        fs::write(&record, "{\"projects\":{}}").unwrap();
+        let refused = seed_marketplace_from(&home, callers.path());
+        assert!(refused.is_err(), "a caller's config folder was written in");
+        assert!(!callers.path().join("plugins").exists());
+        assert_eq!(
+            fs::read_to_string(&settings).unwrap(),
+            "{\"theme\":\"dark\"}"
+        );
+        assert_eq!(fs::read_to_string(&record).unwrap(), "{\"projects\":{}}");
+        layout.untouched().unwrap();
+        cf_e2e::door::again_under_audit(
+            "tests::a_claude_config_a_caller_named_is_never_the_one_the_marketplace_is_written_in",
+        )
+        .unwrap();
+    }
 }

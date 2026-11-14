@@ -1,5 +1,5 @@
 //! A resumed task whose window is at work on it shows working (T-1139, field bug 8; Gabriel's
-//! other board, 2026-11-02). `cf tell T-10 "…"` pauses the task and puts the words to its
+//! other board, 2026-11-02). `cf task pause T-10 "…"` (then `cf tell`) pauses the task and puts the words to its
 //! window; the window answered ("ok") and went straight on with its work in the same turn
 //! (T-429's and T-442's shape, `paused_answers`); the chief's `cf task resume T-10 "…"` then
 //! queued its words behind that turn, and the board read `T-10 [queued]` for as long as the

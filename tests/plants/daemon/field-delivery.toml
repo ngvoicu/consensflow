@@ -266,8 +266,8 @@ runs = ["fd-answers"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/paused_answers.rs"
-find = '''            if id < result && earlier.is_none_or(|earlier| id > earlier) {'''
-replace = '''            if id < result {'''
+find = '''            if !shown && id < result && earlier.is_none_or(|earlier| id > earlier) {'''
+replace = '''            if !shown && id < result {'''
 
 [[plant]]
 name = "field delivery: the note of a task taken back to the board says only its resume"

@@ -63,13 +63,11 @@ file = "crates/cf-board/src/lib.rs"
 find = '''
         if let Some(why) = &self.no_writes {
             return Err(BoardError::NoWrites(why.clone()));
-        }
-        self.send(path, Some(body))'''
+        }'''
 replace = '''
         if let Some(why) = self.no_writes.as_ref().filter(|_| false) {
             return Err(BoardError::NoWrites(why.clone()));
-        }
-        self.send(path, Some(body))'''
+        }'''
 
 [[plant]]
 name = "codex memories: a board that refuses writes refuses reads too"

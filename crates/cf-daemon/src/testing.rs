@@ -308,6 +308,7 @@ pub fn scene() -> Scene {
                     task: thread.task,
                     jobs: finishings.jobs.get(),
                     agents: finishings.agents.get(),
+                    withdrawn: Vec::new(),
                 })
             })
         }),

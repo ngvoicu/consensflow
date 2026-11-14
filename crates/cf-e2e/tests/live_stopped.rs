@@ -31,9 +31,10 @@
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use cf_e2e::door::{Door, Grounded};
 use cf_e2e::live::members::{
-    descending_from, find, member_as, pause_chosen, stand_in_worker, Identity, Machine, Members,
-    Pause, Plan, ThisMachine, STAND_IN_WORKER,
+    find, member_as, stand_in_worker, Identity, Machine, Members, Pause, Plan, ThisMachine,
+    STAND_IN_WORKER,
 };
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window, ANSWER};
@@ -129,15 +130,16 @@ fn in_record(window: &Window) -> usize {
 
 /// Stops the window's own tree where it is, or lets it go on: its program, and what
 /// descends from it, each only while it is still the process chosen (`descent`).
-fn stall(root: Identity, pause: Pause) -> Result<()> {
+fn hold_tree(root: Identity, pause: Pause) -> Result<()> {
     let all = ThisMachine.processes()?;
-    let mut tree: Vec<_> = all
-        .iter()
-        .filter(|process| process.identity == root)
-        .cloned()
-        .collect();
-    tree.extend(descending_from(&all, root));
-    let paused = pause_chosen(&tree, pause);
+    let tree = Grounded::tree(&all, root);
+    let paused = Door::of_run().pause(&tree, pause);
+    if !paused.said.is_empty() {
+        return Err(Error::Daemon(
+            "say only: stopped at the window's pause, which the door said and did not make"
+                .to_owned(),
+        ));
+    }
     if paused.ended.is_empty() || !paused.problems().is_empty() {
         return Err(Error::Daemon(format!(
             "{pause:?} of the window's tree: {} reached; {:?}",
@@ -168,7 +170,7 @@ fn a_claude_code_window_stopped_after_a_paste_shows_and_records_it_as_it_shows()
         .map_err(|screen| Error::Daemon(format!("the window did not open: {screen}")))?;
     let pasted = window.paste(&window.given(&note())?)?;
     let root = root_of(&window)?;
-    stall(root, Pause::Stop)?;
+    hold_tree(root, Pause::Stop)?;
     let stopped = Instant::now();
     log.say("claude: pasted, and stopped");
     let mut seen = Vec::new();
@@ -192,7 +194,7 @@ fn a_claude_code_window_stopped_after_a_paste_shows_and_records_it_as_it_shows()
     if let Some(wait) = STOPPED.checked_sub(stopped.elapsed()) {
         sleep(wait);
     }
-    stall(root, Pause::Continue)?;
+    hold_tree(root, Pause::Continue)?;
     log.say("claude: going on");
     let answered = live::until(ANSWER, LOOK, || {
         let record = window.record()?;
@@ -304,10 +306,10 @@ fn stopped_chief_is_handed_its_result_once_though_it_shows_nothing_for_ninety_se
         members.close()?;
         return Err(Error::Daemon("the result's delivery never began".into()));
     };
-    stall(root, Pause::Stop)?;
+    hold_tree(root, Pause::Stop)?;
     log.say("claude chief: the result's paste begun, the chief stopped");
     sleep(STOPPED);
-    stall(root, Pause::Continue)?;
+    hold_tree(root, Pause::Continue)?;
     log.say("claude chief: going on");
     let id = begun["data"]["message"].as_i64().unwrap_or_default();
     let settled = find(

@@ -10,7 +10,7 @@
 //! with a message of its own when the next one comes (`No response requested.`,
 //! no model behind it, written just before that message).
 
-use std::fs::{self, OpenOptions};
+use std::fs::{self};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
@@ -71,7 +71,7 @@ impl Records {
         let status_file = config.join("sessions").join(format!("{pid}.json"));
         for file in [&transcript, &status_file] {
             if let Some(folder) = file.parent() {
-                fs::create_dir_all(folder)?;
+                cf_e2e::door::make_dir(folder)?;
             }
         }
         let kept = fs::read_to_string(&transcript).unwrap_or_default();
@@ -111,7 +111,7 @@ impl Records {
     /// that writes it anew, holding only what is said from then on, as a harness may (T-1118,
     /// the owner's other board: the copy ConsensFlow kept is then longer than the record).
     pub fn begin_anew(&mut self) -> io::Result<()> {
-        fs::write(&self.transcript, "")?;
+        cf_e2e::door::write(&self.transcript, "")?;
         self.cut = false;
         self.said = false;
         Ok(())
@@ -219,31 +219,28 @@ impl Records {
     /// The transcript, open to be appended to.
     fn open(&self) -> io::Result<fs::File> {
         make_folder_of(&self.transcript)?;
-        OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(&self.transcript)
+        cf_e2e::door::append(&self.transcript).map_err(std::io::Error::from)
     }
 
     /// Writes that the window waits on a dialog of its own, and why, as Claude Code 2.1.317
     /// says it (`waiting`, `waitingFor`).
     pub fn waiting(&self, pid: u32, why: &str) -> io::Result<()> {
         make_folder_of(&self.status_file)?;
-        fs::write(
+        Ok(cf_e2e::door::write(
             &self.status_file,
             json!({ "pid": pid, "sessionId": self.session, "kind": "interactive", "status": "waiting", "waitingFor": why })
                 .to_string(),
-        )
+        )?)
     }
 
     /// Writes the status the window is in: `idle` or `busy`.
     pub fn status(&self, pid: u32, value: &str) -> io::Result<()> {
         make_folder_of(&self.status_file)?;
-        fs::write(
+        Ok(cf_e2e::door::write(
             &self.status_file,
             json!({ "pid": pid, "sessionId": self.session, "kind": "interactive", "status": value })
                 .to_string(),
-        )
+        )?)
     }
 }
 
@@ -253,7 +250,8 @@ impl Records {
 /// as it is for a chief that has heard nothing yet: a window that did not make it again ended
 /// itself with the first thing it was told.
 fn make_folder_of(file: &Path) -> io::Result<()> {
-    file.parent().map_or(Ok(()), fs::create_dir_all)
+    file.parent()
+        .map_or(Ok(()), |folder| Ok(cf_e2e::door::make_dir(folder)?))
 }
 
 /// Writes `record` and its line break to `out`. `writeln!` of a value writes it
@@ -275,17 +273,12 @@ pub fn note_process(beside: &Path, pid: u32, session: &str, began: Option<&str>)
         ("pids.jsonl", format!("{pid}\n")),
         ("processes.jsonl", format!("{pid}\t{session}\n")),
     ] {
-        let mut file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(beside.join(name))?;
+        let mut file = cf_e2e::door::append(beside.join(name)).map_err(std::io::Error::from)?;
         file.write_all(line.as_bytes())?;
     }
     if let Some(began) = began.filter(|began| !began.is_empty()) {
-        let mut file = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(beside.join("began.jsonl"))?;
+        let mut file =
+            cf_e2e::door::append(beside.join("began.jsonl")).map_err(std::io::Error::from)?;
         file.write_all(format!("{pid}\t{began}\n").as_bytes())?;
     }
     Ok(())
@@ -305,7 +298,7 @@ mod tests {
 
     #[test]
     fn a_record_has_the_session_the_version_the_time_and_a_uuid_before_its_own_fields() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "sess-1", 4242).unwrap();
         records
             .append(
@@ -356,7 +349,7 @@ mod tests {
     #[test]
     fn a_conversation_cut_in_a_turn_is_resumed_waiting_and_closes_it_just_before_the_next_message()
     {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let file = config.path().join("projects/integration/sess-1.jsonl");
         let mut cut = Records::new(config.path(), "sess-1", 11).unwrap();
         cut.append(11, user("first")).unwrap();
@@ -384,7 +377,7 @@ mod tests {
     /// of the record before it, closes no turn of it, and writes what it is given from there.
     #[test]
     fn a_window_that_begins_its_record_anew_keeps_only_what_it_is_given_after() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let file = config.path().join("projects/integration/s.jsonl");
         let mut first = Records::new(config.path(), "s", 1).unwrap();
         first.append(1, user("first")).unwrap();
@@ -400,7 +393,7 @@ mod tests {
 
     #[test]
     fn a_conversation_that_ended_in_an_answer_or_in_an_interrupt_has_no_turn_to_close() {
-        let answered = tempfile::tempdir().unwrap();
+        let answered = cf_e2e::door::made("cf-test-").unwrap();
         let mut first = Records::new(answered.path(), "s", 1).unwrap();
         first.append(1, user("first")).unwrap();
         first
@@ -416,7 +409,7 @@ mod tests {
             ["user", "assistant", "user"]
         );
 
-        let interrupted = tempfile::tempdir().unwrap();
+        let interrupted = cf_e2e::door::made("cf-test-").unwrap();
         let mut first = Records::new(interrupted.path(), "s", 1).unwrap();
         first.append(1, user("first")).unwrap();
         first
@@ -433,7 +426,7 @@ mod tests {
         );
 
         // A conversation with nothing in it has nothing cut either.
-        let fresh = tempfile::tempdir().unwrap();
+        let fresh = cf_e2e::door::made("cf-test-").unwrap();
         let mut window = Records::new(fresh.path(), "s", 1).unwrap();
         window.append(1, user("first")).unwrap();
         assert_eq!(
@@ -459,7 +452,7 @@ mod tests {
 
     #[test]
     fn a_record_cut_short_and_the_next_appended_to_it_are_one_line_that_is_not_json() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "sess-1", 4242).unwrap();
         let said =
             |text: &str| json!({ "type": "user", "message": { "role": "user", "content": text } });
@@ -501,7 +494,7 @@ mod tests {
 
     #[test]
     fn the_status_is_the_pid_the_session_and_what_the_window_is_doing_and_is_written_over() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let records = Records::new(config.path(), "sess-1", 4242).unwrap();
         assert_eq!(
             records.status_file(),
@@ -519,7 +512,7 @@ mod tests {
 
     #[test]
     fn a_window_whose_folders_were_taken_makes_them_again_where_it_writes_as_claude_does() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let mut records = Records::new(config.path(), "sess-1", 4242).unwrap();
         // The folder of the conversations goes with a rig of another run that ends, and the
         // folder of the status files with whoever tidies the machine's Claude folder.
@@ -536,7 +529,7 @@ mod tests {
 
     #[test]
     fn the_processes_a_window_writes_down_go_to_the_files_beside_the_home_in_order() {
-        let root = tempfile::tempdir().unwrap();
+        let root = cf_e2e::door::made("cf-test-").unwrap();
         note_process(root.path(), 11, "a", Some("when-a")).unwrap();
         note_process(root.path(), 22, "b", Some("when-b")).unwrap();
         note_process(root.path(), 33, "c", None).unwrap();

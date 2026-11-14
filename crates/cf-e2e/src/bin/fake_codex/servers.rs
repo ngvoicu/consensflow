@@ -14,7 +14,6 @@
 //! workers `worker`. The process is in `<file>.pid` whole from the moment the file is
 //! there ([`cf_e2e::files::say_its_process`]), for a case that waits for the file reads a number.
 
-use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -49,7 +48,8 @@ impl Plugins {
             });
         };
         let folder = jobs_folder(Path::new(&home));
-        fs::create_dir_all(&folder).map_err(|failed| format!("{}: {failed}", folder.display()))?;
+        cf_e2e::door::make_dir(&folder)
+            .map_err(|failed| format!("{}: {failed}", folder.display()))?;
         let program = std::env::current_exe().map_err(|failed| failed.to_string())?;
         let window = std::process::id();
         let servers = (1..=count)
@@ -95,7 +95,7 @@ pub fn serve(args: &[String]) -> ExitCode {
         return refuse(&format!("{SERVER} <file> <workers>"));
     };
     become_a_group_of_its_own();
-    if let Err(failed) = cf_e2e::files::say_its_process(Path::new(file)) {
+    if let Err(failed) = cf_e2e::door::say_its_process(Path::new(file)) {
         return refuse(&failed.to_string());
     }
     let folder = Path::new(file).parent().unwrap_or(Path::new("."));
@@ -135,7 +135,7 @@ pub fn work(args: &[String]) -> ExitCode {
     ) else {
         return refuse(&format!("{WORKER} <seconds> <file>"));
     };
-    if let Err(failed) = cf_e2e::files::say_its_process(Path::new(file)) {
+    if let Err(failed) = cf_e2e::door::say_its_process(Path::new(file)) {
         return refuse(&failed.to_string());
     }
     thread::sleep(Duration::from_secs(seconds));

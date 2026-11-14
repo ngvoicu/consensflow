@@ -928,3 +928,468 @@ async fn while_the_project_is_closed_a_card_whose_brief_no_window_was_handed_is_
     project_is(&scene, "open");
     assert_eq!(listed_title(&scene, &scene.zeus, number).await, "Lexer");
 }
+
+// STC-01: exercise the public task route so the ledger transaction, name
+// resolution and retry contract are all observed through the same boundary as cf.
+fn stc_plan() -> Value {
+    json!({ "plan": [
+        { "name": "first", "tier": "standard", "body": "First\n" },
+        { "name": "second", "tier": "standard", "body": "Second\n", "needs": ["first"] },
+        { "name": "third", "tier": "standard", "body": "Third\n" }
+    ] })
+}
+
+async fn stc_post(scene: &Scene, body: &Value) -> (u16, Value) {
+    post(scene, &scene.chief, &body.to_string()).await
+}
+
+#[tokio::test]
+async fn stc_three_sections_resolve_a_plan_name() {
+    let scene = scene();
+    let (status, said) = stc_post(&scene, &stc_plan()).await;
+    assert_eq!(status, 201, "{said}");
+    let tasks = said["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 3);
+    let first = tasks[0]["task"]["number"].as_i64().unwrap();
+    let second = tasks[1]["task"]["number"].as_i64().unwrap();
+    let thread = scene
+        .context
+        .ledger
+        .borrow()
+        .task(scene.project.id, second)
+        .unwrap()
+        .unwrap();
+    assert_eq!(thread.task.blocked_by, vec![first]);
+}
+
+#[tokio::test]
+async fn stc_a_refusal_in_the_second_section_rolls_back_the_first() {
+    let scene = scene();
+    let mut plan = stc_plan();
+    plan["plan"][1]["needs"] = json!([999]);
+    let (status, said) = stc_post(&scene, &plan).await;
+    assert_ne!(status, 201, "{said}");
+    assert!(
+        said["message"].as_str().unwrap().contains("second"),
+        "{said}"
+    );
+    assert!(scene
+        .context
+        .ledger
+        .borrow()
+        .board(scene.project.id)
+        .unwrap()
+        .open
+        .is_empty());
+}
+
+#[tokio::test]
+async fn stc_a_repeated_key_returns_the_first_tasks() {
+    let scene = scene();
+    let mut plan = stc_plan();
+    plan["key"] = json!("retry-one");
+    let first = stc_post(&scene, &plan).await;
+    let again = stc_post(&scene, &plan).await;
+    assert_eq!(first.0, 201, "{}", first.1);
+    assert_eq!(again.0, 200, "{}", again.1);
+    assert_eq!(first.1["tasks"], again.1["tasks"]);
+    assert_eq!(
+        scene
+            .context
+            .ledger
+            .borrow()
+            .board(scene.project.id)
+            .unwrap()
+            .open
+            .len(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn stc_a_different_plan_under_a_used_key_is_refused() {
+    let scene = scene();
+    let mut plan = stc_plan();
+    plan["key"] = json!("retry-two");
+    let first = stc_post(&scene, &plan).await;
+    assert_eq!(first.0, 201, "{}", first.1);
+    plan["plan"][2]["body"] = json!("Different\n");
+    let again = stc_post(&scene, &plan).await;
+    assert_ne!(again.0, 201, "{}", again.1);
+    assert!(
+        again.1["message"].as_str().unwrap().contains("key"),
+        "{}",
+        again.1
+    );
+    assert_eq!(
+        scene
+            .context
+            .ledger
+            .borrow()
+            .board(scene.project.id)
+            .unwrap()
+            .open
+            .len(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn stc_accept_is_all_or_none_when_a_later_task_cannot_be_accepted() {
+    let scene = scene();
+    let done = finished_session_task(&scene);
+    let open = open_task(&scene);
+    let (status, said) = stc_post(
+        &scene,
+        &json!({"action":"accept", "tasks":[done,open], "body":"checked"}),
+    )
+    .await;
+    assert_ne!(status, 200, "{said}");
+    assert!(
+        said["message"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("T-{open}")),
+        "{said}"
+    );
+    assert_eq!(
+        scene
+            .context
+            .ledger
+            .borrow()
+            .task(scene.project.id, done)
+            .unwrap()
+            .unwrap()
+            .task
+            .state,
+        "done"
+    );
+}
+
+#[tokio::test]
+async fn stc_cancel_moves_several_together() {
+    let scene = scene();
+    let a = open_task(&scene);
+    let b = open_task(&scene);
+    let (status, said) = stc_post(
+        &scene,
+        &json!({"action":"cancel", "tasks":[a,b], "body":"called off"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    for number in [a, b] {
+        assert_eq!(
+            scene
+                .context
+                .ledger
+                .borrow()
+                .task(scene.project.id, number)
+                .unwrap()
+                .unwrap()
+                .task
+                .state,
+            "cancelled"
+        );
+    }
+}
+
+#[tokio::test]
+async fn stc_cancel_can_take_both_ends_of_a_dependency_in_either_order() {
+    let scene = scene();
+    let (status, made) = stc_post(&scene, &stc_plan()).await;
+    assert_eq!(status, 201, "{made}");
+    let first = made["tasks"][0]["task"]["number"].as_i64().unwrap();
+    let second = made["tasks"][1]["task"]["number"].as_i64().unwrap();
+    let (status, said) =
+        stc_post(&scene, &json!({"action":"cancel", "tasks":[first,second]})).await;
+    assert_eq!(status, 200, "{said}");
+    let ledger = scene.context.ledger.borrow();
+    assert_eq!(
+        ledger
+            .task(scene.project.id, first)
+            .unwrap()
+            .unwrap()
+            .task
+            .state,
+        "cancelled"
+    );
+    assert_eq!(
+        ledger
+            .task(scene.project.id, second)
+            .unwrap()
+            .unwrap()
+            .task
+            .state,
+        "cancelled"
+    );
+}
+
+#[tokio::test]
+async fn stc_a_nonpositive_decision_names_the_bad_task_and_changes_nothing() {
+    let scene = scene();
+    let open = open_task(&scene);
+    let (status, said) = stc_post(&scene, &json!({"action":"cancel", "tasks":[open,0]})).await;
+    assert_ne!(status, 200, "{said}");
+    assert!(said["message"].as_str().unwrap().contains("T-0"), "{said}");
+    assert_eq!(
+        scene
+            .context
+            .ledger
+            .borrow()
+            .task(scene.project.id, open)
+            .unwrap()
+            .unwrap()
+            .task
+            .state,
+        "open"
+    );
+}
+
+#[tokio::test]
+async fn stc_cancel_refusal_rolls_back_earlier_cancels() {
+    let scene = scene();
+    let a = open_task(&scene);
+    let (status, said) = stc_post(
+        &scene,
+        &json!({"action":"cancel", "tasks":[a,999], "body":"called off"}),
+    )
+    .await;
+    assert_ne!(status, 200, "{said}");
+    assert!(
+        said["message"].as_str().unwrap().contains("T-999"),
+        "{said}"
+    );
+    assert_eq!(
+        scene
+            .context
+            .ledger
+            .borrow()
+            .task(scene.project.id, a)
+            .unwrap()
+            .unwrap()
+            .task
+            .state,
+        "open"
+    );
+}
+
+#[tokio::test]
+async fn stc_a_refusal_during_creation_rolls_back_an_already_inserted_section() {
+    let scene = scene();
+    let mut plan = stc_plan();
+    plan["plan"][1]["advice"] = json!(true);
+    let (status, said) = stc_post(&scene, &plan).await;
+    assert_ne!(status, 201, "{said}");
+    assert!(
+        said["message"].as_str().unwrap().contains("second"),
+        "{said}"
+    );
+    assert!(scene
+        .context
+        .ledger
+        .borrow()
+        .board(scene.project.id)
+        .unwrap()
+        .open
+        .is_empty());
+}
+
+#[tokio::test]
+async fn stc_forward_names_before_unknown_duplicate_and_circles() {
+    let scene = scene();
+    let mut plan = stc_plan();
+    plan["plan"][0]["before"] = json!(["third"]);
+    plan["plan"][1]["needs"] = json!(["third"]);
+    let (status, said) = stc_post(&scene, &plan).await;
+    assert_eq!(status, 201, "{said}");
+    let tasks = said["tasks"].as_array().unwrap();
+    let number = |at: usize| tasks[at]["task"]["number"].as_i64().unwrap();
+    {
+        let ledger = scene.context.ledger.borrow();
+        assert_eq!(
+            ledger
+                .task(scene.project.id, number(2))
+                .unwrap()
+                .unwrap()
+                .task
+                .blocked_by,
+            [number(0)]
+        );
+        assert_eq!(
+            ledger
+                .task(scene.project.id, number(1))
+                .unwrap()
+                .unwrap()
+                .task
+                .blocked_by,
+            [number(2)]
+        );
+    }
+    for (edited, section) in [
+        (
+            json!({"plan":[{"name":"a", "tier":"standard", "body":"A", "needs":["missing"]}]}),
+            "a",
+        ),
+        (
+            json!({"plan":[{"name":"a", "tier":"standard", "body":"A"},{"name":"a", "tier":"standard", "body":"B"}]}),
+            "a",
+        ),
+        (
+            json!({"plan":[{"name":"a", "tier":"standard", "body":"A", "needs":["b"]},{"name":"b", "tier":"standard", "body":"B", "needs":["a"]}]}),
+            "section",
+        ),
+    ] {
+        let (status, said) = stc_post(&scene, &edited).await;
+        assert_ne!(status, 201, "{said}");
+        assert!(
+            said["message"].as_str().unwrap().contains(section),
+            "{said}"
+        );
+    }
+    assert_eq!(
+        scene
+            .context
+            .ledger
+            .borrow()
+            .board(scene.project.id)
+            .unwrap()
+            .open
+            .len(),
+        3
+    );
+}
+
+#[tokio::test]
+async fn stc_a_numeric_reference_cannot_name_a_task_created_by_the_same_plan() {
+    let scene = scene();
+    let mut plan = stc_plan();
+    plan["plan"][1]["needs"] = json!([1]);
+    let (status, said) = stc_post(&scene, &plan).await;
+    assert_ne!(status, 201, "{said}");
+    assert!(
+        said["message"].as_str().unwrap().contains("second"),
+        "{said}"
+    );
+    assert!(scene
+        .context
+        .ledger
+        .borrow()
+        .board(scene.project.id)
+        .unwrap()
+        .open
+        .is_empty());
+}
+
+#[tokio::test]
+async fn stc_cancel_later_invalid_state_rolls_back_a_first_cancel() {
+    let scene = scene();
+    let done = finished_session_task(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .accept_task(scene.project.id, done, "chief")
+        .unwrap();
+    let open = open_task(&scene);
+    let (status, said) = stc_post(&scene, &json!({"action":"cancel", "tasks":[open,done]})).await;
+    assert_ne!(status, 200, "{said}");
+    assert!(
+        said["message"]
+            .as_str()
+            .unwrap()
+            .contains(&format!("T-{done}")),
+        "{said}"
+    );
+    assert_eq!(
+        scene
+            .context
+            .ledger
+            .borrow()
+            .task(scene.project.id, open)
+            .unwrap()
+            .unwrap()
+            .task
+            .state,
+        "open"
+    );
+}
+
+#[tokio::test]
+async fn stc_a_member_cannot_use_the_batch_door() {
+    let scene = scene();
+    let open = open_task(&scene);
+    let (status, _) = post(
+        &scene,
+        &scene.zeus,
+        &json!({"action":"cancel", "tasks":[open]}).to_string(),
+    )
+    .await;
+    assert_eq!(status, 403);
+    assert_eq!(
+        scene
+            .context
+            .ledger
+            .borrow()
+            .task(scene.project.id, open)
+            .unwrap()
+            .unwrap()
+            .task
+            .state,
+        "open"
+    );
+}
+
+#[tokio::test]
+async fn stc_accept_moves_several_done_tasks_together() {
+    let scene = scene();
+    let first = finished_session_task(&scene);
+    let second = finished_session_task(&scene);
+    let (status, said) = stc_post(
+        &scene,
+        &json!({"action":"accept", "tasks":[first,second], "body":"checked"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    for number in [first, second] {
+        assert_eq!(
+            scene
+                .context
+                .ledger
+                .borrow()
+                .task(scene.project.id, number)
+                .unwrap()
+                .unwrap()
+                .task
+                .state,
+            "accepted"
+        );
+    }
+}
+
+#[tokio::test]
+async fn stc_a_key_refuses_a_changed_source_even_when_the_sections_are_the_same() {
+    let scene = scene();
+    let mut plan = stc_plan();
+    plan["key"] = json!("source-boundaries");
+    plan["source"] = json!("plan-without-blank-boundaries");
+    let first = stc_post(&scene, &plan).await;
+    assert_eq!(first.0, 201, "{}", first.1);
+    let repeated = stc_post(&scene, &plan).await;
+    assert_eq!(repeated.0, 200, "{}", repeated.1);
+    assert_eq!(repeated.1["tasks"], first.1["tasks"]);
+    plan["source"] = json!("plan-with-blank-boundaries");
+    let different = stc_post(&scene, &plan).await;
+    assert_eq!(different.0, 409, "{}", different.1);
+    assert_eq!(different.1["error"], "key-used");
+    assert_eq!(
+        scene
+            .context
+            .ledger
+            .borrow()
+            .board(scene.project.id)
+            .unwrap()
+            .open
+            .len(),
+        3
+    );
+}

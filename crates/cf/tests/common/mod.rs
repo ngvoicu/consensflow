@@ -5,10 +5,32 @@
 // The tests' own helper: a failure in it is the test's.
 #![allow(clippy::expect_used)]
 
+use cf_board::scripted::{reply, Reply};
+use serde_json::{json, Value};
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+
+/// The caller lookup made by `tell` and a plain `note`, followed by the reply
+/// to the command. The table's numbered tell is the chief's; its other is a member's.
+#[allow(dead_code)]
+pub fn replies_for<S: AsRef<str>>(args: &[S], answer: Value) -> Vec<Reply> {
+    let first = args.first().map(AsRef::as_ref);
+    let explicit_human = args.iter().any(|word| word.as_ref() == "--human");
+    let needs_caller = first == Some("tell") || (first == Some("note") && !explicit_human);
+    let mut replies = Vec::new();
+    if needs_caller {
+        let role = if first == Some("tell") && args.get(1).map(AsRef::as_ref) != Some("T-3") {
+            "worker"
+        } else {
+            "chief"
+        };
+        replies.push(reply(200, json!({ "participant": { "role": role } })));
+    }
+    replies.push(reply(201, answer));
+    replies
+}
 
 /// `cf args` with `env` added and `input` on its standard input. An argument
 /// is given as the system takes it, text or not.

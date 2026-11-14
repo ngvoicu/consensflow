@@ -41,6 +41,59 @@ pub(super) fn told(alias: &str) -> String {
     format!("{alias}.kind = 'note' AND {alias}.sender_id IS NOT NULL AND {alias}.urgent = 0")
 }
 
+/// Whether told words created at `created_at` were sent while their task's window was at
+/// work, not before the brief went in: the latest message of the task to that window, `brief`
+/// (a brief, or the words of a resume), was in the window before they were told. The one
+/// place the two times are read; a delivery given up ([`fail_for`]), Finish
+/// ([`withdraw_at_work`]), the footer a window is told them with and the result's earlier
+/// turns (`cf-engine`) all read it. Both are written by the ledger's clock, in one format, so
+/// they compare as text; a tell in the very millisecond the brief arrived was sent before.
+pub fn told_at_work(created_at: &str, brief: Option<&MessageView>) -> bool {
+    brief
+        .and_then(|brief| brief.delivered_at.as_deref())
+        .is_some_and(|delivered| created_at > delivered)
+}
+
+/// [`told_at_work`] of `note`, as the task's `thread` of messages shows it: its latest message
+/// to the note's window is the brief it compares with.
+pub fn sent_at_work(note: &MessageView, thread: &[MessageView]) -> bool {
+    let brief = thread
+        .iter()
+        .filter(|message| {
+            message.kind == "task"
+                && message.recipient_id == note.recipient_id
+                && message.task_number == note.task_number
+        })
+        .max_by_key(|message| message.id);
+    told_at_work(&note.created_at, brief)
+}
+
+/// The latest message of `task` to its window that is a brief or the words of a resume.
+fn latest_brief(store: &Store, task: &TaskRow) -> Result<Option<MessageView>, LedgerError> {
+    Ok(messages(
+        store,
+        &format!(
+            "{MESSAGE_SELECT} WHERE m.task_id = ?1 AND m.recipient_id = ?2 AND m.kind = 'task'
+             ORDER BY m.id DESC LIMIT 1"
+        ),
+        params![task.id, task.assignee_id],
+    )?
+    .pop())
+}
+
+/// Whether `message`, told words, was sent while its task's window was at work
+/// ([`told_at_work`]).
+pub(crate) fn sent_at_work_of(
+    store: &Store,
+    message: &MessageView,
+    task: &TaskRow,
+) -> Result<bool, LedgerError> {
+    Ok(told_at_work(
+        &message.created_at,
+        latest_brief(store, task)?.as_ref(),
+    ))
+}
+
 /// Whether `message` is told words to the window of its task, whose assignee is
 /// `assignee` (a handle): a note from a participant, never urgent, to that
 /// window. A note about the task to anyone else (a worker's to the chief) is
@@ -72,12 +125,12 @@ pub(super) fn behind_held_words(alias: &str) -> String {
     )
 }
 
-/// `from` tells T-`number`'s window `body` while the task is queued for it: the
-/// words are kept for the window, the note that says them. A task that has gone
-/// on (its window has it now) or is over is refused, and so is the chief's own,
-/// which has no window but the chief's. A task that reads working or waiting for the
-/// words that resumed it (`work_while_resumed`) is queued for them still: its window
-/// has not read them, and these go in with them.
+/// `from` tells T-`number`'s window `body`: the words are kept for the window, the note
+/// that says them. They go in after the brief of a task still queued; when the turn
+/// of a task at work or waiting ends, before anything is taken as its result (see
+/// [`notes_waiting`]); with the resume of a task paused. Nothing is stopped, and the
+/// window owes no answer. A task that is over is refused, and so is the chief's own,
+/// which has no window but the chief's.
 pub(crate) fn tell_queued(
     store: &mut Store,
     project_id: i64,
@@ -89,9 +142,11 @@ pub(crate) fn tell_queued(
     store.write(|store| {
         store.participant_by_handle(project_id, from)?;
         let task = store.task_row(project_id, number)?;
-        if crate::tasks::resume_words_not_in(store, &task)?.is_none() {
-            require_task_state(&task, &["queued"], "keep words for the window of")?;
-        }
+        require_task_state(
+            &task,
+            &["queued", "working", "waiting", "paused"],
+            "keep words for the window of",
+        )?;
         let window = store.participant_of(task.assignee_id)?;
         if !roles::is_role(window.role.as_str()) {
             return Err(LedgerError::refused_with(
@@ -147,9 +202,94 @@ pub(crate) fn notes_waiting(
     }))
 }
 
+/// The words told to `participant_id`'s window about the task while it was at work, kept or
+/// held for the human, that Finish withdraws ([`withdraw_at_work`]): not those being pasted.
+pub(crate) fn waiting_at_work(
+    store: &Store,
+    participant_id: i64,
+    task: &TaskRow,
+) -> Result<Vec<MessageView>, LedgerError> {
+    let task_id = task.id;
+    let waiting = messages(
+        store,
+        &format!(
+            "{MESSAGE_SELECT} WHERE m.task_id = ?1 AND m.recipient_id = ?2 AND {told}
+               AND m.state IN ('queued', 'gated') ORDER BY m.id",
+            told = told("m")
+        ),
+        params![task_id, participant_id],
+    )?;
+    let brief = latest_brief(store, task)?;
+    Ok(waiting
+        .into_iter()
+        .filter(|message| told_at_work(&message.created_at, brief.as_ref()))
+        .collect())
+}
+
+/// Finish takes the result as it stands, so the words told to its window while it was at work
+/// that have not gone in are withdrawn, and the chief who finishes is told which. Each is
+/// cancelled, its carrier's hold on it let go.
+pub(crate) fn withdraw_at_work(
+    store: &mut Store,
+    task: &TaskRow,
+    participant_id: i64,
+) -> Result<Vec<MessageView>, LedgerError> {
+    let waiting = waiting_at_work(store, participant_id, task)?;
+    for message in &waiting {
+        store.db.execute(
+            "UPDATE message SET state = 'cancelled', reason = ?, carried_by = NULL WHERE id = ?",
+            params![
+                format!("T-{} was finished before they went in", task.number),
+                message.id
+            ],
+        )?;
+        store.log(
+            message.project_id,
+            "message.withdrawn",
+            json!({ "message": message.id, "finished": task.number }),
+        )?;
+    }
+    waiting
+        .iter()
+        .map(|message| known_message(store, message.id))
+        .collect()
+}
+
+/// [`notes_waiting`] for a Finish: not the words told at work that wait, which it withdraws
+/// ([`withdraw_at_work`]).
+pub(crate) fn notes_waiting_for_finish(
+    store: &Store,
+    participant_id: i64,
+    task: &TaskRow,
+) -> Result<bool, LedgerError> {
+    let withdrawable: Vec<i64> = waiting_at_work(store, participant_id, task)?
+        .iter()
+        .map(|message| message.id)
+        .collect();
+    let waiting: Vec<(i64, Option<String>)> = store
+        .db
+        .prepare(
+            "SELECT m.id, CASE WHEN m.sender_id IS NULL THEN m.body END FROM message m
+              WHERE m.task_id = ? AND m.recipient_id = ?
+                AND m.kind = 'note' AND m.urgent = 0
+                AND m.state IN ('queued', 'gated', 'delivering')",
+        )?
+        .query_map(params![task.id, participant_id], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(waiting.iter().any(|(id, own)| {
+        !withdrawable.contains(id)
+            && own
+                .as_deref()
+                .is_none_or(|body| continuation_tasks(body).is_none())
+    }))
+}
+
 /// Told words `message`, given up for good, fail their task while it still waits
 /// on its window (queued, at work, or waiting on an answer): what the window
-/// answers is to a task without them, and is no result. It is the step of the
+/// answers is to a task without them, and is no result. Not words told at work
+/// ([`told_at_work`]): they fail nothing. It is the step of the
 /// delivery's failure; the engine tells the requester why, as for a brief.
 pub(super) fn fail_for(
     store: &mut Store,
@@ -159,6 +299,11 @@ pub(super) fn fail_for(
     if !HELD_TASK_STATES.contains(&task.state.as_str())
         || !is_told(message, assignee_of(store, task)?.as_deref())
     {
+        return Ok(());
+    }
+    // Words told while the window was at work fail nothing: the work is not thrown away for
+    // them. Their teller is told they did not go in, once, and the result is released.
+    if sent_at_work_of(store, message, task)? {
         return Ok(());
     }
     store.move_task(task, "failed", json!({ "told": message.id }))?;

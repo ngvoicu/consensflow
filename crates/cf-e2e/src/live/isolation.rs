@@ -91,10 +91,9 @@ use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use serde_json::Value;
-use tempfile::TempDir;
 
 use super::agents;
-use super::login::{private_folder, sweep, write_private};
+use super::login::{private_folder, write_private_bytes};
 use super::machine::Harness;
 use super::renew::{Kept, Renewal, Renewed, TestMachine};
 use crate::process::own_var;
@@ -121,7 +120,7 @@ pub const fn lasting(planned: Duration) -> Duration {
 
 /// What the name of a run's home begins with, in the temporary folder: the id of the process
 /// that made it follows, so that one a killed run left behind is known to be nobody's.
-const PREFIX: &str = "consensflow-live-home-";
+pub(crate) const PREFIX: &str = "consensflow-live-home-";
 
 /// What the run's home is given.
 #[derive(Debug, Clone)]
@@ -420,7 +419,7 @@ struct Made {
     /// The owner's setup when it was made.
     owner: Seen,
     /// The folder, removed when this is dropped: with the run, however it ends.
-    folder: TempDir,
+    folder: crate::door::Made,
 }
 
 /// The home a harness's windows run on for a run: made when the rig first asks for it, with a
@@ -678,18 +677,17 @@ impl Isolation {
             .iter()
             .map(|seed| self.read(seed, now))
             .collect::<Result<Vec<_>>>()?;
-        sweep(&self.parent, PREFIX);
-        let folder = tempfile::Builder::new()
-            .prefix(&format!("{PREFIX}{}-", std::process::id()))
-            .tempdir_in(&self.parent)
-            .map_err(|source| Error::File {
-                action: "make a folder in",
-                path: self.parent.clone(),
-                source,
-            })?;
+        crate::rig::sweep::say_copies(&self.parent);
+        let folder =
+            crate::door::made_in(&self.parent, &format!("{PREFIX}{}-", std::process::id()))
+                .map_err(|source| Error::File {
+                    action: "make a folder in",
+                    path: self.parent.clone(),
+                    source,
+                })?;
         private_folder(folder.path())?;
         for relative in &self.plan.folders {
-            files::make_dir(&folder.path().join(relative))?;
+            crate::door::make_dir(folder.path().join(relative))?;
         }
         let mut copied = Vec::new();
         for seed in seeds.into_iter().flatten() {
@@ -942,7 +940,7 @@ impl Isolation {
                     self.harness.name()
                 ))
             })?;
-        files::write(&home.join(below).join(name), text)
+        crate::door::write(home.join(below).join(name), text)
     }
 
     /// What a run that left the owner's setup as it was says it checked: the files, each with the
@@ -1024,7 +1022,7 @@ impl Placed {
             Self::File { to, bytes, login } => {
                 let file = home.join(to);
                 if let Some(folder) = file.parent() {
-                    files::make_dir(folder)?;
+                    crate::door::make_dir(folder)?;
                 }
                 write_bytes(&file, &bytes)?;
                 Ok(login.then_some(Copied { file, was: bytes }))
@@ -1039,41 +1037,13 @@ impl Placed {
 
 /// `bytes` in `file`, readable by its owner alone.
 fn write_bytes(file: &Path, bytes: &[u8]) -> Result {
-    match std::str::from_utf8(bytes) {
-        Ok(text) => write_private(file, text),
-        Err(_) => {
-            // A login is text; a file that is not is copied as it is.
-            let mut made = fs::File::create(file).map_err(Error::file("write", file))?;
-            made.write_all(bytes).map_err(Error::file("write", file))
-        }
-    }
+    write_private_bytes(file, bytes)
 }
 
 /// The folder `from` copied under `to`, its folders and files; the package's own perms are
-/// kept on the entries where the copy can have them.
+/// kept on the entries where the copy can have them (T-1373: an executable it bundles still runs).
 fn copy_tree(from: &Path, to: &Path) -> Result {
-    files::make_dir(to)?;
-    for entry in fs::read_dir(from)
-        .map_err(Error::file("read", from))?
-        .flatten()
-    {
-        let (entry_from, entry_to) = (entry.path(), to.join(entry.file_name()));
-        if entry
-            .file_type()
-            .map_err(Error::file("read", &entry_from))?
-            .is_dir()
-        {
-            copy_tree(&entry_from, &entry_to)?;
-        } else {
-            files::copy(&entry_from, &entry_to)?;
-            // With its mode: an executable the package bundles still runs (T-1373).
-            let permissions = fs::metadata(&entry_from)
-                .map_err(Error::file("read", &entry_from))?
-                .permissions();
-            fs::set_permissions(&entry_to, permissions).map_err(Error::file("write", &entry_to))?;
-        }
-    }
-    Ok(())
+    crate::door::copy_tree(from, to, &|_| false)
 }
 
 impl fmt::Debug for Isolation {

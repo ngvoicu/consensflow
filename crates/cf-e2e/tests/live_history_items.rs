@@ -99,8 +99,8 @@ fn says(members: &Members, words: &str) -> Result<()> {
     members.rig().types(&pane, b"\r")
 }
 
-/// Where a run asked to keep what it made (`--keep`) copies each harness's records: the
-/// tree's own scratch, which the readers' fixtures are made from.
+/// Where a run asked to keep what it made (`--keep`) copies each harness's records, into a new
+/// folder of its own there: the tree's own scratch, which the readers' fixtures are made from.
 const RECORDS: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../app/src-tauri/target/scratch/history-items"
@@ -124,7 +124,19 @@ fn keep_records(members: &Members, harness: Harness, log: &Log) {
     if !live::keep_requested() {
         return;
     }
-    let into = Path::new(RECORDS).join(harness.name());
+    // The scratch folder is shared by every run that keeps records: a run makes a new folder of
+    // its own in it (`<harness>-<pid>-<ms>-<n>`), and never writes into one that is there.
+    let into = match live::export_folder(Some(RECORDS), harness.name()) {
+        Ok(Some(into)) => into,
+        Ok(None) => return,
+        Err(failed) => {
+            log.say(format!(
+                "kept none of the records of {}: {failed}",
+                harness.name()
+            ));
+            return;
+        }
+    };
     for (variable, below) in record_folders(harness) {
         let Some(home) = members.rig().var(variable) else {
             continue;
@@ -150,8 +162,8 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<usize> {
         if entry.file_type()?.is_dir() {
             count += copy_tree(&entry.path(), &target)?;
         } else if entry.file_type()?.is_file() {
-            std::fs::create_dir_all(to)?;
-            std::fs::copy(entry.path(), &target)?;
+            cf_e2e::door::make_dir(to)?;
+            cf_e2e::door::copy_keeping_mode(entry.path(), &target)?;
             count += 1;
         }
     }
@@ -314,7 +326,7 @@ fn run(log: &Log, harness: Harness) -> Result<Vec<Check>> {
         plan
     };
     let members = Members::open(&plan, Path::new(FAKE_AGENT), log)?;
-    std::fs::write(members.folder().join(NOTES), NOTES_TEXT)
+    cf_e2e::door::write(members.folder().join(NOTES), NOTES_TEXT)
         .map_err(|failed| Error::Daemon(format!("{NOTES}: {failed}")))?;
     if !members.chief_is_idle(log)? {
         let _ = members.close();
@@ -427,6 +439,49 @@ mod tests {
 
     fn held(checks: &[Check]) -> Vec<bool> {
         checks.iter().map(|check| check.ok).collect()
+    }
+
+    #[test]
+    fn the_records_a_run_keeps_go_in_a_new_folder_of_its_own_and_an_earlier_runs_are_as_they_were()
+    {
+        use cf_e2e::live::layout::Layout;
+        let mut layout = Layout::new().unwrap();
+        let scratch = layout.home().join("scratch");
+        layout
+            .plant_tree(
+                &scratch,
+                &[(
+                    "claude-1-2-0/CLAUDE_CONFIG_DIR/projects/a.jsonl",
+                    "an earlier run's record",
+                )],
+            )
+            .unwrap();
+        // The harness's records the run made, a folder with a file below a folder.
+        let made = cf_e2e::door::made("live-history-items-test-").unwrap();
+        cf_e2e::door::make_dir(made.path().join("projects/p")).unwrap();
+        cf_e2e::door::write(made.path().join("projects/p/s.jsonl"), "this run's record").unwrap();
+        for _ in 0..2 {
+            let into = live::export_folder(Some(&scratch.display().to_string()), "claude")
+                .unwrap()
+                .unwrap();
+            let kept = copy_tree(
+                &made.path().join("projects"),
+                &into.join("CLAUDE_CONFIG_DIR/projects"),
+            );
+            assert_eq!(kept.unwrap(), 1);
+            assert_eq!(
+                std::fs::read_to_string(into.join("CLAUDE_CONFIG_DIR/projects/p/s.jsonl")).unwrap(),
+                "this run's record"
+            );
+        }
+        // The earlier run's record is as it was, and each run's copy is in a folder of its own.
+        layout.untouched().unwrap();
+        let children = std::fs::read_dir(&scratch).unwrap().count();
+        assert_eq!(
+            children, 3,
+            "the earlier run's folder and one for each of two runs"
+        );
+        cf_e2e::door::again_under_audit("tests::the_records_a_run_keeps_go_in_a_new_folder_of_its_own_and_an_earlier_runs_are_as_they_were").unwrap();
     }
 
     #[test]

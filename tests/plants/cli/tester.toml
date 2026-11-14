@@ -31,9 +31,15 @@ runs = ["board-task"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '''        .filter(|role| role.switch.is_some_and(|switch| words.on(switch)))
+find = '''    // --after beside --self, are not sent, as before: the task is what the rest says.
+    let switched: Vec<&Role> = roles::all()
+        .iter()
+        .filter(|role| role.switch.is_some_and(|switch| words.on(switch)))
 '''
-replace = '''        .filter(|role| role.switch.is_some_and(|switch| words.on(switch)))
+replace = '''    // --after beside --self, are not sent, as before: the task is what the rest says.
+    let switched: Vec<&Role> = roles::all()
+        .iter()
+        .filter(|role| role.switch.is_some_and(|switch| words.on(switch)))
         .filter(|role| role.id != "tester")
 '''
 

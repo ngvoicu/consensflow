@@ -93,10 +93,13 @@ runs = ["daemon-api"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = '    let answer = board.get("/api/whoami")?;'
+find = '''
+    let answer = board.get("/api/whoami")?;
+    let me = answer.value();'''
 replace = '''
     let _ = board.get("/api/whoami");
-    let answer = board.get("/api/whoami")?;'''
+    let answer = board.get("/api/whoami")?;
+    let me = answer.value();'''
 
 [[plant]]
 name = "players: a page operation leaves a file behind"

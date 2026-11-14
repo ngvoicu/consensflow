@@ -334,6 +334,13 @@ mod tests {
     /// taken out again, where it was added, before the file is hashed.
     const T1444_SUGGESTION_OFF: &str = "                launch.suggestion_off,\n";
 
+    /// T-1595's deadline read changes `dialog`, not the prompt reader the corpus borrows.
+    /// Remove only its exact addition at the old offer's assignment before hashing.
+    const T1595_CLOSING: (&str, &str) = (
+        "            .then_some(OFFER_CLOSES_AFTER_S);\n        let closes_after_s = closes_after_s\n            .or_else(|| super::dialog_identity::warning_seconds(&shown.dialog.detail, screen));\n",
+        "            .then_some(OFFER_CLOSES_AFTER_S);\n",
+    );
+
     /// What T-1423 added to `muse/window.rs`: the look a window gives before its session is
     /// known says no delivery began (`Observed::begun`, a field the contract gained). Nothing
     /// the corpus borrows reads it; the line is taken out again before the file is hashed.
@@ -372,6 +379,7 @@ mod tests {
                 .replace(T1328_DEFAULT.0, T1328_DEFAULT.1)
                 .replace(T1399_ADVISOR_OFF, "")
                 .replace(T1444_SUGGESTION_OFF, "")
+                .replace(T1595_CLOSING.0, T1595_CLOSING.1)
         } else if file == "muse/window.rs" {
             text.replacen(T1423_BEGUN, "", 1)
         } else {

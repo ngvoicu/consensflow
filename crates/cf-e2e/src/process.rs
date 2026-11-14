@@ -417,6 +417,8 @@ impl Run {
 
     /// The program's command, with everything but its streams.
     fn command(&self) -> Command {
+        // A say-only run whose audit file cannot be used stops before it starts a program.
+        let audit = crate::door::Door::child_vars();
         let mut command = Command::new(&self.program);
         // Daemons, hosts and stand-ins run for a whole case while other cases open sockets and
         // pipes: one left another's would hold it to its end.
@@ -430,6 +432,10 @@ impl Run {
         for name in &self.removed {
             command.env_remove(name);
         }
+        // A program of a say-only run says only, into the same file, whatever its environment; and
+        // every program is told the folders the run made so far, the only ones it writes below.
+        command.env_remove(crate::door::MADE_ROOTS);
+        command.envs(audit);
         for arg in &self.args {
             arg.add_to(&mut command);
         }
@@ -643,15 +649,19 @@ fn wait(child: &mut Child, limit: Option<Duration>) -> io::Result<(Option<i32>, 
             Ok(Some(status)) => return Ok((status.code(), false)),
             Ok(None) => {}
             Err(cause) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                if crate::door::Door::of_run()
+                    .end_child("a program that could not be waited for", child)
+                {
+                    let _ = child.wait();
+                }
                 return Err(cause);
             }
         }
         if limit.is_some_and(|limit| started.elapsed() >= limit) {
             // It may have ended just now, which is no matter to say.
-            let _ = child.kill();
-            let _ = child.wait();
+            if crate::door::Door::of_run().end_child("a program past its limit", child) {
+                let _ = child.wait();
+            }
             return Ok((None, true));
         }
         thread::sleep(POLL);

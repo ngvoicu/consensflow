@@ -37,7 +37,7 @@ mod project;
 mod report;
 mod route;
 mod stranger;
-mod sweep;
+pub mod sweep;
 mod wait;
 
 use std::path::{Path, PathBuf};
@@ -553,6 +553,13 @@ impl Rig {
         &self.cf
     }
 
+    /// Stops the rig's own daemon where it is, and lets it go on after `span`, through the door:
+    /// what a machine too loaded to run it does for a moment. Whether it was stopped.
+    #[cfg(unix)]
+    pub fn stall_daemon(&self, span: std::time::Duration) -> bool {
+        self.daemon.stall(span)
+    }
+
     /// The daemon's process id.
     pub fn daemon_pid(&self) -> u32 {
         self.daemon.id()
@@ -591,7 +598,7 @@ impl Rig {
     /// The stand-ins a case seats are `roster`'s (`{agents: [{id, kind, model, effort,
     /// workTier, designer}]}`), for the projects it opens and the members it adds after.
     pub fn stand_ins(&self, roster: &Value) -> Result<()> {
-        crate::files::write(&self.stand_ins_file(), format!("{roster}\n"))
+        crate::door::write(self.stand_ins_file(), format!("{roster}\n"))
     }
 
     /// The daemon's home, `CONSENSFLOW_HOME`.
@@ -609,6 +616,12 @@ impl Rig {
     pub fn page(&self, op: &str, body: Value) -> Result<Value> {
         let id = self.shared.next_page_id();
         self.ask(&id, op, &body, self.daemon.sink(), "the daemon")
+    }
+
+    /// Closes the window `pane` of the rig's own pane host (`pane.kill`), through the door
+    /// ([`crate::door::Door::close_pane`]): the one way a case closes a window.
+    pub fn close_pane(&self, pane: Value) -> Result<Value> {
+        crate::door::Door::of_run().close_pane(&pane, |op, body| self.host(op, body))
     }
 
     /// What the desktop app asks the pane host: `op` with `body`, answered by
@@ -674,6 +687,16 @@ impl Rig {
     /// none, or the process had gone by the time it was read.
     pub fn window_process(&self, pane: &Value) -> Option<Identity> {
         window_process_in(&self.shared.seen().roots, pane)
+    }
+
+    /// Every window the pane host opened a process for, as it answered each `pane.open`, whoever
+    /// asked it (the daemon, or the case's own): its id and which process its program is, read
+    /// then and kept ([`Rig::window_process`]). Every window the host opened, those of a reopened
+    /// member that share a pane id among them: the engine opens the new window under the old id with
+    /// a new generation, and what the old one ran may have outlived it. In the order of the
+    /// answers; a window the host named no process of is not among them.
+    pub fn window_roots(&self) -> Vec<(String, Identity)> {
+        window_roots_in(&self.shared.seen().roots)
     }
 
     /// Every `pane.exit` the pane host told so far, in order: which window
@@ -798,12 +821,22 @@ impl Rig {
         }
     }
 
+    /// `path` as a folder of this run's own: under the folder the rig made for the run, its
+    /// temp root, which no other run has ([`crate::live::members::RunFolder`]). None for any
+    /// other: a live rig's home is the person's own, and is none of the run's.
+    pub fn run_folder(&self, path: &Path) -> Option<crate::live::members::RunFolder> {
+        crate::live::members::RunFolder::under(&self.root, path)
+    }
+
     /// Leaves the home where it is when the rig ends, however it ends (closed,
     /// or dropped by a case that failed), for a person to look at what the case
-    /// did: where it is. A rig that starts a day later takes it away unless a process
-    /// works in it.
+    /// did: where it is. It holds the mark [`crate::door::KEPT`], and no sweep takes it.
     pub fn keep_home(&mut self) -> PathBuf {
         self.keep_root = true;
+        let _ = crate::door::write(
+            self.root.join(crate::door::KEPT),
+            "kept for a person to look at\n",
+        );
         self.root.clone()
     }
 
@@ -1006,7 +1039,7 @@ impl Drop for Rig {
         // what the run did in the person's setup, which the homes say loudly.
         let _ = self.finish_homes();
         if !self.keep_root {
-            let _ = std::fs::remove_dir_all(&self.root);
+            let _ = crate::door::Door::of_run().remove_made(&self.root);
         }
     }
 }
@@ -1053,6 +1086,25 @@ fn window_process_in(roots: &[route::Root], pane: &Value) -> Option<Identity> {
         .and_then(|root| root.identity)
 }
 
+/// The windows of `roots` and their processes, in the order they were answered (see
+/// [`Rig::window_roots`]): each process the host named, once, whatever id and generation it was
+/// opened under.
+fn window_roots_in(roots: &[route::Root]) -> Vec<(String, Identity)> {
+    let mut found: Vec<(String, Identity)> = Vec::new();
+    for root in roots {
+        let (Some(id), Some(identity)) = (root.id.as_str(), root.identity) else {
+            continue;
+        };
+        if !found
+            .iter()
+            .any(|(known, was)| known == id && *was == identity)
+        {
+            found.push((id.to_owned(), identity));
+        }
+    }
+    found
+}
+
 /// The records of the conversation `session` that the stand-in agent wrote
 /// under the Claude config folder `config`, whole ones only.
 fn recorded(config: &str, session: &str) -> String {
@@ -1066,6 +1118,38 @@ fn recorded(config: &str, session: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The engine opens the window of a reopened member under the same pane id with a new
+    /// generation, and the old window's process may have left what it ran: every process the host
+    /// named is a window of the run, whatever id it was opened under.
+    #[test]
+    fn a_pane_id_opened_again_under_a_new_generation_keeps_every_window_it_had() {
+        let root = |generation: u64, pid: u32, started: u64| route::Root {
+            id: serde_json::json!("p1-worker-1"),
+            generation: serde_json::json!(generation),
+            identity: Some(Identity { pid, started }),
+        };
+        let roots = [root(1, 100, 10), root(2, 200, 20)];
+        assert_eq!(
+            window_roots_in(&roots),
+            [
+                (
+                    "p1-worker-1".to_owned(),
+                    Identity {
+                        pid: 100,
+                        started: 10
+                    }
+                ),
+                (
+                    "p1-worker-1".to_owned(),
+                    Identity {
+                        pid: 200,
+                        started: 20
+                    }
+                ),
+            ]
+        );
+    }
 
     #[test]
     fn a_windows_process_is_the_one_read_as_the_host_answered_its_open_and_never_read_again() {

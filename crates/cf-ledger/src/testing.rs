@@ -103,6 +103,11 @@ pub use program_gone::undo_migration_0024;
 pub use prompt_suggestion::undo_migration_0036;
 pub use staff_rules::undo_migration_0026;
 
+/// Remove the plan-key table when a test reconstructs a ledger from before 0040.
+pub fn undo_migration_0040(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    db.execute_batch("DROP TABLE task_plan_key")
+}
+
 /// The last schema version Node's ledger had.
 const NODE_LAST_VERSION: i64 = 11;
 
@@ -199,7 +204,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
     }
     // Kept in their order: a table taken out mid-list must not move the last into its place.
     let made: Vec<&str> = compaction::made("TABLE")
-        .chain([model_list::TABLE, drawn_items::TABLE])
+        .chain([model_list::TABLE, drawn_items::TABLE, "task_plan_key"])
         .collect();
     tables.retain(|table, _| !made.contains(&table.as_str()));
 }
@@ -262,6 +267,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
         entry["name"] != pasted_into::TRIGGER
             && entry["name"] != model_list::TABLE
             && entry["name"] != drawn_items::TABLE
+            && entry["name"] != "task_plan_key"
             && entry["name"] != "participant_one_live_backup"
             && entry["name"] != "participant_backup_insert"
             && entry["name"] != "participant_backup_update"

@@ -139,6 +139,7 @@ fn pi_script(real: &str, model: &str, thinking: &str) -> String {
 fn script_with_stand_ins(real: &str, flags: &[String], stand_ins: &StandIns) -> String {
     let word = |path: &Path| shell_word(&path.to_string_lossy());
     let (agent, variable) = (word(stand_ins.agent()), stand_in::FOLDER);
+    let roots = cf_e2e::door::MADE_ROOTS;
     let words: Vec<String> = std::iter::once(real)
         .chain(flags.iter().map(String::as_str))
         .map(shell_word)
@@ -166,6 +167,13 @@ fn script_with_stand_ins(real: &str, flags: &[String], stand_ins: &StandIns) -> 
             format!("  *\" --model {model} \"*)"),
             format!("    if [ -f {marker} ] && [ -x {agent} ]; then"),
             format!("      {variable}={}; export {variable}", word(folder)),
+            // The stand-in writes only below the folders it is handed (the kit's door): the
+            // folder of this run's answers, the Claude config its window runs on, and the
+            // project its window is in, and what the window was handed (a rig's own folder).
+            format!(
+                "      {roots}={}\"${{CLAUDE_CONFIG_DIR:+:$CLAUDE_CONFIG_DIR}}:$PWD${{{roots}:+:${roots}}}\"; export {roots}",
+                word(folder)
+            ),
             format!("      exec {agent} \"$@\""),
             "    fi".to_owned(),
             format!("    echo {} >&2", shell_word(&refused)),

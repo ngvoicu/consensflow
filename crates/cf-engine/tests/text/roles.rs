@@ -250,6 +250,15 @@ fn teach_the_chief_only_the_board_s_commands() {
 }
 
 #[test]
+fn chief_knows_what_a_pause_with_words_does_while_resume_words_wait() {
+    let text = instructions("chief", &[]);
+    assert!(
+        text.contains("If shown working before its resume words go in, a pause with words sends a note: no stop or answer."),
+        "{text}"
+    );
+}
+
+#[test]
 fn teach_the_advisor_only_the_board_s_commands() {
     teaches_only_the_boards_commands("advisor");
 }
@@ -275,6 +284,45 @@ fn teach_the_designer_only_the_board_s_commands() {
 }
 
 #[test]
+fn every_member_is_told_when_its_result_is_delivered_and_what_to_do_with_background_work() {
+    let rules = [
+        (
+            "wait for the result",
+            "Your answer ends your turn: wait for what your result needs.",
+        ),
+        (
+            "delivery and leftovers",
+            "Your result is delivered once your turn has ended and nothing you started is still running, so before your last answer end what you left in the background (a wait loop, a watcher).",
+        ),
+    ];
+    let mut missing = Vec::new();
+    for (shell, cf) in [
+        ("POSIX", CfWord::bare()),
+        (
+            "PowerShell",
+            CfWord::new("C:/Program Files/ConsensFlow/bin/cf.exe", Shell::PowerShell),
+        ),
+    ] {
+        for role in cf_ledger::roles::ids() {
+            let text = role_instructions(&Env::default(), role, &[], &cf, None)
+                .unwrap()
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            for (name, rule) in rules {
+                if !text.contains(rule) {
+                    missing.push(format!("{role} ({shell}): {name}"));
+                }
+            }
+            if text.contains("if you are still waiting on background work, say so in a line") {
+                missing.push(format!("{role} ({shell}): still-waiting line"));
+            }
+        }
+    }
+    assert!(missing.is_empty(), "missing rules: {}", missing.join(", "));
+}
+
+#[test]
 fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
     let shared = [
         "Run each of these in your shell (your Bash or terminal tool).",
@@ -283,10 +331,8 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         // A window the chief continues (`--after`) comes back on its own conversation: the text
         // does not tell it that nothing from an earlier task is there (T-1435).
         "A new window starts from nothing; one the chief continues\nhas its earlier conversation. Either way, finish with a result that stands on\nits own.",
-        // What the engine does since 0eec91d20 (T-1059's read, 2026-11-01): a
-        // turn's end ends no process itself, and a free window's close ends
-        // only what the host can tell is the window's — so nothing is left.
-        "Your answer\nends your turn: wait for what your result needs, and leave nothing running.",
+        // A turn's end does not end background work; the result waits for it.
+        "Your answer ends your turn: wait for what your result needs.",
     ];
     for (role, title) in [
         ("worker", "worker"),
@@ -302,9 +348,7 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         assert!(!text.contains("carries over"), "{role}");
         assert!(found(&format!(r"\n# ConsensFlow {title}\n"), &text));
         assert!(found(
-            &format!(
-                r"leave\s+nothing running\.\s+Keep this {role} role for the whole session\.\n$"
-            ),
+            &format!(r"watcher\)\.\s+Keep this {role} role for the whole session\.\n$"),
             &text
         ));
     }
@@ -548,9 +592,17 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
         r#"cf task edit T-3 "…" \[--tier <tier>\] \[--needs …\] \[--before …\]\s+change the brief, tier, needs or before of a task before any window has its brief \(open, queued, or paused\); T-4,T-5 replaces a list, \+T-5 adds, -T-5 removes"#,
         &text
     ));
-    // A tell stops a working task and gets an answer; a queued or open task is not stopped (T-1435).
+    assert!(
+        text.contains("A pause or finish may withdraw and name them"),
+        "the chief must know a tell can be withdrawn: {text}"
+    );
+    // A tell is read before the result without stopping; pause with words asks instead.
     assert!(found(
-        r#"cf tell T-3 "…"\s+stop T-3 and put this to its window: its answer arrives as a message; then resume it \(queued or open: kept for its window; no answer, nothing to resume\)"#,
+        r#"cf tell T-3 "…"\s+say this to T-3's window without stopping it: a working or waiting window reads your words at rest before its result unless withdrawn first, and owes no answer\. A pause or finish may withdraw and name them"#,
+        &text
+    ));
+    assert!(found(
+        r#"cf task pause T-3 \["…"\]\s+stop a worker's task: its window waits; background work runs on; with words, they go to its window as a question, its answer arrives as a message; then cf task resume T-3 "…" or cf task finish T-3"#,
         &text
     ));
     assert!(found(
@@ -880,6 +932,42 @@ fn section<'a>(text: &'a str, heading: &str) -> &'a str {
         .find("\n## ")
         .map_or(text.len(), |at| start + 3 + at);
     &text[start..end]
+}
+
+#[test]
+fn every_member_is_taught_when_and_how_to_tell_without_waiting() {
+    let cf = CfWord::new("C:/Program Files/ConsensFlow/cf.exe", Shell::Posix);
+    for role in cf_ledger::roles::ids() {
+        let text = role_instructions(&Env::default(), role, &[zeus()], &cf, None).unwrap();
+        let commands = section(&text, "Your commands");
+        let tell =
+            format!("{cf} tell \"…\" tell whoever gave you the task, without asking or waiting");
+        let ask =
+            format!("If you cannot go on without an answer, use `{cf} ask` and end your turn.");
+        assert_says(
+            commands,
+            role,
+            &[
+                &tell,
+                "A tell to your chief is for what it must know before your result: a wrong premise in the brief, a finding that changes another task, a blocker you work around.",
+                "Progress is not a tell.",
+                "Go on working after a tell.",
+                &ask,
+            ],
+        );
+        assert_eq!(text.matches(&format!("{cf} tell ")).count(), 1, "{role}");
+        assert!(!text.contains(&format!("{cf} note --human")), "{role}");
+    }
+}
+
+#[test]
+fn the_chief_is_told_a_members_tell_needs_no_answer() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "What you do"),
+        "the chief",
+        &["A tell from a member on a task you gave arrives headed `[… note from @worker]`; it asks no answer, so act on it or not as you judge."],
+    );
 }
 
 #[test]

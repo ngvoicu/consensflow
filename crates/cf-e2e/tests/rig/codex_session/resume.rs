@@ -24,7 +24,7 @@ const NEVER: &str = "01a0a6ee-0000-7000-8000-000000000000";
 fn a_window_resumed_on_a_thread_that_never_had_a_turn_ends_at_once_with_what_codex_said() -> Outcome
 {
     let _turn = serial::turn();
-    let home = tempfile::tempdir()?;
+    let home = cf_e2e::door::made("cf-cx-home-")?;
     // The home keeps the rollout of another thread, as a home that has seen Codex would.
     held_by(home.path(), B)?;
     let mut s = Supervised::start(
@@ -60,7 +60,7 @@ fn a_window_resumed_on_a_thread_that_never_had_a_turn_ends_at_once_with_what_cod
 #[test]
 fn a_window_resumed_on_a_thread_that_had_a_turn_shows_it_and_the_broker_names_it() -> Outcome {
     let _turn = serial::turn();
-    let home = tempfile::tempdir()?;
+    let home = cf_e2e::door::made("cf-cx-home-")?;
     held_by(home.path(), B)?;
     let mut s = Supervised::start(
         &["resume", B],

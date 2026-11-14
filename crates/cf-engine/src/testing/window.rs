@@ -50,6 +50,8 @@ pub const HOOK_ASK_THEN: &str =
 /// Why a test window waits where its harness says a dialog of its own is open, as Claude
 /// Code's status says one ([`DialogSign::Open`]); any other reason is its own question's.
 pub const DIALOG_OPEN: &str = "dialog open (a test's harness dialog)";
+/// A dialog whose test harness says it closes by itself, independent of a safe decline.
+pub const SELF_ENDING_DIALOG: &str = "Will this test dialog close by itself?";
 
 pub(super) struct FakeWindow {
     seam: String,
@@ -111,6 +113,15 @@ fn holds(screen: &[String], words: &str) -> bool {
 impl Window for FakeWindow {
     fn opened(&self, pid: Option<u32>) {
         self.pid.set(pid);
+    }
+
+    fn dialog(&self, screen: &[String]) -> Option<Dialog> {
+        let mut dialog =
+            cf_harness::testing::read_dialog(screen, |below| self.shows_prompt(below))?;
+        if dialog.question == SELF_ENDING_DIALOG {
+            dialog.closes_after_s = Some(17);
+        }
+        Some(dialog)
     }
 
     fn trusts(&self) -> Option<&Trusts> {
