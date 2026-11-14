@@ -185,7 +185,7 @@ replace = ""
 
 [[plant]]
 name = "staff rules: a bound in bytes that leaves the chief's text read in part"
-meant = "the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say"
+meant = "the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_docs_say"
 runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
@@ -195,7 +195,7 @@ replace = '''pub const STAFF_RULES_MAX_BYTES: usize = 12_000;'''
 
 [[plant]]
 name = "staff rules: a bound in lines that leaves a chief of 25 rows read in part"
-meant = "the_real_text_of_a_chief_with_specs_and_a_large_staff_is_told_whole_or_told_and_read"
+meant = "the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_docs_say"
 runs = ["engine-role-change-lib"]
 
 [[plant.edit]]

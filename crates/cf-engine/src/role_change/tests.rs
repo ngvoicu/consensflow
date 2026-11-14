@@ -1242,7 +1242,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&utf8),
-            &["How a screen looks, feels and moves is the frontend designer"],
+            &["Where the staff has an integrator, it lands accepted work; a"],
         ),
         (
             "a Mac, the most escaped rules",
