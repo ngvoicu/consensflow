@@ -13,9 +13,10 @@
 //! reached the chief only because the model put the line into its `cf answer` or wrote it again
 //! at the end.
 //!
-//! What the chief should see: a note with what the window wrote first, before any tool, and
-//! what it said last, once; the task still paused, with no result; and `cf task finish T-1`
-//! making the last words the result, not both.
+//! The note still holds the first and last words, and Finish takes only the last as the
+//! result. Without a board answer the note is typed. If the window answered on the board,
+//! the note is shown instead, even when the first words differ from that answer. The
+//! answered case below checks both the note's contents and what the chief's window receives.
 //!
 //! The stand-in writes the shape: `SAID <words> THEN <line>` is a message that says the words
 //! and calls a tool, and the rest of the line after it (`REPLY <words> THEN …` answers with `cf
@@ -25,6 +26,7 @@ use cf_e2e::rig::{Project, Rig, OPEN};
 use serde_json::{json, Value};
 
 use crate::a_workers_still_going_was_given_as_its_result::{tier, told};
+use crate::resume_of_a_chief_with_no_turn::{after, windows_of};
 use crate::{config, secs, Outcome};
 
 /// What the worker writes first, as text.
@@ -124,14 +126,55 @@ fn assert_finish_takes_the_last_words(rig: &Rig, project: &Project, chief: &Valu
     Ok(())
 }
 
+/// The chief's recorded conversation and the note's message, so an inbox entry is not
+/// mistaken for a message that was typed into its window.
+fn chief_session(rig: &Rig, project: &Project) -> cf_e2e::Result<String> {
+    windows_of(rig, project)
+        .first()
+        .and_then(|frame| after(frame, "--session-id"))
+        .map(str::to_owned)
+        .ok_or_else(|| cf_e2e::Error::Daemon("the chief has no session".to_owned()))
+}
+
+/// A user prompt in the chief's record containing `words`, including a carried message.
+fn prompt_with(rig: &Rig, session: &str, words: &str) -> Option<String> {
+    rig.transcript(session)
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|row| row["type"] == "user")
+        .map(|row| row.to_string())
+        .find(|row| row.contains(words))
+}
+
+fn note_message(project: &Project) -> cf_e2e::Result<Value> {
+    project
+        .inbox("chief")?
+        .into_iter()
+        .find(|message| {
+            message["kind"] == "note"
+                && message["body"]
+                    .as_str()
+                    .is_some_and(|body| body.contains(REPORT))
+        })
+        .ok_or_else(|| cf_e2e::Error::Daemon("the note is not in the inbox".to_owned()))
+}
+
 #[test]
-fn the_words_a_worker_writes_before_its_tools_in_the_turn_of_a_tell_reach_the_chief_beside_its_last_words(
-) -> Outcome {
+fn without_a_board_answer_the_first_and_last_words_are_typed_to_the_chief() -> Outcome {
     // Devin's first run: the line as text, a command, the last line; no `cf answer`.
     let rig = Rig::start(config())?;
     let words = format!("Stop now. SAID {WRITTEN} THEN SLEEP 2 Reply with exactly: {REPORT}");
     let (project, chief, note) = tell_and_wait_for_the_note(&rig, &words)?;
     assert_the_note_holds_both(&note);
+    let message = note_message(&project)?;
+    assert!(message["receipt"]["shown"].is_null(), "{message}");
+    assert!(message["id"].as_i64().is_some(), "{message}");
+    let session = chief_session(&rig, &project)?;
+    rig.wait_for("the unanswered note to be typed", secs(90), || {
+        Ok(prompt_with(&rig, &session, WRITTEN).is_some())
+    })?;
+    let prompt = prompt_with(&rig, &session, WRITTEN).expect("the note was typed");
+    assert!(prompt.contains(REPORT), "{prompt}");
     assert!(
         !holding(&project, WRITTEN)?
             .iter()
@@ -144,8 +187,7 @@ fn the_words_a_worker_writes_before_its_tools_in_the_turn_of_a_tell_reach_the_ch
 }
 
 #[test]
-fn the_words_a_worker_writes_before_its_tools_reach_the_chief_though_it_answered_the_tell_with_other_words(
-) -> Outcome {
+fn first_words_absent_from_the_board_answer_are_shown_but_not_typed() -> Outcome {
     // Devin's second run, which T-1131 reran alone: `cf answer m-2` carried the last line.
     let rig = Rig::start(config())?;
     let words = format!(
@@ -153,6 +195,35 @@ fn the_words_a_worker_writes_before_its_tools_reach_the_chief_though_it_answered
     );
     let (project, chief, note) = tell_and_wait_for_the_note(&rig, &words)?;
     assert_the_note_holds_both(&note);
+    let message = note_message(&project)?;
+    assert_eq!(message["state"], "read", "{message}");
+    assert!(!message["receipt"]["shown"].is_null(), "{message}");
+    let note_id = message["id"].as_i64().expect("the note has an id");
+    let answer = project
+        .inbox("chief")?
+        .into_iter()
+        .find(|message| message["kind"] == "answer" && message["body"] == REPORT)
+        .expect("the answer is in the inbox");
+    assert!(answer["id"].as_i64().is_some(), "{answer}");
+    let session = chief_session(&rig, &project)?;
+    rig.wait_for("the board answer to be typed", secs(90), || {
+        Ok(prompt_with(&rig, &session, REPORT).is_some())
+    })?;
+    let record = rig.transcript(&session);
+    assert!(
+        !record.contains(&format!("[ConsensFlow m-{note_id} ")),
+        "{record}"
+    );
+    assert!(
+        !record.contains(WRITTEN),
+        "the distinct first words were typed: {record}"
+    );
+    assert!(
+        rig.events().iter().all(|event| {
+            event["kind"] != "delivery.begun" || event["data"]["message"] != note_id
+        }),
+        "the shown note was pasted"
+    );
     let answers: Vec<(String, String)> = told(&project)?
         .into_iter()
         .filter(|(kind, _)| kind == "answer")

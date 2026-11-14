@@ -275,6 +275,18 @@ impl Ledger {
         )
     }
 
+    /// The task an answer's tell still has paused for the chief, if that can
+    /// be proved from the ledger. Used for the answer's delivery footer.
+    pub fn answer_to_current_pause(&self, answer: i64) -> Result<Option<i64>, LedgerError> {
+        messages::answer_to_current_pause(&self.store, answer)
+    }
+
+    /// The tasks whose tell-answer ways on were included when this paste began. This stays
+    /// true after those tasks move, so the paste can be recognised on its window's screen.
+    pub fn tell_pause_ways_on(&self, paste: i64) -> Result<Vec<i64>, LedgerError> {
+        messages::tell_pause_ways_on(&self.store, paste)
+    }
+
     /// The newest note that gave T-`number`'s requester the answer of its window's turn on a
     /// tell, or is to give it, its words not taken as the result, since the task's last result
     /// to that requester before `result`: what `result`'s paste names. None where there is none.
@@ -505,7 +517,17 @@ impl Ledger {
     /// row of `carried` (what its paste was begun with) still riding in it: then
     /// they are the window's, marked handed in this write.
     pub fn admit(&mut self, message_id: i64, carried: &[i64]) -> Result<HandOver, LedgerError> {
-        messages::admit(&mut self.store, message_id, carried)
+        messages::admit(&mut self.store, message_id, carried, false)
+    }
+
+    /// Whether an Enter may send a paste already handed over: its words cannot be
+    /// prepared again, even if a tell's pause changed after the hand-over.
+    pub fn admit_again(
+        &mut self,
+        message_id: i64,
+        carried: &[i64],
+    ) -> Result<HandOver, LedgerError> {
+        messages::admit(&mut self.store, message_id, carried, true)
     }
 
     /// The first row of `carried` (what the paste of `message_id`, handed over
