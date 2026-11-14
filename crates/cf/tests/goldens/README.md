@@ -242,3 +242,7 @@ On 2026-11-13 (T-1609), the four prints of board usage gained the member's
 is the chief's tell. The stdin note case is now a member tell; it, the chief's
 numbered tell and the two empty commands first read `/api/whoami` for the calling
 role. Their existing posts, output and refusals are unchanged.
+
+T-1641 also qualifies queued and paused tells and explains the pause-with-words
+exception while resume words have yet to go in. The same lines were updated in the
+six pause-help and four tell-help prints.

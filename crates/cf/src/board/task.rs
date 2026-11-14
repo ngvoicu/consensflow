@@ -541,7 +541,7 @@ fn moved(
             let (id, window) = (field("id"), field("recipient"));
             if field("kind") == "note" {
                 format!(
-                    "T-{number} is not paused: it is at work on the words that resumed it, so m-{id} waits for @{window}'s window and goes in after them.{running}{gone}"
+                    "T-{number} is not paused: its resume words have not gone in, so m-{id} waits for @{window}'s window and goes in after them as a note; no answer is due.{running}{gone}"
                 )
             } else {
                 format!(

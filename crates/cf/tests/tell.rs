@@ -192,6 +192,16 @@ fn a_pause_with_words_says_it_is_paused_as_a_tell_always_did() {
 }
 
 #[test]
+fn a_pause_with_words_behind_resume_words_says_it_is_a_note_with_no_answer_due() {
+    let api = scripted(vec![reply(200, told("note", "working"))]);
+    let (code, printed) = window(&api, &["task", "pause", "T-3", "Stop: use v2"]);
+    assert_eq!(code, Some(0));
+    assert!(printed.contains("T-3 is not paused"), "{printed}");
+    assert!(printed.contains("m-12"), "{printed}");
+    assert!(printed.contains("as a note; no answer is due"), "{printed}");
+}
+
+#[test]
 fn a_cancel_says_which_of_the_words_told_the_window_went_with_it() {
     let api = scripted(vec![reply(
         200,

@@ -154,6 +154,8 @@ const BOARD: [(&[&str], &str); 19] = [
             "                                    as a question and its answer arrives as a message; then\n",
             "                                    cf task resume T-3 \"…\" or cf task finish T-3\n",
             "                                    a pause withdraws and names your told words not yet in\n",
+            "                                    if shown working before its resume words go in, a pause with words\n",
+            "                                    sends a note after them instead: no stop or answer due\n",
         ),
     ),
     (
@@ -178,7 +180,8 @@ const BOARD: [(&[&str], &str); 19] = [
             "  cf tell T-3 \"…\"                   say this to T-3's window without stopping it; a working\n",
             "                                    or waiting window reads your words at its next rest before its\n",
             "                                    result, unless withdrawn first; it owes no answer\n",
-            "                                    (queued or open: kept for its window, to go in with or after its brief)\n",
+            "                                    (queued or paused: waits for its window or resume unless withdrawn;\n",
+            "                                    open: added to its brief)\n",
             "  cf tell \"…\"                       a member tells whoever gave its task; nothing waits\n",
         ),
     ),

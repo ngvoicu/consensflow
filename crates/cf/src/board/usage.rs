@@ -105,7 +105,7 @@ mod tests {
             "  cf note \"…\" [--human]             a note to the human; nothing waits on it"
         );
         let tell = of(&["tell"]);
-        assert_eq!(tell.lines().count(), 5);
+        assert_eq!(tell.lines().count(), 6);
         assert!(tell
             .lines()
             .take(4)
@@ -118,7 +118,11 @@ mod tests {
         assert!(tell.contains("or waiting window reads your words at its next rest before its"));
         assert!(tell.contains("result, unless withdrawn first; it owes no answer"));
         assert!(tell.lines().nth(3).is_some_and(|line| line
-            .ends_with("(queued or open: kept for its window, to go in with or after its brief)")));
+            .ends_with("(queued or paused: waits for its window or resume unless withdrawn;")));
+        assert!(tell
+            .lines()
+            .nth(4)
+            .is_some_and(|line| line.ends_with("open: added to its brief)")));
         let pause = of(&["task", "pause"]);
         assert!(pause.contains("as a question and its answer arrives as a message"));
         assert!(pause.contains("cf task resume T-3 \"…\" or cf task finish T-3"));
@@ -143,6 +147,28 @@ mod tests {
         assert!(
             missing.is_empty(),
             "missing withdrawal guidance: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn tell_help_says_queued_and_paused_words_may_be_withdrawn() {
+        let tell = of(&["tell"]);
+        assert!(
+            tell.contains("queued or paused: waits for its window or resume unless withdrawn"),
+            "{tell}"
+        );
+    }
+
+    #[test]
+    fn pause_help_says_what_happens_while_resume_words_wait() {
+        let pause = of(&["task", "pause"]);
+        assert!(
+            pause.contains("if shown working before its resume words go in, a pause with words"),
+            "{pause}"
+        );
+        assert!(
+            pause.contains("sends a note after them instead: no stop or answer due"),
+            "{pause}"
         );
     }
 

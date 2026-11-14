@@ -311,3 +311,7 @@ on a tell arriving as a note. No eval card or other text was changed.
 On 2026-11-14 (T-1639), the four `ownHandsChief` goldens gained the same
 member-tell sentence in their shared board instructions, with own hands on and
 off and specs on and off. The accepted member-tell text predates those goldens.
+
+The 12 ordinary and four own-hands chief rows also explain that a pause with words
+sends a note, without a stop or answer, when the task is shown working before its
+resume words go in (T-1641).

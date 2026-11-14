@@ -44,6 +44,8 @@ cf inside a ConsensFlow window: the board's commands.
                                     as a question and its answer arrives as a message; then
                                     cf task resume T-3 "…" or cf task finish T-3
                                     a pause withdraws and names your told words not yet in
+                                    if shown working before its resume words go in, a pause with words
+                                    sends a note after them instead: no stop or answer due
   cf task resume T-3 "…"            go on with it: the same window, with your words
   cf task edit|reopen|resume T-3 … --title "…"
                                     a new title, in any state (else the brief's first line); edit takes it alone
@@ -53,7 +55,8 @@ cf inside a ConsensFlow window: the board's commands.
   cf tell T-3 "…"                   say this to T-3's window without stopping it; a working
                                     or waiting window reads your words at its next rest before its
                                     result, unless withdrawn first; it owes no answer
-                                    (queued or open: kept for its window, to go in with or after its brief)
+                                    (queued or paused: waits for its window or resume unless withdrawn;
+                                    open: added to its brief)
   cf tell "…"                       a member tells whoever gave its task; nothing waits
   cf inbox [read m-12]              what is waiting for you, or one message in full
   cf ask "…"                        a question to the chief (a member's; the chief asks the

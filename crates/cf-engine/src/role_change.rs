@@ -107,10 +107,10 @@
 //! by the write that confirms the delivery (`confirm_delivery`), in the conversation
 //! it was made in. `cf` prints a role in one piece up to a bound of its own
 //! (`cf_base::role_read`, 29,000 bytes and 500 lines, measured on Codex and Muse, the
-//! harnesses a role goes to by a note, less the room its line takes): a staff of 135
-//! rows with specs on, 160 without, two roles to a row and a name of twenty characters, the
+//! harnesses a role goes to by a note, less the room its line takes): a staff of 132
+//! rows with specs on, 157 without, two roles to a row and a name of twenty characters, the
 //! model's id and effort, which a member is named by, on the same text (its bytes are the
-//! bound; 139 and 163 before the chief's tell changed, T-1622; 141 and 166 before the member's tell was taught, T-1609; 143 and 168 before
+//! bound; 135 and 160 before the pause guidance, T-1641; 139 and 163 before the chief's tell changed, T-1622; 141 and 166 before the member's tell was taught, T-1609; 143 and 168 before
 //! the ban on a task for a member by name came back, T-1513;
 //! 151 and 174 before the chief was told of the four roles of spec new-roles, T-1480; 133 and 152 with a column of models in the table, 195 and 223 before it,
 //! harness-models: the name says the model, so T-1234 took the column out, and the words
@@ -130,8 +130,8 @@
 //! every text that says a role, and the ledger bounds them for it (at most 8,000
 //! bytes and 150 lines, `cf_ledger::STAFF_RULES_MAX_BYTES`): a member's real text
 //! with the most rules goes into its window whole. A chief's with specs on and the most rules
-//! needs parts even with no staff; without specs, a staff of up to 24 rows is printed in one piece
-//! (2 and 27 before the chief's tell changed, T-1622; 5 and 30 before the member's tell, T-1609; 7 and 32 read whole before the ban on a task for a
+//! needs parts even with no staff; without specs, a staff of up to 21 rows is printed in one piece
+//! (24 before the pause guidance, T-1641; 2 and 27 before the chief's tell changed, T-1622; 5 and 30 before the member's tell, T-1609; 7 and 32 read whole before the ban on a task for a
 //! member by name, T-1513; 15 and 38 before the four roles of spec new-roles, T-1480; 19 and 39 with the model column, 29 and 58 before it), and a
 //! larger one in parts: a row of the table is about 60 bytes.
 //! A role read so is said nothing of at the next Resume, unless it changed again.

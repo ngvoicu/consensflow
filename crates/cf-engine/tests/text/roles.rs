@@ -250,6 +250,15 @@ fn teach_the_chief_only_the_board_s_commands() {
 }
 
 #[test]
+fn chief_knows_what_a_pause_with_words_does_while_resume_words_wait() {
+    let text = instructions("chief", &[]);
+    assert!(
+        text.contains("If shown working before its resume words go in, a pause with words sends a note: no stop or answer."),
+        "{text}"
+    );
+}
+
+#[test]
 fn teach_the_advisor_only_the_board_s_commands() {
     teaches_only_the_boards_commands("advisor");
 }

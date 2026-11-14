@@ -38,7 +38,7 @@ what happened; a command written in your reply does nothing.
     {{cf}} task done T-3 "…"          finish your own task with its result
     {{cf}} task accept T-3 · {{cf}} task reopen T-3 "…" · {{cf}} task cancel T-3
     {{cf}} task edit T-3 "…" [--tier <tier>] [--needs …] [--before …]  change the brief, tier, needs or before of a task before any window has its brief (open, queued, or paused); T-4,T-5 replaces a list, +T-5 adds, -T-5 removes
-    {{cf}} task pause T-3 ["…"]       stop a worker's task: its window waits; background work runs on; with words, they go to its window as a question, its answer arrives as a message; then {{cf}} task resume T-3 "…" or {{cf}} task finish T-3
+    {{cf}} task pause T-3 ["…"]       stop a worker's task: its window waits; background work runs on; with words, they go to its window as a question, its answer arrives as a message; then {{cf}} task resume T-3 "…" or {{cf}} task finish T-3. If shown working before its resume words go in, a pause with words sends a note: no stop or answer.
     {{cf}} task resume T-3 "…"        go on with it: the same window, with your words
     {{cf}} task edit|reopen|resume T-3 … --title "…"   a new title; edit takes it alone, in any state
     {{cf}} tell T-3 "…"               say this to T-3's window without stopping it: a working or waiting window reads your words at rest before its result unless withdrawn first, and owes no answer. A pause or finish may withdraw and name them

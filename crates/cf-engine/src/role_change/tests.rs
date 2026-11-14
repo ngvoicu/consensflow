@@ -374,10 +374,10 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
         0,
         "docs: never whole without specs either"
     );
-    assert_eq!(rows_while(true, None, &one), 135, "one piece with specs");
+    assert_eq!(rows_while(true, None, &one), 132, "one piece with specs");
     assert_eq!(
         rows_while(false, None, &one),
-        160,
+        157,
         "one piece without specs"
     );
     assert_eq!(
@@ -387,7 +387,7 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     );
     assert_eq!(
         rows_while(false, Some(&most), &one),
-        24,
+        21,
         "one piece without specs and with the most rules"
     );
     let parts = |rows| {
@@ -1227,17 +1227,17 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
     // A case: its name, the window's `cf`, the staff's rows, specs on or off, the rules, and the
     // lines the part after the first begins with.
     type Case<'a> = (&'a str, CfWord, usize, bool, Option<&'a str>, &'a [&'a str]);
-    // The integrator's paragraph in the chief's section on roles.
-    const INTEGRATOR: &str = "Where the staff has an integrator, it lands accepted work; a";
+    // The frontend designer's paragraph in the chief's section on roles.
+    const FRONTEND: &str = "How a screen looks, feels and moves is the frontend designer";
     let cases: [Case; 4] = [
-        ("a Mac, no staff", a_mac(), 0, false, None, &[INTEGRATOR]),
+        ("a Mac, no staff", a_mac(), 0, false, None, &[FRONTEND]),
         (
             "a Mac, the largest chief",
             a_mac(),
             25,
             true,
             Some(&utf8),
-            &[INTEGRATOR],
+            &[FRONTEND],
         ),
         (
             "Windows, the largest chief",
@@ -1245,7 +1245,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&utf8),
-            &["How a screen looks, feels and moves is the frontend designer"],
+            &["Work big enough to need a design (a new module, a new API, a"],
         ),
         (
             "a Mac, the most escaped rules",
@@ -1253,7 +1253,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&escaped),
-            &[INTEGRATOR],
+            &[FRONTEND],
         ),
     ];
     for (name, cf, rows, specs, rules, expected) in cases {
