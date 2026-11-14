@@ -138,15 +138,15 @@ pub fn fake_agent() -> Result<&'static Path> {
 }
 
 /// The folder the run built `cf` and the pane host in before it, where it says one.
-fn given() -> Option<PathBuf> {
+fn given() -> Option<(&'static str, PathBuf)> {
     given_in(BUILT)
 }
 
-/// The folder the variable `name` names, where it names one.
-fn given_in(name: &str) -> Option<PathBuf> {
+/// The folder the variable `name` names, where it names one, with the name.
+fn given_in(name: &'static str) -> Option<(&'static str, PathBuf)> {
     own_var(name)
         .filter(|folder| !folder.is_empty())
-        .map(PathBuf::from)
+        .map(|folder| (name, PathBuf::from(folder)))
 }
 
 /// Whether the run builds nothing ([`NO_BUILD`]).
@@ -162,7 +162,7 @@ fn built(
     package: &str,
     bin: &str,
     more: &[&str],
-    before: Option<PathBuf>,
+    before: Option<(&'static str, PathBuf)>,
 ) -> Result<&'static Path> {
     built_by(
         cell,
@@ -182,10 +182,10 @@ fn built_by(
     cargo: Run,
     root: &Path,
     (package, bin, more): (&str, &str, &[&str]),
-    (before, builds_nothing): (Option<PathBuf>, bool),
+    (before, builds_nothing): (Option<(&'static str, PathBuf)>, bool),
 ) -> Result<&'static Path> {
     cell.get_or_init(|| match before {
-        Some(folder) => taken(&folder, bin),
+        Some((variable, folder)) => taken(variable, &folder, bin),
         None if builds_nothing => Err(format!(
             "{bin} was not built before this run, and a live run builds nothing: run it through \
              `cargo xtask live <name>`, which builds the programs of its cases first, or build \
@@ -200,13 +200,13 @@ fn built_by(
 
 /// The binary `bin` the run built in `folder` before it: an error where it is not
 /// there, which no build is made for.
-fn taken(folder: &Path, bin: &str) -> std::result::Result<PathBuf, String> {
+fn taken(variable: &str, folder: &Path, bin: &str) -> std::result::Result<PathBuf, String> {
     let built = folder.join(exe(bin));
     if built.is_file() {
         Ok(built)
     } else {
         Err(format!(
-            "{BUILT} says {bin} was built in {}, and there is none there",
+            "{variable} says {bin} was built in {}, and there is none there",
             folder.display()
         ))
     }
@@ -507,7 +507,17 @@ mod tests {
                 cargo,
                 root.path(),
                 (package, bin, more),
-                (Some(folder.path().to_path_buf()), true),
+                (
+                    Some((
+                        if bin.ends_with("-ask") {
+                            HELPERS
+                        } else {
+                            BUILT
+                        },
+                        folder.path().to_path_buf(),
+                    )),
+                    true,
+                ),
             )
             .unwrap();
             assert_eq!(taken, folder.path().join(exe(bin)));
@@ -618,7 +628,7 @@ mod tests {
     #[test]
     fn a_program_the_run_says_it_built_and_did_not_is_an_error_and_is_not_built() {
         let folder = tempfile::tempdir().unwrap();
-        let failed = taken(folder.path(), "cf").unwrap_err();
+        let failed = taken(BUILT, folder.path(), "cf").unwrap_err();
         assert_eq!(
             failed,
             format!(
@@ -627,10 +637,22 @@ mod tests {
             )
         );
         static CELL: Built = OnceLock::new();
-        let failed = built(&CELL, "cf", "cf", &[], Some(folder.path().to_path_buf()))
-            .unwrap_err()
-            .to_string();
+        let failed = built(
+            &CELL,
+            "cf",
+            "cf",
+            &[],
+            Some((BUILT, folder.path().to_path_buf())),
+        )
+        .unwrap_err()
+        .to_string();
         assert!(failed.contains("and there is none there"), "{failed}");
+        // A helper the run says is in its folder of test binaries is said under that variable.
+        let failed = taken(HELPERS, folder.path(), "harness-ask").unwrap_err();
+        assert!(
+            failed.starts_with("CF_E2E_HELPERS says harness-ask was built in "),
+            "{failed}"
+        );
     }
 
     #[test]

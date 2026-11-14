@@ -15,8 +15,9 @@
 //! owner's harness files, and only the harness's own renewal of its own login is allowed it:
 //!
 //! - **Never in a say-only run.** A run that only says ([`crate::door::Door`], `CF_LIVE_AUDIT=1`)
-//!   starts no harness: a login that would need the renewal stops the run before anything acts,
-//!   with one line that says so, which the audit file holds too ([`Renewal::renew`]).
+//!   starts no harness: a login that would need the renewal ends the run with one line that says so,
+//!   which the audit file holds too ([`Renewal::renew`]); the rig that needed it does not start, and
+//!   what was done before stays done (the builds, the harnesses' version questions, the first folders).
 //! - **Never on the owner's Mac.** A run knows it is on a test machine by one variable,
 //!   [`TEST_MACHINE`], that the Windows runner (`cargo xtask windows`) gives the command it runs
 //!   with the machine's name, and that nothing else sets. No variable, no renewal.
@@ -216,8 +217,8 @@ impl Renewal {
     /// what the renewal came to. The words that say why it did not, if the harness could not renew.
     pub fn renew(&self, kept: &Kept, text: &str) -> std::result::Result<(String, Renewed), String> {
         // The harness would run as the owner on the owner's own login, which no run's folder holds:
-        // a run that only says starts none, stops here before anything acts, and says so in the
-        // audit file as well.
+        // a run that only says starts none, ends here (the rig that needed it does not start) and
+        // says so in the audit file as well.
         if self.door.says_only() {
             let line = self.not_here();
             self.door.note(&line);
