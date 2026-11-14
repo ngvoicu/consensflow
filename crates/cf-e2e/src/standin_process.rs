@@ -6,6 +6,7 @@ use std::sync::{Mutex, OnceLock};
 use crate::door::Made;
 
 static ROOT: OnceLock<Mutex<Option<Made>>> = OnceLock::new();
+static BUILD_COMPILER: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 extern "C" {
     fn atexit(callback: extern "C" fn()) -> i32;
@@ -62,7 +63,10 @@ pub fn start(allow_live_matrix: bool) {
         return;
     }
 
-    let path = bounded_path();
+    let (path, compiler) = bounded_path();
+    BUILD_COMPILER
+        .set(compiler)
+        .unwrap_or_else(|_| panic!("stand-in compiler was selected twice"));
 
     // The top-level process does not inherit another run's ownership claims.
     // A test's child retains what that test handed it through the door.
@@ -95,7 +99,7 @@ pub fn start(allow_live_matrix: bool) {
 /// A stand-in must not search inherited PATH entries in a harness home. Do
 /// this before replacing the variables that name the person's directories.
 #[allow(clippy::disallowed_methods)] // Read the inherited paths before replacing the environment.
-fn bounded_path() -> std::ffi::OsString {
+fn bounded_path() -> (std::ffi::OsString, Option<PathBuf>) {
     let mut forbidden: Vec<PathBuf> = [
         "CLAUDE_CONFIG_DIR",
         "CODEX_HOME",
@@ -140,53 +144,74 @@ fn bounded_path() -> std::ffi::OsString {
             }
         }
     }
+    // Cargo gives its own absolute executable to a test at compile time. Its
+    // compiler is normally beside it, even if a runner's PATH reaches rustc
+    // through a link that the stand-in cannot safely keep. Check every part
+    // before stat'ing the file; never follow a link into a harness home.
+    let cargo = Path::new(env!("CARGO"));
+    let compiler = cargo.with_file_name(format!("rustc{}", std::env::consts::EXE_SUFFIX));
+    let compiler = (safe_path_entry(&compiler, &forbidden)
+        && std::fs::symlink_metadata(&compiler).is_ok_and(|entry| entry.is_file()))
+    .then_some(compiler);
     let inherited = std::env::var_os("PATH").unwrap_or_default();
-    let safe = std::env::split_paths(&inherited).filter(|folder| {
-        if !folder.is_absolute()
-            || folder
-                .components()
-                .any(|part| matches!(part, Component::ParentDir))
+    let safe =
+        std::env::split_paths(&inherited).filter(|folder| safe_path_entry(folder, &forbidden));
+    (
+        std::env::join_paths(safe).unwrap_or_else(|_| panic!("stand-in PATH lookup: invalid path")),
+        compiler,
+    )
+}
+
+fn safe_path_entry(folder: &Path, forbidden: &[PathBuf]) -> bool {
+    if !folder.is_absolute()
+        || folder
+            .components()
+            .any(|part| matches!(part, Component::ParentDir))
+    {
+        return false;
+    }
+    let inside = forbidden.iter().any(|home| {
+        #[cfg(windows)]
         {
-            return false;
+            let folder = folder.to_string_lossy().replace('/', "\\").to_lowercase();
+            let home = home.to_string_lossy().replace('/', "\\").to_lowercase();
+            folder == home || folder.starts_with(&format!("{}\\", home.trim_end_matches('\\')))
         }
-        let inside = forbidden.iter().any(|home| {
+        #[cfg(not(windows))]
+        {
+            folder.starts_with(home)
+        }
+    });
+    if inside {
+        return false;
+    }
+    let mut checked = PathBuf::new();
+    for part in folder.components() {
+        checked.push(part);
+        if matches!(part, Component::Prefix(_)) {
+            continue;
+        }
+        if std::fs::symlink_metadata(&checked).is_ok_and(|entry| {
             #[cfg(windows)]
             {
-                let folder = folder.to_string_lossy().replace('/', "\\").to_lowercase();
-                let home = home.to_string_lossy().replace('/', "\\").to_lowercase();
-                folder == home || folder.starts_with(&format!("{}\\", home.trim_end_matches('\\')))
+                use std::os::windows::fs::MetadataExt;
+                entry.file_type().is_symlink() || entry.file_attributes() & 0x400 != 0
             }
             #[cfg(not(windows))]
             {
-                folder.starts_with(home)
+                entry.file_type().is_symlink()
             }
-        });
-        if inside {
+        }) {
             return false;
         }
-        let mut checked = PathBuf::new();
-        for part in folder.components() {
-            checked.push(part);
-            if matches!(part, Component::Prefix(_)) {
-                continue;
-            }
-            if std::fs::symlink_metadata(&checked).is_ok_and(|entry| {
-                #[cfg(windows)]
-                {
-                    use std::os::windows::fs::MetadataExt;
-                    entry.file_type().is_symlink() || entry.file_attributes() & 0x400 != 0
-                }
-                #[cfg(not(windows))]
-                {
-                    entry.file_type().is_symlink()
-                }
-            }) {
-                return false;
-            }
-        }
-        true
-    });
-    std::env::join_paths(safe).unwrap_or_else(|_| panic!("stand-in PATH lookup: invalid path"))
+    }
+    true
+}
+
+/// The compiler of the Cargo that built this test, if its complete path was
+/// safe to inspect before the inherited homes were discarded.
+pub(crate) fn build_compiler() -> Option<&'static Path> {
+    BUILD_COMPILER.get().and_then(Option::as_deref)
 }
 
 /// Windows normally puts TEMP inside the person's profile. Use the public
@@ -402,4 +427,32 @@ pub fn require_watch_path(path: &Path, lookup: &str) {
         }
     }
     panic!("{lookup}: too many links");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_path_entry;
+
+    #[test]
+    fn standin_isolation_toolchain_paths_refuse_harness_homes() {
+        let root = crate::door::made("toolchain-path-").unwrap();
+        let forbidden = root.path().join("owner/.codex");
+        crate::door::make_dir(&forbidden).unwrap();
+        let compiler = forbidden.join("rustc");
+        crate::door::write(&compiler, "decoy").unwrap();
+        assert!(!safe_path_entry(
+            &compiler,
+            std::slice::from_ref(&forbidden)
+        ));
+
+        #[cfg(unix)]
+        {
+            let link = root.path().join("linked-toolchain");
+            crate::door::symlink(&forbidden, &link).unwrap();
+            assert!(!safe_path_entry(
+                &link.join("rustc"),
+                std::slice::from_ref(&forbidden)
+            ));
+        }
+    }
 }

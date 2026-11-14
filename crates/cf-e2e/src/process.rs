@@ -316,6 +316,11 @@ impl Run {
     #[must_use]
     pub fn cargo() -> Self {
         let mut run = Self::new(nested_cargo::CARGO).inheriting_env();
+        if own_var("CF_E2E_STAND_IN").as_deref() == Some("1") && own_var("RUSTC").is_none() {
+            if let Some(compiler) = crate::standin_process::build_compiler() {
+                run = run.var("RUSTC", compiler);
+            }
+        }
         for (name, _) in std::env::vars_os() {
             if name.to_str().is_some_and(nested_cargo::given_to_a_test) {
                 run = run.without(name);

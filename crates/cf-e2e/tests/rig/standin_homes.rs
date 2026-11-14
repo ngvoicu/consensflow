@@ -143,6 +143,31 @@ fn standin_isolation_claude_guard_does_not_call_security() -> Outcome {
     Ok(())
 }
 
+#[test]
+fn standin_isolation_nested_cargo_finds_its_compiler_without_path() -> Outcome {
+    let project = cf_e2e::door::made("compiler-")?;
+    cf_e2e::door::write(
+        project.path().join("Cargo.toml"),
+        "[package]\nname = \"standin-compiler-probe\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    )?;
+    cf_e2e::door::make_dir(project.path().join("src"))?;
+    cf_e2e::door::write(project.path().join("src/lib.rs"), "pub fn probe() {}\n")?;
+    let output = cf_e2e::process::Run::cargo()
+        .cwd(project.path())
+        .var("PATH", "")
+        .var("CARGO_TARGET_DIR", project.path().join("target"))
+        .args(["check", "--offline", "-j", "4"])
+        .run()?;
+    assert_eq!(
+        output.code,
+        Some(0),
+        "nested cargo could not use its compiler after PATH was bounded: {}{}",
+        output.stdout,
+        output.stderr
+    );
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn standin_isolation_launcher_refuses_a_link_outside_the_run() -> Outcome {
