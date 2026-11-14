@@ -119,7 +119,7 @@ impl RosterHandle {
 /// stderr could not be pointed at the log has none to hand down (inheriting
 /// an invalid handle fails the spawn); elsewhere it inherits the app's.
 #[cfg(windows)]
-fn daemon_stderr() -> Stdio {
+pub(super) fn daemon_stderr() -> Stdio {
     crate::error_log()
         .and_then(|log| {
             std::fs::OpenOptions::new()
@@ -132,7 +132,7 @@ fn daemon_stderr() -> Stdio {
 }
 
 #[cfg(not(windows))]
-fn daemon_stderr() -> Stdio {
+pub(super) fn daemon_stderr() -> Stdio {
     Stdio::inherit()
 }
 

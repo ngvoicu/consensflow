@@ -55,6 +55,8 @@ pub(crate) const DAEMON_READY_TIMEOUT: Duration = Duration::from_secs(120);
 mod connect;
 mod status;
 
+#[cfg(all(test, windows))]
+use connect::daemon_stderr;
 pub(crate) use connect::{connect_daemon, stop_daemon, RosterHandle};
 pub(crate) use status::DaemonStatus;
 
