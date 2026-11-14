@@ -370,8 +370,13 @@ fn bounded_path(forbidden: &[PathBuf]) -> (std::ffi::OsString, Option<PathBuf>) 
         && std::fs::symlink_metadata(&compiler).is_ok_and(|entry| entry.is_file()))
     .then_some(compiler);
     let inherited = std::env::var_os("PATH").unwrap_or_default();
-    let safe =
-        std::env::split_paths(&inherited).filter(|folder| safe_path_entry(folder, forbidden));
+    let homes: Vec<_> = ["HOME", "USERPROFILE"]
+        .into_iter()
+        .filter_map(inherited_path)
+        .collect();
+    let safe = std::env::split_paths(&inherited).filter(|folder| {
+        !homes.iter().any(|home| same_or_inside(folder, home)) && safe_path_entry(folder, forbidden)
+    });
     let path =
         std::env::join_paths(safe).unwrap_or_else(|_| panic!("stand-in PATH lookup: invalid path"));
     (path, compiler)
@@ -812,6 +817,38 @@ mod tests {
             !safe_path_entry(&dotted, std::slice::from_ref(&home)),
             "a dotted PATH entered a harness home"
         );
+    }
+
+    #[test]
+    fn standin_isolation_inherited_account_home_is_not_searched_on_path() {
+        const CHILD: &str = "CF_T1647_ACCOUNT_PATH";
+        if let Some(target) = crate::process::own_var(CHILD) {
+            let path = crate::process::own_var("PATH").unwrap_or_default();
+            assert!(
+                !std::env::split_paths(&path)
+                    .any(|entry| super::same_or_inside(&entry, std::path::Path::new(&target))),
+                "inherited account-home PATH lookup was retained"
+            );
+            return;
+        }
+        let root = crate::door::made("account-path-").unwrap();
+        let home = root.path().join("account");
+        let target = home.join("custom-home").join("bin");
+        crate::door::make_dir(&target).unwrap();
+        let output = crate::process::Run::new(std::env::current_exe().unwrap())
+            .inheriting_env()
+            .args([
+                "--exact",
+                "standin_process::tests::standin_isolation_inherited_account_home_is_not_searched_on_path",
+            ])
+            .var("HOME", &home)
+            .var("USERPROFILE", &home)
+            .var("PATH", &target)
+            .var(CHILD, &target)
+            .without("CF_E2E_STAND_IN")
+            .run()
+            .unwrap();
+        assert_eq!(output.code, Some(0), "{}{}", output.stdout, output.stderr);
     }
 
     #[test]

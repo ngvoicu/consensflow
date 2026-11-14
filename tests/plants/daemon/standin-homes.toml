@@ -138,3 +138,13 @@ runs = ["standin-home-unit"]
 file = "crates/cf-e2e/src/standin_process.rs"
 find = '''    if !plain_absolute(folder) || forbidden.iter().any(|home| same_or_inside(folder, home)) {'''
 replace = '''    if !plain_absolute(folder) || (forbidden.iter().any(|home| same_or_inside(folder, home)) && !folder.to_string_lossy().contains("/./") && !folder.to_string_lossy().contains("\\.\\")) {'''
+
+[[plant]]
+name = "standin homes: inherited account path remains searchable"
+meant = "standin_isolation_inherited_account_home_is_not_searched_on_path"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''        !homes.iter().any(|home| same_or_inside(folder, home))'''
+replace = '''        !homes.iter().any(|_home| false)'''
