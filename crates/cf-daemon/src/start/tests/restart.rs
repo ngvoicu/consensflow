@@ -167,6 +167,37 @@ async fn a_start_settles_what_was_on_its_way_into_a_window_and_it_waits_for_the_
         .await;
 }
 
+#[tokio::test]
+async fn own_hands_saved_by_the_page_survives_daemon_restarts() {
+    LocalSet::new()
+        .run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let project = open_project_before_the_start(root.path());
+            for on in [true, false] {
+                let (options, app, _) = app_that_opens_windows(root.path());
+                let daemon = start(environment(root.path()), options).await.unwrap();
+                let saved = ask(
+                    &app,
+                    "project.own_hands",
+                    json!({ "project": project, "ownHands": on }),
+                )
+                .await;
+                assert_eq!(saved["ok"], true, "{saved}");
+                daemon.stop("SIGTERM");
+                daemon.finished().await;
+                drop((daemon, app));
+
+                let (options, app, _) = app_that_opens_windows(root.path());
+                let daemon = start(environment(root.path()), options).await.unwrap();
+                let board = ask(&app, "board.get", json!({ "project": project })).await;
+                assert_eq!(board["board"]["project"]["ownHands"] == true, on, "{board}");
+                daemon.stop("SIGTERM");
+                daemon.finished().await;
+            }
+        })
+        .await;
+}
+
 /// The session of the Devin window below, and the launch it ran under.
 const DEVIN_SESSION: &str = "calm-river";
 const DEVIN_LAUNCH: &str = "11111111-1111-4111-8111-111111111111";

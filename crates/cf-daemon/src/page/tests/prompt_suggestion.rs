@@ -254,12 +254,21 @@ async fn creation_with_own_hands_sends_the_initial_mode_in_the_project_open_writ
         assert_eq!(on["ok"], true, "{on}");
         assert_eq!(on["project"]["ownHands"], true, "the first returned project");
         let id = on["project"]["id"].as_i64().unwrap();
-        let ledger = rig.kit.ledger.borrow();
-        assert!(ledger.project(id).unwrap().unwrap().own_hands);
-        let events: Vec<_> = ledger.events(id, 0, 500).unwrap().into_iter()
-            .filter(|event| event.kind == "project.own_hands").map(|event| event.data).collect();
-        assert_eq!(events, [json!({"from":false, "to":true})]);
-        drop(ledger);
+        rig.kit.settle();
+        let launches: Vec<_> = rig.kit.adapter.prepared().into_iter()
+            .filter(|launch| launch["role"] == "chief" && launch["project"]["id"] == id).collect();
+        assert_eq!(launches.len(), 1);
+        assert!(launches[0]["instructions"].as_str().unwrap().contains("own hands"));
+        {
+            let ledger = rig.kit.ledger.borrow();
+            let project = ledger.project(id).unwrap().unwrap();
+            assert!(project.own_hands);
+            let chief = project.participants.iter().find(|p| p.role == "chief").unwrap();
+            assert!(ledger.role_notes_to(chief.id).unwrap().is_empty(), "no change note at creation");
+            let events: Vec<_> = ledger.events(id, 0, 500).unwrap().into_iter()
+                .filter(|event| event.kind == "project.own_hands").map(|event| event.data).collect();
+            assert_eq!(events, [json!({"from":false, "to":true})]);
+        }
         let off = ask(&app, "project.open", base.clone()).await;
         assert_eq!(off["ok"], true, "{off}");
         assert!(off["project"].get("ownHands").is_none());
