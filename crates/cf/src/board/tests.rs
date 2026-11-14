@@ -1489,3 +1489,18 @@ fn stc_a_malformed_task_in_a_decision_is_refused_before_any_request() {
         }
     }
 }
+
+#[test]
+fn bkv05_staff_says_the_backup_and_each_vacation() {
+    let members = json!({ "members": [
+        { "handle": "zeus", "role": "worker", "roles": ["worker"], "tier": "standard",
+          "harnessName": "Claude Code", "nameApart": false, "modelName": "claude-sonnet-5", "effort": null,
+          "vacationSince": "2026-11-13T10:00:00Z" },
+        { "handle": "hera", "role": "worker", "roles": ["worker"], "tier": "standard",
+          "harnessName": "Codex", "nameApart": true, "modelName": "gpt-6-astra", "effort": null,
+          "backupOf": "zeus", "vacationSince": "2026-11-13T10:00:00Z" },
+    ] });
+    let ran = cf(&["staff"], vec![reply(200, members)]);
+    assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
+    assert_eq!(ran.out, "@zeus · worker · standard · Claude Code · on Vacation\n  @hera · backup of @zeus · Codex · gpt-6-astra · on Vacation\n");
+}

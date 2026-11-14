@@ -216,7 +216,7 @@ pub(crate) fn switch_chief(
         let chief = store.participant_by_handle(project_id, "chief")?;
         store.db.execute(
             "UPDATE participant SET harness = ?, model = ?, effort = ?, model_name = ?, agent = NULL, launched_model = NULL,
-           gone_model = NULL, out_until = NULL, needs_edit = 0, switched_from_harness = ?, switched_from_model = ?,
+           gone_model = NULL, out_until = NULL, out_kind = NULL, needs_edit = 0, switched_from_harness = ?, switched_from_model = ?,
            switched_from_agent = ?, switched_from_cut = ?
          WHERE id = ?",
             params![

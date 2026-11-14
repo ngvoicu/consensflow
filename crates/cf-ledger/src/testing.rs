@@ -484,6 +484,60 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn node_recordings_compare_every_older_column_without_the_backup_migration() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        crate::migrate(&db, &crate::MIGRATIONS).unwrap();
+        let schema: Vec<Value> = db
+            .prepare("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name")
+            .unwrap()
+            .query_map([], |row| {
+                Ok(json!({"name": row.get::<_, String>(0)?, "sql": row.get::<_, String>(1)?}))
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        let mut dump = json!({"userVersion": 39, "schema": schema, "tables": {
+            "participant": {"columns": ["id", "backup_of", "vacation_since", "out_kind", "handle"],
+                            "rows": [["3", "NULL", "NULL", "NULL", "'alpha'"]]}
+        }});
+        hold_apart_what_node_never_writes(dump["tables"].as_object_mut().unwrap());
+        hold_apart_what_node_never_had_in_its_schema(&mut dump);
+        assert_eq!(
+            dump["tables"]["participant"]["columns"],
+            json!(["id", "handle"])
+        );
+        assert_eq!(
+            dump["tables"]["participant"]["rows"],
+            json!([["3", "'alpha'"]])
+        );
+        let schema = dump["schema"].as_array().unwrap();
+        let participant = schema
+            .iter()
+            .find(|item| item["name"] == "participant")
+            .unwrap()["sql"]
+            .as_str()
+            .unwrap();
+        for name in ["backup_of", "vacation_since", "out_kind"] {
+            assert!(
+                !participant.contains(name),
+                "{name} remained in {participant}"
+            );
+        }
+        for name in [
+            "participant_one_live_backup",
+            "participant_backup_insert",
+            "participant_backup_update",
+            "participant_backup_owner_update",
+        ] {
+            assert!(
+                !schema.iter().any(|item| item["name"] == name),
+                "{name} remained"
+            );
+        }
+        assert!(participant.contains("handle TEXT NOT NULL"));
+    }
+
+    #[test]
     fn takes_the_stop_out_of_the_event_that_paused_a_task_and_nothing_else() {
         let mut events = [
             json!({ "kind": "task.state", "data": { "task": 1, "from": "working", "to": "paused", "by": "chief", "stop": 2 } }),
