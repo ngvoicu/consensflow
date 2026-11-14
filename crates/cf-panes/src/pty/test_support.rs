@@ -99,7 +99,7 @@ impl PaneTable {
 
     /// The table as a thread that panicked holding its lock leaves it: every
     /// operation on it fails from then on, a kill's included.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn poison(&self) {
         std::thread::scope(|scope| {
             let poisoned = scope
