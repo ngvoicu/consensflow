@@ -24,6 +24,11 @@ thread_local! {
     /// Whether a test has the exit watcher of the windows this thread opens fail to start.
     static WATCH_FAILS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
+#[cfg(test)]
+thread_local! {
+    /// Whether a test has the terminal of the windows this thread opens fail to be taken.
+    static TERMINAL_FAILS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 mod holding;
 #[cfg(test)]
 mod keys;
@@ -153,6 +158,13 @@ pub enum PaneError {
         code: Option<&'static str>,
     },
     Io(io::Error),
+    /// The window did not open, and ending what had started of it failed too: why it did not
+    /// open, and why it could not be ended (it may still be in the table, or its program
+    /// still run).
+    OpenNotUndone {
+        cause: Box<PaneError>,
+        cleanup: Box<PaneError>,
+    },
     InvalidBacklog,
     InvalidEnvironmentVariableName(String),
     NoOutputStream(PaneKey),
@@ -170,6 +182,7 @@ impl PaneError {
     pub fn code(&self) -> Option<&'static str> {
         match self {
             Self::Spawn { code, .. } => *code,
+            Self::OpenNotUndone { cause, .. } => cause.code(),
             _ => None,
         }
     }
@@ -219,6 +232,12 @@ impl fmt::Display for PaneError {
                 write!(formatter, "PTY error: {message}")
             }
             Self::Io(error) => write!(formatter, "PTY I/O error: {error}"),
+            Self::OpenNotUndone { cause, cleanup } => {
+                write!(
+                    formatter,
+                    "{cause}; ending the window failed too: {cleanup}"
+                )
+            }
             Self::InvalidBacklog => write!(formatter, "backlogBytes must be greater than zero"),
             Self::InvalidEnvironmentVariableName(name) => write!(
                 formatter,
@@ -708,7 +727,7 @@ impl PaneTable {
 
     /// A test's pane, under a name of the table's own and with its raw
     /// output: the app opens every pane streamed, at the identity the daemon
-    /// reserved for it (`open_streamed_at`).
+    /// reserved for it (`open_streamed_at_while`).
     #[cfg(any(test, feature = "test-support"))]
     pub fn open(
         &self,
@@ -888,8 +907,9 @@ impl PaneTable {
         self.open_streamed_at(self.mint_key(), cwd, argv, environment, size, backlog_bytes)
     }
 
-    /// Opens a streamed pane at the app-owned identity Node already reserved.
-    /// The store mints pane ids; Rust owns the process living at that key.
+    /// Opens a streamed pane at the identity the daemon reserved for it: the daemon
+    /// mints pane ids, and the host owns the program living at that key.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn open_streamed_at(
         self: &Arc<Self>,
         key: PaneKey,
@@ -902,7 +922,7 @@ impl PaneTable {
         self.open_streamed_at_while(&|| true, key, cwd, argv, environment, size, backlog_bytes)
     }
 
-    /// [`PaneTable::open_streamed_at`] for a window whose opener may stop owning it: `owns` is
+    /// `open_streamed_at` for a window whose opener may stop owning it: `owns` is
     /// asked at the table's insertion, with the table's lock held, and a window it refuses is
     /// not opened and has no program started ([`PaneError::Fenced`]). The daemon's launch
     /// that is slow to reach the table (a loaded Mac) is refused where it would have
@@ -948,19 +968,19 @@ impl PaneTable {
         };
         // A window that fails here lets go of its output before it is ended: on Windows a
         // console closed while its output is held open and unread may wait for ever (`conpty`).
+        #[cfg(test)]
+        let terminal = if TERMINAL_FAILS.get() {
+            Err(PaneError::Pty("planted: no terminal".to_owned()))
+        } else {
+            terminal
+        };
         let terminal = match terminal {
             Ok(terminal) => terminal,
-            Err(error) => {
-                drop(reader);
-                let _ = self.kill(&key);
-                return Err(error);
-            }
+            Err(error) => return Err(self.abandon_open(&key, reader, error)),
         };
         #[cfg(windows)]
         if let Err(error) = self.watch_exit(&key) {
-            drop(reader);
-            let _ = self.kill(&key);
-            return Err(error);
+            return Err(self.abandon_open(&key, reader, error));
         }
 
         let (sender, output) = mpsc::channel();
@@ -983,6 +1003,24 @@ impl PaneTable {
             #[cfg(target_os = "macos")]
             tree,
         })
+    }
+
+    /// A window that failed to open after it was in the table: its output is let go, it is
+    /// ended, and what is returned is why it did not open.
+    fn abandon_open(
+        &self,
+        key: &PaneKey,
+        reader: Box<dyn Read + Send>,
+        error: PaneError,
+    ) -> PaneError {
+        drop(reader);
+        match self.kill(key) {
+            Ok(()) => error,
+            Err(cleanup) => PaneError::OpenNotUndone {
+                cause: Box::new(error),
+                cleanup: Box::new(cleanup),
+            },
+        }
     }
 
     /// Whether the exit of every window whose output is read has been told, waited for
@@ -1330,12 +1368,46 @@ impl PaneTable {
                         drop(program);
                         std::thread::sleep(EXIT_FLUSH);
                         if let Some(table) = table.upgrade() {
-                            let _ = table.retire_exited(&key);
+                            table.retire_after_exit(&key);
                         }
                     })
                     .map(|_| ())
             });
         watched.map_err(PaneError::Io)
+    }
+
+    /// What an exit watcher does once its program has gone: the pane is retired. Where that
+    /// fails, or the program is found to be running still, the pane is ended as a close ends
+    /// one ([`PaneTable::kill_detached`]), which counts what it cannot prove gone as
+    /// unconfirmed, and the host says so on its stderr: left in the table, the pane's
+    /// output would never end on Windows.
+    #[cfg(windows)]
+    fn retire_after_exit(&self, key: &PaneKey) {
+        self.retire_after_exit_by(key, Self::retire_exited);
+    }
+
+    #[cfg(any(windows, test))]
+    #[allow(clippy::print_stderr)] // The pane host's log is its error output.
+    fn retire_after_exit_by(
+        &self,
+        key: &PaneKey,
+        retire: impl FnOnce(&Self, &PaneKey) -> Result<bool, PaneError>,
+    ) {
+        let failed = match retire(self, key) {
+            Ok(true) => return,
+            Ok(false) => "its program still runs".to_owned(),
+            Err(error) => error.to_string(),
+        };
+        let ended = self.kill_detached(key);
+        eprintln!(
+            "consensflow-bridge: pane {} generation {}: its exit could not retire it ({failed}); {}",
+            key.id,
+            key.generation,
+            match ended {
+                Ok(()) => "it is ended as a close ends it".to_owned(),
+                Err(error) => format!("ending it failed too: {error}"),
+            }
+        );
     }
 
     pub fn list(&self) -> Result<Vec<PaneInfo>, PaneError> {
@@ -1386,7 +1458,7 @@ impl PaneTable {
 
     /// The table as a thread that panicked holding its lock leaves it: every
     /// operation on it fails from then on, a kill's included.
-    #[cfg(all(test, unix))]
+    #[cfg(test)]
     pub(crate) fn poison(&self) {
         std::thread::scope(|scope| {
             let poisoned = scope
@@ -1766,7 +1838,7 @@ pub(crate) mod conpty_test {
 mod tests {
     use std::collections::HashMap;
     #[cfg(unix)]
-    use std::io::{BufRead, BufReader, Read};
+    use std::io::{self, BufRead, BufReader, Read};
     use std::path::Path;
     use std::sync::Arc;
     #[cfg(unix)]
@@ -1960,6 +2032,87 @@ mod tests {
         unproven.teardown.begin();
         unproven.teardown.resolve(false);
         assert_eq!(reap_until_clean(&unproven, patience), Reaped::Unconfirmed);
+    }
+
+    /// F2 (T-1540): a window whose start fails after it is in the table is ended, and the
+    /// answer says why it did not open.
+    #[cfg(unix)]
+    #[test]
+    fn a_window_that_fails_to_open_after_it_is_in_the_table_leaves_nothing_behind() {
+        let _serial = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        super::TERMINAL_FAILS.set(true);
+        let opened = table.open_streamed_at(
+            PaneKey::new("half-open", 1),
+            Path::new("/tmp"),
+            &shell("exec /bin/cat"),
+            PaneEnvironment::new(&HashMap::new(), &[]),
+            terminal_size(24, 80),
+            1024,
+        );
+        super::TERMINAL_FAILS.set(false);
+        assert!(
+            matches!(&opened, Err(error) if error.to_string().contains("planted: no terminal")),
+            "the answer does not say why the window did not open"
+        );
+        assert!(
+            table.pending().expect("what is left").is_clean(),
+            "a window that failed to open left something of itself behind"
+        );
+    }
+
+    /// F2 (T-1540): where the end of a window that failed to open fails too, the answer says
+    /// both, the cause first.
+    #[cfg(unix)]
+    #[test]
+    fn a_window_that_fails_to_open_and_cannot_be_ended_says_both() {
+        let _serial = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        let pane = open_shell(&table, "exec /bin/cat");
+        table.poison();
+        let answer = table.abandon_open(
+            &pane.key,
+            pane.reader,
+            PaneError::Pty("planted: no terminal".to_owned()),
+        );
+        let said = answer.to_string();
+        assert!(
+            said.starts_with("PTY error: planted: no terminal"),
+            "the cause does not come first: {said}"
+        );
+        assert!(
+            said.contains("poisoned"),
+            "the failure to end the window is not said: {said}"
+        );
+    }
+
+    /// F2 (T-1540): an exit watcher whose retirement fails or finds the program still running
+    /// does not leave the pane in the table: it is ended as a close ends it.
+    #[cfg(unix)]
+    #[test]
+    fn a_pane_whose_exit_watcher_could_not_retire_it_is_ended_all_the_same() {
+        let _serial = serial_pty_test();
+        for failure in [
+            Err(PaneError::Io(io::Error::other("planted: no status"))),
+            Ok(false),
+        ] {
+            let table = Arc::new(PaneTable::new());
+            let pane = open_shell(&table, "exec /bin/cat");
+            table.retire_after_exit_by(&pane.key, |_, _| failure);
+            let until = Instant::now() + Duration::from_secs(20);
+            while !table.pending().expect("what is left").is_clean() && Instant::now() < until {
+                thread::sleep(Duration::from_millis(20));
+            }
+            assert_eq!(
+                table.pending().expect("what is left"),
+                super::Pending {
+                    open: 0,
+                    finishing: 0,
+                    unconfirmed: 0
+                },
+                "a pane whose retirement failed stayed"
+            );
+        }
     }
 
     #[test]
