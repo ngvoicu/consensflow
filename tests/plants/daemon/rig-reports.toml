@@ -421,7 +421,7 @@ meant = "a_command_is_given_the_temp_folder_its_run_made_for_it"
 runs = ["reports-xtask-runs"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = "        self.checkout.env = Env::from_vars(kept.into_iter().chain(given));"
 replace = "        let _ = given;\n        self.checkout.env = Env::from_vars(kept);"
 
