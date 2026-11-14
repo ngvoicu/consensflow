@@ -172,6 +172,29 @@ file = "crates/cf-e2e/src/muse.rs"
 find = '''    crate::standin_process::require_unlinked_safe_path(&folder, "stand-in Muse lookup");'''
 replace = '''    // The plant searches the handed hosted folder without checking it.'''
 
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/path.rs"
+find = '''                    crate::standin_process::require_search_candidate(
+                        candidate,
+                        "harness search lookup",
+                    );'''
+replace = '''                    // Remove the independent candidate check too.'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''    crate::standin_process::require_watch_path(&launcher, "Muse launcher lookup");'''
+replace = '''    // Remove the independent launcher check too.'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''    crate::standin_process::require_watch_path(&version_file, "Muse version lookup");'''
+replace = '''    // Remove the independent version-file check too.'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''    crate::standin_process::require_watch_path(&binary, "Muse binary lookup");'''
+replace = '''    // Remove the independent binary check too.'''
+
 [[plant]]
 name = "standin homes: hosted Muse watch enters an inherited harness home"
 meant = "standin_isolation_hosted_muse_watch_refuses_an_inherited_harness_home"
@@ -197,6 +220,29 @@ file = "crates/cf-e2e/src/live/machine.rs"
 find = '''    crate::standin_process::require_watch_path(&install.command, "Muse launcher lookup");'''
 replace = '''    // The plant searches the launcher before checking it.'''
 
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/path.rs"
+find = '''                    crate::standin_process::require_search_candidate(
+                        candidate,
+                        "harness search lookup",
+                    );'''
+replace = '''                    // Remove the independent candidate check too.'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''    crate::standin_process::require_watch_path(&launcher, "Muse launcher lookup");'''
+replace = '''    // Remove the independent launcher check too.'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''    crate::standin_process::require_watch_path(&version_file, "Muse version lookup");'''
+replace = '''    // Remove the independent version-file check too.'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''    crate::standin_process::require_watch_path(&binary, "Muse binary lookup");'''
+replace = '''    // Remove the independent binary check too.'''
+
 [[plant]]
 name = "standin homes: PATH candidate link enters an inherited harness home"
 meant = "standin_isolation_path_candidate_refuses_a_link_into_an_inherited_home"
@@ -220,3 +266,14 @@ runs = ["standin-home-unit"]
 file = "crates/cf-e2e/src/muse.rs"
 find = '''    crate::standin_process::require_watch_path(&binary, "Muse binary lookup");'''
 replace = '''    // The plant trusts the version file's path.'''
+
+[[plant]]
+name = "standin homes: watch normalizes a parent after a link"
+meant = "standin_isolation_watch_refuses_a_parent_after_a_link"
+platforms = ["macos", "linux"]
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''                Component::ParentDir => panic!("{lookup}: parent component in a stand-in path"),'''
+replace = '''                Component::ParentDir => { assert!(clean.pop(), "{lookup}: path leaves the stand-in run"); }'''

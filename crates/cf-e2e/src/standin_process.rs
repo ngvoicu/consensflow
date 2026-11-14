@@ -750,9 +750,7 @@ pub fn require_watch_path(path: &Path, lookup: &str) {
         let mut clean = PathBuf::new();
         for part in absolute.components() {
             match part {
-                Component::ParentDir => {
-                    assert!(clean.pop(), "{lookup}: path leaves the stand-in run");
-                }
+                Component::ParentDir => panic!("{lookup}: parent component in a stand-in path"),
                 Component::CurDir => {}
                 other => clean.push(other.as_os_str()),
             }
@@ -823,6 +821,49 @@ pub fn require_watch_path(path: &Path, lookup: &str) {
 #[cfg(test)]
 mod tests {
     use super::safe_path_entry;
+
+    #[cfg(unix)]
+    #[test]
+    fn standin_isolation_watch_refuses_a_parent_after_a_link() {
+        const CHILD: &str = "CF_T1647_WATCH_LINK_PARENT";
+        if let Some(path) = crate::process::own_var(CHILD) {
+            let path = std::path::Path::new(&path);
+            super::require_watch_path(path, "stand-in watch lookup");
+            let _ = std::fs::read(path);
+            panic!("the watch returned without refusing a parent after a link");
+        }
+
+        let root = crate::door::made("watch-link-parent-").unwrap();
+        let echo = root.path().join("muse-echo");
+        let codex = root.path().join("pretend-owner-codex");
+        let subfolder = codex.join("subfolder");
+        crate::door::make_dir(&echo).unwrap();
+        crate::door::make_dir(&subfolder).unwrap();
+        crate::door::write(codex.join("sentinel"), "synthetic content").unwrap();
+        crate::door::symlink(&subfolder, echo.join("link")).unwrap();
+        let watched = echo.join("link").join("..").join("sentinel");
+        let output = crate::process::Run::new(std::env::current_exe().unwrap())
+            .inheriting_env()
+            .args([
+                "--exact",
+                "standin_process::tests::standin_isolation_watch_refuses_a_parent_after_a_link",
+                "--nocapture",
+            ])
+            .var("GITHUB_ACTIONS", "true")
+            .var("CF_E2E_HOSTED_MUSE", "1")
+            .var("RUNNER_TEMP", root.path())
+            .var("CODEX_HOME", &codex)
+            .var(CHILD, &watched)
+            .run()
+            .unwrap();
+        assert_ne!(output.code, Some(0), "the child did not refuse");
+        assert!(
+            format!("{}{}", output.stdout, output.stderr).contains("stand-in watch lookup: "),
+            "the watch followed a parent after a link: {}{}",
+            output.stdout,
+            output.stderr
+        );
+    }
 
     #[test]
     fn standin_isolation_temp_parent_refuses_an_inherited_harness_home() {
