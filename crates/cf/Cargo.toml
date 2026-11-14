@@ -19,7 +19,6 @@ cf-launcher.workspace = true
 cf-ledger.workspace = true
 cf-proto.workspace = true
 form_urlencoded.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 
 # A brief's file is opened as itself, never through a link (`--file`).
@@ -40,6 +39,8 @@ cf-harness = { workspace = true, features = ["test-support"] }
 cf-ledger = { workspace = true, features = ["test-support"] }
 # Whether a daemon's process is alive, and what a program a test starts holds.
 cf-process = { workspace = true, features = ["test-support"] }
+# The derives for the structs the goldens deserialise.
+serde.workspace = true
 tempfile.workspace = true
 
 [target.'cfg(unix)'.dev-dependencies]

@@ -57,7 +57,7 @@ pub fn time_clip(ms: f64) -> Option<i64> {
         return None;
     }
     // In range, so an i64 holds it exactly.
-    #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_possible_truncation)] // In range, so an i64 holds it exactly.
     Some(ms.trunc() as i64)
 }
 
@@ -186,7 +186,7 @@ pub fn canonical(text: &str) -> Option<String> {
 /// ten million.
 // Each whole number is a JavaScript number here: one past 2^53 is the double
 // it rounds to, as it was in JavaScript.
-#[allow(clippy::cast_precision_loss)]
+#[allow(clippy::cast_precision_loss)] // Each whole number is the double JavaScript reads it as.
 pub fn utc_ms(year: i64, month: i64, day: i64, hour: i64, minute: i64) -> Option<i64> {
     let year = if (0..=99).contains(&year) {
         1900 + year

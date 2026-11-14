@@ -97,7 +97,7 @@ pub fn run(
 /// none): a board command that changes the board is refused where the folder is Codex's
 /// memories folder, or inside it. What reads the board, `cf hook`, and the usage of a command
 /// (`--help`) are not changed by it.
-pub fn run_in(
+pub(crate) fn run_in(
     folder: Option<&Path>,
     env: &Env,
     args: &[OsString],

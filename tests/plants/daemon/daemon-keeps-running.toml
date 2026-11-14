@@ -6,7 +6,7 @@
 #
 # What stands against it:
 #
-# - the app's end of the bridge (`crates/cf-bridge/src/lib.rs`) never ends the transport for a
+# - the app's end of the bridge (`crates/cf-bridge/src/writer.rs`) never ends the transport for a
 #   full queue: an event waits, a response waits at most `RESPONSE_WAIT_MS` and is dropped and
 #   told of past it, and no more than `MAX_WAITING_RESPONSES` wait at once; its tests are
 #   `queue_tests`;
@@ -32,7 +32,7 @@ meant = "events_wait_for_a_peer_that_reads_nothing_and_arrive_in_order"
 runs = ["bridge-queue"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/requests.rs"
 find = '''
             None,
             WRITER_QUEUE_CAPACITY,
@@ -54,7 +54,7 @@ meant = "responses_wait_for_room_and_the_reader_goes_on"
 runs = ["bridge-queue"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/requests.rs"
 find = '''
             thread::spawn(move || {
                 bridge.respond_or_report(frame.id, frame.op, unknown_op_body());
@@ -68,7 +68,7 @@ meant = "a_frame_that_waits_for_room_says_so_now_and_then_and_the_bridge_stays_o
 runs = ["bridge-queue"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/writer.rs"
 find = "            self.report(BridgeError::Io(words.to_string()));"
 replace = "            let _ = words;"
 
@@ -192,7 +192,7 @@ meant = "a_burst_far_over_the_old_cap_loses_no_response"
 runs = ["bridge-queue"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/writer.rs"
 find = '''
         self.enqueue_encoded(
             encoded,
@@ -221,7 +221,7 @@ meant = "a_burst_far_over_the_old_cap_loses_no_response"
 runs = ["bridge-queue"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/writer.rs"
 find = '''
         self.enqueue_encoded(
             encoded,
@@ -251,7 +251,7 @@ meant = "a_response_waits_for_a_peer_that_reads_late_and_is_never_dropped"
 runs = ["bridge-queue"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/writer.rs"
 find = '''
         self.enqueue_encoded(
             encoded,
@@ -275,7 +275,7 @@ meant = "closing_the_bridge_ends_every_response_that_waits_for_room"
 runs = ["bridge-queue"]
 
 [[plant.edit]]
-file = "crates/cf-bridge/src/lib.rs"
+file = "crates/cf-bridge/src/writer.rs"
 find = '''
                 let Some(writer) = writer.as_ref() else {
                     return Err(BridgeError::Eof);

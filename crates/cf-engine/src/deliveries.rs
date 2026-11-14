@@ -1591,6 +1591,14 @@ impl Dispatcher {
                 });
             }
         }
+        // A known kind is already a reason. In particular, a cut reply's
+        // screen can contain its incomplete words, not a failure explanation.
+        if observed.failure_kind().is_some() {
+            return Ok(Why {
+                said: failed,
+                key: String::new(),
+            });
+        }
         let pastes = self.pastes_on_screen(participant.id)?;
         let pane = record.window.borrow().pane.clone();
         let shown = match pane {
