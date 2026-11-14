@@ -89,7 +89,7 @@ meant = "the_summary_a_compaction_writes_in_the_user_s_place_is_no_typing_and_th
 runs = ["viewer-ledger-wake-ups"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/read.rs"
 find = "t.role = 'user' AND t.compaction = 0 AND t.copied_at > ?"
 replace = "t.role = 'user' AND t.copied_at > ?"
 
@@ -121,7 +121,7 @@ replace = '''            OR transcript.drawn_only != excluded.drawn_only OR tran
        RETURNING rowid, compaction",'''
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/parts.rs"
 find = '''             revision = transcript_head.revision + 1",'''
 replace = '''             compaction = excluded.compaction, revision = transcript_head.revision + 1",'''
 
@@ -131,7 +131,7 @@ meant = "reads_every_conversation_of_the_chief_across_a_clear_a_resume_a_compact
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = "       WHERE participant_id = ?1 AND id {} ?2 ORDER BY id {} LIMIT 1\","
 replace = "       WHERE participant_id = ?1 AND ended_at IS NOT NULL AND id {} ?2 ORDER BY id {} LIMIT 1\","
 
@@ -177,7 +177,7 @@ meant = "pages_go_on_from_the_oldest_item_shown_whatever_is_added_or_grows_meanw
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = "            Some(place) => (place.row, place.part > 0),"
 replace = "            Some(place) => (place.row - place.row + i64::MAX, place.part > 0),"
 
@@ -188,7 +188,7 @@ meant = "an_item_not_shown_yet_that_a_copy_made_again_moved_on_comes_once_where_
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = '''       WHERE conversation_id = ?1{} AND item {}{} ?2 ORDER BY item {}",'''
 replace = '''       WHERE conversation_id = ?1{} AND (SELECT seq FROM transcript WHERE rowid = item) {}{} COALESCE((SELECT seq FROM transcript WHERE rowid = ?2), ?2) ORDER BY (SELECT seq FROM transcript WHERE rowid = item) {}",'''
 
@@ -230,7 +230,7 @@ meant = "a_search_that_finds_more_than_a_page_holds_shows_what_its_room_holds_an
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = "        if !self.entries.is_empty() && self.used + cost > self.room {"
 replace = "        if false && !self.entries.is_empty() && self.used + cost > self.room {"
 
@@ -240,7 +240,7 @@ meant = "a_read_goes_through_a_page_and_no_more_and_never_through_a_tool_s_text_
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = "        if !self.entries.is_empty() && self.used + reading + ROW_SLACK > self.room {"
 replace = "        if false && !self.entries.is_empty() && self.used + reading + ROW_SLACK > self.room {"
 
@@ -250,7 +250,7 @@ meant = "a_read_goes_through_a_page_and_no_more_and_never_through_a_tool_s_text_
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = '''        if tools {
             "transcript_head_conversation_index"
         } else {
@@ -266,7 +266,7 @@ meant = "a_page_takes_the_same_steps_beside_100_000_tools_outputs_left_out_and_o
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = '''            "transcript_head_said_index"
         },
         if tools { "" } else { " AND role != 'tool'" },'''
@@ -292,7 +292,7 @@ meant = "a_page_takes_the_same_steps_beside_100_000_tools_outputs_left_out_and_o
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = '''"SELECT id FROM conversation INDEXED BY conversation_participant_index'''
 replace = '''"SELECT id FROM conversation NOT INDEXED'''
 
@@ -302,7 +302,7 @@ meant = "a_search_goes_through_no_more_than_its_bound_and_older_goes_on_from_the
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = "        if moved && self.charged() + more > self.scan {"
 replace = "        if false && moved && self.charged() + more > self.scan {"
 
@@ -312,7 +312,7 @@ meant = "a_search_goes_through_no_more_than_its_bound_and_older_goes_on_from_the
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = '''            self.resume = Some(key);
             return Ok(true);'''
 replace = '''            let _ = key;
@@ -324,7 +324,7 @@ meant = "a_search_goes_through_no_more_than_its_bound_and_older_goes_on_from_the
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/text.rs"
 find = "    text.chars().flat_map(char::to_lowercase).collect()"
 replace = "    text.to_ascii_lowercase()"
 
@@ -346,7 +346,7 @@ meant = "a_search_inside_an_item_longer_than_its_bound_stops_at_the_bound_and_go
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = '''        while let Some(bytes) = self.part_bytes(&met, part)? {
             if !self.may(bytes) {'''
 replace = '''        while let Some(bytes) = self.part_bytes(&met, part)? {
@@ -358,7 +358,7 @@ meant = "a_search_inside_an_item_longer_than_its_bound_stops_at_the_bound_and_go
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = "            self.resume = Some(HistoryKey { part, ..met.key });"
 replace = "            self.resume = Some(met.key);"
 
@@ -368,7 +368,7 @@ meant = "words_where_one_part_ends_and_the_next_begins_are_found"
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = '''            let tail = previous
                 .as_ref()
                 .map_or("", |(_, before)| last_chars(before, reach));'''
@@ -380,7 +380,7 @@ meant = "every_read_moves_however_little_it_may_go_through_and_older_reaches_the
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = '''        self.resume = Some(met.key);
         Ok(true)
     }'''
@@ -393,7 +393,7 @@ meant = "a_search_inside_an_item_longer_than_its_bound_stops_at_the_bound_and_go
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = "        if self.part_bytes(&met, 0)?.is_none() {"
 replace = "        if self.part_bytes(&met, 0)?.is_none() || true {"
 
@@ -405,7 +405,7 @@ meant = "a_long_item_shows_a_part_its_first_or_where_a_search_found_and_reads_wh
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = "                return self.take(long_row(met, shown, from));"
 replace = '''                let first = self.read_part(&met, 0)?;
                 return self.take(long_row(met, first, 0));'''
@@ -438,7 +438,7 @@ meant = "a_page_that_shows_a_24_mib_item_reads_what_one_that_shows_an_item_of_tw
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = "SELECT item AS row_id, role, bytes, parts, id_shown"
 replace = "SELECT item AS row_id, role, length((SELECT text FROM transcript WHERE rowid = item)) AS bytes, parts, id_shown"
 
@@ -455,7 +455,7 @@ find = "rusqlite.workspace = true"
 replace = 'rusqlite = { workspace = true, features = ["blob"] }'
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = '''        let first = self.part_bytes(&met, 0)?;
         let reading = first.unwrap_or(met.bytes);'''
 replace = '''        let first = self.part_bytes(&met, 0)?;
@@ -486,7 +486,7 @@ meant = "a_read_takes_as_many_pages_beside_32_mib_ids_roles_names_and_bodies_as_
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = "        \"SELECT item AS row_id, role, bytes, parts, id_shown, complete, at, compaction, revision,"
 replace = "        \"SELECT item AS row_id, role, bytes, parts, id_shown, complete, (SELECT at FROM transcript WHERE rowid = item) AS at, compaction, revision,"
 
@@ -506,7 +506,7 @@ meant = "a_long_item_that_shrinks_and_grows_is_read_as_it_is_now"
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/parts.rs"
 find = '''"DELETE FROM transcript_part WHERE item = ? AND part >= ?"'''
 replace = '''"DELETE FROM transcript_part WHERE item = ? AND part >= ? + 1000000"'''
 
@@ -526,7 +526,7 @@ meant = "a_populated_version_19_ledger_has_its_long_items_split_into_parts_in_mi
 runs = ["viewer-ledger-long"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/parts.rs"
 find = '''    let starts: Vec<usize> = text
         .char_indices()
         .step_by(TRANSCRIPT_ITEM_MAX)
@@ -543,7 +543,7 @@ meant = "a_long_item_shows_a_part_its_first_or_where_a_search_found_and_reads_wh
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = '''       WHERE c.participant_id = ?1 AND h.conversation_id = ?2 AND h.item = ?3";'''
 replace = '''       WHERE ?1 IS NOT NULL AND h.conversation_id = ?2 AND h.item = ?3";'''
 
@@ -588,7 +588,7 @@ meant = "pages_go_on_from_the_oldest_item_shown_whatever_is_added_or_grows_meanw
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = "        self.resume = Some(row.key);"
 replace = ""
 
@@ -860,7 +860,7 @@ meant = "a_version_18_ledger_holding_a_text_that_is_no_utf_8_migrates_and_is_rea
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/parts.rs"
 find = "        let text = read.query_row([row], |found| Ok(text_of(found.get_ref(0)?.as_bytes()?)))?;"
 replace = "        let text: String = read.query_row([row], |found| found.get(0))?;"
 
@@ -870,7 +870,7 @@ meant = "a_version_18_ledger_holding_a_text_that_is_no_utf_8_migrates_and_is_rea
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = '''            .one(ROW_TEXT, [met.key.row], |row| {
                 Ok(text_of(row.get_ref(0)?.as_bytes()?))'''
 replace = '''            .one(ROW_TEXT, [met.key.row], |row| {
@@ -894,7 +894,7 @@ meant = "a_read_never_loads_the_role_a_conversation_was_given"
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = '''        "SELECT id FROM conversation INDEXED BY conversation_participant_index'''
 replace = '''        "SELECT *, id FROM conversation INDEXED BY conversation_participant_index'''
 
@@ -906,7 +906,7 @@ meant = "marks_each_delivery_by_its_own_message_and_never_loads_a_body_whole"
 runs = ["viewer-daemon-page"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = '''const MESSAGE_PARTIES: &str = "SELECT m.project_id, m.recipient_id, s.handle AS sender'''
 replace = '''const MESSAGE_PARTIES: &str = "SELECT m.project_id, m.recipient_id, s.handle AS sender, substr(m.body, 1, 4096) AS opening'''
 
@@ -916,7 +916,7 @@ meant = "a_read_takes_as_many_pages_beside_32_mib_ids_roles_names_and_bodies_as_
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = '''const MESSAGE_PARTIES: &str = "SELECT m.project_id, m.recipient_id, s.handle AS sender'''
 replace = '''const MESSAGE_PARTIES: &str = "SELECT m.project_id, m.recipient_id, s.handle AS sender, substr(m.body, 1, 4096) AS opening'''
 
@@ -926,7 +926,7 @@ meant = "a_migrated_ledger_s_reads_take_as_many_pages_beside_32_mib_ids_roles_na
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = '''const MESSAGE_PARTIES: &str = "SELECT m.project_id, m.recipient_id, s.handle AS sender'''
 replace = '''const MESSAGE_PARTIES: &str = "SELECT m.project_id, m.recipient_id, s.handle AS sender, substr(m.body, 1, 4096) AS opening'''
 
@@ -936,7 +936,7 @@ meant = "reading_a_24_mib_item_whole_a_part_at_a_time_reads_each_part_alone"
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = '''const PART_HEAD: &str = "SELECT h.parts, h.revision FROM transcript_head h'''
 replace = '''const PART_HEAD: &str = "SELECT h.parts, h.revision + (SELECT length(t.copied_at) * 0 FROM transcript t WHERE t.rowid = h.item) FROM transcript_head h'''
 
@@ -946,7 +946,7 @@ meant = "a_page_of_a_long_history_takes_what_a_page_takes"
 runs = ["viewer-ledger-long-page"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = "        if moved && self.charged() + more > self.scan {"
 replace = "        if moved && self.charged() + more > self.scan / 64 {"
 
@@ -958,7 +958,7 @@ meant = "the_copy_keeps_each_id_whole_so_one_round_5_cut_and_the_id_it_cut_it_to
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/parts.rs"
 find = "    match id.char_indices().nth(ID_SHOWN) {"
 replace = "    match id.char_indices().nth(usize::MAX) {"
 
@@ -968,7 +968,7 @@ meant = "a_version_18_ledger_keeps_its_ids_whole_its_collision_two_items_and_its
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = '''    "SELECT octet_length(text) FROM transcript_part WHERE item = ?1 AND part = ?2";'''
 replace = '''    "SELECT octet_length(text) FROM transcript_part WHERE item = (SELECT rowid FROM transcript WHERE item_id = (SELECT item_id FROM transcript WHERE rowid = ?1)) AND part = ?2";'''
 
@@ -1000,7 +1000,7 @@ meant = "each_part_says_which_copy_of_its_item_it_is_of_and_a_copy_written_again
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/parts.rs"
 find = '''             complete = excluded.complete, at = excluded.at,
              revision = transcript_head.revision + 1",'''
 replace = '''             complete = excluded.complete, at = excluded.at",'''
@@ -1011,7 +1011,7 @@ meant = "a_version_18_ledger_keeps_its_ids_whole_its_collision_two_items_and_its
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = '''const PART_HEAD: &str = "SELECT h.parts, h.revision FROM transcript_head h'''
 replace = '''const PART_HEAD: &str = "SELECT h.parts, (SELECT length(text) * 0 FROM transcript WHERE rowid = h.item) + h.revision FROM transcript_head h'''
 
@@ -1021,7 +1021,7 @@ meant = "every_query_of_the_history_goes_by_a_key_or_an_index_and_reads_no_row_i
 runs = ["viewer-ledger-plan"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = "       FROM transcript_head INDEXED BY {}"
 replace = "       FROM transcript_head NOT INDEXED /* {} */"
 
@@ -1122,7 +1122,7 @@ meant = "a_version_18_ledger_s_capped_fields_holding_a_nul_and_a_mebibyte_are_br
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/parts.rs"
 find = "        let at = given.as_deref().and_then(time::canonical);"
 replace = "        let at = given.clone();"
 
@@ -1132,7 +1132,7 @@ meant = "a_version_18_ledger_s_capped_fields_holding_a_nul_and_a_mebibyte_are_br
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/parts.rs"
 find = "        retime.execute(params![item, at])?;"
 replace = "        let _ = (item, at);"
 
@@ -1234,7 +1234,7 @@ meant = "every_field_and_part_a_read_goes_through_is_charged_as_what_it_is"
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = '''            self.scanned.fields += row.get::<_, i64>("field_bytes")?.unsigned_abs() as usize;
 '''
 replace = ""
@@ -1245,7 +1245,7 @@ meant = "every_read_moves_however_little_it_may_go_through_and_older_reaches_the
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = "        if moved && self.charged() + more > self.scan {"
 replace = "        if self.charged() + more > self.scan {"
 
@@ -1255,7 +1255,7 @@ meant = "every_read_moves_however_little_it_may_go_through_and_older_reaches_the
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = '''            // Searched so far: a read that stops before the next part goes on from it.
             self.resume = Some(HistoryKey { part, ..met.key });
 '''
@@ -1269,7 +1269,7 @@ meant = "each_part_says_which_copy_of_its_item_it_is_of_and_a_copy_written_again
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = "            revision: met.revision,"
 replace = "            revision: met.revision * 0,"
 
@@ -1303,7 +1303,7 @@ meant = "a_version_18_ledger_s_capped_fields_holding_a_nul_and_a_mebibyte_are_br
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/parts.rs"
 find = "                id_shown: shown_id(&text_of(row.get_ref(2)?.as_bytes()?)),"
 replace = "                id_shown: text_of(row.get_ref(2)?.as_bytes()?),"
 
@@ -1333,7 +1333,7 @@ meant = "a_read_of_the_history_reads_of_a_participant_and_its_project_only_what_
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = "\"SELECT 1 FROM project WHERE id = ?\""
 replace = "\"SELECT * FROM project WHERE id = ?\""
 
@@ -1343,7 +1343,7 @@ meant = "a_read_of_the_history_reads_of_a_participant_and_its_project_only_what_
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = '''"SELECT id, left_at IS NULL FROM participant'''
 replace = '''"SELECT id, left_at IS NULL, roles FROM participant'''
 
@@ -1353,7 +1353,7 @@ meant = "every_field_and_part_a_read_goes_through_is_charged_as_what_it_is"
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = "        self.scanned.parts += 1;\n        let found = self.one("
 replace = "        let found = self.one("
 
@@ -1363,7 +1363,7 @@ meant = "every_read_moves_however_little_it_may_go_through_and_older_reaches_the
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = "            previous = self.read_tail(&met, before)?;"
 replace = "            previous = Some((before * HISTORY_PART, self.read_part(&met, before)?));"
 
@@ -1373,7 +1373,7 @@ meant = "a_search_that_goes_on_inside_an_item_reads_the_end_of_the_part_before_a
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/parts.rs"
 find = "DO UPDATE SET tail = excluded.tail, text = excluded.text"
 replace = "DO UPDATE SET text = excluded.text"
 
@@ -1383,7 +1383,7 @@ meant = "a_search_that_goes_on_inside_an_item_reads_the_end_of_the_part_before_a
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/parts.rs"
 find = "        .nth(PART_TAIL - 1)"
 replace = "        .nth(PART_TAIL / 4)"
 
@@ -1393,7 +1393,7 @@ meant = "a_search_that_goes_on_inside_an_item_reads_the_end_of_the_part_before_a
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = '''const PART_END: &str = "SELECT tail FROM transcript_part'''
 replace = '''const PART_END: &str = "SELECT substr(text, -2000) FROM transcript_part'''
 
@@ -1408,7 +1408,7 @@ meant = "every_query_of_the_history_goes_by_a_key_or_an_index_and_reads_no_row_i
 runs = ["viewer-ledger-plan"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = "       INDEXED BY participant_history_index WHERE project_id = ?1 AND handle = ?2\";"
 replace = "       INDEXED BY sqlite_autoindex_participant_1 WHERE project_id = ?1 AND handle = ?2\";"
 
@@ -1418,7 +1418,7 @@ meant = "a_read_takes_as_many_pages_beside_32_mib_ids_roles_names_and_bodies_as_
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = "        \"SELECT item AS row_id, role, bytes,"
 replace = "        \"SELECT item AS row_id, (SELECT role FROM transcript WHERE rowid = item) AS role, bytes,"
 
@@ -1438,7 +1438,7 @@ meant = "a_migrated_ledger_s_reads_take_as_many_pages_beside_32_mib_ids_roles_na
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/parts.rs"
 find = "       WHERE octet_length(text) > ?1 OR octet_length(item_id) > ?2\","
 replace = "       WHERE octet_length(text) > ?1 AND ?2 = ?2\","
 
@@ -1624,7 +1624,7 @@ meant = "the_item_that_may_still_be_written_is_the_newest_of_the_conversation_no
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = "       WHERE conversation_id = ?1 ORDER BY item DESC LIMIT 1\";"
 replace = "       WHERE conversation_id = ?1 ORDER BY item ASC LIMIT 1\";"
 
@@ -1634,7 +1634,7 @@ meant = "a_read_takes_as_many_pages_beside_32_mib_ids_roles_names_and_bodies_as_
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/queries.rs"
 find = """    "SELECT id FROM conversation INDEXED BY conversation_current_unique"""
 replace = """    "SELECT *, id FROM conversation INDEXED BY conversation_current_unique"""
 

@@ -2128,7 +2128,7 @@ meant = "an_earlier_copy_of_a_withheld_paste_is_not_taken_for_the_human_sending_
 runs = ["engine-stale-box"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/read.rs"
 find = "         AND t.compaction = 0 AND instr(t.text, ?) > 0 AND t.copied_at >= ?"
 replace = "         AND t.compaction = 0 AND instr(t.text, ?) > 0 AND (t.copied_at >= ? OR 1)"
 

@@ -177,7 +177,7 @@ meant = "a_step_done_before_its_brief_came_back_has_no_transcript_and_the_chiefs
 runs = ["daemon-own-steps"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/read.rs"
 find = "        return Ok(delivered.then_some(copied));"
 replace = "        return Ok(Some(copied));"
 

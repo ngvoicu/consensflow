@@ -1010,7 +1010,7 @@ meant = "reads_past_thousands_of_conversations_that_show_no_item_to_the_one_item
 runs = ["tl-daemon", "tl-ledger"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = """        // Through the whole conversation: the next read goes on past it.
 """
 replace = """        // Through the whole conversation: the next read goes on past it.
@@ -1025,7 +1025,7 @@ meant = "every_read_moves_however_little_it_may_go_through_and_older_reaches_the
 runs = ["tl-ledger", "tl-daemon"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = "        let edge = if self.newest_first { 0 } else { i64::MAX };"
 replace = "        let edge = if self.newest_first { i64::MAX } else { 0 };"
 
@@ -1035,7 +1035,7 @@ meant = "a_read_through_conversations_that_show_no_item_shows_none_and_reads_non
 runs = ["tl-ledger", "tl-daemon"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = """        if found.is_some() {
             self.scanned.conversations += 1;
         }
@@ -1546,7 +1546,7 @@ meant = "the_items_only_the_history_shows_are_in_it_where_they_stand_and_in_no_r
 runs = ["it-ledger"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/read.rs"
 find = '       WHERE conversation_id = ? AND drawn_only = 0 ORDER BY seq'
 replace = '       WHERE conversation_id = ? ORDER BY seq'
 
@@ -1556,7 +1556,7 @@ meant = "a_tasks_transcript_says_what_each_call_was_and_shows_nothing_only_the_h
 runs = ["it-ledger"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/read.rs"
 find = '       WHERE c.participant_id = ? AND t.drawn_only = 0 ORDER BY t.conversation_id, t.seq'
 replace = '       WHERE c.participant_id = ? ORDER BY t.conversation_id, t.seq'
 
@@ -1576,7 +1576,7 @@ meant = "thinking_is_cut_as_a_tools_output_is_and_a_change_as_well"
 runs = ["it-ledger"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = '            if diff_bytes > 0 {'
 replace = '            if diff_bytes > usize::MAX - 1 {'
 
@@ -1586,7 +1586,7 @@ meant = "a_kind_or_a_status_the_ledger_does_not_know_draws_as_a_plain_item_or_no
 runs = ["it-ledger"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/drawn.rs"
 find = '            kind: word("kind", &KINDS)?,'
 replace = '            kind: word("kind", &KINDS).unwrap_or("text"),'
 
@@ -1919,7 +1919,7 @@ meant = "a_search_finds_a_calls_header_as_it_finds_its_output_a_long_output_by_i
 runs = ["tl-ledger"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/history.rs"
+file = "crates/cf-ledger/src/conversations/history/reading.rs"
 find = "        if from_part == 0 && header.is_some_and(|header| folded(header).contains(needle)) {"
 replace = "        if from_part == 0 && header.is_some_and(|header| header.contains(needle)) {"
 
