@@ -163,8 +163,8 @@ runs = ["cf-brief-tell"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = "    Ok(Said::new(message, format!(\"{text}\\n{sent}\")))"
-replace = "    Ok(Said::new(message, format!(\"{text}{}\", &sent[..0])))"
+find = "        format!(\"{text} A pause or finish may withdraw it first and name it.\\n{sent}\"),"
+replace = "        format!(\"{text} A pause or finish may withdraw it first and name it.{}\", &sent[..0]),"
 
 [[plant]]
 name = "briefs: a resume or a reopening says nothing of the words it sent"

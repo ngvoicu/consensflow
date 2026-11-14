@@ -36,8 +36,10 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = '''                   AND kind IN ('task', 'note') AND state IN ('queued', 'gated')",'''
-replace = '''                   AND kind IN ('task', 'note', 'answer') AND state IN ('queued', 'gated')",'''
+find = '''                       AND kind IN ('task', 'note') AND state IN ('queued', 'gated')
+                     RETURNING id, kind, urgent",'''
+replace = '''                       AND kind IN ('task', 'note', 'answer') AND state IN ('queued', 'gated')
+                     RETURNING id, kind, urgent",'''
 
 [[plant]]
 name = "pause: a pause is not counted as a stop"
