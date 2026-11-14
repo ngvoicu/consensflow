@@ -159,9 +159,9 @@ runs = ["accept-failed-cf-usage"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/usage.txt"
-find = '''  cf task accept|cancel T-3         move a task you asked for
+find = '''  cf task accept|cancel T-3 T-4     decide several tasks together, all or none
   cf task accept T-3 "…"            accept a failed task you checked; your words are its result'''
-replace = '''  cf task accept|cancel T-3         move a task you asked for
+replace = '''  cf task accept|cancel T-3 T-4     decide several tasks together, all or none
   cf task cancel T-3 "…"            accept a failed task you checked; your words are its result'''
 
 [[plant]]

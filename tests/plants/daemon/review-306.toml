@@ -94,10 +94,14 @@ runs = ["cf-brief-checks"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/brief.rs"
-find = "    let path = Path::new(name);"
+find = '''    let path = Path::new(name);
+    let shown = escaped(&path.to_string_lossy());
+    if !words.text.is_empty() {'''
 replace = '''
     let lossy = std::path::PathBuf::from(name.to_string_lossy().into_owned());
-    let path = lossy.as_path();'''
+    let path = lossy.as_path();
+    let shown = escaped(&path.to_string_lossy());
+    if !words.text.is_empty() {'''
 
 [[plant]]
 name = "review 306: --file follows a link"
@@ -166,8 +170,12 @@ runs = ["cf-brief-checks"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/brief.rs"
-find = "    let shown = escaped(&path.to_string_lossy());"
-replace = "    let shown = path.to_string_lossy();"
+find = '''    let path = Path::new(name);
+    let shown = escaped(&path.to_string_lossy());
+    if !words.text.is_empty() {'''
+replace = '''    let path = Path::new(name);
+    let shown = path.to_string_lossy();
+    if !words.text.is_empty() {'''
 
 # B7: the transcript of a task whose brief reached no window.
 
