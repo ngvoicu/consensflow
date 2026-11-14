@@ -508,7 +508,8 @@ fn tell(
     let state = answer.take("task")?;
     let text = match state.get("state").and_then(Value::as_str) {
         Some("working" | "waiting") => format!(
-            "T-{number} goes on working; your words go in before its result is taken: m-{id} waits for @{window}'s window. Nothing is paused, and nothing waits for an answer."
+            "T-{number} goes on working; your words go in before its result is taken: m-{id} waits for @{window}'s window. Nothing is paused, and nothing waits for an answer. To stop it and ask: {} task pause T-{number} \"…\".",
+            board.cf()
         ),
         Some("paused") => format!(
             "T-{number} is paused: m-{id} waits for @{window}'s window and goes in with its resume."

@@ -190,7 +190,7 @@ replace = """                *since = Some((now, turn));
 
 [[plant]]
 name = "nothing to stop: the pause's help says the window and its work wait"
-meant = "every_line_of_the_usage_is_a_commands_to_answer_help_with"
+meant = "every_board_command_answers_help_with_its_usage_and_asks_the_board_nothing"
 runs = ["cf-help"]
 
 [[plant.edit]]

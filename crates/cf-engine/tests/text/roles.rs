@@ -547,9 +547,13 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
         r#"cf task edit T-3 "…" \[--tier <tier>\] \[--needs …\] \[--before …\]\s+change the brief, tier, needs or before of a task before any window has its brief \(open, queued, or paused\); T-4,T-5 replaces a list, \+T-5 adds, -T-5 removes"#,
         &text
     ));
-    // A tell stops a working task and gets an answer; a queued or open task is not stopped (T-1435).
+    // A tell is read before the result without stopping; pause with words asks instead.
     assert!(found(
-        r#"cf tell T-3 "…"\s+stop T-3 and put this to its window: its answer arrives as a message; then resume it \(queued or open: kept for its window; no answer, nothing to resume\)"#,
+        r#"cf tell T-3 "…"\s+say this to T-3's window without stopping it: it reads your words before its result is taken, and owes no answer"#,
+        &text
+    ));
+    assert!(found(
+        r#"cf task pause T-3 \["…"\]\s+stop a worker's task: its window waits; background work runs on; with words, they go to its window as a question, its answer arrives as a message; then cf task resume T-3 "…" or cf task finish T-3"#,
         &text
     ));
     assert!(found(

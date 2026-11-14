@@ -39,15 +39,17 @@ cf inside a ConsensFlow window: the board's commands.
   cf task edit T-3 "…" [--tier <tier>] [--needs T-4,T-5|+T-5|-T-5] [--before …]
                                     change the brief, tier, needs or before of a task before any window
                                     has its brief (open, queued, or paused): a list replaces, +T-5 adds, -T-5 removes
-  cf task pause T-3                 stop a worker's task: the agent stops and its window waits;
-                                    what it left running in the background runs on
+  cf task pause T-3 ["…"]           stop a worker's task: the agent stops and its window waits;
+                                    background work runs on; with words, they go to its window
+                                    as a question and its answer arrives as a message; then
+                                    cf task resume T-3 "…" or cf task finish T-3
   cf task resume T-3 "…"            go on with it: the same window, with your words
   cf task edit|reopen|resume T-3 … --title "…"
                                     a new title, in any state (else the brief's first line); edit takes it alone
   cf task finish T-3                take what a working, waiting or paused task's worker said last as its
                                     result; what its turn left running is not ended
-  cf tell T-3 "…"                   stop T-3 and put this to its window: its answer arrives as
-                                    a message; then cf task resume T-3 "…"
+  cf tell T-3 "…"                   say this to T-3's window without stopping it; it reads your
+                                    words before its result is taken, and owes no answer
                                     (queued or open: kept for its window, to go in with or after its brief)
   cf tell "…"                       a member tells whoever gave its task; nothing waits
   cf inbox [read m-12]              what is waiting for you, or one message in full

@@ -114,9 +114,13 @@ mod tests {
         assert!(tell.contains(
             "cf tell \"…\"                       a member tells whoever gave its task; nothing waits"
         ));
-        assert!(tell.contains("then cf task resume T-3"));
+        assert!(tell.contains("without stopping it"));
+        assert!(tell.contains("words before its result is taken, and owes no answer"));
         assert!(tell.lines().nth(2).is_some_and(|line| line
             .ends_with("(queued or open: kept for its window, to go in with or after its brief)")));
+        let pause = of(&["task", "pause"]);
+        assert!(pause.contains("as a question and its answer arrives as a message"));
+        assert!(pause.contains("cf task resume T-3 \"…\" or cf task finish T-3"));
     }
 
     #[test]

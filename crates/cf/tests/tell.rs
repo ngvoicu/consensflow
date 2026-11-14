@@ -114,8 +114,39 @@ fn a_tell_to_a_task_at_work_says_it_goes_on_and_nothing_is_paused() {
         assert_eq!(code, Some(0));
         assert_eq!(
             printed,
-            "T-3 goes on working; your words go in before its result is taken: m-12 waits for @zeus-amber-pine's window. Nothing is paused, and nothing waits for an answer.\nT-3: sent 18 characters, ending \"Use the v2 grammar\".\n"
+            "T-3 goes on working; your words go in before its result is taken: m-12 waits for @zeus-amber-pine's window. Nothing is paused, and nothing waits for an answer. To stop it and ask: cf task pause T-3 \"…\".\nT-3: sent 18 characters, ending \"Use the v2 grammar\".\n"
         );
+    }
+}
+
+#[test]
+fn the_stopping_command_in_a_tell_reply_uses_the_windows_cf_without_rewriting_its_words() {
+    for state in ["working", "waiting"] {
+        for own in [
+            "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf",
+            "& 'C:/Program Files/ConsensFlow/bin/cf.exe'",
+        ] {
+            let api = scripted(vec![
+                reply(200, json!({ "participant": { "role": "chief" } })),
+                reply(200, told("note", state)),
+            ]);
+            let ran = cf(
+                &["tell", "T-3", "run cf task list"],
+                &[
+                    ("CONSENSFLOW_URL", &api.url),
+                    ("CONSENSFLOW_TOKEN", "tok"),
+                    ("CONSENSFLOW_CF", own),
+                ],
+                "",
+            );
+            let printed = String::from_utf8_lossy(&ran.stdout);
+            assert_eq!(ran.status.code(), Some(0));
+            assert!(
+                printed.contains(&format!("To stop it and ask: {own} task pause T-3 \"…\".")),
+                "{state}: {printed}"
+            );
+            assert!(printed.contains("ending \"run cf task list\""), "{printed}");
+        }
     }
 }
 
