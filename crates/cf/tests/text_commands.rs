@@ -35,7 +35,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use cf_board::scripted::scripted;
+use cf_board::scripted::{reply, scripted};
 use common::{cf, cf_bytes};
 use serde_json::{json, Value};
 
