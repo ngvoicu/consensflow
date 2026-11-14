@@ -64,10 +64,11 @@ def clean_env(**extra):
 
 def digest(path):
     try:
-        with open(path, "rb") as fh:
-            return hashlib.sha256(fh.read()).hexdigest()[:12]
-    except OSError:
+        fh = open(path, "rb")
+    except FileNotFoundError:
         return None
+    with fh:
+        return hashlib.sha256(fh.read()).hexdigest()[:12]
 
 
 def copy_secret(source, target):
@@ -78,10 +79,21 @@ def copy_secret(source, target):
 
 
 def remove(path):
-    for _ in range(10):
-        shutil.rmtree(path, ignore_errors=True)
-        if not os.path.exists(path):
+    for attempt in range(10):
+        try:
+            shutil.rmtree(path)
             return
+        except FileNotFoundError:
+            # A disappearing child is not proof that the root is gone.
+            try:
+                os.lstat(path)
+            except FileNotFoundError:
+                return
+            if attempt == 9:
+                raise
+        except OSError:
+            if attempt == 9:
+                raise
         time.sleep(0.5)
 
 
@@ -231,8 +243,11 @@ def pi(scratch, a, b):
     agent = os.path.join(scratch, "pi-agent")
     for name in ("auth.json", "models-store.json", "models.json", "settings.json"):
         source = os.path.join(HOME, ".pi", "agent", name)
-        if os.path.exists(source):
-            copy_secret(source, os.path.join(agent, name))
+        try:
+            os.stat(source)
+        except FileNotFoundError:
+            continue
+        copy_secret(source, os.path.join(agent, name))
     sessions = os.path.join(scratch, "pi-sessions")
     env = clean_env(PI_CODING_AGENT_DIR=agent, PI_OFFLINE="1")
     work = os.path.join(scratch, "work")

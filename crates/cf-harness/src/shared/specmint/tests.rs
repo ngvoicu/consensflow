@@ -49,6 +49,74 @@ fn sha256(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// Only the named, single-occurrence HTML lines may differ; compare all other bytes.
+fn references_match(plain: &str, html: &str, differences: &[(&str, &str)]) -> bool {
+    let mut expected = plain.to_owned();
+    for &(from, to) in differences {
+        if expected.matches(from).count() != 1 {
+            return false;
+        }
+        expected = expected.replacen(from, to, 1);
+    }
+    expected.as_bytes() == html.as_bytes()
+}
+
+#[test]
+fn paired_references_have_the_same_words() {
+    let pairs: [(&str, &str, &[(&str, &str)]); 3] = [
+        (
+            "core/references/researcher.md",
+            "core-html/references/researcher.md",
+            &[
+                (
+                    "  Deep codebase, internet, and documentation researcher for Spec Mint Core.\n",
+                    "  Deep codebase, internet, and documentation researcher for Spec Mint Core HTML.\n",
+                ),
+                ("# Spec Mint Core Researcher\n", "# Spec Mint Core HTML Researcher\n"),
+                (
+                    "## Researcher: Spec Mint Core Researcher\n",
+                    "## Researcher: Spec Mint Core HTML researcher\n",
+                ),
+            ],
+        ),
+        (
+            "tdd/references/researcher.md",
+            "tdd-html/references/researcher.md",
+            &[
+                ("# Spec Mint TDD Researcher\n", "# Spec Mint TDD HTML Researcher\n"),
+                (
+                    "## Researcher: Spec Mint TDD research subagent\n",
+                    "## Researcher: Spec Mint TDD HTML research subagent\n",
+                ),
+            ],
+        ),
+        (
+            "tdd/references/testing-knowledge.md",
+            "tdd-html/references/testing-knowledge.md",
+            &[(
+                "Language-agnostic testing reference for the specmint-tdd research subagent and\n",
+                "Language-agnostic testing reference for the specmint-tdd-html research subagent and\n",
+            )],
+        ),
+    ];
+    for (plain_path, html_path, differences) in pairs {
+        let plain = fs::read_to_string(vendored().join(plain_path)).expect("plain reference");
+        let html = fs::read_to_string(vendored().join(html_path)).expect("HTML reference");
+        assert!(
+            references_match(&plain, &html, differences),
+            "unexpected drift in {plain_path} and {html_path}"
+        );
+        assert!(
+            !references_match(&(plain.clone() + "changed"), &html, differences),
+            "a change only in {plain_path} must be caught"
+        );
+        assert!(
+            !references_match(&plain, &(html.clone() + "changed"), differences),
+            "a change only in {html_path} must be caught"
+        );
+    }
+}
+
 #[test]
 fn the_table_the_folder_and_the_manifest_hold_the_same_files_with_the_same_bytes() {
     let manifest: Value =
