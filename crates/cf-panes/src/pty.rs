@@ -36,7 +36,7 @@ mod turn;
 
 pub use close::CLOSE_GRACE;
 pub use error::PaneError;
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use flow::terminal_of;
 use flow::OutputFlow;
 pub(crate) use output_end::Handed;
