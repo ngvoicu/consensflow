@@ -1141,7 +1141,7 @@ find = '''
                     header_id(&item.text).is_some_and(|message| replacements.contains(&message));
                 // A message to the member'''
 replace = '''
-                of_the_role = item.text.contains(OPENING);
+                of_the_role = item.text.contains(super::OPENING);
                 // A message to the member'''
 
 [[plant]]

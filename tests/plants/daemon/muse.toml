@@ -2897,7 +2897,7 @@ runs = ["muse-role-cleared"]
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change/greeting.rs"
 find = '''        record.delivery.borrow_mut().greeting = Some(note.id);'''
-replace = '''        record.delivery.borrow_mut().prelude = Some(Prelude {
+replace = '''        record.delivery.borrow_mut().prelude = Some(super::Prelude {
             replacement: note.id,
             displaced: None,
             chief: participant.role == "chief",
