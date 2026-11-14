@@ -247,3 +247,68 @@ fn neither_a_launch_s_end_nor_a_start_s_sweep_removes_the_copy_and_each_variant_
         assert!(exists(&copy.file()), "{} stays", copy.file());
     }
 }
+
+#[test]
+fn a_temporary_that_cannot_be_removed_is_said_beside_the_failure_that_put_it_there() {
+    // A folder at the launch's name takes no write, and is not a file the
+    // removal removes: the write fails and its clean-up does too.
+    let fake = Fake::new();
+    let copy = written_for(&fake, &id(), Variant::Core);
+    fs::write(copy.file(), "changed by hand\n").expect("a change");
+    let mine = format!("{}.{}.tmp", copy.file(), id().as_str());
+    fs::create_dir(&mine).expect("a folder at the launch's name");
+    let env = home_env(&fake);
+    let skill = place(Harness::Claude, &env, Variant::Core, ".specs", None).expect("a place");
+    let specs = Specs {
+        variant: Variant::Core,
+        folder: ".specs",
+        skill: &skill,
+    };
+    let failed = write_own(Harness::Claude, &env, &launch(&id(), Some(specs)))
+        .expect_err("a folder at the name takes no write");
+    assert!(failed.contains("remains"), "{failed}");
+    assert!(Path::new(&mine).is_dir(), "what was there is as it was");
+    assert_eq!(
+        fs::read_to_string(copy.file()).expect("the file"),
+        "changed by hand\n",
+        "what was there is as it was"
+    );
+    fs::remove_dir(&mine).expect("the folder goes");
+
+    // The write to the temporary, which is there already and writable, goes
+    // through, and both the rename and the removal of it fail in folders
+    // where nothing can be made or renamed in. (Unix alone, whose read-only
+    // folder refuses a rename and a removal; a Windows folder takes neither
+    // for files it holds.)
+    #[cfg(unix)]
+    {
+        let fake = Fake::new();
+        let copy = written_for(&fake, &id(), Variant::Core);
+        fs::write(copy.file(), "changed by hand\n").expect("a change");
+        let mine = format!("{}.{}.tmp", copy.file(), id().as_str());
+        fs::write(&mine, "the launch's temporary\n").expect("the temporary");
+        let locked = locked_folders(Path::new(&copy.root));
+        let env = home_env(&fake);
+        let skill = place(Harness::Claude, &env, Variant::Core, ".specs", None).expect("a place");
+        let specs = Specs {
+            variant: Variant::Core,
+            folder: ".specs",
+            skill: &skill,
+        };
+        let failed = write_own(Harness::Claude, &env, &launch(&id(), Some(specs)))
+            .expect_err("nothing can be renamed in a locked folder");
+        unlocked(&locked);
+        assert!(failed.contains("rename"), "{failed}");
+        assert!(failed.contains("remains"), "{failed}");
+        assert!(
+            Path::new(&mine).exists(),
+            "the temporary remains, and is said"
+        );
+        assert_eq!(
+            fs::read_to_string(copy.file()).expect("the file"),
+            "changed by hand\n",
+            "what was there is as it was"
+        );
+        fs::remove_file(&mine).expect("the temporary goes");
+    }
+}

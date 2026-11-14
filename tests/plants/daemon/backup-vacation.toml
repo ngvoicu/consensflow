@@ -16,7 +16,7 @@ name = "bkv ledger: inserting a backup skips link validation"
 meant = "a_backup_insert_cannot_link_across_projects_or_to_a_chief"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_backup_insert_cannot_link_across_projects_or_to_a_chief"]]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0038.sql"
+file = "crates/cf-ledger/migrations/0039.sql"
 find = '''CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant
 WHEN NEW.backup_of IS NOT NULL'''
 replace = '''CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant
@@ -27,7 +27,7 @@ name = "bkv ledger: a member can have two live backups"
 meant = "a_live_member_cannot_have_two_live_backups"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_live_member_cannot_have_two_live_backups"]]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0038.sql"
+file = "crates/cf-ledger/migrations/0039.sql"
 find = "CREATE UNIQUE INDEX participant_one_live_backup"
 replace = "CREATE INDEX participant_one_live_backup"
 
@@ -36,7 +36,7 @@ name = "bkv ledger: a backup can cross projects"
 meant = "a_backup_must_belong_to_the_same_project_as_a_live_member"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_backup_must_belong_to_the_same_project_as_a_live_member"]]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0038.sql"
+file = "crates/cf-ledger/migrations/0039.sql"
 find = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
 WHEN NEW.backup_of IS NOT NULL
@@ -61,7 +61,7 @@ name = "bkv ledger: a member can back itself"
 meant = "a_backup_cannot_back_itself_another_backup_or_form_a_ring"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_backup_cannot_back_itself_another_backup_or_form_a_ring"]]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0038.sql"
+file = "crates/cf-ledger/migrations/0039.sql"
 find = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
 WHEN NEW.backup_of IS NOT NULL
@@ -79,7 +79,7 @@ name = "bkv ledger: a backup can have a backup"
 meant = "a_backup_cannot_back_itself_another_backup_or_form_a_ring"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_backup_cannot_back_itself_another_backup_or_form_a_ring"]]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0038.sql"
+file = "crates/cf-ledger/migrations/0039.sql"
 find = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
 WHEN NEW.backup_of IS NOT NULL
@@ -109,7 +109,7 @@ name = "bkv ledger: a chief can have a backup"
 meant = "the_chief_and_a_session_cannot_be_backups_or_have_backups"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "the_chief_and_a_session_cannot_be_backups_or_have_backups"]]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0038.sql"
+file = "crates/cf-ledger/migrations/0039.sql"
 find = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
 WHEN NEW.backup_of IS NOT NULL
@@ -137,7 +137,7 @@ name = "bkv ledger: a session can be a backup"
 meant = "the_chief_and_a_session_cannot_be_backups_or_have_backups"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "the_chief_and_a_session_cannot_be_backups_or_have_backups"]]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0038.sql"
+file = "crates/cf-ledger/migrations/0039.sql"
 find = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
 WHEN NEW.backup_of IS NOT NULL
@@ -217,7 +217,7 @@ name = "bkv ledger: a human can have a backup"
 meant = "the_human_cannot_be_a_backup_or_have_one"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "the_human_cannot_be_a_backup_or_have_one"]]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0038.sql"
+file = "crates/cf-ledger/migrations/0039.sql"
 find = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
 WHEN NEW.backup_of IS NOT NULL
@@ -246,7 +246,7 @@ name = "bkv ledger: a human can be a backup"
 meant = "the_human_cannot_be_a_backup_or_have_one"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "the_human_cannot_be_a_backup_or_have_one"]]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0038.sql"
+file = "crates/cf-ledger/migrations/0039.sql"
 find = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
 WHEN NEW.backup_of IS NOT NULL
@@ -263,7 +263,7 @@ name = "bkv ledger: a departed row can acquire an invalid link"
 meant = "a_departed_link_still_cannot_name_itself_a_nonmember_or_another_project"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_departed_link_still_cannot_name_itself_a_nonmember_or_another_project"]]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0038.sql"
+file = "crates/cf-ledger/migrations/0039.sql"
 find = '''CREATE TRIGGER participant_backup_update
 BEFORE UPDATE OF backup_of, left_at, member_id, role, project_id ON participant
 WHEN NEW.backup_of IS NOT NULL'''
@@ -276,7 +276,7 @@ name = "bkv ledger: an inserted departed row can acquire an invalid link"
 meant = "an_inserted_departed_link_must_still_name_a_member_in_its_project"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "an_inserted_departed_link_must_still_name_a_member_in_its_project"]]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0038.sql"
+file = "crates/cf-ledger/migrations/0039.sql"
 find = '''CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant
 WHEN NEW.backup_of IS NOT NULL'''
 replace = '''CREATE TRIGGER participant_backup_insert BEFORE INSERT ON participant
@@ -287,7 +287,7 @@ name = "bkv ledger: an owner in history can cease to be a member"
 meant = "a_former_owner_stays_a_member_in_its_project_while_history_links_it"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_former_owner_stays_a_member_in_its_project_while_history_links_it"]]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0038.sql"
+file = "crates/cf-ledger/migrations/0039.sql"
 find = "WHEN EXISTS (SELECT 1 FROM participant child WHERE child.backup_of = OLD.id)"
 replace = "WHEN EXISTS (SELECT 1 FROM participant child WHERE child.backup_of = OLD.id AND child.left_at IS NULL)"
 
@@ -296,11 +296,11 @@ name = "bkv ledger: an owner in history can become a backup"
 meant = "a_former_owner_cannot_become_a_backup_while_its_history_links_it"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "a_former_owner_cannot_become_a_backup_while_its_history_links_it"]]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0038.sql"
+file = "crates/cf-ledger/migrations/0039.sql"
 find = "WHEN EXISTS (SELECT 1 FROM participant child WHERE child.backup_of = OLD.id)"
 replace = "WHEN EXISTS (SELECT 1 FROM participant child WHERE child.backup_of = OLD.id AND child.left_at IS NULL)"
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0038.sql"
+file = "crates/cf-ledger/migrations/0039.sql"
 find = '''    OR EXISTS (SELECT 1 FROM participant child
       WHERE child.backup_of = NEW.id)
   THEN RAISE(ABORT, 'invalid backup relationship') END;
@@ -577,6 +577,6 @@ name = "bkv review: migration loses the account hold kind"
 meant = "upgrading_main_keeps_projects_members_tasks_and_history_and_adds_the_marks"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation", "upgrading_main_keeps_projects_members_tasks_and_history_and_adds_the_marks"]]
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0038.sql"
+file = "crates/cf-ledger/migrations/0039.sql"
 find = "WHEN '9999-12-31T23:59:59.998Z' THEN 'account'"
 replace = "WHEN '9999-12-31T23:59:59.998Z' THEN 'quota'"

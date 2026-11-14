@@ -1,0 +1,31 @@
+# Faults in the switch's two silent engine/daemon boundaries.
+
+[run]
+own-news = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_news::own_hands_switch_is_told_once_each_way_on_every_harness"]
+own-text = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "own_hands_selects_the_chiefs_text_and_keeps_the_members_text"]
+
+[[plant]]
+name = "own hands: a switch under a running chief is never noticed"
+meant = "own_hands_switch_is_told_once_each_way_on_every_harness"
+runs = ["own-news"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_news.rs"
+find = '''            specs: self.specs_setting(project, participant),
+            rules: project.staff_rules.clone(),
+            own_hands: project.own_hands,'''
+replace = '''            specs: self.specs_setting(project, participant),
+            rules: project.staff_rules.clone(),
+            own_hands: false,'''
+
+[[plant]]
+name = "own hands: the chief is always given the ordinary text"
+meant = "own_hands_selects_the_chiefs_text_and_keeps_the_members_text"
+runs = ["own-text"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''            specs,
+            project.own_hands,'''
+replace = '''            specs,
+            false,'''

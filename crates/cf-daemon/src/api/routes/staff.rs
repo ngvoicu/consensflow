@@ -67,7 +67,11 @@ pub(super) async fn handle(
             row
         })
         .collect();
-    Ok(Answer::ok(json!({ "members": members })))
+    let mut answer = json!({ "members": members });
+    if caller.project.own_hands {
+        answer["ownHands"] = json!(true);
+    }
+    Ok(Answer::ok(answer))
 }
 
 #[cfg(test)]

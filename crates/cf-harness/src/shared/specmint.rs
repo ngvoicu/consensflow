@@ -269,7 +269,7 @@ pub(crate) fn write_own_of(
         if let Some(above) = file.parent() {
             make_folder(above, 0o700, Mkdir::Promise).map_err(said)?;
         }
-        put_in_place(file, &bytes, id).map_err(said)?;
+        put_in_place(file, &bytes, id)?;
     }
     Ok(Some(copy))
 }
@@ -279,17 +279,28 @@ pub(crate) fn write_own_of(
 /// made to), then renamed over it. A window of another launch that reads the
 /// skill meanwhile, the copy being shared, finds the file as it was or as it is,
 /// never half of it, and a write cut short (a crash, a full disk) leaves what was
-/// there. The temporary is removed where the write or the rename fails. On
-/// Windows a rename over a file another process holds open, without sharing it
-/// for deleting, is refused: the launch says so, and the next one tries again.
-fn put_in_place(file: &Path, bytes: &[u8], launch: &LaunchId) -> Result<(), FileError> {
+/// there. The temporary is removed where the write or the rename fails; where
+/// it cannot be removed the failure says so with it, so what failed is kept
+/// apart from what remains. On Windows a rename over a file another process
+/// holds open, without sharing it for deleting, is refused: the launch says
+/// so, and the next one tries again.
+fn put_in_place(file: &Path, bytes: &[u8], launch: &LaunchId) -> Result<(), String> {
     let mut beside = OsString::from(file.as_os_str());
     beside.push(format!(".{}.tmp", launch.as_str()));
     let beside = PathBuf::from(beside);
     write_file(&beside, bytes, 0o600)
         .and_then(|()| rename(&beside, file))
-        .inspect_err(|_| {
+        .map_err(|failure| {
+            let said = failure.to_string();
             // What was written is no file of the skill's, whatever came of it.
-            let _ = rm_force(&beside);
+            match rm_force(&beside) {
+                Ok(()) => said,
+                Err(cleanup) => {
+                    format!(
+                        "{said}; temporary '{}' remains: {cleanup}",
+                        beside.display()
+                    )
+                }
+            }
         })
 }

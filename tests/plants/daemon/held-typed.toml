@@ -35,7 +35,7 @@ meant = "what_the_terminal_reports_types_nothing"
 runs = ["held-typed-arbiter"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
+file = "crates/cf-panes/src/arbiter/keys.rs"
 find = '''            0x1b if rest.get(1).is_some_and(|kind| b"]P_^X".contains(kind)) => {'''
 replace = '''            0x1b if false => {'''
 
@@ -45,7 +45,7 @@ meant = "what_the_terminal_reports_types_nothing"
 runs = ["held-typed-arbiter"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
+file = "crates/cf-panes/src/arbiter/keys.rs"
 find = '''            0x1b if body.get(at + 1) == Some(&b'\\') => Some(at + 2),'''
 replace = '''            0x1b if false => Some(at + 2),'''
 
@@ -159,7 +159,7 @@ runs = ["held-typed-rig"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
+file = "crates/cf-panes/src/arbiter/keys.rs"
 find = '''            0x1b if rest.get(1).is_some_and(|kind| b"]P_^X".contains(kind)) => {'''
 replace = '''            0x1b if false => {'''
 
@@ -282,7 +282,7 @@ meant = "a_pane_keeps_the_humans_last_writes_as_age_length_and_kinds_and_no_byte
 runs = ["held-typed-ring"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
+file = "crates/cf-panes/src/arbiter/keys.rs"
 find = '''            .map(|(_, name)| *name)
             .collect()'''
 replace = '''            .map(|(_, name)| *name)

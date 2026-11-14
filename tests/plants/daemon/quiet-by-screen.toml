@@ -85,7 +85,7 @@ meant = "a_snapshot_says_how_long_the_screen_has_shown_the_same_apart_from_the_o
 runs = ["qs-panes"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
+file = "crates/cf-panes/src/arbiter/state.rs"
 find = "            screen_quiet_ms: self.output.screen_quiet_ms(now),"
 replace = "            screen_quiet_ms: self.output.quiet_ms(now),"
 
@@ -106,7 +106,7 @@ meant = "a_pastes_enter_waits_for_the_window_to_finish_echoing_it"
 runs = ["qs-panes"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
+file = "crates/cf-panes/src/arbiter/timing.rs"
 find = '''
             let echoed = output
                 .quiet_ms(now)

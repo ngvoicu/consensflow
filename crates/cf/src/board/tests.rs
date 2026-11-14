@@ -1395,6 +1395,16 @@ fn a_flag_of_one_value_given_twice_is_refused() {
 /// is its name or what it runs on, its role and its harness (designer P2, T-1280). The
 /// board says a designer's tier as none (null), and a member with a tier says it.
 #[test]
+fn staff_says_when_the_chief_works_with_its_own_hands() {
+    let ran = cf(
+        &["staff"],
+        vec![reply(200, json!({"ownHands": true, "members": []}))],
+    );
+    assert_eq!(ran.code.unwrap(), 0);
+    assert!(ran.out.starts_with("The chief works with its own hands; work goes on the board only on the person's word.\n"), "{}", ran.out);
+}
+
+#[test]
 fn the_staff_says_a_tier_for_a_member_that_has_one_and_none_for_an_image_designer() {
     let members = json!({ "members": [
         { "handle": "claude-opus-5-5-high", "role": "worker", "roles": ["worker"], "tier": "standard",

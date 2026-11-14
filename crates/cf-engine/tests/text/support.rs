@@ -293,6 +293,7 @@ pub fn project_of(participants: Vec<ParticipantView>) -> ProjectView {
         compaction: None,
         advisor_tool: false,
         prompt_suggestion: false,
+        own_hands: false,
     }
 }
 

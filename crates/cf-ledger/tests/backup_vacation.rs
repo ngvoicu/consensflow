@@ -7,7 +7,7 @@ use rusqlite::Connection;
 #[test]
 fn upgrading_main_keeps_projects_members_tasks_and_history_and_adds_the_marks() {
     let db = Connection::open_in_memory().unwrap();
-    migrate(&db, &MIGRATIONS[..37]).expect("the schema of main");
+    migrate(&db, &MIGRATIONS[..38]).expect("the schema of main");
     db.execute_batch(
         "INSERT INTO project(id,directory,name,state,created_at,updated_at)
              VALUES(10,'/app','App','open','2026-11-01','2026-11-01'),
@@ -47,6 +47,8 @@ fn upgrading_main_keeps_projects_members_tasks_and_history_and_adds_the_marks() 
             .query_map([], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?))).unwrap()
             .map(Result::unwrap).collect()
     };
+    db.execute("UPDATE project SET own_hands = 1 WHERE id = 10", [])
+        .unwrap();
     let old_rows = legacy(&db);
     let before: (i64, i64, i64, i64, String) = db.query_row(
         "SELECT p.id, t.id, c.id, e.id, p.former_handles FROM participant p JOIN task t ON t.assignee_id=41 JOIN conversation c ON c.participant_id=41 JOIN event e ON e.project_id=p.project_id WHERE p.id=40",
@@ -57,18 +59,27 @@ fn upgrading_main_keeps_projects_members_tasks_and_history_and_adds_the_marks() 
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
     assert!(
-        version >= 38,
-        "the upgrade must add migration 0038; got {version}"
+        version >= 39,
+        "the upgrade must add migration 0039; got {version}"
     );
     let after: (i64, i64, i64, i64, String) = db.query_row(
         "SELECT p.id, t.id, c.id, e.id, p.former_handles FROM participant p JOIN task t ON t.assignee_id=41 JOIN conversation c ON c.participant_id=41 JOIN event e ON e.project_id=p.project_id WHERE p.id=40",
         [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))
     ).unwrap();
     assert_eq!(before, after);
+    let own_hands: i64 = db
+        .query_row("SELECT own_hands FROM project WHERE id = 10", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        own_hands, 1,
+        "migration 0039 preserves the own-hands setting"
+    );
     assert_eq!(
         old_rows,
         legacy(&db),
-        "all legacy fields survive 0038 unchanged"
+        "all legacy fields survive 0039 unchanged"
     );
     let kinds: Vec<(i64, Option<String>)> = db
         .prepare("SELECT id,out_kind FROM participant WHERE id BETWEEN 51 AND 55 ORDER BY id")

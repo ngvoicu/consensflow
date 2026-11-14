@@ -114,6 +114,11 @@ impl Ledger {
         projects::set_prompt_suggestion(&mut self.store, id, on)
     }
 
+    /// The person's choice to have the chief work itself in this project.
+    pub fn set_own_hands(&mut self, id: i64, on: bool) -> Result<ProjectView, LedgerError> {
+        projects::set_own_hands(&mut self.store, id, on)
+    }
+
     /// What the project says of specs: whether they are on, the folder and the
     /// Specmint variant, all three at once. A chief whose window is open is told at its
     /// next rest, and any other takes it at its next launch.

@@ -637,7 +637,7 @@ runs = ["matrix-recap"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
+file = "crates/cf-panes/src/arbiter/keys.rs"
 find = '''            0x1b if rest.get(1).is_some_and(|kind| b"]P_^X".contains(kind)) => {'''
 replace = '''            0x1b if false => {'''
 

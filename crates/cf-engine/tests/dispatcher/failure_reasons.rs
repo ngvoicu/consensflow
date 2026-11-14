@@ -82,6 +82,26 @@ fn a_failed_turn_whose_harness_named_its_kind_says_the_kind_in_plain_words_befor
 }
 
 #[test]
+fn a_named_failure_with_no_harness_words_does_not_quote_the_screen() {
+    let context = Context::new();
+    let tiers = working(&context);
+    context
+        .host
+        .set_snapshot(json!({"tail": ["A partial reply"]}));
+    context.adapter.with("zeus", |agent| {
+        agent.failure_kind = Some("a known cause".to_owned())
+    });
+    fails(&context, None);
+    assert_eq!(
+        told(&tiers),
+        [failed(
+            &tiers,
+            "@zeus's harness reported a failure: a known cause"
+        )]
+    );
+}
+
+#[test]
 fn a_failed_turn_whose_record_says_nothing_says_what_its_window_shows_last() {
     let context = Context::new();
     let tiers = working(&context);

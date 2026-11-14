@@ -296,5 +296,5 @@ staff, and in parts past that, so no staff is too large to be read.
 
 The same twelve chief texts say a tier can be served by a backup, that a member on Vacation
 takes no tasks, and that the chief still names the tier (BKV-05, T-1627). With those words,
-the one-piece bounds are 139 rows with specs on and 163 without, or 2 and 27 with the most
+the one-piece bounds are 138 rows with specs on and 163 without, or 2 and 27 with the most
 staff rules; longer texts are read in parts as before.

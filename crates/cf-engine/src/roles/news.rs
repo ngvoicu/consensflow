@@ -12,12 +12,13 @@
 //! ([`OPENING`](crate::role_change::OPENING)): the window says in one line that it has
 //! it, and waits for the next message.
 
+use cf_proto::cf_word::CfWord;
 use cf_proto::specs::SpecsSetting;
 
-use super::{with_staff_rules, ProjectSpecs};
+use super::{chief, with_staff_rules, ProjectSpecs, RoleError};
 
 /// What a note that tells a running chief of a change ends with.
-const CONTEXT: &str = "This is context, not a task: say in one short line that you have it, and wait for the next message.";
+pub(crate) const CONTEXT: &str = "This is context, not a task: say in one short line that you have it, and wait for the next message.";
 
 /// The change the human made to a running chief's role, in the words it is told.
 /// `specs` is what its specs were and are, and `rules` the project's rules for its
@@ -31,9 +32,13 @@ pub(crate) struct Change<'a> {
 impl Change<'_> {
     /// The note, or none where nothing changed.
     pub(crate) fn note(&self) -> Option<String> {
+        self.note_for(false)
+    }
+
+    pub(crate) fn note_for(&self, own_hands: bool) -> Option<String> {
         let mut parts = Vec::new();
         if let Some((was, now)) = self.specs {
-            parts.push(specs_said(was, now));
+            parts.push(specs_said(was, now, own_hands));
         }
         if let Some((was, now)) = self.rules {
             parts.push(rules_said(was, now));
@@ -46,11 +51,26 @@ impl Change<'_> {
 }
 
 /// What the human changed of the specs, and the section the chief reads from now on.
-fn specs_said(was: Option<&SpecsSetting>, now: Option<&ProjectSpecs<'_>>) -> String {
+fn specs_said(
+    was: Option<&SpecsSetting>,
+    now: Option<&ProjectSpecs<'_>>,
+    own_hands: bool,
+) -> String {
+    let section = |now: &ProjectSpecs<'_>| {
+        if own_hands {
+            now.section_for(true)
+        } else {
+            now.section()
+        }
+    };
     match (was, now) {
         (None, Some(now)) => format!(
             "Specs are now on in this project: the human turned them on while you work. This is now a section of your instructions:\n{}",
-            now.section()
+            section(now)
+        ),
+        (Some(was), None) if own_hands => format!(
+            "Specs are now off in this project: the human turned them off while you work. Do new work yourself unless the human explicitly asks for it on the board; the specs already in `{}` stay. The section of your instructions on this project's specs no longer applies.\n",
+            was.folder
         ),
         (Some(was), None) => format!(
             "Specs are now off in this project: the human turned them off while you work. Plan new work as tasks, not specs; the specs already in `{}` stay. The section of your instructions on this project's specs no longer applies.\n",
@@ -79,12 +99,38 @@ fn specs_said(was: Option<&SpecsSetting>, now: Option<&ProjectSpecs<'_>>) -> Str
             format!(
                 "The human changed this project's specs while you work: {}.{stay} This section replaces the one on specs in your instructions; follow it from now on:\n{}",
                 changed.join(", and "),
-                now.section()
+                section(now)
             )
         }
         // Nothing was told and nothing is: no change.
         (None, None) => String::new(),
     }
+}
+
+/// The changed parts of the role, without the staff table or the person's rules.
+pub(crate) fn own_hands_said(
+    on: bool,
+    cf: &CfWord,
+    specs: Option<&ProjectSpecs<'_>>,
+) -> Result<String, RoleError> {
+    let intro = if on {
+        "The person turned \"Do with your own hands\" on: do the work yourself in the project's folder; put work on the board only when the person explicitly asks."
+    } else {
+        "The person turned \"Do with your own hands\" off: return to your ordinary chief role and put work on the board as your instructions say."
+    };
+    let part = |name| Ok::<_, RoleError>(chief::part(on, name)?.replace("{{cf}}", cf.as_str()));
+    let opening = part("opening")?;
+    let duty = part("duty")?;
+    let never = part("never")?;
+    let specs = specs.map_or_else(String::new, |specs| {
+        format!(
+            "\n\n## This project's specs\n\n{}\n\n{}\n\n{}",
+            ProjectSpecs::small_ask_for(on),
+            specs.work_for(on),
+            ProjectSpecs::phases_for(on)
+        )
+    });
+    Ok(format!("{intro}\n\nThese replace the earlier directions on how you work and use the board:\n\n{opening}\n\n## What you do\n\n{duty}\n\n## What you never do\n\n{never}{specs}"))
 }
 
 /// What the human changed of the project's rules for its staff.

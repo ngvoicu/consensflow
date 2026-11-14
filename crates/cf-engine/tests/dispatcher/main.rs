@@ -105,6 +105,7 @@ mod pause_notes;
 mod paused_answers;
 mod paused_left;
 mod pending_agents;
+mod pi_length_stop;
 mod plain_run;
 mod privacy_prompts;
 mod prompt_suggestion_off;

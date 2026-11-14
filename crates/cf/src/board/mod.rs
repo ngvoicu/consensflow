@@ -511,6 +511,7 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
         return Ok(help_of(&["staff"]));
     }
     let mut answer = board.get("/api/staff")?;
+    let own_hands = answer.value().get("ownHands").and_then(Value::as_bool) == Some(true);
     let members = answer.take("members")?;
     let text = match answer.list(Some(&members), "members")? {
         [] => "No members are on this project's staff yet; the human adds them in the app."
@@ -576,6 +577,11 @@ fn staff(rest: &[String], board: &Board) -> Result<Said, Failure> {
             })
             .collect::<Vec<_>>()
             .join("\n"),
+    };
+    let text = if own_hands {
+        format!("The chief works with its own hands; work goes on the board only on the person's word.\n{text}")
+    } else {
+        text
     };
     Ok(Said::new(members, text))
 }

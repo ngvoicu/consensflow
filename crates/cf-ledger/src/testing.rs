@@ -69,6 +69,7 @@ mod meeting;
 mod members_compaction;
 mod model_list;
 mod new_roles;
+mod own_hands;
 mod pasted_into;
 mod paused_with_project;
 mod program_gone;
@@ -95,6 +96,7 @@ pub use meeting::undo_migration_0025;
 pub use members_compaction::undo_migration_0034;
 pub use model_list::undo_migration_0027;
 pub use new_roles::{new_roles_version, undo_new_roles_migration};
+pub use own_hands::undo_migration_0038;
 pub use pasted_into::undo_migration_0023;
 pub use paused_with_project::undo_migration_0021;
 pub use program_gone::undo_migration_0024;
@@ -142,6 +144,7 @@ fn added_columns() -> impl Iterator<Item = &'static str> {
         include_str!("../migrations/0026.sql"),
         include_str!("../migrations/0035.sql"),
         include_str!("../migrations/0036.sql"),
+        include_str!("../migrations/0038.sql"),
     ]
     .into_iter()
     .flat_map(str::lines)
@@ -487,7 +490,7 @@ mod tests {
             .unwrap()
             .map(Result::unwrap)
             .collect();
-        let mut dump = json!({"userVersion": 38, "schema": schema, "tables": {
+        let mut dump = json!({"userVersion": 39, "schema": schema, "tables": {
             "participant": {"columns": ["id", "backup_of", "vacation_since", "out_kind", "handle"],
                             "rows": [["3", "NULL", "NULL", "NULL", "'alpha'"]]}
         }});

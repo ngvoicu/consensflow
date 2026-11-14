@@ -14,6 +14,7 @@ pub mod args;
 pub mod bundle;
 pub mod env;
 pub mod file;
+#[cfg(any(test, feature = "test-support"))]
 pub mod fixture;
 pub mod home;
 pub mod js;

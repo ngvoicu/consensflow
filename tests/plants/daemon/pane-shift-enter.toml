@@ -224,7 +224,7 @@ meant = "a_new_line_in_the_draft_is_part_of_the_draft_and_a_delivery_stays_held"
 runs = ["pse-arbiter"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
+file = "crates/cf-panes/src/arbiter/keys.rs"
 find = '''            b'\n' => {
                 classes.with("text");
                 unsent += 1;
@@ -243,7 +243,7 @@ meant = "unsent_counts_what_the_keys_leave_in_the_input"
 runs = ["pse-arbiter"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/arbiter.rs"
+file = "crates/cf-panes/src/arbiter/keys.rs"
 find = '''                classes.with("text");
                 unsent += 1;
             }

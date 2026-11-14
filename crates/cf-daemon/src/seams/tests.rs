@@ -163,6 +163,36 @@ fn no_window_is_given_a_harness_session_a_terminal_was_asked_in() {
 }
 
 #[test]
+fn own_hands_selects_the_chiefs_text_and_keeps_the_members_text() {
+    let scene = scene();
+    let texts = RoleTexts::new(Env::default(), "/bundle/bin/cf".to_owned());
+    let mut project = scene.project.clone();
+    let chief = participant(&project, "chief").clone();
+    let worker = participant(&project, "zeus").clone();
+    let ordinary = texts.instructions(&chief, &project, None).unwrap();
+    let member = texts.instructions(&worker, &project, None).unwrap();
+    project.own_hands = true;
+    let own = texts.instructions(&chief, &project, None).unwrap();
+    assert!(
+        own.contains("is for work the human explicitly asks you to put there"),
+        "{own}"
+    );
+    assert!(own.contains("project's own folder"), "{own}");
+    assert!(
+        !own.contains("You do not change the project yourself"),
+        "{own}"
+    );
+    assert!(own.contains("## Reviews"));
+    assert!(own.contains("| zeus | worker | Standard work |"));
+    assert_eq!(texts.instructions(&worker, &project, None).unwrap(), member);
+    project.own_hands = false;
+    assert_eq!(
+        texts.instructions(&chief, &project, None).unwrap(),
+        ordinary
+    );
+}
+
+#[test]
 fn the_chief_is_given_its_staff_and_every_role_the_cf_of_its_window() {
     let scene = scene();
     let texts = RoleTexts::new(Env::default(), "/bundle/bin/cf".to_owned());

@@ -356,7 +356,7 @@ fn radix_number(text: &str) -> Option<f64> {
     }
     // Under 2^53, the number is a double as it is; a power of two scales it
     // exactly, or past the largest double, to infinity.
-    #[allow(clippy::cast_precision_loss)]
+    #[allow(clippy::cast_precision_loss)] // Under 2^53 the number is a double exactly.
     Some(number as f64 * 2_f64.powi(exponent))
 }
 

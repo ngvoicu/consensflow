@@ -87,6 +87,7 @@ fn rows(db: &Connection, table: &str) -> Vec<Vec<String>> {
         .query_map([], |row| row.get(1))
         .expect("the SQL of a test reads the ledger")
         .map(Result::unwrap)
+        .filter(|column: &String| table != "project" || column != "own_hands")
         .collect();
     let quoted = columns
         .iter()
@@ -186,6 +187,7 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     // As a build of the migration before it left it: its checks name the five roles, its
     // version is that migration's.
     let raw = Connection::open(&file).unwrap();
+    cf_ledger::testing::undo_migration_0038(&raw).expect("own hands undone");
     undo_new_roles_migration(&raw).expect("the new roles' migration undone");
     raw.execute_batch(&format!(
         "PRAGMA user_version = {}",
@@ -221,7 +223,7 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     );
     let wide = schema(&raw);
     // The test helper reconstructs the old tables with today's columns and
-    // index, but drops the new triggers; migration 0038 puts them back.
+    // index, but drops the new triggers; migration 0039 puts them back.
     // Compare every other schema object exactly as before.
     let backup_triggers = [
         "participant_backup_insert",
@@ -237,7 +239,8 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
         .map(|(name, sql)| {
             (
                 name.clone(),
-                sql.replace(", 'frontend', 'architect', 'researcher', 'integrator'", ""),
+                sql.replace(", 'frontend', 'architect', 'researcher', 'integrator'", "")
+                    .replace(", own_hands INTEGER NOT NULL DEFAULT 0", ""),
             )
         })
         .collect();

@@ -10,6 +10,7 @@
 mod advisor_tool;
 mod compaction;
 mod describing;
+mod own_hands;
 mod prompt_suggestion;
 mod staff_copy;
 mod staff_rules;
@@ -28,6 +29,8 @@ pub use compaction::{
 pub(crate) use compaction::{parse_new_compaction, set_compaction};
 pub use describing::parse_description;
 pub(crate) use describing::{describe_project, rename_project};
+pub use own_hands::parse_own_hands;
+pub(crate) use own_hands::set_own_hands;
 pub use prompt_suggestion::parse_prompt_suggestion;
 pub(crate) use prompt_suggestion::set_prompt_suggestion;
 pub(crate) use staff_copy::create_project_with_staff;
@@ -85,6 +88,7 @@ pub(crate) struct ProjectRow {
     /// 1 where the human leaves Claude Code's prompt suggestion on in the project's windows;
     /// 0 (every project's until it is ticked) where they are launched with it switched off.
     pub(crate) prompt_suggestion: i64,
+    pub(crate) own_hands: i64,
 }
 
 impl ProjectRow {
@@ -106,6 +110,7 @@ impl ProjectRow {
             compaction: row.get("compaction")?,
             advisor_tool: row.get("advisor_tool")?,
             prompt_suggestion: row.get("prompt_suggestion")?,
+            own_hands: row.get("own_hands")?,
         })
     }
 
@@ -479,6 +484,7 @@ pub(crate) fn project(store: &Store, id: i64) -> Result<Option<ProjectView>, Led
         compaction: row.compaction,
         advisor_tool: row.advisor_tool == 1,
         prompt_suggestion: row.prompt_suggestion == 1,
+        own_hands: row.own_hands == 1,
     }))
 }
 

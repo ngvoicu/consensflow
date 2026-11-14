@@ -78,7 +78,7 @@ const UNREACHED: &str =
 /// The operations this build added to Node's: no recording of Node's asks
 /// them, and the page's own unit tests (`src/page/tests`) do. `harnesses.missing` is
 /// what is left of Node's `agents.list`.
-const ADDED: [PageOperation; 29] = [
+const ADDED: [PageOperation; 30] = [
     PageOperation::HarnessesMissing,
     PageOperation::WakeUpGet,
     PageOperation::WakeUpSet,
@@ -103,6 +103,7 @@ const ADDED: [PageOperation; 29] = [
     PageOperation::ProjectPromptSuggestion,
     PageOperation::ModelsGet,
     PageOperation::MemberEdit,
+    PageOperation::ProjectOwnHands,
     PageOperation::BackupAdd,
     PageOperation::BackupChange,
     PageOperation::BackupRemove,

@@ -35,6 +35,34 @@ async fn a_member_is_said_with_its_roles_tier_harness_and_the_model_and_effort_i
 }
 
 #[tokio::test]
+async fn staff_says_own_hands_only_while_the_person_has_it_on() {
+    let scene = scene();
+    assert!(staff(&scene, &scene.context)
+        .await
+        .1
+        .get("ownHands")
+        .is_none());
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .set_own_hands(scene.project.id, true)
+        .unwrap();
+    assert_eq!(staff(&scene, &scene.context).await.1["ownHands"], true);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .set_own_hands(scene.project.id, false)
+        .unwrap();
+    assert!(staff(&scene, &scene.context)
+        .await
+        .1
+        .get("ownHands")
+        .is_none());
+}
+
+#[tokio::test]
 async fn a_member_on_its_harness_s_default_says_so_and_a_tester_its_roles() {
     let scene = scene();
     scene

@@ -63,6 +63,7 @@ use crate::specs::{ChiefSpecs, RoleText};
 pub(crate) struct Parts {
     specs: Option<SpecsSetting>,
     rules: Option<String>,
+    own_hands: bool,
 }
 
 /// What a window was told of its role when it launched, or by a note since: the
@@ -116,6 +117,7 @@ impl Told {
             parts: Parts {
                 specs: specs.cloned(),
                 rules: project.staff_rules.clone(),
+                own_hands: project.own_hands,
             },
             staff: project.participants.clone(),
         }
@@ -129,6 +131,7 @@ impl Dispatcher {
         Parts {
             specs: self.specs_setting(project, participant),
             rules: project.staff_rules.clone(),
+            own_hands: project.own_hands,
         }
     }
 
@@ -281,7 +284,30 @@ impl Dispatcher {
             rules: (told.parts.rules != wanted.rules)
                 .then_some((told.parts.rules.as_deref(), wanted.rules.as_deref())),
         };
-        let Some(body) = change.note() else {
+        let other = if wanted.own_hands {
+            change.note_for(true)
+        } else {
+            change.note()
+        };
+        let body = if told.parts.own_hands != wanted.own_hands {
+            let first = match crate::roles::news::own_hands_said(
+                wanted.own_hands,
+                &self.seams.roles.cf(participant),
+                now.as_ref(),
+            ) {
+                Ok(first) => first,
+                Err(cause) => {
+                    let cause = EngineError::said("no-role-text", cause.to_string());
+                    return self.news_refused(project, participant, record, wanted, &cause);
+                }
+            };
+            format!(
+                "{first}\n\n{}",
+                other.unwrap_or_else(|| crate::roles::news::CONTEXT.to_owned())
+            )
+        } else if let Some(body) = other {
+            body
+        } else {
             return Ok(());
         };
         let note = self.seams.ledger.borrow_mut().note_role(
