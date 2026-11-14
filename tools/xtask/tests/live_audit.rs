@@ -79,18 +79,22 @@ fn a_set_under_audit_is_no_pass_with_a_file_for_each_run_and_stops_where_one_is_
     // Every run of the set came to 0, and the set is no pass all the same.
     assert_eq!(ran.status.code(), Some(1), "{}", err(&ran));
     assert!(err(&ran).contains("is no pass"), "{}", err(&ran));
-    // Each run of the set was given a file of its own, beside the one named.
-    let given: Vec<String> = out(&ran)
-        .lines()
-        .filter(|line| line.starts_with("var CF_LIVE_AUDIT_FILE:"))
-        .map(str::to_owned)
-        .collect();
-    assert_eq!(given.len(), 3, "{}", out(&ran));
-    for (at, line) in given.iter().enumerate() {
+    // The fake cargo also reports the builds before the cases. Count the file given to each
+    // case, not the variable inherited by those builds.
+    let output = out(&ran);
+    let cases: Vec<&str> = output.split("== live ").skip(1).collect();
+    assert_eq!(cases.len(), 3, "{output}");
+    for (at, case) in cases.iter().enumerate() {
+        let given: Vec<&str> = case
+            .lines()
+            .filter(|line| line.starts_with("var CF_LIVE_AUDIT_FILE:"))
+            .collect();
+        assert_eq!(given.len(), 1, "{case}");
         assert!(
-            line.contains(&format!("said-{}.txt", at + 1)),
-            "run {} was given {line}",
-            at + 1
+            given[0].contains(&format!("said-{}.txt", at + 1)),
+            "run {} was given {}",
+            at + 1,
+            given[0]
         );
     }
 
