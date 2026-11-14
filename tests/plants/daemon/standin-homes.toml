@@ -115,3 +115,26 @@ runs = ["standin-home-unit"]
 file = "crates/cf-e2e/src/standin_process.rs"
 find = '''    require_inherited_home(&inherited_homes);'''
 replace = '''    require_inherited_home(&[]);'''
+
+[[plant]]
+name = "standin homes: parent component hides inherited harness home"
+meant = "standin_isolation_inherited_parent_component_refuses_before_path_search"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''    assert!(
+        plain_absolute(&path),
+        "stand-in inherited {name} lookup: relative or aliased path"
+    );'''
+replace = '''    let _ = name; // The plant accepts an ambiguous inherited path.'''
+
+[[plant]]
+name = "standin homes: dot hides a PATH in a harness home"
+meant = "standin_isolation_dotted_path_refuses_a_harness_home"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''    if !plain_absolute(folder) || forbidden.iter().any(|home| same_or_inside(folder, home)) {'''
+replace = '''    if !plain_absolute(folder) || (forbidden.iter().any(|home| same_or_inside(folder, home)) && !folder.to_string_lossy().contains("/./") && !folder.to_string_lossy().contains("\\.\\")) {'''

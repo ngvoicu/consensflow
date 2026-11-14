@@ -311,13 +311,10 @@ fn inherited_harness_homes() -> Vec<PathBuf> {
         "PI_CODING_AGENT_SESSION_DIR",
     ]
     .into_iter()
-    .filter_map(std::env::var_os)
-    .filter(|value| !value.is_empty())
-    .filter_map(|value| std::path::absolute(value).ok())
+    .filter_map(inherited_path)
     .collect();
     for name in ["HOME", "USERPROFILE"] {
-        if let Some(home) = std::env::var_os(name).filter(|value| !value.is_empty()) {
-            let home = PathBuf::from(home);
+        if let Some(home) = inherited_path(name) {
             for suffix in [
                 ".claude",
                 ".codex",
@@ -326,9 +323,7 @@ fn inherited_harness_homes() -> Vec<PathBuf> {
                 ".config/devin",
                 ".local/share/devin",
             ] {
-                if let Ok(path) = std::path::absolute(home.join(suffix)) {
-                    forbidden.push(path);
-                }
+                forbidden.push(home.join(suffix));
             }
         }
     }
@@ -340,15 +335,25 @@ fn inherited_harness_homes() -> Vec<PathBuf> {
         "APPDATA",
         "LOCALAPPDATA",
     ] {
-        if let Some(base) = std::env::var_os(name).filter(|value| !value.is_empty()) {
+        if let Some(base) = inherited_path(name) {
             for harness in ["claude", "codex", "pi", "devin", "muse"] {
-                if let Ok(path) = std::path::absolute(Path::new(&base).join(harness)) {
-                    forbidden.push(path);
-                }
+                forbidden.push(base.join(harness));
             }
         }
     }
     forbidden
+}
+
+/// A parent component or platform alias cannot be compared safely without
+/// consulting the named home. Refuse it before looking at the filesystem.
+#[allow(clippy::disallowed_methods)]
+fn inherited_path(name: &str) -> Option<PathBuf> {
+    let path = PathBuf::from(std::env::var_os(name).filter(|value| !value.is_empty())?);
+    assert!(
+        plain_absolute(&path),
+        "stand-in inherited {name} lookup: relative or aliased path"
+    );
+    Some(path.components().collect())
 }
 
 /// A stand-in must not search inherited PATH entries in a harness home. Do
@@ -451,6 +456,10 @@ fn plain_absolute(folder: &Path) -> bool {
 }
 
 fn same_or_inside(folder: &Path, home: &Path) -> bool {
+    // Components remove harmless interior `.` and repeated separators. A
+    // textual comparison of their original spellings could miss a home.
+    let folder: PathBuf = folder.components().collect();
+    let home: PathBuf = home.components().collect();
     #[cfg(windows)]
     {
         let folder = folder.to_string_lossy().replace('/', "\\");
@@ -763,6 +772,45 @@ mod tests {
             "{}{}",
             output.stdout,
             output.stderr
+        );
+    }
+
+    #[test]
+    fn standin_isolation_inherited_parent_component_refuses_before_path_search() {
+        let root = crate::door::made("parent-component-").unwrap();
+        let parent = root.path().join("parent");
+        let target = root.path().join("custom-home");
+        crate::door::make_dir(&parent).unwrap();
+        crate::door::make_dir(target.join("bin")).unwrap();
+        let alias = parent.join("..").join("custom-home");
+        let output = crate::process::Run::new(std::env::current_exe().unwrap())
+            .inheriting_env()
+            .arg("--list")
+            .var("CODEX_HOME", alias)
+            .var("PATH", target.join("bin"))
+            .without("CF_E2E_STAND_IN")
+            .run()
+            .unwrap();
+        assert_ne!(output.code, Some(0), "aliased CODEX_HOME was accepted");
+        assert!(
+            output
+                .stderr
+                .contains("stand-in inherited CODEX_HOME lookup"),
+            "{}{}",
+            output.stdout,
+            output.stderr
+        );
+    }
+
+    #[test]
+    fn standin_isolation_dotted_path_refuses_a_harness_home() {
+        let root = crate::door::made("dotted-path-").unwrap();
+        let home = root.path().join("custom-home");
+        crate::door::make_dir(home.join("bin")).unwrap();
+        let dotted = root.path().join(".").join("custom-home").join("bin");
+        assert!(
+            !safe_path_entry(&dotted, std::slice::from_ref(&home)),
+            "a dotted PATH entered a harness home"
         );
     }
 
