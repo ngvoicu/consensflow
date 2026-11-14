@@ -141,6 +141,11 @@ cf-ledger.workspace = true
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["process", "signal", "term"] }
 
+# macOS compares canonically equivalent Unicode spellings of a path alike.
+[target.'cfg(target_os = "macos")'.dependencies]
+icu_casemap = "=2.3.0"
+icu_normalizer.workspace = true
+
 # A descriptor left open and not close-on-exec, for a test of what the programs a case starts
 # hold.
 [target.'cfg(unix)'.dev-dependencies]

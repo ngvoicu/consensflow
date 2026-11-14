@@ -193,8 +193,13 @@ fn same_or_inside(folder: &Path, home: &Path) -> bool {
     }
     #[cfg(target_os = "macos")]
     {
-        let folder = folder.to_string_lossy().to_lowercase();
-        let home = home.to_string_lossy().to_lowercase();
+        let normalizer = icu_normalizer::DecomposingNormalizerBorrowed::new_nfd();
+        let folder_text = folder.to_string_lossy();
+        let home_text = home.to_string_lossy();
+        let folder_fold = icu_casemap::CaseMapperBorrowed::new().fold_string(&folder_text);
+        let home_fold = icu_casemap::CaseMapperBorrowed::new().fold_string(&home_text);
+        let folder = normalizer.normalize(&folder_fold);
+        let home = normalizer.normalize(&home_fold);
         folder == home || folder.starts_with(&format!("{}/", home.trim_end_matches('/')))
     }
     #[cfg(not(any(windows, target_os = "macos")))]
@@ -483,6 +488,31 @@ mod tests {
         let alias = root.path().join("SYNTHETIC-OWNER/.CODEX/bin");
         assert!(super::same_or_inside(&alias, &forbidden));
         assert!(!safe_path_entry(&alias, &[forbidden]));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn standin_isolation_path_refuses_unicode_aliases() {
+        let root = crate::door::made("path-unicode-").unwrap();
+        let forbidden = root.path().join("synthetic-\u{00e9}-owner/.codex");
+        crate::door::make_dir(&forbidden).unwrap();
+        let alias = root.path().join("synthetic-e\u{0301}-owner/.codex/bin");
+        assert!(!safe_path_entry(&alias, &[forbidden]));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn standin_isolation_path_refuses_unicode_casefold_aliases() {
+        let root = crate::door::made("path-casefold-").unwrap();
+        for (owner, alias) in [
+            ("synthetic-Stra\u{00df}e-owner", "synthetic-STRASSE-owner"),
+            ("synthetic-\u{03a3}-owner", "synthetic-\u{03c2}-owner"),
+        ] {
+            let forbidden = root.path().join(owner).join(".codex");
+            crate::door::make_dir(&forbidden).unwrap();
+            let alias = root.path().join(alias).join(".codex/bin");
+            assert!(!safe_path_entry(&alias, &[forbidden]));
+        }
     }
 
     #[cfg(windows)]
