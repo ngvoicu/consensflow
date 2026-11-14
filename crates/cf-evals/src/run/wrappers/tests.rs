@@ -364,6 +364,101 @@ fn a_window_on_the_stand_in_model_is_the_stand_in_agent_with_this_runs_folder_an
     assert_ne!(folders[0].1, folders[1].1, "one folder for each");
 }
 
+/// The variable a window of Claude Code is given its config folder in: a test's window here, not
+/// an eval's choice (the scan of `tests/claude_config.rs` is for the evals' own code).
+#[cfg(unix)]
+const WINDOWS_CONFIG: &str = concat!("CLAUDE_CONFIG", "_DIR");
+
+/// The folders a stand-in is handed to write below (`CF_LIVE_MADE_ROOTS`), as the wrapper `wrapper`
+/// hands them to a window on `model` that runs in `project` with the Claude config `config`. The
+/// kit's own program start adds the folders this test process made through the door after them.
+#[cfg(unix)]
+fn roots_handed(
+    wrapper: &Path,
+    agent: &Path,
+    model: &str,
+    project: &Path,
+    config: Option<&Path>,
+) -> String {
+    let seen = project.join("roots-seen");
+    cf_e2e::files::write_executable(
+        agent,
+        format!(
+            "#!/bin/sh\nprintf '%s' \"$CF_LIVE_MADE_ROOTS\" > '{}'\n",
+            seen.display()
+        ),
+    )
+    .unwrap();
+    let mut window = cf_e2e::process::Run::new("/bin/sh")
+        .arg(wrapper)
+        .args(["--model", model])
+        .cwd(project);
+    if let Some(config) = config {
+        window = window.var(WINDOWS_CONFIG, config);
+    }
+    let ran = window.run().unwrap();
+    assert_eq!(ran.code, Some(0), "{ran}");
+    cf_e2e::files::read_string(&seen).unwrap()
+}
+
+#[cfg(unix)]
+#[test]
+fn the_stand_in_is_handed_its_answers_its_config_and_its_project_and_after_them_what_the_window_was_handed(
+) {
+    // A stand-in the door did not start writes only below what it is handed: the run's folder of
+    // answers (its journal, and a worker's files), the Claude config its window runs on (its
+    // transcript and status), and the project the window is in. Anything else is not its to write.
+    let home = tempfile::tempdir().unwrap();
+    let (_machine, stand_ins, wrapper, _played) = with_stand_ins(home.path());
+    stand_ins.restart().unwrap();
+    let project = home.path().join("project");
+    let config = home.path().join("config");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&config).unwrap();
+    // The window's `$PWD` is where it is, by its real path.
+    let project = std::fs::canonicalize(&project).unwrap();
+    let agent = home.path().join("fake-agent");
+    // A folder this test process made through the door: the kit's program start hands it to the
+    // window, and the wrapper keeps it after its own roots.
+    let rigs = cf_e2e::door::made("cf-evals-roots-").unwrap();
+    let inherited = std::fs::canonicalize(rigs.path()).unwrap();
+    // What the wrapper hands, by its own words, comes first; the folders the window was handed
+    // (this process's, among them the one made above) follow, each of its own.
+    let handed_first = |model: &str, config: Option<&Path>, expected: String| {
+        let roots = roots_handed(&wrapper, &agent, model, &project, config);
+        let rest = roots.strip_prefix(&expected).unwrap_or_else(|| {
+            panic!("{model}: the stand-in is handed {roots:?}, not {expected:?} first")
+        });
+        let kept: Vec<&str> = rest.split(':').filter(|root| !root.is_empty()).collect();
+        assert!(
+            rest.is_empty() || rest.starts_with(':'),
+            "{model}: {rest:?} follows {expected:?} as a folder of its own"
+        );
+        assert!(
+            kept.contains(&inherited.to_string_lossy().as_ref()),
+            "{model}: what the window was handed ({inherited:?}) is not kept after the run's own: {roots:?}"
+        );
+    };
+    for (model, folder) in members(&stand_ins) {
+        handed_first(
+            model,
+            Some(&config),
+            format!(
+                "{}:{}:{}",
+                folder.display(),
+                config.display(),
+                project.display()
+            ),
+        );
+        // A window on no config of the run's is handed none.
+        handed_first(
+            model,
+            None,
+            format!("{}:{}", folder.display(), project.display()),
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn a_window_on_any_other_model_is_the_real_claude_with_the_flags_as_always() {

@@ -49,7 +49,7 @@ use cf_e2e::muse::{
 };
 use cf_e2e::process::own_var;
 use cf_e2e::rig::{Config, Project, Rig};
-use cf_e2e::{checkout, files, Error, Result};
+use cf_e2e::{checkout, Error, Result};
 use serde_json::{json, Value};
 
 /// The stand-in for the chief's window, built for these tests.
@@ -118,7 +118,7 @@ impl Live {
 
     /// The allowance now, or the end of the run where it is spent past the stop.
     fn allowance(&self, log: &Log) -> Result<String> {
-        let folder = tempfile::tempdir().map_err(|source| Error::File {
+        let folder = cf_e2e::door::made("live-muse-window-").map_err(|source| Error::File {
             action: "make",
             path: PathBuf::from("a temporary folder"),
             source,
@@ -136,7 +136,7 @@ impl Live {
     /// near the end and run out midway, so a red an empty allowance caused is told from a
     /// bug (T-1123). Why it could not be asked, where it could not.
     fn allowance_after(&self) -> String {
-        let asked = tempfile::tempdir()
+        let asked = cf_e2e::door::made("live-muse-window-")
             .map_err(|source| Error::File {
                 action: "make",
                 path: PathBuf::from("a temporary folder"),
@@ -508,12 +508,12 @@ fn rest_case(live: &Live) -> Result<String> {
 }
 
 fn question_case(live: &Live) -> Result<String> {
-    let foreign = tempfile::tempdir().map_err(|source| Error::File {
+    let foreign = cf_e2e::door::made("live-muse-window-").map_err(|source| Error::File {
         action: "make",
         path: PathBuf::from("a temporary folder"),
         source,
     })?;
-    files::write(&foreign.path().join("AGENTS.md"), FOREIGN_RULES)?;
+    cf_e2e::door::write(foreign.path().join("AGENTS.md"), FOREIGN_RULES)?;
     let config = live
         .config()
         .var("CODEX_HOME", foreign.path().display().to_string());

@@ -16,7 +16,7 @@ use super::path;
 use crate::live::agents::{STAND_IN_CHIEF_MODEL, STAND_IN_MEMBER_MODEL, STAND_IN_WORKER_MODEL};
 use crate::live::ask;
 use crate::process::own_var;
-use crate::{files, Result};
+use crate::Result;
 
 /// The flags that keep a scripted Claude window from reaching the human's MCP
 /// servers, connectors and browser, which it would in full-permission mode on
@@ -90,7 +90,7 @@ pub fn shimmed_claude_with_servers(
 /// The program `name` in `folder`, with `script` for its words.
 fn written(folder: &Path, name: &str, script: String) -> Result<PathBuf> {
     let program = folder.join(name);
-    files::write_executable(&program, script)?;
+    crate::door::write_executable(&program, script)?;
     Ok(program)
 }
 
@@ -166,9 +166,9 @@ fn write_windows_wrapper(
     stand_in: Option<&Path>,
 ) -> Result<PathBuf> {
     let script = folder.join(format!("{name}.mjs"));
-    files::write(&script, relay(why, argv, stand_in))?;
+    crate::door::write(&script, relay(why, argv, stand_in))?;
     let program = folder.join(format!("{name}.cmd"));
-    files::write_executable(&program, cmd(why, node, &script))?;
+    crate::door::write_executable(&program, cmd(why, node, &script))?;
     Ok(program)
 }
 
@@ -347,7 +347,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_wrapper_is_a_program_that_runs_the_claude_it_was_made_for_with_the_flags_first() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-test-").unwrap();
         let program = isolated_claude(folder.path(), Path::new("/bin/echo")).unwrap();
         assert_eq!(program, folder.path().join("claude-isolated"));
         // Run by the shell: a script just written and started as a program may be
@@ -369,7 +369,7 @@ mod tests {
     /// it was given.
     #[cfg(unix)]
     fn shimmed(words: &[&str]) -> String {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-test-").unwrap();
         let shim =
             shimmed_claude(folder.path(), Path::new("/bin/echo"), Path::new("/bin/sh")).unwrap();
         assert_eq!(shim, folder.path().join("claude-shimmed"));
@@ -390,7 +390,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_read_of_the_models_claude_lists_is_the_stand_ins_though_no_word_of_it_is_a_fake_model() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-test-").unwrap();
         let agent = folder.path().join("agent");
         crate::files::write_executable(&agent, "#!/bin/sh\necho \"stand-in $*\"\n").unwrap();
         let shim = shimmed_claude(folder.path(), Path::new("/bin/echo"), &agent).unwrap();
@@ -438,7 +438,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_stand_in_keeps_the_claude_folder_a_run_was_given() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-test-").unwrap();
         let shim =
             shimmed_claude(folder.path(), Path::new("/bin/echo"), Path::new("/bin/sh")).unwrap();
         let run = |config: Option<&str>| {
@@ -475,7 +475,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_window_of_the_real_claude_is_given_the_servers_file_and_a_fake_one_is_not() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-test-").unwrap();
         let shim = shimmed_claude_with_servers(
             folder.path(),
             Path::new("/bin/echo"),
@@ -637,7 +637,7 @@ mod tests {
 
     #[test]
     fn a_windows_wrapper_is_the_cmd_of_a_script_written_beside_it_under_the_name_it_was_given() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-test-").unwrap();
         let program = write_windows_wrapper(
             folder.path(),
             "claude-shimmed",
@@ -665,7 +665,7 @@ mod tests {
     /// the Node as the stand-in: the words a window was given, `given`, and what comes of them.
     fn relayed(real: &[&str], given: &[&str]) -> crate::process::Ran {
         let node = path::command("node").expect("a test of the wrapper's script needs Node");
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-test-").unwrap();
         let mut argv = vec![node.to_string_lossy().into_owned()];
         argv.extend(real.iter().map(|word| (*word).to_owned()));
         let program =

@@ -460,3 +460,59 @@ fn a_case_is_planned_for_ten_minutes_unless_it_says_more_and_each_scope_of_it_sa
     let begun = Log::begun("live x", Ok(agents::parse(None, None).unwrap())).unwrap();
     assert_eq!(begun.planned, PLANNED);
 }
+
+#[test]
+fn what_a_caller_names_for_an_export_gets_a_new_folder_of_the_runs_own_and_is_never_written_into() {
+    use crate::live::layout::Layout;
+    // `--transcripts <folder>`, `CF_EVIDENCE`, `history-items --keep`: the caller's folder has files
+    // in it, an earlier run's child among them.
+    let mut layout = Layout::new().unwrap();
+    let theirs = layout.home().join("evidence");
+    layout
+        .plant_tree(
+            &theirs,
+            &[
+                ("devin-0/store.db", "a store of an earlier run"),
+                ("compaction-routes-devin-1-2-3/devin-0/log", "its log"),
+                ("notes.txt", "a person's note"),
+            ],
+        )
+        .unwrap();
+    let named = theirs.display().to_string();
+    let first = export_folder(Some(&named), "compaction-routes-devin")
+        .unwrap()
+        .unwrap();
+    let second = export_folder(Some(&named), "compaction-routes-devin")
+        .unwrap()
+        .unwrap();
+    assert_ne!(first, second, "two runs were given one folder");
+    for child in [&first, &second] {
+        assert!(
+            child.is_dir() && child.parent() == Some(theirs.as_path()),
+            "{child:?}"
+        );
+        assert!(
+            child
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("compaction-routes-devin-"),
+            "{child:?}"
+        );
+        // The run goes on to write in its own folder.
+        crate::door::write(child.join("devin-0/store.db"), "this run's store").unwrap();
+        assert_eq!(
+            fs::read_to_string(child.join("devin-0/store.db")).unwrap(),
+            "this run's store"
+        );
+    }
+    layout.untouched().unwrap();
+    // None named, or an empty word: nothing is made.
+    assert_eq!(export_folder(None, "x").unwrap(), None);
+    assert_eq!(export_folder(Some(""), "x").unwrap(), None);
+    // A name that is a file of the caller's is refused, and the file is as it was.
+    let file = theirs.join("notes.txt");
+    assert!(export_folder(Some(&file.display().to_string()), "x").is_err());
+    layout.untouched().unwrap();
+    crate::door::again_under_audit("live::tests::what_a_caller_names_for_an_export_gets_a_new_folder_of_the_runs_own_and_is_never_written_into").unwrap();
+}

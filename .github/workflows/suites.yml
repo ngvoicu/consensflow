@@ -185,7 +185,8 @@ jobs:
         if: matrix.suite == 'clippy-windows'
         run: |
           rustup target add x86_64-pc-windows-msvc
-          cargo fetch --target x86_64-pc-windows-msvc
+          # The offline lint also builds dependencies for the runner's host.
+          cargo fetch --locked
       - name: Install Chromium
         if: contains(fromJSON('["page-chromium","plants"]'), matrix.suite)
         working-directory: app

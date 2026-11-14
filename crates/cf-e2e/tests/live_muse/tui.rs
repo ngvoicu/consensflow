@@ -170,9 +170,9 @@ pub fn environment(root: &Path) -> BTreeMap<String, String> {
 
 pub fn write(file: &Path, text: &str) -> Outcome {
     if let Some(folder) = file.parent() {
-        fs::create_dir_all(folder).map_err(|error| error.to_string())?;
+        cf_e2e::door::make_dir(folder).map_err(|error| error.to_string())?;
     }
-    fs::write(file, text).map_err(|error| format!("{}: {error}", file.display()))
+    cf_e2e::door::write(file, text).map_err(|error| format!("{}: {error}", file.display()))
 }
 
 /// The run's home: its folders, the login's metadata and the feature gates, and a
@@ -186,10 +186,10 @@ pub fn set_up(root: &Path) -> Outcome {
         "tmp",
         "work",
     ] {
-        fs::create_dir_all(root.join(folder)).map_err(|error| error.to_string())?;
+        cf_e2e::door::make_dir(root.join(folder)).map_err(|error| error.to_string())?;
     }
     let owner = home();
-    fs::copy(
+    cf_e2e::door::copy_keeping_mode(
         owner.join(".config/muse/auth.json"),
         root.join("config/muse/auth.json"),
     )
@@ -201,10 +201,10 @@ pub fn set_up(root: &Path) -> Outcome {
     let gates = owner.join(".local/share/muse/feature-config");
     if gates.is_dir() {
         let into = root.join("data/muse/feature-config");
-        fs::create_dir_all(&into).map_err(|error| error.to_string())?;
+        cf_e2e::door::make_dir(&into).map_err(|error| error.to_string())?;
         for entry in fs::read_dir(&gates).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
-            fs::copy(entry.path(), into.join(entry.file_name()))
+            cf_e2e::door::copy_keeping_mode(entry.path(), into.join(entry.file_name()))
                 .map_err(|error| error.to_string())?;
         }
     }
@@ -407,11 +407,18 @@ impl Window {
         String::from_utf8_lossy(&screen[from..]).into_owned()
     }
 
-    /// Quits as a person does at rest, two Ctrl-Cs, and kills what is left.
+    /// Quits as a person does at rest, two Ctrl-Cs, and kills what is left. The two keys are
+    /// typed through the door ([`cf_e2e::door::Door::quit_own_terminal`]): a say-only run says them
+    /// and types none.
     pub fn close(mut self) {
-        self.keys(b"\x03");
-        thread::sleep(Duration::from_secs(1));
-        self.keys(b"\x03");
+        let typed = cf_e2e::door::Door::of_run().quit_own_terminal("Muse's terminal", || {
+            self.keys(b"\x03");
+            thread::sleep(Duration::from_secs(1));
+            self.keys(b"\x03");
+        });
+        if !typed {
+            return;
+        }
         let deadline = Instant::now() + Duration::from_secs(8);
         while Instant::now() < deadline {
             if matches!(self.child.try_wait(), Ok(Some(_))) {
@@ -419,6 +426,9 @@ impl Window {
             }
             thread::sleep(Duration::from_millis(200));
         }
-        let _ = self.child.kill();
+        let child = &mut self.child;
+        cf_e2e::door::Door::of_run().close_own_terminal("Muse's terminal", || {
+            let _ = child.kill();
+        });
     }
 }

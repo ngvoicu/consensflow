@@ -66,7 +66,7 @@ fn what_is_said_of_an_item_gained_names_it_and_its_cause_and_the_command_that_de
 fn the_security_that_finds_no_item_and_writes_none_answers_as_claude_code_reads_it() {
     use std::os::unix::fs::PermissionsExt;
 
-    let into = tempfile::tempdir().unwrap();
+    let into = crate::door::made("cf-test-").unwrap();
     let folder = without_keychain(into.path()).unwrap().unwrap();
     let security = folder.join("security");
     assert!(security.is_file());
@@ -105,6 +105,6 @@ fn the_security_that_finds_no_item_and_writes_none_answers_as_claude_code_reads_
 #[cfg(not(unix))]
 #[test]
 fn a_machine_with_no_keychain_has_no_security_to_put_first() {
-    let into = tempfile::tempdir().unwrap();
+    let into = crate::door::made("cf-test-").unwrap();
     assert_eq!(without_keychain(into.path()).unwrap(), None);
 }

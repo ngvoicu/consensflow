@@ -30,7 +30,7 @@
 //! daemon, and the wait ends there ([`unstarted`]).
 
 #[path = "midturn/begin.rs"]
-mod begin;
+pub mod begin;
 #[path = "midturn/judge.rs"]
 mod judge;
 #[path = "midturn/numbers.rs"]

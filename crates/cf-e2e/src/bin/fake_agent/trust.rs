@@ -85,10 +85,7 @@ fn millis(name: &str) -> Option<Duration> {
 /// 2026-10-21: `writeln!` wrote the line and its end apart, and two windows' yeses
 /// came out as both folders on one line).
 fn append(config: &Path, name: &str, line: &str) -> io::Result<()> {
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(config.join(name))?;
+    let mut file = cf_e2e::door::append(config.join(name)).map_err(std::io::Error::from)?;
     file.write_all(format!("{line}\n").as_bytes())
 }
 
@@ -107,7 +104,7 @@ pub fn bring_the_record_back(transcript: &Path) {
     let back = transcript.to_path_buf();
     std::thread::spawn(move || {
         sleep(away);
-        let _ = fs::rename(hidden, back);
+        let _ = cf_e2e::door::rename(hidden, back);
     });
 }
 
@@ -422,8 +419,12 @@ pub fn ask_server(
         names.push(serde_json::json!(name));
         settings[list] = serde_json::json!(names);
     }
-    fs::create_dir_all(file.parent().unwrap_or(&folder)).map_err(failed)?;
-    fs::write(&file, settings.to_string()).map_err(failed)?;
+    cf_e2e::door::make_dir(file.parent().unwrap_or(&folder))
+        .map_err(std::io::Error::from)
+        .map_err(failed)?;
+    cf_e2e::door::write(&file, settings.to_string())
+        .map_err(std::io::Error::from)
+        .map_err(failed)?;
     say("\u{1b}[2J\u{1b}[H").map_err(failed)
 }
 
@@ -560,7 +561,7 @@ mod tests {
 
     #[test]
     fn two_windows_that_append_at_once_leave_two_whole_lines() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
         let start = std::sync::Arc::new(std::sync::Barrier::new(2));
         let writers: Vec<_> = ["/work/first", "/work/second"]
             .into_iter()
@@ -589,8 +590,8 @@ mod tests {
     /// it, or on Windows its name in capitals.
     #[test]
     fn a_folder_trusted_under_one_spelling_is_trusted_under_another() {
-        let config = tempfile::tempdir().unwrap();
-        let place = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-test-").unwrap();
+        let place = cf_e2e::door::made("cf-test-").unwrap();
         let folder = place.path().join("a-repository");
         fs::create_dir(&folder).unwrap();
         #[cfg(unix)]

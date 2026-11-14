@@ -46,6 +46,11 @@ impl Trace {
         self.events.len()
     }
 
+    /// The events written after the first `mark` of them: what came since a [`Trace::len`].
+    pub fn after(&self, mark: usize) -> &[Value] {
+        &self.events[mark.min(self.events.len())..]
+    }
+
     /// Whether the daemon has written none.
     pub fn is_empty(&self) -> bool {
         self.events.is_empty()

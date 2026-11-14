@@ -73,8 +73,17 @@
 //! began before the first monitor's call, less the margin, as the engine's do in a worker's
 //! first turn: it leaves out no more than the engine's.
 //!
-//! The run is given a Claude config folder of its own where its caller made one
+//! The run takes its login from a Claude config folder its caller made where it is given one
 //! (`--claude-config`, with a copy of the login in it): the owner's is then not touched.
+//!
+//! A config folder given with `--claude-config` is its caller's and is **read, never written**
+//! (T-1592): the run takes the login from the folder's `.credentials.json` (the access token is
+//! enough; a refresh token is never copied on), makes a config folder of its own with that copy
+//! of the login, and seeds it with the trust a person's own config has for the live folders, as
+//! it does for the machine's login. The folder's own `.claude.json`, settings and records are not
+//! carried over, and the run holds the folder's login to what it was when the run is over. A folder
+//! with no `.credentials.json` (on a Mac a Claude Code that ran on it keeps its login in the
+//! Keychain) stops the run before it acts.
 //!
 //! ```text
 //! cargo xtask live monitor-wait
@@ -90,8 +99,8 @@ use std::time::{Duration, Instant};
 use std::collections::BTreeMap;
 
 use cf_e2e::live::claude::{self, Entry};
-use cf_e2e::live::mcp_server::{Runtime, Server};
-use cf_e2e::live::members::{Machine, ThisMachine};
+use cf_e2e::live::mcp_server::{Runtime, Server, STEM};
+use cf_e2e::live::members::{Machine, ThisMachine, Watch};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window};
 use cf_e2e::live::{self, ask, Harness, Log};
@@ -123,9 +132,17 @@ const STOPPED: &str = "STOPPED";
 const QUIETED: &str = "QUIETED";
 const RUN_OVER: &str = "RUN-OVER";
 
+/// `text` with the word made for the run ([`cf_e2e::live::members::run_word`]) where it says
+/// `{RUN}`: the no-op word the monitors' commands carry, which stays in the command line of what a
+/// monitor runs, so that what a closed window left is found by it whatever became of its parent
+/// (the sweep, on every platform).
+fn with_run(text: &str) -> String {
+    text.replace("{RUN}", cf_e2e::live::members::run_word())
+}
+
 /// What the agent is asked first: T-442's shape, with a monitor that expires within the
 /// run.
-const ARM: &str = "Do exactly this, using your tools. 1) Use the Bash tool with run_in_background set to true to run: for i in 1 2 3; do echo tick $i; sleep 5; done; echo finished . 2) Use ToolSearch to load the Monitor tool (select:Monitor), then use Monitor to watch that run: its command is : cf-mark-ticks; then tail -f on the background command's output file piped through grep --line-buffered tick, with timeout_ms 40000 and description 'ticks'. 3) End your turn at once, saying only WAITING. Then, each time a notification wakes you: if it is a monitor event with a tick line, reply only NOTED; if it says the background command completed, reply only REPORT-READY; if it says the monitor expired, reply only ALL-DONE.";
+const ARM: &str = "Do exactly this, using your tools. 1) Use the Bash tool with run_in_background set to true to run: for i in 1 2 3; do echo tick $i; sleep 5; done; echo finished . 2) Use ToolSearch to load the Monitor tool (select:Monitor), then use Monitor to watch that run: its command is : cf-mark-ticks {RUN}; then tail -f on the background command's output file piped through grep --line-buffered tick, with timeout_ms 40000 and description 'ticks'. 3) End your turn at once, saying only WAITING. Then, each time a notification wakes you: if it is a monitor event with a tick line, reply only NOTED; if it says the background command completed, reply only REPORT-READY; if it says the monitor expired, reply only ALL-DONE.";
 
 /// Claude's `hooks` setting of the window: a PostToolUse command hook on every tool, which
 /// prints an empty answer, as an owner's hook of any kind runs (Calliope on c593fd49).
@@ -143,7 +160,7 @@ const STOP: &str = "Do exactly this, using your tools. 1) Use the Bash tool with
 
 /// What it is asked third: T-442's own shape, a monitor that watches the run itself and is
 /// over when the run's command exits, which Claude Code says by the monitor's status.
-const EXITS: &str = "Do exactly this, using your tools. 1) Use Monitor to watch the command: : cf-mark-run; for i in 1 2 3; do echo tick $i; sleep 2; done , with timeout_ms 120000 and description 'run'. 2) End your turn at once, saying only WATCHING. Then, each time a notification wakes you: if it says the monitor or its command completed or ended, reply only RUN-OVER; otherwise reply only NOTED.";
+const EXITS: &str = "Do exactly this, using your tools. 1) Use Monitor to watch the command: : cf-mark-run {RUN}; for i in 1 2 3; do echo tick $i; sleep 2; done , with timeout_ms 120000 and description 'run'. 2) End your turn at once, saying only WATCHING. Then, each time a notification wakes you: if it says the monitor or its command completed or ended, reply only RUN-OVER; otherwise reply only NOTED.";
 
 /// What it is asked fourth: ten monitors of no output whose time runs out, five of them on a
 /// command that `exec`s, so that the run measures when Claude Code's notices of their
@@ -153,7 +170,7 @@ const TEN: &str = "Do exactly this, using your tools. 1) Use Monitor five times,
 /// What it is asked last: a monitor on a command that writes more than Claude Code lets
 /// through (2.1.306: ten events, then one each two seconds), which it stops after half a
 /// minute of holding events back, with its own notice and no status (`FIn` of its bundle).
-const NOISY: &str = "Do exactly this, using your tools. 1) Use Monitor to watch the command: : cf-mark-noisy; while true; do echo tick; sleep 0.1; done , with timeout_ms 300000 and description 'noisy'. 2) End your turn at once, saying only WATCHING. Then, each time a notification wakes you: if it says the monitor stopped, reply only QUIETED; otherwise reply only NOTED.";
+const NOISY: &str = "Do exactly this, using your tools. 1) Use Monitor to watch the command: : cf-mark-noisy {RUN}; while true; do echo tick; sleep 0.1; done , with timeout_ms 300000 and description 'noisy'. 2) End your turn at once, saying only WATCHING. Then, each time a notification wakes you: if it says the monitor stopped, reply only QUIETED; otherwise reply only NOTED.";
 
 /// How long the agent has for the whole of the first message's work (the command runs
 /// for 15 seconds and the monitor expires after 40), and for the second's; how often the
@@ -701,26 +718,35 @@ fn report_lines(looks: &[Look], entries: &[Entry]) -> String {
     lines.join("\n")
 }
 
+/// The file `--fixture` names, made new before anything is spent: refused where anything is there,
+/// so that a record a person kept is never written over, and the file the run then writes.
+fn claim_fixture(file: Option<&str>) -> Result {
+    if let Some(file) = file {
+        cf_e2e::door::made_file(Path::new(file))
+            .map_err(|error| Error::Daemon(format!("--fixture {file}: {error}")))?;
+    }
+    Ok(())
+}
+
 #[test]
 #[ignore = "opt-in: spends the machine's quota on a window of Claude Code; cargo xtask live monitor-wait (npm run live:monitor-wait)"]
 fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_each_is_over(
 ) -> Result {
+    claim_fixture(live::option("fixture").as_deref())?;
     let log = Log::begin("live monitor-wait")?;
     // What a window is opened on is the harness code's to say: built before anything is spent.
     ask::prepare()?;
     let claude = log.found(Harness::Claude)?;
     let rig = Rig::start(live::rig(std::slice::from_ref(&claude), FAKE_AGENT))?;
     let runtime = Runtime::of_machine()?;
-    let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-monitor-wait");
-    fs::create_dir_all(&made)
-        .map_err(|error| Error::Daemon(format!("{}: {error}", made.display())))?;
-    let server = Server::write_leaving_group(&made, &runtime)?;
+    let made = server_folder(Path::new(env!("CARGO_TARGET_TMPDIR")))?;
+    let server = Server::write_leaving_group(made.path(), &runtime)?;
     // The first message goes in as the window opens, its first turn under way from the
     // first look (`Open::seed`).
     let mut open = Open::new(&rig, &claude, FOLDER, FOLDER)
         .claude_alone_with_hooks(hooks())
         .mcp_config(server.config())
-        .seed(&live::ask::window_text(ARM)?);
+        .seed(&live::ask::window_text(&with_run(ARM))?);
     for name in session_identity() {
         open = open.without(name);
     }
@@ -831,7 +857,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
         stopped && settled_at(&stopping, STOPPED, 1),
         "a command the agent stopped with TaskStop was pending no more: the expired monitor alone was",
     ));
-    window.paste(&window.given(EXITS)?)?;
+    window.paste(&window.given(&with_run(EXITS))?)?;
     let exits = watch(&window, RUN_OVER, &mut starts);
     let raw = raw_records(&window);
     let told = notifications(&raw);
@@ -973,7 +999,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
             .is_some_and(|look| look.settled && look.jobs == 11 && look.noticed == 11),
         "the reader counted the ten pending and noticed, with the first monitor eleven, as the engine is told them",
     ));
-    window.paste(&window.given(NOISY)?)?;
+    window.paste(&window.given(&with_run(NOISY))?)?;
     let noisy = watch(&window, QUIETED, &mut starts);
     let raw = raw_records(&window);
     let told = notifications(&raw);
@@ -1047,12 +1073,29 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     ));
     if let Some(file) = live::option("fixture") {
         let lines = fixture(&raw, &session, &folders(&window));
-        fs::write(Path::new(&file), format!("{}\n", lines.join("\n")))
+        cf_e2e::door::write(Path::new(&file), format!("{}\n", lines.join("\n")))
             .map_err(|error| Error::Daemon(format!("the fixture was not written: {error}")))?;
         log.say(format!("the fixture, {} records: {file}", lines.len()));
     }
+    // What the window runs while it is open is taken now, and what is left of it once it is
+    // closed is found and said, never ended (it fails `left-nothing`): a Monitor armed on
+    // `tail -f … | grep tick` outlived its Claude Code by seventeen hours (T-491), and the rig
+    // notes only what its stand-ins ran, so nothing looked.
+    let watch = Watch::of_rig(&rig, Some(window.workspace()));
     drop(window);
     rig.close()?;
+    let swept = watch.sweep();
+    log.say(swept.said());
+    checks.push(Check::new(
+        "claude",
+        "left-nothing",
+        swept.is_clean() && swept.problems().is_empty(),
+        if swept.is_clean() {
+            "the closed window left nothing running: the thirteen monitors' commands ended with it or by their own time".to_owned()
+        } else {
+            swept.said()
+        },
+    ));
     let checks = host_can_answer(checks, cfg!(unix));
     report::conclude(
         &log,
@@ -1174,6 +1217,41 @@ mod tests {
     }
 
     #[test]
+    fn a_fixture_file_a_caller_names_is_made_new_and_refused_where_anything_is_there() {
+        use cf_e2e::live::layout::Layout;
+        let mut layout = Layout::new().unwrap();
+        let folder = layout.home().join("kept-records");
+        layout
+            .plant_tree(
+                &folder,
+                &[("monitor-wait.jsonl", "a record a person kept\n")],
+            )
+            .unwrap();
+        let there = folder.join("monitor-wait.jsonl");
+        let refused = claim_fixture(Some(&there.display().to_string())).unwrap_err();
+        assert!(
+            refused.to_string().contains("--fixture")
+                && refused.to_string().contains("there already"),
+            "{refused}"
+        );
+        // Refused before anything runs, and the record is as the person left it.
+        layout.untouched().unwrap();
+        // A name that is not there is made new, and the run goes on to write it.
+        let new = folder.join("new.jsonl");
+        claim_fixture(Some(&new.display().to_string())).unwrap();
+        cf_e2e::door::write(&new, "the run's record\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&new).unwrap(), "the run's record\n");
+        // None asked: nothing is made.
+        claim_fixture(None).unwrap();
+        // A second claim of the name the first made is refused as well.
+        assert!(claim_fixture(Some(&new.display().to_string())).is_err());
+        cf_e2e::door::again_under_audit(
+            "tests::a_fixture_file_a_caller_names_is_made_new_and_refused_where_anything_is_there",
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn the_fixture_keeps_what_the_reader_reads_and_nothing_of_the_machine() {
         let raw = [
             json!({ "type": "user", "sessionId": "s-1", "cwd": "/Users/me/work", "uuid": "u1", "timestamp": "t", "message": { "role": "user", "content": "/Users/me/work/x" }, "toolUseResult": { "taskId": "b1", "timeoutMs": 40000, "persistent": false, "stdout": "secret" } }),
@@ -1197,6 +1275,57 @@ mod tests {
             json!({ "type": "queued_command", "commandMode": "task-notification", "prompt": "<task-notification>" })
         );
     }
+}
+
+/// The folder the server's files are written in: one of this invocation's own, made fresh under
+/// the build's scratch folder (`target`), held until the run's close and removed then by its own
+/// path. A fixed name there was every invocation's of one built tree: a later one took away an
+/// earlier one's process file and wrote over its configuration while its server ran (T-1557).
+fn server_folder(target: &Path) -> Result<cf_e2e::door::Made> {
+    cf_e2e::door::made_in(target, "live-monitor-wait-")
+        .map_err(|error| Error::Daemon(format!("{}: {error}", target.display())))
+}
+
+/// Two set-ups of the server from one built tree (one build folder, `CARGO_TARGET_TMPDIR`), as two
+/// invocations of the suite make: each writes in a folder of its own, and the close of one leaves
+/// the other's files, its process's file among them (T-1557's fourth finding: a fixed folder was
+/// shared, and the later set-up took away the earlier's process file and wrote over its
+/// configuration while its server ran).
+#[test]
+fn two_set_ups_from_one_build_have_folders_of_their_own_and_the_close_of_one_leaves_the_others_files(
+) -> Result {
+    let target = cf_e2e::door::made("live-monitor-wait-")
+        .map_err(|error| Error::Daemon(error.to_string()))?;
+    let runtime = Runtime::of_machine()?;
+    let first = server_folder(target.path())?;
+    let first_server = Server::write_leaving_group(first.path(), &runtime)?;
+    // Its server has started and written its process.
+    cf_e2e::door::write(first.path().join(format!("{STEM}.pid")), "4242\n")
+        .map_err(|error| Error::Daemon(error.to_string()))?;
+    let second = server_folder(target.path())?;
+    let _second_server = Server::write_leaving_group(second.path(), &runtime)?;
+    assert_ne!(first.path(), second.path(), "two set-ups share one folder");
+    assert_eq!(
+        first_server.pid(),
+        Some(4242),
+        "the second set-up took away the first's process file"
+    );
+    let second_folder = second.path().to_owned();
+    drop(second);
+    assert!(
+        !second_folder.exists(),
+        "the second's folder stays after its close"
+    );
+    assert!(
+        first_server.config().is_file(),
+        "the close of the second took away the first's configuration"
+    );
+    assert_eq!(
+        first_server.pid(),
+        Some(4242),
+        "the close of the second took away the first's process file"
+    );
+    Ok(())
 }
 
 #[test]

@@ -42,7 +42,7 @@
 //! windows in a folder of their own: what is read of them is their record and their
 //! screen, which is what the daemon reads of a Codex, Pi or Devin window (Pi's
 //! extension says more). `--transcripts <folder>` copies each case's
-//! Claude transcript there, as the cut left it and as it ended. Claude has no MCP
+//! Claude transcript into a new folder the run makes in it (never into the folder itself), as the cut left it and as it ended. Claude has no MCP
 //! server and no browser. The run fails only when a case could not be run (a window
 //! that did not open, or a turn that was never at work): what a harness does is the
 //! result, and it is said. A cut that found the turn already over (its answer, with the
@@ -205,7 +205,7 @@ fn a_window_resumed_on_a_conversation_the_quit_cut_is_watched_and_takes_a_second
             install.home().display()
         ));
     }
-    let shims = tempfile::tempdir().map_err(|source| Error::File {
+    let shims = cf_e2e::door::made("live-resume-cut-").map_err(|source| Error::File {
         action: "make a folder in",
         path: std::env::temp_dir(),
         source,
@@ -218,6 +218,21 @@ fn a_window_resumed_on_a_conversation_the_quit_cut_is_watched_and_takes_a_second
             rig.keep_home().display()
         ));
     }
+    // A folder `--transcripts` names is its caller's: the run copies into a new child of it.
+    let transcripts = live::export_folder(
+        options
+            .transcripts
+            .as_deref()
+            .map(Path::to_string_lossy)
+            .as_deref(),
+        "resume-cut",
+    )?;
+    if let Some(folder) = &transcripts {
+        log.say(format!(
+            "the transcripts are copied into {}",
+            folder.display()
+        ));
+    }
     let mut checks = Vec::new();
     for install in &installs {
         let harness = install.harness();
@@ -226,7 +241,7 @@ fn a_window_resumed_on_a_conversation_the_quit_cut_is_watched_and_takes_a_second
                 rig: &rig,
                 install,
                 agent: agent_of(harness, options.model.as_deref(), &models),
-                transcripts: options.transcripts.as_deref(),
+                transcripts: transcripts.as_deref(),
                 log: &log,
             };
             let account = case::run(&run, case).unwrap_or_else(|failed| {

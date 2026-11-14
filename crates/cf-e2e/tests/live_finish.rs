@@ -162,7 +162,7 @@ fn each(log: &Log, checked: &str, step: impl Fn(Who) -> Result<Finished>) -> Res
         ));
     }
     log.report("what each worker came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::verdict_of(log, &checks)
 }
 
 #[test]
@@ -215,7 +215,7 @@ fn a_devin_worker_whose_turn_devin_compacts_finishes_its_task_and_its_result_rea
         format!("{version}: {}", finished.summary),
     )];
     log.report("what the worker came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::verdict_of(&log, &checks)
 }
 
 #[cfg(test)]

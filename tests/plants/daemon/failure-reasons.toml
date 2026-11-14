@@ -900,7 +900,7 @@ meant = "a_pi_run_is_given_a_folder_of_its_own_with_the_login_it_needs_and_nothi
 runs = ["failure-reason-live-homes"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/live/login.rs"
+file = "crates/cf-e2e/src/door/writes.rs"
 find = '''
         .mode(0o600)
 '''

@@ -24,6 +24,7 @@ use std::thread::sleep;
 use std::time::Duration;
 
 use cf_e2e::live::ask::{self, Item};
+use cf_e2e::live::human::{taken, Taken};
 use cf_e2e::live::members::{
     self, find, Account, LongCommand, Members, Plan, BENCH_BRIEF, STAND_IN_WORKER,
 };
@@ -55,6 +56,23 @@ const LOOK: Duration = Duration::from_secs(2);
 /// human presses Enter again, and how many times they do.
 const TAKES: Duration = Duration::from_secs(6);
 const ENTERS: usize = 3;
+
+/// What the case says when the chief was not at work on what was typed to it: the words
+/// of each outcome of [`taken`], so that a prompt taken and finished is not said never to
+/// have been taken.
+pub fn not_at_work(seen: Taken) -> String {
+    match seen {
+        Taken::AtWork => "the chief is at work on what was typed to it".to_owned(),
+        Taken::AndOver => "the chief's window took what was typed to it and its turn is over, but \
+             the board never read the chief working (an activity mismatch, or a turn too \
+             short to hold a wake-up back): the case needs a turn that outlasts the interval"
+            .to_owned(),
+        Taken::NotTaken => format!(
+            "the chief's window did not take what the human typed, in {} Enters",
+            ENTERS + 1
+        ),
+    }
+}
 
 /// What a chief's run came to.
 pub struct Finished {
@@ -262,19 +280,34 @@ impl Chief<'_> {
         Ok(found.unwrap_or_else(|| self.items()))
     }
 
-    /// The human types `words` into the chief's window, and presses Enter again
-    /// while the window keeps them, until the chief is at work on them.
-    fn types(&self, words: &str) -> Result<()> {
+    /// The human types `words` into the chief's window, and presses Enter again only
+    /// while nothing says the window took them ([`taken`]: the chief at work on them, or a
+    /// turn that began and ended between two looks, which the chief's record or its calls
+    /// show). What became of them.
+    fn types(&self, words: &str) -> Result<Taken> {
         let rig = self.members.rig();
         self.log.say(format!(
             "the human types into the chief's window: {}",
             cf_e2e::live::cut(words, 120)
         ));
-        rig.tell(self.members.project_id(), words)?;
-        for _ in 0..=ENTERS {
+        let given_before = evidence::given(&self.items(), words).len();
+        // Counted from the paste itself, after the wait for the chief to be idle.
+        let mark = rig.tell_marked(self.members.project_id(), words, AT_REST)?;
+        for again in 0..=ENTERS {
             sleep(TAKES);
-            if self.state()? != "idle" {
-                return Ok(());
+            let lane = self.state()?;
+            let events = self.events();
+            let after = &events[mark.min(events.len())..];
+            let mut seen = taken(after, &lane, false);
+            if seen.presses_again() {
+                let given = evidence::given(&self.items(), words).len();
+                seen = taken(after, &lane, given > given_before);
+            }
+            if !seen.presses_again() {
+                return Ok(seen);
+            }
+            if again == ENTERS {
+                break;
             }
             let pane = self.members.lane("chief")?["pane"].clone();
             self.log
@@ -284,7 +317,7 @@ impl Chief<'_> {
                 json!({ "id": pane["id"], "generation": pane["generation"], "bytes": [13] }),
             )?;
         }
-        Ok(())
+        Ok(Taken::NotTaken)
     }
 
     /// Everything the board and the human's inbox hold that a reply could have
@@ -432,7 +465,13 @@ impl Chief<'_> {
     fn busy(&self, case: &mut Account) -> Result<()> {
         let before = self.wakes();
         let mark = self.events().last().map_or(0, evidence::number);
-        self.types(&words::busy(self.who))?;
+        match self.types(&words::busy(self.who))? {
+            Taken::AtWork => {}
+            seen => {
+                case.fail(not_at_work(seen));
+                return Ok(());
+            }
+        }
         let Some(from_ms) = find(self.log, "the chief to be at work", WORKS, LOOK, || {
             Ok(evidence::chief_became(&self.events(), "working", mark))
         })?
@@ -466,5 +505,26 @@ impl Chief<'_> {
             ),
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wake_ups_say_the_prompt_was_not_taken_not_that_the_chief_never_worked() {
+        let not_taken = not_at_work(Taken::NotTaken);
+        assert!(
+            not_taken.contains("did not take what the human typed"),
+            "{not_taken}"
+        );
+        // A prompt taken and finished is not one the window did not take.
+        let over = not_at_work(Taken::AndOver);
+        assert!(over.contains("took what was typed"), "{over}");
+        assert!(!over.contains("did not take"), "{over}");
+        for said in [&not_taken, &over] {
+            assert!(!said.contains("never went to work"), "{said}");
+        }
     }
 }

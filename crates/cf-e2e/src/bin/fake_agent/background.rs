@@ -57,7 +57,6 @@
 //! `CF_TEST_MCP_BROWSER` set it launches its browser as it starts.
 
 use std::ffi::OsString;
-use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -243,14 +242,14 @@ impl Jobs {
     /// file without its kind, for the files that go beside it.
     #[cfg(unix)]
     pub fn note(&self, label: &str, pid: u32) -> Result<PathBuf, String> {
-        fs::create_dir_all(&self.folder)
+        cf_e2e::door::make_dir(&self.folder)
             .map_err(|failed| format!("{}: {failed}", self.folder.display()))?;
         let number = self.started.fetch_add(1, Ordering::Relaxed) + 1;
         let base = self
             .folder
             .join(format!("{label}-{}-{number}", self.window));
         let file = base.with_extension("pid");
-        cf_e2e::files::write_whole(&file, &format!("{pid}\n"))
+        cf_e2e::door::write_whole(&file, &format!("{pid}\n"))
             .map_err(|failed| format!("{}: {failed}", file.display()))?;
         Ok(base)
     }
@@ -259,7 +258,7 @@ impl Jobs {
     /// program that is started otherwise than [`Jobs::start`] starts one to write its
     /// files by: a build, and the daemon it leaves (`build`).
     pub fn file(&self, label: &str) -> Result<PathBuf, String> {
-        fs::create_dir_all(&self.folder)
+        cf_e2e::door::make_dir(&self.folder)
             .map_err(|failed| format!("{}: {failed}", self.folder.display()))?;
         let number = self.started.fetch_add(1, Ordering::Relaxed) + 1;
         Ok(self
@@ -368,7 +367,7 @@ impl Jobs {
         how: How,
         then: impl FnOnce() + Send + 'static,
     ) -> Result<PathBuf, String> {
-        fs::create_dir_all(&self.folder)
+        cf_e2e::door::make_dir(&self.folder)
             .map_err(|failed| format!("{}: {failed}", self.folder.display()))?;
         let number = self.started.fetch_add(1, Ordering::Relaxed) + 1;
         let file = self
@@ -724,11 +723,12 @@ impl Job {
         // request is never lost.
         #[cfg(unix)]
         self.hear()?;
-        cf_e2e::files::say_its_process(&self.file).map_err(|failed| failed.to_string())?;
+        cf_e2e::door::say_its_process(&self.file).map_err(|failed| failed.to_string())?;
         // Held to the end, as the server holds the browser it launched.
         let _browser = self.launch_browser()?;
         thread::sleep(Duration::from_secs(self.seconds));
-        fs::write(self.beside("finished"), "FINISHED\n").map_err(|failed| failed.to_string())
+        cf_e2e::door::write(self.beside("finished"), "FINISHED\n")
+            .map_err(|failed| failed.to_string())
     }
 
     /// Starts the job it was asked to, which is a child of it and runs as long as it
@@ -783,7 +783,7 @@ impl Job {
 /// Says it was asked to end, and goes.
 #[cfg(unix)]
 fn release(file: &Path) -> ! {
-    let _ = fs::write(file, "RELEASED\n");
+    let _ = cf_e2e::door::write(file, "RELEASED\n");
     std::process::exit(0)
 }
 

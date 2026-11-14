@@ -108,7 +108,7 @@ fn a_chief_of_each_harness_is_woken_once_at_rest_by_a_setting_a_minute_apart_and
         ));
     }
     log.report("what each chief came to", &report::table(&checks));
-    report::verdict(&checks)
+    report::verdict_of(&log, &checks)
 }
 
 #[cfg(test)]

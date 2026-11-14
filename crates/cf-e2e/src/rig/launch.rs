@@ -40,6 +40,7 @@ impl Rig {
     /// pane host under test if they are not built; refuses a daemon whose start
     /// line says it is not the native one.
     pub fn start(config: Config) -> Result<Self> {
+        crate::door::Door::init();
         // Before anything: what the case's thread has failed with so far is none of this
         // rig's, and the case it names is the one that starts it.
         let judged = config.judged.then(Verdict::start);
@@ -59,27 +60,29 @@ impl Rig {
         // real harnesses' windows open in no git repository there, where a home under the
         // checkout would put them in ConsensFlow's own (the repository's settings and
         // instructions, a project by its root for trust, one project for every window).
-        // The homes a killed run left in the folder, older than a day and worked in by no
-        // process, are taken away first, unread (`sweep`).
+        // The homes older runs left in the folder are counted, and none is taken (`sweep`).
+        // The home is a folder the door made, which goes through the door with the rig.
         let (root, scratch) = match &config.existing_root {
             Some(root) => (root.clone(), None),
             None => {
                 let folder = config.homes.clone().unwrap_or_else(std::env::temp_dir);
-                files::make_dir(&folder)?;
+                // The place the rig's own folder is made in is made where it is not there, and
+                // is no folder of the run's: only the rig's root below it is.
+                crate::door::make_place(&folder).map_err(Error::file("make", &folder))?;
                 super::sweep::homes(&folder);
-                let scratch = tempfile::Builder::new()
-                    .prefix("consensflow-integration-")
-                    .tempdir_in(&folder)
-                    .map_err(|source| Error::File {
-                        action: "make a folder in",
-                        path: folder.clone(),
-                        source,
+                let scratch =
+                    crate::door::made_in(&folder, crate::door::RIG_PREFIX).map_err(|source| {
+                        Error::File {
+                            action: "make a folder in",
+                            path: folder.clone(),
+                            source,
+                        }
                     })?;
                 (scratch.path().to_path_buf(), Some(scratch))
             }
         };
         let workspace = root.join("workspace");
-        files::make_dir(&workspace)?;
+        crate::door::make_dir(&workspace)?;
         let fake_bin = write_fake_install(&root, &config)?;
         let muse_launcher = matches!(config.muse, Some((_, crate::muse::Run::Live { .. })))
             .then(|| own_commands(&root, &config).join("muse"));
@@ -109,7 +112,7 @@ impl Rig {
 
         // The rig owns its home from here on: it goes with it.
         if let Some(scratch) = scratch {
-            let _ = scratch.keep();
+            let _ = scratch.hand_on();
         }
         Ok(Self {
             root,

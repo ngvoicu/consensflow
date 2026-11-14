@@ -68,7 +68,7 @@
 //! `CF_TEST_CODEX_WORKERS` processes of its own when the first turn's tools are
 //! called ([`crate::servers`]).
 
-use std::fs::{self, OpenOptions};
+use std::fs::{self};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -318,7 +318,7 @@ impl Agent {
             return;
         }
         let folder = home.join("memories");
-        let _ = fs::create_dir_all(&folder);
+        let _ = cf_e2e::door::make_dir(&folder);
         let thread = uuid::Uuid::new_v4().to_string();
         let window_env = held(&self.window_env).clone();
         let ran = cf_e2e::process::Run::new(cf_e2e::process::as_a_shell_finds("cf"))
@@ -414,7 +414,7 @@ impl Agent {
             return true;
         };
         let locks = home.join("thread-locks");
-        let _ = fs::create_dir_all(&locks);
+        let _ = cf_e2e::door::make_dir(&locks);
         let lock = locks.join(self.thread());
         let ours = ThisMachine.identity(std::process::id()).ok().flatten();
         let holder = fs::read_to_string(&lock).ok().and_then(|text| {
@@ -430,7 +430,7 @@ impl Agent {
             }
         }
         if let Some(ours) = ours {
-            let _ = fs::write(&lock, format!("{} {}\n", ours.pid, ours.started));
+            let _ = cf_e2e::door::write(&lock, format!("{} {}\n", ours.pid, ours.started));
         }
         true
     }
@@ -446,7 +446,7 @@ impl Agent {
             };
             let path = rollout_of(home, &thread);
             if let Some(folder) = path.parent() {
-                let _ = fs::create_dir_all(folder);
+                let _ = cf_e2e::door::make_dir(folder);
             }
             *rollout = Some(path);
         }
@@ -673,10 +673,8 @@ impl Agent {
             "payload": payload,
         });
         let line = format!("{record}\n");
-        let _ = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
+        let _ = cf_e2e::door::append(&path)
+            .map_err(std::io::Error::from)
             .and_then(|mut file| file.write_all(line.as_bytes()));
     }
 }
@@ -1004,7 +1002,7 @@ mod tests {
 
     #[test]
     fn a_thread_begins_with_the_developer_instructions_its_server_has_and_writes_them_once() {
-        let home = tempfile::tempdir().unwrap();
+        let home = cf_e2e::door::made("cf-test-").unwrap();
         let agent = server(home.path(), "thread-1", "the role as it was");
         agent.turn("first");
         agent.turn("second");
@@ -1028,7 +1026,7 @@ mod tests {
     #[test]
     fn a_thread_whose_start_names_developer_instructions_begins_with_them_in_place_of_its_servers()
     {
-        let home = tempfile::tempdir().unwrap();
+        let home = cf_e2e::door::made("cf-test-").unwrap();
         let agent = server(
             home.path(),
             "thread-1",
@@ -1041,7 +1039,7 @@ mod tests {
             ["the role its start names"]
         );
         // A start that names none, or names them as null, begins with the server's.
-        let other = tempfile::tempdir().unwrap();
+        let other = cf_e2e::door::made("cf-test-").unwrap();
         let agent = server(
             other.path(),
             "thread-2",
@@ -1058,7 +1056,7 @@ mod tests {
     #[test]
     fn a_resumed_thread_goes_on_in_its_rollout_with_the_instructions_it_began_with_whatever_its_server_has_now(
     ) {
-        let home = tempfile::tempdir().unwrap();
+        let home = cf_e2e::door::made("cf-test-").unwrap();
         let before = server(home.path(), "thread-1", "the role as it was");
         before.turn("first");
         let began = records(home.path(), "thread-1").len();
@@ -1126,7 +1124,7 @@ mod tests {
     fn a_compaction_rebuilds_the_developer_message_from_the_instructions_of_the_session_that_compacts(
     ) {
         // A first window: its thread began with the role, and a compaction keeps it once.
-        let home = tempfile::tempdir().unwrap();
+        let home = cf_e2e::door::made("cf-test-").unwrap();
         let first = server(home.path(), "thread-1", "the configured");
         first.started(&json!({ "developerInstructions": ROLE }));
         first.turn("Reply with exactly: ONE");
@@ -1208,7 +1206,7 @@ mod tests {
 
     #[test]
     fn a_thread_that_had_no_turn_has_no_rollout_and_no_instructions_yet_and_cannot_be_resumed() {
-        let home = tempfile::tempdir().unwrap();
+        let home = cf_e2e::door::made("cf-test-").unwrap();
         let before = server(home.path(), "thread-1", "the role as it was");
         // Nothing was said in it: its server has written no rollout of it, and the
         // server of another window finds nothing to go on in.

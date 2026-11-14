@@ -44,7 +44,7 @@ use sha2::{Digest, Sha256};
 
 use super::login::SERVICE;
 use crate::process::{own_var, Run};
-use crate::{files, Error, Result};
+use crate::{Error, Result};
 
 /// The names of the Keychain items of the service `Claude Code-credentials` now, and of the ones
 /// Claude Code names after a config folder; none where the machine has no Keychain, or it cannot
@@ -137,8 +137,8 @@ pub fn without_keychain(into: &Path) -> Result<Option<PathBuf>> {
         return Ok(None);
     }
     let folder = into.join("no-keychain");
-    files::make_dir(&folder)?;
-    files::write_executable(&folder.join(PROGRAM), script())?;
+    crate::door::make_dir(&folder)?;
+    crate::door::write_executable(folder.join(PROGRAM), script())?;
     Ok(Some(folder))
 }
 

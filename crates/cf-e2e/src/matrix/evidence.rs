@@ -126,23 +126,25 @@ pub struct Evidence {
 }
 
 impl Evidence {
-    /// The evidence of the run `run` under `reports`.
-    pub fn under(reports: &Path, run: &str) -> Self {
-        Self {
-            folder: reports.join(run),
-        }
+    /// The evidence of the run `run` under `reports`: the folder is made new, as one of this
+    /// run's own, and refused where it is there ([`crate::door::made_dir`]: the id of a run is
+    /// unique, so a folder of that name is another run's and is never written into).
+    pub fn under(reports: &Path, run: &str) -> Result<Self> {
+        let folder = reports.join(run);
+        crate::door::made_dir(&folder)?;
+        Ok(Self { folder })
     }
 
     /// Writes `value` as `name` (pretty JSON), the folder made first.
     pub fn json(&self, name: &str, value: &Value) -> Result {
         let text = serde_json::to_string_pretty(value)
             .map_err(|failed| Error::Daemon(format!("{name}: {failed}")))?;
-        files::write(&self.folder.join(name), format!("{text}\n"))
+        crate::door::write(self.folder.join(name), format!("{text}\n"))
     }
 
     /// Writes `text` as `name`.
     pub fn text(&self, name: &str, text: &str) -> Result {
-        files::write(&self.folder.join(name), text)
+        crate::door::write(self.folder.join(name), text)
     }
 
     /// Writes the checks, as JSON and as the table a person reads: `known` are the checks that
@@ -220,16 +222,17 @@ pub fn ledger_snapshot(db: &Path, to: &Path) -> Result {
                 .map(|meta| (meta.len(), meta.modified().ok()))
         })
     };
-    let clones =
-        tempfile::tempdir().map_err(Error::file("make a folder in", &std::env::temp_dir()))?;
+    // The clone's folder is one this run makes through the door, which takes it away with the
+    // receipt of having made it.
+    let clones = crate::door::made("consensflow-ledger-clone-")
+        .map_err(Error::file("make a folder in", &std::env::temp_dir()))?;
     let clone = clones.path().join("clone.db");
     let mut held = false;
     for _ in 0..5 {
         let before = stamp();
-        std::fs::copy(db, &clone).map_err(Error::file("copy", db))?;
+        crate::door::copy_keeping_mode(db, &clone)?;
         if wal.is_file() {
-            std::fs::copy(&wal, clones.path().join("clone.db-wal"))
-                .map_err(Error::file("copy", &wal))?;
+            crate::door::copy_keeping_mode(&wal, clones.path().join("clone.db-wal"))?;
         }
         if stamp() == before {
             held = true;
@@ -244,8 +247,10 @@ pub fn ledger_snapshot(db: &Path, to: &Path) -> Result {
         )));
     }
     if let Some(folder) = to.parent() {
-        files::make_dir(folder)?;
+        crate::door::make_dir(folder)?;
     }
+    // `VACUUM INTO` writes the file itself, so the write is asked of the guard first.
+    files::guard(to)?;
     let source = rusqlite::Connection::open(&clone).map_err(failed)?;
     source
         .execute("VACUUM INTO ?1", [to.to_string_lossy().as_ref()])
@@ -309,7 +314,7 @@ mod tests {
 
     #[test]
     fn the_owners_files_are_unchanged_until_one_is_written_or_a_link_moved() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-test-").unwrap();
         let (file, link) = (
             folder.path().join("auth.json"),
             folder.path().join("claude"),
@@ -344,9 +349,40 @@ mod tests {
     }
 
     #[test]
+    fn a_reports_folder_that_holds_an_earlier_runs_evidence_is_never_written_into() {
+        // `CF_EVIDENCE` names a folder an earlier run kept its evidence in, as CI reuses one.
+        let mut layout = crate::live::layout::Layout::new().unwrap();
+        let reports = layout.home().join("evidence");
+        layout
+            .plant_tree(
+                &reports,
+                &[
+                    ("r1/verdict.txt", "an earlier run's verdict"),
+                    ("r1/checks.json", "[]"),
+                    ("notes.txt", "a person's note"),
+                ],
+            )
+            .unwrap();
+        // A run id that is there is refused before a file is written, and the folder is as it was.
+        assert!(Evidence::under(&reports, "r1").is_err());
+        layout.untouched().unwrap();
+        // A new id is made as a folder of the run's own, and the run writes below it only.
+        let evidence = Evidence::under(&reports, "r2").unwrap();
+        evidence
+            .json("manifest.json", &json!({ "board": 0 }))
+            .unwrap();
+        assert!(reports.join("r2/manifest.json").is_file());
+        layout.untouched().unwrap();
+        crate::door::again_under_audit(
+            "matrix::evidence::tests::a_reports_folder_that_holds_an_earlier_runs_evidence_is_never_written_into",
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn the_evidence_is_written_in_a_folder_of_the_runs_own_with_a_verdict_a_person_reads() {
-        let reports = tempfile::tempdir().unwrap();
-        let evidence = Evidence::under(reports.path(), "r1");
+        let reports = crate::door::made("cf-test-").unwrap();
+        let evidence = Evidence::under(reports.path(), "r1").unwrap();
         evidence
             .json("manifest.json", &json!({ "board": 0 }))
             .unwrap();
@@ -383,7 +419,7 @@ mod tests {
 
     #[test]
     fn the_evidence_holds_no_token_and_a_ledger_is_copied_whole_while_it_is_held() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-test-").unwrap();
         std::fs::write(folder.path().join("a.json"), "{\"said\":\"hello\"}").unwrap();
         let tokens = ["0123456789abcdef".to_owned(), "short".to_owned()];
         assert!(holds_none(folder.path(), &tokens).ok);

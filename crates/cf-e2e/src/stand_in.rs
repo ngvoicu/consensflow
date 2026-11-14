@@ -23,7 +23,7 @@ const SCRIPT: &[u8] = b"@echo off\r\nexit /b 0\r\n";
 /// the path it is found at, `name` itself on POSIX and `name.cmd` on Windows.
 pub fn install(dir: &Path, name: &str) -> Result<PathBuf> {
     let path = dir.join(program_name(name));
-    files::write_executable(&path, SCRIPT)?;
+    crate::door::write_executable(&path, SCRIPT)?;
     Ok(path)
 }
 
@@ -36,9 +36,9 @@ pub fn install(dir: &Path, name: &str) -> Result<PathBuf> {
 pub fn install_for_window(dir: &Path, name: &str, agent: &Path) -> Result<PathBuf> {
     let path = dir.join(program_name(name));
     if cfg!(windows) {
-        files::write_executable(&path, window_shim(agent))?;
+        crate::door::write_executable(&path, window_shim(agent))?;
     } else {
-        files::write_executable(
+        crate::door::write_executable(
             &path,
             format!("#!/bin/sh\nexec '{}' \"$@\"\n", agent.display()),
         )?;
@@ -93,7 +93,7 @@ mod tests {
 
     #[test]
     fn a_stand_in_is_made_in_a_folder_that_is_made_for_it_under_the_name_a_system_finds_it_by() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-test-").unwrap();
         let dir = root.path().join("not").join("yet");
         let path = install(&dir, "claude").unwrap();
         let name = if cfg!(windows) {
@@ -108,7 +108,7 @@ mod tests {
 
     #[test]
     fn a_stand_in_for_a_window_is_a_script_that_runs_the_agent_on_posix_and_its_shim_on_windows() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-test-").unwrap();
         let dir = root.path().join("not").join("yet");
         let agent = Path::new("/bin/fake-agent");
         let path = install_for_window(&dir, "claude", agent).unwrap();
@@ -141,7 +141,7 @@ mod tests {
     #[test]
     fn a_stand_in_that_is_a_cmd_of_the_runs_own_is_the_shim_already_and_any_other_is_named_by_one()
     {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-test-").unwrap();
         let wrapper = root.path().join("claude-shimmed.cmd");
         let text = "@echo off\r\n\"C:\\node.exe\" \"C:\\relay.mjs\" %*\r\n";
         fs::write(&wrapper, text).unwrap();
@@ -164,7 +164,7 @@ mod tests {
     fn a_stand_in_is_an_executable_script_that_ends_at_once_with_0_and_says_nothing() {
         use std::os::unix::fs::PermissionsExt;
 
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-test-").unwrap();
         let path = install(root.path(), "claude").unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().permissions().mode() & 0o111,
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn a_stand_in_cannot_be_put_where_a_file_is_in_the_way() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::door::made("cf-test-").unwrap();
         let in_the_way = root.path().join("bin");
         fs::write(&in_the_way, "a file").unwrap();
         let failed = install(&in_the_way, "claude").unwrap_err();

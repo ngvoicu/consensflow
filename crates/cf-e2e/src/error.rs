@@ -68,6 +68,18 @@ impl fmt::Debug for Error {
     }
 }
 
+/// A program of the kit that works in `io` terms (a stand-in) carries the error on as one: the
+/// kind of the failure of a file, and what it says.
+impl From<Error> for io::Error {
+    fn from(error: Error) -> Self {
+        let kind = match &error {
+            Error::File { source, .. } | Error::Program { source, .. } => source.kind(),
+            _ => io::ErrorKind::Other,
+        };
+        io::Error::new(kind, error.to_string())
+    }
+}
+
 impl Error {
     /// Turns the failure of `action` on `path` into an error that names both.
     pub(crate) fn file(action: &'static str, path: &Path) -> impl FnOnce(io::Error) -> Self {

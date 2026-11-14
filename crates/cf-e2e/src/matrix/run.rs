@@ -161,7 +161,7 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
     }
     let scenario = &scenario;
     let id = run_id(&seating.label(), scenario.name);
-    let evidence = Evidence::under(reports, &id);
+    let evidence = Evidence::under(reports, &id)?;
     let mut manifest = json!({
         "run": id,
         "replayOf": replay_of,
@@ -395,8 +395,9 @@ pub fn run(matrix: &Matrix, log: &Log) -> Result<Outcome> {
     checks.push(owner.unchanged(&owner.again()));
     evidence.checks(&checks, &known)?;
     if checks.iter().all(|check| check.ok) {
-        // A green run's project is no evidence: the folder it made goes (a red one's stays, named in its manifest).
-        let _ = std::fs::remove_dir_all(&folder);
+        // A green run's project is no evidence: the folder it made goes (a red one's stays, named
+        // in its manifest), through the door, which holds the receipt of the folder this run made.
+        let _ = crate::door::Door::of_run().remove_made(&folder);
     }
     Ok(Outcome {
         checks,

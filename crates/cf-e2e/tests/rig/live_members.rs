@@ -41,7 +41,14 @@ fn a_project_opens_with_the_stand_in_for_its_chief_and_the_chief_gives_its_membe
     assert_eq!(members.trust(), None);
     assert_eq!(members.chief(), "chief");
     let folder = members.folder().to_path_buf();
-    assert!(folder.ends_with(".consensflow-candidate/live/members-task") || cfg!(windows));
+    // A folder of this run's own below the live folder: `members-task-<random>`.
+    assert_eq!(
+        folder.parent().and_then(|live| live.file_name()),
+        Some(std::ffi::OsStr::new("live"))
+    );
+    assert!(folder
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with("members-task-")));
     for name in ["AGENTS.md", "CLAUDE.md"] {
         assert_eq!(
             std::fs::read_to_string(folder.join(name))?,
@@ -236,8 +243,8 @@ fn a_chief_that_has_written_nothing_stays_when_its_empty_folder_of_conversations
     use crate::kept_config::Kept;
 
     let machine = tempfile::tempdir()?;
-    let shims = tempfile::tempdir()?;
-    let kept = tempfile::tempdir()?;
+    let shims = cf_e2e::door::made("cf-live-members-")?;
+    let kept = cf_e2e::door::made("cf-live-members-")?;
     let config = Kept::new(kept.path().join("claude-config"), None);
     let claude = Installed::at(Harness::Claude, "/nowhere/claude", machine.path())
         .with_claude_config(config.clone());

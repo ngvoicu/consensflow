@@ -112,14 +112,14 @@ runs = ["rig-stand-ins"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent/background.rs"
 find = '''
-        cf_e2e::files::say_its_process(&self.file).map_err(|failed| failed.to_string())?;
+        cf_e2e::door::say_its_process(&self.file).map_err(|failed| failed.to_string())?;
 '''
 replace = '''
         {
             let file = self.beside("pid");
-            fs::write(&file, "").map_err(|failed| failed.to_string())?;
+            cf_e2e::door::write(&file, "").map_err(|failed| failed.to_string())?;
             std::thread::sleep(std::time::Duration::from_millis(300));
-            fs::write(&file, std::process::id().to_string()).map_err(|failed| failed.to_string())?;
+            cf_e2e::door::write(&file, std::process::id().to_string()).map_err(|failed| failed.to_string())?;
         }
 '''
 
