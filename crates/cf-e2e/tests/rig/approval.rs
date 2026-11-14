@@ -708,7 +708,7 @@ fn a_note_a_member_writes_waits_at_the_gate_the_human_can_only_pass_it_on_and_so
     rig.tell(
         project.id(),
         &format!(
-            "DISPATCH --tier {} CF note :: Mind the tests",
+            "DISPATCH --tier {} CF tell :: Mind the tests",
             tier(&project)?
         ),
     )?;
