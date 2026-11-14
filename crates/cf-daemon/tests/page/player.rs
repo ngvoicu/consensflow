@@ -309,7 +309,8 @@ fn modelled(name: &str, step: &Value) -> Value {
 /// (`cf_ledger::testing::hold_apart_what_members_run_on`), the marks of a lane whose
 /// saved agent was gone, which Node's board said and this one's has none of, and the roles
 /// `board.get` answers beside its board, which Node's had no table of (`cf_ledger::roles`;
-/// the daemon's own test `page::tests::roles` holds them).
+/// the daemon's own test `page::tests::roles` holds them). Node's cards predate
+/// `stateSince`, which the ledger's fixed-clock tests hold to the move events.
 fn projected(reply: &[u8]) -> String {
     let Ok(mut value) = serde_json::from_slice::<Value>(reply) else {
         return String::from_utf8_lossy(reply).into_owned();
@@ -320,11 +321,26 @@ fn projected(reply: &[u8]) -> String {
             fields.shift_remove("roles");
         }
     }
+    let cards = |value: Option<&mut Value>| {
+        if let Some(cards) = value.and_then(Value::as_array_mut) {
+            for card in cards {
+                if let Some(fields) = card.as_object_mut() {
+                    fields.shift_remove("stateSince");
+                }
+            }
+        }
+    };
+    cards(
+        value
+            .get_mut("board")
+            .and_then(|board| board.get_mut("open")),
+    );
     if let Some(Value::Array(lanes)) = value
         .get_mut("board")
         .and_then(|board| board.get_mut("lanes"))
     {
         for lane in lanes {
+            cards(lane.get_mut("tasks"));
             if let Some(fields) = lane.as_object_mut() {
                 fields.shift_remove("agentMissing");
                 fields.shift_remove("agentRetired");
@@ -332,6 +348,16 @@ fn projected(reply: &[u8]) -> String {
         }
     }
     value.to_string()
+}
+
+#[test]
+fn only_the_new_card_clock_is_held_apart_from_nodes_page_reply() {
+    let reply = json!({"stateSince":"keep", "board":{"stateSince":"keep", "open":[{"stateSince":"drop","title":"open"}], "lanes":[{"participant":{"stateSince":"keep"}, "tasks":[{"stateSince":"drop","title":"done"}]}]}});
+    let expected = json!({"stateSince":"keep", "board":{"stateSince":"keep", "open":[{"title":"open"}], "lanes":[{"participant":{"stateSince":"keep"}, "tasks":[{"title":"done"}]}]}});
+    assert_eq!(
+        projected(reply.to_string().as_bytes()),
+        expected.to_string()
+    );
 }
 
 /// What the test's own ledger said the last staff was, when the test gave the
