@@ -34,6 +34,7 @@ pub enum Run {
 /// being in the keychain, the one item every Muse of the machine reads; on Windows all of
 /// it, `credential_backend: file`). The person's file is read, never written.
 pub fn seed_live_home(rig_home: &Path, real_home: &Path) -> Result {
+    crate::standin_process::require_home(real_home, "Muse login lookup");
     let config = rig_home.join(".config").join("muse");
     crate::door::write(config.join("settings.json"), "{\"schema_version\":1}\n")?;
     let auth = real_home.join(".config").join("muse").join("auth.json");
@@ -116,6 +117,35 @@ pub fn installed() -> std::result::Result<Installed, String> {
         &own_var("PATH").unwrap_or_default(),
         installer_place().as_deref(),
     )
+}
+
+/// The real executable used by an echo case. Its Keychain behaviour at
+/// startup is not established, so it runs only on a disposable hosted runner.
+pub fn echo_required() -> std::result::Result<Installed, String> {
+    if own_var("GITHUB_ACTIONS").as_deref() != Some("true")
+        || own_var("CF_E2E_HOSTED_MUSE").as_deref() != Some("1")
+    {
+        return Err("Muse echo requires a named Muse on a disposable GitHub hosted runner; its Keychain startup behaviour is not established".to_owned());
+    }
+    let folder = own_var("RUNNER_TEMP")
+        .map(PathBuf::from)
+        .ok_or("required Muse for echo is missing: the hosted runner has no RUNNER_TEMP")?
+        .join("muse-echo");
+    let found = installed_on(&folder.to_string_lossy(), None).map_err(|why| {
+        format!(
+            "required Muse for echo in {} is missing: {why}",
+            folder.display()
+        )
+    })?;
+    #[allow(clippy::print_stderr)]
+    {
+        eprintln!(
+            "Muse echo uses {} (version {})",
+            found.binary.display(),
+            found.version
+        );
+    }
+    Ok(found)
 }
 
 /// Where Muse's installer puts its launcher for whoever runs the tests: `~/.local/bin` on

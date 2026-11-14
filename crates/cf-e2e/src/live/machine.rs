@@ -860,6 +860,17 @@ fn home_of(
     codex_home: Option<String>,
     user_home: Option<String>,
 ) -> Option<PathBuf> {
+    let home = home_of_unchecked(harness, codex_home, user_home)?;
+    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));
+    Some(home)
+}
+
+/// Resolve the spelling before a stand-in run checks whether it may be read.
+fn home_of_unchecked(
+    harness: Harness,
+    codex_home: Option<String>,
+    user_home: Option<String>,
+) -> Option<PathBuf> {
     let named = |value: Option<String>| value.filter(|value| !value.is_empty());
     let home = match (harness, named(codex_home)) {
         (Harness::Codex, Some(home)) => PathBuf::from(home),
@@ -871,7 +882,7 @@ fn home_of(
 
 /// The user's own home on this machine: `HOME`, else `USERPROFILE`.
 pub fn home() -> Result<PathBuf> {
-    own_var("HOME")
+    let home = own_var("HOME")
         .or_else(|| own_var("USERPROFILE"))
         .filter(|home| !home.is_empty())
         .map(PathBuf::from)
@@ -882,7 +893,9 @@ pub fn home() -> Result<PathBuf> {
                 io::ErrorKind::NotFound,
                 "this run has neither HOME nor USERPROFILE",
             ),
-        })
+        })?;
+    crate::standin_process::require_home(&home, "user home lookup");
+    Ok(home)
 }
 
 /// A live test's own folder, `~/.consensflow-candidate/live/<name>-<random>/...`, made: where

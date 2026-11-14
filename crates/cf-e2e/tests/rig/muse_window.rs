@@ -33,24 +33,13 @@ const TURN_MS: u64 = 4_000;
 const MUSE_STAND_IN: &str = env!("CARGO_BIN_EXE_muse-stand-in");
 
 /// A rig whose Muse windows run the machine's Muse, or why there is none.
-fn muse_rig() -> Option<Config> {
-    match muse::installed() {
-        Ok(install) => Some(config().muse(install.through(MUSE_STAND_IN), TURN_MS)),
-        Err(why) => {
-            #[allow(clippy::print_stderr)] // Said in the output of the case it skips.
-            {
-                eprintln!("skipped: {why}");
-            }
-            None
-        }
-    }
+fn muse_rig() -> Result<Config, String> {
+    muse::echo_required().map(|install| config().muse(install.through(MUSE_STAND_IN), TURN_MS))
 }
 
 #[test]
 fn a_task_goes_from_its_brief_to_its_result_in_a_muse_window_launched_whole() -> Outcome {
-    let Some(config) = muse_rig() else {
-        return Ok(());
-    };
+    let config = muse_rig()?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
     rig.tell(
@@ -127,9 +116,7 @@ fn a_task_goes_from_its_brief_to_its_result_in_a_muse_window_launched_whole() ->
 #[cfg(unix)]
 #[test]
 fn a_muse_window_beside_a_devin_home_names_its_session_and_takes_its_brief() -> Outcome {
-    let Some(config) = muse_rig() else {
-        return Ok(());
-    };
+    let config = muse_rig()?;
     // A pretend owner, with a Devin login and a Muse of their own.
     let owner = tempfile::tempdir()?;
     let at = |below: &str| owner.path().join(below);
@@ -166,16 +153,14 @@ fn a_muse_window_beside_a_devin_home_names_its_session_and_takes_its_brief() -> 
 }
 
 /// A rig whose Muse turns are `turn_ms` long.
-fn muse_rig_of(turn_ms: u64) -> Option<Config> {
+fn muse_rig_of(turn_ms: u64) -> Result<Config, String> {
     muse_rig().map(|config| config.var("CF_TEST_MUSE_DELAY_MS", turn_ms.to_string()))
 }
 
 #[test]
 fn an_interrupt_before_the_first_word_takes_the_brief_back_and_the_resume_goes_in_alone() -> Outcome
 {
-    let Some(config) = muse_rig_of(20_000) else {
-        return Ok(());
-    };
+    let config = muse_rig_of(20_000)?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
     rig.tell(
@@ -227,9 +212,7 @@ fn an_interrupt_before_the_first_word_takes_the_brief_back_and_the_resume_goes_i
 #[test]
 fn a_brief_taken_back_taller_than_the_window_waits_in_words_until_the_human_empties_the_box(
 ) -> Outcome {
-    let Some(config) = muse_rig_of(20_000) else {
-        return Ok(());
-    };
+    let config = muse_rig_of(20_000)?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
     // 60 short lines: too many for the host's last 40, too few characters for Muse to fold
@@ -277,9 +260,7 @@ fn a_brief_taken_back_taller_than_the_window_waits_in_words_until_the_human_empt
 
 #[test]
 fn a_tell_while_the_turn_works_stops_it_takes_the_brief_back_and_goes_in_alone_once() -> Outcome {
-    let Some(config) = muse_rig_of(20_000) else {
-        return Ok(());
-    };
+    let config = muse_rig_of(20_000)?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
     rig.tell(
@@ -339,9 +320,7 @@ fn a_tell_while_the_turn_works_stops_it_takes_the_brief_back_and_goes_in_alone_o
 
 #[test]
 fn words_that_land_in_a_turn_at_work_are_the_turn_s_at_once_and_its_task_ends_once() -> Outcome {
-    let Some(config) = muse_rig_of(20_000) else {
-        return Ok(());
-    };
+    let config = muse_rig_of(20_000)?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
     rig.tell(
@@ -384,9 +363,7 @@ fn words_that_land_in_a_turn_at_work_are_the_turn_s_at_once_and_its_task_ends_on
 #[test]
 fn a_muse_worker_cut_by_the_app_s_quit_is_resumed_on_its_session_with_the_note_pasted_once_up(
 ) -> Outcome {
-    let Some(config) = muse_rig_of(30_000) else {
-        return Ok(());
-    };
+    let config = muse_rig_of(30_000)?;
     let rig = Rig::start(config.clone())?;
     let project = project(&rig, &echo_worker())?;
     let id = project.id();
@@ -449,9 +426,7 @@ fn the_chief_is_given_the_result_of_t1(rig: &Rig, project: &Project) -> Outcome 
 
 #[test]
 fn a_task_put_after_another_opens_the_worker_again_on_the_same_conversation() -> Outcome {
-    let Some(config) = muse_rig_of(2_000) else {
-        return Ok(());
-    };
+    let config = muse_rig_of(2_000)?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
     rig.tell(
@@ -492,9 +467,7 @@ fn a_task_put_after_another_opens_the_worker_again_on_the_same_conversation() ->
 
 #[test]
 fn a_conversation_the_app_quit_at_rest_is_gone_on_with_after_the_restart() -> Outcome {
-    let Some(config) = muse_rig_of(2_000) else {
-        return Ok(());
-    };
+    let config = muse_rig_of(2_000)?;
     let rig = Rig::start(config.clone())?;
     let project = project(&rig, &echo_worker())?;
     let id = project.id();
@@ -540,9 +513,7 @@ fn a_conversation_the_app_quit_at_rest_is_gone_on_with_after_the_restart() -> Ou
 
 #[test]
 fn a_stop_that_finds_the_muse_window_at_rest_is_paid_with_no_key() -> Outcome {
-    let Some(config) = muse_rig_of(20_000) else {
-        return Ok(());
-    };
+    let config = muse_rig_of(20_000)?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
     rig.tell(
@@ -582,9 +553,7 @@ fn a_stop_that_finds_the_muse_window_at_rest_is_paid_with_no_key() -> Outcome {
 /// the task waits, paused.
 #[test]
 fn a_window_whose_process_is_killed_in_its_turn_leaves_no_muse_running() -> Outcome {
-    let Some(config) = muse_rig_of(30_000) else {
-        return Ok(());
-    };
+    let config = muse_rig_of(30_000)?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
     rig.tell(
@@ -614,9 +583,7 @@ fn a_window_whose_process_is_killed_in_its_turn_leaves_no_muse_running() -> Outc
 /// a path reaches Muse through the console and the command line as UTF-16).
 #[test]
 fn a_task_in_a_folder_whose_name_is_not_ascii_goes_from_its_brief_to_its_result() -> Outcome {
-    let Some(config) = muse_rig() else {
-        return Ok(());
-    };
+    let config = muse_rig()?;
     let rig = Rig::start(config)?;
     let folder = rig.workspace().join("zo\u{eb}-\u{65e5}\u{672c}");
     std::fs::create_dir_all(&folder).map_err(|source| cf_e2e::Error::File {

@@ -6,10 +6,58 @@ use std::time::Duration;
 
 use super::*;
 
+// Each test names a decoy home outside the run, never the person's actual home.
+// A lookup that would reach that home must refuse it, rather than fall back.
+fn standin_isolation_refuses_home(harness: Harness) {
+    assert_eq!(
+        crate::process::own_var("CF_E2E_STAND_IN").as_deref(),
+        Some("1")
+    );
+    let temp = std::env::temp_dir();
+    let owner = temp
+        .parent()
+        .unwrap()
+        .join(format!("cf-foreign-home-{}", std::process::id()))
+        .to_string_lossy()
+        .into_owned();
+    let error = std::panic::catch_unwind(|| home_of(harness, Some(owner.clone()), Some(owner)))
+        .expect_err("home lookup did not fail closed");
+    let text = error
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| error.downcast_ref::<&str>().copied())
+        .unwrap_or("");
+    assert!(
+        text.contains(harness.name()) && text.contains("lookup"),
+        "{text}"
+    );
+}
+
+#[test]
+fn standin_isolation_claude_home_refuses_the_owner() {
+    standin_isolation_refuses_home(Harness::Claude);
+}
+#[test]
+fn standin_isolation_codex_home_refuses_the_owner() {
+    standin_isolation_refuses_home(Harness::Codex);
+}
+#[test]
+fn standin_isolation_pi_home_refuses_the_owner() {
+    standin_isolation_refuses_home(Harness::Pi);
+}
+#[test]
+fn standin_isolation_devin_home_refuses_the_owner() {
+    standin_isolation_refuses_home(Harness::Devin);
+}
+#[test]
+fn standin_isolation_muse_home_refuses_the_owner() {
+    standin_isolation_refuses_home(Harness::Muse);
+}
+
 #[test]
 fn codex_logs_in_at_its_home_when_named_and_in_the_dot_codex_of_the_users_otherwise() {
     let home = |codex: Option<&str>, user: Option<&str>| {
-        home_of(
+        home_of_unchecked(
             Harness::Codex,
             codex.map(str::to_owned),
             user.map(str::to_owned),
@@ -32,7 +80,7 @@ fn every_other_harness_logs_in_at_the_users_home_whatever_codex_home_says() {
     let user_text = user.to_string_lossy().into_owned();
     for harness in Harness::ALL.into_iter().filter(|h| *h != Harness::Codex) {
         let home = |codex: Option<&str>, user: Option<&str>| {
-            home_of(harness, codex.map(str::to_owned), user.map(str::to_owned))
+            home_of_unchecked(harness, codex.map(str::to_owned), user.map(str::to_owned))
         };
         assert_eq!(
             home(Some("elsewhere"), Some(&user_text)),
@@ -46,7 +94,7 @@ fn every_other_harness_logs_in_at_the_users_home_whatever_codex_home_says() {
 
 #[test]
 fn a_home_named_by_a_relative_path_is_made_whole_against_the_folder_of_the_run() {
-    let home = home_of(Harness::Codex, Some("login".to_owned()), None).unwrap();
+    let home = home_of_unchecked(Harness::Codex, Some("login".to_owned()), None).unwrap();
     assert!(home.is_absolute(), "{}", home.display());
     assert!(home.ends_with("login"));
 }
@@ -643,23 +691,37 @@ fn a_claude_config_of_the_runs_own_is_seeded_with_the_live_folders_trusted_and_k
 
 #[test]
 fn a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed() {
-    let home = crate::door::made("cf-test-").unwrap();
-    // A folder a person made (or another run): nothing is written in it. (A folder this test made
-    // by `tempfile`, which the run's registry does not hold, as the caller's is.)
-    let given = tempfile::tempdir().unwrap();
-    fs::write(given.path().join(".claude.json"), r#"{"projects":{}}"#).unwrap();
-    assert!(seed_claude_trust(given.path(), home.path()).is_err());
-    assert_eq!(
-        fs::read_to_string(given.path().join(".claude.json")).unwrap(),
-        r#"{"projects":{}}"#
-    );
+    const FOREIGN: &str = "CF_STANDIN_FOREIGN_TRUST_CONFIG";
+    if let Some(path) = crate::process::own_var(FOREIGN) {
+        let home = crate::door::made("cf-test-").unwrap();
+        let given = Path::new(&path);
+        assert!(seed_claude_trust(given, home.path()).is_err());
+        assert_eq!(
+            fs::read_to_string(given.join(".claude.json")).unwrap(),
+            r#"{"projects":{}}"#
+        );
+        return;
+    }
+    // A folder made by the parent, but not handed to the child. The child has
+    // a fresh ownership registry and must leave this synthetic config alone.
+    let given = crate::door::made("foreign-config-").unwrap();
+    crate::door::write(given.path().join(".claude.json"), r#"{"projects":{}}"#).unwrap();
+    let child = crate::process::Run::new(std::env::current_exe().unwrap())
+        .inheriting_env()
+        .args(["--exact", "live::machine::tests::a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed"])
+        .var(FOREIGN, given.path())
+        .without("CF_E2E_STAND_IN")
+        .without(crate::door::MADE_ROOTS)
+        .run().unwrap();
+    assert_eq!(child.code, Some(0), "{}{}", child.stdout, child.stderr);
     // A folder this run made, whose .claude.json is a link, is not written through.
     #[cfg(unix)]
     {
+        let home = crate::door::made("cf-test-").unwrap();
         let made = crate::door::made("consensflow-seed-test-").unwrap();
         let target = given.path().join("elsewhere.json");
-        fs::write(&target, "{}").unwrap();
-        std::os::unix::fs::symlink(&target, made.path().join(".claude.json")).unwrap();
+        crate::door::write(&target, "{}").unwrap();
+        crate::door::symlink(&target, made.path().join(".claude.json")).unwrap();
         assert!(seed_claude_trust(made.path(), home.path()).is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), "{}");
     }

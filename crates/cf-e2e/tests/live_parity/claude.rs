@@ -26,7 +26,7 @@ use cf_e2e::live::machine::{home, live_folder};
 #[cfg(unix)]
 use cf_e2e::live::members::{self, Machine};
 use cf_e2e::live::{self, Harness, Log};
-use cf_e2e::process::{own_var, Run};
+use cf_e2e::process::own_var;
 use cf_e2e::{files, Error, Result};
 use cf_panes::pty::PaneTable;
 use portable_pty::PtySize;
@@ -106,17 +106,18 @@ pub(crate) fn login(config: &Path) -> Result<Value> {
     };
     if cfg!(target_os = "macos") {
         let user = own_var("USER").unwrap_or_default();
-        let found = Run::new("security")
-            .args([
+        let found = live::keychain::security(
+            "live_parity::claude::login",
+            [
                 "find-generic-password",
                 "-s",
                 "Claude Code-credentials",
                 "-a",
                 &user,
                 "-w",
-            ])
-            .inheriting_env()
-            .run()?;
+            ],
+            Duration::from_secs(60),
+        )?;
         read("the Keychain", found.stdout)
     } else {
         read(

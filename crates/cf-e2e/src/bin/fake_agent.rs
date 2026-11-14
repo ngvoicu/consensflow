@@ -1554,3 +1554,9 @@ mod tests {
         assert_eq!(model_switch("Use /model x"), None);
     }
 }
+
+#[cfg(test)]
+const ALLOW_LIVE_MATRIX: bool = false;
+#[cfg(test)]
+#[path = "../../tests/support/standin_boot.rs"]
+mod standin_boot;

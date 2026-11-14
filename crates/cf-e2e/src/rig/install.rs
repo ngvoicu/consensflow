@@ -157,6 +157,35 @@ pub(super) fn environment(
     env
 }
 
+/// Bound every home variable the harnesses can consult in a stand-in rig.
+/// This is applied after the case's variables and harness homes have won.
+pub(super) fn bound_standin_homes(env: &mut Vec<(String, String)>, root: &Path) {
+    if own_var("CF_E2E_STAND_IN").as_deref() != Some("1") {
+        return;
+    }
+    for (name, default) in crate::standin_process::home_vars(&root.join("home")) {
+        let value = env
+            .iter()
+            .rev()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value);
+        if let Some(value) = value {
+            assert!(
+                !value.is_empty(),
+                "stand-in window {name} lookup: empty path"
+            );
+            crate::standin_process::require_home(
+                Path::new(value),
+                &format!("stand-in window {name} lookup"),
+            );
+        } else {
+            env.push((name.to_owned(), default.to_string_lossy().into_owned()));
+        }
+    }
+    env.retain(|(name, _)| name != "CF_E2E_STAND_IN");
+    env.push(("CF_E2E_STAND_IN".to_owned(), "1".to_owned()));
+}
+
 /// The `PATH` of the rig: the folder of the stand-in `claude` first, then the
 /// folders a case wants found before the rest ([`Config::first_on_path`]) and the
 /// ones it added ([`Config::also_on_path`]), then the system's own and no folder a

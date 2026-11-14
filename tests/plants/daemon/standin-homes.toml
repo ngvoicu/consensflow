@@ -1,0 +1,84 @@
+# CLN-77: a stand-in's parent refuses a home outside its own run, for each
+# harness, and Log::begin never reads Pi's provider file. Each plant removes
+# one boundary; its named assertion must catch the silent wrong result.
+
+[run]
+standin-home-unit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "standin_isolation_"]
+
+[[plant]]
+name = "standin homes: claude home lookup may escape"
+meant = "standin_isolation_claude_home_refuses_the_owner"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));'''
+replace = '''    if harness != Harness::Claude {
+    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));
+    }'''
+
+[[plant]]
+name = "standin homes: codex home lookup may escape"
+meant = "standin_isolation_codex_home_refuses_the_owner"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));'''
+replace = '''    if harness != Harness::Codex {
+    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));
+    }'''
+
+[[plant]]
+name = "standin homes: pi home lookup may escape"
+meant = "standin_isolation_pi_home_refuses_the_owner"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));'''
+replace = '''    if harness != Harness::Pi {
+    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));
+    }'''
+
+[[plant]]
+name = "standin homes: devin home lookup may escape"
+meant = "standin_isolation_devin_home_refuses_the_owner"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));'''
+replace = '''    if harness != Harness::Devin {
+    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));
+    }'''
+
+[[plant]]
+name = "standin homes: muse home lookup may escape"
+meant = "standin_isolation_muse_home_refuses_the_owner"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));'''
+replace = '''    if harness != Harness::Muse {
+    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));
+    }'''
+
+[[plant]]
+name = "standin homes: Log begins by reading Pi providers"
+meant = "standin_isolation_log_begin_never_reads_a_decoy_pi_auth"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''    if !super::keychain::live_case() {'''
+replace = '''    if false {'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''    assert!(
+        super::keychain::live_case(),
+        "stand-in run attempted Pi provider lookup"
+    );'''
+replace = '''    // The plant lets provider discovery read the stand-in's decoy.'''

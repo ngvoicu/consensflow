@@ -474,6 +474,7 @@ dependencies = [
  "cf-panes",
  "cf-process",
  "cf-proto",
+ "ctor",
  "flate2",
  "jiff",
  "nix 0.28.0",
@@ -534,10 +535,12 @@ version = "3.0.7-alpha.5"
 dependencies = [
  "base64 0.22.1",
  "cf-base",
+ "cf-e2e",
  "cf-harness",
  "cf-launcher",
  "cf-process",
  "cf-proto",
+ "ctor",
  "flate2",
  "futures-util",
  "getrandom 0.4.3",
@@ -3304,6 +3307,7 @@ version = "0.23.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6725596c3f2c3a0aef021139e145d4eafe314a6623e4680ca83852b2c67ab2ba"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -4786,8 +4790,11 @@ dependencies = [
  "base64 0.23.1",
  "log",
  "percent-encoding",
+ "rustls",
+ "rustls-pki-types",
  "ureq-proto",
  "utf8-zero",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -5078,6 +5085,15 @@ name = "webpki-root-certs"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
+dependencies = [
+ "rustls-pki-types",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
 dependencies = [
  "rustls-pki-types",
 ]

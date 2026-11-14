@@ -36,6 +36,7 @@ impl Seen {
             files: files
                 .iter()
                 .map(|file| {
+                    crate::standin_process::require_home(file, "harness isolation file lookup");
                     (
                         file.clone(),
                         fs::read(file).ok().map(|bytes| digest(&bytes)),
@@ -44,7 +45,13 @@ impl Seen {
                 .collect(),
             records: records
                 .iter()
-                .map(|folder| (folder.clone(), run_entries(folder)))
+                .map(|folder| {
+                    crate::standin_process::require_home(
+                        folder,
+                        "harness isolation records lookup",
+                    );
+                    (folder.clone(), run_entries(folder))
+                })
                 .collect(),
         }
     }

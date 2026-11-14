@@ -246,8 +246,12 @@ fn a_chief_that_has_written_nothing_stays_when_its_empty_folder_of_conversations
     let shims = cf_e2e::door::made("cf-live-members-")?;
     let kept = cf_e2e::door::made("cf-live-members-")?;
     let config = Kept::new(kept.path().join("claude-config"), None);
-    let claude = Installed::at(Harness::Claude, "/nowhere/claude", machine.path())
-        .with_claude_config(config.clone());
+    let claude = Installed::at(
+        Harness::Claude,
+        machine.path().join("bin/claude"),
+        machine.path(),
+    )
+    .with_claude_config(config.clone());
     let rig = Rig::start(cf_e2e::live::rig_with_stand_ins(
         &[claude],
         shims.path(),

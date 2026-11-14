@@ -151,24 +151,13 @@ mod stand_ins {
 }
 
 /// A rig whose Muse windows run the machine's Muse on its echo provider, or why there is none.
-fn muse_rig() -> Option<Config> {
-    match muse::installed() {
-        Ok(install) => Some(config().muse(install.through(MUSE_STAND_IN), 2_000)),
-        Err(why) => {
-            #[allow(clippy::print_stderr)] // Said in the output of the case it skips.
-            {
-                eprintln!("skipped: {why}");
-            }
-            None
-        }
-    }
+fn muse_rig() -> Result<Config, String> {
+    muse::echo_required().map(|install| config().muse(install.through(MUSE_STAND_IN), 2_000))
 }
 
 #[test]
 fn a_muse_members_window_takes_the_projects_size_as_its_context_limit() -> Outcome {
-    let Some(config) = muse_rig() else {
-        return Ok(());
-    };
+    let config = muse_rig()?;
     let rig = Rig::start(config)?;
     let project = muse_project(&rig, &echo_worker())?;
     rig.page(

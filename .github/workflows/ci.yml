@@ -229,11 +229,27 @@ jobs:
       # 18.5 to 22.4 on macOS, and that landing's Devin cases on both of Devin's wire
       # shapes (T-1431, T-1496) add about 5 minutes a Windows shard and 3.5 a macOS one,
       # which put the slowest at about 30 and 26 against a limit of 30.
+      - name: Prepare the pinned Muse echo executable
+        run: cargo run -p cf-e2e --features test-support --bin prepare-muse-echo
+        env:
+          CF_E2E_HOSTED_MUSE: '1'
       - run: npm run test:daemons
         env:
           CF_TEST_SHARD: ${{ matrix.shard }}
           CF_TEST_SHARD_LIMIT_MINUTES: 40
+          CF_E2E_HOSTED_MUSE: '1'
         timeout-minutes: 40
+
+      # These two cases add and remove a fabricated item from the disposable
+      # runner's Keychain. They refuse to start without both GitHub's marker
+      # and this step's marker, and are ignored everywhere else.
+      - name: Keychain guard on the disposable Mac
+        if: runner.os == 'macOS' && matrix.shard == '1/6'
+        env:
+          CF_E2E_HOSTED_KEYCHAIN: '1'
+        run: |
+          cargo test -p cf-e2e --test rig -- --ignored --exact owner_launchers::a_run_whose_claude_code_left_an_item_in_the_keychain_fails_the_rig_that_ends_and_names_it
+          cargo test -p cf-e2e --test rig -- --ignored --exact owner_launchers::a_claude_whose_config_keeps_its_findings_is_not_listed_by_the_guard_and_its_rig_ignores_another_processs_item
 
       # A rig case that fails keeps a report of what its windows showed beside
       # its home, in the runner's temp folder (cf-e2e's rig/report.rs, `keep`),

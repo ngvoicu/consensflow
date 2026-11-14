@@ -101,7 +101,7 @@ impl Owner {
         let home = self.home.path();
         let run = Duration::from_secs(3600);
         vec![
-            Installed::at(Harness::Pi, "/nowhere/pi", home).with_isolation(Arc::new(
+            Installed::at(Harness::Pi, self.path("bin/pi"), home).with_isolation(Arc::new(
                 Isolation::pi(
                     home,
                     &self.path(".pi/agent"),
@@ -109,9 +109,9 @@ impl Owner {
                     run,
                 ),
             )),
-            Installed::at(Harness::Codex, "/nowhere/codex", self.path(".codex"))
+            Installed::at(Harness::Codex, self.path("bin/codex"), self.path(".codex"))
                 .with_isolation(Arc::new(Isolation::codex(home, &self.path(".codex")))),
-            Installed::at(Harness::Devin, "/nowhere/devin", home).with_isolation(Arc::new(
+            Installed::at(Harness::Devin, self.path("bin/devin"), home).with_isolation(Arc::new(
                 Isolation::devin(home, &self.path(".config"), &self.path(".local/share")),
             )),
         ]
@@ -253,13 +253,14 @@ fn a_pi_login_that_will_not_last_the_run_stops_the_rig_before_anything_starts() 
             .to_string(),
     )?;
     let home = owner.home.path();
-    let pi =
-        Installed::at(Harness::Pi, "/nowhere/pi", home).with_isolation(Arc::new(Isolation::pi(
+    let pi = Installed::at(Harness::Pi, owner.path("bin/pi"), home).with_isolation(Arc::new(
+        Isolation::pi(
             home,
             &owner.path(".pi/agent"),
             "openai/gpt-6-luna",
             Duration::from_secs(3600),
-        )));
+        ),
+    ));
     let Err(failed) = Rig::start(live::rig(&[pi], FAKE_AGENT)) else {
         panic!("a rig started on a Pi login that ends in ten minutes");
     };

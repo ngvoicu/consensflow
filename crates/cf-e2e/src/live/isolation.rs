@@ -707,6 +707,17 @@ impl Isolation {
     /// What `seed` puts in the home, read from the owner's: nothing where there is nothing
     /// to put.
     fn read(&self, seed: &Seed, now: i64) -> Result<Vec<Placed>> {
+        let source = match seed {
+            Seed::Copy { from, .. }
+            | Seed::PiLogin { from, .. }
+            | Seed::PiProvider { from, .. } => from,
+            #[cfg(unix)]
+            Seed::Carry { from, .. } => from,
+        };
+        crate::standin_process::require_home(
+            source,
+            &format!("{} isolation lookup", self.harness.name()),
+        );
         match seed {
             Seed::Copy { from, to, login } => match fs::read(from) {
                 Ok(bytes) => Ok(vec![Placed::File {

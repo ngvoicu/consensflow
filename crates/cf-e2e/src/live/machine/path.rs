@@ -12,6 +12,17 @@ use crate::{Error, Result};
 /// Where the program `name` is, on the `PATH` of this run, as a shell finds it.
 /// A machine that has none is an error that says so.
 pub fn command(name: &str) -> Result<PathBuf> {
+    if own_var("CF_E2E_STAND_IN").as_deref() == Some("1")
+        && super::Harness::from_name(name).is_some()
+    {
+        return Err(Error::Program {
+            action: "find",
+            program: name.to_owned(),
+            source: io::Error::other(format!(
+                "stand-in {name} executable lookup cannot search the machine's PATH"
+            )),
+        });
+    }
     let path = own_var("PATH").unwrap_or_default();
     find(name, &path, own_var("PATHEXT").as_deref()).ok_or_else(|| not_found(name))
 }

@@ -63,9 +63,13 @@ impl Rig {
         // The homes older runs left in the folder are counted, and none is taken (`sweep`).
         // The home is a folder the door made, which goes through the door with the rig.
         let (root, scratch) = match &config.existing_root {
-            Some(root) => (root.clone(), None),
+            Some(root) => {
+                crate::standin_process::require_home(root, "rig resumed home lookup");
+                (root.clone(), None)
+            }
             None => {
                 let folder = config.homes.clone().unwrap_or_else(std::env::temp_dir);
+                crate::standin_process::require_home(&folder, "rig home allocation lookup");
                 // The place the rig's own folder is made in is made where it is not there, and
                 // is no folder of the run's: only the rig's root below it is.
                 crate::door::make_place(&folder).map_err(Error::file("make", &folder))?;
@@ -86,7 +90,8 @@ impl Rig {
         let fake_bin = write_fake_install(&root, &config)?;
         let muse_launcher = matches!(config.muse, Some((_, crate::muse::Run::Live { .. })))
             .then(|| own_commands(&root, &config).join("muse"));
-        let env = environment(&root, &fake_bin, &config, &home_vars);
+        let mut env = environment(&root, &fake_bin, &config, &home_vars);
+        super::install::bound_standin_homes(&mut env, &root);
         #[cfg(unix)]
         super::install::give_muse_its_folders(&root, &config, &home_vars)?;
         // A restart over the same home keeps the stand-ins a case wrote: they are still

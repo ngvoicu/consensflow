@@ -8,7 +8,7 @@
 //! session's log says what each hook did and what context it gave: the real program is the
 //! judge here, not a stand-in that knows the limit.
 //!
-//! Each case is skipped, in plain words, on a machine with no Muse Code installed: CI's.
+//! Every case requires the named Muse executable on the disposable runner.
 
 use std::fs;
 use std::path::PathBuf;
@@ -32,24 +32,26 @@ const MUSE_HOOK_OUTPUT_LIMIT: usize = 16_384;
 const STAFF: usize = 25;
 
 /// A rig whose Muse windows run the machine's Muse, or why there is none.
-fn muse_rig() -> Option<Config> {
-    match muse::installed() {
-        Ok(install) => Some(config().muse(
+fn muse_rig() -> Result<Config, String> {
+    muse_rig_from(muse::echo_required())
+}
+
+fn muse_rig_from(found: Result<muse::Installed, String>) -> Result<Config, String> {
+    found.map(|install| {
+        config().muse(
             install.through(env!("CARGO_BIN_EXE_muse-stand-in")),
             TURN_MS,
-        )),
-        Err(why) => {
-            #[allow(clippy::print_stderr)] // Said in the output of the case it skips.
-            {
-                eprintln!("skipped: {why}");
-            }
-            None
-        }
-    }
+        )
+    })
+}
+
+#[test]
+fn standin_isolation_a_required_muse_that_is_missing_fails_the_case() {
+    assert!(muse_rig_from(Err("fixture Muse is missing".into())).is_err());
 }
 
 /// A rig whose Muse turns are `turn_ms` long.
-fn muse_rig_of(turn_ms: u64) -> Option<Config> {
+fn muse_rig_of(turn_ms: u64) -> Result<Config, String> {
     muse_rig().map(|config| config.var("CF_TEST_MUSE_DELAY_MS", turn_ms.to_string()))
 }
 
@@ -291,9 +293,7 @@ fn tell_the_chief(rig: &Rig, project: &Project<'_>, text: &str) -> cf_e2e::Resul
 
 #[test]
 fn a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks() -> Outcome {
-    let Some(config) = muse_rig() else {
-        return Ok(());
-    };
+    let config = muse_rig()?;
     let rig = Rig::start(config)?;
     let project = largest_chiefs_project(&rig)?;
     tell_the_chief(&rig, &project, "Reply with exactly: ROLE_GIVEN")?;
@@ -453,9 +453,7 @@ fn chief_launch(rig: &Rig, project: &Project<'_>, launch: usize) -> cf_e2e::Resu
 #[test]
 fn a_resumed_muse_chief_has_no_old_role_text_whatever_its_owners_hooks_print_and_however_its_role_changes(
 ) -> Outcome {
-    let Some(config) = muse_rig() else {
-        return Ok(());
-    };
+    let config = muse_rig()?;
     let rig = Rig::start(config)?;
     let owner = tempfile::tempdir()?;
     let files = [owner.path().join("one.txt"), owner.path().join("two.txt")];
@@ -556,9 +554,7 @@ fn rules_tag(role: &str) -> String {
 
 #[test]
 fn a_resumed_muse_member_goes_from_one_block_to_two_and_back_with_no_old_role_text() -> Outcome {
-    let Some(config) = muse_rig_of(500) else {
-        return Ok(());
-    };
+    let config = muse_rig_of(500)?;
     let rig = Rig::start(config)?;
     let owner = tempfile::tempdir()?;
     let files = [owner.path().join("one.txt")];
@@ -799,9 +795,7 @@ fn an_older_conversation(home: &tempfile::TempDir, session: &str) -> Found<Vec<V
 #[test]
 fn a_window_that_resumes_a_conversation_of_more_role_blocks_than_its_own_leaves_no_old_role_text(
 ) -> Outcome {
-    let Some(config) = muse_rig_of(60_000) else {
-        return Ok(());
-    };
+    let config = muse_rig_of(60_000)?;
     let rig = Rig::start(config)?;
     // The window of a worker with a role of one part, at work for a minute.
     let (hooks, role) = a_workers_hooks(&rig)?;
@@ -850,9 +844,7 @@ fn median(mut values: Vec<u64>) -> u64 {
 #[test]
 #[ignore = "a timing: run by hand with --ignored --nocapture"]
 fn the_cost_of_the_hooks_of_a_start() -> Outcome {
-    let Some(config) = muse_rig_of(60_000) else {
-        return Ok(());
-    };
+    let config = muse_rig_of(60_000)?;
     let rig = Rig::start(config)?;
     let (hooks, role) = a_workers_hooks(&rig)?;
     println!(
@@ -959,7 +951,7 @@ fn muse_exec(
     settings: &Value,
     session: Option<&str>,
 ) -> Found<Vec<Value>> {
-    let install = muse::installed()?;
+    let install = muse::echo_required()?;
     let at = |below: &str| home.path().join(below);
     let workspace = at("work");
     fs::create_dir_all(&workspace)?;
@@ -983,16 +975,8 @@ fn muse_exec(
     // the means to find there, and the system's `cat` on a Mac.
     let ran = run
         .arg("x")
-        .vars([
-            ("HOME", home.path().as_os_str()),
-            ("USERPROFILE", home.path().as_os_str()),
-            ("APPDATA", at("appdata").as_os_str()),
-            ("LOCALAPPDATA", at("localappdata").as_os_str()),
-            ("XDG_CONFIG_HOME", at(".config").as_os_str()),
-            ("XDG_DATA_HOME", at(".local/share").as_os_str()),
-            ("XDG_CACHE_HOME", at(".cache").as_os_str()),
-            ("MUSE_NO_AUTO_UPDATE", "1".as_ref()),
-        ])
+        .vars(cf_e2e::standin_process::home_vars(home.path()))
+        .var("MUSE_NO_AUTO_UPDATE", "1")
         .var("PATH", "/usr/bin:/bin")
         .finding_programs()
         .closed_input()
@@ -1029,9 +1013,7 @@ fn json_of(n: usize) -> Vec<u8> {
 
 #[test]
 fn muse_takes_16384_bytes_of_a_hooks_output_and_no_more_plain_or_in_json() {
-    if muse_rig().is_none() {
-        return;
-    }
+    let _config = muse_rig().unwrap_or_else(|why| panic!("{why}"));
     for (name, printed) in [
         ("plain", bytes_of as fn(usize) -> Vec<u8>),
         ("json", json_of),
@@ -1062,9 +1044,7 @@ fn muse_takes_16384_bytes_of_a_hooks_output_and_no_more_plain_or_in_json() {
 #[test]
 fn muse_keeps_each_hooks_text_as_a_block_of_its_own_numbered_in_order_with_its_white_space_cut_off_and_every_block_is_in_the_request(
 ) {
-    if muse_rig().is_none() {
-        return;
-    }
+    let _config = muse_rig().unwrap_or_else(|why| panic!("{why}"));
     // Three hooks of 16,000 bytes: each a block, in the order of the hooks, whole.
     let (first, second, third) = (
         [b"ONE ".as_slice(), &bytes_of(15_996)].concat(),
@@ -1113,9 +1093,7 @@ fn muse_keeps_each_hooks_text_as_a_block_of_its_own_numbered_in_order_with_its_w
 
 #[test]
 fn a_resumed_conversation_keeps_the_blocks_it_has_until_a_hook_of_the_same_number_writes_them() {
-    if muse_rig().is_none() {
-        return;
-    }
+    let _config = muse_rig().unwrap_or_else(|why| panic!("{why}"));
     // A session whose first start gave three blocks, and whose second, with one hook, writes
     // the first only: the other two are in its request still, the old role's tail.
     let home = tempfile::tempdir().unwrap();
