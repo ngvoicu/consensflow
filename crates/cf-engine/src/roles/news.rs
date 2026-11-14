@@ -110,7 +110,7 @@ fn specs_said(
 /// its role as it now is, the short text, in full: that text is what the conversation holds
 /// once the note is in. (Off, it is told its ordinary role whole, in the words of every role
 /// that is said again: `role_change`.)
-const OWN_HANDS_ON: &str = "The person turned \"Do with your own hands\" on. The instructions below replace the ones you were given before: follow these from now on. Do the work yourself in the project's folder; put work on the board only when the person explicitly asks, and read the board's guide before your first board command.";
+const OWN_HANDS_ON: &str = "The person turned \"Do with your own hands\" on. The instructions below replace the ones you were given before: follow these from now on. The staff on the board is now for explicit asks only.";
 
 /// The note that tells a running chief its switch went on: `instructions` is its role as it
 /// now is, the short text and the section of its specs.

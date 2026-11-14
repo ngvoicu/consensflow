@@ -173,7 +173,10 @@ fn own_hands_selects_the_chiefs_text_and_keeps_the_members_text() {
     let member = texts.instructions(&worker, &project, None).unwrap();
     project.own_hands = true;
     let own = texts.instructions(&chief, &project, None).unwrap();
-    assert!(own.contains("project's own folder"), "{own}");
+    assert!(
+        own.contains("staff of agents, on a ConsensFlow board"),
+        "{own}"
+    );
     assert!(own.contains("run `/bundle/bin/cf guide`"), "{own}");
     assert!(own.lines().count() < 40, "{own}");
     assert!(

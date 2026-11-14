@@ -34,21 +34,29 @@ fn own_hands_gives_a_short_text_that_is_whole_in_itself() {
     let cf = CfWord::bare();
     let text = own(&cf, None);
     let flat = text.replace('\n', " ");
-    assert!(text.lines().count() < 40, "{}", text.lines().count());
+    assert!(text.lines().count() < 20, "{}", text.lines().count());
     assert!(text.starts_with("---\nname: consensflow-chief\ndescription: "));
     for words in [
         "never run `cf`",
-        "as a coding agent would",
-        "this project's own folder, on its current branch",
-        "Make no worktree or new branch unless the human asks, and commit or push when the human asks",
         "Use it only when the human\nexplicitly asks",
-        "Hand no work to your harness's own subagents or task tool",
-        "Before your first board command, read the board's guide: run `cf guide`",
+        "not to your\nharness's own subagents",
+        "run `cf guide`",
         "begins `[ConsensFlow m-… · T-… · …]`",
-        "Work that was\nalready on the board when the human turned this on goes on",
+        "Work already on the board\ngoes on, and its results come to you",
         "turn \"Do with your own hands\" off on your pane, and you are told",
     ] {
         assert!(flat.contains(&words.replace('\n', " ")), "{words}: {text}");
+    }
+    // How to work is the harness's own: the text says nothing of it.
+    for words in [
+        "coding agent",
+        "worktree",
+        "branch",
+        "commit",
+        "push",
+        "folder",
+    ] {
+        assert!(!text.contains(words), "{words}: {text}");
     }
     // What the board's guide holds is not in front of it.
     for words in [
