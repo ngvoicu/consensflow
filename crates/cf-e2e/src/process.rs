@@ -77,7 +77,10 @@ pub fn case_of(binary: impl AsRef<OsStr>, case: &str, limit: Duration) -> Run {
     let run = Run::new(binary).args(["--exact", case]).limit(limit);
     if own_var("CF_E2E_STAND_IN").as_deref() == Some("1") {
         let temp = std::env::temp_dir();
+        let home = own_var("HOME").unwrap_or_else(|| panic!("stand-in case has no HOME"));
         run.var("CF_E2E_STAND_IN", "1")
+            .var("HOME", &home)
+            .var("USERPROFILE", &home)
             .var("TMPDIR", &temp)
             .var("TMP", &temp)
             .var("TEMP", &temp)

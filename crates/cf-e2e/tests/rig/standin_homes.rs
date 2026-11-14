@@ -124,8 +124,8 @@ fn standin_isolation_replaces_every_inherited_home_before_any_case() -> Outcome 
             "standin_homes::standin_isolation_replaces_every_inherited_home_before_any_case",
         ])
         .var(CHILD, "1");
-    for name in HOMES {
-        command = command.var(name, &decoy);
+    for (name, path) in cf_e2e::standin_process::home_vars(&decoy) {
+        command = command.var(name, path);
     }
     let output = command.run()?;
     assert!(output.code == Some(0), "{}{}", output.stdout, output.stderr);
