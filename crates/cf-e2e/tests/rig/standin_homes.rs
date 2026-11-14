@@ -112,7 +112,11 @@ fn standin_isolation_replaces_every_inherited_home_before_any_case() -> Outcome 
         }
         return Ok(());
     }
-    let decoy = cf_e2e::door::made("foreign-")?;
+    let temp = std::env::temp_dir();
+    let decoy = temp
+        .parent()
+        .expect("temporary folder has no parent")
+        .join(format!("synthetic-foreign-home-{}", std::process::id()));
     let mut command = cf_e2e::process::Run::new(std::env::current_exe()?)
         .inheriting_env()
         .args([
@@ -121,7 +125,7 @@ fn standin_isolation_replaces_every_inherited_home_before_any_case() -> Outcome 
         ])
         .var(CHILD, "1");
     for name in HOMES {
-        command = command.var(name, decoy.path());
+        command = command.var(name, &decoy);
     }
     let output = command.run()?;
     assert!(output.code == Some(0), "{}{}", output.stdout, output.stderr);

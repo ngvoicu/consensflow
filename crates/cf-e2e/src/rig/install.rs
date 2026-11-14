@@ -468,7 +468,11 @@ mod tests {
             assert!(said.contains("window PATH lookup"), "{said}");
             return;
         }
-        let decoy = crate::door::made("foreign-path-").unwrap();
+        let temp = std::env::temp_dir();
+        let decoy = temp
+            .parent()
+            .unwrap()
+            .join(format!("synthetic-foreign-harness-{}", std::process::id()));
         let output = crate::process::Run::new(std::env::current_exe().unwrap())
             .inheriting_env()
             .args([
@@ -476,8 +480,8 @@ mod tests {
                 "rig::install::tests::standin_isolation_window_path_refuses_a_foreign_harness_home",
             ])
             .var(CHILD, "1")
-            .var(DECOY, decoy.path())
-            .var("CODEX_HOME", decoy.path())
+            .var(DECOY, &decoy)
+            .var("CODEX_HOME", &decoy)
             .run()
             .unwrap();
         assert_eq!(output.code, Some(0), "{}{}", output.stdout, output.stderr);

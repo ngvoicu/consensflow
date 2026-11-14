@@ -83,16 +83,15 @@ pub fn start(allow_live_matrix: bool) {
     if std::env::var_os("CF_E2E_STAND_IN").is_none() {
         std::env::remove_var(crate::door::MADE_ROOTS);
     }
+    let forbidden = INHERITED_HARNESS_HOMES
+        .get()
+        .unwrap_or_else(|| panic!("stand-in inherited homes were not recorded"));
+    let handed = checked_handed_roots(forbidden);
     let parent = process_temp_parent();
-    let fixture_root = fixture_home.as_deref().map(|home| {
-        fixture_root(
-            home,
-            &parent,
-            INHERITED_HARNESS_HOMES
-                .get()
-                .unwrap_or_else(|| panic!("stand-in inherited homes were not recorded")),
-        )
-    });
+    require_audit_file(&parent, &handed, forbidden);
+    let fixture_root = fixture_home
+        .as_deref()
+        .map(|home| fixture_root(home, &parent, forbidden));
     let root = crate::door::made_in(&parent, "h-")
         .unwrap_or_else(|error| panic!("make stand-in process home: {error}"));
     let home = fixture_home.unwrap_or_else(|| root.path().join("home"));
@@ -121,6 +120,81 @@ pub fn start(allow_live_matrix: bool) {
         0,
         "register stand-in home cleanup"
     );
+}
+
+/// The door's inherited roots must be safe to inspect before its registry
+/// canonicalizes them. On Windows the door itself hands down canonical disk
+/// paths with the system's verbatim prefix; convert only that known form.
+#[allow(clippy::disallowed_methods)]
+fn checked_handed_roots(forbidden: &[PathBuf]) -> Vec<PathBuf> {
+    let roots: Vec<_> = std::env::var_os(crate::door::MADE_ROOTS)
+        .map(|value| {
+            std::env::split_paths(&value)
+                .map(plain_handed_root)
+                .collect()
+        })
+        .unwrap_or_default();
+    for root in &roots {
+        assert!(
+            safe_path_entry(root, forbidden),
+            "stand-in handed folder lookup: forbidden, linked or ambiguous path"
+        );
+    }
+    roots
+}
+
+#[cfg(windows)]
+fn plain_handed_root(root: PathBuf) -> PathBuf {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    let wide: Vec<u16> = root.as_os_str().encode_wide().collect();
+    let prefix = [b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
+    if wide.starts_with(&prefix)
+        && wide
+            .get(4)
+            .is_some_and(|ch| (*ch as u8).is_ascii_alphabetic() && *ch <= 0x7f)
+        && wide.get(5) == Some(&(b':' as u16))
+        && wide.get(6) == Some(&(b'\\' as u16))
+    {
+        PathBuf::from(std::ffi::OsString::from_wide(&wide[4..]))
+    } else {
+        root
+    }
+}
+
+#[cfg(not(windows))]
+fn plain_handed_root(root: PathBuf) -> PathBuf {
+    root
+}
+
+/// Door initialization opens an audit file before making the process home.
+/// It may do so only in a folder handed down by this stand-in's parent.
+#[allow(clippy::disallowed_methods)]
+fn require_audit_file(parent: &Path, handed: &[PathBuf], forbidden: &[PathBuf]) {
+    let audit = std::env::var_os(crate::door::AUDIT);
+    if !audit
+        .as_deref()
+        .is_some_and(|value| !value.is_empty() && value != "0")
+    {
+        return;
+    }
+    let named = std::env::var_os(crate::door::AUDIT_FILE).filter(|value| !value.is_empty());
+    let file = named.as_ref().map_or_else(
+        || parent.join(format!("consensflow-live-audit-{}.txt", std::process::id())),
+        PathBuf::from,
+    );
+    assert!(
+        std::env::var_os("CF_E2E_STAND_IN").as_deref() == Some(std::ffi::OsStr::new("1"))
+            && plain_absolute(&file)
+            && handed.iter().any(|root| same_or_inside(&file, root)),
+        "stand-in audit file lookup: not handed down by the run"
+    );
+    assert!(
+        safe_path_entry(&file, forbidden),
+        "stand-in audit file lookup: forbidden, linked or ambiguous path"
+    );
+    if named.is_none() {
+        std::env::set_var(crate::door::AUDIT_FILE, file);
+    }
 }
 
 /// The layout test's subprocess may use only a layout actually handed down by
@@ -588,6 +662,32 @@ pub fn require_watch_path(path: &Path, lookup: &str) {
 #[cfg(test)]
 mod tests {
     use super::safe_path_entry;
+
+    #[test]
+    fn standin_isolation_unowned_audit_file_is_refused_before_it_is_opened() {
+        let temp = std::env::temp_dir();
+        let foreign = temp.parent().unwrap().join("synthetic-foreign-audit-file");
+        let output = crate::process::Run::new(std::env::current_exe().unwrap())
+            .inheriting_env()
+            .arg("--list")
+            .var(crate::door::AUDIT, "1")
+            .var(crate::door::AUDIT_MADE, "1")
+            .var(crate::door::AUDIT_FILE, &foreign)
+            .run()
+            .unwrap();
+        assert_ne!(output.code, Some(0), "unowned audit file was accepted");
+        assert!(
+            output.stderr.contains("stand-in audit file lookup"),
+            "{}{}",
+            output.stdout,
+            output.stderr
+        );
+        assert!(
+            !output.stderr.contains("not there to add to"),
+            "the door attempted to open the unowned file: {}",
+            output.stderr
+        );
+    }
 
     #[test]
     fn standin_isolation_fixture_home_must_be_handed_down() {

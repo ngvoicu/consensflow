@@ -621,9 +621,12 @@ mod tests {
     #[test]
     fn standin_isolation_log_begin_never_reads_a_decoy_pi_auth() {
         const CHILD: &str = "CF_T1647_PI_CHILD";
+        const OUTSIDE: &str = "CF_T1647_PI_OUTSIDE";
         if crate::process::own_var(CHILD).is_some() {
             let decoy =
                 std::path::PathBuf::from(crate::process::own_var("PI_CODING_AGENT_DIR").unwrap());
+            let inherited = std::path::PathBuf::from(crate::process::own_var(OUTSIDE).unwrap());
+            assert_ne!(decoy, inherited.join(".pi/agent"));
             crate::door::make_dir(&decoy).unwrap();
             crate::door::write(decoy.join("auth.json"), "{\"cliproxyapi\":{}}\n").unwrap();
             super::super::Log::begin("stand-in decoy").unwrap();
@@ -634,6 +637,13 @@ mod tests {
             );
             return;
         }
+        // This is the child's inherited decoy home, outside the home that its
+        // own bootstrap makes. With no PI_CODING_AGENT_DIR, the old lookup
+        // would have read this file through HOME.
+        let inherited = crate::door::made("pi-inherited-home-").unwrap();
+        let agent = inherited.path().join(".pi/agent");
+        crate::door::make_dir(&agent).unwrap();
+        crate::door::write(agent.join("auth.json"), "{\"outside-provider\":{}}\n").unwrap();
         let output = crate::process::Run::new(std::env::current_exe().unwrap())
             .inheriting_env()
             .args([
@@ -642,7 +652,12 @@ mod tests {
                 "--nocapture",
             ])
             .var(CHILD, "1")
+            .var(OUTSIDE, inherited.path())
+            .var("HOME", inherited.path())
+            .var("USERPROFILE", inherited.path())
             .var("CF_E2E_STAND_IN", "1")
+            .without("PI_CODING_AGENT_DIR")
+            .without("PI_CODING_AGENT_SESSION_DIR")
             .without("CONSENSFLOW_TEST_MACHINE")
             .run()
             .unwrap();
