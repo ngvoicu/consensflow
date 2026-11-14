@@ -10,6 +10,7 @@ use cf_engine::testing::Context;
 use cf_engine::SwitchWhen;
 use cf_harness::records::{End, Source};
 use cf_ledger::NewNote;
+use cf_proto::cf_word::CfWord;
 
 use crate::chiefs::{to, with_codex};
 use crate::fixtures::{after, exhausted, given, now, Tiers};
@@ -114,7 +115,7 @@ fn a_worker_awake_with_background_work_is_reminded_at_the_first_hour() {
     context.pass().unwrap();
     context.advance(AN_HOUR - FORTY_MINUTES);
     context.pass().unwrap();
-    assert_eq!(typed(&context, &tiers), ["T-1 has been working in the background for 60 minutes, holding again 0 times (2 commands). Its result comes when that ends; `cf task finish T-1` takes what it said last now."]);
+    assert_eq!(typed(&context, &tiers), [format!("T-1 has been working in the background for 60 minutes, holding again 0 times (2 commands). Its result comes when that ends; `{} task finish T-1` takes what it said last now.", CfWord::bare())]);
 }
 
 #[test]
@@ -435,7 +436,7 @@ fn a_worker_who_holds_again_after_forty_minutes_is_typed_at_the_first_hour() {
     context.pass().unwrap();
     assert_eq!(
         typed(&context, &tiers),
-        ["T-1 has been working in the background for 60 minutes, holding again 1 time (2 commands). Its result comes when that ends; `cf task finish T-1` takes what it said last now."]
+        [format!("T-1 has been working in the background for 60 minutes, holding again 1 time (2 commands). Its result comes when that ends; `{} task finish T-1` takes what it said last now.", CfWord::bare())]
     );
     for _ in 0..4 {
         context.pass().unwrap();
@@ -473,8 +474,8 @@ fn a_worker_who_keeps_holding_every_forty_minutes_is_typed_again_at_four_hours()
     assert_eq!(
         typed(&context, &tiers),
         [
-            "T-1 has been working in the background for 60 minutes, holding again 1 time (1 command). Its result comes when that ends; `cf task finish T-1` takes what it said last now.",
-            "T-1 has been working in the background for 4 h 0 min, holding again 6 times (6 commands). Its result comes when that ends; `cf task finish T-1` takes what it said last now."
+            format!("T-1 has been working in the background for 60 minutes, holding again 1 time (1 command). Its result comes when that ends; `{} task finish T-1` takes what it said last now.", CfWord::bare()),
+            format!("T-1 has been working in the background for 4 h 0 min, holding again 6 times (6 commands). Its result comes when that ends; `{} task finish T-1` takes what it said last now.", CfWord::bare())
         ]
     );
     for _ in 0..4 {
@@ -518,7 +519,7 @@ fn a_worker_who_sends_its_own_note_starts_a_new_stretch_at_its_next_hold() {
     assert!(typed(&context, &tiers).is_empty(), "the old hour is over");
     context.advance(FORTY_MINUTES);
     context.pass().unwrap();
-    assert_eq!(typed(&context, &tiers), ["T-1 has been working in the background for 60 minutes, holding again 0 times (2 commands). Its result comes when that ends; `cf task finish T-1` takes what it said last now."]);
+    assert_eq!(typed(&context, &tiers), [format!("T-1 has been working in the background for 60 minutes, holding again 0 times (2 commands). Its result comes when that ends; `{} task finish T-1` takes what it said last now.", CfWord::bare())]);
 }
 
 #[test]
@@ -550,7 +551,7 @@ fn a_worker_who_asks_and_is_answered_starts_a_new_stretch() {
     assert!(typed(&context, &tiers).is_empty(), "the old hour is over");
     context.advance(FORTY_MINUTES);
     context.pass().unwrap();
-    assert_eq!(typed(&context, &tiers), ["T-1 has been working in the background for 60 minutes, holding again 0 times (1 command). Its result comes when that ends; `cf task finish T-1` takes what it said last now."]);
+    assert_eq!(typed(&context, &tiers), [format!("T-1 has been working in the background for 60 minutes, holding again 0 times (1 command). Its result comes when that ends; `{} task finish T-1` takes what it said last now.", CfWord::bare())]);
 }
 
 #[test]
@@ -575,7 +576,7 @@ fn a_worker_given_a_question_while_held_starts_a_new_stretch_when_it_holds_again
     assert!(typed(&context, &tiers).is_empty(), "the old hour is over");
     context.advance(FORTY_MINUTES);
     context.pass().unwrap();
-    assert_eq!(typed(&context, &tiers), ["T-1 has been working in the background for 60 minutes, holding again 0 times (1 command). Its result comes when that ends; `cf task finish T-1` takes what it said last now."]);
+    assert_eq!(typed(&context, &tiers), [format!("T-1 has been working in the background for 60 minutes, holding again 0 times (1 command). Its result comes when that ends; `{} task finish T-1` takes what it said last now.", CfWord::bare())]);
 }
 
 #[test]
@@ -603,7 +604,7 @@ fn a_worker_whose_result_is_followed_by_more_work_starts_a_new_stretch() {
     assert!(typed(&context, &tiers).is_empty(), "the old hour is over");
     context.advance(FORTY_MINUTES);
     context.pass().unwrap();
-    assert_eq!(typed(&context, &tiers), ["T-1 has been working in the background for 60 minutes, holding again 0 times (1 command). Its result comes when that ends; `cf task finish T-1` takes what it said last now."]);
+    assert_eq!(typed(&context, &tiers), [format!("T-1 has been working in the background for 60 minutes, holding again 0 times (1 command). Its result comes when that ends; `{} task finish T-1` takes what it said last now.", CfWord::bare())]);
 }
 
 #[test]
@@ -626,7 +627,7 @@ fn a_hold_that_ends_by_itself_is_shown_on_its_task_and_not_typed() {
         .expect("the note is in the task's thread");
     assert_eq!(
         note.body,
-        "T-1 is still working in the background (1 command); its result comes when it ends. `cf task finish T-1` takes what it said last now.\n\nWhat it said:\n\nThe Windows run starts"
+        format!("T-1 is still working in the background (1 command); its result comes when it ends. `{} task finish T-1` takes what it said last now.\n\nWhat it said:\n\nThe Windows run starts", CfWord::bare())
     );
     assert_eq!(note.state, "read");
     for _ in 0..3 {
@@ -716,8 +717,8 @@ fn a_single_long_hold_is_typed_at_one_hour_and_again_at_four_hours() {
 
     context.advance(1_000);
     context.pass().unwrap();
-    let reminder = "T-1 has been working in the background for 60 minutes, holding again 0 times (1 command). Its result comes when that ends; `cf task finish T-1` takes what it said last now.";
-    assert_eq!(typed(&context, &tiers), [reminder]);
+    let reminder = format!("T-1 has been working in the background for 60 minutes, holding again 0 times (1 command). Its result comes when that ends; `{} task finish T-1` takes what it said last now.", CfWord::bare());
+    assert_eq!(typed(&context, &tiers), [reminder.clone()]);
     chief_reads(&context);
     assert_eq!(
         aside(&tiers).as_deref(),
@@ -737,7 +738,7 @@ fn a_single_long_hold_is_typed_at_one_hour_and_again_at_four_hours() {
     context.pass().unwrap();
     assert_eq!(
         typed(&context, &tiers),
-        [reminder, "T-1 has been working in the background for 4 h 0 min, holding again 0 times (1 command). Its result comes when that ends; `cf task finish T-1` takes what it said last now."]
+        [reminder, format!("T-1 has been working in the background for 4 h 0 min, holding again 0 times (1 command). Its result comes when that ends; `{} task finish T-1` takes what it said last now.", CfWord::bare())]
     );
 }
 

@@ -883,22 +883,27 @@ fn section<'a>(text: &'a str, heading: &str) -> &'a str {
 
 #[test]
 fn every_member_is_taught_when_and_how_to_tell_without_waiting() {
+    let cf = CfWord::new("C:/Program Files/ConsensFlow/cf.exe", Shell::Posix);
     for role in cf_ledger::roles::ids() {
-        let text = instructions(role, &[zeus()]);
+        let text = role_instructions(&Env::default(), role, &[zeus()], &cf, None).unwrap();
         let commands = section(&text, "Your commands");
+        let tell =
+            format!("{cf} tell \"…\" tell whoever gave you the task, without asking or waiting");
+        let ask =
+            format!("If you cannot go on without an answer, use `{cf} ask` and end your turn.");
         assert_says(
             commands,
             role,
             &[
-                "cf tell \"…\" tell whoever gave you the task, without asking or waiting",
+                &tell,
                 "A tell to your chief is for what it must know before your result: a wrong premise in the brief, a finding that changes another task, a blocker you work around.",
                 "Progress is not a tell.",
                 "Go on working after a tell.",
-                "If you cannot go on without an answer, use `cf ask` and end your turn.",
+                &ask,
             ],
         );
-        assert_eq!(text.matches("cf tell ").count(), 1, "{role}");
-        assert!(!text.contains("cf note --human"), "{role}");
+        assert_eq!(text.matches(&format!("{cf} tell ")).count(), 1, "{role}");
+        assert!(!text.contains(&format!("{cf} note --human")), "{role}");
     }
 }
 

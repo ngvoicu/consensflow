@@ -4,6 +4,7 @@
 //! moves on. To anyone but a chief it is queued as any note.
 
 use cf_ledger::{MessageView, NewNote, NewTask, SHOWN};
+use cf_proto::cf_word::CfWord;
 use serde_json::json;
 
 use crate::fixture::{frozen_world, world, World};
@@ -109,6 +110,12 @@ fn note_of_tell(w: &mut World, task: i64, session: &str, tell: i64) -> MessageVi
         .note_paused_answer(w.project, task, session, tell, None, "The parser is done.")
         .expect("the ledger")
         .expect("the turn's note")
+}
+
+/// The unrendered ledger note uses the canonical bare command word.
+fn paused_ways_on() -> String {
+    let cf = CfWord::bare();
+    format!("If that is the result, take it: {cf} task finish T-1. To send it on: {cf} task resume T-1 \"…\".")
 }
 
 fn assert_shown_tell_note(w: &World, task: i64, tell: i64, id: i64) {
@@ -481,8 +488,7 @@ fn a_shown_note_has_a_typed_fallback_if_its_board_answers_delivery_fails() {
         if moved {
             assert!(fallback.body.contains("has moved on since"));
         } else {
-            assert!(fallback.body.contains("cf task finish T-1"));
-            assert!(fallback.body.contains("cf task resume T-1"));
+            assert!(fallback.body.ends_with(&paused_ways_on()), "{fallback:?}");
         }
     }
 }
@@ -599,8 +605,7 @@ fn an_unanswered_tells_note_is_queued_with_both_ways_on_while_the_task_stays_pau
     let (task, session, tell) = delivered_tell(&mut w);
     let note = note_of_tell(&mut w, task, &session, tell);
     assert_eq!(note.state, "queued");
-    assert!(note.body.contains("cf task finish T-1"));
-    assert!(note.body.contains("cf task resume T-1"));
+    assert!(note.body.ends_with(&paused_ways_on()), "{note:?}");
     assert_eq!(w.next("chief"), Some(note.id));
 }
 
