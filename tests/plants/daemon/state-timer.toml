@@ -1,0 +1,76 @@
+# A wrong state start on the board is silent. Each plant must be caught by the
+# ledger's fixed-clock board tests, with no display or wall-clock oracle.
+[run]
+state-timer = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "state_timer"]
+
+[[plant]]
+name = "state timer: assignment does not reset the clock"
+meant = "board_state_time_is_the_last_move_not_the_last_edit_and_survives_restart"
+runs = ["state-timer"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/page_reads.rs"
+find = "AND kind IN ('task.opened', 'task.created', 'task.assigned', 'task.released', 'task.state')"
+replace = "AND kind IN ('task.opened', 'task.created', 'task.released', 'task.state')"
+
+[[plant]]
+name = "state timer: release does not reset the clock"
+meant = "board_state_time_is_the_last_move_not_the_last_edit_and_survives_restart"
+runs = ["state-timer"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/page_reads.rs"
+find = "AND kind IN ('task.opened', 'task.created', 'task.assigned', 'task.released', 'task.state')"
+replace = "AND kind IN ('task.opened', 'task.created', 'task.assigned', 'task.state')"
+
+[[plant]]
+name = "state timer: only creation assignment and release reset the clock"
+meant = "board_state_time_follows_named_creation_and_later_state_moves"
+runs = ["state-timer"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/page_reads.rs"
+find = "AND kind IN ('task.opened', 'task.created', 'task.assigned', 'task.released', 'task.state')"
+replace = "AND kind IN ('task.opened', 'task.created', 'task.assigned', 'task.released')"
+
+[[plant]]
+name = "state timer: the last edit resets the clock"
+meant = "board_state_time_is_the_last_move_not_the_last_edit_and_survives_restart"
+runs = ["state-timer"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/page_reads.rs"
+find = "coalesce(move.at, tasks.created_at) AS state_since"
+replace = "tasks.updated_at AS state_since"
+
+[[plant]]
+name = "state timer: an open task starts at its row instead of task.opened"
+meant = "board_state_time_uses_the_initial_event_even_when_the_row_was_written_earlier"
+runs = ["state-timer"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/page_reads.rs"
+find = "AND kind IN ('task.opened', 'task.created', 'task.assigned', 'task.released', 'task.state')"
+replace = "AND kind IN ('task.created', 'task.assigned', 'task.released', 'task.state')"
+
+[[plant]]
+name = "state timer: a named task starts at its row instead of task.created"
+meant = "board_state_time_uses_the_initial_event_even_when_the_row_was_written_earlier"
+runs = ["state-timer"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/page_reads.rs"
+find = "AND kind IN ('task.opened', 'task.created', 'task.assigned', 'task.released', 'task.state')"
+replace = "AND kind IN ('task.opened', 'task.assigned', 'task.released', 'task.state')"
+
+[[plant]]
+name = "state timer: a later move in another project replaces this task's clock"
+meant = "board_state_time_uses_the_initial_event_even_when_the_row_was_written_earlier"
+runs = ["state-timer"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/page_reads.rs"
+find = "WHERE project_id = ?1 AND json_valid(data)"
+replace = "WHERE json_valid(data)"
+
+[[plant]]
+name = "state timer: the first move is used instead of the last"
+meant = "board_state_time_is_the_last_move_not_the_last_edit_and_survives_restart"
+runs = ["state-timer"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/page_reads.rs"
+find = "AS number, max(id) AS event_id"
+replace = "AS number, min(id) AS event_id"

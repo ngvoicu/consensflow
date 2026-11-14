@@ -151,27 +151,47 @@ pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError
             results.insert(task, row.get("body")?);
         }
     }
+    // One scan of this project's event index for the whole board. Event id, not the
+    // clock's order, says which move came last; the integer affinity lets SQLite
+    // index the grouped task numbers for the join. A row with no readable move
+    // event falls back to its creation time.
     let tasks = store
         .db
         .prepare(&format!(
-            "{TASK_SELECT} WHERE t.project_id = ? AND t.deleted_at IS NULL ORDER BY t.number"
+            "WITH last_moves AS (
+               SELECT CAST(json_extract(data, '$.task') AS INTEGER) AS number, max(id) AS event_id
+               FROM event
+               WHERE project_id = ?1 AND json_valid(data)
+                 AND kind IN ('task.opened', 'task.created', 'task.assigned', 'task.released', 'task.state')
+                 AND (kind IN ('task.opened', 'task.created')
+                      OR json_extract(data, '$.from') IS NULL
+                      OR json_extract(data, '$.to') IS NULL
+                      OR json_extract(data, '$.from') != json_extract(data, '$.to'))
+               GROUP BY CAST(json_extract(data, '$.task') AS INTEGER)
+             )
+             SELECT tasks.*, coalesce(move.at, tasks.created_at) AS state_since
+             FROM ({TASK_SELECT} WHERE t.project_id = ?1 AND t.deleted_at IS NULL) tasks
+             LEFT JOIN last_moves ON last_moves.number = tasks.number
+             LEFT JOIN event move ON move.id = last_moves.event_id
+             ORDER BY tasks.number"
         ))?
         .query_map([project_id], |row| {
             let task = task_view(row)?;
+            let state_since: String = row.get("state_since")?;
             let left: Option<String> = row.get("assignee_left_at")?;
             let member: Option<String> = row.get("assignee_member")?;
             let lane = match member {
                 Some(member) if left.is_some() => Some(member),
                 _ => task.assignee.clone(),
             };
-            Ok((task, lane))
+            Ok((task, lane, state_since))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let cards: Vec<(TaskCard, Option<String>)> = tasks
         .into_iter()
-        .map(|(task, lane)| {
+        .map(|(task, lane, state_since)| {
             let result = results.get(&task.id).map(|body| title_of(body));
-            (TaskCard::of(task, result), lane)
+            (TaskCard::of(task, result, state_since), lane)
         })
         .collect();
     let gated = store

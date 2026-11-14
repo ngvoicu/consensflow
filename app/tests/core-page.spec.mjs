@@ -114,6 +114,7 @@ const task = (number, title, state, requester, assignee, minutesAgo = 3, extra =
   deletedAt: null,
   createdAt: at(minutesAgo + 1),
   updatedAt: at(minutesAgo),
+  stateSince: at(minutesAgo),
   ...extra,
 })
 /** A message of a task's thread as the daemon reads it: delivered, sent `minutesAgo`. */
@@ -1052,6 +1053,92 @@ async function pickDesigner(dialog) {
   await add.locator('[name="role"]').selectOption('designer')
   await expect(add.locator('[name="memberHarness"]')).toHaveValue('codex')
 }
+
+test('card state clocks follow the ledger time, tick, and reset only on a move', async ({
+  page,
+}) => {
+  const now = Date.parse('2026-11-14T12:00:00.000Z')
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  chief.tasks = [
+    task(41, 'Queued', 'queued', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 45_000).toISOString(),
+    }),
+    task(42, 'Working', 'working', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 12 * 60_000).toISOString(),
+    }),
+    task(43, 'Waiting', 'waiting', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 185 * 60_000).toISOString(),
+    }),
+    task(44, 'Done', 'done', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 52 * 3_600_000).toISOString(),
+    }),
+    task(45, 'Accepted', 'accepted', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 59_000).toISOString(),
+    }),
+    task(46, 'Paused', 'paused', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 8 * 60_000).toISOString(),
+    }),
+    task(47, 'Failed', 'failed', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 5_000).toISOString(),
+    }),
+    task(48, 'Cancelled', 'cancelled', 'chief', 'chief', 0, {
+      stateSince: new Date(now - 6_000).toISOString(),
+    }),
+  ]
+  data.boards[1].open.push(
+    task(49, 'Open', 'open', 'chief', null, 0, { stateSince: new Date(now - 7_000).toISOString() }),
+  )
+  await page.clock.install({ time: now })
+  await open(page, data)
+  const timer = (n) => page.locator(`button.card[data-task="${n}"] .card-age`)
+  await expect(timer(41)).toHaveText('45s')
+  await expect(page.locator('button.card[data-task="41"]')).toHaveAccessibleDescription(
+    'Queued for 45s',
+  )
+  await expect(timer(42)).toHaveText('12m')
+  await expect(timer(43)).toHaveText('3h 05m')
+  await expect(timer(44)).toHaveText('2d 4h')
+  await expect(timer(45)).toHaveText('59s')
+  for (const [number, age] of [
+    [46, '8m'],
+    [47, '5s'],
+    [48, '6s'],
+    [49, '7s'],
+  ]) {
+    await expect(timer(number)).toHaveText(age)
+    await expect(timer(number)).toBeVisible()
+  }
+  await page.reload()
+  await expect(timer(41)).toHaveText('45s')
+  await page.clock.fastForward(1_000)
+  await expect(timer(41)).toHaveText('46s')
+  await expect(page.locator('button.card[data-task="41"]')).toHaveAccessibleDescription(
+    'Queued for 46s',
+  )
+  await expect(timer(45)).toHaveText('1m')
+  await page.evaluate(() => {
+    const task = window.__model.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+      .tasks[0]
+    task.title = 'Edited'
+    task.updatedAt = new Date().toISOString()
+    window.__listeners.get('state-changed')()
+  })
+  await expect(page.locator('button.card[data-task="41"] .card-title')).toHaveText('Edited')
+  await expect(timer(41)).toHaveText('46s')
+  await page.evaluate(() => {
+    const task = window.__model.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+      .tasks[0]
+    task.state = 'working'
+    task.stateSince = new Date().toISOString()
+    window.__listeners.get('state-changed')()
+  })
+  await expect(timer(41)).toHaveText('0s')
+  await page.clock.fastForward(60_000)
+  await expect(timer(41)).toHaveText('1m')
+  await expect(timer(42)).toHaveText('13m')
+  await expect(timer(43)).toHaveText('3h 06m')
+})
 
 test('draws the kanban: a row per participant, a column per state, and cards that stay when done', async ({
   page,

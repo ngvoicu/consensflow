@@ -143,6 +143,18 @@ function age(iso, now = Date.now()) {
   return `${Math.round(hours / 24)}d`
 }
 
+/** How long a task has been in its state, without rounding up to the next unit. */
+function stateAge(iso, now = Date.now()) {
+  const seconds = Math.max(0, Math.floor((now - Date.parse(iso)) / 1000))
+  if (!Number.isFinite(seconds)) return '—'
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ${String(minutes % 60).padStart(2, '0')}m`
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`
+}
+
 /**
  * A member of the staff, as the ledger counts one: a participant on a harness,
  * neither one of a member's sessions, nor the chief, nor the human.
@@ -623,6 +635,8 @@ export class BoardView {
     this.#stackTitle = stack.querySelector('#stack-title')
     this.#stackCards = stack.querySelector('#stack-cards')
     this.#actions = actions
+    // Update the clocks in place: a tick must not redraw a focused card or the board.
+    setInterval(() => this.#tick(), 1000)
     // A card chosen opens its task, as on the board, and the dialog goes.
     this.#stackCards.addEventListener('click', (event) => {
       if (event.target.closest('.card') !== null) stack.close()
@@ -1109,6 +1123,8 @@ export class BoardView {
     this.#stacked = { project: projectId, handle, role, state }
     this.#drawStack()
     this.#stack.showModal()
+    // A long list itself can take the browser's first focus; start on its first card.
+    this.#stackCards.querySelector('.card')?.focus({ preventScroll: true })
   }
 
   /**
@@ -1142,6 +1158,20 @@ export class BoardView {
     )
   }
 
+  #tick() {
+    const now = Date.now()
+    for (const root of [this.#root, this.#stackCards]) {
+      for (const age of root.querySelectorAll('.card-age')) {
+        const text = stateAge(age.dataset.since, now)
+        if (age.textContent !== text) {
+          age.textContent = text
+          const card = age.closest('.card')
+          card.setAttribute('aria-description', `${STATE_LABEL[card.dataset.state]} for ${text}`)
+        }
+      }
+    }
+  }
+
   #card(task, busy = null) {
     const item = element('li', 'card-item')
     const card = button('', 'card', () => this.#actions.onOpenTask(task.number))
@@ -1153,6 +1183,17 @@ export class BoardView {
       'aria-label',
       `T-${task.number}, ${task.title}, ${stateLabel(task)}, from ${who(task.requester)}`,
     )
+    const elapsed = stateAge(task.stateSince)
+    const status = element('span', 'card-status')
+    const elapsedNode = element('span', 'card-age', elapsed)
+    elapsedNode.dataset.since = task.stateSince ?? ''
+    elapsedNode.title = 'Time in this state'
+    card.setAttribute('aria-description', `${STATE_LABEL[task.state]} for ${elapsed}`)
+    status.append(
+      element('span', 'card-state', stateLabel(task)),
+      task.questionPending ? ' · Waiting ' : ' · ',
+      elapsedNode,
+    )
     const where = element('span', 'card-route', route(task, busy))
     // What it waits on is said on the card itself: the window's lamp says it rests.
     if (task.held) {
@@ -1162,7 +1203,7 @@ export class BoardView {
       element('span', 'card-number', `T-${task.number}`),
       element('span', 'card-title', task.title),
       where,
-      element('span', 'card-state', stateLabel(task)),
+      status,
     )
     // A result reads by its first line: its drawer has it whole.
     if (task.result) card.append(element('span', 'card-result', task.result.trim().split('\n')[0]))
