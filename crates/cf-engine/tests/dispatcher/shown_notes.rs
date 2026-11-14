@@ -730,7 +730,7 @@ fn a_single_long_hold_is_typed_at_one_hour_and_again_at_four_hours() {
         context.advance(AN_HOUR);
         context.pass().unwrap();
     }
-    assert_eq!(typed(&context, &tiers), [reminder]);
+    assert_eq!(typed(&context, &tiers), [reminder.clone()]);
     context.advance(AN_HOUR - 1_000);
     context.pass().unwrap();
     assert_eq!(typed(&context, &tiers).len(), 1);
