@@ -5,6 +5,147 @@
 
 use super::*;
 
+/// A made Pi 1.5.0 session, keeping the field order of the benchmark's cut
+/// message but none of its words. `content` is a JSON array of our own.
+fn length_stop(content: &str) -> Stage {
+    let mut stage = Stage::new();
+    stage.write_text(&format!(
+        concat!(
+            "{{\"type\":\"session\",\"version\":3,\"id\":\"hazy-ridge\",\"timestamp\":\"2026-08-24T18:00:00.703Z\"}}\n",
+            "{{\"type\":\"message\",\"id\":\"u1\",\"parentId\":null,\"timestamp\":\"2026-08-24T18:00:01.000Z\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"text\",\"text\":\"Inspect the parser\"}}]}}}}\n",
+            "{{\"type\":\"message\",\"id\":\"a1\",\"parentId\":\"u1\",\"timestamp\":\"2026-08-24T18:00:02.000Z\",\"message\":{{",
+            "\"role\":\"assistant\",\"content\":{content},\"api\":\"made-api\",\"provider\":\"made-provider\",\"model\":\"made-model\",",
+            "\"usage\":{{\"input\":1,\"output\":2,\"cacheRead\":0,\"cacheWrite\":0,\"reasoning\":2,\"totalTokens\":3,\"cost\":{{\"input\":0,\"output\":0,\"cacheRead\":0,\"cacheWrite\":0,\"total\":0,\"totalFromProvider\":0}}}},",
+            "\"stopReason\":\"length\",\"timestamp\":1790000002000,\"responseId\":\"made-response\",\"rawStopReason\":\"length\",\"durationMs\":1000,\"thinkingLevel\":\"high\"}}}}\n"
+        ),
+        content = content
+    ));
+    stage
+}
+
+fn assert_length_failure(mut stage: Stage) {
+    let before_end = stage.at(1_000);
+    assert!(
+        before_end.in_flight && !before_end.failed,
+        "Pi may still continue"
+    );
+    let record = stage.at(120_000);
+    assert!(!record.in_flight, "the cut turn must be over: {record:?}");
+    assert_eq!(record.settlement, Settlement::Settled);
+    assert!(record.failed);
+    assert!(record.quota.is_none());
+    assert_eq!(record.failure, None);
+    assert_eq!(
+        record.failure_kind.as_deref(),
+        Some("the member's reply was cut at the model's output limit; nothing was taken as its result")
+    );
+    assert!(
+        !record.items.last().unwrap().complete,
+        "a cut reply is not a result"
+    );
+}
+
+#[test]
+fn a_cut_tool_call_is_followed_by_pis_error_result_and_continuation() {
+    // Pi 1.5.0 declines a truncated tool call, records its error result and
+    // asks the model again. That cut message is not the agent's end.
+    let cut = || {
+        message(
+            "a1",
+            json!({"role":"assistant", "stopReason":"length",
+        "content":[{"type":"toolCall", "id":"c1", "name":"read", "arguments":{}}]}),
+        )
+    };
+    let mut stage = Stage::with(&[
+        header(),
+        user("u1", "go"),
+        cut(),
+        result("r1", &json!("c1")),
+    ]);
+    let waiting = stage.at(120_000);
+    assert!(waiting.in_flight && !waiting.failed);
+    assert_eq!(waiting.settlement, Settlement::InFlight);
+    stage.write(&[
+        header(),
+        user("u1", "go"),
+        cut(),
+        result("r1", &json!("c1")),
+        assistant("a2", "stop", "Inspection complete."),
+    ]);
+    let done = stage.at(120_000);
+    assert_eq!(done.settlement, Settlement::Settled);
+    assert!(!done.failed && done.failure_kind.is_none());
+}
+
+#[test]
+fn a_length_stop_after_only_thinking_ends_the_turn_as_a_failure() {
+    assert_length_failure(length_stop(
+        r#"[{"type":"thinking","thinking":"Let me inspect the parser.","thinkingSignature":"made"}]"#,
+    ));
+}
+
+#[test]
+fn a_length_stop_after_some_text_ends_the_turn_as_a_failure() {
+    assert_length_failure(length_stop(
+        r#"[{"type":"thinking","thinking":"First check the parser.","thinkingSignature":"made"},{"type":"text","text":"The parser appears to"}]"#,
+    ));
+}
+
+#[test]
+fn a_deferred_response_ends_the_turn_as_a_failure_without_a_result() {
+    // Pi 1.5.0's agent loop ends after a deferred response with no tool calls:
+    // the provider returned a handle, not an answer to this task.
+    let mut stage = Stage::with(&[
+        header(),
+        user("u1", "Inspect the parser"),
+        message(
+            "a1",
+            json!({
+                "role": "assistant", "content": [], "stopReason": "deferred",
+                "deferred": { "provider": "made-provider", "modelId": "made-model",
+                    "api": "made-api", "id": "made-handle" }
+            }),
+        ),
+    ]);
+    let record = stage.at(120_000);
+    assert!(
+        !record.in_flight,
+        "the deferred turn must be over: {record:?}"
+    );
+    assert_eq!(record.settlement, Settlement::Settled);
+    assert!(record.failed && record.quota.is_none());
+    assert_eq!(record.failure, None);
+    assert_eq!(
+        record.failure_kind.as_deref(),
+        Some("the provider deferred the member's reply; no result was returned")
+    );
+    assert!(!record.items.last().unwrap().complete);
+}
+
+#[test]
+fn a_later_message_clears_the_cut_failure_and_pending_is_not_an_end() {
+    let cut = || assistant("a1", "length", "partial");
+    for next in [
+        assistant("a2", "stop", "complete"),
+        user("u2", "try another way"),
+    ] {
+        let mut stage = Stage::with(&[header(), user("u1", "go"), cut(), next]);
+        let record = stage.at(120_000);
+        assert!(!record.failed && record.failure_kind.is_none());
+    }
+    let mut stage = Stage::with(&[
+        header(),
+        user("u1", "go"),
+        cut(),
+        failing("a2", &json!("provider error"), &json!(0)),
+    ]);
+    let record = stage.at(120_000);
+    assert!(record.failed && record.failure_kind.is_none());
+    assert_eq!(record.failure.as_deref(), Some("provider error"));
+    let mut pending = Stage::with(&[header(), user("u1", "go"), assistant("a1", "pending", "")]);
+    assert!(pending.at(120_000).in_flight);
+}
+
 #[test]
 fn a_record_that_is_null_fails_the_look_and_a_file_of_no_record_is_an_empty_session() {
     let mut stage = Stage::with(&[header(), Value::Null]);

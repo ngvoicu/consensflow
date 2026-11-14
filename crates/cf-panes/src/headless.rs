@@ -183,13 +183,10 @@ fn takes_human_keys(value: Option<&std::ffi::OsStr>) -> bool {
 
 /// The headless pane helper, running the WINDOW's handlers.
 ///
-/// `consensflow-bridge` used to carry its own copy of the pane operations, and
-/// a copy is a contract that drifts: it had no pane id or generation on
-/// `pane.open`, and it never reported a natural `pane.exit`. The real Node
-/// side speaks to the window, so against the helper it could only be refused.
-/// There is nothing to keep in step here: this is `register_pane_handlers`,
-/// the same `InputQueue` and the same drain the window uses, over stdin and
-/// stdout instead of a webview.
+/// The Rust daemon speaks to the window through this code, over stdin and
+/// stdout instead of a webview: there is no second copy of the pane
+/// operations for it to keep in step. This is `register_pane_handlers`,
+/// the same `InputQueue` and the same drain the window uses.
 ///
 /// Serves until the peer closes the transport, then ends what it opened and tells how
 /// each ended ([`shut_down`]). `human_keys` is what [`HUMAN_KEYS`] is in the

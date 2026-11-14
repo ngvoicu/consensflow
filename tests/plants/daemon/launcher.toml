@@ -429,8 +429,8 @@ runs = ["launcher-pair"]
 
 [[plant.edit]]
 file = "crates/cf-launcher/src/install.rs"
-find = 'let _ = std::fs::remove_file(script_of(&file));'
-replace = 'let _ = script_of(&file);'
+find = 'if let Err(failed) = std::fs::remove_file(&cmd) {'
+replace = 'if let Err(failed) = Ok::<(), std::io::Error>(()) {'
 
 [[plant]]
 name = "launcher: setup replaces the cmd of someone else"

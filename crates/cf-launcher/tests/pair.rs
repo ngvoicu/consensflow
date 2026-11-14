@@ -103,6 +103,41 @@ fn setup_takes_away_the_cmd_of_ours_that_a_build_before_the_shim_left() {
     );
 }
 
+/// Windows only: the old command of ours is held open by a handle that lets
+/// it be read but not deleted, while on Unix an open file is removed with the
+/// folder's write. It stays, so `setup` must say so instead of reporting the
+/// install done.
+#[cfg(windows)]
+#[test]
+fn setup_says_so_when_the_cmd_of_ours_cannot_be_taken_away() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let home = Home::new();
+    let bundle = Bundle::new(home.root(), "This");
+    let old = Bundle::new(home.root(), "Old");
+    let [(_, consensflow, _), (cf_program, cf, cf_launch)] = pairs(&home);
+    write(&consensflow, &script_naming(&old.cf, &home));
+    write(&cf, &script_naming(&old.cf, &home));
+    // FILE_SHARE_READ (1): `setup` may read it to know it is ours, but no one
+    // may delete it while this handle is open.
+    let held = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(1)
+        .open(&cf)
+        .unwrap();
+
+    let outcome = install(&home.env(true), &bundle.cf, &at(&home));
+    drop(held);
+
+    let said = outcome.unwrap_err();
+    assert!(
+        said.contains(&cf.display().to_string()),
+        "it names the command it could not take away: {said}"
+    );
+    // The launch files and the shims are in place; the old command is still there.
+    assert!(cf.exists() && !consensflow.exists());
+    assert!(cf_launch.exists() && cf_program.exists());
+}
+
 #[test]
 fn setup_leaves_a_cmd_of_someone_else_and_makes_no_launcher_under_its_name() {
     let home = Home::new();

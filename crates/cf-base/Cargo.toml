@@ -6,6 +6,11 @@ edition.workspace = true
 rust-version.workspace = true
 publish = false
 
+# The programs a test starts that end when the test does (`fixture`): for the
+# tests of the crates that start them alone, never into what ships.
+[features]
+test-support = []
+
 [dependencies]
 icu_normalizer.workspace = true
 icu_properties.workspace = true

@@ -22,6 +22,18 @@ const FAILURE: &str = "Connection error.";
 /// The record of the conversation `session` on disk: the user's message and the step that
 /// failed, written `quiet_for_ms` before the adapters' clock.
 fn failed_turn(home: &Home, session: &str, quiet_for_ms: i64) {
+    turn(
+        home,
+        session,
+        quiet_for_ms,
+        json!({
+            "role": "assistant", "stopReason": "error", "errorMessage": FAILURE, "content": []
+        }),
+    );
+}
+
+/// The same session with a made assistant message.
+fn turn(home: &Home, session: &str, quiet_for_ms: i64, assistant: Value) {
     let folder = Path::new(&home.root)
         .join("home")
         .join(".pi")
@@ -35,8 +47,7 @@ fn failed_turn(home: &Home, session: &str, quiet_for_ms: i64) {
         json!({ "type": "session", "version": 3, "id": session, "timestamp": "2026-10-13T10:00:00.000Z" }),
         json!({ "type": "message", "id": "u1", "timestamp": at, "message": {
             "role": "user", "content": [{ "type": "text", "text": "Count to forty" }] } }),
-        json!({ "type": "message", "id": "a1", "timestamp": at, "message": {
-            "role": "assistant", "stopReason": "error", "errorMessage": FAILURE, "content": [] } }),
+        json!({ "type": "message", "id": "a1", "timestamp": at, "message": assistant }),
     ];
     let lines: Vec<String> = records.iter().map(Value::to_string).collect();
     fs::write(&file, format!("{}\n", lines.join("\n"))).unwrap();
@@ -49,6 +60,32 @@ fn failed_turn(home: &Home, session: &str, quiet_for_ms: i64) {
             SystemTime::UNIX_EPOCH + Duration::from_millis(u64::try_from(written).unwrap()),
         )
         .unwrap();
+}
+
+#[test]
+fn a_window_whose_reply_was_cut_waits_for_its_end_then_reports_the_limit() {
+    let home = Home::new();
+    let (adapter, _fakes) = adapter(&home);
+    let plan = prepare(&adapter, &Request::default()).unwrap();
+    let (window, session) = (plan.window, plan.native_session.unwrap());
+    shows(&home, &session);
+    let cut = || {
+        json!({ "role": "assistant", "stopReason": "length", "content": [
+        { "type": "thinking", "thinking": "Inspecting." },
+        { "type": "text", "text": "The parser appears to" }
+    ] })
+    };
+    turn(&home, &session, 10_000, cut());
+    let working = finished(window.observe()).unwrap();
+    assert!(!working.failed && !working.settled, "{working:?}");
+    turn(&home, &session, 121_000, cut());
+    let ended = finished(window.observe()).unwrap();
+    assert!(ended.failed && ended.settled, "{ended:?}");
+    let Some(Reading::Known(record)) = ended.reading.as_deref() else {
+        panic!("the window did not read its Pi session: {ended:?}");
+    };
+    assert_eq!(record.failure_kind.as_deref(), Some("the member's reply was cut at the model's output limit; nothing was taken as its result"));
+    assert!(!record.items.last().unwrap().complete);
 }
 
 #[test]

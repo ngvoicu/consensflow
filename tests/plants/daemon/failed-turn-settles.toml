@@ -19,6 +19,16 @@ failed-turn-goldens = ["cargo", "test", "--offline", "-p", "cf-harness", "--test
 failed-turn-window = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "pi::failed"]
 
 [[plant]]
+name = "failed turn: Pi's output-limit and deferred replies never end"
+meant = "a_length_stop_after_only_thinking_ends_the_turn_as_a_failure"
+runs = ["failed-turn-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '''            Some(reason @ ("length" | "deferred")) => {'''
+replace = '''            Some(reason @ ("missing-length" | "missing-deferred")) => {'''
+
+[[plant]]
 name = "failed turn: Pi's reader never settles a failed step by the file's quiet (the field's)"
 meant = "a_failed_step_is_a_turn_that_ended_once_nothing_follows_it_for_the_quiet_spell"
 runs = ["failed-turn-pi", "failed-turn-goldens"]
