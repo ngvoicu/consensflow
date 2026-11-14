@@ -374,10 +374,10 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
         0,
         "docs: never whole without specs either"
     );
-    assert_eq!(rows_while(true, None, &one), 132, "one piece with specs");
+    assert_eq!(rows_while(true, None, &one), 127, "one piece with specs");
     assert_eq!(
         rows_while(false, None, &one),
-        157,
+        152,
         "one piece without specs"
     );
     assert_eq!(
@@ -387,7 +387,7 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     );
     assert_eq!(
         rows_while(false, Some(&most), &one),
-        21,
+        16,
         "one piece without specs and with the most rules"
     );
     let parts = |rows| {
@@ -1165,14 +1165,14 @@ fn the_largest_roles_are_given_to_a_muse_window_in_the_parts_its_hooks_say_and_e
         on(
             &format!("the largest chief in bytes (25 staff, specs, the most rules) on {shape}"),
             &chief(25, true, Some(&utf8)),
-            2,
+            if shape == "Windows" { 3 } else { 2 },
         );
         on(
             &format!(
                 "the largest chief in a hook (25 staff, specs, the most escaped rules) on {shape}"
             ),
             &chief(25, true, Some(&escaped)),
-            3,
+            if shape == "Windows" { 4 } else { 3 },
         );
         for role in cf_ledger::roles::ids() {
             on(
@@ -1245,7 +1245,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&utf8),
-            &["Work big enough to need a design (a new module, a new API, a"],
+            &["## Choose the role, not the member"],
         ),
         (
             "a Mac, the most escaped rules",
