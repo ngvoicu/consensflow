@@ -201,7 +201,7 @@ fn names_once_written(path: &Path) -> Option<Vec<String>> {
 /// Opens a window of `install`, has it write its names, and holds them to the list.
 fn check_of(rig: &Rig, install: &Installed, log: &Log) -> Result<Check> {
     let name = install.harness().name();
-    let file = format!("session-vars-{}.txt", std::process::id());
+    let file = cf_e2e::door::own_name("session-vars", "txt");
     let open = Open::new(
         rig,
         install,
@@ -233,8 +233,9 @@ fn check_of(rig: &Rig, install: &Installed, log: &Log) -> Result<Check> {
             format!("wrote no names to {} in {WRITTEN:?}", path.display()),
         ));
     };
-    // The file is this run's own, named by its process: it goes once read.
-    let _ = fs::remove_file(&path);
+    // The file is this run's own, named by its process, in a folder this run made: it goes once
+    // read.
+    let _ = cf_e2e::door::Door::of_run().remove_in_made(&path);
     log.block(
         &format!("{name}: the names its shell had"),
         &names.join("\n"),

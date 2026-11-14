@@ -27,7 +27,9 @@ use std::time::Duration;
 
 use cf_e2e::live::ask;
 use cf_e2e::live::cut;
-use cf_e2e::live::members::{plus, quiet_command, runs_command, Account, MemberWindow, Members};
+use cf_e2e::live::members::{
+    plus, quiet_command, runs_command, ticks_in, Account, MemberWindow, Members, Moving,
+};
 use cf_e2e::live::tree::{self, Read};
 use cf_e2e::live::Harness;
 use cf_e2e::Result;
@@ -43,6 +45,7 @@ pub const DOING: Doing = Doing {
     did: "ran its command",
     doing: "running its command",
     shown: "its command running",
+    word: None,
 };
 
 /// What the case says where the command was seen by its process in the host's tree.
@@ -68,11 +71,54 @@ pub fn ticker_text() -> &'static str {
 /// How many seconds the ticking command in the project's `folder` says it has run, by its
 /// file `ticks`; none before it has written one.
 pub fn ticks(folder: &Path, ticks: &str) -> Option<u64> {
-    std::fs::read_to_string(folder.join(ticks))
-        .ok()?
-        .trim()
-        .parse()
-        .ok()
+    ticks_in(folder, ticks)
+}
+
+/// The tick files the case's own commands count in, by their literal names: the command's
+/// and its background one's.
+fn tick_files(command: &Command) -> Vec<&str> {
+    command
+        .ticks
+        .as_deref()
+        .into_iter()
+        .chain(
+            command
+                .background
+                .as_deref()
+                .and_then(|b| b.ticks.as_deref()),
+        )
+        .collect()
+}
+
+/// Removes the case's own tick files when the case ends, however it ends.
+struct OwnFiles<'a>(&'a Path, &'a Command);
+
+impl Drop for OwnFiles<'_> {
+    fn drop(&mut self) {
+        clear_ticks(self.0, self.1);
+    }
+}
+
+/// Takes the case's own tick files out of the project's `folder`, each by its name (no glob). Those it took out.
+pub fn clear_ticks(folder: &Path, command: &Command) -> Vec<String> {
+    tick_files(command)
+        .into_iter()
+        .filter(|name| {
+            matches!(
+                cf_e2e::door::Door::of_run().remove_in_made(&folder.join(name)),
+                cf_e2e::door::Removed::Removed(_)
+            )
+        })
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The name of a tick file that is this run's and this command's alone: `<what>-<pid>-<time>-<n>.txt`,
+/// made at each call, so that no file of another run, or of another case of this run whose command
+/// may still be writing (a 360-second background one), can have it. The name is in the command line
+/// the member is given, which a process list shows, so a file of that name is the member's command's.
+fn tick_file(what: &str) -> String {
+    cf_e2e::door::own_name(what, "txt")
 }
 
 /// The command the member is asked to run, and what tells it in a process list, in the file
@@ -123,7 +169,7 @@ impl Command {
     /// every harness's shell. Before T-1137 it was a ping of the machine's own address, which
     /// Codex starts with no shell, so that nothing the case read showed it running.
     pub fn here() -> Self {
-        Self::ticking(SECONDS, "tool-ticks.txt")
+        Self::ticking(SECONDS, &tick_file("tool-ticks"))
     }
 
     /// The field's command of T-1117 (a worker's database tests in WSL, run through
@@ -144,7 +190,10 @@ impl Command {
     pub fn after_background() -> Self {
         let seconds = 2 * STUCK_WATCH.as_secs() + 60;
         Self {
-            background: Some(Box::new(Self::ticking(seconds, "background-ticks.txt"))),
+            background: Some(Box::new(Self::ticking(
+                seconds,
+                &tick_file("background-ticks"),
+            ))),
             ..Self::here()
         }
     }
@@ -294,16 +343,21 @@ pub fn running(
     command: &Command,
     devin: bool,
 ) -> impl FnMut(&Members, &MemberWindow, Duration) -> Option<String> + '_ {
+    let mut moving = Moving::default();
     move |members, window, _worked| {
         let tree = tree::read(members.rig(), &window.pane);
         started(
             &tree,
             command,
+            // Its file counts only where it went up since the look before: the file of an
+            // earlier run does not.
             || {
-                command
-                    .ticks
-                    .as_deref()
-                    .and_then(|file| ticks(members.folder(), file))
+                moving.moved(
+                    command
+                        .ticks
+                        .as_deref()
+                        .and_then(|file| ticks(members.folder(), file)),
+                )
             },
             || {
                 command.replies.is_some_and(|replies| {
@@ -344,6 +398,9 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness, command: Command) ->
         // code, built before anything is spent.
         ask::prepare()?;
     }
+    // The case's own tick files, by their names (this run's and this command's alone), go when
+    // it ends; what an earlier run left under other names is left where it is.
+    let _own_files = OwnFiles(ctx.members.folder(), &command);
     let Some(begun) = begin(
         ctx,
         case,
@@ -375,6 +432,24 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness, command: Command) ->
         )
     });
     let at_the_pause = counted(&command);
+    // The background command counts as left running only if it was running at the pause:
+    // its count went up once more in the moments before it. A file that stood still then
+    // (a command that ended, or an old file) says nothing of what the pause did to it.
+    let before = before.map(|(listed, counted_before)| {
+        let alive = background.and_then(|background| {
+            let mut moving = Moving::default();
+            let mut last = None;
+            for _ in 0..8 {
+                last = moving.moved(counted(background));
+                if last.is_some() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            last
+        });
+        (listed, counted_before, alive)
+    });
     stop_it(
         ctx,
         case,
@@ -392,7 +467,7 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness, command: Command) ->
             seconds_said(counted(&command))
         ));
     }
-    if let (Some(background), Some((listed, counted_before))) = (background, before) {
+    if let (Some(background), Some((listed, counted_before, alive))) = (background, before) {
         let after = holding(&tree::read(ctx.members.rig(), pane), &background.mark);
         let counted_after = counted(background);
         // Its own count says it ran on whether or not the host's tree lists it: a harness
@@ -406,10 +481,10 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness, command: Command) ->
             said(&listed),
             said(&after)
         );
-        if counted_before.is_none() {
-            case.say(format!(
-                "the command started in the background never ran, or ended before it began, so whether the pause left it is not said: {said_of_it}"
-            ));
+        if let Some(why) = background_unmet(counted_before, alive) {
+            // No job was running at the pause to leave running or not: what the case is for
+            // was not tried, and it is said so (`unmet`), never `ok`.
+            case.unmet(format!("{why}: {said_of_it}"));
         } else {
             case.check(
                 "the pause left the work started in the background running",
@@ -419,6 +494,19 @@ pub fn run(ctx: &Ctx, case: &mut Account, harness: Harness, command: Command) ->
         }
     }
     Ok(())
+}
+
+/// Why the background command is no precondition of the case, where it is none: it never wrote
+/// its file (`before`), or its count did not go up in the moments before the pause (`alive`): a
+/// command that ended, or a file nobody writes. None where it was counting at the pause.
+fn background_unmet(before: Option<u64>, alive: Option<u64>) -> Option<&'static str> {
+    if before.is_none() {
+        Some("the command started in the background never ran, or ended before it began, so there was no job at the pause to leave running")
+    } else if alive.is_none() {
+        Some("the command started in the background was not counting just before the pause (its file stood still), so there was no job at the pause to leave running")
+    } else {
+        None
+    }
 }
 
 /// What a count of seconds says: so many, or that its file was never written.
@@ -470,26 +558,34 @@ mod tests {
     #[test]
     fn the_command_is_the_ticker_which_every_shell_starts_and_whose_file_counts_its_seconds() {
         let here = Command::here();
-        assert_eq!(here, Command::ticking(SECONDS, "tool-ticks.txt"));
-        assert_eq!(
-            here.text(),
-            "node ./tick-cf-stops-live.cjs 60 tool-ticks.txt"
+        // Its file's name is this run's and this command's own (`tick_file`).
+        let file = here.ticks.clone().unwrap();
+        assert!(
+            file.starts_with("tool-ticks-") && file.ends_with(".txt"),
+            "{file}"
         );
-        assert_eq!(here.mark, "tick-cf-stops-live.cjs 60 tool-ticks.txt");
+        assert_eq!(here, Command::ticking(SECONDS, &file));
+        let line = format!("tick-cf-stops-live.cjs 60 {file}");
+        assert_eq!(here.text(), format!("node ./{line}"));
+        assert_eq!(here.mark, line);
         assert_eq!(
             here.brief(),
-            "Run exactly this one shell command, wait for it to end, then stop: node ./tick-cf-stops-live.cjs 60 tool-ticks.txt"
+            format!(
+                "Run exactly this one shell command, wait for it to end, then stop: node ./{line}"
+            )
         );
         // As the Mac and PowerShell list it.
-        assert!(here.runs_in("node ./tick-cf-stops-live.cjs 60 tool-ticks.txt"));
-        assert!(here.runs_in(
-            r#""C:\Program Files\nodejs\node.exe" ./tick-cf-stops-live.cjs 60 tool-ticks.txt"#
-        ));
+        assert!(here.runs_in(&format!("node ./{line}")));
+        assert!(here.runs_in(&format!(r#""C:\Program Files\nodejs\node.exe" ./{line}"#)));
         assert!(ticker_text().contains("writeFileSync(file, String(++count))"));
         // Its background one counts in a file of its own, for longer than the watch.
         let after = Command::after_background();
         let background = after.background.as_deref().unwrap();
-        assert_eq!(background.ticks.as_deref(), Some("background-ticks.txt"));
+        assert!(background
+            .ticks
+            .as_deref()
+            .unwrap()
+            .starts_with("background-ticks-"));
         assert!(background
             .text
             .starts_with("node ./tick-cf-stops-live.cjs "));
@@ -498,7 +594,141 @@ mod tests {
             "{}",
             after.brief()
         );
-        assert!(after.brief().ends_with(&here.brief()), "{}", after.brief());
+        let foreground = Command::ticking(SECONDS, after.ticks.as_deref().unwrap());
+        assert!(
+            after.brief().ends_with(&foreground.brief()),
+            "{}",
+            after.brief()
+        );
+    }
+
+    #[test]
+    fn a_background_command_that_was_not_counting_at_the_pause_is_an_unmet_precondition_never_an_ok(
+    ) {
+        assert!(background_unmet(None, None).unwrap().contains("never ran"));
+        assert!(background_unmet(Some(5), None)
+            .unwrap()
+            .contains("not counting just before"));
+        // Counting before the pause: judged by its count after it, as before.
+        assert_eq!(background_unmet(Some(5), Some(6)), None);
+        // And an unmet case holds (no failure) and is said unmet, whatever else held.
+        let mut case = Account::new();
+        case.check("the pause left the foreground", true, "x");
+        case.unmet(format!("{}: ...", background_unmet(Some(5), None).unwrap()));
+        assert!(case.held() && case.is_unmet());
+    }
+
+    #[test]
+    fn a_stale_tick_file_is_no_running_command() {
+        let command = Command::here();
+        let unread = tree(&[(7, "bash")]);
+        let boom = || -> bool { panic!("not asked") };
+        let nothing = || false;
+        // A file of an earlier run: 60 s, and it stands still at every look since the brief.
+        let mut moving = Moving::default();
+        for _ in 0..3 {
+            let said = started(
+                &unread,
+                &command,
+                || moving.moved(Some(60)),
+                nothing,
+                nothing,
+            );
+            assert_eq!(
+                said, None,
+                "a counter that has not moved is no command running"
+            );
+        }
+        // One that counts: the first look has nothing to compare, the next sees it go up.
+        let mut moving = Moving::default();
+        assert_eq!(moving.moved(None), None, "no file yet");
+        assert_eq!(moving.moved(Some(1)), None, "the first look");
+        assert_eq!(
+            moving.moved(Some(1)),
+            None,
+            "half a second on, the same second"
+        );
+        assert_eq!(moving.moved(Some(2)), Some(2));
+        let said = started(&unread, &command, || Some(2), boom, boom);
+        assert!(said.unwrap().starts_with("its file says it has run 2 s"));
+        // A count that goes back (a file written again from 1) is a new run's, and says so
+        // only once it climbs.
+        let mut moving = Moving::default();
+        assert_eq!(moving.moved(Some(40)), None);
+        assert_eq!(moving.moved(Some(1)), None);
+        assert_eq!(moving.moved(Some(2)), Some(2));
+    }
+
+    #[test]
+    fn a_file_under_another_runs_name_that_keeps_growing_is_no_running_command_of_this_run() {
+        let folder = tempfile::tempdir().unwrap();
+        let this = Command::here();
+        // Another run's command (an earlier one, still writing its file each second): its file
+        // has the name of its own run, so this run's command never reads it.
+        let earlier = Command::here();
+        assert_ne!(this.ticks, earlier.ticks, "a name of this run alone");
+        assert_ne!(this.text(), earlier.text());
+        let theirs = earlier.ticks.as_deref().unwrap();
+        let mut moving = Moving::default();
+        for count in 1..=4 {
+            std::fs::write(folder.path().join(theirs), count.to_string()).unwrap();
+            let seen = this
+                .ticks
+                .as_deref()
+                .and_then(|file| ticks(folder.path(), file));
+            assert_eq!(moving.moved(seen), None, "look {count}");
+        }
+        // The old fixed names are no part of it either.
+        std::fs::write(folder.path().join("tool-ticks.txt"), "9").unwrap();
+        assert_eq!(ticks(folder.path(), this.ticks.as_deref().unwrap()), None);
+        let background = Command::after_background();
+        let file = background
+            .background
+            .as_deref()
+            .unwrap()
+            .ticks
+            .clone()
+            .unwrap();
+        assert_ne!(file, "background-ticks.txt");
+        assert!(file.contains("background-ticks-"), "{file}");
+    }
+
+    #[test]
+    fn the_case_removes_its_own_tick_files_by_their_names_and_no_other_file() {
+        // A folder of the door's own: a file is taken only below a folder this run made.
+        let folder = cf_e2e::door::made("tick-files-").unwrap();
+        let command = Command::after_background();
+        let own = [
+            command.ticks.clone().unwrap(),
+            command
+                .background
+                .as_deref()
+                .unwrap()
+                .ticks
+                .clone()
+                .unwrap(),
+        ];
+        // Its own, files of an earlier run under the old fixed names and under another run's,
+        // and another file: only its own go.
+        let others = [
+            "tool-ticks.txt",
+            "background-ticks.txt",
+            "tool-ticks-1-2-3.txt",
+            "notes.txt",
+        ];
+        for name in own.iter().map(String::as_str).chain(others) {
+            std::fs::write(folder.path().join(name), "60").unwrap();
+        }
+        let cleared = clear_ticks(folder.path(), &command);
+        assert_eq!(cleared, own);
+        for name in &own {
+            assert!(!folder.path().join(name).exists(), "{name}");
+        }
+        for name in others {
+            assert!(folder.path().join(name).exists(), "{name}");
+        }
+        // Where there are none, there is nothing to say.
+        assert!(clear_ticks(folder.path(), &Command::here()).is_empty());
     }
 
     #[test]
@@ -546,16 +776,18 @@ mod tests {
         let boom = || -> bool { panic!("not asked") };
         let unasked = || -> Option<u64> { panic!("not asked") };
         // Its process, among the turn's others, which the host lists.
-        let shown = tree(&[
-            (
-                4101,
-                "bash -c node ./tick-cf-stops-live.cjs 60 tool-ticks.txt",
-            ),
-            (4102, "node ./tick-cf-stops-live.cjs 60 tool-ticks.txt"),
-        ]);
+        let line = format!(
+            "node ./tick-cf-stops-live.cjs 60 {}",
+            command.ticks.as_deref().unwrap()
+        );
+        let bash = format!("bash -c {line}");
+        let shown = tree(&[(4101, bash.as_str()), (4102, line.as_str())]);
         assert_eq!(
-            started(&shown, &command, unasked, boom, boom).as_deref(),
-            Some("its process is in the host's tree (4101 bash -c node ./tick-cf-stops-live.cjs 60 tool-ticks.txt)")
+            started(&shown, &command, unasked, boom, boom),
+            Some(format!(
+                "its process is in the host's tree (4101 {})",
+                cut(&bash, 60)
+            ))
         );
         // None in the tree (Codex starts it with no shell): its file; then its replies on the
         // screen; or its call on the wire.

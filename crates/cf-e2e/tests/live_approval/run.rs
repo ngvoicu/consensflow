@@ -28,6 +28,8 @@ pub struct Machine {
     /// The stand-in the rig puts first on the `PATH` where no Claude Code is
     /// in the project.
     pub stand_in: PathBuf,
+    /// The folder the wrapper is in, a folder of this run's own: taken away with the run.
+    pub _shims: cf_e2e::door::Made,
 }
 
 impl Machine {

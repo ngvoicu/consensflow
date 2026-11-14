@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use cf_e2e::{files, Result};
+use cf_e2e::Result;
 
 /// The script's file, in the project's folder.
 pub const SCRIPT: &str = "minute.pl";
@@ -36,7 +36,7 @@ print \"$rounds rounds, last digest $digest\\n\";
 
 /// Puts the script in the project's `folder`, which the advisor's window runs in.
 pub fn write(folder: &Path) -> Result {
-    files::write(&folder.join(SCRIPT), PROGRAM)
+    cf_e2e::door::write(folder.join(SCRIPT), PROGRAM)
 }
 
 /// What the advisor is asked: to run the script, then to answer with `marker`.
@@ -122,7 +122,7 @@ mod tests {
         let Ok(perl) = live::command("perl") else {
             return;
         };
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         write(folder.path()).unwrap();
         let started = Instant::now();
         let ran = cf_e2e::process::Run::new(perl)

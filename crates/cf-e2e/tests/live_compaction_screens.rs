@@ -15,7 +15,7 @@
 //!
 //! ```text
 //! cargo xtask live compaction-screens claude
-//! cargo xtask live compaction-screens pi --pi-agent-dir <a folder holding a copy of Pi's login>
+//! cargo xtask live compaction-screens pi
 //! ```
 //!
 //! The run fails when the chief never answered, or its screen never said it compacts.
@@ -89,38 +89,29 @@ fn says_it_compacts(lines: &[String]) -> bool {
     lines.iter().any(|line| line.contains("ompacting"))
 }
 
-/// Pi keeps the last 20,000 tokens of a conversation as they are (`compaction.
-/// keepRecentTokens`), and says there is nothing to compact in a shorter one: the run's
-/// own Pi folder (`--pi-agent-dir`) is told to keep one, so that one exchange compacts.
-fn keep_one_token(folder: &Path) -> Result {
-    let file = folder.join("settings.json");
-    let mut settings: Value = std::fs::read_to_string(&file)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .filter(Value::is_object)
-        .unwrap_or_else(|| json!({}));
-    settings["compaction"] = json!({ "keepRecentTokens": 1 });
-    cf_e2e::files::write(&file, format!("{settings}\n"))
-}
+/// What the run's own Pi is set to: Pi keeps the last 20,000 tokens of a conversation as they
+/// are (`compaction.keepRecentTokens`), and says there is nothing to compact in a shorter one, so
+/// it is told to keep one, and one exchange compacts. Written in the Pi folder the kit made for the
+/// run (the plan's home file), never in a folder of the person's or the caller's.
+const PI_SETTINGS: &str = "{\"compaction\":{\"keepRecentTokens\":1}}\n";
 
 fn check(harness: Harness, log: &Log) -> Result<Check> {
     let name = format!("{harness:?}").to_lowercase();
-    if harness == Harness::Pi {
-        let Some(folder) = live::option("pi-agent-dir") else {
-            return Ok(Check::new(
-                &name,
-                "its screen while it compacts",
-                false,
-                "Pi runs on a folder of the run's own: --pi-agent-dir <a folder holding a copy of its login>",
-            ));
-        };
-        keep_one_token(Path::new(&folder))?;
-    }
     let plan = Plan::new(
         &format!("compaction-screens-{name}"),
         member_as(harness, "chief"),
     )
     .with(stand_in_worker());
+    let plan = if harness == Harness::Pi {
+        plan.with_home_file(
+            Harness::Pi,
+            "PI_CODING_AGENT_DIR",
+            "settings.json",
+            PI_SETTINGS,
+        )
+    } else {
+        plan
+    };
     let members = Members::open(&plan, Path::new(FAKE_AGENT), log)?;
     let pane = members.lane("chief")?["pane"].clone();
 

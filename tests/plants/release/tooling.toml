@@ -1553,7 +1553,7 @@ runs = ["cf-e2e-lib-cf"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/cf.rs"
-find = "    own_var(BUILT)\n"
+find = "    own_var(name)\n"
 replace = "    own_var(\"CF_E2E_NOT_GIVEN\")\n"
 
 [[plant]]

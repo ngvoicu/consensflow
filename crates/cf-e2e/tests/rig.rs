@@ -53,7 +53,9 @@
 //! window is told of. So is `stranger`: the rig keeps a process that is none of any
 //! window's beside them, which every case that ends a window holds the pane host to
 //! leaving as it was, and whose end of its own is no end the pane host gave it. So is
-//! `reports`: a rig keeps a report of a case
+//! `layout`: a live run in a home laid out as the real one is, with another run's project
+//! folders, rig folder and login copies beside its own, which it writes over, ends and takes
+//! none of (T-1592). So is `reports`: a rig keeps a report of a case
 //! that failed and none of one that passed, and every case here and in the
 //! regressions that starts a rig closes it. So is `smoke_stand_in`: the packaged
 //! smoke's stand-in harness taking its brief and handing back its result on the
@@ -119,6 +121,8 @@ mod homes;
 mod kept_config;
 #[path = "rig/kit_efforts.rs"]
 mod kit_efforts;
+#[path = "rig/layout.rs"]
+mod layout;
 #[path = "rig/live_base.rs"]
 mod live_base;
 #[path = "rig/live_member.rs"]

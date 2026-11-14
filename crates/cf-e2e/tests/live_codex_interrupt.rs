@@ -193,7 +193,7 @@ fn an_interrupted_question_ends_the_turn_or_idles_the_thread_in_what_codex_says(
     let home = install.home_outside_a_rig()?;
     let flags = isolation(&codex::mcp_servers(install.command())?)?;
     // The folder is the check's own, and removed with it; Codex knows it by the path it resolves to.
-    let scratch = tempfile::tempdir().map_err(|source| Error::File {
+    let scratch = cf_e2e::door::made("live-codex-interrupt-").map_err(|source| Error::File {
         action: "make a folder in",
         path: std::env::temp_dir(),
         source,

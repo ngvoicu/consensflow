@@ -429,6 +429,7 @@ fn a_codex_window_follows_a_role_no_command_line_holds_fresh_resumed_and_changed
     log.say("Codex runs on a home of the run's own, holding a copy of the machine's login");
     check(&config, &words, &log)?;
     log.say("ok: the Codex chief followed its role, fresh, resumed and changed, and no command line held it");
+    log.passed();
     Ok(())
 }
 

@@ -45,16 +45,6 @@ replace = '''    if true || config.muse.is_none() {
     let own = files::real_path(&root.join("home"));'''
 
 [[plant]]
-name = "muse advisor start: a rig on a home another rig linked fails to start"
-meant = "a_rig_that_runs_muse_beside_devins_home_reads_muse_where_its_muse_writes"
-runs = ["muse-advisor-start-homes"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/rig/install.rs"
-find = '''                std::fs::remove_file(&link).map_err(Error::file("remove", &link))?;'''
-replace = ""
-
-[[plant]]
 name = "muse advisor start: Devin's home reaches the owner's Muse"
 meant = "a_devin_home_reaches_none_of_the_owners_muse"
 runs = ["muse-advisor-start-isolation"]

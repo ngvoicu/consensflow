@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use super::{drain, ended_by, pid, Drain, Signal, HELD, POLL};
+use super::{drain, ended_by, Drain, Signal, HELD, POLL};
 use crate::{Error, Result};
 
 /// What goes down the queue to a program's input.
@@ -194,15 +194,32 @@ impl Spawned {
         }
     }
 
-    /// Sends it `signal`. A program that is gone is no error.
-    pub fn signal(&self, signal: Signal) {
-        let _ = pid::signal(self.id(), signal);
+    /// Stops it where it is and lets it go on after `span`, through the door
+    /// ([`crate::door::Door::stall_child`]): whether it was stopped.
+    #[cfg(unix)]
+    pub fn stall(&self, span: Duration) -> bool {
+        crate::door::Door::of_run().stall_child(&self.program, &self.child, span)
     }
 
-    /// Ends it at once, and waits for it to be gone.
+    /// Sends it `signal`, through the door ([`crate::door::Door::signal_child`]). A program that
+    /// is gone is no error.
+    pub fn signal(&self, signal: Signal) {
+        crate::door::Door::of_run().signal_child(&self.program, &self.child, signal);
+    }
+
+    /// Ends the group it leads (it was started in a group of its own, [`super::Run::own_group`]) and
+    /// what runs in it, through the door ([`crate::door::Door::end_group_of_child`]): on Unix the
+    /// group, on Windows the tree. A say-only door says it and ends none.
+    pub fn end_group(&self) {
+        crate::door::Door::of_run().end_group_of_child(&self.program, &self.child);
+    }
+
+    /// Ends it at once, and waits for it to be gone, through the door ([`crate::door::Door::end_child`]):
+    /// a say-only door says it and neither kills nor waits.
     pub fn kill(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        if crate::door::Door::of_run().end_child(&self.program, &mut self.child) {
+            let _ = self.child.wait();
+        }
     }
 }
 

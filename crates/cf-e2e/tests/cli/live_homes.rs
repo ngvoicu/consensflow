@@ -27,7 +27,8 @@ const HOMES: [&str; 8] = [
 ];
 
 /// What else makes a home by hand: a type of a test's that copied a login, and the flag that
-/// hands the rig a Claude folder of the caller's.
+/// names a Claude folder of the caller's, which only the kit reads, for its login, and never
+/// writes in (`Login::of_folder`: the run's windows run on a folder of the kit's own).
 const COPIES: [&str; 3] = [
     "CodexHome",
     "Throwaway::holding",
@@ -53,7 +54,7 @@ const KIT: [&str; 5] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 23] = [
+const BY_HAND: [(&str, &str, &str); 26] = [
     (
         "crates/cf-e2e/tests/live_pi_parity.rs",
         "HOME",
@@ -189,7 +190,25 @@ const BY_HAND: [(&str, &str, &str); 23] = [
          updater finds its versions apart from its launcher. The folder is the run's own and nothing \
          of the owner's is read there; `live::launcher` is what holds the owner's launcher",
     ),
-
+    (
+        "crates/cf-e2e/src/live/layout.rs",
+        "HOME",
+        "the layout of a person's home that the kit's own tests give a program they start \
+         (`Layout::vars`), with other runs' folders in it to be held as they were: no harness \
+         runs on it, and no login is in it",
+    ),
+    (
+        "crates/cf-e2e/src/live/layout.rs",
+        "USERPROFILE",
+        "the same home, as Windows names it",
+    ),
+    (
+        "crates/cf-e2e/tests/live_finish/stand_in.rs",
+        "HOME",
+        "the stand-in's window runs on a folder the test made through the door, to show that a \
+         process whose home is outside the run's temp root is none of what the windows left: a \
+         stand-in, no real harness",
+    ),
 ];
 
 /// The sources that call `on_own_home`, each with the reason.

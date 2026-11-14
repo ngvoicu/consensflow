@@ -382,7 +382,7 @@ fn the_copy_the_chief_was_given_is_the_harness_s_own_where_it_has_the_variant_an
 fn what_each_harness_s_adapter_says_of_the_variant_is_what_the_judge_holds_the_chief_s_text_to() {
     use cf_e2e::live::{ask, Harness};
 
-    let root = tempfile::tempdir().unwrap();
+    let root = cf_e2e::door::made("live-specs-test-").unwrap();
     let home = root.path().join("home");
     let consensflow = root.path().join("consensflow").display().to_string();
     let env = vec![
@@ -457,7 +457,7 @@ fn what_each_harness_s_adapter_says_of_the_variant_is_what_the_judge_holds_the_c
             said.starts_with("the harness's own copy of specmint-tdd"),
             "{harness:?}: {said}"
         );
-        std::fs::remove_dir_all(&home).unwrap();
+        assert!(cf_e2e::door::Door::acting().remove_in_made(&home).is_gone());
     }
 }
 

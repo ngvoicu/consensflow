@@ -9,7 +9,6 @@
 //! program (Devin's on Windows is Git Bash), where a `.cmd` is found by some of them
 //! only.
 
-use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::process::ExitCode;
 
@@ -33,10 +32,8 @@ fn main() -> ExitCode {
 fn note(words: &[String]) -> io::Result<()> {
     let log = std::env::current_exe()?.with_file_name(calls::LOG);
     let at = jiff::Timestamp::now().as_millisecond();
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log)?
+    cf_e2e::door::append(log)
+        .map_err(std::io::Error::from)?
         .write_all(calls::line(at, words).as_bytes())?;
     if let Some(said) = calls::answer(words) {
         writeln!(io::stdout(), "{said}")?;

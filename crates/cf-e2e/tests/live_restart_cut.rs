@@ -53,9 +53,10 @@ use std::path::Path;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use cf_e2e::door::{Door, Grounded};
 use cf_e2e::live::members::{
-    end_chosen, find, member, member_as, stand_in_chief, stand_in_worker, Account, Ended,
-    LongCommand, Members, Plan, Running, ThisMachine, STAND_IN_WORKER,
+    find, member, member_as, stand_in_chief, stand_in_worker, ticks_in, Account, Ended,
+    LongCommand, Members, Moving, Plan, ThisMachine, STAND_IN_WORKER,
 };
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, ask, seconds, Harness, Log};
@@ -67,6 +68,28 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
 /// The command a window is cut inside of.
 const LONG: LongCommand = LongCommand::new("cf-restart-cut-long-command");
+
+/// The command the chief at rest starts in the background: the same mark, and it counts its seconds
+/// in a file of the project's folder whose name is this run's alone (`restart-cut-job-ticks-<pid>-<time>-<n>.txt`, [`cf_e2e::door::own_name`],
+/// made at each call, given to the command in the words the chief is asked, so a file of that name can
+/// only be this command's: a command of an earlier run still writing its own has another name). A
+/// harness that starts a program with no shell (Codex, T-1137) leaves nothing for a process list to say
+/// of it that is the window's own, so what shows it running is that count going up. The name is leaked
+/// to the `'static` a [`LongCommand`] holds: a test binary makes a few.
+fn job() -> LongCommand {
+    let file: &'static str =
+        Box::leak(cf_e2e::door::own_name("restart-cut-job-ticks", "txt").into_boxed_str());
+    LongCommand::counting("cf-restart-cut-long-command", 300, file)
+}
+
+/// Removes the job's own tick file, by its name, when the case ends however it does.
+struct OwnTicks(std::path::PathBuf);
+
+impl Drop for OwnTicks {
+    fn drop(&mut self) {
+        let _ = Door::of_run().remove_in_made(&self.0);
+    }
+}
 
 /// How long a window may take to be at its command.
 const WORK: Duration = Duration::from_secs(180);
@@ -99,10 +122,10 @@ fn worker_cut(number: i64) -> String {
 
 /// What the human asks the window: to start the long command in the background and
 /// not wait for it, so that its turn ends with the command running.
-fn the_background_ask() -> String {
+fn the_background_ask(job: &LongCommand) -> String {
     format!(
         "Start this exact command with your shell tool, in the background (do not wait for it to finish), and then reply with exactly one line: STARTED\n{}",
-        LONG.text()
+        job.text()
     )
 }
 
@@ -225,13 +248,13 @@ fn worker_plan(worker: Harness) -> Plan {
 /// agent), with what they started: what descends from the window's own process and
 /// holds the command's mark. None while the window has no process. A process outside
 /// the window is none of it, whatever its command line says.
-fn in_window(members: &Members, who: &str) -> Result<Vec<Running>> {
+fn in_window(members: &Members, who: &str) -> Result<Grounded> {
     let own = members
         .window_of(who)?
         .and_then(|window| members.window_process(&window));
     match own {
         Some(own) => LONG.chosen_in(&ThisMachine, own),
-        None => Ok(Vec::new()),
+        None => Ok(Grounded::none()),
     }
 }
 
@@ -239,7 +262,7 @@ fn in_window(members: &Members, who: &str) -> Result<Vec<Running>> {
 /// is the long one. Each process is ended only while it is still the one chosen, and what
 /// could not be ended fails the case ([`ended`]).
 fn end_in_window(members: &Members, who: &str, case: &mut Account) -> Result<()> {
-    ended(case, &end_chosen(&in_window(members, who)?));
+    ended(case, &Door::of_run().end(&in_window(members, who)?));
     Ok(())
 }
 
@@ -361,7 +384,7 @@ fn drive_chief(mut members: Members, log: &Log) -> Result<Account> {
     let quit_at = Instant::now();
     let left = in_window(&members, "chief")?;
     let restarted = members.restart(log);
-    ended(&mut case, &end_chosen(&left));
+    ended(&mut case, &Door::of_run().end(&left));
     let members = restarted?;
     case.say(format!(
         "quit and started again in {} s",
@@ -622,17 +645,33 @@ fn drive_chief_at_rest_with_a_job(mut members: Members, log: &Log) -> Result<Acc
     members.add(STAND_IN_WORKER, &[])?;
 
     let pane = members.lane("chief")?["pane"].clone();
-    members.paste(&pane, &ask::window_text(&the_background_ask())?)?;
+    // Its file's name is this run's alone: a count an earlier run's command writes is under another.
+    let job = job();
+    let job_file = job.counts_in().unwrap_or_default();
+    let _own = OwnTicks(members.folder().join(job_file));
+    members.paste(&pane, &ask::window_text(&the_background_ask(&job))?)?;
+    let mut counted = Moving::default();
+    let mut shown_by_file = false;
     let at_rest = find(
         log,
         "the chief at rest with its command running",
         WORK,
         Duration::from_millis(200),
         || {
-            let running = !in_window(&members, "chief")?.is_empty();
+            // The command's process in the window's tree, or where it lists none (Codex starts
+            // the program with no shell), its file's count going up.
+            let listed = !in_window(&members, "chief")?.is_empty();
+            let moving = counted
+                .moved(ticks_in(members.folder(), job_file))
+                .is_some();
+            shown_by_file |= moving && !listed;
+            let running = listed || moving;
             Ok((running && state_of(&members.lane("chief")?) == "idle").then_some(()))
         },
     )?;
+    if shown_by_file {
+        case.say("the command is shown running by its file's count: no process of the window's tree is it");
+    }
     if at_rest.is_none() {
         case.fail(format!(
             "the chief never came to rest with its command running: its lane reads {}; {}",
@@ -667,7 +706,7 @@ fn drive_chief_at_rest_with_a_job(mut members: Members, log: &Log) -> Result<Acc
             members.lane("chief")?["activity"]
         ),
     );
-    ended(&mut case, &end_chosen(&left));
+    ended(&mut case, &Door::of_run().end(&left));
 
     // The human's Resume: the chief comes back told nothing of a cut turn.
     members.resume()?;
@@ -764,7 +803,7 @@ fn drive_worker(mut members: Members, worker: Harness, agent: &str, log: &Log) -
     let quit_at = Instant::now();
     let left = in_window(&members, agent)?;
     let restarted = members.restart(log);
-    ended(&mut case, &end_chosen(&left));
+    ended(&mut case, &Door::of_run().end(&left));
     let members = restarted?;
     case.say(format!(
         "quit and started again in {} s",
@@ -998,12 +1037,46 @@ mod tests {
     }
 
     #[test]
+    fn a_file_under_another_runs_name_is_no_command_of_this_run_and_the_ask_names_this_ones() {
+        let (this, earlier) = (job(), job());
+        let file = this.counts_in().unwrap();
+        assert!(
+            file.starts_with("restart-cut-job-ticks-") && file.ends_with(".txt"),
+            "{file}"
+        );
+        // Another run's file (or the old fixed name) is read under no name of this run's.
+        assert_ne!(Some(file), earlier.counts_in());
+        assert_ne!(file, "restart-cut-job-ticks.txt");
+        let folder = tempfile::tempdir().unwrap();
+        let mut counted = Moving::default();
+        for count in 1..=4 {
+            std::fs::write(
+                folder.path().join(earlier.counts_in().unwrap()),
+                count.to_string(),
+            )
+            .unwrap();
+            assert_eq!(
+                counted.moved(ticks_in(folder.path(), file)),
+                None,
+                "look {count}"
+            );
+        }
+        // The ask is the command that ends with the mark (a window's tree finds it where it lists
+        // it) and counts in this run's file, which the chief is told whole.
+        let ask = the_background_ask(&this);
+        assert!(ask.ends_with("cf-restart-cut-long-command"), "{ask}");
+        assert!(ask.contains(&format!("writeFileSync('{file}'")), "{ask}");
+        assert!(!ask.contains(earlier.counts_in().unwrap()), "{ask}");
+    }
+
+    #[test]
     fn the_human_asks_the_window_to_run_the_long_command_and_to_wait_for_it() {
         let ask = the_ask();
         assert!(ask.starts_with("Run this exact command with your shell tool, wait for it to finish, and then reply with exactly one line: FINISHED\n"));
-        assert!(
-            ask.ends_with("node -e \"setTimeout(() => {}, 300000)\" cf-restart-cut-long-command")
-        );
+        assert!(ask.ends_with(&format!(
+            "node -e \"setTimeout(() => {{}}, 300000)\" {} cf-restart-cut-long-command",
+            cf_e2e::live::members::run_word()
+        )));
     }
 
     #[test]

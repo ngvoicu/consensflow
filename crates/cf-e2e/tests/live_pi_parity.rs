@@ -123,15 +123,15 @@ const CASES: [Case; 2] = [
 
 /// A skill called `name` in the skills folder `folder`.
 fn skill(folder: &Path, name: &str) -> Result {
-    files::write(
-        &folder.join(name).join("SKILL.md"),
+    cf_e2e::door::write(
+        folder.join(name).join("SKILL.md"),
         format!("---\nname: {name}\ndescription: {name} of the parity run\n---\n\nbody\n"),
     )
 }
 
 /// An extension that adds the tool `<name>_tool` and the command `<name>-cmd`.
 fn extension(file: &Path, name: &str) -> Result {
-    files::write(
+    cf_e2e::door::write(
         file,
         format!(
             "export default function (pi) {{\n  pi.registerCommand('{name}-cmd', {{ description: 'probe', handler: async () => {{}} }})\n  pi.registerTool({{ name: '{name}_tool', label: '{name}', description: 'probe', parameters: {{ type: 'object', properties: {{}} }}, execute: async () => ({{ content: [] }}) }})\n}}\n"
@@ -144,7 +144,7 @@ fn mcp(file: &Path, server: &Path, name: &str) -> Result {
     let config = json!({ "mcpServers": { name: {
         "command": "node", "args": [server, name], "exposure": "direct",
     } } });
-    files::write(file, config.to_string())
+    cf_e2e::door::write(file, config.to_string())
 }
 
 /// One of each thing a person keeps in Pi's folder of `home`, the probe among them.
@@ -154,47 +154,45 @@ fn user_config(home: &Path) -> Result {
         "defaultProvider": PROVIDER, "defaultModel": MODEL, "defaultThinkingLevel": "low",
         "defaultProjectTrust": "always", "lastChangelogVersion": "99.0.0",
     });
-    files::write(&agent.join("settings.json"), settings.to_string())?;
-    files::write(&agent.join("AGENTS.md"), "MARK_USER_AGENTS\n")?;
-    files::write(&agent.join("APPEND_SYSTEM.md"), "MARK_USER_APPEND\n")?;
+    cf_e2e::door::write(agent.join("settings.json"), settings.to_string())?;
+    cf_e2e::door::write(agent.join("AGENTS.md"), "MARK_USER_AGENTS\n")?;
+    cf_e2e::door::write(agent.join("APPEND_SYSTEM.md"), "MARK_USER_APPEND\n")?;
     skill(&agent.join("skills"), "user-skill")?;
     skill(&home.join(".agents").join("skills"), "agents-skill")?;
     extension(&agent.join("extensions").join("user-ext.ts"), "user_ext")?;
-    files::write(&agent.join("extensions").join("probe.ts"), PROBE)?;
-    files::write(
-        &agent.join("prompts").join("user-prompt.md"),
+    cf_e2e::door::write(agent.join("extensions").join("probe.ts"), PROBE)?;
+    cf_e2e::door::write(
+        agent.join("prompts").join("user-prompt.md"),
         "---\ndescription: probe\n---\nhi\n",
     )?;
     let server = home.join("mcp-server.mjs");
-    files::write(&server, MCP_SERVER)?;
+    cf_e2e::door::write(&server, MCP_SERVER)?;
     mcp(&agent.join("mcp.json"), &server, "user_mcp")
 }
 
-/// The project's own of each in `folder`, with an `APPEND_SYSTEM.md` where `append`.
+/// The project's own of each in `folder`, a live folder this run made, with an `APPEND_SYSTEM.md`
+/// where `append` (and the one an earlier case of this run wrote taken away where not).
 fn project_config(folder: &Path, server: &Path, append: bool) -> Result {
     let pi = folder.join(".pi");
-    files::write(&folder.join("AGENTS.md"), "MARK_PROJECT_AGENTS\n")?;
+    cf_e2e::door::write(folder.join("AGENTS.md"), "MARK_PROJECT_AGENTS\n")?;
     skill(&pi.join("skills"), "project-skill")?;
     skill(
         &folder.join(".agents").join("skills"),
         "project-agents-skill",
     )?;
     extension(&pi.join("extensions").join("project-ext.ts"), "project_ext")?;
-    files::write(
-        &pi.join("prompts").join("project-prompt.md"),
+    cf_e2e::door::write(
+        pi.join("prompts").join("project-prompt.md"),
         "---\ndescription: probe\n---\nhi\n",
     )?;
     mcp(&pi.join("mcp.json"), server, "project_mcp")?;
     let appended = pi.join("APPEND_SYSTEM.md");
     if append {
-        files::write(&appended, "MARK_PROJECT_APPEND\n")
+        cf_e2e::door::write(&appended, "MARK_PROJECT_APPEND\n")
     } else {
-        match std::fs::remove_file(&appended) {
-            Err(source) if source.kind() != std::io::ErrorKind::NotFound => Err(Error::File {
-                action: "remove",
-                path: appended,
-                source,
-            }),
+        let removed = cf_e2e::door::Door::of_run().remove_in_made(&appended);
+        match removed {
+            cf_e2e::door::Removed::Left(..) => Err(Error::Daemon(removed.to_string())),
             _ => Ok(()),
         }
     }
@@ -302,14 +300,11 @@ fn a_pi_members_window_has_everything_bare_pi_has_in_the_same_folder() -> Result
     // The case is its own home: its windows' HOME holds the Pi folder it made, and none of the
     // owner's is read or written, so the kit's home (`PI_CODING_AGENT_DIR`) is none of its.
     let install = log.found(Harness::Pi)?.on_own_home();
-    let users = tempfile::Builder::new()
-        .prefix("cf-pi-parity-")
-        .tempdir()
-        .map_err(|source| Error::File {
-            action: "make",
-            path: std::env::temp_dir(),
-            source,
-        })?;
+    let users = cf_e2e::door::made("cf-pi-parity-").map_err(|source| Error::File {
+        action: "make",
+        path: std::env::temp_dir(),
+        source,
+    })?;
     let home = users.path().join("home");
     user_config(&home)?;
     let config = live::rig(std::slice::from_ref(&install), FAKE_AGENT)

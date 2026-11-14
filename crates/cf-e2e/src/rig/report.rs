@@ -13,7 +13,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 
 use super::Rig;
-use crate::{files, pattern, process};
+use crate::{pattern, process};
 
 /// How much of a window's screen a failure shows.
 const SCREEN: usize = 1_500;
@@ -363,7 +363,15 @@ fn keep(root: &Path, case: &str, report: &str, folder: Option<&Path>) -> String 
         Some(folder) => folder.join(format!("{name}-left.txt")),
         None => root.with_file_name(format!("{name}-left.txt")),
     };
-    match files::write(&file, report) {
+    // The file is made new, as one of this run's own: a rig's root has a name of its own, so a file
+    // of that name is none the run may write into.
+    let wrote = folder
+        .map_or(Ok(()), |folder| {
+            crate::door::make_place(folder).map_err(crate::Error::file("make", folder))
+        })
+        .and_then(|()| crate::door::made_file(&file).map(drop))
+        .and_then(|()| crate::door::write(&file, report));
+    match wrote {
         Ok(()) => format!(
             "\n--- the rig, as the failed case left it, is kept in {} (case: {case})\n",
             file.display()
@@ -452,7 +460,7 @@ mod tests {
     #[test]
     #[ignore = "the report output test runs this case in its own process"]
     fn a_nested_dropped_rig_report_is_said() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-test-").unwrap();
         let root = folder.path().join("a-rig");
         Left {
             root,
@@ -490,7 +498,7 @@ mod tests {
     #[test]
     fn a_dropped_rigs_report_is_kept_beside_its_home_and_its_error_output_says_only_where() {
         // A screen with a value no masker knows, its name cut off above the window's tail.
-        let folder = tempfile::tempdir().unwrap();
+        let folder = crate::door::made("cf-test-").unwrap();
         let root = folder.path().join("consensflow-integration-AbC123");
         let report = "--- p1-long-claude-1: \"correct horse battery staple\"\n";
         let case = "a_suite::a_case_that_left_it";
@@ -644,7 +652,7 @@ mod tests {
 
     #[test]
     fn what_the_agents_wrote_is_read_from_the_config_folder_by_the_names_of_the_files() {
-        let config = tempfile::tempdir().unwrap();
+        let config = crate::door::made("cf-test-").unwrap();
         assert_eq!(written(config.path()), "  nothing\n");
         let at = |relative: &str| config.path().join(relative);
         fs::create_dir_all(at("sessions")).unwrap();

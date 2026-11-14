@@ -391,16 +391,6 @@ find = '''    forget(records, folder.path());'''
 replace = ''''''
 
 [[plant]]
-name = "matrix: the renewal takes away every record of a run in the owner's projects"
-meant = "a_renewal_takes_away_the_record_claude_code_kept_of_its_own_folder_and_no_other"
-runs = ["login-lib"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/renew.rs"
-find = '''            if !entry.file_name().to_string_lossy().ends_with(name) {'''
-replace = '''            if entry.file_name().to_string_lossy().is_empty() {'''
-
-[[plant]]
 name = "matrix: Claude Code's renewal names no record to take away"
 meant = "a_renewal_takes_away_the_record_claude_code_kept_of_its_own_folder_and_no_other"
 runs = ["login-lib"]

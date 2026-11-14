@@ -392,7 +392,7 @@ fn what_devin_writes_of_a_paste_at_rest_queued_and_cut_by_the_stop_is_what_the_d
     ask::prepare()?;
     let install = log.found(Harness::Devin)?;
     let interrupt = ask::interrupt(Harness::Devin.kind())?;
-    let stand_in = tempfile::tempdir().map_err(|source| Error::File {
+    let stand_in = cf_e2e::door::made("live-devin-wire-").map_err(|source| Error::File {
         action: "make a folder in",
         path: std::env::temp_dir(),
         source,
