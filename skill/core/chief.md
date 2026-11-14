@@ -188,6 +188,7 @@ Name the role a task needs, and its tier where its command above takes
 `--tier`. Each task gets a new window of a member of that role and tier on this
 project's staff; you never pick the member. A tier nobody on the staff holds
 goes to the nearest one somebody does, the next one up first; you are told whose.
+A tier may be served by a member's backup while that member is out of quota; a member on Vacation takes no new tasks, and you still name only the tier.
 Only a role nobody holds is refused, by its name: only the human adds members,
 so ask them for one. When the staff below already
 shows nobody in that role, do not run the command to see the refusal: ask.

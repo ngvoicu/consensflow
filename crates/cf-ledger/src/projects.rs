@@ -12,6 +12,7 @@ mod compaction;
 mod describing;
 mod own_hands;
 mod prompt_suggestion;
+mod staff_copy;
 mod staff_rules;
 
 use cf_base::json::from_slice_lossy;
@@ -32,6 +33,7 @@ pub use own_hands::parse_own_hands;
 pub(crate) use own_hands::set_own_hands;
 pub use prompt_suggestion::parse_prompt_suggestion;
 pub(crate) use prompt_suggestion::set_prompt_suggestion;
+pub(crate) use staff_copy::create_project_with_staff;
 pub(crate) use staff_rules::set_staff_rules;
 pub use staff_rules::{parse_staff_rules, STAFF_RULES_MAX_BYTES, STAFF_RULES_MAX_LINES};
 
@@ -352,8 +354,8 @@ fn designer_refused() -> LedgerError {
 }
 
 /// A project with its chief, on the harness and model it runs on, and its staff, and
-/// the calls, specs, rules for the staff and compaction the human said for it, kept in
-/// the same write: the chief's first launch reads the specs and the rules, and the
+/// the calls, specs, rules for the staff, compaction and own-hands choice the human said for it,
+/// kept in the same write: the chief's first launch reads these settings, and the
 /// project is never seen without them. Everything the ledger refuses is refused
 /// before the write begins.
 pub(crate) fn create_project(

@@ -116,6 +116,7 @@ fn own_hands_changes_only_the_chief_and_specs_follow_the_switch() {
             ordinary
         );
         let own = role_instructions_for(&env, "chief", &[], &cf, choice, true).unwrap();
+        assert!(own.contains("A tier may be served by a member's backup while that member is out of quota; a member on Vacation takes no new tasks, and you still name only the tier."));
         assert!(
             own.len() < ordinary.len(),
             "the own-hands role stays shorter"

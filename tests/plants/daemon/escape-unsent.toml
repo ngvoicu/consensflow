@@ -267,8 +267,8 @@ runs = ["escape-unsent-page"]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = "  if (out !== null) return ['out', lane.holding ? `${out}. ${holding}` : out]"
-replace = "  if (out !== null) return ['out', out]"
+find = "    return ['out', lane.holding ? `${covered}. ${holding}` : covered]"
+replace = "    return ['out', covered]"
 
 # --- end to end, on the rig ---
 

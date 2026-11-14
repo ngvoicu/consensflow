@@ -30,14 +30,17 @@ replace = ""
 [[plant]]
 name = "session: a task named for a session is given to it whatever it has"
 meant = "a_task_named_for_a_session_is_refused_while_it_is_on_its_work_and_goes_once_it_is_free"
-runs = ["ledger-receipt"]
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "sessions::a_task_named_for_a_session_is_refused_while_it_is_on_its_work_and_goes_once_it_is_free"]]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
 find = '''
                 let named = store.participant_by_handle(project_id, to)?;
+                require_available_for_new_task(store, &named)?;
                 require_free(store, &named, Giving::Task)?;'''
-replace = "                let named = store.participant_by_handle(project_id, to)?;"
+replace = '''
+                let named = store.participant_by_handle(project_id, to)?;
+                require_available_for_new_task(store, &named)?;'''
 
 [[plant]]
 name = "session: the rule holds a member that is no session, the chief too"

@@ -27,8 +27,8 @@ pub(super) async fn list(page: &Page) -> Result<Fields, Said> {
 /// here. The gate, the wake-up calls
 /// (`wakeUp`, as `wakeup.set` takes them), the specs (`specs`, as
 /// `project.specs` takes them), the rules for the staff (`rules`, as `project.rules`
-/// takes them) and the compaction (`compaction`, as `project.compaction` takes it) are
-/// the human's word for the project, kept in the write that makes it, so the chief's
+/// takes them), the compaction (`compaction`, as `project.compaction` takes it) and the chief's
+/// mode (`ownHands`, as `project.own_hands` takes it) are the human's word for the project, kept in the write that makes it, so the chief's
 /// first launch has them; one the ledger refuses refuses the whole start, in the words
 /// the Project settings dialog shows for it, and no project is made. A `compaction` that
 /// is left out starts the project on the ledger's default size, and `null` on each
@@ -45,8 +45,22 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         Some(Value::Array(members)) => {
             let mut staff = Vec::new();
             for member in members {
-                let picked = picked_member(page, Body::new(member), false).await?;
-                staff.push(member_json(&picked));
+                let mut choice = member.clone();
+                if member.get("backupOf").is_some_and(|value| !value.is_null()) {
+                    let fields = choice
+                        .as_object_mut()
+                        .ok_or_else(|| Said::from("a staff row is an object"))?;
+                    fields.insert("roles".to_owned(), json!(["worker"]));
+                    fields.insert("tier".to_owned(), json!("light"));
+                }
+                let picked = picked_member(page, Body::new(&choice), false).await?;
+                let mut row = member_json(&picked);
+                for key in ["id", "backupOf", "vacationSince"] {
+                    if let Some(value) = member.get(key) {
+                        row[key] = value.clone();
+                    }
+                }
+                staff.push(row);
             }
             staff
         }
@@ -89,7 +103,10 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         request.insert("ownHands".to_owned(), said.clone());
     }
     request.insert("staff".to_owned(), Value::Array(staff));
-    let project = page.engine.open_project(new_project(request)?).await?;
+    let project = page
+        .engine
+        .open_project_with_staff(new_project(request.clone())?, Value::Object(request))
+        .await?;
     one("project", project)
 }
 
@@ -110,7 +127,7 @@ fn member_json(member: &NewMember) -> Value {
 /// ledger reads it from JSON: what New project starts with where the page names no staff.
 fn last_staff(page: &Page) -> Result<Vec<Value>, Said> {
     let missing = cf_harness::detect::missing_harnesses(&page.env);
-    Ok(page
+    let staff: Vec<_> = page
         .ledger
         .borrow()
         .last_staff()?
@@ -122,18 +139,17 @@ fn last_staff(page: &Page) -> Result<Vec<Value>, Said> {
                 .and_then(cf_proto::agents::Harness::from_kind)
                 .is_some_and(|harness| !missing.contains(&harness))
         })
-        .map(|member| {
-            json!({
-                "harness": member.harness,
-                "model": member.model,
-                "effort": member.effort,
-                "modelName": member.model_name,
-                "designer": member.designer,
-                "roles": member.roles,
-                "tier": member.tier,
-            })
-        })
-        .collect())
+        .collect();
+    let owners: std::collections::HashSet<i64> = staff
+        .iter()
+        .filter(|member| member.backup_of.is_none())
+        .filter_map(|member| member.id)
+        .collect();
+    staff
+        .into_iter()
+        .filter(|member| member.backup_of.is_none_or(|id| owners.contains(&id)))
+        .map(|member| serde_json::to_value(member).map_err(Said::from))
+        .collect()
 }
 
 /// `project.resume`.
@@ -279,7 +295,24 @@ pub(super) async fn own_hands(page: &Page, body: Body<'_>) -> Result<Fields, Sai
 /// words refuse what it cannot read. The page has already picked the chief and every member
 /// (`chief_asked`, `picked_member`), so the request holds what the ledger takes: a member with
 /// its harness, model, effort, the model's name, its roles and its tier.
-fn new_project(request: Map<String, Value>) -> Result<NewProject, Said> {
+fn new_project(mut request: Map<String, Value>) -> Result<NewProject, Said> {
+    // A copied backup holds its owner's roles, including an image designer's, but
+    // its own model need not be an image agent. The engine needs its harness for
+    // validation; the ledger checks and reconnects the original source rows.
+    if let Some(Value::Array(staff)) = request.get_mut("staff") {
+        for row in staff {
+            if row.get("backupOf").is_some_and(|value| !value.is_null()) {
+                if let Some(fields) = row.as_object_mut() {
+                    let designer = fields.get("designer") == Some(&Value::Bool(true));
+                    fields.insert(
+                        "roles".to_owned(),
+                        json!([if designer { "designer" } else { "worker" }]),
+                    );
+                    fields.insert("tier".to_owned(), json!("light"));
+                }
+            }
+        }
+    }
     Ok(NewProject::from_json(&Value::Object(request))?)
 }
 
