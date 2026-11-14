@@ -1244,6 +1244,7 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
     let checks_upload = upload_of("name: live-reports-checks-${{ matrix.os }}")?;
     for line in [
         "if: always()",
+        "include-hidden-files: true",
         "if-no-files-found: ignore",
         "retention-days: 7",
         "app/src-tauri/target/live-reports/",
@@ -1265,6 +1266,7 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
         upload_of("name: matrix-evidence-${{ matrix.os }}-${{ strategy.job-index }}")?;
     for line in [
         "if: always()",
+        "include-hidden-files: true",
         "if-no-files-found: ignore",
         "retention-days: 7",
         "path: .runs/live-matrix/",

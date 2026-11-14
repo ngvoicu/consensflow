@@ -117,6 +117,7 @@ jobs:
           path: |
             app/src-tauri/target/live-reports/
             .runs/live-matrix/
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 
@@ -327,6 +328,7 @@ jobs:
         with:
           name: matrix-evidence-${{ matrix.os }}-${{ strategy.job-index }}
           path: .runs/live-matrix/
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 7
 
