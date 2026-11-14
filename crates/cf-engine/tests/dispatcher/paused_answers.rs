@@ -12,6 +12,7 @@
 use cf_engine::testing::Context;
 use cf_harness::records::{End, Role, Source};
 use cf_ledger::NewTask;
+use cf_proto::cf_word::{CfWord, Shell};
 use cf_proto::ledger::MessageView;
 use serde_json::json;
 
@@ -172,6 +173,8 @@ fn the_final_answer_a_window_ends_the_turn_of_a_tell_with_is_put_to_the_chief_on
 #[test]
 fn an_answered_tells_turn_is_shown_and_the_answer_tells_the_paused_chief_both_ways_on() {
     let context = Context::new();
+    let cf = CfWord::new("C:/Program Files/ConsensFlow/cf.exe", Shell::Posix);
+    *context.roles.cf.borrow_mut() = cf.clone();
     let (project, told) = told_at_work(&context);
     answers_then_goes_on_to_the_end(&context, &told);
     for _ in 0..5 {
@@ -185,9 +188,12 @@ fn an_answered_tells_turn_is_shown_and_the_answer_tells_the_paused_chief_both_wa
         .iter()
         .find(|text| text.contains(ANSWER))
         .expect("the answer was typed");
-    assert!(answer.ends_with("T-1 is paused. To take its window's last complete answer as the result: cf task finish T-1. To send it on: cf task resume T-1 \"…\"."), "{answer}");
+    assert!(answer.ends_with(&format!("T-1 is paused. To take its window's last complete answer as the result: {cf} task finish T-1. To send it on: {cf} task resume T-1 \"…\".")), "{answer}");
+    let rendered_note = cf.in_text(&note.body);
     assert!(
-        !pastes.iter().any(|text| text.contains(&note.body)),
+        !pastes
+            .iter()
+            .any(|text| text.contains(rendered_note.as_ref())),
         "the note was not typed"
     );
 }

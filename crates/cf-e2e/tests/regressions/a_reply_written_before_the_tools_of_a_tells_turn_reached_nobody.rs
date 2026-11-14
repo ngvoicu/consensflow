@@ -23,6 +23,7 @@
 //! answer` first).
 
 use cf_e2e::rig::{Project, Rig, OPEN};
+use cf_proto::cf_word::{CfWord, Shell};
 use serde_json::{json, Value};
 
 use crate::a_workers_still_going_was_given_as_its_result::{tier, told};
@@ -85,11 +86,15 @@ fn tell_and_wait_for_the_note<'a>(
 
 /// The note holds what the worker wrote first, then what it said last, and says how to go on.
 fn assert_the_note_holds_both(note: &str) {
+    // This is the ledger's unrendered inbox note, whose command word is bare.
+    let cf = CfWord::bare();
+    let ways_on = format!(
+        "If that is the result, take it: {cf} task finish T-1. To send it on: {cf} task resume T-1 \"…\"."
+    );
     assert!(
         note.starts_with("T-1 is paused, and @")
             && note.contains("What it wrote first, before any tool:")
-            && note.contains("cf task finish T-1")
-            && note.contains("cf task resume T-1"),
+            && note.ends_with(&ways_on),
         "{note}"
     );
     let (first, last) = (note.find(WRITTEN), note.find(REPORT));
@@ -175,6 +180,16 @@ fn without_a_board_answer_the_first_and_last_words_are_typed_to_the_chief() -> O
     })?;
     let prompt = prompt_with(&rig, &session, WRITTEN).expect("the note was typed");
     assert!(prompt.contains(REPORT), "{prompt}");
+    let prompt_row: Value = serde_json::from_str(&prompt).expect("the prompt is a record item");
+    let prompt_text = prompt_row["message"]["content"]
+        .as_str()
+        .expect("the prompt has text");
+    let cf = CfWord::new(&rig.cf().to_string_lossy().replace('\\', "/"), Shell::Posix);
+    let ways_on = format!(
+        "If that is the result, take it: {cf} task finish T-1. To send it on: {cf} task resume T-1 \"…\"."
+    );
+    // A note can be carried alongside another message; still require its entire footer.
+    assert!(prompt_text.contains(&ways_on), "{prompt}");
     assert!(
         !holding(&project, WRITTEN)?
             .iter()

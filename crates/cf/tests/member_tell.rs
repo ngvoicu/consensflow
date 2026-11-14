@@ -9,6 +9,9 @@ use cf_board::scripted::{reply, scripted, ScriptedApi};
 use common::cf;
 use serde_json::{json, Value};
 
+/// The same shell word the caller gives the CLI and expects in its guidance.
+const CF_WORD: &str = "'C:/Program Files/ConsensFlow/cf.exe'";
+
 fn who(role: &str, task: Value) -> Value {
     json!({ "participant": { "handle": "window", "role": role }, "task": task })
 }
@@ -20,7 +23,11 @@ fn noted(to: &str, task: Value) -> Value {
 fn run(api: &ScriptedApi, args: &[&str], input: &str) -> (Option<i32>, String, String) {
     let result = cf(
         args,
-        &[("CONSENSFLOW_URL", &api.url), ("CONSENSFLOW_TOKEN", "tok")],
+        &[
+            ("CONSENSFLOW_URL", &api.url),
+            ("CONSENSFLOW_TOKEN", "tok"),
+            ("CONSENSFLOW_CF", CF_WORD),
+        ],
         input,
     );
     (
@@ -123,7 +130,7 @@ fn a_member_cannot_use_plain_note_and_is_shown_tell() {
     let api = scripted(vec![reply(200, who("worker", json!({"number": 3})))]);
     let (status, out, err) = run(&api, &["note", "A warning"], "");
     assert_eq!((status, out.as_str()), (Some(2), ""));
-    assert!(err.contains("cf tell \"…\""), "{err}");
+    assert_eq!(err, format!("cf: members use {CF_WORD} tell \"…\"\n"));
     assert_eq!(err.lines().count(), 1);
     assert_eq!(requests(&api), [lookup()]);
 }
@@ -133,7 +140,7 @@ fn a_member_is_shown_tell_even_when_plain_note_has_no_words() {
     let api = scripted(vec![reply(200, who("worker", json!({"number": 3})))]);
     let (status, out, err) = run(&api, &["note"], "");
     assert_eq!((status, out.as_str()), (Some(2), ""));
-    assert!(err.contains("cf tell \"…\""), "{err}");
+    assert_eq!(err, format!("cf: members use {CF_WORD} tell \"…\"\n"));
     assert_eq!(err.lines().count(), 1);
     assert_eq!(requests(&api), [lookup()]);
 }
@@ -186,7 +193,10 @@ fn a_chief_without_a_task_number_and_a_member_with_one_are_told_their_forms() {
     let api = scripted(vec![reply(200, who("chief", json!(null)))]);
     let (status, _, err) = run(&api, &["tell", "A warning"], "");
     assert_eq!(status, Some(2));
-    assert!(err.contains("cf tell T-3 \"…\""), "{err}");
+    assert_eq!(
+        err,
+        format!("cf: the chief names the task: {CF_WORD} tell T-3 \"…\"\n")
+    );
     assert_eq!(err.lines().count(), 1);
     assert_eq!(requests(&api), [lookup()]);
 
@@ -194,7 +204,11 @@ fn a_chief_without_a_task_number_and_a_member_with_one_are_told_their_forms() {
         let api = scripted(vec![reply(200, who("worker", json!({"number": 3})))]);
         let (status, _, err) = run(&api, &["tell", number, "A warning"], "");
         assert_eq!(status, Some(2), "{number}");
-        assert!(err.contains("cf tell \"…\""), "{number}: {err}");
+        assert_eq!(
+            err,
+            format!("cf: members tell without a task number: {CF_WORD} tell \"…\"\n"),
+            "{number}"
+        );
         assert_eq!(err.lines().count(), 1);
         assert_eq!(requests(&api), [lookup()]);
     }

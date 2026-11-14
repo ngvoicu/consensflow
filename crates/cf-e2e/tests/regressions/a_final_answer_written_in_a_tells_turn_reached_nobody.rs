@@ -21,6 +21,7 @@
 //! the answer (`REPLY … THEN …` of the fake agent).
 
 use cf_e2e::rig::{Project, Rig, OPEN};
+use cf_proto::cf_word::{CfWord, Shell};
 use serde_json::{json, Value};
 
 use crate::a_workers_still_going_was_given_as_its_result::{tier, told};
@@ -141,10 +142,15 @@ fn the_answer_is_typed_with_ways_on_and_the_distinct_final_words_are_shown_and_c
     )?;
     let record = rig.transcript(&session);
     let prompt = prompt_with(&rig, &session, ANSWER).expect("the answer was typed");
-    assert!(
-        prompt.contains("cf task finish T-1") && prompt.contains("cf task resume T-1"),
-        "{prompt}"
+    let prompt_row: Value = serde_json::from_str(&prompt).expect("the prompt is a record item");
+    let prompt_text = prompt_row["message"]["content"]
+        .as_str()
+        .expect("the prompt has text");
+    let cf = CfWord::new(&rig.cf().to_string_lossy().replace('\\', "/"), Shell::Posix);
+    let ways_on = format!(
+        "T-1 is paused. To take its window's last complete answer as the result: {cf} task finish T-1. To send it on: {cf} task resume T-1 \"…\"."
     );
+    assert!(prompt_text.ends_with(&ways_on), "{prompt}");
     assert!(
         !record.contains(&format!("[ConsensFlow m-{note_id} ")),
         "{record}"
@@ -153,10 +159,13 @@ fn the_answer_is_typed_with_ways_on_and_the_distinct_final_words_are_shown_and_c
         !record.contains(REPORT),
         "the distinct final words were typed: {record}"
     );
+    // The inbox holds the ledger's unrendered note; its canonical command word is bare.
+    let stored_cf = CfWord::bare();
+    let note_ways_on = format!(
+        "If that is the result, take it: {stored_cf} task finish T-1. To send it on: {stored_cf} task resume T-1 \"…\"."
+    );
     assert!(
-        notes[0].starts_with("T-1 is paused, and @")
-            && notes[0].contains("cf task finish T-1")
-            && notes[0].contains("cf task resume T-1"),
+        notes[0].starts_with("T-1 is paused, and @") && notes[0].ends_with(&note_ways_on),
         "{notes:?}"
     );
 
