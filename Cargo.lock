@@ -359,6 +359,7 @@ dependencies = [
  "nix 0.28.0",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "winapi-util",
  "windows-sys 0.61.2",

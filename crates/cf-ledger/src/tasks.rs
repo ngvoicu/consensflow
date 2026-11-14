@@ -12,6 +12,7 @@ mod giving;
 mod outage;
 mod own_steps;
 mod pausing;
+mod plan;
 
 use cf_proto::ledger::{MessageView, TaskThread, TaskView};
 use rusqlite::{params, OptionalExtension};
@@ -43,6 +44,8 @@ pub(crate) use pausing::{
     work_while_resumed,
 };
 pub use pausing::{resumed_in_vain, NEVER_BEGAN};
+pub(crate) use plan::{create_plan, decide_tasks};
+pub use plan::{PlanCreated, PlanTask};
 
 /// What a paused task's window is told when it goes on: the human's Resume
 /// and the daemon's alike.

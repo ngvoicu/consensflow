@@ -81,7 +81,8 @@ pub use specs::SpecsChange;
 pub use staff::MemberEdit;
 pub use staff::{BackupCandidate, Candidate, HoldKind, StaffMember};
 pub use tasks::{
-    asked_role, reopen_or_accept, window_closed, NewTask, RESUME_WORDS, SAME_ERROR_WITHIN_MS,
+    asked_role, reopen_or_accept, window_closed, NewTask, PlanCreated, PlanTask, RESUME_WORDS,
+    SAME_ERROR_WITHIN_MS,
 };
 pub use tasks::{resumed_in_vain, NEVER_BEGAN};
 pub use wake_ups::{NewWakeUp, WakeUpSetting, WakeUpUnit, DEFAULT_WAKE_UP_TEXT, WAKE_UP_FLOOR_MS};

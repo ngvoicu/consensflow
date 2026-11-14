@@ -157,5 +157,11 @@ runs = ["encodings", "class"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/brief.rs"
-find = '''    words_of(&bytes).map_err(|why| Failure::Failed(format!("cannot read {shown}: {why}")))'''
-replace = '''    Ok(String::from_utf8_lossy(&bytes).into_owned())'''
+find = '''    words_of(&bytes).map_err(|why| Failure::Failed(format!("cannot read {shown}: {why}")))
+}
+
+/// The words in `bytes`, a file's or standard input's, with one final line ending dropped, the'''
+replace = '''    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// The words in `bytes`, a file's or standard input's, with one final line ending dropped, the'''

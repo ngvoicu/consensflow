@@ -140,10 +140,14 @@ file = "crates/cf/src/board/task.rs"
 find = '''
         "--before",
         brief::FILE,
+        "--plan",
+        "--key",
     ],
 '''
 replace = '''
         "--before",
+        "--plan",
+        "--key",
     ],
 '''
 

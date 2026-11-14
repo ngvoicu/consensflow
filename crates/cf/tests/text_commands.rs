@@ -564,6 +564,10 @@ fn a_function_that_reads_a_text_is_a_command_of_the_table() {
     assert!(!readers.is_empty(), "the sources show no reader of a text");
     for reader in readers {
         let in_the_table = commands.iter().any(|command| command.last() == reader)
+            || (reader == "decide_many"
+                && commands
+                    .iter()
+                    .any(|command| command.name == ["task", "accept"]))
             || (reader == "moved"
                 && commands.iter().any(|command| {
                     command.name.first().is_some_and(|first| first == "task")
@@ -573,6 +577,41 @@ fn a_function_that_reads_a_text_is_a_command_of_the_table() {
             in_the_table,
             "`{reader}` in src/board reads a text, and no command of the table (cf help) ends in \
              a text for it: add its line to usage.txt, so that it is run here"
+        );
+    }
+}
+
+#[test]
+fn several_decisions_take_words_from_input_and_a_file() {
+    let folder = tempfile::tempdir().expect("a folder");
+    let path = folder.path().join("checked words.md");
+    fs::write(&path, "Checked `both`.\r\n").expect("the file");
+    let path = path.to_string_lossy();
+    for (args, input) in [
+        (
+            vec!["task", "accept", "T-3", "T-4", "-"],
+            "Checked `both`.\n",
+        ),
+        (vec!["task", "accept", "T-3", "T-4", "--file", &path], ""),
+    ] {
+        let api = scripted(vec![reply(
+            200,
+            json!({"tasks":[{"task":{"number":3,"state":"accepted"}}, {"task":{"number":4,"state":"accepted"}}]}),
+        )]);
+        let ran = cf(
+            &args,
+            &[("CONSENSFLOW_URL", &api.url), ("CONSENSFLOW_TOKEN", "tok")],
+            input,
+        );
+        assert_eq!(
+            ran.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        assert_eq!(
+            api.received()[0].json(),
+            Some(json!({"action":"accept", "tasks":[3,4], "body":"Checked `both`."}))
         );
     }
 }
