@@ -486,13 +486,47 @@ async fn a_post_to_the_transcript_is_the_reopen_that_node_s_last_branch_made_of_
 }
 
 #[tokio::test]
-async fn a_tell_pauses_the_task_for_the_question_it_puts_to_the_window() {
+async fn a_tell_to_a_task_at_work_keeps_its_words_for_the_window_and_stops_nothing() {
     let scene = scene();
     let number = working_task(&scene);
     let (status, said) = post(
         &scene,
         &scene.chief,
         &format!("{number}/tell"),
+        r#"{"body":"Use v2"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        said.as_object().unwrap().keys().collect::<Vec<_>>(),
+        ["message", "task"]
+    );
+    assert_eq!(said["message"]["kind"], "note");
+    assert_eq!(said["message"]["recipient"], "zeus");
+    assert_eq!(said["message"]["preview"], "Use v2");
+    assert_eq!(said["task"]["state"], "working", "the task is not stopped");
+    assert_eq!(scene.kicks.get(), 1);
+    // Told again, it is kept again.
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/tell"),
+        r#"{"body":"And the tests"}"#,
+    )
+    .await;
+    assert_eq!(status, 200);
+    assert_eq!(said["task"]["state"], "working");
+    assert_eq!(scene.kicks.get(), 2);
+}
+
+#[tokio::test]
+async fn a_pause_with_words_pauses_the_task_for_the_question_it_puts_to_the_window() {
+    let scene = scene();
+    let number = working_task(&scene);
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/pause"),
         r#"{"body":"Stop: use v2"}"#,
     )
     .await;
@@ -506,16 +540,90 @@ async fn a_tell_pauses_the_task_for_the_question_it_puts_to_the_window() {
     assert_eq!(said["message"]["preview"], "Stop: use v2");
     assert_eq!(said["task"]["state"], "paused", "the task as it is now");
     assert_eq!(scene.kicks.get(), 1);
-    // A paused task has a window still, and is told again.
-    let (status, _) = post(
+    // A paused task has a window still, and is asked again at once.
+    let (status, said) = post(
         &scene,
         &scene.chief,
-        &format!("{number}/tell"),
+        &format!("{number}/pause"),
         r#"{"body":"And the tests"}"#,
     )
     .await;
-    assert_eq!(status, 200);
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["message"]["kind"], "question");
     assert_eq!(scene.kicks.get(), 2);
+}
+
+#[tokio::test]
+async fn a_pause_with_or_without_words_names_the_tell_it_withdraws() {
+    for words in [r#"{"body":"Stop: use v2"}"#, "{}"] {
+        let scene = scene();
+        let number = working_task(&scene);
+        let (_, told) = post(
+            &scene,
+            &scene.chief,
+            &format!("{number}/tell"),
+            r#"{"body":"Use v2"}"#,
+        )
+        .await;
+        let id = told["message"]["id"].as_i64().expect("the tell's id");
+        let (status, said) = post(&scene, &scene.chief, &format!("{number}/pause"), words).await;
+        assert_eq!(status, 200, "{said}");
+        assert_eq!(said["task"]["state"], "paused", "{words}");
+        assert_eq!(said["toldWithdrawn"], json!([id]), "{words}: {said}");
+    }
+}
+
+#[tokio::test]
+async fn a_pause_of_a_queued_task_names_the_tell_it_withdraws_and_not_the_brief() {
+    let scene = scene();
+    let (number, brief) = queued_task(&scene);
+    let (_, told) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/tell"),
+        r#"{"body":"Use v2"}"#,
+    )
+    .await;
+    let id = told["message"]["id"].as_i64().expect("the tell's id");
+    let (status, said) = post(&scene, &scene.chief, &format!("{number}/pause"), "{}").await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(said["toldWithdrawn"], json!([id]), "{said}");
+    let ledger = scene.context.ledger.borrow();
+    for cancelled in [id, brief] {
+        assert_eq!(
+            ledger.message(cancelled).unwrap().unwrap().state,
+            "cancelled"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_pause_with_words_is_refused_for_a_queued_or_an_open_task_and_names_the_tell() {
+    let scene = scene();
+    let (queued, _) = queued_task(&scene);
+    let open = open_task(&scene);
+    for (number, state) in [(queued, "queued"), (open, "open")] {
+        let said = post(
+            &scene,
+            &scene.chief,
+            &format!("{number}/pause"),
+            r#"{"body":"Stop"}"#,
+        )
+        .await;
+        assert_eq!(
+            refused(&said),
+            (
+                409,
+                "no-turn-to-stop",
+                format!(
+                    "T-{number} is {state}: its window has no turn to stop. To put words to it: cf tell T-{number} \"…\""
+                )
+                .as_str()
+            )
+        );
+        assert_eq!(state_of(&scene, number), state);
+    }
+    assert_eq!(scene.kicks.get(), 0);
 }
 
 #[tokio::test]
@@ -717,7 +825,7 @@ async fn a_queued_task_is_told_with_no_pause_and_its_words_wait_for_its_window_a
 #[tokio::test]
 async fn a_tell_goes_the_way_its_task_is_on_once_its_words_are_in() {
     // Queued when it was read; its brief arrives while the words come in: the
-    // window has it, and is stopped and asked.
+    // window has it, and the words are kept for it at rest; nothing is stopped.
     let scene = scene();
     let (number, brief) = queued_task(&scene);
     let context = std::rc::Rc::clone(&scene.context);
@@ -738,11 +846,12 @@ async fn a_tell_goes_the_way_its_task_is_on_once_its_words_are_in() {
     assert_eq!(status, 200, "{said}");
     assert_eq!(
         [&said["message"]["kind"], &said["task"]["state"]],
-        [&json!("question"), &json!("paused")]
+        [&json!("note"), &json!("working")]
     );
 
     // At work when it was read; paused and resumed while the words come in: it
     // is queued for its window again, and the words are kept for it.
+    let scene = self::scene();
     let number = working_task(&scene);
     let context = std::rc::Rc::clone(&scene.context);
     let queued_again = read_while(r#"{"body":"And keep the old tests"}"#, move || {
@@ -804,7 +913,8 @@ async fn a_tell_of_a_task_shown_working_for_the_words_that_resumed_it_is_kept_be
         .unwrap();
     assert_eq!(words.state, "queued", "the resume's words stand");
 
-    // Once the words are in, a tell is a tell again: it stops the task.
+    // Once the words are in, a tell is kept for the window at rest as before: nothing is
+    // stopped.
     {
         let mut ledger = scene.context.ledger.borrow_mut();
         ledger.begin_delivery(words.id).unwrap();
@@ -822,8 +932,48 @@ async fn a_tell_of_a_task_shown_working_for_the_words_that_resumed_it_is_kept_be
     assert_eq!(status, 200, "{said}");
     assert_eq!(
         [&said["message"]["kind"], &said["task"]["state"]],
-        [&json!("question"), &json!("paused")]
+        [&json!("note"), &json!("working")]
     );
+}
+
+#[tokio::test]
+async fn a_pause_with_words_of_a_task_shown_working_for_the_words_that_resumed_it_keeps_them_behind_them(
+) {
+    // T-1153's F5: at work on the turn before the words that resumed it, the task is queued for
+    // them still. A pause here would withdraw them: the words are kept behind them, nothing
+    // is stopped.
+    let scene = scene();
+    let number = working_task(&scene);
+    let words = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        ledger.pause_task(1, number, Some("chief"), None).unwrap();
+        let resumed = ledger
+            .resume_task(1, number, Some("chief"), "Go on, or say you finished")
+            .unwrap();
+        ledger.work_while_resumed(1, number).unwrap();
+        resumed.message.unwrap().id
+    };
+    let (status, said) = post(
+        &scene,
+        &scene.chief,
+        &format!("{number}/pause"),
+        r#"{"body":"Also check the lexer"}"#,
+    )
+    .await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        [&said["message"]["kind"], &said["task"]["state"]],
+        [&json!("note"), &json!("working")],
+        "kept for the window, the task not stopped"
+    );
+    let words = scene
+        .context
+        .ledger
+        .borrow()
+        .message(words)
+        .unwrap()
+        .unwrap();
+    assert_eq!(words.state, "queued", "the resume's words stand");
 }
 
 #[tokio::test]
@@ -895,7 +1045,7 @@ async fn a_task_is_acted_on_as_it_was_read_before_the_body_came_in() {
         (
             409,
             "invalid-transition",
-            format!("cannot pause T-{number}: it is cancelled").as_str()
+            format!("cannot keep words for the window of T-{number}: it is cancelled").as_str()
         ),
         "a task read afresh would have said it has no window"
     );

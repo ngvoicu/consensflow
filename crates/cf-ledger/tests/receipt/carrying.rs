@@ -245,7 +245,11 @@ fn a_tell_that_was_never_answered_does_not_keep_the_task_from_working_once_it_go
     let (task, brief) = (created.task.number, created.message.expect("a brief").id);
     w.deliver(brief);
     let tell = w.tell("zeus", task, "Where are you?");
-    assert_eq!(w.state(task), "paused", "a tell pauses its task");
+    assert_eq!(
+        w.state(task),
+        "paused",
+        "a pause with words pauses its task"
+    );
     assert_eq!(
         w.next("zeus"),
         Some(tell.id),

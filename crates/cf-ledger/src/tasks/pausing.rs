@@ -49,6 +49,20 @@ pub(crate) fn pause_task(
     pause_task_as(store, project_id, number, by, because, false)
 }
 
+/// [`pause_task`], and with the task the told notes the pause cancelled: what the chief wrote
+/// for the window and it had not read goes with the pause, and the one who paused is told
+/// which words of its own went (every pause that cancels words says them, whatever state the
+/// task was in).
+pub(crate) fn pause_task_naming(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    by: Option<&str>,
+    because: Option<&str>,
+) -> Result<(TaskView, Vec<MessageView>), LedgerError> {
+    pause_task_inner(store, project_id, number, by, because, false)
+}
+
 /// ConsensFlow pauses a worker's task whose window it closed itself, as it
 /// pauses one whose window went away. In a suspended project the window closed
 /// with the project, and the pause is marked for the human's Resume of the
@@ -80,6 +94,17 @@ fn pause_task_as(
     because: Option<&str>,
     with_project: bool,
 ) -> Result<TaskView, LedgerError> {
+    Ok(pause_task_inner(store, project_id, number, by, because, with_project)?.0)
+}
+
+fn pause_task_inner(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    by: Option<&str>,
+    because: Option<&str>,
+    with_project: bool,
+) -> Result<(TaskView, Vec<MessageView>), LedgerError> {
     if let Some(because) = because {
         model::require_text(because, "because", 1000)?;
     }
@@ -111,21 +136,37 @@ fn pause_task_as(
                 ));
             }
         }
+        let mut told = Vec::new();
         if let (Some(author), Some(window)) = (
             author.filter(|author| author.role == "chief"),
             task.assignee_id,
         ) {
-            store.db.execute(
-                "UPDATE message SET state = 'cancelled', reason = ?
-                 WHERE task_id = ? AND recipient_id = ? AND sender_id = ?
-                   AND kind IN ('task', 'note') AND state IN ('queued', 'gated')",
-                params![
-                    format!("withdrawn by @{}'s pause", author.handle),
-                    task.id,
-                    window,
-                    author.id
-                ],
-            )?;
+            // The statement gives back what it cancels: the told notes among them (a note of
+            // the chief's to the window, never urgent) are named to the one who paused.
+            let cancelled: Vec<(i64, String, bool)> = store
+                .db
+                .prepare(
+                    "UPDATE message SET state = 'cancelled', reason = ?
+                     WHERE task_id = ? AND recipient_id = ? AND sender_id = ?
+                       AND kind IN ('task', 'note') AND state IN ('queued', 'gated')
+                     RETURNING id, kind, urgent",
+                )?
+                .query_map(
+                    params![
+                        format!("withdrawn by @{}'s pause", author.handle),
+                        task.id,
+                        window,
+                        author.id
+                    ],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )?
+                .collect::<rusqlite::Result<_>>()?;
+            for (id, kind, urgent) in cancelled {
+                if kind == "note" && !urgent {
+                    told.extend(store.message(id)?);
+                }
+            }
+            told.sort_by_key(|message| message.id);
             release_carried(store, task.id)?;
         }
         if !taken {
@@ -136,7 +177,7 @@ fn pause_task_as(
             }
             pause(store, &task, detail, with_project, Stops::Asked)?;
         }
-        task_by_id(store, task.id)
+        Ok((task_by_id(store, task.id)?, told))
     })
 }
 

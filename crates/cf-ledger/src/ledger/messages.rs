@@ -269,6 +269,15 @@ impl Ledger {
         messages::ask(&mut self.store, project_id, question)
     }
 
+    /// [`Ledger::ask`], and with the question the told notes its pause cancelled.
+    pub fn ask_naming(
+        &mut self,
+        project_id: i64,
+        question: &NewQuestion,
+    ) -> Result<(MessageView, Vec<MessageView>), LedgerError> {
+        messages::ask_naming(&mut self.store, project_id, question)
+    }
+
     /// `from` tells the window of T-`number`, still queued for it, `body`: kept
     /// for the window, it goes in after the brief, and nothing is paused.
     pub fn tell_queued(
@@ -340,6 +349,28 @@ impl Ledger {
     /// result until each is in.
     pub fn notes_waiting(&self, participant_id: i64, task_id: i64) -> Result<bool, LedgerError> {
         messages::notes_waiting(&self.store, participant_id, task_id)
+    }
+
+    /// [`Ledger::notes_waiting`] for the chief's Finish of T-`number`: the words told to
+    /// its window at work that wait are not counted, as Finish withdraws them.
+    pub fn notes_waiting_for_finish(
+        &self,
+        project_id: i64,
+        number: i64,
+        participant_id: i64,
+    ) -> Result<bool, LedgerError> {
+        let task = self.store.task_row(project_id, number)?;
+        messages::notes_waiting_for_finish(&self.store, participant_id, &task)
+    }
+
+    /// Whether `message`, told words, was sent while its task's window was at work, not
+    /// before the brief went in (`told_at_work`).
+    pub fn sent_at_work(&self, message: &MessageView) -> Result<bool, LedgerError> {
+        let Some(number) = message.task_number else {
+            return Ok(false);
+        };
+        let task = self.store.task_row(message.project_id, number)?;
+        messages::sent_at_work_of(&self.store, message, &task)
     }
 
     /// A launch whose first message was `carrier` is over before its window

@@ -104,12 +104,39 @@ fn a_tell_to_an_open_task_says_the_words_are_added_to_its_brief_for_whichever_wi
 }
 
 #[test]
-fn a_tell_to_a_task_in_its_window_says_it_is_paused_as_it_always_did() {
+fn a_tell_to_a_task_at_work_says_it_goes_on_and_nothing_is_paused() {
+    for state in ["working", "waiting"] {
+        let api = scripted(vec![
+            reply(200, json!({ "participant": { "role": "chief" } })),
+            reply(200, told("note", state)),
+        ]);
+        let (code, printed) = window(&api, &["tell", "T-3", "Use the v2 grammar"]);
+        assert_eq!(code, Some(0));
+        assert_eq!(
+            printed,
+            "T-3 goes on working; your words go in before its result is taken: m-12 waits for @zeus-amber-pine's window. Nothing is paused, and nothing waits for an answer.\nT-3: sent 18 characters, ending \"Use the v2 grammar\".\n"
+        );
+    }
+}
+
+#[test]
+fn a_tell_to_a_paused_task_says_the_words_go_in_with_its_resume() {
     let api = scripted(vec![
         reply(200, json!({ "participant": { "role": "chief" } })),
-        reply(200, told("question", "paused")),
+        reply(200, told("note", "paused")),
     ]);
-    let (code, printed) = window(&api, &["tell", "T-3", "Stop: use v2"]);
+    let (code, printed) = window(&api, &["tell", "T-3", "Use the v2 grammar"]);
+    assert_eq!(code, Some(0));
+    assert_eq!(
+        printed,
+        "T-3 is paused: m-12 waits for @zeus-amber-pine's window and goes in with its resume.\nT-3: sent 18 characters, ending \"Use the v2 grammar\".\n"
+    );
+}
+
+#[test]
+fn a_pause_with_words_says_it_is_paused_as_a_tell_always_did() {
+    let api = scripted(vec![reply(200, told("question", "paused"))]);
+    let (code, printed) = window(&api, &["task", "pause", "T-3", "Stop: use v2"]);
     assert_eq!(code, Some(0));
     assert_eq!(
         printed,

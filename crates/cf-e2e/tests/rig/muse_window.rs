@@ -288,10 +288,10 @@ fn a_tell_while_the_turn_works_stops_it_takes_the_brief_back_and_goes_in_alone_o
     )?;
     in_its_turn(&rig, &project, 1, secs(90))?;
     let worker = worker(&project)?;
-    // The chief's tell into a task at work pauses it for the question: the daemon stops
+    // The chief's pause with words into a task at work pauses it for the question: the daemon stops
     // the turn, Muse puts the brief back before a word of its answer, and the question
     // goes in on its own once the window rests.
-    rig.tell(project.id(), "CF tell T-1 :: Also say HANDED_OVER.")?;
+    rig.tell(project.id(), "CF task pause T-1 :: Also say HANDED_OVER.")?;
     let mut told = None;
     rig.wait_for("the tell to be received", secs(90), || {
         told = message_with(&project, &worker, "HANDED_OVER")?
@@ -332,6 +332,54 @@ fn a_tell_while_the_turn_works_stops_it_takes_the_brief_back_and_goes_in_alone_o
     assert!(
         !words[1].contains("T1_DONE"),
         "the brief put back was cleared first: {words:?}"
+    );
+    rig.close()?;
+    Ok(())
+}
+
+/// A tell to a Muse window at work stops nothing (T-1616): no Escape, no brief taken back, the
+/// task still working; the words go in once the turn has rested, before its result is taken.
+#[test]
+fn a_tell_to_a_muse_window_at_work_presses_no_key_and_goes_in_once_the_turn_has_ended() -> Outcome {
+    let Some(config) = muse_rig_of(20_000) else {
+        return Ok(());
+    };
+    let rig = Rig::start(config)?;
+    let project = project(&rig, &echo_worker())?;
+    rig.tell(
+        project.id(),
+        "DISPATCH --tier standard Reply with exactly: T1_DONE",
+    )?;
+    in_its_turn(&rig, &project, 1, secs(90))?;
+    let worker = worker(&project)?;
+    rig.tell(project.id(), "CF tell T-1 :: Also say HANDED_OVER.")?;
+    rig.wait_for("the tell to wait for the window", secs(30), || {
+        Ok(message_with(&project, &worker, "HANDED_OVER")?.is_some())
+    })?;
+    assert_eq!(
+        project.task(1)?["state"],
+        "working",
+        "the tell moved nothing"
+    );
+    let pane = pane_of(&project)?;
+    assert_eq!(
+        rig.keys_pressed(pane["id"].as_str().unwrap_or_default(), &[27]),
+        0,
+        "no key"
+    );
+    rig.wait_for("the words to go in", secs(120), || {
+        Ok(message_with(&project, &worker, "HANDED_OVER")?
+            .is_some_and(|message| message["state"] == "delivered"))
+    })?;
+    let brief = message_with(&project, &worker, "T1_DONE")?.unwrap_or_default();
+    assert_eq!(
+        brief["state"], "delivered",
+        "the brief was not taken back: {brief}"
+    );
+    assert_eq!(
+        rig.keys_pressed(pane["id"].as_str().unwrap_or_default(), &[27]),
+        0,
+        "still no key"
     );
     rig.close()?;
     Ok(())

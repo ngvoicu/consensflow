@@ -131,6 +131,19 @@ impl Ledger {
         tasks::pause_task(&mut self.store, project_id, number, by, because)
     }
 
+    /// [`Ledger::pause_task`], and with the task the told notes the pause cancelled.
+    pub fn pause_task_naming(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        by: Option<&str>,
+        because: Option<&str>,
+    ) -> Result<(TaskView, Vec<crate::MessageView>), LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("pause_task", Some(number))?;
+        tasks::pause_task_naming(&mut self.store, project_id, number, by, because)
+    }
+
     /// ConsensFlow relaunches the window of T-`number` that began no turn on message
     /// `message_id`, stopped by its own stop `seq`: that message goes back to the window's
     /// keeping and the task is queued for it, or nothing moves where anything of the stall

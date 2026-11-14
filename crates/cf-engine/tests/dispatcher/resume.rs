@@ -543,7 +543,7 @@ fn the_chiefs_pause_and_its_tell_stay_paused_through_a_close_and_a_resume() {
     tiers.open_for("worker", "light", "Write the docs");
     context.pass().unwrap();
     context.pass().unwrap();
-    // `cf task pause T-1`, and `cf tell T-3`, which pauses T-3 to put its words in.
+    // `cf task pause T-1`, and `cf task pause T-3 "…"`, which pauses T-3 to put its words in.
     context.pause_task(project, 1);
     let hera = tiers.assignee(3);
     context.tell(project, &hera, 3, "Use the new style");
@@ -2533,6 +2533,20 @@ fn a_task_held_for_a_job_at_the_close_whose_job_the_resume_could_not_retire_is_h
 fn told_before_a_reopen_that_failed(
     context: &Context,
 ) -> (Tiers<'_>, Restarted<'_>, String, MessageView) {
+    reopen_that_failed(context, true).map_note()
+}
+
+/// A project whose T-1 is at work, quit, and Resumed with a window that will not come up;
+/// with a note told it (a tell at work) or none.
+struct Failed<'a>(Tiers<'a>, Restarted<'a>, String, Option<MessageView>);
+
+impl<'a> Failed<'a> {
+    fn map_note(self) -> (Tiers<'a>, Restarted<'a>, String, MessageView) {
+        (self.0, self.1, self.2, self.3.expect("its note"))
+    }
+}
+
+fn reopen_that_failed(context: &Context, with_note: bool) -> Failed<'_> {
     let tiers = Tiers::new(context, &["zeus"]);
     let project = tiers.project.id;
     tiers.open();
@@ -2552,27 +2566,55 @@ fn told_before_a_reopen_that_failed(
             Ok(())
         }
     }));
-    let note = context
-        .ledger
-        .borrow_mut()
-        .note(
-            project,
-            &NewNote {
-                from: Some("chief".to_owned()),
-                to: session.clone(),
-                task: Some(1),
-                body: "Use the grammar in the docs".to_owned(),
-            },
-        )
-        .unwrap();
+    let note = with_note.then(|| {
+        context
+            .ledger
+            .borrow_mut()
+            .note(
+                project,
+                &NewNote {
+                    from: Some("chief".to_owned()),
+                    to: session.clone(),
+                    task: Some(1),
+                    body: "Use the grammar in the docs".to_owned(),
+                },
+            )
+            .unwrap()
+    });
     after.resume_project(project).unwrap();
     assert_eq!(tiers.task(1).task.state, "working", "with no window");
     assert!(to_human(context, project).contains(&format!(
         "@{session} could not start: the launch failed (its cause is in ConsensFlow's log)."
     )));
-    assert_eq!(context.message(note.id).state, "queued");
+    if let Some(note) = &note {
+        assert_eq!(context.message(note.id).state, "queued");
+    }
     *context.adapter.prepare.borrow_mut() = None;
-    (tiers, after, session, note)
+    Failed(tiers, after, session, note)
+}
+
+/// With no tell at all, nothing opens a window for T-1 after a Resume whose launch failed: the
+/// task is paused at the window's exit, the chief told so, the human told it could not start.
+/// A tell waiting changes nothing of how the task ends (T-1616): it is paused the same way, and
+/// the teller is told once that its words did not go in (the tests below).
+#[test]
+fn a_member_whose_resumed_window_never_comes_up_with_no_tell_waiting_is_paused_and_the_chief_told()
+{
+    let context = Context::new();
+    let Failed(tiers, after, session, _) = reopen_that_failed(&context, false);
+    never_up(&context.adapter);
+    for _ in 0..4 {
+        after.pass().unwrap();
+        context.advance(130_000);
+    }
+    context.settle();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert_eq!(
+        tiers.notes("chief"),
+        [format!(
+            "T-1 is paused: @{session}'s window is gone. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+        )]
+    );
 }
 
 /// The window opened for the note never comes up. Its exit is settled at the
@@ -2594,7 +2636,7 @@ fn a_member_whose_window_never_comes_up_with_a_note_told_it_as_its_first_message
     assert_match(
         launch_of(&context, &session)["message"].as_str().unwrap(),
         &format!(
-            r"^\[ConsensFlow m-{} · T-1 · note from @chief\]\nUse the grammar in the docs$",
+            r"^\[ConsensFlow m-{} · T-1 · note from @chief\]\nUse the grammar in the docs\n\nT-1 goes on: take this in and carry on\.",
             note.id
         ),
     );
@@ -2661,9 +2703,10 @@ fn a_member_whose_window_never_comes_up_with_a_note_told_it_as_its_first_message
 }
 
 /// The same window, whose kill the host never answers: the launch is not held for it.
-/// Past the kill's wait the note goes without the exit, as before the close settled it,
-/// and fails, T-1 with it, whoever is told hearing why; the window's exit, once the kill
-/// is answered, settles nothing more.
+/// Past the kill's wait the note goes without the exit and fails, whoever told it hearing
+/// why, once; the task is not failed for it (a tell changes nothing of how its task ends).
+/// It ends as it ends with no tell waiting: the window's exit, once the kill is answered,
+/// pauses it and the chief is told its window is gone.
 #[test]
 fn a_member_whose_window_never_comes_up_and_is_never_killed_has_the_note_told_it_fail_after_the_wait(
 ) {
@@ -2694,7 +2737,9 @@ fn a_member_whose_window_never_comes_up_and_is_never_killed_has_the_note_told_it
         (failed.state.as_str(), failed.reason.as_deref()),
         ("failed", Some(why.as_str()))
     );
-    assert_eq!(tiers.task(1).task.state, "failed");
+    // Told while its window was at work (after its brief went in): the task is not failed for
+    // them (`cf tell`); the chief is told they did not reach it.
+    assert_eq!(tiers.task(1).task.state, "working");
     let kept_words = format!("m-{}", note.id);
     assert_eq!(
         tiers
@@ -2703,7 +2748,7 @@ fn a_member_whose_window_never_comes_up_and_is_never_killed_has_the_note_told_it
             .filter(|said| said.contains(&kept_words))
             .collect::<Vec<_>>(),
         [format!(
-            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\"\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
+            "Your {kept_words} on T-1 did not reach @{session}'s window: {why}.\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
         )]
     );
     assert_eq!(
@@ -2723,19 +2768,28 @@ fn a_member_whose_window_never_comes_up_and_is_never_killed_has_the_note_told_it
     let host = Rc::clone(&context.host);
     context.run(async move { host.exited(window).await });
     after.pass().unwrap();
-    assert_eq!(tiers.task(1).task.state, "failed");
-    assert!(
-        !tiers
+    // The window's exit pauses the task as with no tell waiting, and the chief is told so once.
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert_eq!(
+        tiers
             .notes("chief")
             .iter()
-            .any(|said| said.starts_with("T-1 is paused")),
+            .filter(|said| said.starts_with("T-1 is paused: "))
+            .count(),
+        1,
         "{:?}",
         tiers.notes("chief")
+    );
+    assert_eq!(
+        context.message(note.id).state,
+        "failed",
+        "settles nothing more"
     );
 }
 
 /// The same window, whose kill the host refuses: no exit pauses T-1, and the note goes,
-/// failing, T-1 with it, whoever is told hearing why (T-63, as for a window unfit for work).
+/// failing, whoever told it hearing why (T-63, as for a window unfit for work); the task is
+/// not failed for it, and is left as a window that cannot be closed leaves it.
 #[test]
 fn a_member_whose_window_never_comes_up_and_whose_kill_is_refused_has_the_note_told_it_fail_and_says_why(
 ) {
@@ -2749,7 +2803,9 @@ fn a_member_whose_window_never_comes_up_and_whose_kill_is_refused_has_the_note_t
     let why = "the window could not take its first message (its cause is in ConsensFlow's log)"
         .to_owned();
     assert_eq!(context.message(note.id).state, "failed");
-    assert_eq!(tiers.task(1).task.state, "failed");
+    // Told while its window was at work (after its brief went in): the task is not failed for
+    // them (`cf tell`); the chief is told they did not reach it.
+    assert_eq!(tiers.task(1).task.state, "working");
     let kept_words = format!("m-{}", note.id);
     assert_eq!(
         tiers
@@ -2758,7 +2814,7 @@ fn a_member_whose_window_never_comes_up_and_whose_kill_is_refused_has_the_note_t
             .filter(|said| said.contains(&kept_words))
             .collect::<Vec<_>>(),
         [format!(
-            "T-1 failed: what @chief told its window, {kept_words}, did not reach it ({why}). Reopen it with: cf task reopen T-1 \"…\", or accept it with what you checked: cf task accept T-1 \"…\"\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
+            "Your {kept_words} on T-1 did not reach @{session}'s window: {why}.\n\nIts words, {kept_words}, not delivered, so that you can send them again:\n\nUse the grammar in the docs"
         )]
     );
     assert_eq!(

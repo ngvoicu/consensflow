@@ -556,7 +556,7 @@
     "code": 0
   },
   {
-    "name": "telling a window something urgent",
+    "name": "telling a window something while its task is at work",
     "args": [
       "tell",
       "T-3",
@@ -572,7 +572,7 @@
       },
       {
         "status": 201,
-        "text": "{\"message\":{\"id\":23,\"kind\":\"question\",\"state\":\"queued\",\"sender\":\"zeus\",\"recipient\":\"zeus\",\"task\":3,\"preview\":\"Which one?\"}}"
+        "text": "{\"message\":{\"id\":23,\"kind\":\"note\",\"state\":\"queued\",\"sender\":\"chief\",\"recipient\":\"zeus\",\"task\":3,\"preview\":\"stop that\"},\"task\":{\"number\":3,\"state\":\"working\",\"assignee\":\"zeus\"}}"
       }
     ],
     "requests": [
@@ -589,7 +589,7 @@
         "body": "{\"body\":\"stop that\"}"
       }
     ],
-    "stdout": "T-3 is paused and m-23 put to @zeus; its answer arrives as a message. Then: cf task resume T-3 \"…\"\nT-3: sent 9 characters, ending \"stop that\".\n",
+    "stdout": "T-3 goes on working; your words go in before its result is taken: m-23 waits for @zeus's window. Nothing is paused, and nothing waits for an answer.\nT-3: sent 9 characters, ending \"stop that\".\n",
     "stderr": "",
     "code": 0
   },

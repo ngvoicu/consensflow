@@ -133,7 +133,7 @@ of the same words (`crates/cf-daemon/tests/goldens/cf-board-028.json.gz`).
 ## `cf task finish` takes a paused task too
 
 Board task T-442 (3.0.6): the chief's `cf task finish T-3` takes what a worker said last as
-the task's result for a paused task as well as a working one, since a tell pauses a task and
+the task's result for a paused task as well as a working one, since a pause with words (`cf task pause T-n "…"`) pauses a task and
 the window's last complete answer, written after it, would otherwise reach nobody. The
 usage's entry says it, `take what a working or paused task's worker said last as its
 result`, in the six prints of `board.json` that hold it (`cf`, `cf help`, `cf --help`, `cf

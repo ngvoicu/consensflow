@@ -503,16 +503,19 @@ fn tell(
         js::text(message.get("id")),
         js::text(message.get("recipient")),
     );
-    // A task still queued is not stopped: its window is not up, and the words wait for it.
-    let text = if js::text(message.get("kind")) == "note" {
-        format!(
+    // A tell stops nothing: the words are kept for the window, which has not got the task yet
+    // (queued), is at work on it, or is paused on it.
+    let state = answer.take("task")?;
+    let text = match state.get("state").and_then(Value::as_str) {
+        Some("working" | "waiting") => format!(
+            "T-{number} goes on working; your words go in before its result is taken: m-{id} waits for @{window}'s window. Nothing is paused, and nothing waits for an answer."
+        ),
+        Some("paused") => format!(
+            "T-{number} is paused: m-{id} waits for @{window}'s window and goes in with its resume."
+        ),
+        _ => format!(
             "T-{number} is queued: m-{id} waits for @{window}'s window and goes in after its brief. Nothing is paused, and nothing waits for an answer."
-        )
-    } else {
-        format!(
-            "T-{number} is paused and m-{id} put to @{window}; its answer arrives as a message. Then: {} task resume T-{number} \"…\"",
-            board.cf()
-        )
+        ),
     };
     Ok(Said::new(message, format!("{text}\n{sent}")))
 }

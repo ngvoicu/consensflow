@@ -7,7 +7,7 @@
 //! closed its window, "it ignored the interrupt" (m-3943), which ended the plant run and
 //! the build it had left in the background (m-3945); the same close was told twice
 //! (m-3943, m-3944). Its turn had ended on the refusal: nothing was left to stop. At
-//! ~21:05 a `cf tell` of T-604 pressed Escape into a turn whose three background agents
+//! ~21:05 a `cf tell` (now `cf task pause T-604 "…"`) of T-604 pressed Escape into a turn whose three background agents
 //! ran; Claude's record shows the interrupt worked, and ConsensFlow closed the window
 //! all the same (m-4188), ending the agents. Claude says busy while agents run, and an
 //! interrupted or refused turn writes no count of them, so the look did not read the
@@ -234,9 +234,12 @@ fn a_tell_that_stopped_a_turn_whose_agents_run_keeps_the_window_and_its_work() -
         .ok_or_else(|| Error::Daemon("the job is gone".to_owned()))?;
     let pane = pane_of(&project, &session)?;
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
-    let told = rig.cf_in_window(&chief, ["tell", "T-1", "Drop the cap. REPLY dropped"])?;
+    let told = rig.cf_in_window(
+        &chief,
+        ["task", "pause", "T-1", "Drop the cap. REPLY dropped"],
+    )?;
     if told.code != Some(0) {
-        return Err(Error::Daemon(format!("cf tell: {told}")).into());
+        return Err(Error::Daemon(format!("cf task pause: {told}")).into());
     }
     rig.wait_for("the turn to be stopped", secs(30), || {
         Ok(escapes(&rig, &pane) >= 1)

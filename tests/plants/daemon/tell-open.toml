@@ -20,8 +20,8 @@ runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = "    if state == OPEN {"
-replace = "    if false && state == OPEN {"
+find = "    if telling.state == OPEN {"
+replace = "    if false && telling.state == OPEN {"
 
 [[plant]]
 name = "tell open: a task taken back to the board while its words come in is told as it was read"

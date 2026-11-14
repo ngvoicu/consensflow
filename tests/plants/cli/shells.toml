@@ -70,7 +70,7 @@ runs = ["windows-shells"]
 platforms = ["windows"]
 
 [[plant.edit]]
-file = "crates/cf/src/board/mod.rs"
+file = "crates/cf/src/board/brief.rs"
 find = '''
         .strip_suffix("\r\n")
         .or_else(|| text.strip_suffix('\n'))
@@ -109,12 +109,12 @@ find = '''
         .iter()
         .map(|word| word.to_string_lossy().into_owned())
         .collect();
-    match command(&words, given, board, input) {
+    match command(&words, given, board, input).map(|said| said.in_words_of(board.cf())) {
 '''
 replace = '''
     let words: Vec<String> = given
         .iter()
         .map(|word| word.to_string_lossy().lines().next().unwrap_or_default().to_owned())
         .collect();
-    match command(&words, given, board, input) {
+    match command(&words, given, board, input).map(|said| said.in_words_of(board.cf())) {
 '''

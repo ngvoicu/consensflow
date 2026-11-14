@@ -2,7 +2,7 @@
 //! nobody.
 //!
 //! Seen by the chief on 2026-10-24, on 3.0.5 (T-429), and by the tester on 2026-10-25, on
-//! 3.0.6-alpha.2 (T-534, on Claude Code and Codex): the chief ran `cf tell T-1 "…"`,
+//! 3.0.6-alpha.2 (T-534, on Claude Code and Codex): the chief ran `cf tell T-1 "…"` (now `cf task pause T-1 "…"`),
 //! which pauses the task and puts the words to its window as a question. The worker answered
 //! it with `cf answer`, went straight on in the same turn, and ended it with its full result.
 //! The task was paused, so that result was no result, and no message carried it either. The
@@ -91,7 +91,7 @@ fn the_answer_is_typed_with_ways_on_and_the_distinct_final_words_are_shown_and_c
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
     let session = chief_session(&rig, &project)?;
     let words = format!("Stop now. REPLY {ANSWER} THEN SLEEP 2 Reply with exactly: {REPORT}");
-    let tell = rig.cf_in_window(&chief, ["tell", "T-1", words.as_str()])?;
+    let tell = rig.cf_in_window(&chief, ["task", "pause", "T-1", words.as_str()])?;
     assert_eq!(tell.code, Some(0), "{tell}");
 
     // The window answers the tell, then ends with different final words.
@@ -213,7 +213,7 @@ fn an_answered_tells_note_stays_shown_when_the_chief_resumes_before_the_answer_i
         Ok(project.lane("chief")?["activity"]["state"] != "idle")
     })?;
     let words = format!("Stop now. REPLY {ANSWER} THEN SLEEP 2 Reply with exactly: {REPORT}");
-    let tell = rig.cf_in_window(&chief, ["tell", "T-1", words.as_str()])?;
+    let tell = rig.cf_in_window(&chief, ["task", "pause", "T-1", words.as_str()])?;
     assert_eq!(tell.code, Some(0), "{tell}");
 
     rig.wait_for("the answered tell note to be shown", secs(60), || {
@@ -304,7 +304,7 @@ fn an_unanswered_tells_note_is_typed_after_the_chief_resumes() -> Outcome {
         Ok(project.lane("chief")?["activity"]["state"] != "idle")
     })?;
     let words = format!("Stop now. SLEEP 2 Reply with exactly: {REPORT}");
-    let tell = rig.cf_in_window(&chief, ["tell", "T-1", words.as_str()])?;
+    let tell = rig.cf_in_window(&chief, ["task", "pause", "T-1", words.as_str()])?;
     assert_eq!(tell.code, Some(0), "{tell}");
     rig.wait_for("the unanswered tell note to wait", secs(60), || {
         Ok(note(&project)?.is_some())

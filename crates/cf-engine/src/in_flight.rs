@@ -29,7 +29,7 @@ use std::sync::Arc;
 
 use cf_harness::contract::TurnLeft;
 use cf_harness::records::{LastCall, Options, Reading, Role};
-use cf_ledger::MessageView;
+use cf_ledger::{is_told, MessageView};
 use cf_proto::agents::Harness;
 use cf_proto::cf_word::CfWord;
 use serde_json::json;
@@ -37,6 +37,7 @@ use serde_json::json;
 use crate::deliveries::Delivering;
 use crate::delivery_text::{
     arrival_boundary, arrived_among, delivery_text_beside, is_paste_of, marker_of,
+    tell_at_work_footer,
 };
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -97,6 +98,23 @@ impl Dispatcher {
         };
         let cf = self.cf_for(message)?;
         let mut text = delivery_text_beside(message, carried, &cf, again, told_in);
+        // The chief's tell sent while its task's window was at work says it stops nothing.
+        if let Some(number) = message.task_number.filter(|_| carried.is_empty()) {
+            let ledger = self.seams.ledger.borrow();
+            let thread = ledger.task(message.project_id, number)?;
+            if let Some(thread) = thread.filter(|thread| {
+                is_told(message, thread.task.assignee.as_deref())
+                    && matches!(thread.task.state.as_str(), "working" | "waiting")
+            }) {
+                if ledger.sent_at_work(message)? {
+                    text.push_str(&tell_at_work_footer(
+                        number,
+                        &cf,
+                        thread.task.state == "waiting",
+                    ));
+                }
+            }
+        }
         let paused = if message.kind == "answer" || carried.iter().any(|row| row.kind == "answer") {
             self.seams.ledger.borrow().tell_pause_ways_on(message.id)?
         } else {

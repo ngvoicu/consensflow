@@ -1,4 +1,4 @@
-//! `tell`: the chief's `cf tell` into a Claude member at work on a long command while
+//! `tell`: the chief's `cf task pause T-n "…"` (once `cf tell`) into a Claude member at work on a long command while
 //! background agents it started run (T-604, 2026-10-25, 3.0.6-alpha.2). The tell
 //! pauses the task, and its Escape stopped the turn; Claude says busy while its
 //! agents run, the interrupted turn's record counts none of them, and ConsensFlow
@@ -77,7 +77,10 @@ pub fn tell(ctx: &Ctx, case: &mut Account) -> Result<()> {
         OPEN,
     )?;
     let made = now_ms();
-    let told = rig.cf_in_window(&chief, ["tell", &format!("T-{number}"), &told_words()])?;
+    let told = rig.cf_in_window(
+        &chief,
+        ["task", "pause", &format!("T-{number}"), &told_words()],
+    )?;
     case.check("the chief's tell is taken", told.code == Some(0), &told);
 
     let gone = find(

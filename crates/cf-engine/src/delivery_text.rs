@@ -77,6 +77,21 @@ pub fn delivery_text_beside(
     )
 }
 
+/// What a window is told after the chief's tell sent while it was at work (`cf tell`, which
+/// stops nothing): to take it in and carry on, that its final message is still the whole
+/// result, and how to say something back without stopping. A task waiting on its question
+/// says that the question still waits.
+pub fn tell_at_work_footer(task: i64, cf: &CfWord, waiting: bool) -> String {
+    let question = if waiting {
+        " Your question still waits for its answer."
+    } else {
+        ""
+    };
+    format!(
+        "\n\nT-{task} goes on: take this in and carry on. Your final message is still the whole result; if you had finished, give it again in full.{question} To say something back without stopping: {cf} tell \"…\"."
+    )
+}
+
 /// [`delivery_text`], `again` said at the end of its header, and `told_in` in its footer.
 fn text_of(
     message: &MessageView,
