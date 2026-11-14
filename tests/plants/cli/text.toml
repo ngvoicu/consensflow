@@ -69,8 +69,8 @@ runs = ["cf-text"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = "            brief::brief_of(&words, given, input)?,\n            \"cf note \\\"what to know\\\"\",\n"
-replace = "            words.text.clone(),\n            \"cf note \\\"what to know\\\"\",\n"
+find = "        brief::brief_of(&words, given, input)?,\n        \"cf note \\\"what to know\\\"\",\n"
+replace = "        words.text.clone(),\n        \"cf note \\\"what to know\\\"\",\n"
 
 [[plant]]
 name = "text: cf ask takes a dash as its text"

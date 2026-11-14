@@ -882,6 +882,37 @@ fn section<'a>(text: &'a str, heading: &str) -> &'a str {
 }
 
 #[test]
+fn every_member_is_taught_when_and_how_to_tell_without_waiting() {
+    for role in cf_ledger::roles::ids() {
+        let text = instructions(role, &[zeus()]);
+        let commands = section(&text, "Your commands");
+        assert_says(
+            commands,
+            role,
+            &[
+                "cf tell \"…\" tell whoever gave you the task, without asking or waiting",
+                "A tell to your chief is for what it must know before your result: a wrong premise in the brief, a finding that changes another task, a blocker you work around.",
+                "Progress is not a tell.",
+                "Go on working after a tell.",
+                "If you cannot go on without an answer, use `cf ask` and end your turn.",
+            ],
+        );
+        assert_eq!(text.matches("cf tell ").count(), 1, "{role}");
+        assert!(!text.contains("cf note --human"), "{role}");
+    }
+}
+
+#[test]
+fn the_chief_is_told_a_members_tell_needs_no_answer() {
+    let text = instructions("chief", &[zeus()]);
+    assert_says(
+        section(&text, "What you do"),
+        "the chief",
+        &["A tell from a member on a task you gave arrives headed `[… note from @worker]`; it asks no answer, so act on it or not as you judge."],
+    );
+}
+
+#[test]
 fn tells_the_chief_a_blocker_is_evidenced_and_the_rest_does_not_hold_the_work() {
     let reviews = instructions("chief", &[zeus()]);
     let reviews = section(&reviews, "Reviews");

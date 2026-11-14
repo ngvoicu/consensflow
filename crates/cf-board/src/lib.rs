@@ -197,11 +197,17 @@ impl Board {
         self.send(path, None)
     }
 
-    /// POST `body` to `path`, as `JSON.stringify` wrote it: compact, keys in order.
-    pub fn post(&self, path: &str, body: &Value) -> Result<Answer, BoardError> {
+    /// Refuse a write before a command reads the board to decide where to send it.
+    pub fn require_writes(&self) -> Result<(), BoardError> {
         if let Some(why) = &self.no_writes {
             return Err(BoardError::NoWrites(why.clone()));
         }
+        Ok(())
+    }
+
+    /// POST `body` to `path`, as `JSON.stringify` wrote it: compact, keys in order.
+    pub fn post(&self, path: &str, body: &Value) -> Result<Answer, BoardError> {
+        self.require_writes()?;
         self.send(path, Some(body))
     }
 
