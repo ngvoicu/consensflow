@@ -188,19 +188,19 @@ runs = ["fm-rig-late-trust"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = """
-                    } else if self.now() - began > ASKS_WITHIN_MS && !owes_first(record) {
-                        break (false, false);
-                    }
-                }
-                // No screen says nothing of the question"""
-replace = """
-                    } else if self.now() - began > ASKS_WITHIN_MS {
-                        break (false, false);
-                    }
-                }
-                // No screen says nothing of the question"""
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '''        } else {
+            self.never_asked_in_time(w)
+        }
+    }
+
+    /// No screen says nothing of the question'''
+replace = '''        } else {
+            (self.now() - w.began > ASKS_WITHIN_MS).then_some(Ended::PAST)
+        }
+    }
+
+    /// No screen says nothing of the question'''
 
 [[plant]]
 name = "first message: a window owed it that shows neither the question nor its prompt spends no launch time"
@@ -318,9 +318,9 @@ meant = "a_chief_whose_window_shows_no_prompt_for_two_minutes_has_the_human_told
 runs = ["fm-engine-delivered"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = "                self.tell_no_prompt(project, record)?;"
-replace = "                let _ = (project, record);"
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            self.tell_no_prompt(w.project, w.record)?;'
+replace = '            let _ = (w.project, w.record);'
 
 [[plant]]
 name = "first message: the human is told of a chief's window before 2 minutes with no prompt"
@@ -328,9 +328,11 @@ meant = "a_chief_whose_window_shows_its_prompt_within_two_minutes_has_the_human_
 runs = ["fm-engine-delivered"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = "                && self.now() - began > NO_PROMPT_MS\n"
-replace = "                && self.now() - began >= 0\n"
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '''            && self.now() - w.began > NO_PROMPT_MS
+'''
+replace = '''            && self.now() - w.began >= 0
+'''
 
 [[plant]]
 name = "first message: the human is told of a chief's window with no prompt at every look"
@@ -338,9 +340,10 @@ meant = "a_chief_whose_window_shows_no_prompt_for_two_minutes_has_the_human_told
 runs = ["fm-engine-delivered"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = "                told_no_prompt = true;\n"
-replace = ""
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '''            w.told_no_prompt = true;
+'''
+replace = ''
 
 # The live kit's own Claude config holds the trust a person's would (T-629): `live
 # folder-trust`'s fresh and follow-up cases went red under a config made fresh.
@@ -397,19 +400,19 @@ meant = "a_question_that_comes_after_half_a_minute_holds_a_workers_first_message
 runs = ["fm-engine-delivered"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = """
-                    } else if self.now() - began > ASKS_WITHIN_MS && !owes_first(record) {
-                        break (false, false);
-                    }
-                }
-                // No screen says nothing of the question"""
-replace = """
-                    } else if self.now() - began > ASKS_WITHIN_MS {
-                        break (false, false);
-                    }
-                }
-                // No screen says nothing of the question"""
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '''        } else {
+            self.never_asked_in_time(w)
+        }
+    }
+
+    /// No screen says nothing of the question'''
+replace = '''        } else {
+            (self.now() - w.began > ASKS_WITHIN_MS).then_some(Ended::PAST)
+        }
+    }
+
+    /// No screen says nothing of the question'''
 
 [[plant]]
 name = "first message: a brief's picture sources are the user's item, and its answer is no result"
