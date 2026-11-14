@@ -50,7 +50,10 @@ fn powershell_lists_the_reports_of_a_folder_and_none_of_a_link() {
     let reports = profile
         .path()
         .join(DIR)
-        .join("app/src-tauri/target/live-matrix");
+        .join("app")
+        .join("src-tauri")
+        .join("target")
+        .join("live-matrix");
     let list = |profile: &std::path::Path| {
         let vars: Vec<_> = Env::from_process()
             .iter()
@@ -98,11 +101,7 @@ fn powershell_lists_the_reports_of_a_folder_and_none_of_a_link() {
         .args(["/c", "mklink", "/J"])
         .arg(reports.as_os_str())
         .arg(elsewhere.path());
-    assert_eq!(
-        process::capture(&junction, &Env::from_process())
-            .unwrap()
-            .code,
-        0
-    );
+    let made = process::capture(&junction, &Env::from_process()).unwrap();
+    assert_eq!(made.code, 0, "{}", said(&made));
     assert_eq!(list(profile.path()), "");
 }
