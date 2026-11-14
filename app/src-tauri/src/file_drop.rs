@@ -86,7 +86,7 @@ pub fn hear<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
         window,
         event,
         |target, name, body| window.emit_to(target, name, body),
-        |said| eprintln!("{said}"),
+        |said| crate::diag::say(said),
     );
 }
 

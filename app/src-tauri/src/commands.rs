@@ -148,7 +148,7 @@ pub async fn pane_input_wait<R: Runtime>(app: AppHandle<R>, ticket: String) -> V
             human,
             result,
             |event, body| app.emit(event, body),
-            |said| eprintln!("{said}"),
+            |said| crate::diag::say(said),
         )
     })
     .await
