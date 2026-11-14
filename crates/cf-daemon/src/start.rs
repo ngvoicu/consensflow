@@ -274,7 +274,7 @@ async fn run(
     // The tokens, and the HTTP front the agents' and the human's requests come
     // to. The pass loop does not exist yet: a kick waits for it.
     let credentials = Rc::new(Credentials::new());
-    let token = random_hex(24);
+    let token = random_hex(&SystemEntropy, 24).map_err(StartError::System)?;
     let passes: Rc<OnceCell<PassLoop>> = Rc::new(OnceCell::new());
     let kick: Rc<dyn Fn()> = {
         let passes = Rc::clone(&passes);
@@ -363,7 +363,7 @@ async fn run(
         adapters: Rc::clone(&adapters) as _,
         records: Rc::clone(&records) as _,
         time: Rc::clone(&time) as _,
-        launch_ids: Rc::new(RandomLaunchIds),
+        launch_ids: Rc::new(RandomLaunchIds::new()),
         credentials: Rc::clone(&credentials) as _,
         pane_env: Rc::new(
             WindowEnv::new(&env, api.url(), &options.bundle.bin.to_string_lossy())

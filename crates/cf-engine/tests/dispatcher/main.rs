@@ -107,6 +107,7 @@ mod pending_agents;
 mod pi_length_stop;
 mod privacy_prompts;
 mod prompt_suggestion_off;
+mod purge_and_entropy;
 mod questions_not_results;
 mod queued_tells;
 mod quota;

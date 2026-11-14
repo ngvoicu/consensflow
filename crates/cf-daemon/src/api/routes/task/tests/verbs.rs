@@ -1468,7 +1468,7 @@ async fn a_window_at_work_keeps_running_cf_with_its_token_after_its_member_is_re
         .id;
     // Its token, as the engine issues it when the window opens; a question it asked on the
     // task, and the chief's answer, which waits for it.
-    let token = scene.context.credentials.issue(project, window_id);
+    let token = scene.context.credentials.issue(project, window_id).unwrap();
     let asked = cf_ledger::NewQuestion {
         from: Some(window.clone()),
         to: "chief".to_owned(),

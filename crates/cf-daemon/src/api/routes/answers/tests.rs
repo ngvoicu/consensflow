@@ -239,7 +239,7 @@ async fn a_message_that_is_no_question_or_is_of_another_project_is_not_answered(
         .iter()
         .find(|p| p.handle == "chief")
         .unwrap();
-    let token = scene.context.credentials.issue(other.id, chief.id);
+    let token = scene.context.credentials.issue(other.id, chief.id).unwrap();
     let body = json!({ "question": scene.question.id, "body": "x" }).to_string();
     let (status, said) = post(&scene, &token, &body).await;
     assert_eq!(status, 404);

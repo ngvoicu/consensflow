@@ -617,7 +617,14 @@ impl Dispatcher {
         let deleted = self.seams.ledger.borrow_mut().delete_project(project)?;
         // What is remembered of its tasks and participants goes now, and so do its own lines in the trace.
         self.forget_project(deleted.id);
-        self.seams.trace.forget(project);
+        // The project is gone from the ledger already: a trace that kept some of its
+        // lines is said in the log, where the person who reads the trace looks.
+        if let Err(cause) = self.seams.trace.forget(project) {
+            self.seams.log.error(
+                "a deleted project's lines could not be removed from the trace",
+                &cause,
+            );
+        }
         let ids: Vec<i64> = found
             .map(|found| found.participants.iter().map(|p| p.id).collect())
             .unwrap_or_default();
