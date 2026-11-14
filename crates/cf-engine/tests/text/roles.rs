@@ -278,12 +278,12 @@ fn teach_the_designer_only_the_board_s_commands() {
 fn every_member_is_told_when_its_result_is_delivered_and_what_to_do_with_background_work() {
     let rules = [
         (
-            "delivery",
-            "Your answer ends your turn, and your result is delivered once it has ended and nothing you started is still running.",
+            "wait for the result",
+            "Your answer ends your turn: wait for what your result needs.",
         ),
         (
-            "background work",
-            "Before your last answer, end any background work you no longer need (a wait loop, a watcher); if you are still waiting on background work, say so in a line and your result follows when it ends.",
+            "delivery and leftovers",
+            "Your result is delivered once your turn has ended and nothing you started is still running, so before your last answer end what you left in the background (a wait loop, a watcher).",
         ),
     ];
     let mut missing = Vec::new();
@@ -305,6 +305,9 @@ fn every_member_is_told_when_its_result_is_delivered_and_what_to_do_with_backgro
                     missing.push(format!("{role} ({shell}): {name}"));
                 }
             }
+            if text.contains("if you are still waiting on background work, say so in a line") {
+                missing.push(format!("{role} ({shell}): still-waiting line"));
+            }
         }
     }
     assert!(missing.is_empty(), "missing rules: {}", missing.join(", "));
@@ -320,7 +323,7 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         // does not tell it that nothing from an earlier task is there (T-1435).
         "A new window starts from nothing; one the chief continues\nhas its earlier conversation. Either way, finish with a result that stands on\nits own.",
         // A turn's end does not end background work; the result waits for it.
-        "Your answer ends your turn, and your result is delivered once it has\nended and nothing you started is still running.",
+        "Your answer ends your turn: wait for what your result needs.",
     ];
     for (role, title) in [
         ("worker", "worker"),
@@ -336,9 +339,7 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         assert!(!text.contains("carries over"), "{role}");
         assert!(found(&format!(r"\n# ConsensFlow {title}\n"), &text));
         assert!(found(
-            &format!(
-                r"your result follows when it ends\.\s+Keep this {role} role for the whole session\.\n$"
-            ),
+            &format!(r"watcher\)\.\s+Keep this {role} role for the whole session\.\n$"),
             &text
         ));
     }

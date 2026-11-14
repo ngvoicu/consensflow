@@ -13,9 +13,10 @@ release `v3.0.0-alpha.82`, and in `21297242`, the commit before it was deleted.
 
 ## Changed by hand after Node
 
-The 27 member role texts say when a result is delivered and what to do with
-background work (T-1644, `skill/core/staff.md`). Their shared paragraph was
-changed in those words alone; the other member roles have no recorded rows.
+The 27 member role texts say to wait for what the result needs, when it is
+delivered, and to end background leftovers (T-1644, `skill/core/staff.md`). Their
+shared paragraph was changed in those words alone; the other member roles have
+no recorded rows.
 
 The chief's text, in each of the twelve `roleInstructions` rows that hold it, has
 three passages Node's did not: the line of its commands for `cf task add --test`, the
