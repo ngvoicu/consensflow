@@ -401,7 +401,7 @@ meant = "the_page_is_told_each_step_of_a_restart_in_the_words_it_draws"
 runs = ["app-daemon-restart"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/daemon.rs"
+file = "app/src-tauri/src/daemon/status.rs"
 find = "            closing: true,\n            ..Self::down(DAEMON_CLOSING_WINDOWS, true)"
 replace = "            closing: false,\n            ..Self::down(DAEMON_CLOSING_WINDOWS, true)"
 

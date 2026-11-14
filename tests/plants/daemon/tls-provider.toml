@@ -120,10 +120,12 @@ replace = '''
 [[plant.edit]]
 file = "app/src-tauri/src/lib.rs"
 find = '''
-    .expect("error while building the ConsensFlow app");
+        .build(context),
+    );
 '''
 replace = '''
-    .expect("error while building the ConsensFlow app");
+        .build(context),
+    );
     tls::install_ring_as_default();
 '''
 
@@ -599,12 +601,12 @@ runs = ["tls-crate-allows"]
 [[plant.edit]]
 file = "app/src-tauri/src/lib.rs"
 find = '''
-#![allow(
-    clippy::unwrap_used,'''
+//! ConsensFlow's desktop shell: the Tauri app that holds the page, its daemon and its panes.
+'''
 replace = '''
-#![allow(
-    clippy::disallowed_methods,
-    clippy::unwrap_used,'''
+#![allow(clippy::disallowed_methods)]
+//! ConsensFlow's desktop shell: the Tauri app that holds the page, its daemon and its panes.
+'''
 
 [[plant]]
 name = "tls provider lint: the daemon's network module allows the lints for itself"

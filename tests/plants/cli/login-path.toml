@@ -128,14 +128,14 @@ meant = "a_login_shell_that_fails_or_hangs_gives_no_path_and_leaves_what_it_star
 runs = ["app-daemon-path"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/daemon_command.rs"
-find = "        let mut started = shell.spawn().ok()?;"
+file = "app/src-tauri/src/daemon_command/lookup.rs"
+find = "        let mut started = match shell.spawn() {"
 replace = '''
         std::os::unix::process::CommandExt::process_group(shell, 0);
-        let mut started = shell.spawn().ok()?;'''
+        let mut started = match shell.spawn() {'''
 
 [[plant.edit]]
-file = "app/src-tauri/src/daemon_command.rs"
+file = "app/src-tauri/src/daemon_command/lookup.rs"
 find = '''
             at.map(|at| asking.shells.remove(at).1).map(|mut shell| {
                 let _ = shell.kill();'''
@@ -150,14 +150,14 @@ meant = "ending_a_lookup_ends_the_shell_it_asks_at_once_and_only_it"
 runs = ["app-daemon-path"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/daemon_command.rs"
-find = "        let mut started = shell.spawn().ok()?;"
+file = "app/src-tauri/src/daemon_command/lookup.rs"
+find = "        let mut started = match shell.spawn() {"
 replace = '''
         std::os::unix::process::CommandExt::process_group(shell, 0);
-        let mut started = shell.spawn().ok()?;'''
+        let mut started = match shell.spawn() {'''
 
 [[plant.edit]]
-file = "app/src-tauri/src/daemon_command.rs"
+file = "app/src-tauri/src/daemon_command/lookup.rs"
 find = '''
         for (_, shell) in &mut asking.shells {
             let _ = shell.kill();
@@ -175,7 +175,7 @@ meant = "a_lookup_given_up_on_has_ended_its_shell_before_a_quit_can_miss_it"
 runs = ["app-daemon-path"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/daemon_command.rs"
+file = "app/src-tauri/src/daemon_command/lookup.rs"
 find = '''
             at.map(|at| asking.shells.remove(at).1).map(|mut shell| {
                 let _ = shell.kill();
@@ -200,7 +200,7 @@ meant = "a_lookup_the_app_has_quit_starts_no_shell"
 runs = ["app-daemon-path"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/daemon_command.rs"
+file = "app/src-tauri/src/daemon_command/lookup.rs"
 find = '''
         if asking.ended {
             return None;
@@ -227,7 +227,7 @@ meant = "ending_a_lookup_ends_the_shell_it_asks_at_once_and_only_it"
 runs = ["app-daemon-path"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/daemon_command.rs"
+file = "app/src-tauri/src/daemon_command/lookup.rs"
 find = '''
         for (_, shell) in &mut asking.shells {
             let _ = shell.kill();
@@ -516,6 +516,6 @@ meant = "ending_a_lookup_ends_both_shells_it_asks_at_once"
 runs = ["app-daemon-path"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/daemon_command.rs"
+file = "app/src-tauri/src/daemon_command/lookup.rs"
 find = '''        for (_, shell) in &mut asking.shells {'''
 replace = '''        for (_, shell) in asking.shells.iter_mut().take(1) {'''
