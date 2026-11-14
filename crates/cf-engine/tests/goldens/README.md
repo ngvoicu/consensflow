@@ -297,3 +297,7 @@ staff, and in parts past that, so no staff is too large to be read.
 On 2026-11-13 (T-1609), the 27 member rows gained the shared `cf tell` line
 and its rule beside `cf ask`; the twelve ordinary chief rows gained one sentence
 on a tell arriving as a note. No eval card or other text was changed.
+
+On 2026-11-14 (T-1639), the four `ownHandsChief` goldens gained the same
+member-tell sentence in their shared board instructions, with own hands on and
+off and specs on and off. The accepted member-tell text predates those goldens.
