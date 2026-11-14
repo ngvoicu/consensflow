@@ -718,7 +718,10 @@ fn a_single_long_hold_is_typed_at_one_hour_and_again_at_four_hours() {
     context.advance(1_000);
     context.pass().unwrap();
     let reminder = format!("T-1 has been working in the background for 60 minutes, holding again 0 times (1 command). Its result comes when that ends; `{} task finish T-1` takes what it said last now.", CfWord::bare());
-    assert_eq!(typed(&context, &tiers), [reminder.clone()]);
+    assert_eq!(
+        typed(&context, &tiers).as_slice(),
+        std::slice::from_ref(&reminder)
+    );
     chief_reads(&context);
     assert_eq!(
         aside(&tiers).as_deref(),
@@ -730,7 +733,10 @@ fn a_single_long_hold_is_typed_at_one_hour_and_again_at_four_hours() {
         context.advance(AN_HOUR);
         context.pass().unwrap();
     }
-    assert_eq!(typed(&context, &tiers), [reminder.clone()]);
+    assert_eq!(
+        typed(&context, &tiers).as_slice(),
+        std::slice::from_ref(&reminder)
+    );
     context.advance(AN_HOUR - 1_000);
     context.pass().unwrap();
     assert_eq!(typed(&context, &tiers).len(), 1);
