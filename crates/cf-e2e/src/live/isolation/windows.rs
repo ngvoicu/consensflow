@@ -9,6 +9,23 @@ const SENTINEL: &str = "SENTINEL-the-owners-own-0002";
 
 const NOW: i64 = 1_800_000_000_000;
 
+#[test]
+fn kit_round4_windows_devin_gets_generated_git_config() {
+    let owner = Owner::new();
+    let isolation = owner.devin();
+    let home = isolation.made_at(NOW).unwrap();
+    let vars = isolation.vars_in(&home);
+    let git = vars
+        .iter()
+        .find(|(name, _)| name == "GIT_CONFIG_GLOBAL")
+        .expect("Windows Devin has no GIT_CONFIG_GLOBAL");
+    let path = PathBuf::from(&git.1);
+    assert!(path.starts_with(&home));
+    let content = fs::read_to_string(path).unwrap();
+    assert!(content.contains("ConsensFlow Live"));
+    assert!(content.contains("live@consensflow.invalid"));
+}
+
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, text).unwrap();
@@ -122,7 +139,12 @@ fn a_devin_run_on_windows_is_given_a_profile_of_its_own_and_the_three_variables_
     // looks in the owner's Roaming for what Devin wrote in the run's.
     assert_eq!(
         names,
-        ["USERPROFILE", "APPDATA", "LOCALAPPDATA"],
+        [
+            "USERPROFILE",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "GIT_CONFIG_GLOBAL"
+        ],
         "{vars:?}"
     );
     let value = |name: &str| -> PathBuf {
@@ -152,8 +174,7 @@ fn a_devin_run_on_windows_is_given_a_profile_of_its_own_and_the_three_variables_
 
 #[test]
 fn a_devin_run_on_windows_keeps_the_owners_home_for_what_reads_it_by_home() {
-    // Git and Git Bash read `HOME`, which the kit leaves the person's (`Installed::login`): the
-    // owner's `.gitconfig` is found, and a commit a Devin window makes has its author.
+    // The kit leaves HOME alone and separately gives Git a generated global config.
     let owner = Owner::new();
     let isolation = owner.devin();
     let home = isolation.made_at(NOW).unwrap();
@@ -177,7 +198,8 @@ fn a_devin_run_on_windows_copies_its_login_and_config_to_the_roaming_folder_and_
         files_below(&home),
         [
             "profile/AppData/Roaming/devin/config.json",
-            "profile/AppData/Roaming/devin/credentials.toml"
+            "profile/AppData/Roaming/devin/credentials.toml",
+            "profile/git/config"
         ]
     );
     assert_eq!(
@@ -213,7 +235,10 @@ fn a_devin_config_that_is_not_there_is_no_reason_to_stop() {
     let home = isolation.made_at(NOW).unwrap();
     assert_eq!(
         files_below(&home),
-        ["profile/AppData/Roaming/devin/credentials.toml"]
+        [
+            "profile/AppData/Roaming/devin/credentials.toml",
+            "profile/git/config"
+        ]
     );
 }
 
@@ -329,7 +354,15 @@ fn on_windows_devin_has_a_home_of_the_runs_own_made_from_the_machines_roaming_fo
         machine_roaming(home).join("devin").join("credentials.toml")
     );
     let names: Vec<&str> = made.plan.vars.iter().map(|(name, _)| *name).collect();
-    assert_eq!(names, ["USERPROFILE", "APPDATA", "LOCALAPPDATA"]);
+    assert_eq!(
+        names,
+        [
+            "USERPROFILE",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "GIT_CONFIG_GLOBAL"
+        ]
+    );
 }
 
 /// The Windows twin of the Mac's rule that every harness the kit can launch has a home of the
@@ -435,7 +468,8 @@ fn the_homes_of_all_five_harnesses_on_one_windows_rig_set_no_variable_twice() {
             "PI_OFFLINE",
             "USERPROFILE",
             "APPDATA",
-            "LOCALAPPDATA"
+            "LOCALAPPDATA",
+            "GIT_CONFIG_GLOBAL"
         ],
         "Muse's launcher sets its folders for its own window alone; its home sets none"
     );

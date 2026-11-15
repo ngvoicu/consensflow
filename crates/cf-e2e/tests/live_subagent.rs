@@ -508,6 +508,31 @@ fn copy_devin_store(store: &Path, into: &Path) {
     }
 }
 
+/// Keeps matching records and SQLite sidecars for a failed case.
+fn keep_holding(holding: &[String], kept: &Path) {
+    let with_stores = holding
+        .iter()
+        .flat_map(|file| match file.strip_suffix("-wal") {
+            Some(store) => vec![store.to_owned(), file.clone(), format!("{store}-shm")],
+            None => vec![file.clone()],
+        });
+    for (number, file) in with_stores.enumerate() {
+        let path = Path::new(&file);
+        if !cf_e2e::door::is_made_or_below(path) {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned());
+        if cf_e2e::door::make_dir(kept).is_ok() {
+            let _ = cf_e2e::door::copy_keeping_mode(
+                path,
+                kept.join(format!("{number}-{}", name.unwrap_or_default())),
+            );
+        }
+    }
+}
+
 /// The rows `query` reads from `db`, each as `row` makes it.
 fn read_rows<T>(
     db: &rusqlite::Connection,
@@ -649,24 +674,7 @@ fn child(
         if live::keep_requested() {
             let kept = members.home().join(format!("holding-{}", case.name));
             // A write-ahead log is read with its store: both are kept beside it.
-            let with_stores = holding
-                .iter()
-                .flat_map(|file| match file.strip_suffix("-wal") {
-                    Some(store) => vec![store.to_owned(), file.clone(), format!("{store}-shm")],
-                    None => vec![file.clone()],
-                });
-            for (number, file) in with_stores.enumerate() {
-                let path = Path::new(&file);
-                let name = path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned());
-                if cf_e2e::door::make_dir(&kept).is_ok() {
-                    let _ = cf_e2e::door::copy_keeping_mode(
-                        path,
-                        kept.join(format!("{number}-{}", name.unwrap_or_default())),
-                    );
-                }
-            }
+            keep_holding(&holding, &kept);
             account.say(format!("{step}: kept in {}", kept.display()));
         }
     }
@@ -891,6 +899,30 @@ fn a_members_sub_agents_keep_no_role_and_ask_the_board_nothing_as_the_member() -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kit_round4_kept_wal_does_not_copy_linked_shm() {
+        let run = cf_e2e::door::made("cf-subagent-kept-").unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        let secret = foreign.path().join("secret");
+        fs::write(&secret, "fabricated foreign record").unwrap();
+        let store = run.path().join("sessions.db");
+        let wal = run.path().join("sessions.db-wal");
+        fs::write(&store, "fabricated store").unwrap();
+        fs::write(&wal, "fabricated wal").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&secret, run.path().join("sessions.db-shm")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&secret, run.path().join("sessions.db-shm")).unwrap();
+        let kept = run.path().join("kept");
+        keep_holding(&[wal.to_string_lossy().into_owned()], &kept);
+        assert!(kept.join("0-sessions.db").is_file());
+        assert!(kept.join("1-sessions.db-wal").is_file());
+        assert!(
+            !kept.join("2-sessions.db-shm").exists(),
+            "linked-out shm was copied"
+        );
+    }
 
     #[test]
     fn kit_round3_subagent_parent_record_refuses_a_foreign_file() {

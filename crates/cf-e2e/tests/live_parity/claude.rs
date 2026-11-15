@@ -131,15 +131,23 @@ pub(crate) fn now_ms() -> i64 {
     jiff::Timestamp::now().as_millisecond()
 }
 
-/// Copies the folder `from` into `to`, whole, where it is there.
-fn copy_tree(from: &Path, to: &Path) -> Result {
-    if fs::symlink_metadata(from).is_ok_and(|meta| meta.file_type().is_symlink()) {
+/// Copies a Claude tree without walking its links.
+fn copy_tree(from: &Path, to: &Path, outside: cf_e2e::door::OutsideLinks) -> Result {
+    let meta = match fs::symlink_metadata(from) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(Error::File {
+                action: "read",
+                path: from.to_owned(),
+                source,
+            });
+        }
+    };
+    if !meta.is_dir() && !meta.file_type().is_symlink() {
         return Ok(());
     }
-    if !from.is_dir() {
-        return Ok(());
-    }
-    cf_e2e::door::copy_tree(from, to, &|_| false)
+    cf_e2e::door::copy_tree_with_links(from, to, &|_| false, outside)
 }
 
 /// A throwaway Claude config at `throwaway`, a copy of the machine's own at `own` that
@@ -154,21 +162,15 @@ fn throwaway_config(
     login: &Value,
     folder: &Path,
 ) -> Result {
-    if fs::symlink_metadata(own).is_ok_and(|meta| meta.file_type().is_symlink()) {
-        return Err(Error::Daemon(
-            "Claude parity cannot read a linked config folder".to_owned(),
-        ));
-    }
     let required_json = |path: &Path, name: &str| -> Result<Map<String, Value>> {
         let failed = || Error::Daemon(format!("Claude parity cannot read or parse {name}"));
-        if fs::symlink_metadata(path)
-            .map_err(|_| failed())?
-            .file_type()
-            .is_symlink()
-        {
-            return Err(failed());
-        }
-        let text = files::read_string(path).map_err(|_| failed())?;
+        let text = match fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Map::new());
+            }
+            Err(_) => return Err(failed()),
+        };
         serde_json::from_str::<Value>(&text)
             .ok()
             .and_then(|value| value.as_object().cloned())
@@ -198,13 +200,14 @@ fn throwaway_config(
     cf_e2e::live::login::without_refresh(&mut settings);
     cf_e2e::door::write(throwaway.join("settings.json"), settings.to_string())?;
     for part in ["skills", "plugins", "agents", "commands"] {
-        copy_tree(&own.join(part), &throwaway.join(part))?;
+        let outside = if part == "plugins" {
+            cf_e2e::door::OutsideLinks::Refuse
+        } else {
+            cf_e2e::door::OutsideLinks::Preserve
+        };
+        copy_tree(&own.join(part), &throwaway.join(part), outside)?;
     }
-    rename_in_json_under(
-        &throwaway.join("plugins"),
-        &own.to_string_lossy(),
-        &throwaway.to_string_lossy(),
-    )?;
+    rewrite_plugin_paths(&throwaway.join("plugins"), own, throwaway)?;
     let entry = json!({ "hasTrustDialogAccepted": true, "hasCompletedProjectOnboarding": true, "enabledMcpServers": ["computer-use"] });
     let mut projects = Map::new();
     let name = folder.to_string_lossy().into_owned();
@@ -217,12 +220,42 @@ fn throwaway_config(
     cf_e2e::door::write(throwaway.join(".claude.json"), configuration.to_string())
 }
 
+/// Plugin metadata can name either a linked Claude folder or its real path.
+fn rewrite_plugin_paths(plugins: &Path, own: &Path, throwaway: &Path) -> Result {
+    let mut names = vec![own.to_string_lossy().into_owned()];
+    if let Ok(real) = fs::canonicalize(own) {
+        let real = real.to_string_lossy().into_owned();
+        #[cfg(windows)]
+        if let Some(unc) = real.strip_prefix(r"\\?\UNC\") {
+            names.push(format!(r"\\{unc}"));
+        } else if let Some(plain) = real.strip_prefix(r"\\?\") {
+            names.push(plain.to_owned());
+        }
+        names.push(real);
+    }
+    #[cfg(windows)]
+    names.extend(
+        names
+            .clone()
+            .into_iter()
+            .map(|name| name.replace('\\', "/")),
+    );
+    // Replace the longest spelling first, so one alias cannot consume a prefix of another.
+    names.sort_by_key(|name| std::cmp::Reverse(name.len()));
+    names.dedup();
+    for name in names {
+        rename_in_json_under(plugins, &name, &throwaway.to_string_lossy())?;
+    }
+    Ok(())
+}
+
 /// Writes `to` for `from` in every JSON file under `folder`, as JSON writes both.
 fn rename_in_json_under(folder: &Path, from: &str, to: &str) -> Result {
-    if !folder.is_dir() {
+    if fs::symlink_metadata(folder).is_ok_and(|meta| meta.file_type().is_symlink())
+        || !folder.is_dir()
+    {
         return Ok(());
     }
-    let (from_json, to_json) = (from.replace('\\', "\\\\"), to.replace('\\', "\\\\"));
     for entry in fs::read_dir(folder).map_err(|source| Error::File {
         action: "read",
         path: folder.to_owned(),
@@ -247,12 +280,62 @@ fn rename_in_json_under(folder: &Path, from: &str, to: &str) -> Result {
                 .is_some_and(|extension| extension == "json")
         {
             let text = files::read_string(&path)?;
-            if text.contains(&from_json) {
-                cf_e2e::door::write(&path, text.replace(&from_json, &to_json))?;
+            if let Some(rewritten) = rename_json_strings(&text, from, to)? {
+                cf_e2e::door::write(&path, rewritten)?;
             }
         }
     }
     Ok(())
+}
+
+/// Replace paths in JSON string tokens, including escaped spellings, without changing other bytes.
+fn rename_json_strings(text: &str, from: &str, to: &str) -> Result<Option<String>> {
+    let bytes = text.as_bytes();
+    let mut next = 0;
+    let mut copied = 0;
+    let mut rewritten = String::new();
+    let mut changed = false;
+    while next < bytes.len() {
+        if bytes[next] != b'"' {
+            next += 1;
+            continue;
+        }
+        let start = next;
+        next += 1;
+        let mut closed = false;
+        while next < bytes.len() {
+            match bytes[next] {
+                b'\\' => next = (next + 2).min(bytes.len()),
+                b'"' => {
+                    next += 1;
+                    closed = true;
+                    break;
+                }
+                _ => next += 1,
+            }
+        }
+        if !closed {
+            break;
+        }
+        let Ok(value) = serde_json::from_str::<String>(&text[start..next]) else {
+            continue;
+        };
+        if value.contains(from) {
+            let value = value.replace(from, to);
+            let encoded = serde_json::to_string(&value)
+                .map_err(|_| Error::Daemon("Claude parity cannot rewrite a plugin path".into()))?;
+            rewritten.push_str(&text[copied..start]);
+            rewritten.push_str(&encoded);
+            copied = next;
+            changed = true;
+        }
+    }
+    if changed {
+        rewritten.push_str(&text[copied..]);
+        Ok(Some(rewritten))
+    } else {
+        Ok(None)
+    }
 }
 
 /// The words ConsensFlow's adapter gives a Claude worker, after the executable: its
@@ -586,6 +669,314 @@ pub fn run(log: &Log) -> Result {
 mod tests {
     use super::*;
 
+    fn link_dir(from: &Path, to: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(from, to).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(from, to).unwrap();
+    }
+
+    fn link_file(from: &Path, to: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(from, to).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(from, to).unwrap();
+    }
+
+    fn make_parity_copy(owner: &Path, config: &Path, run: &Path) -> Result {
+        throwaway_config(owner, config, run, &json!({"accessToken":"fake"}), run)
+    }
+
+    #[test]
+    fn kit_round4_missing_settings_is_empty() {
+        let root = cf_e2e::door::made("cf-parity-missing-settings-").unwrap();
+        let owner = root.path().join("owner");
+        fs::create_dir(&owner).unwrap();
+        let config = root.path().join("account.json");
+        fs::write(&config, "{}").unwrap();
+        let run = root.path().join("run");
+        make_parity_copy(&owner, &config, &run).expect("missing settings must be accepted");
+        assert_eq!(fs::read_to_string(run.join("settings.json")).unwrap(), "{}");
+    }
+
+    #[test]
+    fn kit_round4_missing_account_is_empty() {
+        let root = cf_e2e::door::made("cf-parity-missing-account-").unwrap();
+        let owner = root.path().join("owner");
+        fs::create_dir(&owner).unwrap();
+        fs::write(owner.join("settings.json"), "{}").unwrap();
+        let run = root.path().join("run");
+        make_parity_copy(&owner, &root.path().join("missing.json"), &run)
+            .expect("missing account config must be accepted");
+        let config: Value =
+            serde_json::from_slice(&fs::read(run.join(".claude.json")).unwrap()).unwrap();
+        assert_eq!(config["hasCompletedOnboarding"], true);
+    }
+
+    #[test]
+    fn kit_round4_linked_settings_is_read() {
+        let root = cf_e2e::door::made("cf-parity-linked-settings-").unwrap();
+        let real_owner = root.path().join("real-owner");
+        fs::create_dir(&real_owner).unwrap();
+        let settings = root.path().join("settings.json");
+        fs::write(&settings, r#"{"theme":"dark"}"#).unwrap();
+        link_file(&settings, &real_owner.join("settings.json"));
+        let owner = real_owner;
+        let config = root.path().join("account.json");
+        fs::write(&config, "{}").unwrap();
+        let run = root.path().join("run");
+        make_parity_copy(&owner, &config, &run).expect("linked settings must be accepted");
+        let copied: Value =
+            serde_json::from_slice(&fs::read(run.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(copied["theme"], "dark");
+    }
+
+    #[test]
+    fn kit_round4_linked_config_folder_is_read() {
+        let root = cf_e2e::door::made("cf-parity-linked-owner-").unwrap();
+        let real_owner = root.path().join("real-owner");
+        fs::create_dir(&real_owner).unwrap();
+        fs::write(real_owner.join("settings.json"), r#"{"theme":"dark"}"#).unwrap();
+        let owner = root.path().join("owner-link");
+        link_dir(&real_owner, &owner);
+        let config = root.path().join("account.json");
+        fs::write(&config, "{}").unwrap();
+        let run = root.path().join("run");
+        make_parity_copy(&owner, &config, &run).expect("linked config folder must be accepted");
+        let copied: Value =
+            serde_json::from_slice(&fs::read(run.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(copied["theme"], "dark");
+    }
+
+    #[test]
+    fn kit_round4_linked_skill_keeps_the_real_target() {
+        let root = cf_e2e::door::made("cf-parity-linked-skill-").unwrap();
+        let owner = root.path().join("owner");
+        let skills = owner.join("skills");
+        fs::create_dir_all(&skills).unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        let shared = foreign.path().join("shared-skill");
+        fs::create_dir(&shared).unwrap();
+        fs::write(shared.join("SKILL.md"), "fabricated skill").unwrap();
+        link_dir(&shared, &skills.join("mine"));
+        fs::write(owner.join("settings.json"), "{}").unwrap();
+        let config = root.path().join("account.json");
+        fs::write(&config, "{}").unwrap();
+        let run = root.path().join("run");
+        make_parity_copy(&owner, &config, &run).unwrap();
+        let copied = run.join("skills/mine");
+        assert!(
+            fs::symlink_metadata(&copied).is_ok_and(|m| m.file_type().is_symlink()),
+            "outside skill must remain a link"
+        );
+        assert_eq!(
+            fs::canonicalize(&copied).unwrap(),
+            fs::canonicalize(&shared).unwrap()
+        );
+        assert_eq!(
+            fs::read_to_string(copied.join("SKILL.md")).unwrap(),
+            "fabricated skill"
+        );
+    }
+
+    #[test]
+    fn kit_round4_linked_skills_root_keeps_the_real_target() {
+        let root = cf_e2e::door::made("cf-parity-linked-root-").unwrap();
+        let owner = root.path().join("owner");
+        fs::create_dir(&owner).unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        let shared = foreign.path().join("shared-skills");
+        fs::create_dir(&shared).unwrap();
+        link_dir(&shared, &owner.join("skills"));
+        fs::write(owner.join("settings.json"), "{}").unwrap();
+        let config = root.path().join("account.json");
+        fs::write(&config, "{}").unwrap();
+        let run = root.path().join("run");
+        make_parity_copy(&owner, &config, &run).unwrap();
+        let copied = run.join("skills");
+        assert!(
+            fs::symlink_metadata(&copied).is_ok_and(|m| m.file_type().is_symlink()),
+            "linked skills root must remain a link"
+        );
+        assert_eq!(
+            fs::canonicalize(copied).unwrap(),
+            fs::canonicalize(shared).unwrap()
+        );
+    }
+
+    #[test]
+    fn kit_round4_external_plugin_link_is_refused_by_name() {
+        let root = cf_e2e::door::made("cf-parity-linked-plugin-").unwrap();
+        let owner = root.path().join("owner");
+        let plugins = owner.join("plugins");
+        fs::create_dir_all(&plugins).unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        let shared = foreign.path().join("shared-plugin");
+        fs::create_dir(&shared).unwrap();
+        let link = plugins.join("mine");
+        link_dir(&shared, &link);
+        fs::write(owner.join("settings.json"), "{}").unwrap();
+        let config = root.path().join("account.json");
+        fs::write(&config, "{}").unwrap();
+        let error = make_parity_copy(&owner, &config, &root.path().join("run"))
+            .expect_err("external plugin link must be refused");
+        assert!(
+            error
+                .to_string()
+                .contains(&link.to_string_lossy().to_string()),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn kit_round4_linked_account_is_read_and_bad_objects_refuse_generically() {
+        let root = cf_e2e::door::made("cf-parity-account-link-").unwrap();
+        let owner = root.path().join("owner");
+        fs::create_dir(&owner).unwrap();
+        fs::write(owner.join("settings.json"), "{}").unwrap();
+        let account = root.path().join("real-account");
+        fs::write(&account, r#"{"custom":"kept"}"#).unwrap();
+        let link = root.path().join("account-link");
+        link_file(&account, &link);
+        let run = root.path().join("run");
+        make_parity_copy(&owner, &link, &run).unwrap();
+        let copied: Value =
+            serde_json::from_slice(&fs::read(run.join(".claude.json")).unwrap()).unwrap();
+        assert_eq!(copied["custom"], "kept");
+        for text in ["[]", "{broken"] {
+            fs::write(&account, text).unwrap();
+            let error = make_parity_copy(&owner, &link, &root.path().join("other")).unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                "Claude parity cannot read or parse .claude.json"
+            );
+        }
+        fs::write(owner.join("settings.json"), "[]").unwrap();
+        let error = make_parity_copy(&owner, &link, &root.path().join("other")).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Claude parity cannot read or parse settings.json"
+        );
+    }
+
+    #[test]
+    fn kit_round4_parity_skips_dangling_links_and_retargets_internal_links() {
+        let root = cf_e2e::door::made("cf-parity-inside-").unwrap();
+        let source = root.path().join("skills");
+        fs::create_dir_all(source.join("real")).unwrap();
+        fs::write(source.join("real/SKILL.md"), "inside").unwrap();
+        link_dir(&source.join("real"), &source.join("inside"));
+        link_dir(&root.path().join("missing"), &source.join("dangling"));
+        let target = root.path().join("copy");
+        copy_tree(&source, &target, cf_e2e::door::OutsideLinks::Preserve).unwrap();
+        assert!(fs::symlink_metadata(target.join("inside"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(
+            fs::canonicalize(target.join("inside")).unwrap(),
+            fs::canonicalize(target.join("real")).unwrap()
+        );
+        assert!(fs::symlink_metadata(target.join("dangling")).is_err());
+    }
+
+    #[test]
+    fn kit_round4_plugin_root_link_is_refused_and_rewriter_skips_links() {
+        let root = cf_e2e::door::made("cf-parity-plugin-root-").unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        let source = root.path().join("plugins");
+        let external = foreign.path().join("plugins");
+        fs::create_dir(&external).unwrap();
+        fs::write(external.join("paths.json"), r#"{"path":"old"}"#).unwrap();
+        link_dir(&external, &source);
+        let error = copy_tree(
+            &source,
+            &root.path().join("copy"),
+            cf_e2e::door::OutsideLinks::Refuse,
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains(&source.to_string_lossy().to_string()));
+        rename_in_json_under(&source, "old", "new").unwrap();
+        assert_eq!(
+            fs::read_to_string(external.join("paths.json")).unwrap(),
+            r#"{"path":"old"}"#
+        );
+    }
+
+    #[test]
+    fn kit_round4_plugin_paths_use_copy_when_owner_config_is_linked() {
+        let root = cf_e2e::door::made("cf-parity-linked-plugin-path-").unwrap();
+        let real_owner = root.path().join("real-owner");
+        let plugins = real_owner.join("plugins");
+        fs::create_dir_all(plugins.join("package")).unwrap();
+        let real_path = fs::canonicalize(&plugins).unwrap().join("package");
+        let original = json!({"installPath": real_path.to_string_lossy()}).to_string();
+        fs::write(plugins.join("installed.json"), &original).unwrap();
+        let owner = root.path().join("owner-link");
+        link_dir(&real_owner, &owner);
+        let run = root.path().join("run");
+        make_parity_copy(&owner, &root.path().join("missing.json"), &run).unwrap();
+        let copied: Value =
+            serde_json::from_slice(&fs::read(run.join("plugins/installed.json")).unwrap()).unwrap();
+        assert_eq!(
+            copied["installPath"],
+            run.join("plugins/package").to_string_lossy().as_ref(),
+            "plugin path still reaches the owner's folder"
+        );
+        assert_eq!(
+            fs::read_to_string(plugins.join("installed.json")).unwrap(),
+            original
+        );
+    }
+
+    #[test]
+    fn kit_round4_plugin_paths_with_json_escapes_are_rewritten() {
+        let root = cf_e2e::door::made("cf-parity-escaped-plugin-").unwrap();
+        let owner = root.path().join("owner-escaped");
+        let plugins = owner.join("plugins");
+        fs::create_dir_all(plugins.join("package")).unwrap();
+        let real_path = fs::canonicalize(&plugins).unwrap().join("package");
+        let quoted = serde_json::to_string(&real_path.to_string_lossy().to_string())
+            .unwrap()
+            .replace("owner-escaped", r"\u006fwner-escaped");
+        let original = format!(r#"{{"installPath":{quoted}}}"#);
+        fs::write(plugins.join("installed.json"), &original).unwrap();
+        let run = root.path().join("run");
+        make_parity_copy(&owner, &root.path().join("missing.json"), &run).unwrap();
+        let copied: Value =
+            serde_json::from_slice(&fs::read(run.join("plugins/installed.json")).unwrap()).unwrap();
+        assert_eq!(
+            copied["installPath"],
+            run.join("plugins/package").to_string_lossy().as_ref(),
+            "escaped plugin path still reaches the owner's folder"
+        );
+        assert_eq!(
+            fs::read_to_string(plugins.join("installed.json")).unwrap(),
+            original
+        );
+    }
+
+    #[test]
+    fn kit_round4_removing_copy_leaves_external_skill_untouched() {
+        let root = cf_e2e::door::made("cf-parity-cleanup-").unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        fs::write(foreign.path().join("SKILL.md"), "unchanged").unwrap();
+        let owner = root.path().join("owner");
+        fs::create_dir_all(owner.join("skills")).unwrap();
+        link_dir(foreign.path(), &owner.join("skills/mine"));
+        let config = root.path().join("missing.json");
+        let run = root.path().join("run");
+        make_parity_copy(&owner, &config, &run).unwrap();
+        let removed = Door::of_run().remove_in_made(&run);
+        assert!(!run.exists(), "copy was not removed: {removed:?}");
+        assert_eq!(
+            fs::read_to_string(foreign.path().join("SKILL.md")).unwrap(),
+            "unchanged"
+        );
+    }
+
     #[cfg(unix)]
     fn linked_out_parity_tree(part: &str) {
         let root = cf_e2e::door::made("cf-parity-tree-").unwrap();
@@ -600,31 +991,49 @@ mod tests {
         std::os::unix::fs::symlink(foreign.path().join("login.json"), source.join("leak.json"))
             .unwrap();
         let target = root.path().join("copy");
-        copy_tree(&source, &target).unwrap();
-        assert!(
-            !target.join("leak.json").exists(),
-            "{part} copied a linked-out login"
-        );
+        let outside = if part == "plugins" {
+            cf_e2e::door::OutsideLinks::Refuse
+        } else {
+            cf_e2e::door::OutsideLinks::Preserve
+        };
+        let copied = copy_tree(&source, &target, outside);
+        if part == "plugins" {
+            assert!(copied.is_err(), "plugins accepted a linked-out file");
+        } else {
+            copied.unwrap();
+            let link = target.join("leak.json");
+            assert!(
+                fs::symlink_metadata(&link)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink(),
+                "{part} copied instead of linking the outside file"
+            );
+            assert_eq!(
+                fs::canonicalize(link).unwrap(),
+                fs::canonicalize(foreign.path().join("login.json")).unwrap()
+            );
+        }
     }
 
     #[cfg(unix)]
     #[test]
-    fn kit_round3_claude_skills_skip_links_out() {
+    fn kit_round3_claude_skills_keep_links_out() {
         linked_out_parity_tree("skills");
     }
     #[cfg(unix)]
     #[test]
-    fn kit_round3_claude_plugins_skip_links_out() {
+    fn kit_round3_claude_plugins_refuse_links_out() {
         linked_out_parity_tree("plugins");
     }
     #[cfg(unix)]
     #[test]
-    fn kit_round3_claude_agents_skip_links_out() {
+    fn kit_round3_claude_agents_keep_links_out() {
         linked_out_parity_tree("agents");
     }
     #[cfg(unix)]
     #[test]
-    fn kit_round3_claude_commands_skip_links_out() {
+    fn kit_round3_claude_commands_keep_links_out() {
         linked_out_parity_tree("commands");
     }
 

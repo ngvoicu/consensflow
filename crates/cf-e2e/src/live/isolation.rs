@@ -16,8 +16,8 @@
 //! | Claude Code | `CLAUDE_CONFIG_DIR` ([`super::login`]) | the Keychain's login, without its refresh token, that lasts the case's planned length and the margin | `settings.json`, `.claude.json`'s projects, `history.jsonl`, `projects/`, the Keychain's items |
 //! | Codex | `CODEX_HOME` | `auth.json`, without refresh-named keys except an empty `tokens.refresh_token` and a copy-time `last_refresh` for token-backed logins | `auth.json`, `config.toml` |
 //! | Pi | `PI_CODING_AGENT_DIR` | the entries of `auth.json` the run's model needs and that last the run and a margin, without their refresh tokens; and, where the model's provider is one the folder gives Pi by a package (`cliproxyapi`, [`pi::provider`]), the provider's files, its package and a `settings.json` that names it | `auth.json`, `settings.json`, `models.json`, `mcp-auth.json`, `sessions/`, and the provider's files, npm's manifests and the package |
-//! | Devin | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | `credentials.toml` if it has no refresh-named key, `config.json` | those two and `trusted_workspaces.json` |
-//! | Devin, on Windows | `USERPROFILE`, `APPDATA`, `LOCALAPPDATA` ([`Plan::devin_on_windows`]) | `credentials.toml` if it has no refresh-named key, `config.json` | those two and `trusted_workspaces.json`, in the owner's `%APPDATA%\devin` |
+//! | Devin | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`, `GIT_CONFIG_GLOBAL` | `credentials.toml` if it has no refresh-named key, `config.json` | those two and `trusted_workspaces.json` |
+//! | Devin, on Windows | `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `GIT_CONFIG_GLOBAL` ([`Plan::devin_on_windows`]) | `credentials.toml` if it has no refresh-named key, `config.json` | those two and `trusted_workspaces.json`, in the owner's `%APPDATA%\devin` |
 //!
 //! **Muse Code** sets none of these: its windows run through the rig's own launcher
 //! ([`crate::muse::write_live_stand_in`], given by [`super::machine::rig`] to every rig that
@@ -37,8 +37,8 @@
 //! call, which ignores `APPDATA` (T-727) and expands `%USERPROFILE%` from the window's
 //! environment. The run's home holds a profile of its own with both folders made, `USERPROFILE`
 //! names it, and `APPDATA` and `LOCALAPPDATA` follow it so that the daemon, which reads Devin's
-//! sessions by `APPDATA`, looks where Devin writes. `HOME` stays the person's (Git and Git Bash
-//! read it); `~/.agents/skills` is read where the system's profile folder is, never written.
+//! sessions by `APPDATA`, looks where Devin writes. `HOME` stays the person's; Git gets a
+//! generated global config. `~/.agents/skills` is read where the system's profile folder is.
 //!
 //! Every harness says its row, or why it has none, in [`Isolation::of_machine_lasting`], with
 //! no arm for "any other": one added later is a decision, not a silence.
@@ -123,6 +123,9 @@ pub const fn lasting(planned: Duration) -> Duration {
 /// that made it follows, so that one a killed run left behind is known to be nobody's.
 pub(crate) const PREFIX: &str = "consensflow-live-home-";
 
+const DEVIN_GIT_CONFIG: &str =
+    "[user]\n\tname = ConsensFlow Live\n\temail = live@consensflow.invalid\n";
+
 /// What the run's home is given.
 #[derive(Debug, Clone)]
 enum Seed {
@@ -151,7 +154,6 @@ enum Seed {
         provider: &'static pi::Provider,
     },
     /// A file made from the kit's own fixed contents, not the owner's configuration.
-    #[cfg(unix)]
     Fixed { to: PathBuf, text: &'static str },
 }
 
@@ -251,7 +253,7 @@ impl Plan {
     /// it would look in the owner's Roaming for what Devin wrote in the run's (T-1081's class).
     /// The profile holds a copy of `credentials.toml` (an API key: there is no refresh token to
     /// strip) and `config.json` from the owner's Roaming folder `owner_roaming`, and nothing else
-    /// of the owner's. `HOME` is not set here: Git and Git Bash read it, and it stays the person's.
+    /// of the owner's. `HOME` stays the person's, and Git gets the generated global config.
     /// (Devin reads `~/.agents/skills` by the system's profile folder, not the variable, so the
     /// owner's skills are read there, never written.)
     fn devin_on_windows(owner_roaming: &Path) -> Self {
@@ -265,6 +267,7 @@ impl Plan {
                 ("USERPROFILE", profile),
                 ("APPDATA", roaming.clone()),
                 ("LOCALAPPDATA", local),
+                ("GIT_CONFIG_GLOBAL", "profile/git/config".into()),
             ],
             set: Vec::new(),
             seeds: vec![
@@ -277,6 +280,10 @@ impl Plan {
                     from: owner.join("config.json"),
                     to: roaming.join("devin").join("config.json"),
                     login: false,
+                },
+                Seed::Fixed {
+                    to: "profile/git/config".into(),
+                    text: DEVIN_GIT_CONFIG,
                 },
             ],
             watched: vec![
@@ -340,7 +347,7 @@ impl Plan {
                 },
                 Seed::Fixed {
                     to: "config/git/config".into(),
-                    text: "[user]\n\tname = ConsensFlow Live\n\temail = live@consensflow.invalid\n",
+                    text: DEVIN_GIT_CONFIG,
                 },
             ],
             watched: vec![
@@ -706,7 +713,6 @@ impl Isolation {
                 }])
             }
             Seed::PiProvider { from, to, provider } => self.pi_provider(from, to, provider),
-            #[cfg(unix)]
             Seed::Fixed { to, text } => Ok(vec![Placed::File {
                 to: to.clone(),
                 bytes: text.as_bytes().to_vec(),

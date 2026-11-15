@@ -304,18 +304,48 @@ pub fn copy_tree(
     to: impl AsRef<Path>,
     skip: &dyn Fn(&Path) -> bool,
 ) -> Result {
+    copy_tree_with_links(from, to, skip, OutsideLinks::Skip)
+}
+
+/// How a tree copy treats a link whose real target is outside its source tree.
+#[derive(Clone, Copy)]
+pub enum OutsideLinks {
+    /// Omit the link.
+    Skip,
+    /// Recreate it pointing at the same real target, without copying that target.
+    Preserve,
+    /// Refuse the copy and name the link.
+    Refuse,
+}
+
+/// Copy a tree with a chosen policy for outside links. A linked root is outside the tree.
+/// Dangling links are skipped; links inside the tree point to the corresponding copied target.
+pub fn copy_tree_with_links(
+    from: impl AsRef<Path>,
+    to: impl AsRef<Path>,
+    skip: &dyn Fn(&Path) -> bool,
+    outside: OutsideLinks,
+) -> Result {
     let (from, to) = (from.as_ref(), to.as_ref());
     if fs::symlink_metadata(from)
         .map_err(Error::file("read", from))?
         .file_type()
         .is_symlink()
     {
-        return Ok(());
+        if matches!(outside, OutsideLinks::Skip) {
+            return Ok(());
+        }
+        let real = match fs::canonicalize(from) {
+            Ok(real) => real,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(Error::file("read", from)(error)),
+        };
+        return outside_link(from, to, &real, outside);
     }
     make_dir_private(to)?;
     let source_root = fs::canonicalize(from).map_err(Error::file("read", from))?;
     let target_root = fs::canonicalize(to).map_err(Error::file("read", to))?;
-    copy_tree_inside(from, to, &source_root, &target_root, skip)
+    copy_tree_inside(from, to, &source_root, &target_root, skip, outside)
 }
 
 fn copy_tree_inside(
@@ -324,6 +354,7 @@ fn copy_tree_inside(
     source_root: &Path,
     target_root: &Path,
     skip: &dyn Fn(&Path) -> bool,
+    outside: OutsideLinks,
 ) -> Result {
     for entry in fs::read_dir(from)
         .map_err(Error::file("read", from))?
@@ -335,22 +366,46 @@ fn copy_tree_inside(
         }
         let kind = entry.file_type().map_err(Error::file("read", &source))?;
         if kind.is_symlink() {
-            let Ok(real) = fs::canonicalize(&source) else {
-                continue;
+            let real = match fs::canonicalize(&source) {
+                Ok(real) => real,
+                Err(error)
+                    if error.kind() == io::ErrorKind::NotFound
+                        || matches!(outside, OutsideLinks::Skip) =>
+                {
+                    continue;
+                }
+                Err(error) => return Err(Error::file("read", &source)(error)),
             };
             let Ok(relative) = real.strip_prefix(source_root) else {
+                outside_link(&source, &target, &real, outside)?;
                 continue;
             };
             let destination = target_root.join(relative);
             copied_link(&destination, &target, real.is_dir())?;
         } else if kind.is_dir() {
             make_dir_private(&target)?;
-            copy_tree_inside(&source, &target, source_root, target_root, skip)?;
+            copy_tree_inside(&source, &target, source_root, target_root, skip, outside)?;
         } else if kind.is_file() {
             copy_keeping_mode(&source, &target)?;
         }
     }
     Ok(())
+}
+
+fn outside_link(source: &Path, target: &Path, real: &Path, outside: OutsideLinks) -> Result {
+    match outside {
+        OutsideLinks::Skip => Ok(()),
+        OutsideLinks::Preserve => copied_link(real, target, real.is_dir()).map_err(|error| {
+            Error::Daemon(format!(
+                "cannot recreate link {}: {error}",
+                source.display()
+            ))
+        }),
+        OutsideLinks::Refuse => Err(Error::Daemon(format!(
+            "cannot copy outside link {}",
+            source.display()
+        ))),
+    }
 }
 
 #[cfg(unix)]
@@ -397,4 +452,28 @@ pub fn say_its_process(file: impl AsRef<Path>) -> Result {
     let mut named = file.as_os_str().to_owned();
     named.push(".pid");
     write_whole(Path::new(&named), &std::process::id().to_string())
+}
+
+#[cfg(test)]
+mod link_tests {
+    use super::*;
+
+    #[test]
+    fn kit_round4_uncreatable_links_fail_and_name_the_link() {
+        let run = crate::door::made("cf-link-failure-").unwrap();
+        let real = run.path().join("real");
+        let target = run.path().join("occupied");
+        fs::write(&real, "fabricated").unwrap();
+        fs::write(&target, "already here").unwrap();
+        let source = run.path().join("owner-link");
+        let error = outside_link(&source, &target, &real, OutsideLinks::Preserve).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains(&source.to_string_lossy().to_string()));
+        let error = copied_link(&real, &target, false).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains(&target.to_string_lossy().to_string()));
+        assert_eq!(fs::read_to_string(&target).unwrap(), "already here");
+    }
 }
