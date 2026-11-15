@@ -193,6 +193,7 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
 }
 
 #[cfg(test)]
+#[cfg(unix)]
 mod tests {
     use super::*;
 
