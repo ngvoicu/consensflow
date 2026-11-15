@@ -5,16 +5,17 @@
 //! it is given: the caller's own prefix (`consensflow: …`) is part of it.
 
 use std::fmt::Display;
+use std::io::{self, Write};
 
 /// Writes `line` to the error log.
-#[allow(
-    clippy::print_stderr,
-    reason = "this is the app's door to its stderr, which is its error log"
-)]
 pub(crate) fn say(line: impl Display) {
     #[cfg(test)]
     tests::heard(line.to_string());
-    eprintln!("{line}");
+    write_line(io::stderr().lock(), line);
+}
+
+fn write_line(mut out: impl Write, line: impl Display) {
+    let _ = writeln!(out, "{line}");
 }
 
 #[cfg(test)]
@@ -22,6 +23,8 @@ pub(crate) use tests::said;
 
 #[cfg(test)]
 mod tests {
+    use std::io::{self, Write};
+    use std::panic::{catch_unwind, AssertUnwindSafe};
     use std::sync::Mutex;
 
     static HEARD: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -40,5 +43,36 @@ mod tests {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .clone()
+    }
+
+    #[test]
+    fn an_unwritable_error_log_does_not_panic() {
+        #[derive(Default)]
+        struct FailingWriter {
+            attempts: usize,
+        }
+
+        impl Write for FailingWriter {
+            fn write(&mut self, _bytes: &[u8]) -> io::Result<usize> {
+                self.attempts += 1;
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, "closed"))
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut out = FailingWriter::default();
+        let result = catch_unwind(AssertUnwindSafe(|| super::write_line(&mut out, "diagnostic")));
+        assert!(out.attempts > 0, "the diagnostic was not attempted");
+        assert!(result.is_ok(), "a failed diagnostic write panicked");
+    }
+
+    #[test]
+    fn a_diagnostic_is_written_as_one_line() {
+        let mut out = Vec::new();
+        super::write_line(&mut out, "diagnostic");
+        assert_eq!(out, b"diagnostic\n");
     }
 }

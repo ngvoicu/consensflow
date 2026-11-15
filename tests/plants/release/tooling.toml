@@ -1155,6 +1155,7 @@ replace = "                    Some(_) => Self::Status,"
 name = "tooling: the packaged smoke is taken for no suite of tests (a Mac's)"
 meant = "a_command_is_reported_by_the_runner_of_its_tests"
 runs = ["xtask-lib-plants"]
+platforms = ["macos"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
