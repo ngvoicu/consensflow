@@ -1,7 +1,7 @@
 import { button, element, icon, iconButton, redraw } from '../dom.js'
 import { notePanes } from './computer-use.js'
 import { preview, render } from './markdown.js'
-import { aPool, takesNoTier } from './roles.js'
+import { aPool, roleIds, roleLabel, takesNoTier } from './roles.js'
 
 /**
  * The board: a kanban of the project's tasks. One row per participant, one
@@ -13,6 +13,9 @@ import { aPool, takesNoTier } from './roles.js'
  * project asks for approval, notes to read, and, while the chief waits for
  * the human in its terminal, the way there. The human is asked nothing here:
  * the chief asks in its terminal, and what is for the chief stays its own.
+ *
+ * The rows are grouped: the chief's alone first, then one group a role, each
+ * folded until the human opens it, and folded, it says what of it needs them.
  *
  * Everything here is drawn from the daemon's state with `textContent`, never
  * markup, so an agent-written title cannot become HTML. Actions go out through
@@ -247,6 +250,109 @@ function boardRows(board) {
     rows.push(...sessions.filter((session) => !roles.includes(session.participant.role)))
   }
   return rows
+}
+
+/**
+ * The board's rows in their groups: the chief's alone first (it has one only
+ * while a task is on it), then one group a role, in the roles' order, each with
+ * its rows in lane order: a member with two roles is in both groups, its row of
+ * each role there with that role's sessions under it. A role the table does not
+ * name comes last, by its id.
+ */
+function boardGroups(board) {
+  const rows = boardRows(board)
+  const order = roleIds()
+  const rank = (role) => (order.includes(role) ? order.indexOf(role) : order.length)
+  const groups = new Map()
+  for (const row of rows) {
+    const { role } = row.participant
+    if (role === 'chief') continue
+    if (!groups.has(role)) groups.set(role, [])
+    groups.get(role).push(row)
+  }
+  return {
+    chief: rows.filter((row) => row.participant.role === 'chief'),
+    groups: [...groups]
+      .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
+      .map(([role, members]) => ({ role, rows: members })),
+  }
+}
+
+/** A group's name: "Workers", "Frontend designers". */
+const groupName = (role) => `${roleLabel(role) ?? role}s`
+
+/** What this browser keeps a project's open groups under. */
+const groupsKey = (projectId) => `cf.board.groups.${projectId}`
+
+/**
+ * The groups open on project `projectId` in this browser, by role: none kept, or no
+ * storage, is none, every group folded. A per-viewer convenience, so every touch is guarded.
+ */
+function keptGroups(projectId) {
+  try {
+    const kept = JSON.parse(localStorage.getItem(groupsKey(projectId)) ?? '[]')
+    return new Set(Array.isArray(kept) ? kept.filter((role) => typeof role === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+/** Keeps the groups open on project `projectId`; with no storage they hold for this page alone. */
+function keepGroups(projectId, open) {
+  try {
+    localStorage.setItem(groupsKey(projectId), JSON.stringify([...open]))
+  } catch {
+    // No storage: the groups stay as they are until the page is reloaded.
+  }
+}
+
+/** What a group's head says folded, in the order it says it, and the words for each. */
+const MARKS = [
+  ['working', (count) => `${count} working`],
+  ['waiting', (count) => `${count} waiting for you`],
+  ['question', (count) => `${plural(count, 'question')} waiting`],
+  ['done', (count) => `${count} done, to decide`],
+  ['failed', (count) => `${count} failed`],
+  ['out', (count) => `${count} out of quota`],
+  ['attention', (count) => `${count} ${count === 1 ? 'needs' : 'need'} you`],
+]
+
+/**
+ * What a folded group holds that the human would look for, so nothing that needs
+ * them hides in it: its windows at work and those waiting for them, its tasks
+ * waiting on a question, done and waiting for a decision, or failed, its members out
+ * of quota, and its rows whose status asks for the human (a member to edit, a window
+ * that did not stop, a message held by what they typed). Each with how many; none
+ * that is none.
+ */
+function groupMarks(rows, board, now) {
+  const lanes = rows.flatMap((row) => [row, ...(row.sessions ?? [])])
+  const tasks = rows.flatMap((row) => rowCards(row, board, (row.sessions?.length ?? 0) > 0))
+  const tasksIn = (state) =>
+    new Set(tasks.filter((task) => task.state === state).map((task) => task.number)).size
+  const out = new Set(
+    lanes
+      .filter((lane) => outOfQuota(lane.participant, now))
+      .map((lane) => lane.participant.handle),
+  )
+  const windows = (state) =>
+    lanes.filter((lane) => !outOfQuota(lane.participant, now) && lane.activity?.state === state)
+      .length
+  const counts = {
+    working: windows('working'),
+    waiting: windows('waiting'),
+    question: tasksIn('waiting'),
+    done: tasksIn('done'),
+    failed: tasksIn('failed'),
+    out: out.size,
+    attention: lanes.filter((lane) =>
+      ['missing', 'unstopped', 'holding'].includes(laneStatus(lane, board, now)?.[0]),
+    ).length,
+  }
+  return MARKS.filter(([mark]) => counts[mark] > 0).map(([mark, words]) => [
+    mark,
+    words(counts[mark]),
+  ])
 }
 
 /** The human and the chief first, then each member with its sessions right under it. */
@@ -625,6 +731,8 @@ export class BoardView {
   #stacked = null
   /** The members' rows the human unfolded, by foldKey: every other is folded. */
   #unfolded = new Set()
+  /** The groups open on each project, by its id, as this browser keeps them: every other is folded. */
+  #openGroups = new Map()
   #vacationErrors = new Map()
   /** What the board was drawn from last, to draw it again when a row folds. */
   #drawn = null
@@ -899,18 +1007,26 @@ export class BoardView {
       headRow.append(cell)
     }
     head.append(headRow)
-    const body = element('tbody')
-    for (const row of boardRows(board)) {
-      const folded = this.#folded(board, row)
-      body.append(this.#row(row, board, now, folded))
-      if (folded !== false) continue
-      for (const session of row.sessions) {
-        body.append(this.#row(session, board, now, null))
-      }
+    const { chief, groups } = boardGroups(board)
+    const bodies = []
+    if (chief.length > 0) {
+      const body = element('tbody', 'chief-rows')
+      body.append(...this.#rows(chief, board, now))
+      bodies.push(body)
+    }
+    for (const group of groups) {
+      const open = this.#groupsOpen(board.project.id).has(group.role)
+      const body = element('tbody', 'role-group')
+      body.dataset.group = group.role
+      body.dataset.open = String(open)
+      body.append(this.#groupHead(group, board, now, open))
+      if (open) body.append(...this.#rows(group.rows, board, now))
+      bodies.push(body)
     }
     // A project with nobody on its staff looks like any other board, and every
     // task the chief hands out is refused: say it where the members would be.
     if (!board.lanes.some((lane) => isMember(lane.participant))) {
+      const body = element('tbody')
       const row = element('tr', 'board-empty')
       const cell = element(
         'td',
@@ -920,9 +1036,77 @@ export class BoardView {
       cell.colSpan = COLUMNS.length + 1
       row.append(cell)
       body.append(row)
+      bodies.push(body)
     }
-    table.append(head, body)
+    table.append(head, ...bodies)
     return table
+  }
+
+  /** `rows` as the board draws them: each, and an unfolded member's sessions' under it. */
+  #rows(rows, board, now) {
+    const drawn = []
+    for (const row of rows) {
+      const folded = this.#folded(board, row)
+      drawn.push(this.#row(row, board, now, folded))
+      if (folded !== false) continue
+      for (const session of row.sessions) {
+        drawn.push(this.#row(session, board, now, null))
+      }
+    }
+    return drawn
+  }
+
+  /** The groups open on project `projectId`, read from this browser the first time it is drawn. */
+  #groupsOpen(projectId) {
+    if (!this.#openGroups.has(projectId)) this.#openGroups.set(projectId, keptGroups(projectId))
+    return this.#openGroups.get(projectId)
+  }
+
+  /**
+   * A group's head: its name and how many members it has, a button that opens or
+   * folds it, kept in this browser for the project; folded, what of it needs the
+   * human. Folding it hides its rows, not its terminals: a window shown in the dock
+   * stays there.
+   */
+  #groupHead({ role, rows }, board, now, open) {
+    const head = element('tr', 'group-head')
+    const cell = element('th')
+    cell.setAttribute('scope', 'rowgroup')
+    cell.colSpan = COLUMNS.length + 1
+    const line = element('div', 'group-line')
+    const members = new Set(
+      rows.filter((row) => row.participant.member === null).map((row) => row.participant.handle),
+    ).size
+    const toggle = button('', 'fold-group', () => {
+      const shown = this.#groupsOpen(this.#board.project.id)
+      if (!shown.delete(role)) shown.add(role)
+      keepGroups(this.#board.project.id, shown)
+      this.render(this.#drawn)
+    })
+    toggle.setAttribute('aria-expanded', String(open))
+    toggle.append(
+      icon(ICONS.fold),
+      element('span', 'group-name', groupName(role)),
+      ' ',
+      element('span', 'group-count', plural(members, 'member')),
+    )
+    line.append(toggle)
+    if (!open) {
+      const marks = groupMarks(rows, board, now)
+      if (marks.length > 0) {
+        const list = element('ul', 'group-marks')
+        list.setAttribute('aria-label', `In ${groupName(role)}`)
+        for (const [mark, words] of marks) {
+          const item = element('li', 'group-mark', words)
+          item.dataset.mark = mark
+          list.append(item)
+        }
+        line.append(list)
+      }
+    }
+    cell.append(line)
+    head.append(cell)
+    return head
   }
 
   /**

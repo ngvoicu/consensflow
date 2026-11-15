@@ -316,8 +316,28 @@ function model() {
   }
 }
 
+/**
+ * Every role's group open on each project of the model, as a human who opened them all has
+ * them: the board's tests read the members' rows. A test of the groups themselves starts as a
+ * human does, with none kept and every group folded (`openGroups: false`).
+ */
+function groupsOpen(data) {
+  if (data.openGroups === false) return
+  try {
+    for (const project of data.projects ?? []) {
+      const key = `cf.board.groups.${project.id}`
+      if (localStorage.getItem(key) === null) {
+        localStorage.setItem(key, JSON.stringify(data.roles.map((role) => role.id)))
+      }
+    }
+  } catch {
+    // A frame with no storage of its own draws no board.
+  }
+}
+
 async function open(page, given = model()) {
   const data = { roles: ROLES, ...given }
+  await page.addInitScript(groupsOpen, data)
   await page.addInitScript((data) => {
     window.__calls = []
     window.__model = data
@@ -1223,7 +1243,8 @@ test('draws the kanban: a row per participant, a column per state, and cards tha
     'Done',
     /^Finished/,
   ])
-  const rows = table.locator('tbody tr')
+  // The participants' rows, under their groups' heads.
+  const rows = table.locator('tbody tr[data-handle]')
   // Nothing assigns the human a task: what is for them is in For you, not a row.
   await expect(rows).toHaveCount(3)
   await expect(rows.locator('.row-name')).toHaveText(['Chief of Staff', '@zeus', '@diana'])
@@ -1314,6 +1335,178 @@ test("gives a session's lane the human's hand on its window: show (opening a clo
     "@zeus-brisk-birch is off the board, its conversation kept: a follow-up brings it back. Its tasks stay on @zeus's lane.",
   )
   await expect(page.getByRole('button', { name: "Delete @zeus's session" })).toHaveCount(0)
+})
+
+/** The role groups' heads on the board, by name, in their order: open or folded, and what each says. */
+const groupHeads = (page) =>
+  page.locator('.kanban tbody.role-group').evaluateAll((groups) =>
+    groups.map((group) => ({
+      group: group.querySelector('.group-name').textContent,
+      count: group.querySelector('.group-count').textContent,
+      open: group.querySelector('.fold-group').getAttribute('aria-expanded') === 'true',
+      marks: [...group.querySelectorAll('.group-mark')].map((mark) => mark.textContent),
+    })),
+  )
+
+/** The board's model with a reviewer at work and a tester whose task waits on a question. */
+function staffedModel() {
+  const data = model()
+  data.openGroups = false
+  data.boards[1].lanes.push(
+    {
+      participant: participant(5, 'hera', 'reviewer', { harness: 'codex' }),
+      tasks: [task(7, 'Review the parser', 'working', 'chief', 'hera', 2)],
+      activity: { state: 'working' },
+      pane: { id: 'p1-hera', generation: 3 },
+    },
+    {
+      participant: participant(6, 'athena', 'tester', { harness: 'pi' }),
+      tasks: [task(8, 'Test the parser', 'waiting', 'chief', 'athena', 4)],
+      activity: { state: 'idle' },
+      pane: { id: 'p1-athena', generation: 2 },
+    },
+  )
+  return data
+}
+
+test('groups the staff by role, the chief alone first, each group folded until opened, and says folded what needs the human', async ({
+  page,
+}) => {
+  await open(page, staffedModel())
+  const kanban = page.getByRole('table', { name: 'Tasks' })
+  // The chief's row first, in no group; then a group a role, in the roles' order.
+  await expect(kanban.locator('tbody').first().locator('tr')).toHaveCount(1)
+  await expect(kanban.locator('tbody').first().locator('tr')).toHaveAttribute('data-role', 'chief')
+  // Folded until the human opens one: no member's row, and what of each needs them, said.
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([
+      {
+        group: 'Workers',
+        count: '2 members',
+        open: false,
+        marks: ['1 waiting for you', '1 done, to decide', '1 failed', '1 out of quota'],
+      },
+      { group: 'Reviewers', count: '1 member', open: false, marks: ['1 working'] },
+      { group: 'Testers', count: '1 member', open: false, marks: ['1 question waiting'] },
+    ])
+  for (const handle of ['zeus', 'diana', 'hera', 'athena']) {
+    await expect(kanban.locator(`tr[data-handle="${handle}"]`)).toHaveCount(0)
+  }
+  // Opened, a group shows its members' rows and their cards, and says no marks of its own.
+  await page.getByRole('button', { name: 'Workers 2 members' }).click()
+  await expect(page.getByRole('button', { name: 'Workers 2 members' })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  )
+  // The keyboard stays on the button it pressed.
+  await expect(page.getByRole('button', { name: 'Workers 2 members' })).toBeFocused()
+  const workers = kanban.locator('tbody[data-group="worker"]')
+  await expect(workers.locator('tr[data-handle]')).toHaveCount(2)
+  await expect(workers.locator('tr[data-handle="zeus"] .card')).toHaveCount(3)
+  await expect(workers.locator('.group-mark')).toHaveCount(0)
+  await expect(kanban.locator('tr[data-handle="hera"]')).toHaveCount(0)
+  expect(await page.evaluate(() => localStorage.getItem('cf.board.groups.1'))).toBe('["worker"]')
+  // Kept in this browser for the project: a reload finds Workers open, the others folded.
+  await page.reload()
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([
+      { group: 'Workers', count: '2 members', open: true, marks: [] },
+      { group: 'Reviewers', count: '1 member', open: false, marks: ['1 working'] },
+      { group: 'Testers', count: '1 member', open: false, marks: ['1 question waiting'] },
+    ])
+  await expect(kanban.locator('tbody[data-group="worker"] tr[data-handle="zeus"]')).toHaveCount(1)
+  // Folded again: its rows go, its marks come back, and that is kept too.
+  await page.getByRole('button', { name: 'Workers 2 members' }).click()
+  await expect(kanban.locator('tr[data-handle="zeus"]')).toHaveCount(0)
+  await expect(kanban.locator('tbody[data-group="worker"] .group-mark')).toHaveText([
+    '1 waiting for you',
+    '1 done, to decide',
+    '1 failed',
+    '1 out of quota',
+  ])
+  expect(await page.evaluate(() => localStorage.getItem('cf.board.groups.1'))).toBe('[]')
+})
+
+test("keeps each project's open groups apart, and a member with two roles in each role's group", async ({
+  page,
+}) => {
+  const data = staffedModel()
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  zeusLane.participant.roles = ['worker', 'reviewer']
+  zeusLane.tasks.push(
+    task(9, 'Review the docs', 'working', 'chief', 'zeus', 1, { pool: 'reviewer' }),
+  )
+  data.boards[2].lanes.push({
+    participant: participant(10, 'ares', 'worker', { projectId: 2 }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  await page.getByRole('button', { name: 'Reviewers 2 members' }).click()
+  const reviewers = page.locator('.kanban tbody[data-group="reviewer"]')
+  await expect(reviewers.locator('tr[data-handle]')).toHaveCount(2)
+  // Zeus is in both groups: as a reviewer here, with its review, the other row folded away.
+  await expect(reviewers.locator('tr[data-handle="zeus"] .card')).toHaveText([/T-9/])
+  await page.getByRole('button', { name: 'Workers 2 members' }).click()
+  const workers = page.locator('.kanban tbody[data-group="worker"]')
+  await expect(workers.locator('tr[data-handle="zeus"] .card')).toHaveCount(3)
+  await expect(workers.locator('tr[data-handle="zeus"] .card', { hasText: 'T-9' })).toHaveCount(0)
+  // Another project's groups are its own: folded there, whatever is open here.
+  await chooseProject(page, 'foundry')
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([{ group: 'Workers', count: '1 member', open: false, marks: [] }])
+  await chooseProject(page, 'harbour')
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([
+      { group: 'Workers', count: '2 members', open: true, marks: [] },
+      { group: 'Reviewers', count: '2 members', open: true, marks: [] },
+      { group: 'Testers', count: '1 member', open: false, marks: ['1 question waiting'] },
+    ])
+})
+
+test("opens a session's terminal from its lane in an open group, and keeps it shown when the group folds", async ({
+  page,
+}) => {
+  const data = model()
+  data.openGroups = false
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  Object.assign(zeusLane, { activity: { state: 'idle' } })
+  data.boards[1].lanes.push({
+    participant: session(20, zeusLane.participant, 'amber-pine'),
+    tasks: [task(21, 'Write the lexer', 'working', 'chief', 'zeus-amber-pine', 3)],
+    activity: { state: 'working' },
+    pane: { id: 'p1-zeus-amber-pine', generation: 9 },
+  })
+  await open(page, data)
+  // Folded, the group counts the session's window at work, and its task's member is one.
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([
+      {
+        group: 'Workers',
+        count: '2 members',
+        open: false,
+        marks: ['1 working', '1 done, to decide', '1 failed', '1 out of quota'],
+      },
+    ])
+  await page.getByRole('button', { name: 'Workers 2 members' }).click()
+  await unfold(page)
+  const lane = page.locator('tr[data-handle="zeus-amber-pine"]')
+  await lane.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  const card = page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
+  await expect(card).toHaveCount(1)
+  await page.getByRole('button', { name: 'Workers 2 members' }).click()
+  await expect(lane).toHaveCount(0)
+  // Its terminal stays in the dock, and nothing was asked of the daemon to hide it.
+  await expect(card).toHaveCount(1)
+  await expect(card).toBeVisible()
+  expect(await calls(page, 'session.hide')).toEqual([])
 })
 
 test('gives a member with two roles a row per role, each with its own sessions and cards', async ({
@@ -1424,7 +1617,7 @@ test("draws a member's sessions as lanes under it, named, and counts its open wi
   )
   await open(page, data)
   await unfold(page)
-  const rows = page.locator('table[aria-label="Tasks"] tbody tr')
+  const rows = page.locator('table[aria-label="Tasks"] tbody tr[data-handle]')
   await expect(rows.evaluateAll((nodes) => nodes.map((n) => n.dataset.handle))).resolves.toEqual([
     'chief',
     'zeus',
@@ -3159,7 +3352,7 @@ test("names a compaction's summary in what a window wrote as one, never as what 
   ])
   await expect(items.nth(1)).toHaveAttribute('data-compaction', 'true')
   // Drawn as one: its border and its label in the theme's amber, the other's not.
-  const amber = 'rgb(231, 185, 104)'
+  const amber = 'rgb(252, 211, 77)'
   await expect(items.nth(1)).toHaveCSS('border-left-color', amber)
   await expect(items.nth(1).locator('.transcript-head')).toHaveCSS('color', amber)
   await expect(items.nth(0)).not.toHaveCSS('border-left-color', amber)
@@ -9183,7 +9376,7 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
   const next = await nextControlKey(page)
   await banner.getByRole('button', { name: 'Resume project' }).focus()
   const reached = []
-  for (let press = 0; press < 4; press += 1) {
+  for (let press = 0; press < 5; press += 1) {
     await page.keyboard.press(next)
     reached.push(
       await page.evaluate(
@@ -9192,10 +9385,11 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
       ),
     )
   }
-  // Folding a member's sessions only reads: it stays, as the cards do.
+  // Folding a role's group or a member's sessions only reads: they stay, as the cards do.
   expect(reached).toEqual([
     'Open task',
     'Open task',
+    'Workers 1 member',
     "Hide @zeus's 1 session",
     'T-3, Write the lexer, Done, from @chief',
   ])
@@ -14229,14 +14423,15 @@ test.describe('file drop on a Mac', () => {
     const cards = ['chief', 'zeus'].map((name) =>
       page.locator(`#stage .terminal-card[data-handle="${name}"]`),
     )
-    const ring = /rgb\(99, 199, 178\)/
+    // The window typed into has its own violet glow; the drop's ring is the lavender one.
+    const ring = /rgb\(165, 180, 252\)/
     expect(await marked(page)).toEqual([])
-    await expect(cards[0]).toHaveCSS('box-shadow', 'none')
-    // Entered over the chief's window: it shows, and its ring is the app's own seafoam.
+    await expect(cards[0]).not.toHaveCSS('box-shadow', ring)
+    // Entered over the chief's window: it shows, and its ring is the app's own lavender.
     await dragged.enter(page, ['/a/b.png'], told(chief))
     expect(await marked(page)).toEqual(['chief'])
     await expect(cards[0]).toHaveCSS('box-shadow', ring)
-    await expect(cards[1]).toHaveCSS('box-shadow', 'none')
+    await expect(cards[1]).not.toHaveCSS('box-shadow', ring)
     // Its tint covers the whole card, and lets the pointer through.
     const tint = await cards[0].evaluate((card) => {
       const style = getComputedStyle(card, '::after')
@@ -14252,7 +14447,7 @@ test.describe('file drop on a Mac', () => {
     // Moved over zeus's: the mark moves with it, and is on one window at a time.
     await dragged.over(page, told(zeus))
     expect(await marked(page)).toEqual(['zeus'])
-    await expect(cards[0]).toHaveCSS('box-shadow', 'none')
+    await expect(cards[0]).not.toHaveCSS('box-shadow', ring)
     await expect(cards[1]).toHaveCSS('box-shadow', ring)
     // Over the dock's head, which is no window: no mark.
     await dragged.over(page, told(await centreOf(page.locator('.dock-head'))))
@@ -14270,7 +14465,7 @@ test.describe('file drop on a Mac', () => {
     expect(await marked(page)).toEqual(['zeus'])
     await dragged.drop(page, ['/a/b.png'], told(zeus))
     expect(await marked(page)).toEqual([])
-    await expect(cards[1]).toHaveCSS('box-shadow', 'none')
+    await expect(cards[1]).not.toHaveCSS('box-shadow', ring)
     // So does one that follows the drop.
     await dragged.over(page, told(zeus))
     expect(await marked(page)).toEqual([])

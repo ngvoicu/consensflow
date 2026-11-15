@@ -259,8 +259,28 @@ function model() {
   }
 }
 
+/**
+ * Every role's group open on each project of the model, as a human who opened them all has
+ * them: the board's tests read the members' rows. A test of the groups themselves starts as a
+ * human does, with none kept and every group folded (`openGroups: false`).
+ */
+function groupsOpen(data) {
+  if (data.openGroups === false) return
+  try {
+    for (const project of data.projects ?? []) {
+      const key = `cf.board.groups.${project.id}`
+      if (localStorage.getItem(key) === null) {
+        localStorage.setItem(key, JSON.stringify(data.roles.map((role) => role.id)))
+      }
+    }
+  } catch {
+    // A frame with no storage of its own draws no board.
+  }
+}
+
 async function open(page, given = model()) {
   const data = { roles: ROLES, ...given }
+  await page.addInitScript(groupsOpen, data)
   await page.addInitScript((data) => {
     window.__calls = []
     window.__model = data
@@ -1169,27 +1189,27 @@ test.describe('the history viewer', () => {
     [
       'dark',
       {
-        dialog: 'rgb(30, 33, 36)',
-        words: 'rgb(230, 232, 234)',
-        prompt: 'rgb(31, 74, 99)',
-        ok: 'rgb(42, 74, 53)',
-        failed: 'rgb(110, 40, 40)',
-        compaction: 'rgb(62, 46, 92)',
+        dialog: 'rgb(24, 24, 27)',
+        words: 'rgb(250, 250, 250)',
+        prompt: 'rgb(30, 27, 75)',
+        ok: 'rgb(5, 46, 33)',
+        failed: 'rgb(69, 10, 10)',
+        compaction: 'rgb(46, 16, 101)',
       },
     ],
     [
       'light',
       {
-        dialog: 'rgb(246, 245, 241)',
-        words: 'rgb(34, 36, 38)',
-        prompt: 'rgb(214, 230, 240)',
-        ok: 'rgb(220, 235, 217)',
-        failed: 'rgb(242, 212, 212)',
-        compaction: 'rgb(230, 220, 242)',
+        dialog: 'rgb(255, 255, 255)',
+        words: 'rgb(9, 9, 11)',
+        prompt: 'rgb(238, 242, 255)',
+        ok: 'rgb(236, 253, 245)',
+        failed: 'rgb(254, 242, 242)',
+        compaction: 'rgb(245, 243, 255)',
       },
     ],
   ]) {
-    test(`draws in the mock's ${scheme} colours, in a monospace of the Mac's or Windows'`, async ({
+    test(`draws in providers.dev's ${scheme} colours, in a monospace of the Mac's or Windows'`, async ({
       page,
     }) => {
       await page.emulateMedia({ colorScheme: scheme })

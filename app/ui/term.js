@@ -21,6 +21,43 @@ const LINK_KEY = MAC ? 'Cmd' : 'Ctrl'
  */
 const opensLink = (event) => event.button === 0 && (MAC ? event.metaKey : event.ctrlKey)
 
+/** xterm's colour for each of the page's `--term-*` variables (page.css). */
+const THEME = {
+  background: 'background',
+  foreground: 'foreground',
+  cursor: 'cursor',
+  cursorAccent: 'background',
+  selectionBackground: 'selection',
+  black: 'black',
+  red: 'red',
+  green: 'green',
+  yellow: 'yellow',
+  blue: 'blue',
+  magenta: 'magenta',
+  cyan: 'cyan',
+  white: 'white',
+  brightBlack: 'bright-black',
+  brightRed: 'bright-red',
+  brightGreen: 'bright-green',
+  brightYellow: 'bright-yellow',
+  brightBlue: 'bright-blue',
+  brightMagenta: 'bright-magenta',
+  brightCyan: 'bright-cyan',
+  brightWhite: 'bright-white',
+}
+
+/** The terminals' colours, the page's: what page.css does not say stays xterm's own. */
+function theme() {
+  if (typeof getComputedStyle !== 'function' || !globalThis.document?.documentElement) return {}
+  const style = getComputedStyle(document.documentElement)
+  const said = {}
+  for (const [key, name] of Object.entries(THEME)) {
+    const value = style.getPropertyValue(`--term-${name}`).trim()
+    if (value) said[key] = value
+  }
+  return said
+}
+
 /**
  * What a window is sent for Shift+Enter (T-1330, T-1336, T-1348): a line feed, Ctrl+J, **one byte,
  * in every harness on a Mac and on Windows.** xterm.js 6 has neither the kitty keyboard protocol
@@ -113,6 +150,7 @@ export class XtermEmulator {
       lineHeight: 1.16,
       linkHandler: { ...link, allowNonHttpProtocols: false },
       scrollback: 10_000,
+      theme: theme(),
     })
     this.fitAddon = new FitAddon()
     this.terminal.loadAddon(this.fitAddon)

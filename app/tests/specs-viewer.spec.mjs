@@ -1770,9 +1770,9 @@ for (const colorScheme of ['dark', 'light']) {
     expect(await style(viewer.locator('.specs-tree'), 'backgroundColor')).toBe(
       await colour('--deep'),
     )
-    expect(await style(fileIn(viewer, 'registry.md'), 'color')).toBe(await colour('--seafoam'))
+    expect(await style(fileIn(viewer, 'registry.md'), 'color')).toBe(await colour('--accent'))
     expect(await style(viewer.locator('.registry-title strong').first(), 'color')).toBe(
-      await colour('--foam'),
+      await colour('--text'),
     )
     await fileIn(viewer, 'user-auth/SPEC.md').click()
     const drawing = shown(viewer).locator('figure.spec-diagram').first()
@@ -1780,7 +1780,7 @@ for (const colorScheme of ['dark', 'light']) {
     expect(await style(drawing.locator('g.node rect, g.node polygon').first(), 'fill')).toBe(
       await colour('--panel-raised'),
     )
-    expect(await style(drawing.locator('.nodeLabel').first(), 'color')).toBe(await colour('--foam'))
+    expect(await style(drawing.locator('.nodeLabel').first(), 'color')).toBe(await colour('--text'))
     // An HTML spec's card is the page's too: Specmint's own look is the browser's to show.
     await viewer.getByRole('button', { name: 'Close', exact: true }).click()
     await choose(page, 'checkout')
@@ -1790,7 +1790,7 @@ for (const colorScheme of ['dark', 'light']) {
     const spec = card(html, 'SPEC.html')
     await expect(spec).toBeVisible()
     expect(await style(spec, 'backgroundColor')).toBe(await colour('--panel-raised'))
-    expect(await style(spec.locator('h1'), 'color')).toBe(await colour('--foam'))
+    expect(await style(spec.locator('h1'), 'color')).toBe(await colour('--text'))
   })
 }
 
