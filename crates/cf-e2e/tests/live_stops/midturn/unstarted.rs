@@ -120,7 +120,10 @@ pub fn say_why(
     );
     put(case, window::window_lines(members, agent));
     if devin {
-        put(case, devin::devin_lines(members));
+        match devin::devin_lines(members) {
+            Ok(lines) => put(case, lines),
+            Err(failed) => case.fail(format!("Devin's store diagnostic: {failed}")),
+        }
     }
     put(case, notes::log_lines(&members.rig().log(), LOG));
 }

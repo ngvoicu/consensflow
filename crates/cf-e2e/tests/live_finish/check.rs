@@ -86,13 +86,27 @@ pub fn plan(who: Who) -> Plan {
 /// to, which holds when the task was done and its result reached the chief with nothing
 /// held back.
 pub fn run(who: Who, plan: &Plan, task: &Task, stand_in: &Path, log: &Log) -> Result<Finished> {
+    run_with(who, plan, task, stand_in, log, |_| Ok(())).map(|(finished, ())| finished)
+}
+
+/// Inspect the run while its rig and isolated harness homes still exist, then close it even
+/// if the inspection fails. The regular finish check needs no such inspection.
+pub fn run_with<T>(
+    who: Who,
+    plan: &Plan,
+    task: &Task,
+    stand_in: &Path,
+    log: &Log,
+    inspect: impl FnOnce(&Members) -> Result<T>,
+) -> Result<(Finished, T)> {
     let log = log.scoped(who.name());
     let mut members = Members::open(plan, stand_in, &log)?;
-    let finished = observe(&mut members, &agent(who), task, &log);
+    let finished = observe(&mut members, &agent(who), task, &log)
+        .and_then(|finished| inspect(&members).map(|inspected| (finished, inspected)));
     let closed = members.close();
-    let mut finished = finished?;
+    let (mut finished, inspected) = finished?;
     finished.case.closed(closed);
-    Ok(finished)
+    Ok((finished, inspected))
 }
 
 /// What the run says of how the worker is getting on, when it changes and now and then
