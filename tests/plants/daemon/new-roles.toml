@@ -348,8 +348,20 @@ runs = ["nr-cf-board"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '''    if let Some(tier) = tier.filter(|_| sends_tier) {'''
-replace = '''    if let Some(tier) = tier.filter(|_| !untiered) {'''
+find = '''    let sends_tier = !own || untiered;
+    if mine {
+        body.insert("self".into(), true.into());
+    } else if let Some(after) = after {
+        body.insert("after".into(), after.into());
+    }
+    if let Some(tier) = tier.filter(|_| sends_tier) {'''
+replace = '''    let sends_tier = !own || untiered;
+    if mine {
+        body.insert("self".into(), true.into());
+    } else if let Some(after) = after {
+        body.insert("after".into(), after.into());
+    }
+    if let Some(tier) = tier.filter(|_| !untiered) {'''
 
 [[plant]]
 name = "new roles: cf task add sends the first role of two"
@@ -358,8 +370,20 @@ runs = ["nr-cf-board"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '''    for field in switched.iter().filter_map(|role| role.field()) {'''
-replace = '''    for field in switched.iter().take(1).filter_map(|role| role.field()) {'''
+find = '''    for field in switched.iter().filter_map(|role| role.field()) {
+        body.insert(field.into(), true.into());
+    }
+    if let Some(purpose) = purpose.filter(|_| sends_tier) {
+        body.insert("purpose".into(), purpose.into());
+    }
+    if let Some(needs) = &needs {'''
+replace = '''    for field in switched.iter().take(1).filter_map(|role| role.field()) {
+        body.insert(field.into(), true.into());
+    }
+    if let Some(purpose) = purpose.filter(|_| sends_tier) {
+        body.insert("purpose".into(), purpose.into());
+    }
+    if let Some(needs) = &needs {'''
 
 [[plant]]
 name = "new roles: cf task add says a --self task with a role is one the chief is already at"
@@ -378,8 +402,10 @@ runs = ["nr-cf-board"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = '''!mine && !untiered && switched.len() < 2 {'''
-replace = '''!mine && !untiered {'''
+find = '''    // Two roles are the board's to refuse, in words that name both.
+    if tier.is_none() && after.is_none() && !mine && !untiered && switched.len() < 2 {'''
+replace = '''    // Two roles are the board's to refuse, in words that name both.
+    if tier.is_none() && after.is_none() && !mine && !untiered {'''
 
 [[plant]]
 name = "new roles: a tier and a purpose for a role with none are refused one a try"

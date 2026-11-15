@@ -56,10 +56,12 @@ impl Kept {
 impl ClaudeConfig for Kept {
     fn folder(&self) -> cf_e2e::Result<PathBuf> {
         self.asked_for.fetch_add(1, Ordering::SeqCst);
-        std::fs::create_dir_all(&self.path).map_err(|source| Error::File {
+        // Made through the door, as the folder of a real run's login copy is: the stand-ins of the
+        // rig write below it, and a program of a run writes only below what the run made.
+        cf_e2e::door::made_dir(&self.path).map_err(|made| Error::File {
             action: "make",
             path: self.path.clone(),
-            source,
+            source: std::io::Error::other(made.to_string()),
         })?;
         Ok(self.path.clone())
     }

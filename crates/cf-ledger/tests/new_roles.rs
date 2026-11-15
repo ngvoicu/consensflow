@@ -187,6 +187,7 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     // As a build of the migration before it left it: its checks name the five roles, its
     // version is that migration's.
     let raw = Connection::open(&file).unwrap();
+    cf_ledger::testing::undo_migration_0040(&raw).expect("plan keys undone");
     cf_ledger::testing::undo_migration_0038(&raw).expect("own hands undone");
     undo_new_roles_migration(&raw).expect("the new roles' migration undone");
     raw.execute_batch(&format!(
@@ -235,7 +236,7 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     }
     let narrowed: Vec<(String, String)> = wide
         .iter()
-        .filter(|(name, _)| !backup_triggers.contains(&name.as_str()))
+        .filter(|(name, _)| !backup_triggers.contains(&name.as_str()) && name != "task_plan_key")
         .map(|(name, sql)| {
             (
                 name.clone(),

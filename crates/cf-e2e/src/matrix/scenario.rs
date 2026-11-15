@@ -284,6 +284,18 @@ pub fn accepted(snapshot: &Snapshot, bindings: &Bindings, name: &str) -> bool {
         .is_some_and(|task| task["state"] == "accepted")
 }
 
+/// The human's step that takes `spent` away, the file a quota case made below its project folder
+/// (the account is switched, and the worker's quota is back), through the door: it fails where the
+/// door left it. A say-only door says it and leaves it.
+fn taken(spent: &std::path::Path) -> Result<()> {
+    match crate::door::Door::of_run().remove_in_made(spent) {
+        crate::door::Removed::Removed(_) | crate::door::Removed::Said(_) => Ok(()),
+        other => Err(Error::Daemon(format!(
+            "the quota case's own file was not taken: {other}"
+        ))),
+    }
+}
+
 /// The words the stand-in chief accepts the task bound to `name` with.
 fn accept_line(bindings: &Bindings, name: &str) -> String {
     bindings.of_name(name).map_or_else(
@@ -377,6 +389,21 @@ pub fn smoke() -> Scenario {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_quota_files_removal_is_the_doors_and_only_below_a_folder_the_run_made() {
+        let own = crate::door::made("consensflow-quota-test-").unwrap();
+        let spent = own.path().join(".matrix-quota-spent");
+        std::fs::write(&spent, "").unwrap();
+        super::taken(&spent).unwrap();
+        assert!(!spent.exists());
+        // A file below a folder this run did not make is another's: the step fails and it stays.
+        let other = tempfile::tempdir().unwrap();
+        let theirs = other.path().join(".matrix-quota-spent");
+        std::fs::write(&theirs, "").unwrap();
+        assert!(super::taken(&theirs).is_err());
+        assert!(theirs.exists());
+    }
+
     use std::collections::BTreeMap;
 
     use serde_json::json;

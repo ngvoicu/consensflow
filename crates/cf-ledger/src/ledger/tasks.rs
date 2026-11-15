@@ -2,8 +2,8 @@
 
 use super::Ledger;
 use crate::{
-    tasks, HeldTask, LedgerError, NewTask, Stop, TaskCreated, TaskEdit, TaskEdited, TaskMoved,
-    TaskReleased, TaskRetiered, TaskThread, TaskView,
+    tasks, HeldTask, LedgerError, NewTask, PlanCreated, PlanTask, Stop, TaskCreated, TaskEdit,
+    TaskEdited, TaskMoved, TaskReleased, TaskRetiered, TaskThread, TaskView,
 };
 
 impl Ledger {
@@ -14,6 +14,29 @@ impl Ledger {
         request: &NewTask,
     ) -> Result<TaskCreated, LedgerError> {
         tasks::create_task(&mut self.store, project_id, request)
+    }
+
+    /// Add every named section and its retry key in one transaction.
+    pub fn create_plan(
+        &mut self,
+        project: i64,
+        tasks: &[PlanTask],
+        key: Option<&str>,
+        fingerprint: &str,
+    ) -> Result<PlanCreated, LedgerError> {
+        tasks::create_plan(&mut self.store, project, tasks, key, fingerprint)
+    }
+
+    /// Accept or cancel all of the tasks, or change none.
+    pub fn decide_tasks(
+        &mut self,
+        project: i64,
+        numbers: &[i64],
+        by: &str,
+        action: &str,
+        words: &str,
+    ) -> Result<Vec<TaskView>, LedgerError> {
+        tasks::decide_tasks(&mut self.store, project, numbers, by, action, words)
     }
 
     /// The daemon gives an open task to a new session of a member.
@@ -129,6 +152,19 @@ impl Ledger {
         #[cfg(feature = "test-support")]
         self.watched("pause_task", Some(number))?;
         tasks::pause_task(&mut self.store, project_id, number, by, because)
+    }
+
+    /// [`Ledger::pause_task`], and with the task the told notes the pause cancelled.
+    pub fn pause_task_naming(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        by: Option<&str>,
+        because: Option<&str>,
+    ) -> Result<(TaskView, Vec<crate::MessageView>), LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("pause_task", Some(number))?;
+        tasks::pause_task_naming(&mut self.store, project_id, number, by, because)
     }
 
     /// ConsensFlow relaunches the window of T-`number` that began no turn on message

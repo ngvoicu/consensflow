@@ -49,11 +49,11 @@ use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::Duration;
 
+use cf_e2e::door::Made;
 use cf_e2e::live::ask;
 use cf_e2e::live::members::{self, find, is_over, last_result, LongCommand, Members, Plan};
 use cf_e2e::live::{self, last_lines, text, Harness, Log};
 use cf_e2e::{files, Error, Result};
-use tempfile::TempDir;
 
 use super::{failure, FAKE_AGENT, LOOK, WORK};
 
@@ -135,7 +135,7 @@ struct Case {
     /// Files written in the rig's own home once the project is open, before the worker's
     /// window: each by its path below it.
     rig_files: Vec<(String, String)>,
-    _folders: Vec<TempDir>,
+    _folders: Vec<Made>,
 }
 
 /// Codex's and Devin's checks, for each of `harnesses` that is one of them, one after the
@@ -160,22 +160,19 @@ fn skill(name: &str) -> String {
 }
 
 /// A folder of the run's own whose name begins `prefix`.
-fn folder(prefix: &str) -> Result<TempDir> {
-    tempfile::Builder::new()
-        .prefix(prefix)
-        .tempdir()
-        .map_err(|source| Error::File {
-            action: "make a folder in",
-            path: std::env::temp_dir(),
-            source,
-        })
+fn folder(prefix: &str) -> Result<Made> {
+    cf_e2e::door::made(prefix).map_err(|source| Error::File {
+        action: "make a folder in",
+        path: std::env::temp_dir(),
+        source,
+    })
 }
 
 /// A folder of the run's own holding the MCP server's program, and the program.
-fn server_folder() -> Result<(TempDir, PathBuf)> {
+fn server_folder() -> Result<(Made, PathBuf)> {
     let folder = folder("cf-parity-server-")?;
     let program = folder.path().join("server.cjs");
-    files::write(&program, SERVER)?;
+    cf_e2e::door::write(&program, SERVER)?;
     Ok((folder, program))
 }
 
@@ -282,7 +279,7 @@ fn devin_case() -> Result<Case> {
 fn muse_case() -> Result<Case> {
     let (server, program) = server_folder()?;
     let hook = server.path().join("hook.sh");
-    files::write(
+    cf_e2e::door::write(
         &hook,
         format!(
             "#!/bin/sh\nprintf '%s' '{{\"hookSpecificOutput\":{{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"The parity word of the human hook is {HOOK_WORD}.\"}}}}'\n"
@@ -524,7 +521,7 @@ fn check(harness: Harness, log: &Log) -> Result {
     let daemons = members.rig().home();
     let home = files::real_path(&daemons.parent().unwrap_or(&daemons).join("home"));
     for (name, text) in &case.rig_files {
-        files::write(&home.join(name), text)?;
+        cf_e2e::door::write(home.join(name), text)?;
         log.say(format!(
             "the human's own {name} is written in the rig's home"
         ));

@@ -4,7 +4,6 @@
 //! be ended (by its input ending). `tests/rig/daemon_seam.rs` has the rig refuse
 //! it.
 
-use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::process::ExitCode;
 
@@ -23,12 +22,10 @@ fn main() -> ExitCode {
 fn run() -> io::Result<()> {
     let home = own_var("CONSENSFLOW_HOME")
         .ok_or_else(|| io::Error::other("CONSENSFLOW_HOME is not set"))?;
-    fs::create_dir_all(&home)?;
+    cf_e2e::door::make_dir(&home)?;
     let at = jiff::Timestamp::now().strftime("%Y-%m-%dT%H:%M:%S%.3fZ");
-    let mut log = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(std::path::Path::new(&home).join("daemon.log"))?;
+    let mut log = cf_e2e::door::append(std::path::Path::new(&home).join("daemon.log"))
+        .map_err(std::io::Error::from)?;
     writeln!(
         log,
         "{at} info start pid {} node v0.0.0 home {home}",

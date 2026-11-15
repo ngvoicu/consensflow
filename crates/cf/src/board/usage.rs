@@ -102,17 +102,74 @@ mod tests {
     fn a_command_is_its_line_of_the_list_with_the_lines_that_go_on_from_it() {
         assert_eq!(
             of(&["note"]),
-            "  cf note \"…\" [--human]             something they should know; nothing waits on it"
+            "  cf note \"…\" [--human]             a note to the human; nothing waits on it"
         );
         let tell = of(&["tell"]);
-        assert_eq!(tell.lines().count(), 3);
+        assert_eq!(tell.lines().count(), 6);
         assert!(tell
             .lines()
+            .take(4)
             .skip(1)
             .all(|line| line.starts_with(&" ".repeat(CONTINUED))));
-        assert!(tell.contains("then cf task resume T-3"));
+        assert!(tell.contains(
+            "cf tell \"…\"                       a member tells whoever gave its task; nothing waits"
+        ));
+        assert!(tell.contains("without stopping it"));
+        assert!(tell.contains("or waiting window reads your words at its next rest before its"));
+        assert!(tell.contains("result, unless withdrawn first; it owes no answer"));
+        assert!(tell.lines().nth(3).is_some_and(|line| line
+            .ends_with("(queued or paused: waits for its window or resume unless withdrawn;")));
         assert!(tell
-            .ends_with("(queued or open: kept for its window, to go in with or after its brief)"));
+            .lines()
+            .nth(4)
+            .is_some_and(|line| line.ends_with("open: added to its brief)")));
+        let pause = of(&["task", "pause"]);
+        assert!(pause.contains("as a question and its answer arrives as a message"));
+        assert!(pause.contains("cf task resume T-3 \"…\" or cf task finish T-3"));
+    }
+
+    #[test]
+    fn tell_pause_and_finish_help_explain_withdrawal() {
+        let tell = of(&["tell"]);
+        let pause = of(&["task", "pause"]);
+        let finish = of(&["task", "finish"]);
+        let missing: Vec<_> = [
+            ("tell", tell.contains("unless withdrawn first")),
+            (
+                "pause",
+                pause.contains("withdraws and names your told words"),
+            ),
+            ("finish", finish.contains("withdraw and name told words")),
+        ]
+        .into_iter()
+        .filter_map(|(name, present)| (!present).then_some(name))
+        .collect();
+        assert!(
+            missing.is_empty(),
+            "missing withdrawal guidance: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn tell_help_says_queued_and_paused_words_may_be_withdrawn() {
+        let tell = of(&["tell"]);
+        assert!(
+            tell.contains("queued or paused: waits for its window or resume unless withdrawn"),
+            "{tell}"
+        );
+    }
+
+    #[test]
+    fn pause_help_says_what_happens_while_resume_words_wait() {
+        let pause = of(&["task", "pause"]);
+        assert!(
+            pause.contains("if shown working before its resume words go in, a pause with words"),
+            "{pause}"
+        );
+        assert!(
+            pause.contains("sends a note after them instead: no stop or answer due"),
+            "{pause}"
+        );
     }
 
     #[test]
@@ -120,7 +177,7 @@ mod tests {
         let cancel = of(&["task", "cancel"]);
         assert_eq!(
             cancel,
-            "  cf task accept|cancel T-3         move a task you asked for"
+            "  cf task accept|cancel T-3 T-4     decide several tasks together, all or none"
         );
         // Accept has a line of its own after it: a failed task takes the words of what was checked.
         let accept = of(&["task", "accept"]);

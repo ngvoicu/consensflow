@@ -2,7 +2,7 @@
 //! **a pause did not stop a Devin window.**
 //!
 //! What the owner saw: the worker, a Devin window, was working on T-5 (it had been
-//! since 10:08:41). At 10:08:56 the chief paused T-5 (`cf tell`: the pause and a
+//! since 10:08:41). At 10:08:56 the chief paused T-5 (`cf tell`, now `cf task pause T-5 "…"`: the pause and a
 //! question, m-143). The daemon pressed the harness's interrupt (Devin takes two
 //! Escapes, 150 ms apart, and one more a second later), again three seconds after,
 //! three rounds in all; at 10:09:05 it told the human and the chief that the window
@@ -101,8 +101,11 @@ fn a_pause_stops_a_devin_window_that_takes_escape_twice_within_the_rounds_and_th
     // The turn has been going a moment: it is in the middle of its work.
     sleep(secs(2));
 
-    // The chief pauses T-1 and puts a question to it (`cf tell`).
-    rig.tell(project.id(), "CF tell T-1 :: Reply with exactly: ANSWERED")?;
+    // The chief pauses T-1 and puts a question to it (`cf task pause T-1 "…"`).
+    rig.tell(
+        project.id(),
+        "CF task pause T-1 :: Reply with exactly: ANSWERED",
+    )?;
     rig.wait_for(
         "the chief's question to go into the window",
         secs(60),

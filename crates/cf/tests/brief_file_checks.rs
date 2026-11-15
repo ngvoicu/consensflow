@@ -44,6 +44,16 @@ fn bodies(api: &ScriptedApi) -> Vec<String> {
         .collect()
 }
 
+/// A bad tell may identify its caller, but must post no words.
+fn only_the_caller_was_asked(api: &ScriptedApi) {
+    let asked: Vec<_> = api
+        .received()
+        .into_iter()
+        .map(|r| (r.method, r.path))
+        .collect();
+    assert_eq!(asked, [("GET".to_owned(), "/api/whoami".to_owned())]);
+}
+
 /// What the board answers a tell to T-3, still queued.
 fn told() -> Value {
     json!({
@@ -94,7 +104,10 @@ fn a_file_is_named_by_its_bytes_never_by_a_name_that_reads_the_same() {
     let own = no_text_name(folder.path());
     // APFS takes no name that is no UTF-8; ext4 and NTFS do.
     let made = fs::write(&own, "The file's own words").is_ok();
-    let api = scripted(vec![reply(200, told())]);
+    let api = scripted(vec![
+        reply(200, json!({ "participant": { "role": "chief" } })),
+        reply(200, told()),
+    ]);
     let (code, _, said) = window(&api, &tell_from(&own));
     if made {
         assert_eq!(code, Some(0), "{said}");
@@ -119,7 +132,10 @@ fn a_link_a_device_or_a_folder_is_refused_by_what_the_open_file_is_and_nothing_i
         (PathBuf::from("/dev/null"), "a device"),
         (folder.path().to_path_buf(), "a folder"),
     ] {
-        let api = scripted(vec![reply(200, told())]);
+        let api = scripted(vec![
+            reply(200, json!({ "participant": { "role": "chief" } })),
+            reply(200, told()),
+        ]);
         let (code, printed, said) = window(&api, &tell_from(&path));
         assert_eq!(
             (code, printed.as_str(), said),
@@ -132,20 +148,23 @@ fn a_link_a_device_or_a_folder_is_refused_by_what_the_open_file_is_and_nothing_i
                 )
             )
         );
-        assert!(api.received().is_empty(), "{what}: nothing is asked");
+        only_the_caller_was_asked(&api);
     }
 }
 
 #[cfg(windows)]
 #[test]
 fn a_device_is_refused_by_what_the_open_file_is_and_nothing_is_posted() {
-    let api = scripted(vec![reply(200, told())]);
+    let api = scripted(vec![
+        reply(200, json!({ "participant": { "role": "chief" } })),
+        reply(200, told()),
+    ]);
     let (code, _, said) = window(&api, &tell_from(Path::new("NUL")));
     assert_eq!(
         (code, said.as_str()),
         (Some(1), "cf: cannot read NUL: it is a device, not a file\n")
     );
-    assert!(api.received().is_empty());
+    only_the_caller_was_asked(&api);
 }
 
 /// `cf args` as a window runs it, stopped when it is not over within `seconds`:
@@ -215,7 +234,10 @@ fn a_pipe_no_one_writes_is_refused_at_once_and_never_waited_for() {
         .status()
         .expect("mkfifo runs");
     assert!(made.success());
-    let api = scripted(vec![reply(200, told())]);
+    let api = scripted(vec![
+        reply(200, json!({ "participant": { "role": "chief" } })),
+        reply(200, told()),
+    ]);
     let ended = ended_within(&api, &tell_from(&pipe), 20);
     assert_eq!(
         ended,
@@ -228,7 +250,7 @@ fn a_pipe_no_one_writes_is_refused_at_once_and_never_waited_for() {
         )),
         "cf waited for a writer"
     );
-    assert!(api.received().is_empty());
+    only_the_caller_was_asked(&api);
 }
 
 #[test]
@@ -237,7 +259,10 @@ fn a_file_is_read_as_far_as_the_board_takes_and_one_longer_is_refused_unread() {
     let most = 2 * 1024 * 1024;
     let whole = folder.path().join("whole.md");
     fs::write(&whole, "x".repeat(most)).expect("the file");
-    let api = scripted(vec![reply(200, told())]);
+    let api = scripted(vec![
+        reply(200, json!({ "participant": { "role": "chief" } })),
+        reply(200, told()),
+    ]);
     let (code, _, said) = window(&api, &tell_from(&whole));
     assert_eq!(code, Some(0), "{said}");
     assert_eq!(
@@ -248,7 +273,10 @@ fn a_file_is_read_as_far_as_the_board_takes_and_one_longer_is_refused_unread() {
 
     let longer = folder.path().join("longer.md");
     fs::write(&longer, "x".repeat(most + 1)).expect("the file");
-    let api = scripted(vec![reply(200, told())]);
+    let api = scripted(vec![
+        reply(200, json!({ "participant": { "role": "chief" } })),
+        reply(200, told()),
+    ]);
     let (code, _, said) = window(&api, &tell_from(&longer));
     assert_eq!(
         (code, said),
@@ -260,7 +288,7 @@ fn a_file_is_read_as_far_as_the_board_takes_and_one_longer_is_refused_unread() {
             )
         )
     );
-    assert!(api.received().is_empty());
+    only_the_caller_was_asked(&api);
 }
 
 #[test]
@@ -271,7 +299,10 @@ fn a_file_flag_with_no_name_is_written_wrong_whatever_stands_beside_it() {
         vec!["task", "add", "--tier", "standard", "--file"],
         vec!["task", "resume", "T-3", "Go on", "--file"],
     ] {
-        let api = scripted(vec![reply(200, told())]);
+        let api = scripted(vec![
+            reply(200, json!({ "participant": { "role": "chief" } })),
+            reply(200, told()),
+        ]);
         let (code, printed, said) = window(&api, &args);
         assert_eq!(
             (code, printed.as_str(), said.as_str()),
@@ -282,13 +313,20 @@ fn a_file_flag_with_no_name_is_written_wrong_whatever_stands_beside_it() {
             ),
             "{args:?}"
         );
-        assert!(api.received().is_empty(), "nothing is asked: {args:?}");
+        if args[0] == "tell" {
+            only_the_caller_was_asked(&api);
+        } else {
+            assert!(api.received().is_empty(), "nothing is asked: {args:?}");
+        }
     }
 }
 
 #[test]
 fn the_reply_and_a_refusal_show_a_control_character_escaped_never_raw() {
-    let api = scripted(vec![reply(200, told())]);
+    let api = scripted(vec![
+        reply(200, json!({ "participant": { "role": "chief" } })),
+        reply(200, told()),
+    ]);
     let words = "Stop\u{1b}[2K\u{1b}[GDONE";
     let (code, printed, _) = window(&api, &["tell", "T-3", words]);
     assert_eq!(code, Some(0));
@@ -301,9 +339,13 @@ fn the_reply_and_a_refusal_show_a_control_character_escaped_never_raw() {
 
     let folder = tempfile::tempdir().expect("a folder");
     let missing = folder.path().join("no\u{1b}[2Jwhere.md");
-    let api = scripted(Vec::new());
+    let api = scripted(vec![reply(
+        200,
+        json!({ "participant": { "role": "chief" } }),
+    )]);
     let (code, _, said) = window(&api, &tell_from(&missing));
     assert_eq!(code, Some(1));
     assert!(said.contains("no\\u{1b}[2Jwhere.md ("), "{said:?}");
     assert!(!said.contains('\u{1b}'), "{said:?}");
+    only_the_caller_was_asked(&api);
 }

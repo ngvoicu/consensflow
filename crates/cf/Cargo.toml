@@ -20,6 +20,7 @@ cf-ledger.workspace = true
 cf-proto.workspace = true
 form_urlencoded.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 
 # A brief's file is opened as itself, never through a link (`--file`).
 [target.'cfg(unix)'.dependencies]

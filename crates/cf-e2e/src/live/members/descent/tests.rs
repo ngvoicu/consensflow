@@ -166,7 +166,7 @@ fn an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by
         pids(orphans_in_folder(
             &all,
             "sleep 4711",
-            folder,
+            &RunFolder::assumed(folder),
             100,
             folder_of
         )),
@@ -175,9 +175,57 @@ fn an_orphan_is_the_runs_own_by_its_folder_its_start_and_its_parent_and_never_by
     // A window that began after every one of them leaves them all out: a child (208) is taken
     // only with the orphan it descends from, never alone.
     assert!(
-        orphans_in_folder(&all, "sleep 4711", folder, 108, folder_of).is_empty(),
+        orphans_in_folder(
+            &all,
+            "sleep 4711",
+            &RunFolder::assumed(folder),
+            108,
+            folder_of
+        )
+        .is_empty(),
         "nothing orphaned began at or after 108"
     );
+}
+
+#[test]
+fn a_monitor_whose_claude_was_killed_is_an_orphan_of_the_window_s_folder() {
+    // A Monitor armed on `tail -f out | grep --line-buffered tick` runs in a shell of the window;
+    // the window is killed, and the shell and its pipeline are left with no parent (T-491: 17 h).
+    // Asked for with no words (what a window left is whatever it ran), it is the run's own by the
+    // folder and the start, and the `tail` and the `grep` of the pipeline are found with it.
+    let folder = std::path::Path::new("/runs/monitor-wait");
+    let monitor = "zsh -c tail -f out | grep --line-buffered tick";
+    let all = [
+        running(300, 120, 1, monitor),
+        running(301, 121, 300, "tail -f out"),
+        running(302, 122, 300, "grep --line-buffered tick"),
+        // The same command in another folder: another tree's.
+        running(400, 123, 1, monitor),
+        running(401, 124, 400, "tail -f out"),
+        // The same in the window's folder, older than the window (at 100): an earlier run's.
+        running(500, 90, 1, monitor),
+        // With a parent: the window's tree finds it while the window runs.
+        running(600, 125, 50, monitor),
+    ];
+    let folder_of = |pid: u32| match pid {
+        300 | 500 | 600 => Some(folder.to_path_buf()),
+        400 => Some(std::path::PathBuf::from("/runs/another-tree")),
+        _ => None,
+    };
+    let mut pids: Vec<u32> =
+        orphans_in_folder(&all, "", &RunFolder::assumed(folder), 100, folder_of)
+            .iter()
+            .map(|one| one.identity.pid)
+            .collect();
+    pids.sort_unstable();
+    assert_eq!(pids, [300, 301, 302]);
+    // The `tail` and the `grep` descend from the orphan shell.
+    let under: Vec<u32> = descending_from(&all, all[0].identity)
+        .iter()
+        .map(|one| one.identity.pid)
+        .collect();
+    assert_eq!(under.len(), 2);
+    assert!(under.contains(&301) && under.contains(&302));
 }
 
 #[cfg(unix)]
@@ -192,12 +240,48 @@ fn a_folder_is_compared_by_its_real_path_and_another_folder_is_another() {
     std::os::unix::fs::symlink(&real, &link).unwrap();
     let real = real.canonicalize().unwrap();
     let all = [running(200, 101, 1, "sleep 4711")];
-    let found = orphans_in_folder(&all, "sleep 4711", &link, 100, |_| Some(real.clone()));
+    let linked = RunFolder::under(dir.path(), &link).expect("under the root");
+    assert_eq!(linked.given(), link);
+    let found = orphans_in_folder(&all, "sleep 4711", &linked, 100, |_| Some(real.clone()));
     assert_eq!(found.len(), 1);
     // Its parent folder holds the other's folder, and is no folder of the process's.
-    assert!(
-        orphans_in_folder(&all, "sleep 4711", dir.path(), 100, |_| Some(real.clone())).is_empty()
+    let parent = RunFolder::under(dir.path(), dir.path()).expect("the root itself");
+    assert!(orphans_in_folder(&all, "sleep 4711", &parent, 100, |_| Some(real.clone())).is_empty());
+}
+
+/// A path is a folder of the run's only under the root the rig made for the run: a live rig's
+/// home is the person's own, and a sweep that took it for the run's ended 22 processes of the
+/// owner's and of other tasks (2026-11-12). Refused: a folder outside the root, one whose name
+/// only begins with the root's, one that is not there to read, and any folder of a root that
+/// holds the person's home.
+#[test]
+fn a_folder_is_the_runs_only_under_the_runs_own_root() {
+    let root = tempfile::tempdir().unwrap();
+    let inside = root.path().join("home").join("live");
+    std::fs::create_dir_all(&inside).unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let alike = std::path::PathBuf::from(format!("{}-x", root.path().display()));
+    std::fs::create_dir_all(&alike).unwrap();
+    let ours = RunFolder::under(root.path(), &inside).expect("a folder under the root");
+    assert_eq!(ours.given(), inside);
+    assert_eq!(ours.real(), inside.canonicalize().unwrap());
+    assert_eq!(RunFolder::under(root.path(), outside.path()), None);
+    assert_eq!(RunFolder::under(root.path(), &alike), None);
+    assert_eq!(
+        RunFolder::under(root.path(), &root.path().join("none")),
+        None
     );
+    // A root as wide as the machine's, which holds the person's home, is no run's.
+    let top = inside.ancestors().last().unwrap().to_path_buf();
+    assert_eq!(RunFolder::under(&top, &inside), None);
+    if let Ok(home) = crate::live::machine::home() {
+        assert_eq!(
+            RunFolder::under(&home, &home),
+            None,
+            "the person's home is no run's"
+        );
+    }
+    std::fs::remove_dir(&alike).unwrap();
 }
 
 #[cfg(target_os = "macos")]
@@ -285,24 +369,96 @@ fn a_mac_lists_a_process_with_when_it_began_to_the_microsecond_and_not_one_whose
 ) {
     // `ps` lists 10, 11 and 12; since, 11 has ended and its number is a process that 99
     // started, and 12 is gone. Only 10 is listed, with when it began as the system says it.
+    // `ps` says when each began to the second, here as seconds since 1970 (`second`).
     let listed = vec![
-        running(10, 20_261_016_044_446, 1, "devin"),
-        running(11, 20_261_016_044_447, 10, "node cf-mark"),
-        running(12, 20_261_016_044_448, 10, "sleep 1"),
+        running(10, 1_792_118_686, 1, "devin"),
+        running(11, 1_792_118_687, 10, "node cf-mark"),
+        running(12, 1_792_118_688, 10, "sleep 1"),
     ];
-    let refined = refined_by_bsd(listed, |pid| match pid {
-        10 => Ok(Some(Bsd {
-            ppid: 1,
-            started: 1_792_118_686_123_456,
-        })),
-        11 => Ok(Some(Bsd {
-            ppid: 99,
-            started: 1_792_118_690_000_001,
-        })),
-        12 => Ok(None),
-        _ => Err(std::io::Error::other("unreadable")),
-    });
+    let refined = refined_by_bsd(
+        listed,
+        |pid| match pid {
+            10 => Ok(Some(Bsd {
+                ppid: 1,
+                started: 1_792_118_686_123_456,
+            })),
+            11 => Ok(Some(Bsd {
+                ppid: 99,
+                started: 1_792_118_690_000_001,
+            })),
+            12 => Ok(None),
+            _ => Err(std::io::Error::other("unreadable")),
+        },
+        second,
+    );
     assert_eq!(refined, [running(10, 1_792_118_686_123_456, 1, "devin")]);
+}
+
+/// This process, as `ps` lists it and macOS reads it: the two say its start in the same second
+/// (`lstart`, the machine's time of day), so the check that drops a row whose number changed hands
+/// keeps the rows of processes that still run.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_mac_lists_this_process_with_ps_and_the_system_agreeing_on_the_second_it_began() {
+    let own = std::process::id();
+    let listed = super::ps(Some(own)).unwrap();
+    assert_eq!(listed.len(), 1, "{listed:#?}");
+    let micros = ThisMachine
+        .identity(own)
+        .unwrap()
+        .expect("this process runs")
+        .started;
+    assert_eq!(
+        super::native::lstart_second(micros),
+        Some(listed[0].identity.started),
+        "ps and the system say this process began in other seconds"
+    );
+    assert!(
+        ThisMachine
+            .processes()
+            .unwrap()
+            .iter()
+            .any(|one| one.identity.pid == own && one.identity.started == micros),
+        "this process is not listed"
+    );
+}
+
+/// The second a start in microseconds falls in, as a test's `ps` says it: seconds since 1970.
+#[allow(clippy::unnecessary_wraps)]
+fn second(micros: u64) -> Option<u64> {
+    Some(micros / 1_000_000)
+}
+
+/// `ps` lists 20 and 21, both with no parent (1); between its listing and the system's read, 21
+/// ended and its number went to another process with no parent, begun later. Its parent is the
+/// same, its start is not: it is another process, and it is not listed with 21's command line.
+#[test]
+fn a_mac_row_whose_start_the_system_says_is_another_second_than_ps_said_is_another_process_and_not_listed(
+) {
+    let listed = vec![
+        running(20, 1_792_118_686, 1, "sleep 4711.1"),
+        running(21, 1_792_118_687, 1, "sleep 4711.2"),
+    ];
+    let refined = refined_by_bsd(
+        listed,
+        |pid| match pid {
+            20 => Ok(Some(Bsd {
+                ppid: 1,
+                started: 1_792_118_686_999_999,
+            })),
+            21 => Ok(Some(Bsd {
+                ppid: 1,
+                started: 1_792_118_699_000_001,
+            })),
+            _ => Ok(None),
+        },
+        second,
+    );
+    assert_eq!(
+        refined,
+        [running(20, 1_792_118_686_999_999, 1, "sleep 4711.1")],
+        "a row whose number another process took since `ps` listed it is listed as that process"
+    );
 }
 
 #[test]
@@ -365,123 +521,6 @@ fn rust_files(path: &std::path::Path) -> Vec<std::path::PathBuf> {
         .collect();
     found.sort();
     found
-}
-
-/// Whether a line of Rust ends a process: sends a signal (`signal`, a system's `kill`),
-/// ends one through the descent's own machine, or runs a program that ends processes,
-/// named in the words of the line or started by `Run::new` or `Command::new`. A window's
-/// own end (the pane host's `pane.kill` of it) and a test's of a program it started
-/// (`.kill()`) go by no command line. A comment says.
-fn ends_a_process(line: &str) -> bool {
-    static PROGRAM: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
-    let code = line.trim_start();
-    if code.starts_with("//") {
-        return false;
-    }
-    let program = crate::pattern::once(
-        &PROGRAM,
-        r#"(Run|Command)::new\(\s*"([^"]*[/\\])?(kill|pkill|killall|taskkill|tskill)(\.exe)?""#,
-    );
-    program.is_match(code)
-        || [
-            "signal(",
-            "Signal::",
-            "::kill(",
-            "taskkill",
-            "pkill",
-            "killall",
-            "Stop-Process",
-            "kill -",
-            "ThisMachine.end(",
-            "ThisMachine::end(",
-        ]
-        .iter()
-        .any(|word| code.contains(word))
-}
-
-#[test]
-fn no_live_check_ends_a_process_but_through_the_descent() {
-    // A check that ended every process whose command line held its mark ended the worker
-    // that ran it, whose brief quoted the mark (2026-10-16). A live check ends a process only
-    // through `end_chosen` (and `LongCommand::end_in`, which chooses from a window's own
-    // tree), each process by which it is, read again before its end: nothing else of the
-    // live checks, their support or their suites, sends a signal or runs a program that
-    // ends processes.
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut files = rust_files(&root.join("src").join("live"));
-    for entry in std::fs::read_dir(root.join("tests")).unwrap() {
-        let path = entry.unwrap().path();
-        let live = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with("live_"));
-        if live {
-            files.extend(rust_files(&path));
-        }
-    }
-    for suite in [
-        "live_resume_cut/case.rs",
-        "live_restart_cut.rs",
-        "live_wake_ups/run.rs",
-        "live_finish/leaving.rs",
-        "live_stops/stuck.rs",
-        "live_devin_resume/drive.rs",
-    ] {
-        assert!(
-            files.contains(&root.join("tests").join(suite)),
-            "{suite} is read"
-        );
-    }
-    // The descent's own end, the one way, and its tests, which name the words.
-    let descent = root
-        .join("src")
-        .join("live")
-        .join("members")
-        .join("descent");
-    let ending: Vec<String> = files
-        .iter()
-        .filter(|file| !file.starts_with(&descent) && **file != descent.with_extension("rs"))
-        .flat_map(|file| {
-            let text = std::fs::read_to_string(file).unwrap();
-            let shown = file
-                .strip_prefix(root)
-                .unwrap_or(file)
-                .display()
-                .to_string();
-            text.lines()
-                .enumerate()
-                .filter(|(_, line)| ends_a_process(line))
-                .map(|(at, line)| format!("{shown}:{}: {}", at + 1, line.trim()))
-                .collect::<Vec<_>>()
-        })
-        .collect();
-    assert!(
-        ending.is_empty(),
-        "a live check ends a process other than through the descent: {ending:#?}"
-    );
-    // What the guard takes for an end, and what it does not: the machine's own end and a
-    // `kill` program passed it once (Astra and Sol on round 6).
-    assert!(ends_a_process("let _ = signal(found.pid, Signal::Kill);"));
-    assert!(ends_a_process("    libc::kill(pid, 9);"));
-    assert!(ends_a_process(
-        r#"Run::new("taskkill").args(["/F", "/PID", &pid])"#
-    ));
-    assert!(ends_a_process("    ThisMachine.end(pid);"));
-    assert!(ends_a_process(
-        r#"let _ = Run::new("/bin/kill").args(["-9", &pid]).run();"#
-    ));
-    assert!(ends_a_process(r#"Run::new("kill").arg(pid)"#));
-    assert!(ends_a_process(
-        r#"std::process::Command::new( "C:\\Windows\\System32\\taskkill.exe")"#
-    ));
-    assert!(!ends_a_process(r#"Run::new("ps").args(["-p", &pid])"#));
-    assert!(!ends_a_process(r#"Run::new("killer-app")"#));
-    assert!(!ends_a_process("        cut.kill();"));
-    assert!(!ends_a_process("        kill();"));
-    assert!(!ends_a_process("    rig.kill_daemon();"));
-    assert!(!ends_a_process(
-        "    // signal(pid, Signal::Kill) ended the worker."
-    ));
 }
 
 /// What Git Bash's `ps -W` said on zeewin (2026-10-21) while `bash -c "sh ./plain.sh"` ran a
@@ -841,6 +880,7 @@ const WINDOWS_AWARE: &[(&str, &str)] = &[
     ("src/live/members/descent.rs", "`ps` of the Unix side only (cfg(unix))"),
     ("src/live/members/descent/native/tests.rs", "a test with a Windows branch of its own"),
     ("src/live/members/descent/tests.rs", "this guard and its examples"),
+    ("src/live/members/left/tests.rs", "a test of the Unix side: a window's pipeline killed"),
     ("tests/live_absorbed.rs", "Claude Code's commands run in Git Bash on Windows"),
     ("tests/live_approval/flow.rs", "not a Windows case: an advisor's window on a Mac"),
     ("tests/live_approval/minute.rs", "not a Windows case: an advisor's window on a Mac"),
@@ -848,6 +888,7 @@ const WINDOWS_AWARE: &[(&str, &str)] = &[
     ("tests/live_devin_wire.rs", "`sleep 30` is PowerShell's Start-Sleep and Git Bash's own (not run in cmd.exe; Devin's shell on Windows is PowerShell)"),
     ("tests/live_finish/leaving.rs", "`ps` on the Unix side, PowerShell's table on Windows"),
     ("tests/live_finish/leaving/tests.rs", "tests of the Unix side"),
+    ("tests/live_finish/stand_in.rs", "a test of the Unix side: another run's orphan, started with /bin/sh"),
     ("tests/live_folder_trust.rs", "a server of a .mcp.json the dialog asks of, never started"),
     ("tests/live_keychain.rs", "a Mac case: macOS's keychain, read with `security`"),
     ("tests/live_monitor_wait.rs", "Claude Code's commands run in Git Bash on Windows"),
@@ -857,6 +898,7 @@ const WINDOWS_AWARE: &[(&str, &str)] = &[
     ("tests/live_parity/claude.rs", "macOS's keychain"),
     ("tests/live_parity/codex_devin.rs", "/bin/sh only in its cfg(unix) tests of Muse's hook"),
     ("tests/live_parity/terminal_env.rs", "a Mac case: refuses elsewhere"),
+    ("tests/live_stops/hook.rs", "tests of the Unix side: a decoy that holds the words"),
     ("tests/live_stops/midturn/tool.rs", "text of process lists the case reads"),
     ("tests/live_stops/slow.rs", "a Claude hook, which Claude Code runs in Git Bash on Windows"),
     ("tests/live_tell.rs", "`sleep 15` is PowerShell's Start-Sleep and Git Bash's own; Claude's Monitor runs in Git Bash"),

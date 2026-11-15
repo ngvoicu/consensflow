@@ -403,7 +403,6 @@ fn an_eval_machines_real_windows_run_on_the_kits_homes_and_its_rig_names_no_code
 /// and 45 minutes fits a run of an hour, and is refused for one of an hour and a half.
 #[test]
 fn an_eval_pi_home_holds_the_login_its_models_need_for_the_planned_run_and_its_half_hour() {
-    use cf_e2e::rig::HarnessHome;
     let owner = tempfile::tempdir().unwrap();
     let agent = owner.path().join(".pi").join("agent");
     std::fs::create_dir_all(&agent).unwrap();
@@ -416,13 +415,36 @@ fn an_eval_pi_home_holds_the_login_its_models_need_for_the_planned_run_and_its_h
         ),
     )
     .unwrap();
+    // The kit honours PI_CODING_AGENT_DIR from the caller. Run this assertion in a separate
+    // process whose Pi folder is the fixture, without changing other tests' environment.
+    let ran = cf_e2e::process::case_of(
+        std::env::current_exe().unwrap(),
+        "run::machine::tests::pi_fixture_checks_models_and_margins",
+        Duration::from_secs(30),
+    )
+    .args(["--ignored", "--nocapture"])
+    .inheriting_env()
+    .without("CONSENSFLOW_TEST_MACHINE")
+    .var("CF_EVALS_TEST_PI_HOME", owner.path())
+    .var("PI_CODING_AGENT_DIR", &agent)
+    .run()
+    .unwrap();
+    assert_eq!(ran.code, Some(0), "{ran}");
+    assert!(ran.stdout.contains("1 passed;"), "{ran}");
+}
+
+/// The original assertions, run by the parent with its own synthetic Pi folder.
+#[test]
+#[ignore = "fixture subprocess run by an_eval_pi_home_holds_the_login_its_models_need_for_the_planned_run_and_its_half_hour"]
+#[allow(clippy::disallowed_methods)] // The child reads the fixture path its parent gave it.
+fn pi_fixture_checks_models_and_margins() {
+    use cf_e2e::rig::HarnessHome;
+    let owner = PathBuf::from(std::env::var_os("CF_EVALS_TEST_PI_HOME").unwrap());
     let on = |minutes: u64| Seated {
         windows: vec![(Harness::Pi, "openai/gpt-6-luna".to_owned())],
         planned: Duration::from_secs(minutes * 60),
     };
-    let fits = isolation(Harness::Pi, owner.path(), &on(60))
-        .unwrap()
-        .unwrap();
+    let fits = isolation(Harness::Pi, &owner, &on(60)).unwrap().unwrap();
     let vars = fits.vars().unwrap();
     let (name, folder) = &vars[0];
     assert_eq!(name, "PI_CODING_AGENT_DIR");
@@ -433,16 +455,12 @@ fn an_eval_pi_home_holds_the_login_its_models_need_for_the_planned_run_and_its_h
     );
     // The eval's margin, not the kit's on top of it: a run of 70 minutes fits the login (70 and
     // 30 minutes), which the kit's 10 more would not.
-    let seventy = isolation(Harness::Pi, owner.path(), &on(70))
-        .unwrap()
-        .unwrap();
+    let seventy = isolation(Harness::Pi, &owner, &on(70)).unwrap().unwrap();
     assert!(
         seventy.vars().is_ok(),
         "70 minutes and the evals' half hour fit"
     );
-    let longer = isolation(Harness::Pi, owner.path(), &on(90))
-        .unwrap()
-        .unwrap();
+    let longer = isolation(Harness::Pi, &owner, &on(90)).unwrap().unwrap();
     let said = longer.vars().unwrap_err().to_string();
     assert!(said.contains("`openai` expires in 1 h 4"), "{said}");
 }

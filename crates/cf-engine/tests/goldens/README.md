@@ -13,6 +13,16 @@ release `v3.0.0-alpha.82`, and in `21297242`, the commit before it was deleted.
 
 ## Changed by hand after Node
 
+The twelve ordinary chief rows explain that a pending tell can be withdrawn
+and named by a pause or finish. The four `ownHandsChief` rows take the same
+pause and tell command text, which was newer than their own-hands recording
+(T-1641, `skill/core/chief.md`). Only those commands changed.
+
+The 27 member role texts say to wait for what the result needs, when it is
+delivered, and to end background leftovers (T-1644, `skill/core/staff.md`). Their
+shared paragraph was changed in those words alone; the other member roles have
+no recorded rows.
+
 The chief's text, in each of the twelve `roleInstructions` rows that hold it, has
 three passages Node's did not: the line of its commands for `cf task add --test`, the
 tester in the sentence that names what each role of a tier does, and the line of its
@@ -292,7 +302,17 @@ past the bound a role is read whole at in parts (`cf_base::role_read::role_parts
 one piece to 142 rows with specs on (166 without), and to 5 and 30 with the most rules for the
 staff, and in parts past that, so no staff is too large to be read.
 
+On 2026-11-13 (T-1609), the 27 member rows gained the shared `cf tell` line
+and its rule beside `cf ask`; the twelve ordinary chief rows gained one sentence
+on a tell arriving as a note. No eval card or other text was changed.
+
+On 2026-11-14 (T-1639), the four `ownHandsChief` goldens gained the same
+member-tell sentence in their shared board instructions, with own hands on and
+off and specs on and off. The accepted member-tell text predates those goldens.
+
+The 12 ordinary and four own-hands chief rows also explain that a pause with words
+sends a note, without a stop or answer, when the task is shown working before its
+resume words go in (T-1641).
 The same twelve chief texts say a tier can be served by a backup, that a member on Vacation
-takes no tasks, and that the chief still names the tier (BKV-05, T-1627). With those words,
-the one-piece bounds were 138 rows with specs on and 163 without, or 2 and 27 with the most
-staff rules, and are those of the paragraph above since the subagent sentences went; longer texts are read in parts as before.
+takes no tasks, and that the chief still names the tier (BKV-05, T-1627). At that change, the one-piece bounds were 138 rows with specs on and 163 without, or 2 and 27
+with the most staff rules; the later tell and plan guidance changes these bounds.

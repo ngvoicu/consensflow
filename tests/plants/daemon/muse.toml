@@ -2203,20 +2203,6 @@ replace = '''
 '''
 
 
-[[plant]]
-name = "muse: the scratch copy stays when the run fails"
-meant = "the_scratch_folder_goes_when_the_run_fails_as_when_it_ends"
-runs = ["muse-live"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/guard.rs"
-find = '''
-        let _ = std::fs::remove_dir_all(&self.0);
-'''
-replace = '''
-        let _ = &self.0;
-'''
-
 
 [[plant]]
 name = "muse: the tool does not name the Muse ops"
@@ -2485,13 +2471,21 @@ meant = "a_file_is_copied_with_the_mode_it_had_into_folders_only_its_owner_enter
 runs = ["muse-live"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/live/guard.rs"
+file = "crates/cf-e2e/src/door/writes.rs"
 find = '''
-    std::fs::copy(from, to).map(|_| ())
-'''
+    fs::copy(from, to)
+        .map(|_| ())
+        .map_err(Error::file("copy", from))
+}
+
+/// [`copy_keeping_mode`] that makes a clone'''
 replace = '''
-    std::fs::read(from).and_then(|bytes| std::fs::write(to, bytes))
-'''
+    fs::read(from)
+        .and_then(|bytes| fs::write(to, bytes))
+        .map_err(Error::file("copy", from))
+}
+
+/// [`copy_keeping_mode`] that makes a clone'''
 
 
 [[plant]]
@@ -2500,7 +2494,7 @@ meant = "a_file_is_copied_with_the_mode_it_had_into_folders_only_its_owner_enter
 runs = ["muse-live"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/live/guard.rs"
+file = "crates/cf-e2e/src/door/writes.rs"
 find = '''
     std::os::unix::fs::DirBuilderExt::mode(&mut made, 0o700);
 '''

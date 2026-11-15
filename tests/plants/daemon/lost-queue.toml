@@ -69,11 +69,13 @@ file = "crates/cf-engine/src/dispatcher.rs"
 find = "            return self.heard_exit(pane, &shown);"
 replace = "            return Ok(());"
 
+# Claude's status files can independently prove that no process holds the session, so the
+# end-to-end reopen can succeed even when the engine withholds its host proof. Test the
+# launch's `previous_gone` directly while retaining the separate end-to-end regression.
 [[plant]]
-name = "lost-queue: no launch is told its window before was gone, and the answer to a reopen of a window that closed at rest with a notification queued is never the result"
-meant = "a_claude_workers_answer_to_a_reopen_is_its_result_though_its_window_closed_at_rest_with_a_notification_queued"
-runs = ["lost-queue-rig"]
-builds = true
+name = "lost-queue: no launch is told the program before was gone even when the host proved it"
+meant = "a_window_opened_again_is_told_the_program_before_it_is_gone_only_where_the_host_proved_it"
+runs = ["lost-queue-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"

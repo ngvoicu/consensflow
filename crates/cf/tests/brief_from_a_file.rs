@@ -38,6 +38,7 @@ fn window(api: &ScriptedApi, args: &[&str]) -> (Option<i32>, String, String) {
 fn posted(api: &ScriptedApi) -> Vec<(String, Option<Value>)> {
     api.received()
         .into_iter()
+        .filter(|received| received.method == "POST")
         .map(|received| {
             let body = received.json();
             (received.path, body)
@@ -121,7 +122,7 @@ fn the_words_that_resume_reopen_or_tell_come_from_a_file_too_and_a_windows_line_
             told,
         ),
     ] {
-        let api = scripted(vec![reply(200, answer)]);
+        let api = scripted(common::replies_for(&args, answer));
         let (code, printed, _) = window(&api, &args);
         assert_eq!(code, Some(0), "{args:?}");
         assert_eq!(
@@ -224,7 +225,7 @@ fn every_command_that_takes_words_takes_a_file_of_them() {
             json!({ "question": 9, "body": "The words of the file." }),
         ),
     ] {
-        let api = scripted(vec![reply(200, answer)]);
+        let api = scripted(common::replies_for(&args, answer));
         let (code, _, said) = window(&api, &args);
         assert_eq!((code, said.as_str()), (Some(0), ""), "{args:?}");
         assert_eq!(posted(&api), [(asked.to_owned(), Some(body))], "{args:?}");
@@ -242,7 +243,7 @@ fn a_flag_the_command_does_not_know_in_front_of_the_words_is_refused_not_kept() 
         vec!["ask", "--bogus", "hi"],
         vec!["answer", "m-9", "--bogus", "hi"],
     ] {
-        let api = scripted(Vec::new());
+        let api = scripted(common::replies_for(&args, json!({})));
         let (code, printed, said) = window(&api, &args);
         assert_eq!(
             (code, printed.as_str(), said),
@@ -253,17 +254,23 @@ fn a_flag_the_command_does_not_know_in_front_of_the_words_is_refused_not_kept() 
             ),
             "{args:?}"
         );
-        assert!(api.received().is_empty(), "{args:?}");
+        let asked: Vec<_> = api.received().into_iter().map(|r| r.path).collect();
+        let expected = if ["tell", "note"].contains(&args[0]) {
+            vec!["/api/whoami"]
+        } else {
+            vec![]
+        };
+        assert_eq!(asked, expected, "{args:?}");
     }
     // A flag inside the words is text; one the words begin with is kept by `--`.
     for (args, body) in [
         (vec!["note", "hi", "--bogus"], "hi --bogus"),
         (vec!["note", "--", "--bogus"], "--bogus"),
     ] {
-        let api = scripted(vec![reply(
-            200,
+        let api = scripted(common::replies_for(
+            &args,
             json!({ "message": { "id": 7, "recipient": "zeus" } }),
-        )]);
+        ));
         let (code, _, said) = window(&api, &args);
         assert_eq!((code, said.as_str()), (Some(0), ""), "{args:?}");
         assert_eq!(
@@ -285,14 +292,20 @@ fn a_file_beside_words_of_their_own_is_written_wrong_and_one_that_cannot_be_read
         vec!["task", "add", "--tier", "standard", "--file", &path, "-"],
         vec!["tell", "T-3", "Stop", "--file", &path],
     ] {
-        let api = scripted(Vec::new());
+        let api = scripted(common::replies_for(&args, json!({})));
         let (code, printed, said) = window(&api, &args);
         assert_eq!((code, printed.as_str()), (Some(2), ""), "{args:?}");
         assert!(
             said.starts_with("cf: give the words or --file ") && said.ends_with(", not both\n"),
             "{said}"
         );
-        assert!(api.received().is_empty(), "nothing is asked: {args:?}");
+        let asked: Vec<_> = api.received().into_iter().map(|r| r.path).collect();
+        let expected = if args[0] == "tell" {
+            vec!["/api/whoami"]
+        } else {
+            vec![]
+        };
+        assert_eq!(asked, expected, "nothing is posted: {args:?}");
     }
 
     let missing = folder.path().join("nowhere.md");

@@ -89,7 +89,7 @@ fn env(scratch: &Path) -> Value {
 #[ignore = "opt-in: reads Muse's model list and usage, no model turn; cargo xtask live muse-reads (npm run live:muse-reads)"]
 fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() -> Result {
     // No window runs here, and no model: a `--models` would be read by nothing.
-    let _log = Log::own_agents("live muse-reads", "it reads what Muse says of itself")?;
+    let log = Log::own_agents("live muse-reads", "it reads what Muse says of itself")?;
     ask::prepare()?;
     let home = machine::home()?;
     let config = home.join(".config/muse");
@@ -97,21 +97,24 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
     // Where the login is kept decides whether a copy of the config is safe to make.
     let auth = files::read_string(&config.join("auth.json"))?;
     login_in_keychain(&auth).map_err(Error::Daemon)?;
-    let scratch =
-        Scratch::at(std::env::temp_dir().join(format!("muse-reads-{}", std::process::id())));
+    let scratch = Scratch::made("muse-reads-").map_err(|source| Error::File {
+        action: "make a folder in",
+        path: std::env::temp_dir(),
+        source,
+    })?;
     // What the run copies, and nothing else of Muse's folders: the login file (its keychain
     // entry is the secret, which the copy does not carry) and the model catalog cache, each with
     // its mode, into a folder only its owner enters. It is removed when the run ends or fails.
     eprintln!(
         "muse-reads: copying ~/.config/muse/auth.json and ~/.local/share/muse/model-catalog, and nothing else, into {} (removed when the run ends)",
-        scratch.0.display()
+        scratch.path().display()
     );
-    copy_muse_into(&home, &scratch.0).map_err(|source| Error::File {
+    copy_muse_into(&home, scratch.path()).map_err(|source| Error::File {
         action: "copy the login and the model catalog of",
         path: home.join(".config/muse"),
         source,
     })?;
-    let env = env(&scratch.0);
+    let env = env(scratch.path());
 
     let listed = ask::question(&json!({ "op": "muse_models", "env": env }))?;
     assert_eq!(
@@ -175,5 +178,6 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
         changed.is_empty(),
         "a read changed ~/.config/muse: {changed:?}"
     );
+    log.passed();
     Ok(())
 }

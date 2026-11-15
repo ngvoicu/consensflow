@@ -309,7 +309,9 @@ a score).
   counted in the folder (each window is a fresh one, a reopen too), after writing the files of that
   answer in its own folder, which is the project's; the last answer is given again for any more;
   anything else it is told it acknowledges. It writes down each brief it takes, whole, in
-  `journal.jsonl` of the folder. The folders are made again as each play begins and removed when the
+  `journal.jsonl` of the folder. The wrapper also hands it `CF_LIVE_MADE_ROOTS`, the folders it may write
+  below: that folder, the Claude config its window runs on and the project its window is in (the kit's
+  door makes a program that is handed none write nowhere). The folders are made again as each play begins and removed when the
   run is over. **Guard:** the wrapper starts a stand-in only if the run's marker is in its folder
   and the agent is there, else it prints that the model is the stand-in of an eval run and this is
   none, and exits 1 (neither the stand-in nor the real Claude runs); the stand-in itself refuses a

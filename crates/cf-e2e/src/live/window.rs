@@ -378,7 +378,7 @@ impl Window<'_> {
     /// Ends the window.
     pub fn kill(&self) {
         if !self.killed.replace(true) {
-            let _ = self.rig.host("pane.kill", self.pane());
+            let _ = self.rig.close_pane(self.pane());
         }
     }
 }

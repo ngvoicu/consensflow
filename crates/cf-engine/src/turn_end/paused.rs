@@ -1,7 +1,7 @@
 //! The answer a tell's turn ends with while its task is paused (T-442; T-429 on 3.0.5,
 //! T-534's live runs on 3.0.6-alpha.2).
 //!
-//! `cf tell` pauses a working task and puts the chief's words to its window as a question;
+//! `cf task pause T-n "…"` (then `cf tell`, until T-1616) pauses a working task and puts the chief's words to its window as a question;
 //! the window answers it with `cf answer`, and the answer reaches the chief as a message.
 //! A member that has answered may go straight on, in the same turn, with the work the
 //! pause stopped, and end that turn with its complete answer, or answer in plain text what
@@ -21,6 +21,8 @@
 //! note and keeps its words true as the task moves (`cf-ledger`'s `paused_answers`): a
 //! resume does not take it back unread, it says the task has moved on and that its result
 //! will be the next complete answer; Finish withdraws it.
+//! If the window has answered this tell on the board and the answer is with the chief or on
+//! its way, the ledger shows the note rather than typing it to that chief again (CLN-71).
 //!
 //! **What the window wrote first** (T-1151): a window answers a question before it works, so
 //! the note also holds what it wrote after the tell and before its first tool call, where it

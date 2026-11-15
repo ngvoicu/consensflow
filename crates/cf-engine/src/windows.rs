@@ -1419,6 +1419,8 @@ impl Dispatcher {
         }
         let because = if handed == HandOver::Closed {
             "its project was closed before its window opened"
+        } else if handed == HandOver::PauseChanged {
+            "the tell's pause changed before its answer's window opened"
         } else {
             "what its paste held was withdrawn before its window opened"
         };

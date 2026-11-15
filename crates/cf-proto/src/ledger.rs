@@ -674,6 +674,8 @@ pub struct TaskCard {
     pub deleted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// The ledger event that moved this task into its present state.
+    pub state_since: String,
     pub result: Option<String>,
     /// What ConsensFlow shows of the task instead of telling its chief ([`TaskView::aside`]).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -682,7 +684,7 @@ pub struct TaskCard {
 
 impl TaskCard {
     /// `task`'s card, `result` the first line of its latest result.
-    pub fn of(task: TaskView, result: Option<String>) -> Self {
+    pub fn of(task: TaskView, result: Option<String>, state_since: String) -> Self {
         Self {
             id: task.id,
             project_id: task.project_id,
@@ -702,6 +704,7 @@ impl TaskCard {
             deleted_at: task.deleted_at,
             created_at: task.created_at,
             updated_at: task.updated_at,
+            state_since,
             result,
             aside: task.aside,
         }

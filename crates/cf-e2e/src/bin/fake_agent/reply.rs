@@ -634,7 +634,7 @@ fn saved_in(folder: &Path, names: &str, words: &str) -> Result<String, String> {
     let mut lines = Vec::new();
     for name in names.split(',') {
         let path = folder.join(name);
-        std::fs::write(&path, cf_e2e::png::SMALL)
+        cf_e2e::door::write(&path, cf_e2e::png::SMALL)
             .map_err(|failed| format!("SAVED {name}: {failed}"))?;
         lines.push(path.display().to_string());
     }
@@ -657,7 +657,7 @@ fn written_in(folder: &Path, name: &str, text: &str) -> Result<String, String> {
         ));
     }
     let path = folder.join(relative);
-    std::fs::write(&path, format!("{}\n", text.replace("\\n", "\n")))
+    cf_e2e::door::write(&path, format!("{}\n", text.replace("\\n", "\n")))
         .map_err(|failed| format!("WRITE {name}: {failed}"))?;
     Ok(format!("wrote {name}"))
 }
@@ -822,7 +822,7 @@ mod tests {
 
     #[test]
     fn a_designer_saves_its_pictures_and_answers_their_paths_before_its_words() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let answer = saved_in(folder.path(), "desk.png,hero.png", "Warm editorial scene.").unwrap();
         let (desk, hero) = (
             folder.path().join("desk.png"),
@@ -840,14 +840,18 @@ mod tests {
             let bytes = std::fs::read(picture).unwrap();
             assert!(cf_e2e::png::inspect(&bytes).is_ok());
         }
-        assert!(saved_in(&folder.path().join("none"), "a.png", "x")
+        // A place that is a file, not a folder, cannot be saved in: the door makes a folder where
+        // there is none, so a missing one is no failure.
+        let file = folder.path().join("none");
+        std::fs::write(&file, "").unwrap();
+        assert!(saved_in(&file, "a.png", "x")
             .unwrap_err()
             .starts_with("SAVED a.png: "));
     }
 
     #[test]
     fn a_worker_writes_its_change_below_its_folder_and_answers_the_file() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         assert_eq!(
             written_in(folder.path(), "greet.cjs", "a();\\nb();").unwrap(),
             "wrote greet.cjs"
@@ -1071,7 +1075,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_hook_is_given_the_event_and_what_it_hands_back_is_the_answer() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let settings = folder.path().join("settings.json");
         // A hook that answers the question it is asked with its own words.
         std::fs::write(
@@ -1098,7 +1102,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_hook_that_answers_nothing_is_unanswered_with_its_exit_and_what_it_said() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("cf-test-").unwrap();
         let settings = folder.path().join("settings.json");
         std::fs::write(
             &settings,

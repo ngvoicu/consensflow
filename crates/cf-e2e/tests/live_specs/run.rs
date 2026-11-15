@@ -32,8 +32,9 @@ pub struct Machine {
     /// The stand-in the rig's windows run for the worker, and for every Claude
     /// window where the chief is not Claude Code.
     pub stand_in: PathBuf,
-    /// Where the shim that starts Claude Code through the stand-in is made.
-    pub shims: PathBuf,
+    /// Where the shim that starts Claude Code through the stand-in is made: a folder of this
+    /// run's own, taken away with the run.
+    pub shims: cf_e2e::door::Made,
 }
 
 /// What the run was asked for, besides the harnesses and the steps.
@@ -228,7 +229,7 @@ pub fn project(planned: &Planned, machine: &Machine, options: &Options, log: &Lo
     log.say("starts its rig");
     let config = match members::rig_for(
         std::slice::from_ref(chief),
-        &machine.shims,
+        machine.shims.path(),
         &machine.stand_in,
     ) {
         Ok(config) => config,

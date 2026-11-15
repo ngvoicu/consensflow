@@ -94,8 +94,8 @@ const BOARD: [(&[&str], &str); 20] = [
             "                                    keeps its context; only when that context matters;\n",
             "                                    until T-3 and the window's done tasks are accepted it waits\n",
             "  cf task add --self --needs T-3 \"…\" your own later step: its brief comes back to you when T-3 is accepted\n",
-            "  … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted\n",
-            "  … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task\n",
+            "  cf task add --plan plan.md [--key word]  all or none; retry the same key; each === name flags is followed by its brief (or --file)\n",
+            "  … --needs T-3,T-4 · … --before T-9,T-10  this task waits for T-3,T-4; T-9,T-10 wait for it; in a plan, names work too\n",
         ),
     ),
     (
@@ -120,13 +120,13 @@ const BOARD: [(&[&str], &str); 20] = [
     (
         &["task", "accept"],
         concat!(
-            "  cf task accept|cancel T-3         move a task you asked for\n",
+            "  cf task accept|cancel T-3 T-4     decide several tasks together, all or none\n",
             "  cf task accept T-3 \"…\"            accept a failed task you checked; your words are its result\n",
         ),
     ),
     (
         &["task", "cancel"],
-        "  cf task accept|cancel T-3         move a task you asked for\n",
+        "  cf task accept|cancel T-3 T-4     decide several tasks together, all or none\n",
     ),
     (
         &["task", "reopen"],
@@ -149,8 +149,13 @@ const BOARD: [(&[&str], &str); 20] = [
     (
         &["task", "pause"],
         concat!(
-            "  cf task pause T-3                 stop a worker's task: the agent stops and its window waits;\n",
-            "                                    what it left running in the background runs on\n",
+            "  cf task pause T-3 [\"…\"]           stop a worker's task: the agent stops and its window waits;\n",
+            "                                    background work runs on; with words, they go to its window\n",
+            "                                    as a question and its answer arrives as a message; then\n",
+            "                                    cf task resume T-3 \"…\" or cf task finish T-3\n",
+            "                                    a pause withdraws and names your told words not yet in\n",
+            "                                    if shown working before its resume words go in, a pause with words\n",
+            "                                    sends a note after them instead: no stop or answer due\n",
         ),
     ),
     (
@@ -166,14 +171,18 @@ const BOARD: [(&[&str], &str); 20] = [
         concat!(
             "  cf task finish T-3                take what a working, waiting or paused task's worker said last as its\n",
             "                                    result; what its turn left running is not ended\n",
+            "                                    a finish may withdraw and name told words not yet in\n",
         ),
     ),
     (
         &["tell"],
         concat!(
-            "  cf tell T-3 \"…\"                   stop T-3 and put this to its window: its answer arrives as\n",
-            "                                    a message; then cf task resume T-3 \"…\"\n",
-            "                                    (queued or open: kept for its window, to go in with or after its brief)\n",
+            "  cf tell T-3 \"…\"                   say this to T-3's window without stopping it; a working\n",
+            "                                    or waiting window reads your words at its next rest before its\n",
+            "                                    result, unless withdrawn first; it owes no answer\n",
+            "                                    (queued or paused: waits for its window or resume unless withdrawn;\n",
+            "                                    open: added to its brief)\n",
+            "  cf tell \"…\"                       a member tells whoever gave its task; nothing waits\n",
         ),
     ),
     (
@@ -189,7 +198,7 @@ const BOARD: [(&[&str], &str); 20] = [
     ),
     (
         &["note"],
-        "  cf note \"…\" [--human]             something they should know; nothing waits on it\n",
+        "  cf note \"…\" [--human]             a note to the human; nothing waits on it\n",
     ),
     (
         &["answer"],
@@ -240,7 +249,7 @@ fn every_board_command_answers_help_with_its_usage_and_asks_the_board_nothing() 
 
 #[test]
 fn the_word_may_stand_after_the_number_a_command_takes_first_or_beside_its_flags() {
-    let cases: [(&[&str], &[&str]); 12] = [
+    let cases: [(&[&str], &[&str]); 13] = [
         (&["task", "get", "T-3", "--help"], &["task", "get"]),
         (
             &["task", "get", "T-3", "--transcript", "-h"],
@@ -249,6 +258,7 @@ fn the_word_may_stand_after_the_number_a_command_takes_first_or_beside_its_flags
         (&["task", "get", "--transcript", "--help"], &["task", "get"]),
         (&["task", "done", "T-3", "-h"], &["task", "done"]),
         (&["task", "accept", "T-3", "--help"], &["task", "accept"]),
+        (&["task", "pause", "T-3", "--help"], &["task", "pause"]),
         (&["task", "resume", "T-3", "-h"], &["task", "resume"]),
         (
             &["task", "add", "--tier", "light", "--help"],
@@ -347,7 +357,7 @@ fn every_line_of_the_usage_is_a_commands_to_answer_help_with() {
 #[test]
 fn a_text_that_holds_the_word_among_others_or_after_a_double_dash_is_text() {
     // Each posts what it was given, and the board is asked as it is for any text.
-    let cases: [(&[&str], &str, Value); 12] = [
+    let cases: [(&[&str], &str, Value); 14] = [
         (
             &["note", "--", "--help"],
             "/api/notes",
@@ -384,6 +394,16 @@ fn a_text_that_holds_the_word_among_others_or_after_a_double_dash_is_text() {
             json!({ "body": "--help" }),
         ),
         (
+            &["tell", "--", "--help"],
+            "/api/notes",
+            json!({ "body": "--help" }),
+        ),
+        (
+            &["tell", "see", "--help"],
+            "/api/notes",
+            json!({ "body": "see --help" }),
+        ),
+        (
             &["answer", "m-12", "--", "-h"],
             "/api/answers",
             json!({ "question": 12, "body": "-h" }),
@@ -410,13 +430,15 @@ fn a_text_that_holds_the_word_among_others_or_after_a_double_dash_is_text() {
         ),
     ];
     for (args, path, body) in cases {
-        let api = api();
+        let api = scripted(common::replies_for(args, json!({})));
         window(&api, args);
-        assert_eq!(
-            asked(&api),
-            [("POST".to_owned(), path.to_owned(), Some(body))],
-            "{args:?}"
-        );
+        let needs_caller = args[0] == "tell" || (args[0] == "note" && !args.contains(&"--human"));
+        let mut requests = Vec::new();
+        if needs_caller {
+            requests.push(("GET".to_owned(), "/api/whoami".to_owned(), None));
+        }
+        requests.push(("POST".to_owned(), path.to_owned(), Some(body)));
+        assert_eq!(asked(&api), requests, "{args:?}");
     }
 }
 

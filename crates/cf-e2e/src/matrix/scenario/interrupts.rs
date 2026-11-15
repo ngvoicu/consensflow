@@ -1,7 +1,7 @@
 //! LMX-10, interrupts: `pause` and `resume` mid-turn and mid-tool (a job of its turn's running),
-//! `tell` then `resume` (field report 8, T-1139), `cancel` of an open, a working, a paused and a
-//! done task, `edit` of an open task, and `finish` of a working, a waiting and a paused task
-//! (T-1119). Each checks the ledger's states and the product's own answers to the chief.
+//! a pause with words then `resume` (field report 8, T-1139), `cancel` of an open, a working,
+//! a paused and a done task, `edit` of an open task, and `finish` of a working, a waiting and a
+//! paused task (T-1119). Each checks the ledger's states and the product's own answers to the chief.
 
 use crate::live::report::Check;
 use crate::matrix::observe::{self, Bind, Is};
@@ -187,17 +187,17 @@ pub fn interrupts() -> Vec<Scenario> {
             &[],
             &[],
         ),
-        // Field report 8: told to stop, then resumed; the task shows working while its window
-        // works on the words.
+        // Field report 8: stopped with a question, then resumed; the task shows working while its
+        // window works on the words. The scenario keeps its historic name.
         scenario(
             "field8-tell-resume",
             vec![
                 run!("A", "task add --tier standard :: SLEEP 30 Reply with exactly: A_DONE", |snapshot, bindings| {
                     is(snapshot, bindings, "A", 0, &["working"])
                 }),
-                // The window answers the tell and goes on with its work, its record growing, as the
+                // The window answers the pause and goes on with its work, its record growing, as the
                 // field's did (`REPLY … THEN PACED`): the resume comes while it works.
-                run!("tell A", "tell {A} :: Stop now. REPLY TOLD THEN PACED 6 2 Reply with exactly: TELL_REPORT", |snapshot, bindings| {
+                run!("pause A", "task pause {A} :: Stop now. REPLY TOLD THEN PACED 6 2 Reply with exactly: TELL_REPORT", |snapshot, bindings| {
                     is(snapshot, bindings, "A", 0, &["paused"])
                         && bindings.nth("A", 0).is_some_and(|number| {
                             snapshot.chief_inbox.iter().any(|message| {

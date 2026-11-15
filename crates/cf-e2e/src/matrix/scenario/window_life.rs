@@ -329,7 +329,7 @@ pub fn window_life() -> Vec<Scenario> {
             vec![
                 human(
                     "the worker's account is out",
-                    |members| crate::files::write(&members.folder().join(SPENT), ""),
+                    |members| crate::door::write(members.folder().join(SPENT), ""),
                     |_, _| true,
                 ),
                 run!(
@@ -341,7 +341,7 @@ pub fn window_life() -> Vec<Scenario> {
                     "the human logs the worker into another account, and tries it again",
                     |members| {
                         let spent = members.folder().join(SPENT);
-                        std::fs::remove_file(&spent).map_err(crate::Error::file("remove", &spent))?;
+                        super::taken(&spent)?;
                         members.page("member.back", json!({ "participant": "matrix-worker" })).map(|_| ())
                     },
                     |snapshot, bindings| answered(snapshot, bindings, "A", 0) && crate::matrix::run::settled(snapshot),
@@ -374,14 +374,14 @@ pub fn window_life() -> Vec<Scenario> {
                 ),
                 human(
                     "the account the chief and the worker share runs out",
-                    |members| crate::files::write(&members.folder().join(SPENT), ""),
+                    |members| crate::door::write(members.folder().join(SPENT), ""),
                     |snapshot, bindings| is(snapshot, bindings, "A", 0, &["paused"]),
                 ),
                 human(
                     "the human switches the account and tries the worker again: its turn gets through, and the chief on the same account is back",
                     |members| {
                         let spent = members.folder().join(SPENT);
-                        std::fs::remove_file(&spent).map_err(crate::Error::file("remove", &spent))?;
+                        super::taken(&spent)?;
                         members.page("member.back", json!({ "participant": "matrix-worker" })).map(|_| ())
                     },
                     |snapshot, bindings| answered(snapshot, bindings, "A", 0) && crate::matrix::run::settled(snapshot),
@@ -556,8 +556,8 @@ pub fn window_life() -> Vec<Scenario> {
         )
         .ending(&["A"]),
         // a-stop-closed-a-window-whose-turn-was-over: a worker's turn leaves agents and a job
-        // running; the chief tells it something; the stop takes one Escape, the window stays,
-        // its work is not ended, and its answer reaches the chief.
+        // running; the chief pauses it with a question; the stop takes one Escape, the window
+        // stays, its work is not ended, and its answer reaches the chief. The name is historic.
         scenario(
             "field-tell-keeps-work",
             vec![
@@ -566,7 +566,7 @@ pub fn window_life() -> Vec<Scenario> {
                     "task add --tier standard :: JOB 300 AGENTS --then 2 60 SLEEP 300 Reply with exactly: NEVER_OK",
                     |snapshot, bindings| since(snapshot, bindings, "A", "working").is_some_and(|seconds| seconds >= 5)
                 ),
-                run!("tell A", "tell {A} :: Drop the cap. REPLY dropped", |snapshot, bindings| {
+                run!("pause A", "task pause {A} :: Drop the cap. REPLY dropped", |snapshot, bindings| {
                     bindings.nth("A", 0).is_some_and(|number| {
                         snapshot.chief_inbox.iter().any(|message| message["kind"] == "answer" && message["taskNumber"] == number)
                     }) && crate::matrix::run::settled(snapshot)
@@ -578,7 +578,7 @@ pub fn window_life() -> Vec<Scenario> {
                 vec![
                     Check::new(
                         "A",
-                        "its answer to the tell reached the chief",
+                        "its answer to the pause reached the chief",
                         about(judged, "A", "answer").len() == 1,
                         format!("{} answer(s)", about(judged, "A", "answer").len()),
                     ),
@@ -590,7 +590,7 @@ pub fn window_life() -> Vec<Scenario> {
                             .and_then(|task| task["assignee"].as_str())
                             .unwrap_or_default();
                         let escapes = judged.records.escapes(handle);
-                        Check::new("A", "the tell's stop pressed one Escape into its window", escapes == 1, format!("{escapes} Escape(s)"))
+                        Check::new("A", "the pause pressed one Escape into its window", escapes == 1, format!("{escapes} Escape(s)"))
                     },
                 ]
             },

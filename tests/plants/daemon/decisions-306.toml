@@ -163,8 +163,8 @@ runs = ["cf-brief-tell"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/mod.rs"
-find = "    Ok(Said::new(message, format!(\"{text}\\n{sent}\")))"
-replace = "    Ok(Said::new(message, format!(\"{text}{}\", &sent[..0])))"
+find = "        format!(\"{text} A pause or finish may withdraw it first and name it.\\n{sent}\"),"
+replace = "        format!(\"{text} A pause or finish may withdraw it first and name it.{}\", &sent[..0]),"
 
 [[plant]]
 name = "briefs: a resume or a reopening says nothing of the words it sent"
@@ -173,8 +173,8 @@ runs = ["cf-brief-file"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"
-find = "    let sent = if briefed && !text.is_empty() {"
-replace = "    let sent = if false && briefed && !text.is_empty() {"
+find = "    let sent = if (briefed || action == \"pause\") && !text.is_empty() {"
+replace = "    let sent = if false && (briefed || action == \"pause\") && !text.is_empty() {"
 
 [[plant]]
 name = "briefs: a last word longer than the reply shows is shown whole"
@@ -196,7 +196,7 @@ file = "crates/cf/src/board/usage.txt"
 find = '''
 A long one is surest in a file, which no shell cuts (every command that takes words):
   cf task add --tier standard --file brief.md
-task add, reopen, resume, edit and tell say how many characters went and how the text ends: see that it is all there.'''
+task add, reopen, resume, edit and the chief's tell say how many characters went and how the text ends: see that it is all there.'''
 replace = ""
 
 [[plant]]

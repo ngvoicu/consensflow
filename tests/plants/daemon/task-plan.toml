@@ -1,0 +1,90 @@
+# A plan and a set of decisions are each one write, its key binds the work,
+# and a section name reaches the ledger unchanged from the daemon's route.
+
+[run]
+plan-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "task_plan::"]
+plan-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::tasks::tests::stc_"]
+
+[[plant]]
+name = "task plan: a later refusal leaves an earlier section committed"
+meant = "a_later_refusal_leaves_no_task_or_key_and_the_key_can_be_tried_again"
+runs = ["plan-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/plan.rs"
+find = '''    let fingerprint = format!("{:x}", Sha256::digest(encoded));
+    store.write_batch(|store| {'''
+replace = '''    let fingerprint = format!("{:x}", Sha256::digest(encoded));
+    (|store: &mut Store| {'''
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/plan.rs"
+find = '''        Ok(PlanCreated { tasks: answer, repeated: false })
+    })
+}'''
+replace = '''        Ok(PlanCreated { tasks: answer, repeated: false })
+    })(store)
+}'''
+
+[[plant]]
+name = "task plan: a key silently accepts different work"
+meant = "a_plan_key_survives_reopening_and_cannot_be_reused_for_other_work"
+runs = ["plan-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/plan.rs"
+find = "                if saved != fingerprint {"
+replace = "                if false && saved != fingerprint {"
+
+[[plant]]
+name = "task plan: the ledger drops the dependency between sections"
+meant = "stc_three_sections_resolve_a_plan_name"
+runs = ["plan-route"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/plan.rs"
+find = "                        needs[waiter].push(needed);"
+replace = "                        let _ = needed;"
+
+[[plant]]
+name = "task plan: the route drops the section names from its needs"
+meant = "stc_three_sections_resolve_a_plan_name"
+runs = ["plan-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/tasks.rs"
+find = "                                named[index].push(name.clone())"
+replace = "                                let _ = name;"
+
+[[plant]]
+name = "task plan: the first decision commits before a later refusal"
+meant = "stc_accept_is_all_or_none_when_a_later_task_cannot_be_accepted"
+runs = ["plan-route"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/plan.rs"
+find = ''') -> Result<Vec<TaskView>, LedgerError> {
+    store.write_batch(|store| {'''
+replace = ''') -> Result<Vec<TaskView>, LedgerError> {
+    (|store: &mut Store| {'''
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/plan.rs"
+find = '''        Ok(result.into_iter().flatten().collect())
+    })
+}'''
+replace = '''        Ok(result.into_iter().flatten().collect())
+    })(store)
+}'''
+
+[[plant]]
+name = "task plan: a rolled back batch is sent to the trace"
+meant = "a_refused_plan_does_not_trace_events_that_were_rolled_back"
+runs = ["plan-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/plan.rs"
+find = '''    let fingerprint = format!("{:x}", Sha256::digest(encoded));
+    store.write_batch(|store| {'''
+replace = '''    let fingerprint = format!("{:x}", Sha256::digest(encoded));
+    store.write(|store| {'''

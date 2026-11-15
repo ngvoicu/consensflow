@@ -36,7 +36,7 @@ use crate::model::{self, require_active, LedgerError, FINISHED_TASK_STATES, MAX_
 use crate::questions::{render_choices, render_questions, require_choices, require_questions};
 use crate::queue::{queue, send, withdraw, Queued, Sent};
 use crate::store::Store;
-use crate::tasks::{pause_task, paused_by_consensflow, take_over_pause};
+use crate::tasks::{pause_task_naming, paused_by_consensflow, take_over_pause};
 use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
 
 pub(crate) use again::tell_sent_back;
@@ -66,8 +66,10 @@ pub(crate) use holds::{
     tell_goes_on,
 };
 pub(crate) use paused_answers::{
-    given as paused_answer_given, note as note_paused_answer, put_back as put_back_paused_answers,
-    queued as queued_paused_answers, tell_on_its_way, withdraw as withdraw_paused_answers,
+    answer_to_current_pause, given as paused_answer_given, note as note_paused_answer,
+    put_back as put_back_paused_answers, queued as queued_paused_answers,
+    recover_after_lost_answer, tell_on_its_way, tell_pause_ways_on,
+    withdraw as withdraw_paused_answers,
 };
 pub(crate) use pauses::{
     join_pause_note, leave_pause_notes, note_held_for_context, note_pause, note_stall, say_again,
@@ -82,10 +84,11 @@ pub(crate) use receipt::{
 pub(crate) use roles::{note_role, role_notes_to, role_of_note};
 pub(crate) use taken_back::take_back;
 pub(crate) use told::{
-    drop_queued_but_told, kept_through_leaving, launch_called_off, notes_waiting, tell_queued,
-    told_unreceived, Dropped,
+    drop_queued_but_told, kept_through_leaving, launch_called_off, notes_waiting,
+    notes_waiting_for_finish, sent_at_work_of, tell_queued, told_unreceived, withdraw_at_work,
+    Dropped,
 };
-pub use told::{is_told, waiting_for_the_reopen};
+pub use told::{is_told, sent_at_work, told_at_work, waiting_for_the_reopen};
 
 /// A note: from a participant (ConsensFlow itself when none) to another,
 /// about one of the project's tasks or none.
@@ -164,6 +167,16 @@ pub(crate) fn ask(
     project_id: i64,
     question: &NewQuestion,
 ) -> Result<MessageView, LedgerError> {
+    Ok(ask_naming(store, project_id, question)?.0)
+}
+
+/// [`ask`], and with the question the told notes its pause cancelled (an urgent question
+/// pauses its task, and the pause takes back what the chief wrote for the window).
+pub(crate) fn ask_naming(
+    store: &mut Store,
+    project_id: i64,
+    question: &NewQuestion,
+) -> Result<(MessageView, Vec<MessageView>), LedgerError> {
     let Some(from) = question.from.as_deref() else {
         return Err(LedgerError::refused(
             "unknown-participant",
@@ -185,6 +198,7 @@ pub(crate) fn ask(
         }
         // The pause first, as one step with the tell: what it withdraws from
         // the window is never the tell, and a tell refused below pauses nothing.
+        let mut withdrawn = Vec::new();
         if question.urgent {
             let Some(number) = question.task else {
                 return Err(LedgerError::refused_with(
@@ -201,7 +215,7 @@ pub(crate) fn ask(
             if task.state == "paused" && !paused_by_consensflow(store, &task)? {
                 take_over_pause(store, &task, from)?;
             } else {
-                pause_task(store, project_id, number, Some(from), None)?;
+                withdrawn = pause_task_naming(store, project_id, number, Some(from), None)?.1;
             }
         }
         let body = match &options {
@@ -239,7 +253,7 @@ pub(crate) fn ask(
         if let Some(row) = asking {
             reconcile(store, row.id)?;
         }
-        Ok(message)
+        Ok((message, withdrawn))
     })
 }
 
@@ -354,6 +368,11 @@ pub(crate) fn answer(
             "message.sent",
             json!({ "message": id, "kind": "answer", "from": answerer.handle, "to": question.sender }),
         )?;
+        // If the window's turn was observed first, its note may still be waiting
+        // for the chief. The answer and the change of that note are one write.
+        if let Some(task) = message_task(store, id)? {
+            paused_answers::show_answered(store, &task, question_id, false)?;
+        }
         // A question still gated is answered before the one asked saw it: it goes
         // no further. So is one still queued that the asker's own window answered.
         // One still queued that the one asked answered is theirs: they answered it.

@@ -134,12 +134,20 @@ pub fn run(who: Who, asked: &Asked, stand_in: &Path, log: &Log) -> Result<Accoun
 /// is told, and the check's `cf answer` is refused (2026-10-12).
 fn tidy(members: &Members, case: &mut Account) {
     let folder = members.claude_config().join("projects").join("integration");
-    case.say(match std::fs::remove_dir(&folder) {
-        Ok(()) => format!(
+    let empty = std::fs::read_dir(&folder).is_ok_and(|mut entries| entries.next().is_none());
+    if !empty {
+        case.say(format!(
+            "{} was not taken: it is not empty",
+            folder.display()
+        ));
+        return;
+    }
+    case.say(match cf_e2e::door::Door::of_run().remove_in_made(&folder) {
+        cf_e2e::door::Removed::Removed(_) => format!(
             "another run's rig ended: {} is taken, empty as the chief's folder is until it hears something",
             folder.display()
         ),
-        Err(failed) => format!("{} was not taken: {failed}", folder.display()),
+        other => format!("{} was not taken: {other}", folder.display()),
     });
 }
 

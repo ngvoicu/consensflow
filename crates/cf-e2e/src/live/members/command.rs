@@ -7,7 +7,7 @@
 //!
 //! A command is found and ended in the window's own tree alone, what descends from
 //! the window's process ([`LongCommand::in_window`], [`LongCommand::end_in`], and
-//! [`LongCommand::chosen_in`] with [`end_chosen`] for what a window that is cut
+//! [`LongCommand::chosen_in`] with [`Door::end`] for what a window that is cut
 //! leaves), never by the mark across the machine: a check that ended every process
 //! whose command line held its mark ended the worker that ran it, whose brief quoted
 //! the mark (2026-10-16). What is read across the machine by the mark
@@ -18,14 +18,31 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 use super::super::claude::{processes_with, Process};
-use super::descent::{descending_from, end_chosen, Ended, Identity, Machine, Running, ThisMachine};
+use super::descent::{descending_from, Ended, Identity, Machine, Running, ThisMachine};
+use crate::door::{Door, Grounded};
 use crate::{pattern, Result};
+
+/// A word made for this run of the kit: `cf-run-<16 hex digits>`, 64 random bits made at its first
+/// call. It is in the command line of each [`LongCommand`] the run starts and of what the kit asks a
+/// window to watch, so that what is read across the machine by it ([`LongCommand::running`], what
+/// the closed windows left, [`super::Watch`]) is this run's alone: the marks are fixed words, and
+/// every tree's run of the same case on the machine has the same (T-635).
+pub fn run_word() -> &'static str {
+    static WORD: OnceLock<String> = OnceLock::new();
+    WORD.get_or_init(|| {
+        let (high, low) = uuid::Uuid::new_v4().as_u64_pair();
+        format!("cf-run-{:016x}", high ^ low)
+    })
+}
 
 /// A command that runs for a while, which a check finds by its mark.
 #[derive(Debug, Clone, Copy)]
 pub struct LongCommand {
     mark: &'static str,
     seconds: u64,
+    /// The file in the window's folder it counts its seconds in, where it does
+    /// ([`LongCommand::counting`]).
+    counts_in: Option<&'static str>,
 }
 
 impl LongCommand {
@@ -37,7 +54,27 @@ impl LongCommand {
     /// The command whose command line ends with `mark`, which runs for `seconds` and
     /// ends by itself: for a check that lets a window that runs it again finish it.
     pub const fn lasting(mark: &'static str, seconds: u64) -> Self {
-        Self { mark, seconds }
+        Self {
+            mark,
+            seconds,
+            counts_in: None,
+        }
+    }
+
+    /// [`LongCommand::lasting`], which writes how many seconds it has run into `file` (in the
+    /// folder it is run in) each second: a command Codex starts with no shell, which no
+    /// process tree of the host lists (T-1137), is shown running by its file's count.
+    pub const fn counting(mark: &'static str, seconds: u64, file: &'static str) -> Self {
+        Self {
+            mark,
+            seconds,
+            counts_in: Some(file),
+        }
+    }
+
+    /// The file it counts in, where it does.
+    pub const fn counts_in(&self) -> Option<&'static str> {
+        self.counts_in
     }
 
     /// How long it runs.
@@ -46,19 +83,32 @@ impl LongCommand {
     }
 
     /// The command, as a member is told to run it: Node waits for its seconds, and the
-    /// mark is a word it is given and does nothing with.
+    /// run's word ([`run_word`]) and the mark are words it is given and does nothing with.
     pub fn text(&self) -> String {
-        format!(
-            "node -e \"setTimeout(() => {{}}, {})\" {}",
-            self.seconds * 1_000,
-            self.mark
-        )
+        match self.counts_in {
+            None => format!(
+                "node -e \"setTimeout(() => {{}}, {})\" {} {}",
+                self.seconds * 1_000,
+                run_word(),
+                self.mark
+            ),
+            Some(file) => format!(
+                "node -e \"let n=0;const w=()=>require('fs').writeFileSync('{file}',String(++n));w();setInterval(w,1000);setTimeout(()=>process.exit(),{})\" {} {}",
+                self.seconds * 1_000,
+                run_word(),
+                self.mark
+            ),
+        }
     }
 
-    /// Its own processes, read across the machine and never ended: the `node` it runs,
-    /// not the window whose launch text (the task, as an argument of Claude) names it too.
+    /// Its own processes, read across the machine by this run's word ([`run_word`]), which no
+    /// other run's command has, and never ended: the `node` it runs, not the window whose launch
+    /// text (the task, as an argument of Claude) names it too.
     pub fn running(&self) -> Result<Vec<Process>> {
-        Ok(of_node(processes_with(self.mark)?))
+        Ok(of_node(processes_with(run_word())?)
+            .into_iter()
+            .filter(|process| self.is_run_by(&process.command))
+            .collect())
     }
 
     /// Its processes in the window whose own process is `window` (found when the window
@@ -82,30 +132,55 @@ impl LongCommand {
 
     /// Its processes in the window whose own process is `window`, and what they started:
     /// what a check ends of it, now ([`LongCommand::end_in`]), or once the window is cut,
-    /// which leaves what it ran with no window to descend from ([`end_chosen`]).
-    pub fn chosen_in(&self, machine: &dyn Machine, window: Identity) -> Result<Vec<Running>> {
+    /// which leaves what it ran with no window to descend from ([`Door::end`]).
+    pub fn chosen_in(&self, machine: &dyn Machine, window: Identity) -> Result<Grounded> {
         let all = machine.processes()?;
-        let mut chosen: Vec<Running> = Vec::new();
-        for process in descending_from(&all, window)
-            .into_iter()
-            .filter(|process| self.is_run_by(&process.command))
-        {
-            let under = descending_from(&all, process.identity);
-            for one in std::iter::once(process).chain(under) {
-                if !chosen.iter().any(|seen| seen.identity == one.identity) {
-                    chosen.push(one);
-                }
-            }
-        }
-        Ok(chosen)
+        Ok(Grounded::in_window_where(
+            &all,
+            window,
+            |line| self.is_run_by(line),
+            self.mark,
+        ))
     }
 
     /// Ends its processes in the window whose own process is `window`, and what they
-    /// started, on this machine ([`LongCommand::chosen_in`], [`end_chosen`]): what came of
+    /// started, on this machine ([`LongCommand::chosen_in`], [`Door::end`]): what came of
     /// each, nothing where the window runs no such command. Nothing outside the window is
     /// ended, whatever its command line says.
     pub fn end_in(&self, window: Identity) -> Result<Ended> {
-        Ok(end_chosen(&self.chosen_in(&ThisMachine, window)?))
+        Ok(Door::of_run().end(&self.chosen_in(&ThisMachine, window)?))
+    }
+}
+
+/// How many seconds the ticking command in `folder` says it has run, by its `file`: none before it
+/// has written one (or while it is being written).
+pub fn ticks_in(folder: &std::path::Path, file: &str) -> Option<u64> {
+    std::fs::read_to_string(folder.join(file))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// A tick file read at each look: its count counts as the command running only when it has
+/// gone up since the look before. A file the command of an earlier run left holds its last count
+/// and moves no more, so it is no command running now, however many seconds it says (the live
+/// folders are the same ones each run).
+#[derive(Debug, Default)]
+pub struct Moving {
+    last: Option<u64>,
+}
+
+impl Moving {
+    /// The count `now` as this look read it: some where it is higher than the look before's,
+    /// none at the first look (it has nothing to be higher than) and where it stood still.
+    pub fn moved(&mut self, now: Option<u64>) -> Option<u64> {
+        let before = self.last;
+        self.last = now.or(before);
+        match (before, now) {
+            (Some(before), Some(now)) if now > before => Some(now),
+            _ => None,
+        }
     }
 }
 
@@ -249,11 +324,95 @@ mod tests {
     }
 
     #[test]
+    fn a_counting_command_ends_with_its_mark_like_any_and_writes_its_seconds_in_its_file() {
+        let command = LongCommand::counting("cf-x-long-command", 300, "x-ticks.txt");
+        let text = command.text();
+        assert!(text.ends_with(" cf-x-long-command"), "{text}");
+        assert!(
+            text.contains("writeFileSync('x-ticks.txt',String(++n))"),
+            "{text}"
+        );
+        assert!(text.contains("process.exit(),300000"), "{text}");
+        assert_eq!(command.counts_in(), Some("x-ticks.txt"));
+        // A plain one counts in no file and is as it was.
+        assert_eq!(LongCommand::new("m").counts_in(), None);
+        assert_eq!(
+            LongCommand::new("m").text(),
+            format!(
+                "node -e \"setTimeout(() => {{}}, 300000)\" {} m",
+                run_word()
+            )
+        );
+        // As a process list gives it, it is the command that ends with the mark.
+        assert!(command.is_run_by(&format!("node -e {text}")));
+    }
+
+    #[test]
     fn the_command_is_node_waiting_five_minutes_with_the_mark_as_a_word_it_is_given() {
         let command = LongCommand::new("cf-stops-live-long-command");
         assert_eq!(
             command.text(),
-            "node -e \"setTimeout(() => {}, 300000)\" cf-stops-live-long-command"
+            format!(
+                "node -e \"setTimeout(() => {{}}, 300000)\" {} cf-stops-live-long-command",
+                run_word()
+            )
+        );
+    }
+
+    #[test]
+    fn the_runs_word_is_sixty_four_random_bits_made_once() {
+        let word = run_word();
+        let digits = word.strip_prefix("cf-run-").expect(word);
+        assert_eq!(digits.len(), 16, "{word}");
+        assert!(digits.chars().all(|at| at.is_ascii_hexdigit()), "{word}");
+        assert_eq!(word, run_word());
+    }
+
+    /// The same command of another tree's run: its line holds the mark, as every run's does, and is
+    /// the `node -e` the command is. Read across the machine, it was taken for this run's (T-635).
+    /// A real one, started here, outside the window and with no word of this run's.
+    #[cfg(unix)]
+    #[test]
+    fn the_same_command_of_another_run_on_the_machine_is_not_the_command_this_run_started() {
+        let mark = "cf-decoy-long-command";
+        let command = LongCommand::new(mark);
+        let mut decoy = crate::process::Run::new("node")
+            .args(["-e", "setTimeout(() => {}, 30000)", mark])
+            .inheriting_env()
+            .spawn()
+            .unwrap();
+        // The command this run starts, as a member is told to run it.
+        let mut own = crate::process::Run::new("node")
+            .args(["-e", "setTimeout(() => {}, 30000)", run_word(), mark])
+            .inheriting_env()
+            .spawn()
+            .unwrap();
+        let (pid, own_pid) = (decoy.id(), own.id());
+        let mut found = Vec::new();
+        for _ in 0..50 {
+            found = command.running().unwrap();
+            if found.iter().any(|process| process.pid == own_pid) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let listed = processes_with(mark)
+            .unwrap()
+            .iter()
+            .any(|process| process.pid == pid);
+        decoy.kill();
+        own.kill();
+        assert!(
+            listed,
+            "the decoy {pid} was never listed: the test proves nothing"
+        );
+        assert!(
+            found.iter().any(|process| process.pid == own_pid),
+            "the run's own command {own_pid} is not found: {found:#?}"
+        );
+        assert!(
+            found.iter().all(|process| process.pid != pid),
+            "the decoy {pid} is taken for the command this run started: {found:#?}"
         );
     }
 
@@ -318,7 +477,10 @@ mod tests {
             |found: &[Running]| -> Vec<u32> { found.iter().map(|one| one.identity.pid).collect() };
         assert_eq!(pids(&command.in_window(&machine, window).unwrap()), [102]);
         let chosen = command.chosen_in(&machine, window).unwrap();
-        assert_eq!(pids(&end_chosen_by(&machine, &chosen).ended), [102, 103]);
+        assert_eq!(
+            pids(&end_chosen_by(&machine, &chosen.processes()).ended),
+            [102, 103]
+        );
         assert_eq!(machine.ended(), [102, 103]);
         // A window that runs no such command has nothing found or ended.
         let editor = Identity {
@@ -576,6 +738,8 @@ mod tests {
             (found.len() == 2).then_some(found)
         })
         .expect("the window's command and its sleep are chosen");
+        let grounded = chosen;
+        let chosen = grounded.processes();
         assert!(chosen
             .iter()
             .all(|one| one.identity.pid != outsider.id() && one.identity != own));
@@ -585,7 +749,7 @@ mod tests {
             command.in_window(&ThisMachine, own).unwrap().is_empty(),
             "a window that is gone has no tree to find the command in"
         );
-        assert_eq!(end_chosen(&chosen).ended, chosen);
+        assert_eq!(Door::acting().end(&grounded).ended, chosen);
         let gone = until(Duration::from_secs(10), Duration::from_millis(50), || {
             chosen
                 .iter()

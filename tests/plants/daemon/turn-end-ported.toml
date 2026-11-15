@@ -66,8 +66,8 @@ replace = "use add, list, get, done, accept, reopen, edit, cancel, pause or resu
 
 [[plant]]
 name = "turn end finish: cf says its unknown task command in Node’s words"
-meant = "every_departed_trace_is_there_and_still_departs"
-runs = ["tep-turn-end-finish-daemon-api"]
+meant = "every_case_but_the_departed_asks_says_and_exits_as_node_did"
+runs = ["tep-turn-end-finish-cf-goldens"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"

@@ -298,7 +298,7 @@ impl Pane<'_> {
         match &self.window {
             Some(window) => window.kill(),
             None => {
-                let _ = self.rig.host("pane.kill", self.named());
+                let _ = self.rig.close_pane(self.named());
             }
         }
     }

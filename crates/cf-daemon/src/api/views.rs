@@ -216,7 +216,11 @@ mod tests {
 
     #[test]
     fn a_card_on_the_board_is_summarised_as_its_task_is() {
-        let card = TaskCard::of(task(), Some("Done.".to_owned()));
+        let card = TaskCard::of(
+            task(),
+            Some("Done.".to_owned()),
+            "2026-10-05T09:00:00.000Z".to_owned(),
+        );
         assert_eq!(
             serde_json::to_string(&TaskSummary::from(&card)).unwrap(),
             SUMMARY

@@ -45,6 +45,7 @@ mod sessions;
 mod shown_notes;
 mod suspended;
 mod taken_back;
+mod task_plan;
 mod told;
 mod told_edges;
 mod told_kept;
