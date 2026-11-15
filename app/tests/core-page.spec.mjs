@@ -1249,10 +1249,16 @@ test('draws the kanban: a row per participant, a column per state, and cards tha
   expect(await page.evaluate(() => window.__pwned)).toBeUndefined()
 })
 
-test('shows a failed Resume on the chief card and a paused session can be reopened', async ({ page }) => {
+test('shows a failed Resume on the chief card and a paused session can be reopened', async ({
+  page,
+}) => {
   const data = model()
   const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
-  chief.activity = { state: 'closed', reason: "The chief's window could not be opened: the launch failed (its cause is in ConsensFlow's log)" }
+  chief.activity = {
+    state: 'closed',
+    reason:
+      "The chief's window could not be opened: the launch failed (its cause is in ConsensFlow's log)",
+  }
   chief.pane = null
   const zeus = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
   data.boards[1].lanes.push({
@@ -1264,29 +1270,35 @@ test('shows a failed Resume on the chief card and a paused session can be reopen
   await open(page, data)
   await unfold(page)
   await expect(page.locator('button.card[data-task="91"] .card-state')).toHaveText('Paused')
-  await expect(page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status')).toHaveText(
+  await expect(
+    page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status'),
+  ).toHaveText(
     "The chief's window could not be opened: the launch failed (its cause is in ConsensFlow's log). Close then Resume the project to try again.",
   )
   const row = page.locator('tr[data-handle="zeus-amber-pine"]')
   await expect(row.locator('[data-state="closed"]')).toHaveCount(1)
   await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
-  await expect.poll(() => calls(page, 'session.open')).toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
+  await expect
+    .poll(() => calls(page, 'session.open'))
+    .toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
   await expect(page.getByTestId('chief-asks')).toHaveCount(0)
   await page.evaluate(() => {
     const chief = window.__model.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
     chief.switching = { harness: 'codex', model: 'gpt-6-astra' }
     window.__listeners.get('state-changed')()
   })
-  await expect(page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status')).toHaveText(
-    'Switching the chief to Codex (gpt-6-astra) after this turn',
-  )
+  await expect(
+    page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status'),
+  ).toHaveText('Switching the chief to Codex (gpt-6-astra) after this turn')
   await page.evaluate(() => {
     const chief = window.__model.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
     chief.switching = null
     chief.activity.reason = 'An unrelated closed status'
     window.__listeners.get('state-changed')()
   })
-  await expect(page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status')).toHaveText('No window')
+  await expect(
+    page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status'),
+  ).toHaveText('No window')
 })
 
 test('shows an agent-written title as text, never as markup', async ({ page }) => {
