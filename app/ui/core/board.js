@@ -481,13 +481,20 @@ export function outWords({ participant, activity, busy }, now) {
  */
 export function laneStatus(lane, board, now) {
   const { participant, activity } = lane
-  if (participant.role === 'chief' && activity?.state === 'closed' && activity.reason) return ['closed', activity.reason]
   if (lane.switching) {
     const { harness, model } = lane.switching
     return [
       'switching',
       `Switching the chief to ${HARNESS_NAMES[harness] ?? harness} (${model}) after this turn`,
     ]
+  }
+  if (
+    participant.role === 'chief' &&
+    activity?.state === 'closed' &&
+    activity.reason?.startsWith("The chief's window could not be opened: ")
+  ) {
+    const reason = /[.!?]$/.test(activity.reason) ? activity.reason : `${activity.reason}.`
+    return ['closed', `${reason} Close then Resume the project to try again.`]
   }
   // A meeting with the human: what comes for the chief waits until its Stop.
   if (participant.role === 'chief' && board.project?.meeting) {

@@ -1594,6 +1594,9 @@ impl Dispatcher {
             participant.agent.as_deref(),
         );
         self.release_its_work(project, participant, &because, delivering.cloned())?;
+        // Releasing this member's work is its own existing rule, not a failed
+        // project Resume. Preserve its notice when it has no message to fail.
+        record.window.borrow_mut().coming = None;
         if delivering.is_none() {
             self.launch_failed(record, project, participant, None, &because)?;
         }
