@@ -10,6 +10,97 @@ use super::open::{
 };
 use super::*;
 
+#[test]
+fn kit_round3_window_record_refuses_missing_and_foreign_homes_before_asking() {
+    let foreign = tempfile::tempdir().unwrap();
+    for (harness, name) in [
+        (Harness::Claude, "CLAUDE_CONFIG_DIR"),
+        (Harness::Codex, "CODEX_HOME"),
+        (Harness::Pi, "PI_CODING_AGENT_DIR"),
+        (
+            Harness::Devin,
+            if cfg!(windows) {
+                "APPDATA"
+            } else {
+                "XDG_DATA_HOME"
+            },
+        ),
+        (Harness::Muse, "XDG_DATA_HOME"),
+    ] {
+        for env in [
+            Vec::new(),
+            vec![(name.to_owned(), foreign.path().display().to_string())],
+        ] {
+            let asked = Cell::new(false);
+            let record = with_record_homes(harness, &env, || {
+                asked.set(true);
+                Some(ask::Record::default())
+            });
+            assert!(
+                record.is_none() && !asked.get(),
+                "harness-ask reached a missing or foreign home"
+            );
+        }
+    }
+    let run = crate::door::made("cf-window-record-").unwrap();
+    let value = run.path().display().to_string();
+    for (harness, env) in [
+        (
+            Harness::Claude,
+            vec![("CLAUDE_CONFIG_DIR".to_owned(), value.clone())],
+        ),
+        (
+            Harness::Codex,
+            vec![("CODEX_HOME".to_owned(), value.clone())],
+        ),
+        (
+            Harness::Pi,
+            vec![
+                ("PI_CODING_AGENT_DIR".to_owned(), value.clone()),
+                ("PI_CODING_AGENT_SESSION_DIR".to_owned(), value.clone()),
+            ],
+        ),
+        (
+            Harness::Devin,
+            vec![(
+                if cfg!(windows) {
+                    "APPDATA"
+                } else {
+                    "XDG_DATA_HOME"
+                }
+                .to_owned(),
+                value.clone(),
+            )],
+        ),
+        (
+            Harness::Muse,
+            vec![("XDG_DATA_HOME".to_owned(), value.clone())],
+        ),
+    ] {
+        let asked = Cell::new(false);
+        let _ = with_record_homes(harness, &env, || {
+            asked.set(true);
+            None
+        });
+        assert!(asked.get(), "a run-owned {harness:?} home was refused");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn kit_round3_window_record_refuses_linked_out_record_roots() {
+    let run = crate::door::made("cf-window-linked-").unwrap();
+    let foreign = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(foreign.path(), run.path().join("sessions")).unwrap();
+    let env = vec![("CODEX_HOME".to_owned(), run.path().display().to_string())];
+    let asked = Cell::new(false);
+    let _ = with_record_homes(Harness::Codex, &env, || {
+        asked.set(true);
+        None
+    });
+    assert!(!asked.get());
+}
+
 fn item(role: &str, text: &str) -> Item {
     Item {
         id: String::new(),

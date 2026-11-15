@@ -225,16 +225,18 @@ impl Window<'_> {
     /// items, and whether its turn is over. None while there is no record, or none
     /// can be read.
     pub fn record(&self) -> Option<ask::Record> {
-        let known = self.session.borrow().clone();
-        let session = known.or_else(|| {
-            let found =
-                ask::newest_session(&self.kind, &self.workspace, self.opened_at_ms, &self.env)
-                    .ok()
-                    .flatten();
-            self.session.borrow_mut().clone_from(&found);
-            found
-        });
-        session.and_then(|session| ask::records(&self.kind, &session, &self.env).ok().flatten())
+        with_record_homes(self.harness, &self.env, || {
+            let known = self.session.borrow().clone();
+            let session = known.or_else(|| {
+                let found =
+                    ask::newest_session(&self.kind, &self.workspace, self.opened_at_ms, &self.env)
+                        .ok()
+                        .flatten();
+                self.session.borrow_mut().clone_from(&found);
+                found
+            });
+            session.and_then(|session| ask::records(&self.kind, &session, &self.env).ok().flatten())
+        })
     }
 
     /// What the harness's own record holds so far, as the daemon reads it:
@@ -382,6 +384,73 @@ impl Window<'_> {
             let _ = self.rig.close_pane(self.pane());
         }
     }
+}
+
+fn with_record_homes(
+    harness: Harness,
+    env: &[(String, String)],
+    read: impl FnOnce() -> Option<ask::Record>,
+) -> Option<ask::Record> {
+    if !record_homes_safe(harness, env) {
+        return None;
+    }
+    read()
+}
+
+pub(super) fn record_homes_safe(harness: Harness, env: &[(String, String)]) -> bool {
+    let owned = |name: &str| {
+        env.iter()
+            .rev()
+            .find(|(key, _)| {
+                if cfg!(windows) {
+                    key.eq_ignore_ascii_case(name)
+                } else {
+                    key == name
+                }
+            })
+            .map(|(_, value)| value)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute() && crate::door::is_made_or_below(path))
+    };
+    match harness {
+        Harness::Claude => owned("CLAUDE_CONFIG_DIR")
+            .is_some_and(|home| crate::door::is_made_or_below(&home.join("projects"))),
+        Harness::Codex => owned("CODEX_HOME")
+            .is_some_and(|home| crate::door::is_made_or_below(&home.join("sessions"))),
+        Harness::Pi => {
+            owned("PI_CODING_AGENT_DIR").is_some() && owned("PI_CODING_AGENT_SESSION_DIR").is_some()
+        }
+        Harness::Devin => super::guard::devin_store_path(cfg!(windows), env).is_ok(),
+        Harness::Muse => owned("XDG_DATA_HOME").is_some_and(|home| {
+            let muse = home.join("muse");
+            let sessions = muse.join("sessions");
+            let index = muse.join("session-index.db");
+            crate::door::is_made_or_below(&sessions)
+                && super::guard::run_owned_devin_store(&index)
+                && no_record_links(&sessions)
+        }),
+    }
+}
+
+// Muse's reader follows dated folders and record-file links. Refuse such a tree before it runs.
+fn no_record_links(path: &Path) -> bool {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
+        Err(_) => return false,
+    };
+    if metadata.file_type().is_symlink() {
+        return false;
+    }
+    if !metadata.is_dir() {
+        return true;
+    }
+    std::fs::read_dir(path).is_ok_and(|entries| {
+        entries
+            .into_iter()
+            .all(|entry| entry.is_ok_and(|entry| no_record_links(&entry.path())))
+    })
 }
 
 impl Drop for Window<'_> {

@@ -48,14 +48,24 @@ fn tree(root: &Path) -> Result<BTreeMap<PathBuf, u64>> {
     let mut found = BTreeMap::new();
     let mut folders = vec![root.to_owned()];
     while let Some(folder) = folders.pop() {
+        if std::fs::symlink_metadata(&folder).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            continue;
+        }
         let Ok(entries) = std::fs::read_dir(&folder) else {
             continue;
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
+            let kind = entry.file_type().map_err(|source| Error::File {
+                action: "read",
+                path: path.clone(),
+                source,
+            })?;
+            if kind.is_symlink() {
+                continue;
+            } else if kind.is_dir() {
                 folders.push(path);
-            } else {
+            } else if kind.is_file() {
                 let mut hasher = DefaultHasher::new();
                 files::read(&path)?.hash(&mut hasher);
                 found.insert(path, hasher.finish());
@@ -180,4 +190,23 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
     );
     log.passed();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn kit_round3_muse_fingerprint_does_not_follow_links_out() {
+        let root = tempfile::tempdir().unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        std::fs::write(foreign.path().join("login"), "fabricated refresh token").unwrap();
+        std::os::unix::fs::symlink(foreign.path().join("login"), root.path().join("leak")).unwrap();
+        let found = tree(root.path()).unwrap();
+        assert!(
+            !found.contains_key(&root.path().join("leak")),
+            "a linked-out login was fingerprinted"
+        );
+    }
 }

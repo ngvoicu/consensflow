@@ -133,28 +133,13 @@ pub(crate) fn now_ms() -> i64 {
 
 /// Copies the folder `from` into `to`, whole, where it is there.
 fn copy_tree(from: &Path, to: &Path) -> Result {
+    if fs::symlink_metadata(from).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Ok(());
+    }
     if !from.is_dir() {
         return Ok(());
     }
-    cf_e2e::door::make_dir(to)?;
-    for entry in fs::read_dir(from).map_err(|source| Error::File {
-        action: "read",
-        path: from.to_owned(),
-        source,
-    })? {
-        let entry = entry.map_err(|source| Error::File {
-            action: "read",
-            path: from.to_owned(),
-            source,
-        })?;
-        let (source, target) = (entry.path(), to.join(entry.file_name()));
-        if source.is_dir() {
-            copy_tree(&source, &target)?;
-        } else if source.is_file() {
-            cf_e2e::door::copy(&source, &target)?;
-        }
-    }
-    Ok(())
+    cf_e2e::door::copy_tree(from, to, &|_| false)
 }
 
 /// A throwaway Claude config at `throwaway`, a copy of the machine's own at `own` that
@@ -169,6 +154,28 @@ fn throwaway_config(
     login: &Value,
     folder: &Path,
 ) -> Result {
+    if fs::symlink_metadata(own).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Err(Error::Daemon(
+            "Claude parity cannot read a linked config folder".to_owned(),
+        ));
+    }
+    let required_json = |path: &Path, name: &str| -> Result<Map<String, Value>> {
+        let failed = || Error::Daemon(format!("Claude parity cannot read or parse {name}"));
+        if fs::symlink_metadata(path)
+            .map_err(|_| failed())?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(failed());
+        }
+        let text = files::read_string(path).map_err(|_| failed())?;
+        serde_json::from_str::<Value>(&text)
+            .ok()
+            .and_then(|value| value.as_object().cloned())
+            .ok_or_else(failed)
+    };
+    let mut settings = required_json(&own.join("settings.json"), "settings.json")?;
+    let mut configuration = required_json(own_json, ".claude.json")?;
     cf_e2e::door::make_dir(throwaway)?;
     let mut login = login.clone();
     cf_e2e::live::login::without_refresh(&mut login);
@@ -185,15 +192,11 @@ fn throwaway_config(
             fs::Permissions::from_mode(0o600),
         );
     }
-    if let Ok(text) = files::read_string(&own.join("settings.json")) {
-        if let Ok(Value::Object(mut settings)) = serde_json::from_str::<Value>(&text) {
-            settings.remove("hooks");
-            settings.remove("statusLine");
-            let mut settings = Value::Object(settings);
-            cf_e2e::live::login::without_refresh(&mut settings);
-            cf_e2e::door::write(throwaway.join("settings.json"), settings.to_string())?;
-        }
-    }
+    settings.remove("hooks");
+    settings.remove("statusLine");
+    let mut settings = Value::Object(settings);
+    cf_e2e::live::login::without_refresh(&mut settings);
+    cf_e2e::door::write(throwaway.join("settings.json"), settings.to_string())?;
     for part in ["skills", "plugins", "agents", "commands"] {
         copy_tree(&own.join(part), &throwaway.join(part))?;
     }
@@ -202,11 +205,6 @@ fn throwaway_config(
         &own.to_string_lossy(),
         &throwaway.to_string_lossy(),
     )?;
-    let mut configuration = files::read_string(own_json)
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .and_then(|value| value.as_object().cloned())
-        .unwrap_or_default();
     let entry = json!({ "hasTrustDialogAccepted": true, "hasCompletedProjectOnboarding": true, "enabledMcpServers": ["computer-use"] });
     let mut projects = Map::new();
     let name = folder.to_string_lossy().into_owned();
@@ -230,18 +228,23 @@ fn rename_in_json_under(folder: &Path, from: &str, to: &str) -> Result {
         path: folder.to_owned(),
         source,
     })? {
-        let path = entry
-            .map_err(|source| Error::File {
-                action: "read",
-                path: folder.to_owned(),
-                source,
-            })?
-            .path();
-        if path.is_dir() {
+        let entry = entry.map_err(|source| Error::File {
+            action: "read",
+            path: folder.to_owned(),
+            source,
+        })?;
+        let path = entry.path();
+        let kind = entry.file_type().map_err(|source| Error::File {
+            action: "read",
+            path: path.clone(),
+            source,
+        })?;
+        if kind.is_dir() {
             rename_in_json_under(&path, from, to)?;
-        } else if path
-            .extension()
-            .is_some_and(|extension| extension == "json")
+        } else if kind.is_file()
+            && path
+                .extension()
+                .is_some_and(|extension| extension == "json")
         {
             let text = files::read_string(&path)?;
             if text.contains(&from_json) {
@@ -582,6 +585,73 @@ pub fn run(log: &Log) -> Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    fn linked_out_parity_tree(part: &str) {
+        let root = cf_e2e::door::made("cf-parity-tree-").unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        fs::write(
+            foreign.path().join("login.json"),
+            "fabricated refresh token",
+        )
+        .unwrap();
+        let source = root.path().join(part);
+        fs::create_dir(&source).unwrap();
+        std::os::unix::fs::symlink(foreign.path().join("login.json"), source.join("leak.json"))
+            .unwrap();
+        let target = root.path().join("copy");
+        copy_tree(&source, &target).unwrap();
+        assert!(
+            !target.join("leak.json").exists(),
+            "{part} copied a linked-out login"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kit_round3_claude_skills_skip_links_out() {
+        linked_out_parity_tree("skills");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn kit_round3_claude_plugins_skip_links_out() {
+        linked_out_parity_tree("plugins");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn kit_round3_claude_agents_skip_links_out() {
+        linked_out_parity_tree("agents");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn kit_round3_claude_commands_skip_links_out() {
+        linked_out_parity_tree("commands");
+    }
+
+    fn parity_rejects_bad_config(settings: &str, config: &str) {
+        let root = cf_e2e::door::made("cf-parity-invalid-").unwrap();
+        let owner = root.path().join("owner");
+        fs::create_dir(&owner).unwrap();
+        fs::write(owner.join("settings.json"), settings).unwrap();
+        fs::write(owner.join(".claude.json"), config).unwrap();
+        let result = throwaway_config(
+            &owner,
+            &owner.join(".claude.json"),
+            &root.path().join("run"),
+            &json!({"accessToken":"fake"}),
+            root.path(),
+        );
+        assert!(result.is_err(), "invalid parity configuration was accepted");
+    }
+
+    #[test]
+    fn kit_round3_claude_parity_refuses_invalid_settings() {
+        parity_rejects_bad_config("{invalid", "{}");
+    }
+    #[test]
+    fn kit_round3_claude_parity_refuses_invalid_account_config() {
+        parity_rejects_bad_config("{}", "[]");
+    }
 
     #[test]
     fn parity_config_copies_no_refresh_keys() {

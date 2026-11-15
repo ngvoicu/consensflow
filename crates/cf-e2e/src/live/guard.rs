@@ -110,15 +110,8 @@ pub fn copy_kept(from: &Path, to: &Path) -> io::Result<()> {
 
 /// The folder `from` copied to `to` the same way, the files under it too.
 pub fn copy_folder_kept(from: &Path, to: &Path) -> io::Result<()> {
-    for entry in std::fs::read_dir(from)?.flatten() {
-        let (source, target) = (entry.path(), to.join(entry.file_name()));
-        if source.is_dir() {
-            copy_folder_kept(&source, &target)?;
-        } else {
-            copy_kept(&source, &target)?;
-        }
-    }
-    Ok(())
+    crate::door::copy_tree(from, to, &|_| false)
+        .map_err(|error| io::Error::other(error.to_string()))
 }
 
 /// Copy a Muse login only after removing refresh-named keys, in a private file.
@@ -153,6 +146,23 @@ pub fn copy_muse_into(home: &Path, scratch: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn kit_round3_muse_catalog_skips_links_out() {
+        let root = crate::door::made("cf-muse-catalog-").unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        std::fs::write(foreign.path().join("login"), "fabricated refresh token").unwrap();
+        let catalog = root.path().join("catalog");
+        std::fs::create_dir(&catalog).unwrap();
+        std::os::unix::fs::symlink(foreign.path().join("login"), catalog.join("leak")).unwrap();
+        let target = root.path().join("copy");
+        super::copy_folder_kept(&catalog, &target).unwrap();
+        assert!(
+            !target.join("leak").exists(),
+            "a linked-out login was copied"
+        );
+    }
+
     use super::*;
 
     #[test]

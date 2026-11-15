@@ -332,6 +332,80 @@ fn codex_login_copy_has_no_refresh_keys_at_any_depth() {
 }
 
 #[test]
+fn kit_round3_devin_does_not_carry_git_credentials() {
+    let owner = Owner::new();
+    write(&owner.path(".config/git/config"), "[user]\nname = owner\n");
+    write(
+        &owner.path(".config/git/credentials"),
+        "fabricated credential",
+    );
+    let isolation = owner.devin();
+    let home = isolation.made_at(at(NOW)).unwrap();
+    assert!(
+        !home.join("config/git/credentials").exists(),
+        "the owner's git credentials were copied"
+    );
+}
+
+#[test]
+fn kit_round3_pi_package_skips_links_out_and_keeps_links_inside() {
+    let owner = Owner::new();
+    owner.cliproxyapi(&proxy_answering());
+    let foreign = tempfile::tempdir().unwrap();
+    write(
+        &foreign.path().join("login.json"),
+        "fabricated refresh token",
+    );
+    let package = owner.path(".pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider");
+    std::os::unix::fs::symlink(
+        foreign.path().join("login.json"),
+        package.join("extensions/leak.json"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink("lib.ts", package.join("extensions/internal.ts")).unwrap();
+    let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
+    let home = isolation.made_at(at(NOW)).unwrap();
+    let copy =
+        home.join("pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider/extensions");
+    assert!(
+        !copy.join("leak.json").exists(),
+        "a linked-out login was copied"
+    );
+    assert!(
+        fs::symlink_metadata(copy.join("internal.ts"))
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the package's internal link was lost"
+    );
+    assert_eq!(
+        fs::read_to_string(copy.join("internal.ts")).unwrap(),
+        "the extension's library"
+    );
+}
+
+#[test]
+fn kit_round3_pi_model_cache_does_not_follow_a_link_out() {
+    let owner = Owner::new();
+    owner.cliproxyapi(&proxy_answering());
+    let foreign = tempfile::tempdir().unwrap();
+    write(
+        &foreign.path().join("login.json"),
+        "fabricated refresh token",
+    );
+    let cache = owner.path(".pi/agent/cliproxyapi-models.json");
+    fs::remove_file(&cache).unwrap();
+    std::os::unix::fs::symlink(foreign.path().join("login.json"), &cache).unwrap();
+    let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
+    if let Ok(home) = isolation.made_at(at(NOW)) {
+        assert!(
+            !home.join("pi/agent/cliproxyapi-models.json").exists(),
+            "a linked-out cache was copied"
+        );
+    }
+}
+
+#[test]
 fn pi_login_copy_has_no_nested_refresh_keys() {
     let text = json!({"openai":{"type":"oauth","access":"fake","refresh":"fake","expires":ends(hours(9)),"nested":[{"REFRESH_key":"fake"}]}}).to_string();
     let copy = pi::login(
@@ -591,6 +665,10 @@ fn a_pi_run_is_given_a_folder_of_its_own_with_the_login_it_needs_and_nothing_els
             (
                 "PI_CODING_AGENT_DIR".to_owned(),
                 home.join("pi/agent").display().to_string()
+            ),
+            (
+                "PI_CODING_AGENT_SESSION_DIR".to_owned(),
+                home.join("pi/agent/sessions").display().to_string()
             ),
             ("PI_OFFLINE".to_owned(), "1".to_owned())
         ]
@@ -1258,6 +1336,10 @@ fn a_home_made_in_a_folder_reached_through_a_link_is_named_through_the_link() {
     assert!(home.starts_with(&linked), "{}", home.display());
     for (name, value) in isolation.vars_in(&home) {
         assert!(Path::new(&value).starts_with(&linked), "{name}: {value}");
+        if name == "GIT_CONFIG_GLOBAL" {
+            assert_eq!(Path::new(&value), home.join("config/git/config"));
+            continue;
+        }
         assert_eq!(
             fs::canonicalize(&value)
                 .unwrap()
@@ -1285,7 +1367,8 @@ fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_none_of_the_othe
             "XDG_CONFIG_HOME",
             "XDG_DATA_HOME",
             "XDG_STATE_HOME",
-            "XDG_CACHE_HOME"
+            "XDG_CACHE_HOME",
+            "GIT_CONFIG_GLOBAL"
         ]
     );
     for (name, value) in &vars {
@@ -1328,10 +1411,10 @@ fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_none_of_the_othe
 /// to write there: the owner's `~/.local/share/claude` (Claude Code's versions, which its updater
 /// writes) was the run's `$XDG_DATA_HOME/claude` in a rig that seated Devin and Claude (T-1373).
 /// A Devin home holds no link, and none of the owner's but Devin's own login and config and a
-/// copy of git's config, which a window's git reads below `XDG_CONFIG_HOME`.
+/// generated git config, which a window's git reads by `GIT_CONFIG_GLOBAL`.
 #[cfg(unix)]
 #[test]
-fn a_devin_home_holds_no_link_to_the_owners_folders_and_copies_gits_config_alone() {
+fn a_devin_home_holds_no_link_to_the_owners_folders_and_has_its_own_git_config() {
     let owner = Owner::new();
     write(
         &owner.path(".local/share/claude/versions/2.1.321"),
@@ -1361,7 +1444,7 @@ fn a_devin_home_holds_no_link_to_the_owners_folders_and_copies_gits_config_alone
     assert!(fs::symlink_metadata(&git).unwrap().is_file());
     assert_eq!(
         fs::read_to_string(&git).unwrap(),
-        "[user]\n\tname = the owner\n"
+        "[user]\n\tname = ConsensFlow Live\n\temail = live@consensflow.invalid\n"
     );
 }
 

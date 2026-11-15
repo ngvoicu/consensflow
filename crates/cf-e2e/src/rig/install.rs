@@ -100,6 +100,10 @@ pub(super) fn environment(
         let real = files::real_path(root);
         let data = real.join("home").join(".local").join("share");
         env.push(("XDG_DATA_HOME".to_owned(), text(&data)));
+    } else if cfg!(unix) && config.devin.is_some() {
+        // The stand-in Devin uses the same XDG default, made explicit so record readers can
+        // verify its home before asking the harness adapter.
+        env.push(("XDG_DATA_HOME".to_owned(), text(&home.join(".local/share"))));
     }
     env.push(("CF_TEST_HARNESS".to_owned(), text(&config.stand_in)));
     if let Some(codex) = &config.codex {

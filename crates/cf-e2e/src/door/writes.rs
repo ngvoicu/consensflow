@@ -296,16 +296,35 @@ pub fn make_dir_private(path: impl AsRef<Path>) -> Result {
     made.create(path).map_err(Error::file("make", path))
 }
 
-/// The folder `from` copied under `to` below a folder this run made: its folders and files, each
-/// file with the mode it has ([`copy_keeping_mode`]: an executable a package bundles still runs),
-/// a link to a file as the file it leads to, and no entry `skip` takes. `from` is only read.
+/// Copy ordinary files as they are, preserving their modes. Links outside this source tree, and
+/// dangling links, are skipped. Links inside it are recreated to point inside the copy, so a
+/// package's own links keep working without pointing back to the owner. A root link is skipped.
 pub fn copy_tree(
     from: impl AsRef<Path>,
     to: impl AsRef<Path>,
     skip: &dyn Fn(&Path) -> bool,
 ) -> Result {
     let (from, to) = (from.as_ref(), to.as_ref());
-    make_dir(to)?;
+    if fs::symlink_metadata(from)
+        .map_err(Error::file("read", from))?
+        .file_type()
+        .is_symlink()
+    {
+        return Ok(());
+    }
+    make_dir_private(to)?;
+    let source_root = fs::canonicalize(from).map_err(Error::file("read", from))?;
+    let target_root = fs::canonicalize(to).map_err(Error::file("read", to))?;
+    copy_tree_inside(from, to, &source_root, &target_root, skip)
+}
+
+fn copy_tree_inside(
+    from: &Path,
+    to: &Path,
+    source_root: &Path,
+    target_root: &Path,
+    skip: &dyn Fn(&Path) -> bool,
+) -> Result {
     for entry in fs::read_dir(from)
         .map_err(Error::file("read", from))?
         .flatten()
@@ -314,17 +333,40 @@ pub fn copy_tree(
         if skip(&source) {
             continue;
         }
-        if entry
-            .file_type()
-            .map_err(Error::file("read", &source))?
-            .is_dir()
-        {
-            copy_tree(&source, &target, skip)?;
-        } else {
+        let kind = entry.file_type().map_err(Error::file("read", &source))?;
+        if kind.is_symlink() {
+            let Ok(real) = fs::canonicalize(&source) else {
+                continue;
+            };
+            let Ok(relative) = real.strip_prefix(source_root) else {
+                continue;
+            };
+            let destination = target_root.join(relative);
+            copied_link(&destination, &target, real.is_dir())?;
+        } else if kind.is_dir() {
+            make_dir_private(&target)?;
+            copy_tree_inside(&source, &target, source_root, target_root, skip)?;
+        } else if kind.is_file() {
             copy_keeping_mode(&source, &target)?;
         }
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn copied_link(original: &Path, link: &Path, _directory: bool) -> Result {
+    symlink(original, link)
+}
+
+#[cfg(windows)]
+fn copied_link(original: &Path, link: &Path, directory: bool) -> Result {
+    allowed("link", link, false)?;
+    let made = if directory {
+        std::os::windows::fs::symlink_dir(original, link)
+    } else {
+        std::os::windows::fs::symlink_file(original, link)
+    };
+    made.map_err(Error::file("link", link))
 }
 
 /// Makes `link` a link to `original`, below a folder this run made.

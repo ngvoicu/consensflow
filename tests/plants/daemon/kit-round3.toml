@@ -1,0 +1,278 @@
+# Offline, fabricated fixtures protect source-tree links and run-owned readers.
+[run]
+round3-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "kit_round3"]
+round3-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "kit_round3"]
+round3-muse = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_background", "kit_round3"]
+round3-muse-reads = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_reads", "kit_round3"]
+round3-compaction = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_compaction_routes", "kit_round3"]
+round3-subagent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_subagent", "kit_round3"]
+round3-specs = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_specs", "kit_round3"]
+round3-dialog = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_harness_dialogs", "kit_round3"]
+round3-history = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_history_items", "kit_round3"]
+
+[[plant]]
+name = "kit round3: Devin carries Git credentials"
+meant = "kit_round3_devin_does_not_carry_git_credentials"
+runs = ["round3-lib"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                Seed::Fixed {
+                    to: "config/git/config".into(),'''
+replace = '''                Seed::Copy {
+                    from: config.join("git").join("credentials"),
+                    to: "config/git/credentials".into(),
+                    login: false,
+                },
+                Seed::Fixed {
+                    to: "config/git/config".into(),'''
+
+[[plant]]
+name = "kit round3: Pi package follows a link out"
+meant = "kit_round3_pi_package_skips_links_out_and_keeps_links_inside"
+runs = ["round3-lib"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''            let Ok(real) = fs::canonicalize(&source) else {
+                continue;
+            };
+            let Ok(relative) = real.strip_prefix(source_root) else {
+                continue;
+            };
+            let destination = target_root.join(relative);
+            copied_link(&destination, &target, real.is_dir())?;'''
+replace = '''            copy_keeping_mode(&source, &target)?;'''
+
+[[plant]]
+name = "kit round3: Muse catalog follows a link out"
+meant = "kit_round3_muse_catalog_skips_links_out"
+runs = ["round3-lib"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''            let Ok(real) = fs::canonicalize(&source) else {
+                continue;
+            };
+            let Ok(relative) = real.strip_prefix(source_root) else {
+                continue;
+            };
+            let destination = target_root.join(relative);
+            copied_link(&destination, &target, real.is_dir())?;'''
+replace = '''            copy_keeping_mode(&source, &target)?;'''
+
+[[plant]]
+name = "kit round3: Muse feature config follows a link out"
+meant = "kit_round3_muse_feature_config_skips_links_out"
+runs = ["round3-muse"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''            let Ok(real) = fs::canonicalize(&source) else {
+                continue;
+            };
+            let Ok(relative) = real.strip_prefix(source_root) else {
+                continue;
+            };
+            let destination = target_root.join(relative);
+            copied_link(&destination, &target, real.is_dir())?;'''
+replace = '''            copy_keeping_mode(&source, &target)?;'''
+
+[[plant]]
+name = "kit round3: Claude skills follows a link out"
+meant = "kit_round3_claude_skills_skip_links_out"
+runs = ["round3-parity"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''            let Ok(real) = fs::canonicalize(&source) else {
+                continue;
+            };
+            let Ok(relative) = real.strip_prefix(source_root) else {
+                continue;
+            };
+            let destination = target_root.join(relative);
+            copied_link(&destination, &target, real.is_dir())?;'''
+replace = '''            copy_keeping_mode(&source, &target)?;'''
+
+[[plant]]
+name = "kit round3: Claude plugins follows a link out"
+meant = "kit_round3_claude_plugins_skip_links_out"
+runs = ["round3-parity"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''            let Ok(real) = fs::canonicalize(&source) else {
+                continue;
+            };
+            let Ok(relative) = real.strip_prefix(source_root) else {
+                continue;
+            };
+            let destination = target_root.join(relative);
+            copied_link(&destination, &target, real.is_dir())?;'''
+replace = '''            copy_keeping_mode(&source, &target)?;'''
+
+[[plant]]
+name = "kit round3: Claude agents follows a link out"
+meant = "kit_round3_claude_agents_skip_links_out"
+runs = ["round3-parity"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''            let Ok(real) = fs::canonicalize(&source) else {
+                continue;
+            };
+            let Ok(relative) = real.strip_prefix(source_root) else {
+                continue;
+            };
+            let destination = target_root.join(relative);
+            copied_link(&destination, &target, real.is_dir())?;'''
+replace = '''            copy_keeping_mode(&source, &target)?;'''
+
+[[plant]]
+name = "kit round3: Claude commands follows a link out"
+meant = "kit_round3_claude_commands_skip_links_out"
+runs = ["round3-parity"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''            let Ok(real) = fs::canonicalize(&source) else {
+                continue;
+            };
+            let Ok(relative) = real.strip_prefix(source_root) else {
+                continue;
+            };
+            let destination = target_root.join(relative);
+            copied_link(&destination, &target, real.is_dir())?;'''
+replace = '''            copy_keeping_mode(&source, &target)?;'''
+
+[[plant]]
+name = "kit round3: an internal package link points back to the owner"
+meant = "kit_round3_pi_package_skips_links_out_and_keeps_links_inside"
+runs = ["round3-lib"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''copied_link(&destination, &target, real.is_dir())?;'''
+replace = '''copied_link(&real, &target, real.is_dir())?;'''
+
+[[plant]]
+name = "kit round3: Pi cache follows a link out"
+meant = "kit_round3_pi_model_cache_does_not_follow_a_link_out"
+runs = ["round3-lib"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''if meta.file_type().is_symlink()
+                || !fs::canonicalize(&path)?.starts_with(fs::canonicalize(from)?)'''
+replace = '''if false && (meta.file_type().is_symlink()
+                || !fs::canonicalize(&path)?.starts_with(fs::canonicalize(from)?))'''
+
+[[plant]]
+name = "kit round3: Muse fingerprint reads a linked file"
+meant = "kit_round3_muse_fingerprint_does_not_follow_links_out"
+runs = ["round3-muse-reads"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_muse_reads.rs"
+find = '''if kind.is_symlink() {
+                continue;
+            } else if kind.is_dir() {'''
+replace = '''if kind.is_dir() {'''
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_muse_reads.rs"
+find = '''} else if kind.is_file() {'''
+replace = '''} else if kind.is_file() || kind.is_symlink() {'''
+
+[[plant]]
+name = "kit round3: window asks on missing or foreign harness homes"
+meant = "kit_round3_window_record_refuses_missing_and_foreign_homes_before_asking"
+runs = ["round3-lib"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/window.rs"
+find = '''if !record_homes_safe(harness, env) {'''
+replace = '''if false && !record_homes_safe(harness, env) {'''
+
+[[plant]]
+name = "kit round3: Devin compaction lists foreign folders"
+meant = "kit_round3_devin_folders_refuse_a_foreign_home"
+runs = ["round3-compaction"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_compaction_routes.rs"
+find = '''    cf_e2e::live::guard::devin_store_path(cfg!(windows), home)?;'''
+replace = '''    let _ = home;'''
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_compaction_routes.rs"
+find = '''if value.is_empty()
+                || !cf_e2e::door::is_made_or_below(&base)
+                || !cf_e2e::door::is_made_or_below(&folder)'''
+replace = '''if false && (value.is_empty()
+                || !cf_e2e::door::is_made_or_below(&base)
+                || !cf_e2e::door::is_made_or_below(&folder))'''
+
+[[plant]]
+name = "kit round3: Devin compaction opens a foreign store"
+meant = "kit_round3_devin_compaction_store_refuses_a_foreign_database"
+runs = ["round3-compaction"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_compaction_routes.rs"
+find = '''if !cf_e2e::live::guard::run_owned_devin_store(file) {'''
+replace = '''if false && !cf_e2e::live::guard::run_owned_devin_store(file) {'''
+
+[[plant]]
+name = "kit round3: Devin subagent copies a linked-out sidecar"
+meant = "kit_round3_subagent_refuses_linked_out_sqlite_sidecars"
+runs = ["round3-subagent"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_subagent.rs"
+find = '''if !cf_e2e::live::guard::run_owned_devin_store(store) {'''
+replace = '''if false && !cf_e2e::live::guard::run_owned_devin_store(store) {'''
+
+[[plant]]
+name = "kit round3: specs read foreign Codex records"
+meant = "kit_round3_specs_refuses_a_foreign_codex_home"
+runs = ["round3-specs"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_specs/ctx.rs"
+find = '''if !cf_e2e::door::is_made_or_below(home)
+        || !cf_e2e::door::is_made_or_below(&home.join("sessions"))'''
+replace = '''if false && (!cf_e2e::door::is_made_or_below(home)
+        || !cf_e2e::door::is_made_or_below(&home.join("sessions")))'''
+
+[[plant]]
+name = "kit round3: history exports foreign records"
+meant = "kit_round3_history_export_refuses_a_foreign_record_folder"
+runs = ["round3-history"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_history_items.rs"
+find = '''if !cf_e2e::door::is_made_or_below(from) {'''
+replace = '''if false && !cf_e2e::door::is_made_or_below(from) {'''
+
+[[plant]]
+name = "kit round3: raw record questions accept foreign homes"
+meant = "kit_round3_all_record_queries_refuse_foreign_homes"
+runs = ["round3-lib"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/ask.rs"
+find = '''if !super::window::record_homes_safe(harness, &env) {'''
+replace = '''if false && !super::window::record_homes_safe(harness, &env) {'''
+
+[[plant]]
+name = "kit round3: dialog marketplace follows a linked root"
+meant = "kit_round3_dialog_marketplace_root_does_not_follow_a_link_out"
+runs = ["round3-dialog"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_harness_dialogs.rs"
+find = '''if fs::symlink_metadata(from).is_ok_and(|meta| meta.file_type().is_symlink()) {'''
+replace = '''if false && fs::symlink_metadata(from).is_ok_and(|meta| meta.file_type().is_symlink()) {'''
+
+[[plant]]
+name = "kit round3: subagent reads a foreign parent record"
+meant = "kit_round3_subagent_parent_record_refuses_a_foreign_file"
+runs = ["round3-subagent"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_subagent.rs"
+find = '''if !cf_e2e::door::is_made_or_below(path) {'''
+replace = '''if false && !cf_e2e::door::is_made_or_below(path) {'''

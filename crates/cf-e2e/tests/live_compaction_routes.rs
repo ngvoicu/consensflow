@@ -273,6 +273,11 @@ fn copy_tree(from: &Path, to: &Path, left: &[&str]) {
 /// from others (`metadata.summarized_from`), and the `<context_usage>` notes it gave the model,
 /// each as its first line says it.
 fn devin_summaries_and_notes(file: &Path) -> Result<(usize, Vec<String>)> {
+    if !cf_e2e::live::guard::run_owned_devin_store(file) {
+        return Err(Error::Daemon(
+            "Devin's store is outside the run's own roots".to_owned(),
+        ));
+    }
     let fail = |cause: rusqlite::Error| Error::Daemon(format!("{}: {cause}", file.display()));
     let db =
         rusqlite::Connection::open_with_flags(file, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
@@ -313,7 +318,8 @@ fn devin_summaries_and_notes(file: &Path) -> Result<(usize, Vec<String>)> {
 
 /// Devin's own folders in the kit's home, below those its variables name: the run's data
 /// folder links the owner's other folders, which are never read here.
-fn devin_folders(home: &[(String, String)]) -> Vec<PathBuf> {
+fn devin_folders(home: &[(String, String)]) -> Result<Vec<PathBuf>> {
+    cf_e2e::live::guard::devin_store_path(cfg!(windows), home)?;
     home.iter()
         .filter(|(name, _)| {
             [
@@ -325,7 +331,19 @@ fn devin_folders(home: &[(String, String)]) -> Vec<PathBuf> {
             ]
             .contains(&name.as_str())
         })
-        .map(|(_, value)| PathBuf::from(value).join("devin"))
+        .map(|(_, value)| {
+            let base = PathBuf::from(value);
+            let folder = base.join("devin");
+            if value.is_empty()
+                || !cf_e2e::door::is_made_or_below(&base)
+                || !cf_e2e::door::is_made_or_below(&folder)
+            {
+                return Err(Error::Daemon(
+                    "Devin's folder is outside the run's own roots".to_owned(),
+                ));
+            }
+            Ok(folder)
+        })
         .collect()
 }
 
@@ -377,11 +395,7 @@ fn devin_compacts_at_the_thresholds_its_launch_gives() -> Result {
     // context notes it gave the model.
     let thresholds = own_var("CF_DEVIN_THRESHOLDS").unwrap_or_else(|| "8000,8000".to_owned());
     let _turn = turn(&thresholds)?;
-    let store = devin_folders(&home)
-        .into_iter()
-        .map(|root| root.join("cli").join("sessions.db"))
-        .find(|file| file.exists())
-        .ok_or_else(|| Error::Daemon("Devin's store is not in the run's home".to_owned()))?;
+    let store = cf_e2e::live::guard::devin_store_path(cfg!(windows), &home)?;
     let (summaries, notes) = devin_summaries_and_notes(&store)?;
     log.block(
         &format!(
@@ -410,7 +424,7 @@ fn devin_compacts_at_the_thresholds_its_launch_gives() -> Result {
             "what Devin wrote is copied into {}",
             evidence.display()
         ));
-        for (at, root) in devin_folders(&home).iter().enumerate() {
+        for (at, root) in devin_folders(&home)?.iter().enumerate() {
             copy_tree(
                 root,
                 &evidence.join(format!("devin-{at}")),
@@ -770,6 +784,32 @@ fn pi_member_whose_task_ends_past_the_size_has_its_window_kept_open_for_the_comp
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kit_round3_devin_folders_refuse_a_foreign_home() {
+        let foreign = tempfile::tempdir().unwrap();
+        let env = vec![(
+            "XDG_DATA_HOME".to_owned(),
+            foreign.path().display().to_string(),
+        )];
+        assert!(
+            devin_folders(&env).is_err(),
+            "a foreign Devin folder was accepted"
+        );
+    }
+
+    #[test]
+    fn kit_round3_devin_compaction_store_refuses_a_foreign_database() {
+        let foreign = tempfile::tempdir().unwrap();
+        let store = foreign.path().join("sessions.db");
+        let db = rusqlite::Connection::open(&store).unwrap();
+        db.execute_batch("CREATE TABLE message_nodes (metadata TEXT, chat_message TEXT, row_id INTEGER); INSERT INTO message_nodes VALUES ('{\"summarized_from\":1}', '{}', 1);").unwrap();
+        drop(db);
+        assert!(
+            devin_summaries_and_notes(&store).is_err(),
+            "a foreign Devin store was opened"
+        );
+    }
 
     #[test]
     fn kit_disclosure_muse_compaction_keeps_the_owner_isolation_watch() {

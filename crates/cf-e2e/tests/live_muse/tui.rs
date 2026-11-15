@@ -231,15 +231,7 @@ pub fn set_up(root: &Path) -> Outcome {
         r#"{"schema_version":1,"context":{"foreign_personal_rules":false,"foreign_personal_skills":false}}"#,
     )?;
     let gates = owner.join(".local/share/muse/feature-config");
-    if gates.is_dir() {
-        let into = root.join("data/muse/feature-config");
-        cf_e2e::door::make_dir(&into).map_err(|error| error.to_string())?;
-        for entry in fs::read_dir(&gates).map_err(|error| error.to_string())? {
-            let entry = entry.map_err(|error| error.to_string())?;
-            cf_e2e::door::copy_keeping_mode(entry.path(), into.join(entry.file_name()))
-                .map_err(|error| error.to_string())?;
-        }
-    }
+    copy_feature_config(&gates, &root.join("data/muse/feature-config"))?;
     write(&root.join("work/README.md"), "A throwaway project.\n")?;
     let git = ["/opt/homebrew/bin/git", "/usr/bin/git"]
         .into_iter()
@@ -252,6 +244,34 @@ pub fn set_up(root: &Path) -> Outcome {
         &root.join("work"),
     )
     .map(|_| ())
+}
+
+fn copy_feature_config(gates: &Path, into: &Path) -> Outcome {
+    if fs::symlink_metadata(gates).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Ok(());
+    }
+    if gates.is_dir() {
+        cf_e2e::door::copy_tree(gates, into, &|_| false).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[cfg(unix)]
+#[test]
+fn kit_round3_muse_feature_config_skips_links_out() {
+    let root = cf_e2e::door::made("cf-muse-feature-").unwrap();
+    let foreign = tempfile::tempdir().unwrap();
+    fs::write(foreign.path().join("login"), "fabricated refresh token").unwrap();
+    let source = root.path().join("features");
+    fs::create_dir(&source).unwrap();
+    std::os::unix::fs::symlink(foreign.path().join("login"), source.join("leak")).unwrap();
+    let target = root.path().join("copy");
+    copy_feature_config(&source, &target).unwrap();
+    assert!(
+        !target.join("leak").exists(),
+        "a linked-out feature file was copied"
+    );
 }
 
 /// What `muse usage --json` says is spent of each window, in percent, and the answer,

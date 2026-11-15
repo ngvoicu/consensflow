@@ -155,6 +155,12 @@ fn keep_records(members: &Members, harness: Harness, log: &Log) {
 
 /// `from`'s files copied into `to`, folders and all: how many.
 fn copy_tree(from: &Path, to: &Path) -> std::io::Result<usize> {
+    if !cf_e2e::door::is_made_or_below(from) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "record folder is outside the run's own roots",
+        ));
+    }
     let mut count = 0;
     for entry in std::fs::read_dir(from)? {
         let entry = entry?;
@@ -428,6 +434,17 @@ fn each_readers_history_of_a_real_chief_holds_its_calls_thinking_and_compaction(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kit_round3_history_export_refuses_a_foreign_record_folder() {
+        let foreign = tempfile::tempdir().unwrap();
+        std::fs::write(foreign.path().join("record"), "fabricated record").unwrap();
+        let run = cf_e2e::door::made("cf-history-guard-").unwrap();
+        assert!(
+            copy_tree(foreign.path(), &run.path().join("copy")).is_err(),
+            "a foreign record was exported"
+        );
+    }
 
     fn tool(header: &str, status: &str, diff: Option<&str>) -> Value {
         let mut item = json!({ "kind": "tool", "role": "tool", "text": "", "header": header, "status": status });

@@ -150,26 +150,10 @@ enum Seed {
         to: PathBuf,
         provider: &'static pi::Provider,
     },
-    /// A copy in `to` of each of the folders `only` of the owner's folder `from` that is there:
-    /// what another program of the rig reads in a folder the variables move. A copy, never a
-    /// link: a link was a way for every program of the rig to write in the owner's folder (the
-    /// owner's `~/.local/share/claude`, where Claude Code's updater writes its versions, was a
-    /// Devin run's `$XDG_DATA_HOME/claude`, T-1373), and before that the owner's Muse was the
-    /// rig's (T-1081). Devin's, on Unix.
+    /// A file made from the kit's own fixed contents, not the owner's configuration.
     #[cfg(unix)]
-    Carry {
-        from: PathBuf,
-        to: PathBuf,
-        only: &'static [&'static str],
-    },
+    Fixed { to: PathBuf, text: &'static str },
 }
-
-/// The folders of the owner's XDG config folder a Devin run carries: git's, whose `config` a
-/// window's git reads there besides `~/.gitconfig`. Devin's own login and config are copied by
-/// name; nothing else of the owner's config or data folders is any harness's of the rig's
-/// (Claude Code, Codex and Pi keep theirs below `HOME`, Muse has a home of the run's).
-#[cfg(unix)]
-const XDG_CARRIED: [&str; 1] = ["git"];
 
 /// What a harness's home is made of, and what is watched of the owner's.
 #[derive(Debug, Clone)]
@@ -239,7 +223,10 @@ impl Plan {
         }
         Self {
             folders: Vec::new(),
-            vars: vec![("PI_CODING_AGENT_DIR", "pi/agent".into())],
+            vars: vec![
+                ("PI_CODING_AGENT_DIR", "pi/agent".into()),
+                ("PI_CODING_AGENT_SESSION_DIR", "pi/agent/sessions".into()),
+            ],
             // Pi installs a package its settings name and it has not got, and updates and
             // downloads, at its start unless told not to (Pi 1.5.0, `dist/core/package-manager.js`:
             // `installMissing` returns before installing when `PI_OFFLINE` is set; `--offline` is
@@ -325,7 +312,7 @@ impl Plan {
 
     /// Devin: the four folders of the XDG layout, where it keeps its login and config (and its
     /// sessions, logs and cache); the login (`credentials.toml`, an API key) and `config.json`
-    /// are copied, and git's config ([`XDG_CARRIED`]). Nothing of the owner's is linked.
+    /// are copied. Git gets a run-owned config; no owner Git folder or credentials are carried.
     #[cfg(unix)]
     fn devin(config: &Path, data: &Path) -> Self {
         Self {
@@ -337,6 +324,7 @@ impl Plan {
                 ("XDG_DATA_HOME", "data".into()),
                 ("XDG_STATE_HOME", "state".into()),
                 ("XDG_CACHE_HOME", "cache".into()),
+                ("GIT_CONFIG_GLOBAL", "config/git/config".into()),
             ],
             set: Vec::new(),
             seeds: vec![
@@ -350,10 +338,9 @@ impl Plan {
                     to: "config/devin/config.json".into(),
                     login: false,
                 },
-                Seed::Carry {
-                    from: config.to_path_buf(),
-                    to: "config".into(),
-                    only: &XDG_CARRIED,
+                Seed::Fixed {
+                    to: "config/git/config".into(),
+                    text: "[user]\n\tname = ConsensFlow Live\n\temail = live@consensflow.invalid\n",
                 },
             ],
             watched: vec![
@@ -720,14 +707,11 @@ impl Isolation {
             }
             Seed::PiProvider { from, to, provider } => self.pi_provider(from, to, provider),
             #[cfg(unix)]
-            Seed::Carry { from, to, only } => Ok(only
-                .iter()
-                .filter(|name| from.join(name).is_dir())
-                .map(|name| Placed::Tree {
-                    from: from.join(name),
-                    to: to.join(name),
-                })
-                .collect()),
+            Seed::Fixed { to, text } => Ok(vec![Placed::File {
+                to: to.clone(),
+                bytes: text.as_bytes().to_vec(),
+                login: false,
+            }]),
         }
     }
 
@@ -743,6 +727,9 @@ impl Isolation {
         to: &Path,
         provider: &'static pi::Provider,
     ) -> Result<Vec<Placed>> {
+        if fs::symlink_metadata(from).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return Err(Error::Daemon("Pi's provider tree is a link".to_owned()));
+        }
         let folder = shown(from, &self.owner_home);
         let missing = |what: &str| {
             Error::Daemon(format!(
@@ -750,8 +737,23 @@ impl Isolation {
                 provider.name, provider.package, provider.package, provider.repository,
             ))
         };
-        let config = fs::read_to_string(from.join(provider.config))
-            .map_err(|_| missing(&format!("{} is missing", provider.config)))?;
+        let read_file = |name: &str| {
+            let path = from.join(name);
+            let meta = fs::symlink_metadata(&path)?;
+            if meta.file_type().is_symlink()
+                || !fs::canonicalize(&path)?.starts_with(fs::canonicalize(from)?)
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "a provider file leaves its tree",
+                ));
+            }
+            fs::read(path)
+        };
+        let config = read_file(provider.config)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .ok_or_else(|| missing(&format!("{} is missing or is a link", provider.config)))?;
         let config = super::login::json_copy(&config, "Pi provider")?;
         let mut placed = vec![Placed::File {
             to: to.join(provider.config),
@@ -759,7 +761,7 @@ impl Isolation {
             login: false,
         }];
         for file in provider.required.iter().chain(provider.optional.iter()) {
-            match fs::read(from.join(file)) {
+            match read_file(file) {
                 Ok(bytes) => placed.push(Placed::File {
                     to: to.join(file),
                     bytes,
@@ -775,13 +777,24 @@ impl Isolation {
                 provider.package
             )));
         };
-        if !from.join(&source.folder).join("package.json").is_file() {
+        let package = from.join(&source.folder);
+        let inside = fs::symlink_metadata(&package)
+            .is_ok_and(|meta| !meta.file_type().is_symlink())
+            && fs::canonicalize(&package)
+                .ok()
+                .zip(fs::canonicalize(from).ok())
+                .is_some_and(|(package, agent)| package.starts_with(agent));
+        let manifest_inside = inside
+            && fs::canonicalize(package.join("package.json"))
+                .ok()
+                .zip(fs::canonicalize(&package).ok())
+                .is_some_and(|(manifest, package)| manifest.starts_with(package));
+        if !inside || !manifest_inside {
             return Err(missing(&format!(
-                "{}/package.json is missing",
+                "{}/package.json is missing, or the package or manifest links outside its tree",
                 source.folder.display()
             )));
         }
-        let package = from.join(&source.folder);
         let copied = if source.npm {
             pi::npm_copy(provider, &source, &package)
         } else {

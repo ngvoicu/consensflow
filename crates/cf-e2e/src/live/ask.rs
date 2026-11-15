@@ -40,7 +40,31 @@ pub fn prepare() -> Result {
 
 /// One question to the test binary, and what it answered.
 pub fn question(body: &Value) -> Result<Value> {
-    ask(cf::harness_ask()?, "harness-ask", body)
+    record_question(body, || ask(cf::harness_ask()?, "harness-ask", body))
+}
+
+fn record_question(body: &Value, ask: impl FnOnce() -> Result<Value>) -> Result<Value> {
+    if matches!(body["op"].as_str(), Some("records" | "newest_session")) {
+        let refused = || {
+            Error::Daemon(
+                "harness records are outside the run's own roots or have no home".to_owned(),
+            )
+        };
+        let kind = body["kind"].as_str().ok_or_else(refused)?;
+        let harness = super::machine::Harness::ALL
+            .into_iter()
+            .find(|harness| harness.kind() == kind)
+            .ok_or_else(refused)?;
+        let object = body["env"].as_object().ok_or_else(refused)?;
+        let env: Vec<(String, String)> = object
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), value.as_str().ok_or_else(refused)?.to_owned())))
+            .collect::<Result<_>>()?;
+        if !super::window::record_homes_safe(harness, &env) {
+            return Err(refused());
+        }
+    }
+    ask()
 }
 
 /// One question to `engine-ask`, and what it answered.
@@ -450,6 +474,30 @@ fn specmint_of(answer: &Value) -> SpecmintSkill {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kit_round3_all_record_queries_refuse_foreign_homes() {
+        let foreign = tempfile::tempdir().unwrap();
+        for op in ["records", "newest_session"] {
+            let name = if cfg!(windows) {
+                "APPDATA"
+            } else {
+                "XDG_DATA_HOME"
+            };
+            let body = json!({"op":op, "kind":"devin", "env":{
+                (name): foreign.path().display().to_string()
+            }});
+            let asked = std::cell::Cell::new(false);
+            let result = record_question(&body, || {
+                asked.set(true);
+                Ok(Value::Null)
+            });
+            assert!(
+                result.is_err() && !asked.get(),
+                "{op} reached a foreign home"
+            );
+        }
+    }
 
     #[test]
     fn a_specmint_answer_says_whether_the_harness_has_the_variant_and_where_its_skill_is() {

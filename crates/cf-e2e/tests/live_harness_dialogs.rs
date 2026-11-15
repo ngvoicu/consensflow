@@ -96,6 +96,9 @@ fn seed_marketplace_from(home: &Path, config: &Path) -> Result {
 
 /// Copies the folder `from` into `to`, its files and folders, links left out.
 fn copy_tree(from: &Path, to: &Path) -> Result {
+    if fs::symlink_metadata(from).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Ok(());
+    }
     cf_e2e::door::make_dir(to)?;
     let entries = fs::read_dir(from)
         .map_err(|failed| Error::Daemon(format!("{}: {failed}", from.display())))?;
@@ -380,6 +383,22 @@ fn claude_codes_offer_to_install_an_lsp_plugin_mid_turn_is_told_to_the_human_and
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn kit_round3_dialog_marketplace_root_does_not_follow_a_link_out() {
+        let root = cf_e2e::door::made("cf-dialog-tree-").unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        fs::write(foreign.path().join("login"), "fabricated secret").unwrap();
+        let source = root.path().join("marketplace");
+        std::os::unix::fs::symlink(foreign.path(), &source).unwrap();
+        let target = root.path().join("copy");
+        let _ = copy_tree(&source, &target);
+        assert!(
+            !target.join("login").exists(),
+            "a linked-out marketplace was copied"
+        );
+    }
     use cf_e2e::live::layout::Layout;
 
     /// A person's home with the marketplace their Claude Code knows, below the layout.

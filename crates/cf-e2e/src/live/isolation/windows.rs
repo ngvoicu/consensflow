@@ -431,6 +431,7 @@ fn the_homes_of_all_five_harnesses_on_one_windows_rig_set_no_variable_twice() {
             "CLAUDE_CONFIG_DIR",
             "CODEX_HOME",
             "PI_CODING_AGENT_DIR",
+            "PI_CODING_AGENT_SESSION_DIR",
             "PI_OFFLINE",
             "USERPROFILE",
             "APPDATA",

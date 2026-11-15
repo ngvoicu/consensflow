@@ -434,12 +434,13 @@ fn the_harness_code_of_the_product_answers_what_a_live_test_asks_of_it() -> Outc
     assert_eq!(ask::program(&argv, &[])?, argv);
 
     // A conversation nobody kept a record of is none, and so is a session no store has.
-    let nowhere = tempfile::tempdir()?;
+    let nowhere = cf_e2e::door::made("cf-record-test-")?;
     let here = nowhere.path().to_string_lossy().into_owned();
     let env = [
         ("HOME".to_owned(), here.clone()),
         ("CLAUDE_CONFIG_DIR".to_owned(), here.clone()),
-        ("XDG_DATA_HOME".to_owned(), here),
+        ("XDG_DATA_HOME".to_owned(), here.clone()),
+        ("APPDATA".to_owned(), here),
     ];
     assert_eq!(ask::records("claude-code", "no-such-session", &env)?, None);
     assert_eq!(

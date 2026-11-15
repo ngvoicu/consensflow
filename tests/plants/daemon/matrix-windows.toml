@@ -198,9 +198,14 @@ runs = ["pi-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''        let config = fs::read_to_string(from.join(provider.config))
-            .map_err(|_| missing(&format!("{} is missing", provider.config)))?;'''
-replace = '''        let config = fs::read_to_string(from.join(provider.config)).unwrap_or_else(|_| "{}".to_owned());'''
+find = '''        let config = read_file(provider.config)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .ok_or_else(|| missing(&format!("{} is missing or is a link", provider.config)))?;'''
+replace = '''        let config = read_file(provider.config)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .unwrap_or_else(|| "{}".to_owned());'''
 
 [[plant]]
 name = "matrix: a settings.json that names no package is let through"
@@ -303,11 +308,9 @@ runs = ["isolation-windows-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''            vars: vec![("PI_CODING_AGENT_DIR", "pi/agent".into())],'''
-replace = '''            vars: vec![
-                ("PI_CODING_AGENT_DIR", "pi/agent".into()),
-                ("USERPROFILE", "pi".into()),
-            ],'''
+find = '''                ("PI_CODING_AGENT_SESSION_DIR", "pi/agent/sessions".into()),'''
+replace = '''                ("PI_CODING_AGENT_SESSION_DIR", "pi/agent/sessions".into()),
+                ("USERPROFILE", "pi".into()),'''
 
 [[plant]]
 name = "matrix: Codex's home also moves the whole rig's APPDATA"
@@ -472,5 +475,5 @@ runs = ["pi-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation/pi.rs"
-find = '''            files.extend(below(&agent.join(&source.folder)));'''
-replace = '''            let _ = below(&agent.join(&source.folder));'''
+find = '''                files.extend(below(&package));'''
+replace = '''                let _ = below(&package);'''

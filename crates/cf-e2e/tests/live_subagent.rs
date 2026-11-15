@@ -304,8 +304,15 @@ struct Record {
 }
 
 /// The records of sub-agents `harness` keeps for the run's windows, now.
+fn read_run_record(path: &Path) -> String {
+    if !cf_e2e::door::is_made_or_below(path) {
+        return String::new();
+    }
+    fs::read_to_string(path).unwrap_or_default()
+}
+
 fn child_records(harness: Harness, members: &Members) -> Vec<Record> {
-    let read = |path: &Path| fs::read_to_string(path).unwrap_or_default();
+    let read = read_run_record;
     match harness {
         Harness::Claude => members
             .claude_config()
@@ -434,15 +441,7 @@ fn devin_children(members: &Members) -> Vec<(String, String)> {
         let Ok(copy) = cf_e2e::door::made("live-subagent-") else {
             continue;
         };
-        for suffix in ["", "-wal", "-shm"] {
-            let from = PathBuf::from(format!("{}{suffix}", store.display()));
-            if from.is_file() {
-                let _ = cf_e2e::door::copy_keeping_mode(
-                    &from,
-                    copy.path().join(format!("sessions.db{suffix}")),
-                );
-            }
-        }
+        copy_devin_store(&store, copy.path());
         let Ok(db) = rusqlite::Connection::open(copy.path().join("sessions.db")) else {
             continue;
         };
@@ -494,6 +493,19 @@ fn devin_children(members: &Members) -> Vec<(String, String)> {
         }
     }
     children
+}
+
+fn copy_devin_store(store: &Path, into: &Path) {
+    if !cf_e2e::live::guard::run_owned_devin_store(store) {
+        return;
+    }
+    for suffix in ["", "-wal", "-shm"] {
+        let from = PathBuf::from(format!("{}{suffix}", store.display()));
+        if from.is_file() {
+            let _ =
+                cf_e2e::door::copy_keeping_mode(&from, into.join(format!("sessions.db{suffix}")));
+        }
+    }
 }
 
 /// The rows `query` reads from `db`, each as `row` makes it.
@@ -879,6 +891,39 @@ fn a_members_sub_agents_keep_no_role_and_ask_the_board_nothing_as_the_member() -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kit_round3_subagent_parent_record_refuses_a_foreign_file() {
+        let foreign = tempfile::tempdir().unwrap();
+        let file = foreign.path().join("record.jsonl");
+        fs::write(&file, "fabricated parent record").unwrap();
+        assert!(
+            read_run_record(&file).is_empty(),
+            "a foreign parent record was read"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kit_round3_subagent_refuses_linked_out_sqlite_sidecars() {
+        let run = cf_e2e::door::made("cf-subagent-guard-").unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        std::fs::write(foreign.path().join("secret"), "fabricated record").unwrap();
+        let store = run.path().join("sessions.db");
+        std::fs::write(&store, "fabricated store").unwrap();
+        std::os::unix::fs::symlink(
+            foreign.path().join("secret"),
+            run.path().join("sessions.db-wal"),
+        )
+        .unwrap();
+        let copy = run.path().join("copy");
+        cf_e2e::door::make_dir(&copy).unwrap();
+        copy_devin_store(&store, &copy);
+        assert!(
+            !copy.join("sessions.db-wal").exists(),
+            "a linked-out sidecar was copied"
+        );
+    }
 
     #[test]
     fn every_harness_with_sub_agents_runs_and_pi_is_refused_by_name() {
