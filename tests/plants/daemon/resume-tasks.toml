@@ -23,6 +23,7 @@ ledger-suspended = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "
 ledger-testing-mark = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::"]
 # The engine's tests of a start, a Close and the human's Resume, on the fake windows.
 engine-resume-tasks = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::"]
+engine-resume-launch-failure = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume_launch_failure_pi"]
 # The engine's tests of a window slow to come up, Node's trace of a Resume that comes
 # while a Close is still under way among them.
 engine-window-takes-long = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "window_takes_long::"]
@@ -72,6 +73,16 @@ ledger-told-edges = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", 
 engine-queued-tells = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "queued_tells"]
 
 # --- the Resume, as main had it ---
+
+[[plant]]
+name = "resume launch failure: only log the member's failed reopening"
+meant = "resume_launch_failure_pi"
+runs = ["engine-resume-launch-failure"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "                self.resume_launch_failed(record, project, participant, because)?;"
+replace = "                self.write_down(&EngineError::said(\"launch-failed\", because));"
 
 [[plant]]
 name = "resume tasks: the human's Resume leaves the work the Close paused paused, as 3.0.4 did (the rig)"

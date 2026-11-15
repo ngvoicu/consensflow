@@ -358,12 +358,12 @@ fn a_launch_that_failed_with_words_of_an_adapter_or_a_host_quotes_no_word_of_the
             (
                 "chief, prepared",
                 &notes.chief_prepared,
-                "The chief could not start: the launch failed (its cause is in ConsensFlow's log). What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief.",
+                "The chief could not start: the launch failed (its cause is in ConsensFlow's log). What comes for the chief waits for it; ConsensFlow tries again when something comes for it. Close then Resume the project to try now, or switch the chief.",
             ),
             (
                 "chief, refused",
                 &notes.chief_refused,
-                "The chief could not start: the window did not open: the host would not open it. What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief.",
+                "The chief could not start: the window did not open: the host would not open it. What comes for the chief waits for it; ConsensFlow tries again when something comes for it. Close then Resume the project to try now, or switch the chief.",
             ),
             (
                 "member, prepared",
@@ -421,7 +421,7 @@ fn a_window_refused_as_a_program_that_cannot_be_run_says_its_kind_and_advice_and
             (
                 "chief",
                 &notes.chief_refused,
-                format!("The chief could not start: the window did not open: {said}. What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief."),
+                format!("The chief could not start: the window did not open: {said}. What comes for the chief waits for it; ConsensFlow tries again when something comes for it. Close then Resume the project to try now, or switch the chief."),
             ),
             (
                 "member",

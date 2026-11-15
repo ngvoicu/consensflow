@@ -794,6 +794,20 @@ impl Ledger {
         )
     }
 
+    /// Tell another coordinator of a pause already told to its requester.
+    pub fn note_pause_to(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        to: &str,
+        because: &str,
+        harness_gone: bool,
+    ) -> Result<MessageView, LedgerError> {
+        self.store.write(|store| {
+            messages::note_pause(store, project_id, to, number, because, harness_gone)
+        })
+    }
+
     /// Every message on its way to a window, oldest first.
     pub fn in_flight(&self) -> Result<Vec<MessageView>, LedgerError> {
         messages::in_flight(&self.store)

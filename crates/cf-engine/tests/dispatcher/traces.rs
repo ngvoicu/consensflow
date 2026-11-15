@@ -538,7 +538,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "keeps what was queued for a first chief whose window does not open",
-        NO_CAUSE_QUOTED,
+        "a failed project Resume also puts the reason on the chief's closed-window activity; the failure is still withheld",
     ),
     (
         "tells nobody of a launch that failed once its project was deleted, not a project created meanwhile",

@@ -487,6 +487,13 @@ impl Restarted<'_> {
         self.engine.upgrade().expect("the context holds the engine")
     }
 
+    /// Open the chief on the engine made by the restart.
+    pub fn open_chief(&self, participant: i64) {
+        let engine = self.engine();
+        self.context
+            .run(async move { engine.open_soon(participant, None).await });
+    }
+
     /// The human says a member out of quota is back (`backFromQuota`), to this engine.
     pub fn back_from_quota(
         &self,
