@@ -487,15 +487,11 @@ impl Restarted<'_> {
         self.engine.upgrade().expect("the context holds the engine")
     }
 
-    /// Open a window on the engine made by the restart.
-    pub fn open_window(
-        &self,
-        project: i64,
-        handle: &str,
-    ) -> Result<Option<ProjectView>, EngineError> {
-        let (engine, handle) = (self.engine(), handle.to_owned());
+    /// Open the chief on the engine made by the restart.
+    pub fn open_chief(&self, participant: i64) {
+        let engine = self.engine();
         self.context
-            .run(async move { engine.open_window(project, &handle).await })
+            .run(async move { engine.open_soon(participant, None).await });
     }
 
     /// The human says a member out of quota is back (`backFromQuota`), to this engine.

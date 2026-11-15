@@ -1253,14 +1253,17 @@ test('shows a failed Resume on the paused card and the chief status', async ({ p
   const data = model()
   const reason = "@zeus-amber-pine's window could not be opened: the launch failed (its cause is in ConsensFlow's log)"
   const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
-  chief.activity = { state: 'waiting', reason: "the chief's window could not be opened: the launch failed (its cause is in ConsensFlow's log)" }
+  chief.activity = { state: 'closed', reason: "the chief's window could not be opened: the launch failed (its cause is in ConsensFlow's log)" }
+  chief.pane = null
   const zeus = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
   zeus.tasks.push(task(91, 'Work that did not restart', 'paused', 'chief', 'zeus', 0, { pauseReason: reason }))
   await open(page, data)
   await expect(page.locator('button.card[data-task="91"] .card-reason')).toHaveText(reason)
+  expect(await page.locator('button.card[data-task="91"]').getAttribute('aria-description')).toContain(reason)
   await expect(page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status')).toHaveText(
-    "Waiting: the chief's window could not be opened: the launch failed (its cause is in ConsensFlow's log)",
+    "the chief's window could not be opened: the launch failed (its cause is in ConsensFlow's log)",
   )
+  await expect(page.getByTestId('chief-asks')).toHaveCount(0)
 })
 
 test('shows an agent-written title as text, never as markup', async ({ page }) => {

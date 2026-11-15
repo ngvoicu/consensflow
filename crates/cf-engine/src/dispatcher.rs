@@ -1186,7 +1186,7 @@ impl Dispatcher {
             if project.state == "open"
                 && !own
                 && !up
-                && at_its_launch
+                && !launch_owed
                 && matches!(coming, Some(Coming::Chief))
             {
                 let cause = shown.after("the window ended before it was up");
@@ -1427,6 +1427,11 @@ impl Dispatcher {
     ) -> Result<(), EngineError> {
         let record = self.record_of(participant.id);
         if record.window.borrow().pane.is_some() {
+            if record.window.borrow().failed_resume_window.is_some() {
+                // A failed Resume's kill was refused or unanswered. Its window
+                // may still run, but cannot safely receive a resumed task.
+                return Ok(());
+            }
             return self.step_open(project, participant, &record).await;
         }
         // A window whose open went unanswered is asked to end again at each step until
@@ -2150,7 +2155,23 @@ impl Dispatcher {
             // launch watches the stops its window pays.
             let first = match &coming {
                 Some(coming) => {
-                    let note = this.cut_note(&project, &who, coming).await?;
+                    let note = match this.cut_note(&project, &who, coming).await {
+                        Ok(note) => note,
+                        Err(cause) => {
+                            this.write_down(&cause);
+                            held.window.borrow_mut().coming = Some(*coming);
+                            let said = this.startup_words(
+                                &who,
+                                crate::startup::Startup::new(
+                                    crate::startup::Stage::Prepare,
+                                    crate::startup::Why::Unsaid,
+                                ),
+                                "",
+                            );
+                            this.launch_failed(&held, &project, &who, None, &said)?;
+                            return Ok(());
+                        }
+                    };
                     if !this.still_coming(&who, coming)? {
                         return Ok(());
                     }

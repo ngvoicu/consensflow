@@ -11,12 +11,13 @@ use std::rc::Rc;
 use cf_engine::testing::{Context, FakeAdapter, Gate, Made, Restarted, TRUST_QUESTION};
 use cf_engine::{ActivityState, SwitchWhen};
 use cf_harness::contract::{Pane, Readiness};
-use cf_ledger::{continuation_tasks, MessageView, NewNote, RESUME_WORDS};
+use cf_ledger::{continuation_tasks, MessageView, NewNote, NewTask, RESUME_WORDS};
 use serde_json::{json, Value};
 
 use crate::chiefs::{to, to_human, with_codex};
 use crate::fixtures::{
-    assert_match, fail_next_retry, fail_next_write, finished, given, native_of, Tiers,
+    assert_match, fail_next_note, fail_next_retry, fail_next_write, finished, given, native_of,
+    Tiers,
 };
 
 /// What a worker the quit or the Close cut in T-1 is told, and what the chief is told.
@@ -70,10 +71,13 @@ fn resume_launch_failure_on(harness: &'static str) {
         "{harness}: pause event: {events:?}"
     );
     let notes = context.inbox(context.id(project, "chief"));
+    let chief_words = format!(
+        "T-1 is paused: {reason}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+    );
     assert!(
         notes
             .iter()
-            .any(|note| note.state != "cancelled" && note.body.contains(&reason)),
+            .any(|note| note.state != "cancelled" && note.body == chief_words),
         "{harness}: chief note: {notes:?}"
     );
     assert!(
@@ -138,6 +142,89 @@ fn resume_launch_failure_keeps_the_session_for_cf_task_resume() {
     assert_eq!(native_of(&context, tiers.id(&session)), native);
 }
 
+#[test]
+fn resume_launch_failure_tells_the_chief_even_when_the_human_gave_the_task() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]).id;
+    context.create_task(
+        project,
+        NewTask {
+            from: "human".into(),
+            pool: Some("worker".into()),
+            tier: Some("standard".into()),
+            body: "Parser".into(),
+            ..NewTask::default()
+        },
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = context.task(project, 1).task.assignee.unwrap();
+    context.adapter.with(&session, |agent| agent.settled = true);
+    context.close_project(project).unwrap();
+    let failed = session.clone();
+    *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |launch| {
+        if launch["participant"]["handle"] == failed {
+            Err("failed".into())
+        } else {
+            Ok(())
+        }
+    }));
+    context.resume_project(project).unwrap();
+    assert_eq!(context.task(project, 1).task.state, "paused");
+    for to in ["human", "chief"] {
+        let notes = context.inbox(context.id(project, to));
+        assert!(
+            notes.iter().any(|note| note.state != "cancelled"
+                && note
+                    .body
+                    .contains(&format!("@{session}'s window could not be opened"))),
+            "{to}: {notes:?}"
+        );
+    }
+}
+
+#[test]
+fn resume_launch_failure_when_the_previous_unanswered_window_cannot_be_ended() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let project = tiers.project.id;
+    let session = tiers.assignee(1);
+    context.adapter.with(&session, |agent| agent.settled = true);
+    context.close_project(project).unwrap();
+    context.host.refuse_kills.set(true);
+    let handle = session.clone();
+    let preparing = context
+        .adapter
+        .prepare_holds
+        .hold(move |args| args[0]["participant"]["handle"] == handle);
+    context.resume_project(project).unwrap();
+    context.settle();
+    assert!(context
+        .dispatcher
+        .pane(context.id(project, "chief"))
+        .is_some());
+    context.host.unanswered.set(true);
+    preparing.open();
+    context.settle();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    context.host.refuse_kills.set(false);
+    context.close_project(project).unwrap();
+    context.host.refuse_kills.set(true);
+    context.resume_project(project).unwrap();
+    context.settle();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let notes = context.inbox(context.id(project, "chief"));
+    assert!(
+        notes.iter().any(|note| note.state != "cancelled"
+            && note.body.contains("its previous window could not be ended")
+            && note.body.contains("may still run")),
+        "{notes:?}"
+    );
+}
+
 macro_rules! resume_launch_failure_case {
     ($name:ident, $harness:literal) => {
         #[test]
@@ -153,7 +240,7 @@ resume_launch_failure_case!(resume_launch_failure_devin, "devin");
 resume_launch_failure_case!(resume_launch_failure_muse, "muse");
 
 #[test]
-fn resume_launch_failure_of_the_chief_is_visible_and_retried_without_a_queued_message() {
+fn resume_launch_failure_of_the_chief_is_visible_and_keeps_its_existing_retry() {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]).id;
     let chief = context.id(project, "chief");
@@ -168,6 +255,7 @@ fn resume_launch_failure_of_the_chief_is_visible_and_retried_without_a_queued_me
     }));
     context.resume_project(project).unwrap();
     let activity = context.dispatcher.activity(chief);
+    assert_eq!(activity.state, ActivityState::Closed);
     assert!(
         activity.reason.as_deref().is_some_and(
             |reason| reason.contains("chief") && reason.contains("could not be opened")
@@ -179,9 +267,59 @@ fn resume_launch_failure_of_the_chief_is_visible_and_retried_without_a_queued_me
     context.advance(5_000);
     context.pass().unwrap();
     assert!(
-        context.dispatcher.pane(chief).is_some(),
-        "the at-rest chief is retried even with no message waiting"
+        context.dispatcher.pane(chief).is_none(),
+        "nothing waiting for the chief"
     );
+    context.note(project, "human", "chief", "Carry on");
+    context.pass().unwrap();
+    assert!(
+        context.dispatcher.pane(chief).is_some(),
+        "the failed chief is retried for its waiting message"
+    );
+}
+
+#[test]
+fn resume_launch_failure_when_the_continuation_cannot_be_written_pauses_its_task() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let after = quit_and_start(&context);
+    fail_next_note(&context);
+    after.resume_project(project).unwrap();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let notes = context.inbox(context.id(project, "chief"));
+    assert!(
+        notes.iter().any(|note| note
+            .body
+            .contains("@zeus-amber-pine's window could not be opened")),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn resume_launch_failure_of_the_chief_that_exits_before_open_answers_is_visible() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]).id;
+    context.close_project(project).unwrap();
+    context
+        .host
+        .exits_showing(Some(3), None, Some(&["API key: secret-value"]));
+    let host = Rc::clone(&context.host);
+    *context.adapter.after_prepare.borrow_mut() = Some(Rc::new(move |opened| {
+        if opened == "chief" {
+            *host.exit_after_open.borrow_mut() = Some("chief".to_owned());
+        }
+    }));
+    context.resume_project(project).unwrap();
+    let activity = context.dispatcher.activity(context.id(project, "chief"));
+    assert_eq!(activity.state, ActivityState::Closed);
+    assert!(
+        activity.reason.as_deref().is_some_and(|reason| reason
+            .contains("chief's window could not be opened")
+            && !reason.contains("secret-value")),
+        "{activity:?}"
+    );
+    assert_eq!(context.project(project).state, "open");
 }
 
 #[test]
@@ -218,6 +356,68 @@ fn resume_launch_failure_of_a_window_that_exits_before_its_open_answer_pauses_it
         !notes.iter().any(|note| note.contains("secret-value")),
         "{notes:?}"
     );
+}
+
+#[test]
+fn resume_launch_failure_of_pi_with_a_login_screen_withholds_it_from_the_board_and_chief() {
+    let context = Context::made(Made {
+        harnesses: vec!["pi"],
+        ..Made::default()
+    });
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app", "name": "app",
+            "chief": { "harness": "pi", "model": "apollo" },
+            "staff": [{ "agent": "zeus", "harness": "pi", "roles": ["worker"], "tier": "standard" }]
+        }))
+        .unwrap()
+        .unwrap()
+        .id;
+    context.pool_task(project, "worker", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = context.task(project, 1).task.assignee.unwrap();
+    context.adapter.with(&session, |agent| agent.settled = true);
+    context.close_project(project).unwrap();
+    context.host.exits_showing(
+        Some(3),
+        None,
+        Some(&["No API key found for the selected model. Use /login"]),
+    );
+    let host = Rc::clone(&context.host);
+    let handle = session.clone();
+    *context.adapter.after_prepare.borrow_mut() = Some(Rc::new(move |opened| {
+        if opened == handle {
+            *host.exit_after_open.borrow_mut() = Some(handle.clone());
+        }
+    }));
+    context.resume_project(project).unwrap();
+    context.settle();
+    let board = context.ledger.borrow().board(project).unwrap();
+    let reason = board
+        .lanes
+        .iter()
+        .flat_map(|lane| &lane.tasks)
+        .find(|task| task.number == 1)
+        .unwrap()
+        .pause_reason
+        .as_deref()
+        .unwrap();
+    assert!(
+        reason.contains("its last screen lines named a secret, so they are left out"),
+        "{reason}"
+    );
+    for words in std::iter::once(reason.to_owned()).chain(
+        context
+            .inbox(context.id(project, "chief"))
+            .into_iter()
+            .map(|note| note.body),
+    ) {
+        assert!(
+            !words.contains("No API key") && !words.contains("/login"),
+            "{words}"
+        );
+    }
 }
 
 /// Zeus and diana at work, each on a task of its own, their windows in the middle
@@ -2065,7 +2265,7 @@ fn codex_chief_at_rest_after_a_restart(context: &Context) -> (i64, Restarted<'_>
 
 /// A chief's window that exits while it is waited for to come up went as any
 /// chief's window goes: the launch its exit settled is not given up again, its
-/// window not closed twice, and the human not told the chief could not start.
+/// window is not closed twice, and the human is told it could not start.
 #[test]
 fn a_chief_window_that_exits_while_it_is_waited_for_to_come_up_is_given_up_no_more() {
     let context = Context::made(Made {
@@ -2088,12 +2288,12 @@ fn a_chief_window_that_exits_while_it_is_waited_for_to_come_up_is_given_up_no_mo
         killed,
         "the window that went is not closed again"
     );
-    assert!(
+    assert_eq!(
         to_human(&context, project)
             .iter()
-            .all(|note| !note.starts_with("The chief could not start")),
-        "{:?}",
-        to_human(&context, project)
+            .filter(|note| note.starts_with("The chief could not start"))
+            .count(),
+        1
     );
 }
 
@@ -2277,12 +2477,12 @@ fn a_chief_window_with_a_first_message_that_exits_while_it_is_waited_for_is_give
         killed,
         "the window that went is not closed again"
     );
-    assert!(
+    assert_eq!(
         to_human(&context, project)
             .iter()
-            .all(|note| !note.starts_with("The chief could not start")),
-        "{:?}",
-        to_human(&context, project)
+            .filter(|note| note.starts_with("The chief could not start"))
+            .count(),
+        1
     );
     let notes = cut_notes(&context, context.id(project, "chief"));
     assert_eq!(notes.len(), 1);
@@ -2771,7 +2971,7 @@ fn reopen_that_failed(context: &Context, with_note: bool) -> Failed<'_> {
         .borrow_mut()
         .set_project_state(project, "open")
         .unwrap();
-    after.open_window(project, "chief").unwrap();
+    after.open_chief(context.id(project, "chief"));
     assert_eq!(tiers.task(1).task.state, "working", "with no window");
     if let Some(note) = &note {
         assert_eq!(context.message(note.id).state, "queued");
@@ -3067,7 +3267,7 @@ fn a_member_opened_again_whose_window_never_comes_up_is_given_nothing_and_the_no
     assert!(given(&context, &session)
         .iter()
         .all(|words| !words.contains("Use the grammar in the docs")));
-    let why = "the window never came up (its cause is in ConsensFlow's log)".to_owned();
+    let why = format!("@{session}'s window could not be opened: the window never came up (its cause is in ConsensFlow's log)");
     assert_eq!(
         waiting.reason.as_deref(),
         Some(format!("kept for T-1's resume: {why}").as_str())
@@ -3080,7 +3280,7 @@ fn a_member_opened_again_whose_window_never_comes_up_is_given_nothing_and_the_no
             .filter(|said| said.starts_with("T-1 is paused: "))
             .collect::<Vec<_>>(),
         [format!(
-            "T-1 is paused: @{session}'s window closed: {why}; the words told its window wait for the resume: {kept_words}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+            "T-1 is paused: {why}; the words told its window wait for the resume: {kept_words}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
         )]
     );
     assert_eq!(
@@ -3303,26 +3503,15 @@ fn a_window_closed_while_a_kill_of_an_earlier_one_is_never_answered_is_no_close_
     drop(held);
 }
 
-/// A member opened again at the Resume whose window never comes up, its kill never
-/// answered in the wait: the launch goes on without the exit, the human told the member
-/// could not start, and the close goes on apart. When the kill is answered at last, the
-/// exit pauses T-1, and a ledger that cannot be written then fails that close: it is
-/// written down in the daemon's log, never lost (T-414 P3-7: no case reached it).
+/// An orphaned task from an older ledger is relaunched for a tell; its kill never answers
+/// in time. A ledger that cannot pause it when the late exit arrives fails that close, and
+/// the failure is written down (T-414 P3-7).
 #[test]
 fn a_close_that_fails_after_its_kill_was_waited_for_in_vain_is_written_down() {
     let context = Context::new();
-    let tiers = Tiers::new(&context, &["zeus"]);
-    let project = tiers.project.id;
-    tiers.open();
-    context.pass().unwrap();
-    context.pass().unwrap();
-    let session = tiers.assignee(1);
-    context.adapter.with(&session, |agent| agent.settled = true);
-    let after = quit_and_start(&context);
-    context.advance(1_000);
+    let (tiers, after, session, _note) = told_before_a_reopen_that_failed(&context);
     // The exit comes only through the close itself, as the bridge host sends it after it
     // answers the kill: what fails is the close's own settling, nobody else's.
-    context.host.hold_exits.set(true);
     let held = Gate::default();
     let (host, handle, gate) = (Rc::clone(&context.host), session.clone(), held.clone());
     *context.adapter.started.borrow_mut() = Some(Rc::new(move || {
@@ -3330,14 +3519,14 @@ fn a_close_that_fails_after_its_kill_was_waited_for_in_vain_is_written_down() {
         *host.hold_kill.borrow_mut() = Some((window.generation, gate.clone()));
         Err(NEVER_NAMED.to_owned())
     }));
-    after.resume_project(project).unwrap();
     after.pass().unwrap();
     assert!(context.timers.fire_next(), "the kill's wait ends");
     context.settle();
-    assert!(to_human(&context, project).contains(&format!(
-        "@{session} could not start: the window never came up (its cause is in ConsensFlow's log)."
-    )));
-    assert_eq!(tiers.task(1).task.state, "working", "no exit has paused it");
+    assert_eq!(
+        tiers.task(1).task.state,
+        "working",
+        "the old orphan has not had its exit yet"
+    );
     assert!(context.log.failures.borrow().is_empty());
 
     fail_next_write(&context);
@@ -3441,7 +3630,11 @@ fn a_give_up_whose_kill_is_taken_after_a_close_pauses_its_task_once_for_the_resu
     after.pass().unwrap();
     assert!(context.timers.fire_next(), "the kill's wait ends");
     context.settle();
-    assert_eq!(tiers.task(1).task.state, "working", "no exit has paused it");
+    assert_eq!(
+        tiers.task(1).task.state,
+        "paused",
+        "a failed Resume is paused before the kill answers"
+    );
     *context.adapter.started.borrow_mut() = None;
     let note = context
         .ledger
@@ -3464,13 +3657,10 @@ fn a_give_up_whose_kill_is_taken_after_a_close_pauses_its_task_once_for_the_resu
     assert_eq!(context.project(project).state, "suspended");
     assert_eq!(tiers.task(1).task.state, "paused");
     let kept = context.message(note.id);
-    let why = format!("@{session}'s window closed");
+    let why = format!("@{session}'s window could not be opened: the window never came up (its cause is in ConsensFlow's log); its program could not be ended and may still run");
     assert_eq!(
         (kept.state.as_str(), kept.reason.as_deref()),
-        (
-            "queued",
-            Some(format!("kept for T-1's resume: {why}").as_str())
-        )
+        ("queued", None)
     );
     let chief = context.id(project, "chief");
     let pauses: Vec<MessageView> = context
@@ -3482,14 +3672,15 @@ fn a_give_up_whose_kill_is_taken_after_a_close_pauses_its_task_once_for_the_resu
     assert_eq!(
         pauses[0].body,
         format!(
-            "T-1 is paused: {why}; the words told its window wait for the resume: m-{}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation.",
-            note.id
+            "T-1 is paused: {why}. Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
         )
     );
-    assert!(to_human(&context, project).contains(&format!(
-        "m-{}, a note from @chief on T-1, waits for T-1's resume to reach @{session}: {why}.",
-        note.id
-    )));
+    assert!(
+        to_human(&context, project)
+            .iter()
+            .all(|said| !said.contains(&format!("m-{}", note.id))),
+        "a note written after the pause was not attempted"
+    );
 
     context.host.hold_exits.set(false);
     after.resume_project(project).unwrap();
@@ -3559,7 +3750,11 @@ fn given_up_with_its_kill_unanswered<'a>(
     after.pass().unwrap();
     assert!(context.timers.fire_next(), "the kill's wait ends");
     context.settle();
-    assert_eq!(tiers.task(1).task.state, "working", "no exit has paused it");
+    assert_eq!(
+        tiers.task(1).task.state,
+        "paused",
+        "a failed Resume is paused before the kill answers"
+    );
     *context.adapter.started.borrow_mut() = None;
     let window = context.host.last(&session).unwrap().pane;
     let gates = gates
@@ -3569,6 +3764,45 @@ fn given_up_with_its_kill_unanswered<'a>(
         .map(|(_, gates)| gates.clone())
         .expect("its kills held");
     (tiers, after, session, window, gates)
+}
+
+#[test]
+fn a_failed_resume_whose_window_may_still_run_never_sends_resume_words_into_it() {
+    let context = Context::new();
+    let (tiers, after, session, pane, gates) = given_up_with_its_kill_unanswered(&context, &[true]);
+    let project = tiers.project.id;
+    let reason = context
+        .ledger
+        .borrow()
+        .board(project)
+        .unwrap()
+        .lanes
+        .into_iter()
+        .flat_map(|lane| lane.tasks)
+        .find(|task| task.number == 1)
+        .unwrap()
+        .pause_reason
+        .unwrap();
+    assert!(
+        reason.contains("could not be ended and may still run"),
+        "{reason}"
+    );
+    gates[0].open();
+    context.settle();
+    let before = context.host.opened().len();
+    context.resume_task(project, 1, "Carry on safely");
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        context.host.opened().len(),
+        before,
+        "no second window over an unproven program"
+    );
+    assert_eq!(after.pane(tiers.id(&session)), Some(pane));
+    assert!(given(&context, &session)
+        .iter()
+        .all(|words| !words.contains("Carry on safely")));
 }
 
 /// Rule 4's case, the Close's kill of the window answered first and taken: the exit is

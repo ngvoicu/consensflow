@@ -481,6 +481,7 @@ export function outWords({ participant, activity, busy }, now) {
  */
 export function laneStatus(lane, board, now) {
   const { participant, activity } = lane
+  if (participant.role === 'chief' && activity?.state === 'closed' && activity.reason) return ['closed', activity.reason]
   if (lane.switching) {
     const { harness, model } = lane.switching
     return [
@@ -1188,7 +1189,8 @@ export class BoardView {
     const elapsedNode = element('span', 'card-age', elapsed)
     elapsedNode.dataset.since = task.stateSince ?? ''
     elapsedNode.title = 'Time in this state'
-    card.setAttribute('aria-description', `${STATE_LABEL[task.state]} for ${elapsed}`)
+    const pauseReason = task.state === 'paused' && task.pauseReason ? `. ${task.pauseReason}` : ''
+    card.setAttribute('aria-description', `${STATE_LABEL[task.state]} for ${elapsed}${pauseReason}`)
     status.append(
       element('span', 'card-state', stateLabel(task)),
       task.questionPending ? ' · Waiting ' : ' · ',

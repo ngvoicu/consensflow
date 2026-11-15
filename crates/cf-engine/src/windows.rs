@@ -244,6 +244,8 @@ pub(crate) struct Relaunch {
 pub(crate) struct WindowPart {
     /// The project Resume which is bringing this window back, until it is up.
     pub(crate) coming: Option<Coming>,
+    /// A failed Resume whose window has not been proven closed: no delivery may use it.
+    pub(crate) failed_resume_window: Option<Pane>,
     /// A chief that needs an edit (T-1202) whose harness's record was read and named no
     /// model: it is held, and its record not read again, until the human switches it.
     pub(crate) no_model_in_record: bool,
@@ -408,6 +410,7 @@ impl Default for WindowPart {
     fn default() -> Self {
         Self {
             coming: None,
+            failed_resume_window: None,
             no_model_in_record: false,
             window: None,
             keys: None,
@@ -591,6 +594,7 @@ impl Dispatcher {
             let taken = (window.token.take(), window.launch_id.take());
             window.window = None;
             window.pane = None;
+            window.failed_resume_window = None;
             window.retiring = false;
             window.kill_taken = None;
             window.sent_to.clear();
@@ -697,6 +701,19 @@ impl Dispatcher {
         // A window whose open went unanswered is ended before another opens; until the
         // host says it has, the launch waits for the next step.
         if !self.end_abandoned(record).await? {
+            if record.window.borrow().coming.is_some()
+                && self
+                    .project_of(participant.id)?
+                    .is_some_and(|p| p.state == "open")
+            {
+                return self.launch_failed(
+                    record,
+                    project,
+                    participant,
+                    None,
+                    "its previous window could not be ended",
+                );
+            }
             return Ok(());
         }
         // A chief the update could not tell the model of (T-1202) opens on no default,
@@ -1641,14 +1658,13 @@ impl Dispatcher {
         record.window.borrow_mut().relaunch = Some(Relaunch {
             failures,
             at: self.now() + wait,
-            // Until a window comes up, as a launch that fails for another reason after it.
-            reopens: resuming || before.is_some_and(|relaunch| relaunch.reopens),
+            reopens: before.is_some_and(|relaunch| relaunch.reopens),
         });
         if resuming {
             self.set_activity(
                 record,
                 Activity::because(
-                    ActivityState::Waiting,
+                    ActivityState::Closed,
                     format!("the chief's window could not be opened: {because}"),
                 ),
             )?;
@@ -1691,15 +1707,24 @@ impl Dispatcher {
             .active_task(participant.id, false)?;
         if current.is_some_and(|project| project.state == "open") && stop == paid {
             if let Some(thread) = thread.filter(|thread| thread.task.number == task) {
-                let because = format!(
+                let mut because = format!(
                     "@{}'s window could not be opened: {cause}",
                     participant.handle
                 );
+                let may_run = {
+                    let window = record.window.borrow();
+                    window.pane.is_some() || window.abandoned.is_some()
+                };
+                if may_run {
+                    because.push_str(&format!("; its program {}", cf_ledger::MAY_STILL_RUN));
+                    let mut window = record.window.borrow_mut();
+                    window.failed_resume_window = window.pane.clone();
+                }
                 self.seams
                     .ledger
                     .borrow_mut()
                     .pause_failed_project_resume(project.id, task, &because)?;
-                self.tell_stall(project, &thread.task, &because, &because, None)?;
+                self.tell_resume_failure(project, &thread.task, &because)?;
                 self.changed();
             }
         }

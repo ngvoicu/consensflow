@@ -124,6 +124,31 @@ impl Dispatcher {
         Ok(())
     }
 
+    /// A project Resume also tells the chief when the human gave the task.
+    pub(crate) fn tell_resume_failure(
+        &self,
+        project: &ProjectView,
+        task: &TaskView,
+        because: &str,
+    ) -> Result<(), EngineError> {
+        self.tell_stall(project, task, because, because, None)?;
+        if let Some(chief) = project
+            .participants
+            .iter()
+            .find(|p| p.role == "chief" && task.requester != p.handle)
+        {
+            let harness_gone = self.harness_gone(project, task);
+            self.seams.ledger.borrow_mut().note_pause_to(
+                project.id,
+                task.number,
+                &chief.handle,
+                because,
+                harness_gone,
+            )?;
+        }
+        Ok(())
+    }
+
     /// Whether `task`'s member runs on a harness this build has no adapter for, as
     /// [`Dispatcher::why_not_free`] asks it: no resume opens its window again, and its
     /// pause note says the way on that is left.
