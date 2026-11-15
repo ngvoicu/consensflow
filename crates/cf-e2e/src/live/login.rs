@@ -231,7 +231,7 @@ fn oauth_with(text: &str, now: i64, left: Duration, required: &[&str]) -> Result
              that this machine keeps unusable (the owner is logged out the next time theirs needs it). \
              Claude Code renews a token itself, but only when five minutes of it are left, so using it \
              now does not help: run again once it has ended (Claude Code then renews it, as it does \
-             when the owner opens it, and on a test machine the kit asks it to), or make the run \
+             when the owner opens it, and an eligible test run may ask it to), or make the run \
              shorter",
             span(left)
         )));
@@ -812,6 +812,11 @@ impl Login {
             .as_ref()
             .filter(|_| renewable(&text, now, self.left))
         else {
+            if !self.watch_owner {
+                return Err(Error::Daemon(format!(
+                    "{refused}. Claude parity does not renew the owner's login; renew it outside this case"
+                )));
+            }
             return Err(refused);
         };
         let kept = Kept {

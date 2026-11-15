@@ -1171,7 +1171,12 @@ fn t1700_login_only_refuses_to_renew_on_a_test_machine() {
     let login = run
         .login(&ended, Some(zeewin2()), "", 1)
         .without_owner_config_reads();
-    assert!(login.folder_at(at(NOW)).is_err());
+    let said = login.folder_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("Claude parity does not renew"), "{said}");
+    assert!(
+        !said.contains("on a test machine the kit asks it to"),
+        "{said}"
+    );
     assert!(run.started().is_none(), "the stand-in renewal was started");
 }
 
