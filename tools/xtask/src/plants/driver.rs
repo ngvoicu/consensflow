@@ -55,14 +55,21 @@
 //! MISSED-BY-MEANT, else MISSED; all of these are counted as not caught, and told
 //! with what they said.
 
+mod check;
 mod confirm;
+mod outcome;
+mod prepare;
 
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+pub use self::check::check;
+use self::check::entity;
 use self::confirm::{unstarted, Clean, CleanRuns, Judged};
+use self::outcome::{Trial, Uncaught};
+use self::prepare::{prepare, required, Prepared};
 use super::kit::{Family, Plant, Planted};
 use super::report::{self, Verdict};
 use super::runs::{Execution, Ran, Runner, CF_E2E_PROGRAMS};
@@ -204,101 +211,6 @@ impl Drop for Planting {
     /// could not be put back before, which was said): put back, as well as can be.
     fn drop(&mut self) {
         let _ = self.restore();
-    }
-}
-
-/// How a plant ended, and what the last run said.
-struct Trial {
-    verdict: Verdict,
-    ran: Option<Ran>,
-    /// The tests that failed, or what else caught it.
-    caught: Vec<String>,
-    /// Why it did not apply, or why its run told nothing of it.
-    said: String,
-    /// What else is to be said of it: that no run ran a test of the name it was meant
-    /// for, or that the name stands for more than one test, what broke beside a catch.
-    notes: Vec<String>,
-    /// The other runs that told nothing of it, each as it ended.
-    also: Vec<Trial>,
-}
-
-impl Trial {
-    fn of(verdict: Verdict, ran: Ran, caught: Vec<String>) -> Self {
-        Self {
-            verdict,
-            ran: Some(ran),
-            caught,
-            said: String::new(),
-            notes: Vec::new(),
-            also: Vec::new(),
-        }
-    }
-
-    fn unapplied(said: String) -> Self {
-        Self {
-            verdict: Verdict::DoesNotApply,
-            ran: None,
-            caught: Vec::new(),
-            said,
-            notes: Vec::new(),
-            also: Vec::new(),
-        }
-    }
-
-    fn not_run(said: String) -> Self {
-        Self {
-            verdict: Verdict::NotRun,
-            ..Self::unapplied(said)
-        }
-    }
-
-    fn unstable(said: String) -> Self {
-        Self {
-            verdict: Verdict::Unstable,
-            ..Self::unapplied(said)
-        }
-    }
-}
-
-/// Whether what a plant needs first is done.
-enum Prepared {
-    Done,
-    /// A command failed.
-    Failed(Error),
-    Stopped,
-}
-
-/// Runs the commands a plant needs before it is planted, which must succeed.
-fn prepare(plant: &Plant, runner: &mut dyn Runner) -> Result<Prepared, Error> {
-    for command in &plant.prepare {
-        match runner.run(command)? {
-            Execution::Stopped => return Ok(Prepared::Stopped),
-            Execution::Ended(ran) if ran.code != Some(0) => {
-                return Ok(Prepared::Failed(Error::Prepare {
-                    plant: plant.name.clone(),
-                    command: command.join(" "),
-                    said: report::tail(&ran.output, 1500).to_owned(),
-                }));
-            }
-            Execution::Ended(_) => {}
-        }
-    }
-    Ok(Prepared::Done)
-}
-
-/// The files its runs take as given: one that is not there makes a run fail by
-/// itself, which would be taken for a catch.
-fn required(plant: &Plant, context: &Context) -> Result<(), Error> {
-    match plant
-        .requires
-        .iter()
-        .find(|file| !context.path(file).exists())
-    {
-        Some(file) => Err(Error::NotThere {
-            plant: plant.name.clone(),
-            file: file.clone(),
-        }),
-        None => Ok(()),
     }
 }
 
@@ -611,9 +523,28 @@ fn tried(
         return Ok(Ended::Trial(Box::new(trial)));
     }
     planting.restore()?;
-    let Some(mut told) = settled(told, clean, runner, unplanted)? else {
+    let Some(told) = settled(told, clean, runner, unplanted)? else {
         return Ok(Ended::Stopped);
     };
+    let uncaught = Uncaught {
+        last,
+        others,
+        doubts,
+        tests_ran,
+    };
+    Ok(Ended::Trial(Box::new(finish_uncaught(
+        plant, told, uncaught,
+    ))))
+}
+
+/// Chooses the result when no run caught the plant, retaining the other outcomes and notes.
+fn finish_uncaught(plant: &Plant, mut told: Vec<Trial>, uncaught: Uncaught) -> Trial {
+    let Uncaught {
+        last,
+        others,
+        doubts,
+        tests_ran,
+    } = uncaught;
     let missed = match (others, last) {
         (Some((ran, named)), _) => Some(Trial::of(Verdict::MissedByMeant, ran, named)),
         (None, Some(ran)) => Some(Trial::of(Verdict::Missed, ran, Vec::new())),
@@ -638,7 +569,7 @@ fn tried(
                 .push(format!("no test named {} ran in its runs", plant.meant));
         }
     }
-    Ok(Ended::Trial(Box::new(trial)))
+    trial
 }
 
 /// Says a plant, and what follows from how it ended.
@@ -906,24 +837,6 @@ pub fn run(
     Ok(i32::from(wrong != 0))
 }
 
-/// The first XML entity `meant` holds (`&quot;`, `&amp;`, `&#34;`), if it holds one:
-/// a name copied from a report that escapes it, which is not the test's name.
-fn entity(meant: &str) -> Option<&str> {
-    meant.match_indices('&').find_map(|(at, _)| {
-        let body = &meant[at + 1..];
-        let body = &body[..body.find(';')?];
-        let number = body
-            .strip_prefix("#x")
-            .or_else(|| body.strip_prefix('#'))
-            .filter(|digits| !digits.is_empty());
-        let entity = match number {
-            Some(digits) => digits.chars().all(|digit| digit.is_ascii_hexdigit()),
-            None => !body.is_empty() && body.chars().all(|letter| letter.is_ascii_alphanumeric()),
-        };
-        entity.then(|| &meant[at..at + body.len() + 2])
-    })
-}
-
 /// What `check` finds of one plant.
 enum Fare {
     /// It applies to the sources as they are.
@@ -967,69 +880,6 @@ fn fare(context: &Context, plant: &Plant, runner: &mut dyn Runner) -> Result<Far
             Err(cause) => Fare::NotApplies(cause.to_string()),
         },
     })
-}
-
-/// Whether each of `plants` applies, which plants nothing: the status is 0 where every
-/// one does, or does not and is listed in `family`'s `known_unapplied` (said as known,
-/// and counted apart). A listed plant that applies again fails the check, so the list
-/// is emptied as its plants are mended. The commands a plant needs first are run. A
-/// meant name that holds an XML entity is refused, and so is a run that cannot be run as
-/// it is written (an option of `cargo test` that nextest has no word for). A plant for
-/// other systems is said SKIPPED (platform), its names checked (the table's data was),
-/// nothing of it prepared or applied.
-pub fn check(
-    context: &Context,
-    family: &Family,
-    plants: &[&Plant],
-    runner: &mut dyn Runner,
-    out: &mut dyn Write,
-) -> Result<i32, Failure> {
-    let (mut unapplied, mut known, mut stale, mut skipped) = (0, 0, 0, 0);
-    for plant in plants {
-        let listed = family.known_unapplied.contains(&plant.name);
-        match fare(context, plant, runner)? {
-            Fare::Stopped => return Ok(STOPPED),
-            Fare::Skipped => {
-                skipped += 1;
-                writeln!(
-                    out,
-                    "{}",
-                    report::skipped(&plant.name, &plant.platforms, HERE)
-                )?;
-            }
-            Fare::Applies if listed => {
-                stale += 1;
-                writeln!(
-                    out,
-                    "{}: applies, so it is not known not to apply: take it off known_unapplied in kit.toml",
-                    plant.name
-                )?;
-            }
-            Fare::Applies => {}
-            Fare::NotApplies(cause) if listed => {
-                known += 1;
-                writeln!(out, "known not to apply: {cause}")?;
-            }
-            Fare::NotApplies(cause) => {
-                unapplied += 1;
-                writeln!(out, "{cause}")?;
-            }
-        }
-    }
-    let checked = plants.len() - skipped;
-    let mut said = if unapplied == 0 && known == 0 {
-        format!("{checked} plants apply")
-    } else {
-        format!("{} of {checked} plants apply", checked - unapplied - known)
-    };
-    if known > 0 {
-        said.push_str(&format!(", {known} known not to apply"));
-    }
-    if skipped > 0 {
-        said.push_str(&format!(", {skipped} skipped (platform)"));
-    }
-    writeln!(out, "{said}")?;
-    Ok(i32::from(unapplied + stale != 0))
 }
 
 #[cfg(test)]
