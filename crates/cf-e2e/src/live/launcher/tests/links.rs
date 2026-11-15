@@ -161,13 +161,15 @@ fn a_launcher_that_dangles_that_is_gone_or_that_became_a_file_is_named_for_what_
         "{found:?}"
     );
     let watch = Watch::of(Harness::Claude, &command, home.0.path());
+    let nowhere = home.path("nowhere");
     let found = changes(&watch, &home, || {
-        home.link(".local/bin/claude", Path::new("/nowhere"));
+        home.link(".local/bin/claude", &nowhere);
     });
     assert!(
-        found
-            .iter()
-            .any(|said| said.contains("is a link to /nowhere now, and was a file")),
+        found.iter().any(|said| said.contains(&format!(
+            "is a link to {} now, and was a file",
+            nowhere.display()
+        ))),
         "{found:?}"
     );
     // And a link that became a file says the link it was.
@@ -321,7 +323,8 @@ fn the_guard_fails_what_ends_with_the_way_back_and_is_silent_before_it_looked() 
     guard.finish().unwrap();
     assert!(guard.vars().unwrap().is_empty());
     let was = fs::read_link(&command).unwrap();
-    home.link(".local/bin/claude", Path::new("/gone/claude"));
+    let gone = home.path("gone/claude");
+    home.link(".local/bin/claude", &gone);
     // The first look is the one that holds: asked again, it is not taken again.
     assert!(guard.vars().unwrap().is_empty());
     let failed = guard.finish().unwrap_err().to_string();
@@ -334,7 +337,7 @@ fn the_guard_fails_what_ends_with_the_way_back_and_is_silent_before_it_looked() 
         "{failed}"
     );
     // The way back is not taken by the kit.
-    assert_eq!(fs::read_link(&command).unwrap(), Path::new("/gone/claude"));
+    assert_eq!(fs::read_link(&command).unwrap(), gone);
 }
 
 #[test]

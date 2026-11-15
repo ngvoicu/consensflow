@@ -74,7 +74,7 @@ use sha2::{Digest, Sha256};
 use super::keychain;
 use super::machine::Harness;
 use super::renew::{self, Kept, Renewal, Renewed, TestMachine};
-use crate::process::{own_var, Run};
+use crate::process::own_var;
 use crate::rig::ClaudeConfig;
 use crate::{files, Error, Result};
 
@@ -125,12 +125,15 @@ impl Source {
     /// What it holds, as its text; never said anywhere.
     fn read(&self) -> Result<String> {
         match self {
-            Self::File(file) => files::read_string(file).map_err(|failed| {
-                Error::Daemon(format!(
+            Self::File(file) => {
+                crate::standin_process::require_home(file, "Claude login lookup");
+                files::read_string(file).map_err(|failed| {
+                    Error::Daemon(format!(
                     "Claude Code's login is not in {} ({failed}): log in by running `claude` once",
                     file.display()
                 ))
-            }),
+                })
+            }
             Self::Keychain => {
                 let user = own_var("USER")
                     .or_else(|| own_var("LOGNAME"))
@@ -143,11 +146,11 @@ impl Source {
                     })?;
                 // The login Keychain asks the person once to let it be read; a run
                 // waits for the answer (the call is limited, below).
-                let ran = Run::new("/usr/bin/security")
-                    .args(keychain_args(&user))
-                    .inheriting_env()
-                    .limit(Duration::from_secs(120))
-                    .run()?;
+                let ran = super::keychain::security(
+                    "login::Source::read",
+                    keychain_args(&user),
+                    Duration::from_secs(120),
+                )?;
                 if ran.code != Some(0) {
                     // What it printed is the login, or nothing: only what it said is shown.
                     return Err(Error::Daemon(format!(
@@ -291,16 +294,16 @@ fn services(dump: &str) -> BTreeSet<String> {
 /// The names of those items now; none where the machine has no Keychain (or it cannot be
 /// listed, which a run then cannot check).
 pub fn keychain_services() -> Option<BTreeSet<String>> {
-    if !cfg!(target_os = "macos") {
+    if !cfg!(target_os = "macos") && !cfg!(test) {
         return None;
     }
-    let ran = Run::new("/usr/bin/security")
-        .arg("dump-keychain")
-        .inheriting_env()
-        .limit(Duration::from_secs(60))
-        .run()
-        .ok()
-        .filter(|ran| ran.code == Some(0))?;
+    let ran = super::keychain::security(
+        "login::keychain_services",
+        ["dump-keychain"],
+        Duration::from_secs(60),
+    )
+    .ok()
+    .filter(|ran| ran.code == Some(0))?;
     Some(services(&ran.stdout))
 }
 
@@ -773,7 +776,11 @@ impl Login {
             oauth: copy,
             login: oauth,
             owner: self.owner.look(),
-            services: keychain_services(),
+            services: if keychain::watching() {
+                keychain_services()
+            } else {
+                None
+            },
             renewed,
         });
         Ok(path)
@@ -941,7 +948,11 @@ impl ClaudeConfig for Login {
         }
         let mut refreshed: Vec<String> = made.refreshed().into_iter().collect();
         let mut kept = Vec::new();
-        if let (Some(before), Some(now)) = (&made.services, keychain_services()) {
+        if let Some((before, now)) = made
+            .services
+            .as_ref()
+            .and_then(|before| keychain_services().map(|now| (before, now)))
+        {
             let found = keychain_of(made.folder.path(), before, &now);
             for other in &found.others {
                 let _ = writeln!(io::stderr(), "note: {other}");

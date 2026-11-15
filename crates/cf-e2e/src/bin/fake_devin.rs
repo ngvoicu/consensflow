@@ -343,3 +343,9 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
         }
     }
 }
+
+#[cfg(test)]
+const ALLOW_LIVE_MATRIX: bool = false;
+#[cfg(test)]
+#[path = "../../tests/support/standin_boot.rs"]
+mod standin_boot;

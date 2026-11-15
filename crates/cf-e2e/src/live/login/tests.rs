@@ -4,6 +4,7 @@
 use std::os::unix::fs::PermissionsExt;
 
 use super::*;
+use crate::process::Run;
 
 /// What a login holds that must never be said or kept.
 const ACCESS: &str = "sk-ant-oat01-ACCESS-0123456789";
@@ -238,72 +239,27 @@ fn an_item_another_process_made_is_a_note_of_this_run_and_not_its_failure() {
     assert_eq!(keychain_of(folder, &both, &both), InKeychain::default());
 }
 
-/// A Keychain item of the name Claude Code gives `folder`, made here and deleted by that name when this
-/// is dropped (the Keychain is the machine's: a test of the run's own folder is the only way to see
-/// `finish` look at it).
-#[cfg(target_os = "macos")]
-struct Item {
-    name: String,
-    user: String,
-}
-
-#[cfg(target_os = "macos")]
-impl Item {
-    fn make(folder: &Path) -> Self {
-        let name = keychain::item_of(folder);
-        let user = own_var("USER").unwrap();
-        let made = Run::new("/usr/bin/security")
-            .args([
-                "add-generic-password",
-                "-s",
-                &name,
-                "-a",
-                &user,
-                "-w",
-                "a made-up value",
-            ])
-            .inheriting_env()
-            .run()
-            .unwrap();
-        assert_eq!(made.code, Some(0), "{}", made.stderr);
-        Self { name, user }
-    }
-}
-
-#[cfg(target_os = "macos")]
-impl Drop for Item {
-    fn drop(&mut self) {
-        let _ = Run::new("/usr/bin/security")
-            .args([
-                "delete-generic-password",
-                "-s",
-                &self.name,
-                "-a",
-                &self.user,
-            ])
-            .inheriting_env()
-            .run();
-    }
-}
-
-#[cfg(target_os = "macos")]
 #[test]
 fn a_run_whose_claude_code_moved_the_login_into_the_keychain_is_told_so_and_not_that_it_refreshed_it(
 ) {
+    let listings = keychain::fake::Listings::new([keychain::fake::listing(&[], 0)]);
     let person = Person::new();
     let parent = crate::door::made("cf-test-").unwrap();
     let login = login(&machine_text(hours(5)), person.home.path(), parent.path());
     let folder = login.folder_at(at(NOW)).unwrap();
     // What Claude Code did to a folder in the probe of T-1102: its secure storage into the
     // folder's item, and the login out of the folder's file.
-    let item = Item::make(&folder);
-    std::fs::remove_file(folder.join(".credentials.json")).unwrap();
+    let item = keychain::item_of(&folder);
+    listings.push(keychain::fake::listing(&[&item], 0));
+    assert!(crate::door::Door::of_run()
+        .remove_in_made(&folder.join(".credentials.json"))
+        .is_gone());
     let said = login.finish().unwrap_err().to_string();
     assert!(
         said.contains("LEFT ITS SECURE STORAGE IN THE OWNER'S KEYCHAIN"),
         "{said}"
     );
-    assert!(said.contains(&format!("`{}`", item.name)), "{said}");
+    assert!(said.contains(&format!("`{item}`")), "{said}");
     // The login did not go stale, and the file is not "gone": it is in the item, said once.
     assert!(!said.contains("REFRESHED"), "{said}");
     assert!(!said.contains("gone or no longer holds a login"), "{said}");

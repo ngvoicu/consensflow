@@ -8,6 +8,7 @@ use serde_json::json;
 
 use super::Config;
 use crate::process::own_var;
+use crate::standin_process::same_environment_name;
 use crate::{files, stand_in, Error, Result};
 
 /// The value of `name` in `env`, the last one given.
@@ -155,6 +156,49 @@ pub(super) fn environment(
         env.push((name.clone(), value.clone()));
     }
     env
+}
+
+/// Bound every home variable the harnesses can consult in a stand-in rig.
+/// This is applied after the case's variables and harness homes have won.
+pub(super) fn bound_standin_homes(env: &mut Vec<(String, String)>, root: &Path, subject: &str) {
+    if own_var("CF_E2E_STAND_IN").as_deref() != Some("1") {
+        return;
+    }
+    for (name, default) in crate::standin_process::home_vars(&root.join("home")) {
+        let value = env
+            .iter()
+            .rev()
+            .find(|(key, _)| same_environment_name(key, name))
+            .map(|(_, value)| value.clone());
+        let value = if let Some(value) = value {
+            assert!(
+                !value.is_empty(),
+                "stand-in {subject} {name} lookup: empty path"
+            );
+            crate::standin_process::require_home(
+                Path::new(&value),
+                &format!("stand-in {subject} {name} lookup"),
+            );
+            value
+        } else {
+            default.to_string_lossy().into_owned()
+        };
+        env.retain(|(key, _)| !same_environment_name(key, name));
+        env.push((name.to_owned(), value));
+    }
+    if let Some((_, path)) = env
+        .iter()
+        .rev()
+        .find(|(key, _)| same_environment_name(key, "PATH"))
+    {
+        crate::standin_process::require_search_path(
+            path,
+            &format!("stand-in {subject} PATH lookup"),
+            &system_folders(cfg!(windows), true, own_var("SystemRoot").as_deref()),
+        );
+    }
+    env.retain(|(name, _)| !same_environment_name(name, "CF_E2E_STAND_IN"));
+    env.push(("CF_E2E_STAND_IN".to_owned(), "1".to_owned()));
 }
 
 /// The `PATH` of the rig: the folder of the stand-in `claude` first, then the
@@ -379,6 +423,98 @@ mod tests {
 
     fn config() -> Config {
         Config::new("/the/stand-in").var("CF_TEST_QUOTA_OUT", "worker")
+    }
+
+    #[test]
+    fn standin_isolation_window_path_refuses_an_unowned_directory() {
+        let root = crate::door::made("window-path-").unwrap();
+        let temp = std::env::temp_dir();
+        let foreign = temp.parent().unwrap().join("synthetic-foreign-bin");
+        let mut env = vec![("PATH".to_owned(), foreign.to_string_lossy().into_owned())];
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            bound_standin_homes(&mut env, root.path(), "window");
+        }));
+        let error = match result {
+            Err(error) => error,
+            Ok(_) => panic!("window PATH lookup accepted an unowned directory"),
+        };
+        let said = error
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| error.downcast_ref::<&str>().copied())
+            .unwrap_or("");
+        assert!(said.contains("window PATH lookup"), "{said}");
+    }
+
+    #[test]
+    fn standin_isolation_window_path_refuses_a_foreign_harness_home() {
+        const CHILD: &str = "CF_T1647_PATH_CHILD";
+        const DECOY: &str = "CF_T1647_PATH_DECOY";
+        if let Some(foreign) = crate::process::own_var(DECOY) {
+            let root = crate::door::made("window-path-").unwrap();
+            let mut env = vec![("PATH".to_owned(), foreign)];
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                bound_standin_homes(&mut env, root.path(), "window");
+            }));
+            let error = match result {
+                Err(error) => error,
+                Ok(_) => panic!("window PATH lookup did not fail closed"),
+            };
+            let said = error
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| error.downcast_ref::<&str>().copied())
+                .unwrap_or("");
+            assert!(said.contains("window PATH lookup"), "{said}");
+            return;
+        }
+        let temp = std::env::temp_dir();
+        let decoy = temp
+            .parent()
+            .unwrap()
+            .join(format!("synthetic-foreign-harness-{}", std::process::id()));
+        let output = crate::process::Run::new(std::env::current_exe().unwrap())
+            .inheriting_env()
+            .args([
+                "--exact",
+                "rig::install::tests::standin_isolation_window_path_refuses_a_foreign_harness_home",
+            ])
+            .var(CHILD, "1")
+            .var(DECOY, &decoy)
+            .var("CODEX_HOME", &decoy)
+            .run()
+            .unwrap();
+        assert_eq!(output.code, Some(0), "{}{}", output.stdout, output.stderr);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn standin_isolation_windows_mixed_case_home_override_is_refused() {
+        let root = crate::door::made("windows-home-").unwrap();
+        let temp = std::env::temp_dir();
+        let foreign = temp.parent().unwrap().join("synthetic-foreign-home");
+        for (name, _) in crate::standin_process::home_vars(root.path()) {
+            let mut env = vec![
+                (name.to_owned(), root.path().to_string_lossy().into_owned()),
+                (
+                    name.to_ascii_lowercase(),
+                    foreign.to_string_lossy().into_owned(),
+                ),
+            ];
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                bound_standin_homes(&mut env, root.path(), "window");
+            }));
+            let error = match result {
+                Err(error) => error,
+                Ok(_) => panic!("Windows {name} lookup did not fail closed"),
+            };
+            let said = error
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| error.downcast_ref::<&str>().copied())
+                .unwrap_or("");
+            assert!(said.contains(&format!("window {name} lookup")), "{said}");
+        }
     }
 
     #[test]

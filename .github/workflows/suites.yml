@@ -175,6 +175,11 @@ jobs:
       - name: Warm the Mac git shim, as the daemons job does
         if: runner.os == 'macOS' && contains(fromJSON('["rig","regressions","daemon"]'), matrix.suite)
         run: time /usr/bin/git --version && time /usr/bin/git --version
+      - name: Prepare the pinned Muse echo executable
+        if: contains(fromJSON('["rig","regressions"]'), matrix.suite)
+        env:
+          CF_E2E_HOSTED_MUSE: '1'
+        run: cargo run -p cf-e2e --features test-support --bin prepare-muse-echo
       - name: Install nextest for plants
         if: matrix.suite == 'plants'
         run: cargo install cargo-nextest --version 0.9.148 --locked
@@ -197,6 +202,8 @@ jobs:
         run: npx playwright install webkit
       - name: Run the named suite
         id: run_suite
+        env:
+          CF_E2E_HOSTED_MUSE: '1'
         run: |
           set +e
           {
@@ -273,12 +280,7 @@ jobs:
           let executed = rust.reduce((n, m) => n + Number(m[1]) + Number(m[2]), 0), bad = false;
           if (suite === 'rig' || suite === 'regressions') {
             const reported = [...log.matchAll(/skipped:\s*Muse Code(?: is not installed|'s binary[^\n]*is not on this machine)/gi)].length;
-            const named = [...log.matchAll(/^test ([^\s]*muse_[^\s]*) \.\.\. (?:ok|FAILED)\s*$/gm)].length;
-            const missing = reported || named;
-            lines.push(reported
-              ? `Muse Code is not installed on hosted runners: ${reported} cases returned early (from the log).`
-              : `Muse Code cases do not run on hosted runners: ${named} cases named muse_* (from test names).`);
-            executed = Math.max(0, executed - missing);
+            if (reported) { lines.push(`Muse Code cases returned early: ${reported}.`); bad = true; }
           }
           if (suite === 'page-chromium' || suite === 'page-webkit') {
             executed = [...log.matchAll(/^\s*(\d+)\s+(?:passed|failed|flaky)\b/gm)].reduce((n, m) => n + Number(m[1]), 0);

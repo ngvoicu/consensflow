@@ -695,6 +695,7 @@ fn a_started_case_is_told_where_its_programs_are_and_that_it_builds_none() {
         ("CF_E2E_BUILT", folder.as_str()),
         ("CF_E2E_HELPERS", folder.as_str()),
         ("CF_E2E_NO_BUILD", "1"),
+        ("CF_E2E_ISOLATED_LIVE", "1"),
     ] {
         assert!(vars.contains(&var(name, value)), "{name}: {vars:?}");
     }

@@ -34,6 +34,7 @@ pub enum Run {
 /// being in the keychain, the one item every Muse of the machine reads; on Windows all of
 /// it, `credential_backend: file`). The person's file is read, never written.
 pub fn seed_live_home(rig_home: &Path, real_home: &Path) -> Result {
+    crate::standin_process::require_home(real_home, "Muse login lookup");
     let config = rig_home.join(".config").join("muse");
     crate::door::write(config.join("settings.json"), "{\"schema_version\":1}\n")?;
     let auth = real_home.join(".config").join("muse").join("auth.json");
@@ -118,6 +119,36 @@ pub fn installed() -> std::result::Result<Installed, String> {
     )
 }
 
+/// The real executable used by an echo case. Its Keychain behaviour at
+/// startup is not established, so it runs only on a disposable hosted runner.
+pub fn echo_required() -> std::result::Result<Installed, String> {
+    if own_var("GITHUB_ACTIONS").as_deref() != Some("true")
+        || own_var("CF_E2E_HOSTED_MUSE").as_deref() != Some("1")
+    {
+        return Err("Muse echo requires a named Muse on a disposable GitHub hosted runner; its Keychain startup behaviour is not established".to_owned());
+    }
+    let folder = own_var("RUNNER_TEMP")
+        .map(PathBuf::from)
+        .ok_or("required Muse for echo is missing: the hosted runner has no RUNNER_TEMP")?
+        .join("muse-echo");
+    crate::standin_process::require_unlinked_safe_path(&folder, "stand-in Muse lookup");
+    let found = installed_on(&folder.to_string_lossy(), None).map_err(|why| {
+        format!(
+            "required Muse for echo in {} is missing: {why}",
+            folder.display()
+        )
+    })?;
+    #[allow(clippy::print_stderr)]
+    {
+        eprintln!(
+            "Muse echo uses {} (version {})",
+            found.binary.display(),
+            found.version
+        );
+    }
+    Ok(found)
+}
+
 /// Where Muse's installer puts its launcher for whoever runs the tests: `~/.local/bin` on
 /// a Mac (`install.sh`), `%LOCALAPPDATA%\Programs\muse` on Windows (`install.ps1`).
 fn installer_place() -> Option<PathBuf> {
@@ -145,10 +176,13 @@ pub(crate) fn installed_on(
             .ok_or("no muse on the PATH, and no folder of its installer to find Muse Code in")?
             .join(if cfg!(windows) { "muse.cmd" } else { "muse" }),
     };
+    crate::standin_process::require_watch_path(&launcher, "Muse launcher lookup");
     let real = files::real_path(&launcher);
     let bin = real.parent().unwrap_or(Path::new("."));
     let exe = if cfg!(windows) { ".exe" } else { "" };
-    let version = fs::read_to_string(bin.join(".muse-version"))
+    let version_file = bin.join(".muse-version");
+    crate::standin_process::require_watch_path(&version_file, "Muse version lookup");
+    let version = fs::read_to_string(version_file)
         .map(|line| line.trim().to_owned())
         .map_err(|_| {
             format!(
@@ -157,6 +191,7 @@ pub(crate) fn installed_on(
             )
         })?;
     let binary = bin.join(format!("muse-bin-{version}{exe}"));
+    crate::standin_process::require_watch_path(&binary, "Muse binary lookup");
     if !binary.is_file() {
         return Err(format!(
             "Muse Code's binary {} is not on this machine",
@@ -1008,6 +1043,150 @@ mod tests {
     use super::{echo_list, serve_reply};
     #[cfg(unix)]
     use crate::files;
+
+    #[test]
+    fn standin_isolation_muse_version_refuses_a_path_into_an_inherited_home() {
+        const CHILD: &str = "CF_T1647_MUSE_VERSION_PATH";
+        if crate::process::own_var(CHILD).is_some() {
+            let _ = super::echo_required();
+            panic!("the Muse version lookup returned without refusing the harness home");
+        }
+
+        let root = crate::door::made("muse-version-path-").unwrap();
+        let runner_temp = root.path().join("runner-temp");
+        let echo = runner_temp.join("muse-echo");
+        let codex = runner_temp.join("pretend-owner-codex");
+        crate::door::make_dir(echo.join("muse-bin-d")).unwrap();
+        crate::door::make_dir(&codex).unwrap();
+        let launcher = if cfg!(windows) { "muse.cmd" } else { "muse" };
+        let binary = if cfg!(windows) {
+            "sentinel.exe"
+        } else {
+            "sentinel"
+        };
+        crate::door::write(echo.join(launcher), "synthetic launcher").unwrap();
+        crate::door::write(
+            echo.join(".muse-version"),
+            "d/../../pretend-owner-codex/sentinel\n",
+        )
+        .unwrap();
+        crate::door::write(codex.join(binary), "synthetic binary").unwrap();
+        let output = crate::process::Run::new(std::env::current_exe().unwrap())
+            .inheriting_env()
+            .args([
+                "--exact",
+                "muse::tests::standin_isolation_muse_version_refuses_a_path_into_an_inherited_home",
+                "--nocapture",
+            ])
+            .var("GITHUB_ACTIONS", "true")
+            .var("CF_E2E_HOSTED_MUSE", "1")
+            .var("RUNNER_TEMP", &runner_temp)
+            .var("CODEX_HOME", &codex)
+            .var(CHILD, "1")
+            .run()
+            .unwrap();
+        assert_ne!(output.code, Some(0), "the child did not refuse");
+        assert!(
+            format!("{}{}", output.stdout, output.stderr).contains("Muse binary lookup: "),
+            "the Muse version path did not fail closed: {}{}",
+            output.stdout,
+            output.stderr
+        );
+    }
+
+    #[test]
+    fn standin_isolation_hosted_muse_accepts_a_safe_named_fixture() {
+        const CHILD: &str = "CF_T1647_SAFE_HOSTED_MUSE";
+        if crate::process::own_var(CHILD).is_some() {
+            let found = super::echo_required().expect("the hosted Muse fixture is available");
+            assert_eq!(found.version, "test-version");
+            crate::standin_process::require_watch_path(&found.binary, "stand-in Muse watch lookup");
+            return;
+        }
+
+        let root = crate::door::made("hosted-muse-safe-").unwrap();
+        let runner_temp = root.path().join("runner-temp");
+        let echo = runner_temp.join("muse-echo");
+        crate::door::make_dir(&echo).unwrap();
+        let launcher = if cfg!(windows) { "muse.cmd" } else { "muse" };
+        let binary = if cfg!(windows) {
+            "muse-bin-test-version.exe"
+        } else {
+            "muse-bin-test-version"
+        };
+        crate::door::write(echo.join(launcher), "synthetic launcher").unwrap();
+        crate::door::write(echo.join(".muse-version"), "test-version\n").unwrap();
+        crate::door::write(echo.join(binary), "synthetic binary").unwrap();
+        let output = crate::process::Run::new(std::env::current_exe().unwrap())
+            .inheriting_env()
+            .args([
+                "--exact",
+                "muse::tests::standin_isolation_hosted_muse_accepts_a_safe_named_fixture",
+                "--nocapture",
+            ])
+            .var("GITHUB_ACTIONS", "true")
+            .var("CF_E2E_HOSTED_MUSE", "1")
+            .var("RUNNER_TEMP", &runner_temp)
+            .var(CHILD, "1")
+            .run()
+            .unwrap();
+        assert_eq!(output.code, Some(0), "{}{}", output.stdout, output.stderr);
+    }
+
+    #[test]
+    fn standin_isolation_hosted_muse_refuses_an_inherited_harness_home() {
+        const CHILD: &str = "CF_T1647_HOSTED_MUSE_HOME";
+        if crate::process::own_var(CHILD).is_some() {
+            let _ = super::echo_required();
+            panic!("the hosted Muse lookup returned without refusing the harness home");
+        }
+
+        let root = crate::door::made("hosted-muse-home-").unwrap();
+        let codex = root.path().join("pretend-owner-codex");
+        let echo = codex.join("muse-echo");
+        crate::door::make_dir(&echo).unwrap();
+        let launcher = if cfg!(windows) { "muse.cmd" } else { "muse" };
+        let binary = if cfg!(windows) {
+            "muse-bin-test-version.exe"
+        } else {
+            "muse-bin-test-version"
+        };
+        crate::door::write(echo.join(launcher), "synthetic launcher").unwrap();
+        crate::door::write(echo.join(".muse-version"), "test-version\n").unwrap();
+        crate::door::write(echo.join(binary), "synthetic binary").unwrap();
+
+        #[cfg(unix)]
+        let runner_temps = {
+            let linked = root.path().join("linked-runner-temp");
+            crate::door::symlink(&codex, &linked).unwrap();
+            vec![codex.clone(), linked]
+        };
+        #[cfg(not(unix))]
+        let runner_temps = vec![codex.clone()];
+        for runner_temp in runner_temps {
+            let output = crate::process::Run::new(std::env::current_exe().unwrap())
+                .inheriting_env()
+                .args([
+                    "--exact",
+                    "muse::tests::standin_isolation_hosted_muse_refuses_an_inherited_harness_home",
+                    "--nocapture",
+                ])
+                .var("GITHUB_ACTIONS", "true")
+                .var("CF_E2E_HOSTED_MUSE", "1")
+                .var("RUNNER_TEMP", &runner_temp)
+                .var("CODEX_HOME", &codex)
+                .var(CHILD, "1")
+                .run()
+                .unwrap();
+            assert_ne!(output.code, Some(0), "the child did not refuse");
+            assert!(
+                format!("{}{}", output.stdout, output.stderr).contains("stand-in Muse lookup"),
+                "the hosted Muse lookup did not fail closed: {}{}",
+                output.stdout,
+                output.stderr
+            );
+        }
+    }
 
     #[test]
     fn the_echo_muse_answers_the_daemons_read_of_the_models_and_nothing_else() {

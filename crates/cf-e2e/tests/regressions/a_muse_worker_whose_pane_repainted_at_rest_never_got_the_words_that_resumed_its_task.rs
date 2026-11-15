@@ -48,21 +48,12 @@ const REPAINT_MS: &str = "50";
 const SETTLE_MS: i64 = 3_000;
 
 /// A rig whose Muse windows repaint at rest, or why there is no Muse to run.
-fn repainting_rig() -> Option<Config> {
-    match muse::installed() {
-        Ok(install) => Some(
-            config()
-                .muse(install, TURN_MS)
-                .var("CF_TEST_MUSE_REPAINT_MS", REPAINT_MS),
-        ),
-        Err(why) => {
-            #[allow(clippy::print_stderr)] // Said in the output of the case it skips.
-            {
-                eprintln!("skipped: {why}");
-            }
-            None
-        }
-    }
+fn repainting_rig() -> Result<Config, String> {
+    muse::echo_required().map(|install| {
+        config()
+            .muse(install, TURN_MS)
+            .var("CF_TEST_MUSE_REPAINT_MS", REPAINT_MS)
+    })
 }
 
 /// The `delivery.begun` events of the messages the daemon let into a window it read by the
@@ -81,9 +72,7 @@ fn looks(rig: &Rig) -> Vec<Value> {
 
 #[test]
 fn a_muse_worker_whose_pane_repainted_at_rest_got_the_words_that_resumed_its_task() -> Outcome {
-    let Some(config) = repainting_rig() else {
-        return Ok(());
-    };
+    let config = repainting_rig()?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
     rig.tell(
