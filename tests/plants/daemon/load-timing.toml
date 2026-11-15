@@ -238,7 +238,7 @@ runs = ["lt-pty"]
 platforms = ["macos", "linux"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/flow.rs"
 find = '''            state.unacked.pop_front();
             state.unacked_bytes -= byte_count;
         }

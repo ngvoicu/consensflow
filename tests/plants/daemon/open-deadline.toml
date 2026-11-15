@@ -7,7 +7,7 @@
 # participant opens until the host says it has ended it, asked again at each step
 # (`crates/cf-engine/src/windows.rs`, `end_abandoned`; `crates/cf-engine/src/dispatcher.rs`,
 # `step` and `pass`); and the pane host never opens a window it was asked to kill before its
-# open reached it (`crates/cf-panes/src/pty.rs`, `cancel` and `uncancel`). The daemon's open
+# open reached it (`crates/cf-panes/src/pty/teardown.rs`, `cancel` and `uncancel`). The daemon's open
 # deadline can be cut for a test (`CONSENSFLOW_OPEN_DEADLINE_MS`,
 # `crates/cf-engine/src/seams.rs`). The case on the rig is
 # `crates/cf-e2e/tests/regressions/a_window_whose_open_missed_its_deadline_worked_on_unseen.rs`,
@@ -131,7 +131,7 @@ meant = "a_window_killed_before_its_open_never_opens_and_its_next_generation_doe
 runs = ["od-panes"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/teardown.rs"
 find = "            self.cancel(key);\n            drop(panes);"
 replace = "            drop(panes);"
 
@@ -142,7 +142,7 @@ runs = ["od-rig"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/teardown.rs"
 find = "            self.cancel(key);\n            drop(panes);"
 replace = "            drop(panes);"
 
@@ -152,7 +152,7 @@ meant = "a_window_killed_before_its_open_never_opens_and_its_next_generation_doe
 runs = ["od-panes"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/spawn.rs"
 find = "        if self.uncancel(&key) {"
 replace = "        if false && self.uncancel(&key) {"
 
@@ -162,7 +162,7 @@ meant = "the_windows_killed_before_they_opened_are_the_latest_few"
 runs = ["od-panes"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/teardown.rs"
 find = "            cancelled.pop_front();"
 replace = "            let _ = &cancelled;"
 
@@ -192,7 +192,7 @@ meant = "a_kill_of_a_window_another_kill_is_ending_answers_once_its_program_is_g
 runs = ["od-panes"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/teardown.rs"
 find = "            if self.ending.wait(key, self.close_grace + EXIT_GRACE) {"
 replace = "            if true || self.ending.wait(key, self.close_grace + EXIT_GRACE) {"
 
