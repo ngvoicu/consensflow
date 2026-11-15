@@ -83,3 +83,19 @@ fn a_session_whose_last_step_was_aborted_says_so_and_a_later_step_takes_it_back(
         assert_eq!(stage.at(120_000).aborted, aborted, "{stops:?}");
     }
 }
+
+#[tokio::test]
+async fn a_turn_whose_last_step_was_aborted_is_not_known_to_be_at_rest_where_one_that_stopped_is() {
+    use crate::contract::{tests::Says, Records, TurnLeft};
+    for (stop, left) in [("aborted", None), ("stop", Some(TurnLeft::AtRest))] {
+        let mut stage = Stage::with(&[header(), user("u1", "go"), assistant("a1", stop, "words")]);
+        let reading = (*stage.look(120_000, &Options::default())).clone();
+        assert_eq!(
+            Says(reading)
+                .turn_cut(cf_proto::agents::Harness::Pi, "a-session")
+                .await,
+            left,
+            "{stop}"
+        );
+    }
+}

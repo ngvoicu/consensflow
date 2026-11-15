@@ -18,6 +18,8 @@ fcn-harness-closed = ["cargo", "test", "--offline", "-p", "cf-harness", "--test"
 fcn-harness-outside = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::outside"]
 # The Resume's notes.
 fcn-engine-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::"]
+# A member the quit cut at an abort is told at its Resume, a chief is not (T-1707).
+fcn-engine-abort = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "pi_resume::"]
 # The ledger's words of a continuation, and its withdrawal of a note.
 fcn-ledger-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::continuations"]
 fcn-ledger-receipt = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "continuations::"]
@@ -52,7 +54,7 @@ runs = ["fcn-harness-contract"]
 [[plant.edit]]
 file = "crates/cf-harness/src/contract.rs"
 find = '''
-                    Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),'''
+            Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),'''
 replace = ""
 
 [[plant]]
@@ -128,7 +130,20 @@ replace = '''        if !begins_no_turn(&taken) || !taken.is_empty() {'''
 [[plant.edit]]
 file = "crates/cf-harness/src/contract.rs"
 find = '''
-                    Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),'''
+            Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),'''
+replace = ""
+
+# --- A2: an abort cannot say who ended the turn ---
+
+[[plant]]
+name = "false cut note: a turn the record ends in an abort is read as at rest"
+meant = "a_turn_the_record_ends_in_an_abort_is_not_known_to_be_at_rest"
+runs = ["fcn-harness-contract", "fcn-engine-abort"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''
+            Settlement::Settled if record.aborted => None,'''
 replace = ""
 
 # --- C: a cut turn is named ---
@@ -180,8 +195,8 @@ runs = ["fcn-harness-closed"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/contract.rs"
-find = '''                    Settlement::InFlight => Some(TurnLeft::Cut(Opening::of(&record.items))),'''
-replace = '''                    Settlement::InFlight => Some(TurnLeft::Cut(None)),'''
+find = '''            Settlement::InFlight => Some(TurnLeft::Cut(Opening::of(&record.items))),'''
+replace = '''            Settlement::InFlight => Some(TurnLeft::Cut(None)),'''
 
 [[plant]]
 name = "false cut note: the chief's note does not name the turn"

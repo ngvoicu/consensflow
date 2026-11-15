@@ -145,6 +145,10 @@ pub struct FakeAgent {
     /// Its record, read with no window open, cannot tell whether its turn was
     /// cut: Devin's, which reads a turn as going on only while its window shows it.
     pub cannot_tell_a_cut: bool,
+    /// Its last turn ended in an abort its harness writes as a turn over (`Record::aborted`),
+    /// as a quit and an Escape both leave it: read with no window open through the rule of the
+    /// harness contract.
+    pub ended_in_abort: bool,
     /// The message its record shows a turn with no end began with, read with no
     /// window open: none where it shows none.
     pub opening: Option<Opening>,
@@ -719,6 +723,21 @@ impl FakeAdapter {
         self.with(handle, |agent| agent.settled = false);
     }
 
+    /// Its last turn ended in an abort (`Record::aborted`).
+    pub fn ended_in_abort(&self, handle: &str) {
+        self.with(handle, |agent| agent.ended_in_abort = true);
+    }
+
+    /// Whether the latest window on `session` ended its turn in an abort.
+    pub(super) fn aborted_of(&self, session: &str) -> bool {
+        let agents = self.agents.borrow();
+        agents
+            .iter()
+            .rev()
+            .find(|agent| agent.native == session)
+            .is_some_and(|agent| agent.ended_in_abort)
+    }
+
     /// Its record cannot tell, with no window open, whether its turn was cut,
     /// as Devin's cannot.
     pub fn cannot_tell_a_cut(&self, handle: &str) {
@@ -1290,6 +1309,7 @@ impl Asked {
             over: Over::No,
             busy_when_interrupted: false,
             cannot_tell_a_cut: false,
+            ended_in_abort: false,
             opening: None,
             resumable: Some(true),
             used: None,
