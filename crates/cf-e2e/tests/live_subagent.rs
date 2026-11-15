@@ -906,23 +906,23 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn kit_round3_subagent_refuses_linked_out_sqlite_sidecars() {
-        let run = cf_e2e::door::made("cf-subagent-guard-").unwrap();
-        let foreign = tempfile::tempdir().unwrap();
-        std::fs::write(foreign.path().join("secret"), "fabricated record").unwrap();
-        let store = run.path().join("sessions.db");
-        std::fs::write(&store, "fabricated store").unwrap();
-        std::os::unix::fs::symlink(
-            foreign.path().join("secret"),
-            run.path().join("sessions.db-wal"),
-        )
-        .unwrap();
-        let copy = run.path().join("copy");
-        cf_e2e::door::make_dir(&copy).unwrap();
-        copy_devin_store(&store, &copy);
-        assert!(
-            !copy.join("sessions.db-wal").exists(),
-            "a linked-out sidecar was copied"
-        );
+        for suffix in ["-shm", "-wal"] {
+            let run = cf_e2e::door::made("cf-subagent-guard-").unwrap();
+            let foreign = tempfile::tempdir().unwrap();
+            std::fs::write(foreign.path().join("secret"), "fabricated record").unwrap();
+            let store = run.path().join("sessions.db");
+            std::fs::write(&store, "fabricated store").unwrap();
+            let name = format!("sessions.db{suffix}");
+            std::os::unix::fs::symlink(foreign.path().join("secret"), run.path().join(&name))
+                .unwrap();
+            let copy = run.path().join("copy");
+            cf_e2e::door::make_dir(&copy).unwrap();
+            copy_devin_store(&store, &copy);
+            assert!(
+                !copy.join(&name).exists(),
+                "a linked-out {suffix} sidecar was copied"
+            );
+        }
     }
 
     #[test]
