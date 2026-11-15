@@ -378,6 +378,12 @@ fn kit_round3_pi_package_skips_links_out_and_keeps_links_inside() {
             .is_symlink(),
         "the package's internal link was lost"
     );
+    assert!(
+        fs::canonicalize(copy.join("internal.ts"))
+            .unwrap()
+            .starts_with(fs::canonicalize(&copy).unwrap()),
+        "the internal link points back to the owner's package"
+    );
     assert_eq!(
         fs::read_to_string(copy.join("internal.ts")).unwrap(),
         "the extension's library"
