@@ -32,7 +32,7 @@ meant = "what_a_member_writes_before_its_first_tool_call_is_its_reply_and_what_i
 runs = ["tell-reply-unit", "tell-reply-engine"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = "            Role::Assistant if !self.over && !item.synthetic => self.run.push(item),"
 replace = "            Role::Assistant if !self.over && !item.synthetic => {}"
 
@@ -42,7 +42,7 @@ meant = "the_progress_a_window_writes_between_its_tools_stays_out_of_the_note"
 runs = ["tell-reply-engine", "tell-reply-unit"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = "            Role::Assistant if !self.over && !item.synthetic => self.run.push(item),"
 replace = "            Role::Assistant if !item.synthetic => self.run.push(item),"
 
@@ -52,7 +52,7 @@ meant = "what_a_harness_wrote_itself_is_no_reply"
 runs = ["tell-reply-engine", "tell-reply-unit"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = "            Role::Assistant if !self.over && !item.synthetic => self.run.push(item),"
 replace = "            Role::Assistant if !self.over => self.run.push(item),"
 
@@ -62,7 +62,7 @@ meant = "a_turn_with_no_tool_call_or_with_one_before_its_words_has_no_reply"
 runs = ["tell-reply-unit"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = "        if self.over {\n            self.run\n        } else {\n            Vec::new()\n        }"
 replace = "        self.run"
 
@@ -72,7 +72,7 @@ meant = "only_the_turn_after_the_latest_message_has_a_reply"
 runs = ["tell-reply-unit"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = "            Role::User => *self = Self::default(),"
 replace = "            Role::User => {}"
 
@@ -193,7 +193,7 @@ meant = "only_the_turn_after_the_latest_message_has_a_reply"
 runs = ["tell-reply-unit"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = "        if of_the_role {\n            return;\n        }\n        match item.role {\n            Role::User => *self = Self::default(),"
 replace = "        match item.role {\n            Role::User => *self = Self::default(),"
 

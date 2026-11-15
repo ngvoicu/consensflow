@@ -71,7 +71,7 @@ meant = "a_turn_that_wrote_nothing_after_its_last_tool_call_gives_the_last_words
 runs = ["rt-engine-final"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '        Some(said) if !run.iter().any(|item| has_words(item)) => Run {'
 replace = '        Some(said) if run.is_empty() => Run {'
 
@@ -82,7 +82,7 @@ runs = ["rt-rig-progress"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '        final_run: with_words(&final_run, said),'
 replace = '        final_run: with_words(&final_run, None),'
 
@@ -92,7 +92,7 @@ meant = "the_words_before_a_woken_turns_last_tool_call_are_its_own_and_none_of_t
 runs = ["rt-engine-final"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '                said = said.filter(|_| of_the_role);'
 replace = ''
 
@@ -102,7 +102,7 @@ meant = "a_turn_that_wrote_nothing_after_its_last_tool_call_gives_the_last_words
 runs = ["rt-engine-final"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '    !item.commentary && !item.synthetic && !js::trim(&item.text).is_empty()'
 replace = '    !item.synthetic && !js::trim(&item.text).is_empty()'
 
@@ -112,7 +112,7 @@ meant = "a_turn_with_no_words_after_its_last_tool_call_answers_with_the_last_wor
 runs = ["rt-role-change-lib"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '    !item.commentary && !item.synthetic && !js::trim(&item.text).is_empty()'
 replace = '    !item.commentary && !js::trim(&item.text).is_empty()'
 
@@ -122,7 +122,7 @@ meant = "finish_takes_the_last_words_before_the_last_tool_call_of_a_held_turn_th
 runs = ["rt-engine-final"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '                    complete_run = Some(with_words(&final_run, said));'
 replace = '                    complete_run = Some(with_words(&final_run, None));'
 
@@ -152,7 +152,7 @@ meant = "the_last_words_a_result_takes_say_so_above_them_and_no_other_words_do"
 runs = ["rt-turn-end-lib"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '            last_words: true,'
 replace = '            last_words: false,'
 

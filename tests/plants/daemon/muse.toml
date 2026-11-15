@@ -2825,7 +2825,7 @@ meant = "a_session_no_hook_greeted_is_given_the_role_first_and_one_a_hook_greete
 runs = ["muse-role-cleared"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/greeting.rs"
 find = '''        if window.is_none_or(|window| window.greeted(session))'''
 replace = '''        if window.is_none()'''
 
@@ -2835,7 +2835,7 @@ meant = "a_session_no_hook_greeted_is_given_the_role_first_and_one_a_hook_greete
 runs = ["muse-role-cleared"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/greeting.rs"
 find = '''            if told.is_some_and(|told| told == role.instructions) {'''
 replace = '''            if told.is_some_and(|told| told.is_empty()) {'''
 
@@ -2845,7 +2845,7 @@ meant = "a_harness_that_keeps_its_first_instructions_is_given_nothing_at_a_switc
 runs = ["muse-role-cleared"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/greeting.rs"
 find = '''            .filter(|adapter| !adapter.keeps_first_instructions())'''
 replace = '''            .filter(|_| true)'''
 
@@ -2889,9 +2889,9 @@ meant = "a_member_at_work_long_after_a_switch_to_a_session_no_hook_greeted_keeps
 runs = ["muse-role-cleared"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/greeting.rs"
 find = '''        record.delivery.borrow_mut().greeting = Some(note.id);'''
-replace = '''        record.delivery.borrow_mut().prelude = Some(Prelude {
+replace = '''        record.delivery.borrow_mut().prelude = Some(super::Prelude {
             replacement: note.id,
             displaced: None,
             chief: participant.role == "chief",
@@ -2915,7 +2915,7 @@ meant = "a_greeting_whose_session_a_hook_greeted_meanwhile_is_withdrawn_unsent"
 runs = ["muse-role-cleared"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/greeting.rs"
 find = '''        if note.state == "queued" && self.greeted_since(record)? {'''
 replace = '''        if note.state == "queued" && self.greeted_since(record)? && false {'''
 
@@ -2925,7 +2925,7 @@ meant = "two_switches_before_the_greeting_goes_in_write_one_note"
 runs = ["muse-role-cleared"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/greeting.rs"
 find = '''            || self.greeting(record)?.is_some()
 '''
 replace = ''''''
