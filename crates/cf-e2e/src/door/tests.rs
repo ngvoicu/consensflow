@@ -326,7 +326,7 @@ fn a_stand_ins_status_file_is_taken_below_a_folder_of_the_run_and_a_file_elsewhe
     let sessions = run.path().join("sessions");
     fs::create_dir_all(&sessions).unwrap();
     let own = sessions.join(format!("{}.json", std::process::id()));
-    let elsewhere = tempfile::tempdir().unwrap();
+    let elsewhere = crate::standin_process::unowned_tempdir();
     let theirs = elsewhere
         .path()
         .join(format!("{}.json", std::process::id()));
@@ -352,7 +352,7 @@ fn a_name_the_run_made_for_a_file_is_taken_only_below_a_folder_the_run_made() {
     let folder = made("door-own-name-test-").unwrap();
     let own = folder.path().join(own_name("ticks", "txt"));
     fs::write(&own, "1").unwrap();
-    let outside = tempfile::tempdir().unwrap();
+    let outside = crate::standin_process::unowned_tempdir();
     let alike = outside.path().join(own_name("ticks", "txt"));
     fs::write(&alike, "1").unwrap();
 
@@ -373,7 +373,7 @@ fn a_name_the_run_made_for_a_file_is_taken_only_below_a_folder_the_run_made() {
 
 #[test]
 fn a_write_in_the_live_zone_goes_only_below_a_folder_this_run_made() {
-    let home = tempfile::tempdir().unwrap();
+    let home = crate::standin_process::unowned_tempdir();
     let live = crate::live::machine::live_root(home.path());
     let other = live.join("bench");
     fs::create_dir_all(&other).unwrap();
@@ -426,7 +426,7 @@ fn a_write_in_the_live_zone_goes_only_below_a_folder_this_run_made() {
 
 /// A folder of a person's, which this run made none of, with a file of theirs in it.
 fn a_persons_folder() -> (tempfile::TempDir, PathBuf) {
-    let theirs = tempfile::tempdir().unwrap();
+    let theirs = crate::standin_process::unowned_tempdir();
     let kept = theirs.path().join("kept.txt");
     fs::write(&kept, "theirs").unwrap();
     (theirs, kept)
@@ -542,7 +542,7 @@ fn a_file_a_caller_names_is_made_new_and_refused_where_it_is_there_and_is_then_t
 
 #[test]
 fn the_place_an_allocation_is_made_in_is_made_where_it_is_not_there_and_is_no_place_to_write() {
-    let home = tempfile::tempdir().unwrap();
+    let home = crate::standin_process::unowned_tempdir();
     let live = home.path().join(".consensflow-candidate").join("live");
     let mine = made_in(&live, "case-").unwrap();
     assert!(live.is_dir() && mine.path().starts_with(&live));
@@ -736,7 +736,7 @@ fn a_folder_the_door_made_goes_when_it_is_dropped_and_one_kept_stays_marked() {
 
 #[test]
 fn the_door_takes_no_folder_it_did_not_make_nor_a_path_under_none() {
-    let parent = tempfile::tempdir().unwrap();
+    let parent = crate::standin_process::unowned_tempdir();
     let other = parent.path().join("consensflow-integration-another-run");
     fs::create_dir_all(other.join("workspace")).unwrap();
     let door = Door::acting();

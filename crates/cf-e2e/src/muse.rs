@@ -1138,17 +1138,17 @@ mod tests {
         install(&forbidden, "must-not-be-read");
         install(&allowed, "safe");
         let path = std::env::join_paths([&forbidden, &allowed]).unwrap();
-        let output = crate::process::Run::new(std::env::current_exe().unwrap())
-            .inheriting_env()
-            .args([
-                "--exact",
-                "muse::tests::standin_isolation_muse_search_passes_over_an_inherited_harness_home",
-                "--nocapture",
-            ])
-            .var("CODEX_HOME", &forbidden)
-            .var(CHILD_PATH, path)
-            .run()
-            .unwrap();
+        let output = crate::process::case_of(
+            std::env::current_exe().unwrap(),
+            "muse::tests::standin_isolation_muse_search_passes_over_an_inherited_harness_home",
+            std::time::Duration::from_secs(120),
+        )
+        .inheriting_env()
+        .arg("--nocapture")
+        .var("CODEX_HOME", &forbidden)
+        .var(CHILD_PATH, path)
+        .run()
+        .unwrap();
         assert_eq!(output.code, Some(0), "{}{}", output.stdout, output.stderr);
     }
 

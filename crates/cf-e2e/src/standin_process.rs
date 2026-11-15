@@ -559,6 +559,23 @@ pub fn require_watch_path(path: &Path, lookup: &str) {
     );
 }
 
+/// A synthetic foreign folder must be outside every root handed to this test
+/// process, including the parent's root when the test runs again under audit.
+#[cfg(test)]
+pub(crate) fn unowned_tempdir() -> tempfile::TempDir {
+    let temp = std::env::temp_dir();
+    let parent = temp
+        .ancestors()
+        .find(|path| crate::door::writable(path, true).is_err())
+        .expect("no unowned parent of the stand-in temp folder");
+    let foreign = tempfile::Builder::new()
+        .prefix("foreign-fixture-")
+        .tempdir_in(parent)
+        .expect("make a synthetic foreign folder");
+    assert!(crate::door::writable(foreign.path(), true).is_err());
+    foreign
+}
+
 #[cfg(test)]
 mod tests {
     use super::safe_path_entry;
@@ -568,11 +585,15 @@ mod tests {
         let root = crate::door::made("missing-home-").unwrap();
         let path = root.path().join(".codex").join("bin");
         crate::door::make_dir(&path).unwrap();
-        let mut command = crate::process::Run::new(std::env::current_exe().unwrap())
-            .inheriting_env()
-            .arg("--list")
-            .var("PATH", &path)
-            .without("CF_E2E_STAND_IN");
+        let mut command = crate::process::case_of(
+            std::env::current_exe().unwrap(),
+            "standin_process::tests::standin_isolation_missing_inherited_home_refuses_before_searching_path",
+            std::time::Duration::from_secs(120),
+        )
+        .inheriting_env()
+        .arg("--list")
+        .var("PATH", &path)
+        .without("CF_E2E_STAND_IN");
         for (name, _) in super::home_vars(root.path()) {
             command = command.without(name);
         }
@@ -602,19 +623,19 @@ mod tests {
         let home = root.path().join("account");
         let target = home.join(".local").join("bin");
         crate::door::make_dir(&target).unwrap();
-        let output = crate::process::Run::new(std::env::current_exe().unwrap())
-            .inheriting_env()
-            .args([
-                "--exact",
-                "standin_process::tests::standin_isolation_inherited_account_home_is_not_searched_on_path",
-            ])
-            .var("HOME", &home)
-            .var("USERPROFILE", &home)
-            .var("PATH", &target)
-            .var(CHILD, &target)
-            .without("CF_E2E_STAND_IN")
-            .run()
-            .unwrap();
+        let output = crate::process::case_of(
+            std::env::current_exe().unwrap(),
+            "standin_process::tests::standin_isolation_inherited_account_home_is_not_searched_on_path",
+            std::time::Duration::from_secs(120),
+        )
+        .inheriting_env()
+        .var("HOME", &home)
+        .var("USERPROFILE", &home)
+        .var("PATH", &target)
+        .var(CHILD, &target)
+        .without("CF_E2E_STAND_IN")
+        .run()
+        .unwrap();
         assert_eq!(output.code, Some(0), "{}{}", output.stdout, output.stderr);
     }
 
@@ -622,14 +643,18 @@ mod tests {
     fn standin_isolation_unowned_audit_file_is_refused_before_it_is_opened() {
         let temp = std::env::temp_dir();
         let foreign = temp.parent().unwrap().join("synthetic-foreign-audit-file");
-        let output = crate::process::Run::new(std::env::current_exe().unwrap())
-            .inheriting_env()
-            .arg("--list")
-            .var(crate::door::AUDIT, "1")
-            .var(crate::door::AUDIT_MADE, "1")
-            .var(crate::door::AUDIT_FILE, &foreign)
-            .run()
-            .unwrap();
+        let output = crate::process::case_of(
+            std::env::current_exe().unwrap(),
+            "standin_process::tests::standin_isolation_unowned_audit_file_is_refused_before_it_is_opened",
+            std::time::Duration::from_secs(120),
+        )
+        .inheriting_env()
+        .arg("--list")
+        .var(crate::door::AUDIT, "1")
+        .var(crate::door::AUDIT_MADE, "1")
+        .var(crate::door::AUDIT_FILE, &foreign)
+        .run()
+        .unwrap();
         assert_ne!(output.code, Some(0), "unowned audit file was accepted");
         assert!(
             output.stderr.contains("stand-in audit file lookup"),
@@ -648,21 +673,21 @@ mod tests {
     fn standin_isolation_fixture_home_must_be_handed_down() {
         let temp = std::env::temp_dir();
         let foreign = temp.parent().unwrap().join("synthetic-foreign-layout");
-        let output = crate::process::Run::new(std::env::current_exe().unwrap())
-            .inheriting_env()
-            .args([
-                "--exact",
-                "standin_process::tests::standin_isolation_fixture_home_must_be_handed_down",
-            ])
-            .var("CF_E2E_STAND_IN", "1")
-            .var(super::FIXTURE_HOME, foreign.join("home"))
-            .var("HOME", foreign.join("home"))
-            .var("USERPROFILE", foreign.join("home"))
-            .var("TMPDIR", foreign.join("temp"))
-            .var("TMP", foreign.join("temp"))
-            .var("TEMP", foreign.join("temp"))
-            .run()
-            .unwrap();
+        let output = crate::process::case_of(
+            std::env::current_exe().unwrap(),
+            "standin_process::tests::standin_isolation_fixture_home_must_be_handed_down",
+            std::time::Duration::from_secs(120),
+        )
+        .inheriting_env()
+        .var("CF_E2E_STAND_IN", "1")
+        .var(super::FIXTURE_HOME, foreign.join("home"))
+        .var("HOME", foreign.join("home"))
+        .var("USERPROFILE", foreign.join("home"))
+        .var("TMPDIR", foreign.join("temp"))
+        .var("TMP", foreign.join("temp"))
+        .var("TEMP", foreign.join("temp"))
+        .run()
+        .unwrap();
         assert_ne!(output.code, Some(0), "unowned fixture was accepted");
         assert!(
             output

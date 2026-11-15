@@ -451,17 +451,17 @@ mod tests {
             .parent()
             .unwrap()
             .join(format!("synthetic-foreign-harness-{}", std::process::id()));
-        let output = crate::process::Run::new(std::env::current_exe().unwrap())
-            .inheriting_env()
-            .args([
-                "--exact",
-                "rig::install::tests::standin_isolation_window_path_refuses_a_foreign_harness_home",
-            ])
-            .var(CHILD, "1")
-            .var(DECOY, &decoy)
-            .var("CODEX_HOME", &decoy)
-            .run()
-            .unwrap();
+        let output = crate::process::case_of(
+            std::env::current_exe().unwrap(),
+            "rig::install::tests::standin_isolation_window_path_refuses_a_foreign_harness_home",
+            std::time::Duration::from_secs(120),
+        )
+        .inheriting_env()
+        .var(CHILD, "1")
+        .var(DECOY, &decoy)
+        .var("CODEX_HOME", &decoy)
+        .run()
+        .unwrap();
         assert_eq!(output.code, Some(0), "{}{}", output.stdout, output.stderr);
     }
 

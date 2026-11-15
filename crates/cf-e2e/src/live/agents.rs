@@ -644,23 +644,23 @@ mod tests {
         let agent = inherited.path().join(".pi/agent");
         crate::door::make_dir(&agent).unwrap();
         crate::door::write(agent.join("auth.json"), "{\"outside-provider\":{}}\n").unwrap();
-        let output = crate::process::Run::new(std::env::current_exe().unwrap())
-            .inheriting_env()
-            .args([
-                "--exact",
-                "live::agents::tests::standin_isolation_log_begin_never_reads_a_decoy_pi_auth",
-                "--nocapture",
-            ])
-            .var(CHILD, "1")
-            .var(OUTSIDE, inherited.path())
-            .var("HOME", inherited.path())
-            .var("USERPROFILE", inherited.path())
-            .var("CF_E2E_STAND_IN", "1")
-            .without("PI_CODING_AGENT_DIR")
-            .without("PI_CODING_AGENT_SESSION_DIR")
-            .without("CONSENSFLOW_TEST_MACHINE")
-            .run()
-            .unwrap();
+        let output = crate::process::case_of(
+            std::env::current_exe().unwrap(),
+            "live::agents::tests::standin_isolation_log_begin_never_reads_a_decoy_pi_auth",
+            std::time::Duration::from_secs(120),
+        )
+        .inheriting_env()
+        .arg("--nocapture")
+        .var(CHILD, "1")
+        .var(OUTSIDE, inherited.path())
+        .var("HOME", inherited.path())
+        .var("USERPROFILE", inherited.path())
+        .var("CF_E2E_STAND_IN", "1")
+        .without("PI_CODING_AGENT_DIR")
+        .without("PI_CODING_AGENT_SESSION_DIR")
+        .without("CONSENSFLOW_TEST_MACHINE")
+        .run()
+        .unwrap();
         assert!(output.code == Some(0), "{}{}", output.stdout, output.stderr);
     }
 

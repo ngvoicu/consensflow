@@ -32,17 +32,17 @@ fn standin_isolation_muse_launcher_refuses_an_inherited_harness_home() {
     crate::door::write(codex.join(launcher), "synthetic launcher").unwrap();
     crate::door::write(codex.join(".muse-version"), "test-version\n").unwrap();
     crate::door::write(codex.join(binary), "synthetic binary").unwrap();
-    let output = crate::process::Run::new(std::env::current_exe().unwrap())
-        .inheriting_env()
-        .args([
-            "--exact",
-            "live::machine::tests::standin_isolation_muse_launcher_refuses_an_inherited_harness_home",
-            "--nocapture",
-        ])
-        .var("CODEX_HOME", &codex)
-        .var(CHILD, &codex)
-        .run()
-        .unwrap();
+    let output = crate::process::case_of(
+        std::env::current_exe().unwrap(),
+        "live::machine::tests::standin_isolation_muse_launcher_refuses_an_inherited_harness_home",
+        std::time::Duration::from_secs(120),
+    )
+    .inheriting_env()
+    .arg("--nocapture")
+    .var("CODEX_HOME", &codex)
+    .var(CHILD, &codex)
+    .run()
+    .unwrap();
     assert_ne!(output.code, Some(0), "the child did not refuse");
     assert!(
         format!("{}{}", output.stdout, output.stderr).contains("Muse launcher lookup: "),
@@ -747,17 +747,19 @@ fn a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed()
         );
         return;
     }
-    // A folder made by the parent, but not handed to the child. The child has
-    // a fresh ownership registry and must leave this synthetic config alone.
-    let given = crate::door::made("foreign-config-").unwrap();
-    crate::door::write(given.path().join(".claude.json"), r#"{"projects":{}}"#).unwrap();
-    let child = crate::process::Run::new(std::env::current_exe().unwrap())
-        .inheriting_env()
-        .args(["--exact", "live::machine::tests::a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed"])
-        .var(FOREIGN, given.path())
-        .without("CF_E2E_STAND_IN")
-        .without(crate::door::MADE_ROOTS)
-        .run().unwrap();
+    // A synthetic folder outside the run's handed roots stays foreign to the
+    // child, including when this test runs again under a say-only audit.
+    let given = crate::standin_process::unowned_tempdir();
+    fs::write(given.path().join(".claude.json"), r#"{"projects":{}}"#).unwrap();
+    let child = crate::process::case_of(
+        std::env::current_exe().unwrap(),
+        "live::machine::tests::a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed",
+        std::time::Duration::from_secs(120),
+    )
+    .inheriting_env()
+    .var(FOREIGN, given.path())
+    .run()
+    .unwrap();
     assert_eq!(child.code, Some(0), "{}{}", child.stdout, child.stderr);
     // A folder this run made, whose .claude.json is a link, is not written through.
     #[cfg(unix)]
@@ -765,7 +767,7 @@ fn a_claude_config_this_run_did_not_make_is_not_written_through_the_trust_seed()
         let home = crate::door::made("cf-test-").unwrap();
         let made = crate::door::made("consensflow-seed-test-").unwrap();
         let target = given.path().join("elsewhere.json");
-        crate::door::write(&target, "{}").unwrap();
+        fs::write(&target, "{}").unwrap();
         crate::door::symlink(&target, made.path().join(".claude.json")).unwrap();
         assert!(seed_claude_trust(made.path(), home.path()).is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), "{}");
@@ -893,11 +895,12 @@ fn a_rig_that_seats_muse_runs_it_through_the_rigs_own_launcher() {
     crate::files::write(&bin.path().join(".muse-version"), "1.4.14-R7309.1\n").unwrap();
     crate::files::write_executable(&bin.path().join("muse-bin-1.4.14-R7309.1"), "#!/bin/sh\n")
         .unwrap();
-    let muse = Installed::at(Harness::Muse, bin.path().join("muse"), "/home/me");
+    let home = crate::door::made("cf-test-home-").unwrap();
+    let muse = Installed::at(Harness::Muse, bin.path().join("muse"), home.path());
     let config = rig(&[muse], "/the/stand-in");
-    assert_eq!(config.muse_live_home(), Some(Path::new("/home/me")));
+    assert_eq!(config.muse_live_home(), Some(home.path()));
     // A rig that seats no Muse runs none.
-    let codex = Installed::at(Harness::Codex, "/bin/echo", "/home/me");
+    let codex = Installed::at(Harness::Codex, "/bin/echo", home.path());
     assert_eq!(rig(&[codex], "/the/stand-in").muse_live_home(), None);
 }
 

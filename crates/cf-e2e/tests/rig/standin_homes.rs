@@ -117,13 +117,13 @@ fn standin_isolation_replaces_every_inherited_home_before_any_case() -> Outcome 
         .parent()
         .expect("temporary folder has no parent")
         .join(format!("synthetic-foreign-home-{}", std::process::id()));
-    let mut command = cf_e2e::process::Run::new(std::env::current_exe()?)
-        .inheriting_env()
-        .args([
-            "--exact",
-            "standin_homes::standin_isolation_replaces_every_inherited_home_before_any_case",
-        ])
-        .var(CHILD, "1");
+    let mut command = cf_e2e::process::case_of(
+        std::env::current_exe()?,
+        "standin_homes::standin_isolation_replaces_every_inherited_home_before_any_case",
+        std::time::Duration::from_secs(120),
+    )
+    .inheriting_env()
+    .var(CHILD, "1");
     for (name, path) in cf_e2e::standin_process::home_vars(&decoy) {
         command = command.var(name, path);
     }
