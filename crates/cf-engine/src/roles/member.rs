@@ -24,7 +24,11 @@ pub(super) fn text(role: &str, cf: &CfWord, mac: bool) -> Result<String, RoleErr
     let input = shells::paragraph(cf.shell(), "member_input")?;
     let removal = shells::paragraph(cf.shell(), "removal")?;
     // The paragraph for a window on a Mac is none for any other.
-    let home = if mac { shells::mac_paragraph("home")? } else { "" };
+    let home = if mac {
+        shells::mac_paragraph("home")?
+    } else {
+        ""
+    };
     let note = super::cf_note(cf);
     filled(
         STAFF,
@@ -169,6 +173,19 @@ more
 <!-- advisor: title -->
 the advisor
 ";
+
+    #[test]
+    fn a_slot_left_empty_takes_its_paragraph_break_with_it() {
+        let text = "one\n\n{{a}}\n\ntwo\n\n{{b}}\n\nthree {{a}}\n\nfour";
+        let none = |_: &str| Ok("");
+        assert_eq!(fill(text, none).unwrap(), "one\n\ntwo\n\nthree \n\nfour");
+        // A slot with something in it, or in the middle of a line, keeps what follows it.
+        let some = |_: &str| Ok("x");
+        assert_eq!(
+            fill(text, some).unwrap(),
+            "one\n\nx\n\ntwo\n\nx\n\nthree x\n\nfour"
+        );
+    }
 
     #[test]
     fn a_marker_is_a_whole_line_of_two_words() {

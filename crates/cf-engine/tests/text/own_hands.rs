@@ -210,7 +210,10 @@ fn the_guide_has_the_staff_the_tiers_the_window_s_cf_and_the_staff_s_rules() {
     assert!(guide.contains("crisp-comet"));
     let word = if PATH_ONCE { "cf" } else { "/opt/cf/bin/cf" };
     assert!(guide.contains(&format!("{word} task add --tier")));
-    assert_eq!(guide.matches("/opt/cf/bin/cf").count(), usize::from(PATH_ONCE));
+    assert_eq!(
+        guide.matches("/opt/cf/bin/cf").count(),
+        usize::from(PATH_ONCE)
+    );
     assert!(!guide.contains("{{"));
     let heading = "## The project's rules for the staff";
     assert!(guide.contains(heading));

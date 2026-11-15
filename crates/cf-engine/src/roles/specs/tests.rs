@@ -44,9 +44,16 @@ fn with_specs_off_a_chief_s_text_holds_no_word_of_them_and_is_the_text_it_was() 
             "{word:?} in a chief's text with specs off"
         );
     }
-    // The text is chief.md with the staff, each command starting with this window's cf.
+    // The text is chief.md with the staff, its window's cf said once and each command starting
+    // with the word `cf` (the path itself, where the path is written in every command).
     assert!(!chief.contains("This window's cf"));
-    assert!(chief.contains(&format!("\n    {CF} task get T-3 ")));
+    let word = if crate::roles::PATH_ONCE { "cf" } else { CF };
+    assert!(chief.contains(&format!("\n    {word} task get T-3 ")));
+    assert_eq!(
+        chief.matches(CF).count(),
+        usize::from(crate::roles::PATH_ONCE),
+        "the path, said once"
+    );
     assert!(chief.contains("| zeus (Opus · max) | worker | "));
 }
 

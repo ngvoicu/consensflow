@@ -364,11 +364,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-delivers it to whoever asked. Begin with the outcome and what
-the chief has to decide, in a few lines. Then the details. '''
-replace = '''delivers it to whoever asked. '''
-
+find = "ConsensFlow delivers it to whoever asked. Begin with the outcome and what the chief has to decide, in a few lines. Then the details: what you did"
+replace = "ConsensFlow delivers it to whoever asked. Then the details: what you did"
 [[plant]]
 name = "smaller contexts: the advisor's answer does not begin with the outcome"
 meant = "tells_a_worker_an_advisor_a_reviewer_and_a_tester_to_begin_with_the_outcome_and_what_the_chief_decides"
@@ -376,11 +373,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-and delivers it to the chief. Begin with the outcome and what the chief
-has to decide, in a few lines. Then the details. '''
-replace = '''and delivers it to the chief. '''
-
+find = "ConsensFlow delivers it to the chief. Begin with the outcome and what the chief has to decide, in a few lines. Then the details: findings"
+replace = "ConsensFlow delivers it to the chief. Then the details: findings"
 [[plant]]
 name = "smaller contexts: the tester's result does not begin with the outcome"
 meant = "tells_a_worker_an_advisor_a_reviewer_and_a_tester_to_begin_with_the_outcome_and_what_the_chief_decides"
@@ -388,13 +382,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-who decides what happens to the
-work. Begin with the outcome and what the chief has to decide, in
-a few lines. Then the details. A long log'''
-replace = '''who decides what happens to the
-work. A long log'''
-
+find = "who decides what happens to the work. Begin with the outcome and what the chief has to decide, in a few lines. Then the details: what you tested"
+replace = "who decides what happens to the work. Then the details: what you tested"
 [[plant]]
 name = "smaller contexts: the reviewer's findings do not begin with whether the work is ready"
 meant = "tells_the_reviewer_to_begin_with_whether_the_work_is_ready_and_to_number_each_finding_and_say_if_it_blocks"
@@ -402,12 +391,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-Begin with
-whether the work is ready (ready, ready with notes, or not ready) and what the
-chief has to decide, in a few lines. '''
+find = "Begin with whether the work is ready (ready, ready with notes, or not ready) and what the chief has to decide, in a few lines. "
 replace = ""
-
 [[plant]]
 name = "smaller contexts: the worker's result puts a long log in the project"
 meant = "tells_a_worker_an_advisor_a_reviewer_and_a_tester_to_put_a_long_log_in_a_file_outside_the_tracked_files_and_give_its_path"
@@ -415,13 +400,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-A long log, table or
-listing goes in a file outside the project's tracked files (your scratch
-folder, or where the brief says), and the result gives its path. Make it
-complete: what you did'''
-replace = '''Make it complete: what you did'''
-
+find = "anything left open. A long log, table or listing goes in a file outside the project's tracked files (your scratch folder, or where the brief says), and the result gives its path."
+replace = "anything left open."
 [[plant]]
 name = "smaller contexts: the advisor's answer puts a long log in the project"
 meant = "tells_a_worker_an_advisor_a_reviewer_and_a_tester_to_put_a_long_log_in_a_file_outside_the_tracked_files_and_give_its_path"
@@ -429,12 +409,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-A long log, table or listing
-goes in a file outside the project's tracked files (your scratch folder, or
-where the brief says), and the answer gives its path. '''
-replace = ""
-
+find = "and recommendations. A long log, table or listing goes in a file outside the project's tracked files (your scratch folder, or where the brief says), and the answer gives its path."
+replace = "and recommendations."
 [[plant]]
 name = "smaller contexts: the reviewer's findings put a long log in the project"
 meant = "tells_a_worker_an_advisor_a_reviewer_and_a_tester_to_put_a_long_log_in_a_file_outside_the_tracked_files_and_give_its_path"
@@ -442,12 +418,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-A long log, table or listing goes in a file outside the project's
-tracked files (your scratch folder, or where the brief says), and the findings
-give its path. '''
-replace = ""
-
+find = "or newly broken. A long log, table or listing goes in a file outside the project's tracked files (your scratch folder, or where the brief says), and the findings give its path."
+replace = "or newly broken."
 [[plant]]
 name = "smaller contexts: the tester's result puts a long log in the project"
 meant = "tells_a_worker_an_advisor_a_reviewer_and_a_tester_to_put_a_long_log_in_a_file_outside_the_tracked_files_and_give_its_path"
@@ -455,13 +427,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-A long log, table or listing goes
-in a file outside the project's tracked files (your scratch folder,
-or where the brief says), and the result gives its path. Make it
-complete: what you tested'''
-replace = '''Make it complete: what you tested'''
-
+find = "and whether the work is ready. A long log, table or listing goes in a file outside the project's tracked files (your scratch folder, or where the brief says), and the result gives its path."
+replace = "and whether the work is ready."
 [[plant]]
 name = "smaller contexts: the image designer is told to begin with what the chief decides"
 meant = "tells_a_worker_an_advisor_a_reviewer_and_a_tester_to_begin_with_the_outcome_and_what_the_chief_decides"
@@ -489,11 +456,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-Then each finding, numbered so a later
-review can name it, with its evidence, its location and whether it blocks. '''
+find = "Then each finding, numbered so a later review can name it, with its evidence, its location and whether it blocks. "
 replace = ""
-
 [[plant]]
 name = "smaller contexts: every member is asked to number its findings"
 meant = "tells_the_reviewer_to_begin_with_whether_the_work_is_ready_and_to_number_each_finding_and_say_if_it_blocks"
@@ -501,13 +465,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-Make it
-complete: what you did'''
-replace = '''
-Then each finding, numbered so a later review can name it. Make it
-complete: what you did'''
-
+find = "Then the details: what you did, the evidence, anything left open."
+replace = "Then each finding, numbered so a later review can name it. Then the details: what you did, the evidence, anything left open."
 [[plant]]
 name = "smaller contexts: the reviewer is not told what makes a finding block"
 meant = "tells_the_reviewer_to_begin_with_whether_the_work_is_ready_and_to_number_each_finding_and_say_if_it_blocks"
@@ -515,12 +474,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-A
-finding blocks only when it would make the work fail, and then it names the
-requirement, the case and the failure one would see. '''
+find = "A finding blocks only when it would make the work fail, and then it names the requirement, the case and the failure one would see. "
 replace = ""
-
 [[plant]]
 name = "smaller contexts: the reviewer is not told the rest is optional"
 meant = "tells_the_reviewer_to_begin_with_whether_the_work_is_ready_and_to_number_each_finding_and_say_if_it_blocks"
@@ -538,11 +493,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-The
-work is ready when nothing blocks. '''
+find = "The work is ready when nothing blocks. "
 replace = ""
-
 [[plant]]
 name = "smaller contexts: the reviewer is not told a second review checks the earlier findings"
 meant = "tells_the_reviewer_a_second_review_checks_the_earlier_findings_and_what_the_fixes_touch"
@@ -550,13 +502,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-On a second review of the same work, check
-the earlier findings and what the fixes touch, not the whole work again: say of
-each finding whether it is fixed, still open, fixed only in part, or newly
-broken. '''
+find = "On a second review of the same work, check the earlier findings and what the fixes touch, not the whole work again: say of each finding whether it is fixed, still open, fixed only in part, or newly broken. "
 replace = ""
-
 [[plant]]
 name = "smaller contexts: the reviewer is not told a finding can be newly broken"
 meant = "tells_the_reviewer_a_second_review_checks_the_earlier_findings_and_what_the_fixes_touch"
@@ -564,10 +511,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-fixed only in part, or newly
-broken'''
-replace = '''or fixed only in part'''
+find = "fixed only in part, or newly broken"
+replace = "or fixed only in part"
 
 # What the critical review (T-1014, notes 3 and 9) asked back or settled, T-1074 (2026-11-02).
 
@@ -599,11 +544,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = '''- Send work to another window: the board is the only channel, and
-  only the human'''
-replace = '''- Send work to another window:
-  only the human'''
-
+find = "- Send work by any channel but the board; only the human gives you work, here in your terminal."
+replace = "- Send work by any channel; only the human gives you work, here in your terminal."
 [[plant]]
 name = "smaller contexts: the chief's own later step names a task only the card defines"
 meant = "tells_the_chief_its_own_later_step_comes_back_when_the_task_it_needs_is_accepted_naming_no_task"
@@ -621,7 +563,5 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''A review changes no project file: suggested
-fixes belong in your findings.'''
-replace = '''A review changes no file: suggested fixes
-belong in your findings.'''
+find = "A review changes no project file: suggested fixes belong in your findings."
+replace = "A review changes no file: suggested fixes belong in your findings."

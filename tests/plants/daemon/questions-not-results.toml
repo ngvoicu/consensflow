@@ -223,9 +223,8 @@ runs = ["qnr-text"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = "turn has ended. To wait for the chief's answer, ask with `{{cf}} ask`, never in your\nlast words.\n"
-replace = "turn has ended.\n"
-
+find = " or in your last words."
+replace = "."
 [[plant]]
 name = "questions not results: the rig's stand-in answers nothing to a SAY line"
 meant = "a_line_that_says_words_is_answered_with_them_whole"

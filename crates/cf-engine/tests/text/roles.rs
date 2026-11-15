@@ -74,10 +74,7 @@ fn teaches_only_the_boards_commands(role: &str) {
             !text.contains("cf task add @"),
             "no agent gives another a task by name"
         );
-        assert!(found(
-            r"(?i)agent's\s+session files",
-            &text
-        ));
+        assert!(found(r"(?i)agent's\s+session files", &text));
         assert!(
             found(
                 r"\| Member \| Roles \| Work tier \|\n\|---\|---\|---\|\n\| zeus \(Opus · high\) \| worker, reviewer \| Standard work \|",
@@ -167,10 +164,7 @@ fn teaches_only_the_boards_commands(role: &str) {
             !text.contains("the human"),
             "{role} is asked and answers only through the chief"
         );
-        assert!(found(
-            r"(?i)agent's\s+session files",
-            &text
-        ));
+        assert!(found(r"(?i)agent's\s+session files", &text));
         for (pattern, why) in MEMBER_BANS {
             assert!(!found(pattern, &text), "{role} {why}");
         }
@@ -670,7 +664,11 @@ fn holds_for(cf: &CfWord) {
             "{which}: {commands} commands start with {said}"
         );
         if PATH_ONCE {
-            assert_eq!(text.matches(word).count(), 1, "{which}: the path is said once");
+            assert_eq!(
+                text.matches(word).count(),
+                1,
+                "{which}: the path is said once"
+            );
             assert!(
                 text.contains(&format!(
                     "`cf` below stands for this command; type it in full every time:\n`{word}`\n\n## Your commands"
@@ -963,7 +961,11 @@ fn every_member_is_taught_when_and_how_to_tell_without_waiting() {
         let ask = format!("{word} ask \"…\" a question to the chief: then end your turn, the answer arrives as a new message");
         assert_says(commands, role, &[&tell, &ask]);
         assert_eq!(text.matches(&format!("{word} tell ")).count(), 1, "{role}");
-        assert_eq!(text.matches("end your turn").count(), 1, "{role}: said once");
+        assert_eq!(
+            text.matches("end your turn").count(),
+            1,
+            "{role}: said once"
+        );
         assert!(!text.contains(&format!("{word} note --human")), "{role}");
     }
 }
@@ -1413,5 +1415,40 @@ fn the_four_new_roles_texts_say_their_own_territory() {
         r"showing both sides",
     ] {
         assert!(found(said, &integrator), "integrator: {said}");
+    }
+}
+
+#[test]
+fn a_member_is_told_of_the_home_folder_and_the_folders_macos_asks_about_only_on_a_mac() {
+    let on = |role: &str, cf: &CfWord, mac: bool| {
+        role_instructions_on(&Env::default(), role, &[zeus()], cf, None, false, mac).unwrap()
+    };
+    let paragraph = "never over the home folder or in `~/Music` or `~/Pictures`";
+    let roles = [
+        "worker",
+        "advisor",
+        "reviewer",
+        "tester",
+        "designer",
+        "frontend",
+        "architect",
+        "researcher",
+        "integrator",
+    ];
+    for role in roles {
+        for cf in [
+            CfWord::bare(),
+            CfWord::new("/opt/consensflow/bin/cf", Shell::Posix),
+        ] {
+            let mac = on(role, &cf, true);
+            let other = on(role, &cf, false);
+            assert!(mac.contains(paragraph), "{role}: a window on a Mac is told");
+            assert!(!other.contains(paragraph), "{role}: no other window is");
+            assert!(!other.contains("~/Music"), "{role}");
+            // Nothing else differs: the paragraph and its break are all that is left out.
+            let line = mac.lines().find(|line| line.contains(paragraph)).unwrap();
+            assert_eq!(other, mac.replacen(&format!("{line}\n\n"), "", 1), "{role}");
+            assert!(!other.contains("{{") && !other.contains("\n\n\n"), "{role}");
+        }
     }
 }

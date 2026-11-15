@@ -52,7 +52,12 @@ fn the_own_hands_on_note_is_the_short_text_whole_and_fits_in_one_piece() {
             // What the conversation holds once the note is in is the role, whole: the note
             // carries it word for word.
             assert!(note.contains(&instructions));
-            assert!(note.contains(&format!("run `{} guide`", cf.as_str())));
+            let word = if crate::roles::PATH_ONCE {
+                "cf"
+            } else {
+                cf.as_str()
+            };
+            assert!(note.contains(&format!("run `{word} guide`")));
             assert_eq!(note.contains("## This project's specs"), chosen.is_some());
             assert!(!note.contains("## The staff") && !note.contains("task add"));
             assert!(note.ends_with(CONTEXT));

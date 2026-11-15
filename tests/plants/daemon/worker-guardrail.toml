@@ -3,9 +3,9 @@
 # restored files they had not). Two rules stand in 3.0.5, each held by tests:
 #
 # - every member's text (`skill/core/staff.md`) says others work in the same folder, never to throw
-#   away a change it did not make (no `git checkout` or `git restore` that overwrites a file, while
-#   `git restore --staged` of its own change is fine; no `git reset --hard`, `git stash` or
-#   `git clean` over work that is not committed), and to say a file is restored only once it has
+#   away a change it did not make (no `git checkout` or `git restore` over a file, no
+#   `git reset --hard`, `git stash` or `git clean` over work that is not committed; T-1681 cut the
+#   leave to unstage, which overwrites no file), and to say a file is restored only once it has
 #   checked it (`crates/cf-engine/tests/text/roles.rs`, and the 27 members' rows of
 #   `crates/cf-engine/tests/goldens/text.json`, moved by hand);
 # - the eval `uncommitted-work` (`crates/cf-evals/src/scenarios/uncommitted_work.rs`) plays the
@@ -45,14 +45,8 @@ runs = ["engine-text-roles-guardrail"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-Others work in this folder too, and not all of their work is committed. Never
-throw away a change you did not make: no `git checkout` or `git restore` that
-overwrites a file (`git restore --staged` of your own change is fine), and no
-`git reset --hard`, `git stash` or `git clean` over work that is not committed;
-take a change of yours out by hand. Say'''
-replace = "Say"
-
+find = "Others work in this folder too, with work not committed. Never throw away a change you did not make: no `git checkout` or `git restore` over a file, no `git reset --hard`, `git stash` or `git clean` over uncommitted work; take out a change of yours by hand, and say a file is restored only once you have checked it."
+replace = "Others work in this folder too. Say a file is restored only once you have checked it."
 [[plant]]
 name = "worker guardrail: the staff's text forbids git checkout and git restore but lets a stash or a hard reset through"
 meant = "teach_the_worker_only_the_board_s_commands"
@@ -60,11 +54,8 @@ runs = ["engine-text-roles-guardrail"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-(`git restore --staged` of your own change is fine), and no
-`git reset --hard`, `git stash` or `git clean` over work that is not committed;'''
-replace = "(`git restore --staged` of your own change is fine);"
-
+find = "no `git checkout` or `git restore` over a file, no `git reset --hard`, `git stash` or `git clean` over uncommitted work;"
+replace = "no `git checkout` or `git restore` over a file;"
 [[plant]]
 name = "worker guardrail: the staff's text does not say a restore is said only once it is checked"
 meant = "teach_the_worker_only_the_board_s_commands"
@@ -72,36 +63,8 @@ runs = ["engine-text-roles-guardrail"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = ''' Say a file is restored only once you have
-checked it: its diff, or what it holds.'''
-replace = ""
-
-[[plant]]
-name = "worker guardrail: the staff's text forbids any git checkout or git restore of a file, an unstaging too"
-meant = "teach_the_worker_only_the_board_s_commands"
-runs = ["engine-text-roles-guardrail"]
-
-[[plant.edit]]
-file = "skill/core/staff.md"
-find = '''
-no `git checkout` or `git restore` that
-overwrites a file (`git restore --staged` of your own change is fine), and no'''
-replace = '''
-no `git checkout` or `git restore` of a
-file, and no'''
-
-[[plant]]
-name = "worker guardrail: the staff's text does not say a worker may unstage its own change"
-meant = "teach_the_worker_only_the_board_s_commands"
-runs = ["engine-text-roles-guardrail"]
-
-[[plant.edit]]
-file = "skill/core/staff.md"
-find = " (`git restore --staged` of your own change is fine)"
-replace = ""
-
-# The eval's expectations.
-
+find = ", and say a file is restored only once you have checked it."
+replace = "."
 [[plant]]
 name = "worker guardrail: the eval does not ask for the worker's line at T-1's result, so two tasks that did nothing pass"
 meant = "the_uncommitted_work_fails_two_tasks_that_did_nothing_and_said_they_did"

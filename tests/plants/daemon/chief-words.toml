@@ -120,10 +120,8 @@ runs = ["cw-text"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''Do
-not research the project or redesign what was asked.'''
-replace = '''.'''
-
+find = "Do not research the project or redesign what was asked."
+replace = ""
 [[plant]]
 name = "chief-words: the designer guesses at what is missing"
 meant = "teach_the_designer_only_the_board_s_commands"
@@ -131,9 +129,8 @@ runs = ["cw-text"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''`{{cf}} ask "…"` rather than guess, and end your turn;'''
-replace = '''`{{cf}} ask "…"` and end your turn;'''
-
+find = "ask rather than guess."
+replace = "guess."
 [[plant]]
 name = "chief-words: a role text names a preset"
 meant = "names_no_agent_to_pick_no_preset_no_nickname_and_no_cf_agent_or_catalog_in_any_text"

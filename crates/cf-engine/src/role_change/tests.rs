@@ -340,56 +340,71 @@ fn told_whole_or_told_and_read(text: &str, cf: &CfWord) {
 /// read whole, which the docs of this module say, and the parts it is printed in past that.
 #[test]
 fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_docs_say() {
-    let cf = a_mac();
-    let rows_while = |specs_on, rules: Option<&str>, holds: &dyn Fn(&MessageView) -> bool| {
+    let most = the_most_rules();
+    // The rows a chief's role holds, with specs on or off and the rules, as `cf inbox read`
+    // prints it for a window whose `cf` is `cf`: a text that says its path once is not given it
+    // again in each command, so the longest rules and the specs leave room for a staff.
+    let rows_while = |cf: &CfWord,
+                      specs_on,
+                      rules: Option<&str>,
+                      holds: &dyn Fn(&MessageView, &CfWord) -> bool| {
         (1..)
             .take_while(|&rows| {
-                holds(&note(
-                    None,
-                    "note",
-                    body_of(&a_chiefs_role_with(rows, specs_on, rules), &cf),
-                ))
+                holds(
+                    &note(
+                        None,
+                        "note",
+                        body_of(&a_chiefs_role_for(cf, rows, specs_on, rules), cf),
+                    ),
+                    cf,
+                )
             })
             .last()
             .unwrap_or(0)
     };
-    let whole = |note: &MessageView| goes_whole(note, &[], &cf);
-    let one = |note: &MessageView| read_in_one(note, &cf);
-    let most = the_most_rules();
-    assert!(
-        !one(&note(
-            None,
-            "note",
-            body_of(&a_chiefs_role_with(0, true, Some(&most)), &cf),
-        )),
-        "even an empty staff needs parts with specs and the most rules"
-    );
-    assert_eq!(
-        rows_while(true, None, &whole),
-        0,
-        "docs: never whole with specs on"
-    );
-    assert_eq!(
-        rows_while(false, None, &whole),
-        0,
-        "docs: never whole without specs either"
-    );
-    assert_eq!(rows_while(true, None, &one), 130, "one piece with specs");
-    assert_eq!(
-        rows_while(false, None, &one),
-        155,
-        "one piece without specs"
-    );
-    assert_eq!(
-        rows_while(true, Some(&most), &one),
-        0,
-        "no staff row fits with specs and the most rules"
-    );
-    assert_eq!(
-        rows_while(false, Some(&most), &one),
-        19,
-        "one piece without specs and with the most rules"
-    );
+    let whole = |note: &MessageView, cf: &CfWord| goes_whole(note, &[], cf);
+    let one = |note: &MessageView, cf: &CfWord| read_in_one(note, cf);
+    for (cf, pins) in [
+        (a_mac(), [172, 197, 36, 61]),
+        (a_windows(), [173, 198, 37, 62]),
+    ] {
+        assert!(
+            one(
+                &note(
+                    None,
+                    "note",
+                    body_of(&a_chiefs_role_for(&cf, 0, true, Some(&most)), &cf),
+                ),
+                &cf
+            ),
+            "{cf}: even with specs and the most rules an empty staff is read in one piece"
+        );
+        assert_eq!(
+            rows_while(&cf, true, None, &whole),
+            0,
+            "docs: never whole with specs on"
+        );
+        assert_eq!(
+            rows_while(&cf, false, None, &whole),
+            0,
+            "docs: never whole without specs"
+        );
+        assert_eq!(
+            [
+                rows_while(&cf, true, None, &one),
+                rows_while(&cf, false, None, &one),
+                rows_while(&cf, true, Some(&most), &one),
+                rows_while(&cf, false, Some(&most), &one),
+            ],
+            pins,
+            "{cf}: rows in one piece: specs, none; no specs, none; specs, the most rules; no specs, the most rules"
+        );
+        assert!(
+            pins[2] >= 10,
+            "{cf}: a staff of ten is read in one piece with specs and the most rules"
+        );
+    }
+    let cf = a_mac();
     let parts = |rows| {
         printed_by_cf(
             &note(
@@ -403,8 +418,8 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
         .1
     };
     assert_eq!(
-        [parts(6), parts(143), parts(300)],
-        [2, 2, 3],
+        [parts(36), parts(37), parts(143), parts(300)],
+        [1, 2, 2, 3],
         "docs: past one piece, 2 parts to 143 rows, 3 at 300"
     );
 }
@@ -1108,9 +1123,8 @@ fn kept_by_muse(blocks: &[String]) -> String {
 /// T-1246: Muse takes at most 16,384 bytes of a hook's output, and a Muse window has its role
 /// by hooks alone, so a role is given in parts, a hook each (`cf_harness::muse`), each part's
 /// hook under that limit, and what Muse keeps of the parts, put together, the role to the
-/// byte. A chief's role is longer than one hook says since each command of it named the
-/// window's `cf` in full (T-1049: 17,455 bytes with no staff at all), so no chief's is one
-/// part; a member's is one with the most rules in the most bytes, and two with the most in
+/// byte. A chief's role is longer than one hook says (about 18,000 bytes with no staff
+/// at all), so no chief's is one part; a member's is one with the most rules in the most bytes, and two with the most in
 /// JSON: the rules the ledger takes can make 16,000 bytes of answer of 8,000. The most of
 /// parts is the hooks Muse was measured to take at one start, and the case keeps a role at
 /// half of it. These are the numbers: the spare bytes are in the message of each case that
@@ -1165,14 +1179,14 @@ fn the_largest_roles_are_given_to_a_muse_window_in_the_parts_its_hooks_say_and_e
         on(
             &format!("the largest chief in bytes (25 staff, specs, the most rules) on {shape}"),
             &chief(25, true, Some(&utf8)),
-            if shape == "Windows" { 3 } else { 2 },
+            2,
         );
         on(
             &format!(
                 "the largest chief in a hook (25 staff, specs, the most escaped rules) on {shape}"
             ),
             &chief(25, true, Some(&escaped)),
-            if shape == "Windows" { 4 } else { 3 },
+            3,
         );
         for role in cf_ledger::roles::ids() {
             on(
@@ -1227,8 +1241,9 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
     // A case: its name, the window's `cf`, the staff's rows, specs on or off, the rules, and the
     // lines the part after the first begins with.
     type Case<'a> = (&'a str, CfWord, usize, bool, Option<&'a str>, &'a [&'a str]);
-    // The frontend designer's paragraph in the chief's section on roles.
-    const FRONTEND: &str = "How a screen looks, feels and moves is the frontend designer";
+    // The paragraph on a second review in the chief's section on reviews, where the second part
+    // begins in every case.
+    const FRONTEND: &str = "A second review checks the fixes: give it the earlier findin";
     let cases: [Case; 4] = [
         ("a Mac, no staff", a_mac(), 0, false, None, &[FRONTEND]),
         (
@@ -1245,7 +1260,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&utf8),
-            &["## Choose the role, not the member"],
+            &[FRONTEND],
         ),
         (
             "a Mac, the most escaped rules",

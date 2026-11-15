@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use cf_base::env::Env;
 use cf_base::file::{read_file_sync, FileError};
 use cf_proto::agents::{WorkTier, WORK_TIERS};
-use cf_proto::cf_word::CfWord;
+use cf_proto::cf_word::{CfWord, CF_STANDS_FOR};
 use cf_proto::ledger::ProjectView;
 
 pub use skill::{team_table, work_tier_list};
@@ -57,7 +57,7 @@ pub(crate) fn cf_in_text(cf: &CfWord) -> &str {
 pub(crate) fn cf_note(cf: &CfWord) -> String {
     if PATH_ONCE && cf.as_str() != "cf" {
         format!(
-            "`cf` below stands for this command; type it in full every time:\n`{}`",
+            "{CF_STANDS_FOR}; type it in full every time:\n`{}`",
             cf.as_str()
         )
     } else {
