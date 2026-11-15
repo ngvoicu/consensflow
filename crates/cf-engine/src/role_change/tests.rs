@@ -374,10 +374,10 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
         0,
         "docs: never whole without specs either"
     );
-    assert_eq!(rows_while(true, None, &one), 127, "one piece with specs");
+    assert_eq!(rows_while(true, None, &one), 130, "one piece with specs");
     assert_eq!(
         rows_while(false, None, &one),
-        152,
+        155,
         "one piece without specs"
     );
     assert_eq!(
@@ -387,7 +387,7 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     );
     assert_eq!(
         rows_while(false, Some(&most), &one),
-        16,
+        19,
         "one piece without specs and with the most rules"
     );
     let parts = |rows| {

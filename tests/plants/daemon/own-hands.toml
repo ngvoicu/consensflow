@@ -63,8 +63,8 @@ runs = ["own-guide"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/guide.rs"
-find = '''caller.project.staff_rules.as_deref())'''
-replace = '''None)'''
+find = '''        caller.project.staff_rules.as_deref(),'''
+replace = '''        None,'''
 
 [[plant]]
 name = "own hands: the short text is the ordinary chief's whole role"

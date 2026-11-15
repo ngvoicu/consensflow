@@ -316,3 +316,9 @@ resume words go in (T-1641).
 The same twelve chief texts say a tier can be served by a backup, that a member on Vacation
 takes no tasks, and that the chief still names the tier (BKV-05, T-1627). At that change, the one-piece bounds were 138 rows with specs on and 163 without, or 2 and 27
 with the most staff rules; the later tell and plan guidance changes these bounds.
+
+On T-1689, the own-hands role became the short text; the guide carries the ordinary
+board instructions, including the new member-tell and pause guidance. The ordinary
+role now fits in one piece to 130 rows with specs on and 155 without, or 0 and 19
+with the most staff rules. The role and guide goldens were regenerated from the test
+fixtures and role renderers after merging main.
