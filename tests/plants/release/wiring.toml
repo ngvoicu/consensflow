@@ -98,6 +98,7 @@ find = """
         env:
           CF_TEST_SHARD: ${{ matrix.shard }}
           CF_TEST_SHARD_LIMIT_MINUTES: 40
+          CF_E2E_NO_MUSE: '1'
         timeout-minutes: 40
 """
 replace = ""

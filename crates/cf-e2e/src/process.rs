@@ -74,7 +74,19 @@ pub const POWERSHELL_LIMIT: Duration = Duration::from_secs(120);
 /// (T-848); a rig case's own is [`crate::rig::nested::case_of`]. The words after are the
 /// caller's, and so is the environment (none of the test's unless it asks).
 pub fn case_of(binary: impl AsRef<OsStr>, case: &str, limit: Duration) -> Run {
-    Run::new(binary).args(["--exact", case]).limit(limit)
+    let run = Run::new(binary).args(["--exact", case]).limit(limit);
+    if own_var("CF_E2E_STAND_IN").as_deref() == Some("1") {
+        let temp = std::env::temp_dir();
+        let home = own_var("HOME").unwrap_or_else(|| panic!("stand-in case has no HOME"));
+        run.var("CF_E2E_STAND_IN", "1")
+            .var("HOME", &home)
+            .var("USERPROFILE", &home)
+            .var("TMPDIR", &temp)
+            .var("TMP", &temp)
+            .var("TEMP", &temp)
+    } else {
+        run
+    }
 }
 
 /// How often a program that has not ended is looked at again.
@@ -316,6 +328,11 @@ impl Run {
     #[must_use]
     pub fn cargo() -> Self {
         let mut run = Self::new(nested_cargo::CARGO).inheriting_env();
+        if own_var("CF_E2E_STAND_IN").as_deref() == Some("1") && own_var("RUSTC").is_none() {
+            if let Some(compiler) = crate::standin_process::build_compiler() {
+                run = run.var("RUSTC", compiler);
+            }
+        }
         for (name, _) in std::env::vars_os() {
             if name.to_str().is_some_and(nested_cargo::given_to_a_test) {
                 run = run.without(name);

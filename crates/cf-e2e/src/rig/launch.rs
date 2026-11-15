@@ -63,9 +63,13 @@ impl Rig {
         // The homes older runs left in the folder are counted, and none is taken (`sweep`).
         // The home is a folder the door made, which goes through the door with the rig.
         let (root, scratch) = match &config.existing_root {
-            Some(root) => (root.clone(), None),
+            Some(root) => {
+                crate::standin_process::require_home(root, "rig resumed home lookup");
+                (root.clone(), None)
+            }
             None => {
                 let folder = config.homes.clone().unwrap_or_else(std::env::temp_dir);
+                crate::standin_process::require_home(&folder, "rig home allocation lookup");
                 // The place the rig's own folder is made in is made where it is not there, and
                 // is no folder of the run's: only the rig's root below it is.
                 crate::door::make_place(&folder).map_err(Error::file("make", &folder))?;
@@ -86,7 +90,8 @@ impl Rig {
         let fake_bin = write_fake_install(&root, &config)?;
         let muse_launcher = matches!(config.muse, Some((_, crate::muse::Run::Live { .. })))
             .then(|| own_commands(&root, &config).join("muse"));
-        let env = environment(&root, &fake_bin, &config, &home_vars);
+        let mut env = environment(&root, &fake_bin, &config, &home_vars);
+        super::install::bound_standin_homes(&mut env, &root, "window");
         #[cfg(unix)]
         super::install::give_muse_its_folders(&root, &config, &home_vars)?;
         // A restart over the same home keeps the stand-ins a case wrote: they are still
@@ -106,7 +111,7 @@ impl Rig {
             &copies,
         )?;
         let pane_host = bundle::copy_of(cf::pane_host()?, &copies)?;
-        let (mut daemon, start_line) = start_daemon(&config, &cf, &env)?;
+        let (mut daemon, start_line) = start_daemon(&config, &cf, &env, &root)?;
         let (mut host, host_output) = start_host(&pane_host, &env)?;
         let shared = route(&mut daemon, &mut host, host_output)?;
 
@@ -145,12 +150,9 @@ fn start_daemon(
     config: &Config,
     cf: &Path,
     env: &[(String, String)],
+    root: &Path,
 ) -> Result<(Daemon, StartLine)> {
-    let mut env = env.to_vec();
-    for (name, value) in &config.daemon_vars {
-        env.retain(|(held, _)| held != name);
-        env.push((name.clone(), value.clone()));
-    }
+    let env = daemon_environment(config, env, root);
     let env = env.as_slice();
     let mut daemon = match &config.daemon {
         Some(program) => Daemon::run(program, [] as [&str; 0], env.iter().cloned())?,
@@ -181,6 +183,20 @@ fn start_daemon(
         )));
     }
     Ok((daemon, start_line))
+}
+
+fn daemon_environment(
+    config: &Config,
+    env: &[(String, String)],
+    root: &Path,
+) -> Vec<(String, String)> {
+    let mut env = env.to_vec();
+    for (name, value) in &config.daemon_vars {
+        env.retain(|(held, _)| !crate::standin_process::same_environment_name(held, name));
+        env.push((name.clone(), value.clone()));
+    }
+    super::install::bound_standin_homes(&mut env, root, "daemon");
+    env
 }
 
 /// The variable that has the pane host take the human's keys (`pane.typed`), as
@@ -274,6 +290,33 @@ fn route(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn standin_isolation_daemon_override_refuses_a_foreign_home() {
+        let root = crate::door::made("daemon-home-").unwrap();
+        let temp = std::env::temp_dir();
+        let foreign = temp.parent().unwrap().join("synthetic-foreign-home");
+        let env = vec![(
+            "HOME".to_owned(),
+            root.path().to_string_lossy().into_owned(),
+        )];
+        for (name, _) in crate::standin_process::home_vars(root.path()) {
+            let config = Config::new("stand-in").daemon_var(name, foreign.to_string_lossy());
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                daemon_environment(&config, &env, root.path())
+            }));
+            let error = match result {
+                Err(error) => error,
+                Ok(_) => panic!("daemon {name} lookup did not fail closed"),
+            };
+            let said = error
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| error.downcast_ref::<&str>().copied())
+                .unwrap_or("");
+            assert!(said.contains(&format!("daemon {name} lookup")), "{said}");
+        }
+    }
 
     #[test]
     fn only_an_address_on_loopback_with_a_port_is_the_daemons() {

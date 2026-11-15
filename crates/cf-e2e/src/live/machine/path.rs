@@ -12,6 +12,17 @@ use crate::{Error, Result};
 /// Where the program `name` is, on the `PATH` of this run, as a shell finds it.
 /// A machine that has none is an error that says so.
 pub fn command(name: &str) -> Result<PathBuf> {
+    if own_var("CF_E2E_STAND_IN").as_deref() == Some("1")
+        && super::Harness::from_name(name).is_some()
+    {
+        return Err(Error::Program {
+            action: "find",
+            program: name.to_owned(),
+            source: io::Error::other(format!(
+                "stand-in {name} executable lookup cannot search the machine's PATH"
+            )),
+        });
+    }
     let path = own_var("PATH").unwrap_or_default();
     find(name, &path, own_var("PATHEXT").as_deref()).ok_or_else(|| not_found(name))
 }
@@ -49,7 +60,7 @@ pub(super) fn working(
     extensions: Option<&str>,
     probe: &[&str],
 ) -> Result<PathBuf> {
-    let found = candidates(name, path, extensions);
+    let found = candidates(name, path, extensions, true);
     if found.is_empty() {
         return Err(not_found(name));
     }
@@ -94,12 +105,21 @@ pub(super) fn runs(found: PathBuf, name: &str, probe: &[&str]) -> Result<PathBuf
 
 /// [`command`] on the `path` and the extensions it is given.
 pub(crate) fn find(command: &str, path: &str, extensions: Option<&str>) -> Option<PathBuf> {
-    candidates(command, path, extensions).into_iter().next()
+    candidates(command, path, extensions, true)
+        .into_iter()
+        .next()
+}
+
+/// Muse's echo tests may inspect the inherited install launcher itself.
+pub(crate) fn find_muse_install(path: &str) -> Option<PathBuf> {
+    candidates("muse", path, Some(".CMD;.EXE"), false)
+        .into_iter()
+        .next()
 }
 
 /// Every file a shell would take for `command` on the `path`, in the order it looks: in
 /// each folder, the first of the extensions it is given (on Windows) that names a file.
-fn candidates(command: &str, path: &str, extensions: Option<&str>) -> Vec<PathBuf> {
+fn candidates(command: &str, path: &str, extensions: Option<&str>, check: bool) -> Vec<PathBuf> {
     let suffixes: Vec<&str> = if cfg!(windows) {
         extensions
             .unwrap_or(".COM;.EXE;.BAT;.CMD")
@@ -110,12 +130,30 @@ fn candidates(command: &str, path: &str, extensions: Option<&str>) -> Vec<PathBu
         vec![""]
     };
     std::env::split_paths(path)
+        .filter(|folder| !folder.as_os_str().is_empty())
         .filter(|folder| !holds_no_harness(folder))
         .filter_map(|folder| {
             suffixes
                 .iter()
                 .map(|suffix| folder.join(format!("{command}{suffix}")))
-                .find(|candidate| candidate.is_file())
+                .find(|candidate| {
+                    if !check && !crate::standin_process::outside_inherited_harness_homes(candidate)
+                    {
+                        return false;
+                    }
+                    if check {
+                        crate::standin_process::require_search_candidate(
+                            candidate,
+                            "harness search lookup",
+                        );
+                        if ["claude", "codex", "pi", "devin", "muse"].contains(&command)
+                            && !crate::standin_process::may_search_harness(candidate)
+                        {
+                            return false;
+                        }
+                    }
+                    candidate.is_file()
+                })
         })
         .collect()
 }
@@ -182,7 +220,8 @@ mod tests {
     fn a_folder_of_the_name_is_no_command_and_a_command_that_is_not_there_is_none() {
         let folder = tempfile::tempdir().unwrap();
         fs::create_dir(folder.path().join(file_of("codex"))).unwrap();
-        let path = path_of(&[folder.path(), Path::new("no-such-folder")]);
+        let missing = folder.path().join("no-such-folder");
+        let path = path_of(&[folder.path(), &missing]);
         assert_eq!(find("codex", &path, None), None);
         assert_eq!(find("claude", &path, None), None);
         assert_eq!(find("codex", "", None), None);

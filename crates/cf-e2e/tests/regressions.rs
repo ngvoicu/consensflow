@@ -32,6 +32,10 @@
 // The cases are in `tests/regressions/`: cargo looks for the modules of a test's
 // root file beside it, where each would be a suite of its own.
 // The stand-in's command is a shell of a Unix machine.
+#[path = "support/standin_boot.rs"]
+mod standin_boot;
+const ALLOW_LIVE_MATRIX: bool = false;
+
 #[path = "regressions/a_brief_could_not_be_edited_once_added.rs"]
 mod a_brief_could_not_be_edited_once_added;
 #[path = "regressions/a_builds_daemon_held_a_workers_task.rs"]

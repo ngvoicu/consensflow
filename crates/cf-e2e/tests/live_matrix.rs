@@ -17,6 +17,10 @@
 //!
 //! The evidence of a run is under `app/src-tauri/target/live-matrix/<run-id>/`.
 
+#[path = "support/standin_boot.rs"]
+mod standin_boot;
+const ALLOW_LIVE_MATRIX: bool = true;
+
 use std::path::{Path, PathBuf};
 
 use cf_e2e::checkout;

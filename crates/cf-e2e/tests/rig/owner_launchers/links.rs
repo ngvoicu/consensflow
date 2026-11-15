@@ -235,7 +235,6 @@ fn a_case_that_gives_the_rig_a_claude_folder_of_its_own_is_held_to_the_launcher_
 ) -> Outcome {
     // Its guard lists the Keychain (the install has no config of the kit's), so it takes turns with
     // the case that makes an item there.
-    let _keychain = super::KeychainLock::take(false)?;
     let owner = Owner::new()?;
     let folder = tempfile::tempdir()?;
     let rig = Rig::start(live::rig_with_claude_config(
@@ -243,10 +242,14 @@ fn a_case_that_gives_the_rig_a_claude_folder_of_its_own_is_held_to_the_launcher_
         FAKE_AGENT,
         folder.path(),
     ))?;
-    owner.link(".local/bin/claude", Path::new("/nowhere/claude"))?;
+    let missing = owner.path("nowhere/claude");
+    owner.link(".local/bin/claude", &missing)?;
     let failed = rig.close().unwrap_err().to_string();
     assert!(
-        failed.contains("~/.local/bin/claude now points at /nowhere/claude"),
+        failed.contains(&format!(
+            "~/.local/bin/claude now points at {}",
+            missing.display()
+        )),
         "{failed}"
     );
     Ok(())

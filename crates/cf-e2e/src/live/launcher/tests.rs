@@ -368,7 +368,22 @@ fn a_keychain_that_gained_nothing_or_was_not_listed_is_no_change() {
 }
 
 #[test]
+fn a_guard_that_leaves_the_keychain_to_the_login_lists_none() {
+    let _listings = super::keychain::fake::Listings::new([]);
+    let home = OwnerHome::new();
+    let command = claude_launcher(&home);
+    let guard = Guard::new(Harness::Claude, &command, home.0.path());
+    assert!(guard.watch.keychain.is_some());
+    assert!(guard
+        .leaving_the_keychain_to_the_login()
+        .watch
+        .keychain
+        .is_none());
+}
+
+#[test]
 fn only_the_guard_of_claude_code_looks_at_the_keychain() {
+    let _listings = super::keychain::fake::Listings::new([]);
     let home = OwnerHome::new();
     let command = claude_launcher(&home);
     let looks = |harness| {
@@ -385,6 +400,37 @@ fn only_the_guard_of_claude_code_looks_at_the_keychain() {
     assert!(Watch::of(Harness::Claude, &command, home.0.path())
         .keychain
         .is_none());
+}
+
+#[test]
+fn fabricated_security_listings_hold_the_guards_keychain_rules() {
+    use super::keychain::fake::{listing, Listings};
+
+    let check = |before, after| {
+        let _listings = Listings::new([before, after]);
+        let home = OwnerHome::new();
+        let command = claude_launcher(&home);
+        let guard = Guard::new(Harness::Claude, &command, home.0.path());
+        guard.vars().unwrap();
+        guard.finish().map_err(|error| error.to_string())
+    };
+    let same = ["Claude Code-credentials"];
+    assert!(check(listing(&same, 0), listing(&same, 0)).is_ok());
+    assert!(check(listing(&same, 0), listing(&[], 0)).is_ok());
+    let gained = check(
+        listing(&same, 0),
+        listing(&[same[0], "Claude Code-credentials-12345678"], 0),
+    )
+    .unwrap_err();
+    assert!(
+        gained.contains("THE RUN LEFT AN ITEM IN THE OWNER'S KEYCHAIN"),
+        "{gained}"
+    );
+    assert!(
+        gained.contains("Claude Code-credentials-12345678"),
+        "{gained}"
+    );
+    assert!(check(listing(&same, 0), listing(&[], 1)).is_ok());
 }
 
 /// The names the guard of [`a_guard_whose_keychain_gained_an_item_fails_the_rig_that_ends_and_names_it`]

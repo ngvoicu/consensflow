@@ -42,7 +42,7 @@ use crate::process::{own_var, Run};
 use crate::rig::{ClaudeConfig, Config, HarnessHome};
 use crate::{checkout, files, Error, Result};
 
-pub(crate) use path::find;
+pub(crate) use path::find_muse_install;
 pub use path::{command, working_command};
 pub use wrapper::{
     isolated_claude, shimmed_claude, shimmed_claude_with_servers, windows_wrapper, ISOLATION,
@@ -559,6 +559,14 @@ fn rig_keeping_claude_in(
         // The owner's launcher of every harness the rig seats is looked at when the rig starts
         // and when it ends, whatever home the harness runs on (T-1082).
         let guard = Guard::new(install.harness, &install.command, &install.home);
+        let guard = if install
+            .claude_config()
+            .is_some_and(|config| config.keeps_its_findings())
+        {
+            guard.leaving_the_keychain_to_the_login()
+        } else {
+            guard
+        };
         config = config.isolated(Arc::new(guard));
         if install.harness == Harness::Muse {
             config = config.muse_live(muse_of(install), &install.home);
@@ -588,6 +596,8 @@ fn rig_keeping_claude_in(
 /// ([`muse_stand_in_beside`]): it runs the machine's Muse in the rig's own folders on a copy of the
 /// person's login (T-1084), where before this kit refused a rig that seats Muse there (T-985).
 fn muse_of(install: &Installed) -> crate::muse::Installed {
+    crate::standin_process::require_home(&install.home, "Muse home lookup");
+    crate::standin_process::require_watch_path(&install.command, "Muse launcher lookup");
     let folder = install
         .command
         .parent()
@@ -849,6 +859,17 @@ fn home_of(
     codex_home: Option<String>,
     user_home: Option<String>,
 ) -> Option<PathBuf> {
+    let home = home_of_unchecked(harness, codex_home, user_home)?;
+    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));
+    Some(home)
+}
+
+/// Resolve the spelling before a stand-in run checks whether it may be read.
+fn home_of_unchecked(
+    harness: Harness,
+    codex_home: Option<String>,
+    user_home: Option<String>,
+) -> Option<PathBuf> {
     let named = |value: Option<String>| value.filter(|value| !value.is_empty());
     let home = match (harness, named(codex_home)) {
         (Harness::Codex, Some(home)) => PathBuf::from(home),
@@ -860,7 +881,7 @@ fn home_of(
 
 /// The user's own home on this machine: `HOME`, else `USERPROFILE`.
 pub fn home() -> Result<PathBuf> {
-    own_var("HOME")
+    let home = own_var("HOME")
         .or_else(|| own_var("USERPROFILE"))
         .filter(|home| !home.is_empty())
         .map(PathBuf::from)
@@ -871,7 +892,9 @@ pub fn home() -> Result<PathBuf> {
                 io::ErrorKind::NotFound,
                 "this run has neither HOME nor USERPROFILE",
             ),
-        })
+        })?;
+    crate::standin_process::require_home(&home, "user home lookup");
+    Ok(home)
 }
 
 /// A live test's own folder, `~/.consensflow-candidate/live/<name>-<random>/...`, made: where

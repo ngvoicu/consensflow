@@ -16,7 +16,7 @@ use std::path::PathBuf;
 
 use cf_e2e::live::{self, Harness, Installed};
 #[cfg(target_os = "macos")]
-use cf_e2e::process::{own_var, Run};
+use cf_e2e::process::own_var;
 use cf_e2e::rig::Rig;
 
 use crate::{Outcome, FAKE_AGENT};
@@ -45,35 +45,9 @@ impl cf_e2e::rig::ClaudeConfig for Folder {
     fn finish(&self) -> cf_e2e::Result {
         Ok(())
     }
-}
 
-/// A lock between the cases that make an item in the machine's Keychain (exclusive) and the cases whose
-/// guard lists it (shared): nextest runs each case in a process of its own, and a rig that began before
-/// an item was made would end for it. It is a file in the temporary folder, held until this is dropped.
-#[cfg(unix)]
-pub(crate) struct KeychainLock(std::fs::File);
-
-#[cfg(unix)]
-impl KeychainLock {
-    pub(crate) fn take(exclusive: bool) -> Result<Self, Box<dyn std::error::Error>> {
-        let file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(std::env::temp_dir().join("cf-e2e-keychain-cases.lock"))?;
-        if exclusive {
-            file.lock()?;
-        } else {
-            file.lock_shared()?;
-        }
-        Ok(Self(file))
-    }
-}
-
-#[cfg(unix)]
-impl Drop for KeychainLock {
-    fn drop(&mut self) {
-        let _ = self.0.unlock();
+    fn keeps_its_findings(&self) -> bool {
+        true
     }
 }
 
@@ -197,8 +171,9 @@ impl Item {
     fn make(folder: &std::path::Path) -> Result<Self, Box<dyn std::error::Error>> {
         let name = live::keychain::item_of(folder);
         let user = own_var("USER").ok_or("no USER")?;
-        let made = Run::new("/usr/bin/security")
-            .args([
+        let made = live::keychain::security(
+            "owner_launchers::Item::make",
+            [
                 "add-generic-password",
                 "-s",
                 &name,
@@ -206,11 +181,15 @@ impl Item {
                 &user,
                 "-w",
                 "a made-up value",
-            ])
-            .inheriting_env()
-            .run()?;
+            ],
+            std::time::Duration::from_secs(60),
+        )?;
         if made.code != Some(0) {
-            return Err(format!("security could not make the item {name}: {:?}", made.code).into());
+            return Err(format!(
+                "security could not make the item {name}: code {:?}, timed out {}, stderr: {}",
+                made.code, made.timed_out, made.stderr
+            )
+            .into());
         }
         Ok(Self { name, user })
     }
@@ -219,24 +198,26 @@ impl Item {
 #[cfg(target_os = "macos")]
 impl Drop for Item {
     fn drop(&mut self) {
-        let _ = Run::new("/usr/bin/security")
-            .args([
+        let _ = live::keychain::security(
+            "owner_launchers::Item::drop",
+            [
                 "delete-generic-password",
                 "-s",
                 &self.name,
                 "-a",
                 &self.user,
-            ])
-            .inheriting_env()
-            .run();
+            ],
+            std::time::Duration::from_secs(60),
+        );
     }
 }
 
 #[cfg(target_os = "macos")]
 #[test]
+#[ignore = "real Keychain test: disposable GitHub hosted macOS runner only"]
 fn a_run_whose_claude_code_left_an_item_in_the_keychain_fails_the_rig_that_ends_and_names_it(
 ) -> Outcome {
-    let _lock = KeychainLock::take(true)?;
+    require_hosted()?;
     let owner = Owner::new()?;
     let rig = Rig::start(live::rig(&[owner.plain_claude()], FAKE_AGENT))?;
     // What a Claude Code writes in the Keychain for a throwaway config folder, after the rig began.
@@ -257,5 +238,30 @@ fn a_run_whose_claude_code_left_an_item_in_the_keychain_fails_the_rig_that_ends_
     );
     // The launcher is as it was: only the Keychain is said.
     assert!(!failed.contains("LAUNCHER"), "{failed}");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "real Keychain test: disposable GitHub hosted macOS runner only"]
+fn a_claude_whose_config_keeps_its_findings_is_not_listed_by_the_guard_and_its_rig_ignores_another_processs_item(
+) -> Outcome {
+    require_hosted()?;
+    // A config that records its own findings names the item of its own folder. The guard
+    // leaves the shared Keychain to it, so another process's item cannot fail this rig.
+    let owner = Owner::new()?;
+    let rig = Rig::start(live::rig(&[owner.claude()], FAKE_AGENT))?;
+    // An item made for a folder that is none of the run's.
+    let other = tempfile::tempdir()?;
+    let _item = Item::make(other.path())?;
+    rig.close()?;
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn require_hosted() -> Outcome {
+    if !live::keychain::hosted_test() {
+        return Err("real Keychain tests require the disposable GitHub hosted Mac job".into());
+    }
     Ok(())
 }

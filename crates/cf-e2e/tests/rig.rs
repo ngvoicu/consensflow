@@ -73,6 +73,10 @@
 
 // The cases are in `tests/rig/`: cargo looks for the modules of a test's root
 // file beside it, where each would be a suite of its own.
+#[path = "support/standin_boot.rs"]
+mod standin_boot;
+const ALLOW_LIVE_MATRIX: bool = false;
+
 #[path = "rig/advisor_off.rs"]
 mod advisor_off;
 #[path = "rig/approval.rs"]
@@ -164,6 +168,8 @@ mod specs_codex;
 mod stand_in_codex;
 #[path = "rig/stand_ins.rs"]
 mod stand_ins;
+#[path = "rig/standin_homes.rs"]
+mod standin_homes;
 #[path = "rig/start_suspended.rs"]
 mod start_suspended;
 #[path = "rig/stranger.rs"]

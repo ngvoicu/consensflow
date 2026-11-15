@@ -403,6 +403,11 @@ pub trait ClaudeConfig: std::fmt::Debug + Send + Sync {
     /// when a rig that used the folder ends, the windows gone: an error says what
     /// the run did that it was not to, and fails the case that ends the rig.
     fn finish(&self) -> Result;
+
+    /// Whether this config records its own Keychain findings instead of the launcher guard.
+    fn keeps_its_findings(&self) -> bool {
+        false
+    }
 }
 
 /// A process a window's stand-in agent started, as it wrote it down.

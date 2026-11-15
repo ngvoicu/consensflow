@@ -3,9 +3,10 @@
 //! throwaway ConsensFlow home and throwaway harness homes, never the machine's
 //! own `~/.consensflow`.
 //!
-//! The environment is these variables and no others: `HOME`,
-//! `CONSENSFLOW_HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`, a
-//! `PATH` of one folder (empty until a case puts a stand-in command in it), the
+//! The environment bounds `HOME`, `USERPROFILE`, every harness config and
+//! session variable, the XDG folders, `APPDATA`, and `LOCALAPPDATA` below this
+//! home. It also gives `CONSENSFLOW_HOME`, a `PATH` of one folder (empty until
+//! a case puts a stand-in command in it), the
 //! system's folders of programs (`CONSENSFLOW_TOOL_FOLDERS`, one that is never
 //! made, so `cf` finds no Homebrew program of the machine's) and
 //! `CONSENSFLOW_BIN_DIR`, all under the folder. Nothing is made in it: `cf`
@@ -57,16 +58,14 @@ impl ScratchHome {
     /// The environment of the home, variable by variable.
     pub fn vars(&self) -> Vec<(&'static str, PathBuf)> {
         let home = self.root().join("home");
-        vec![
-            ("HOME", home.clone()),
+        let mut vars = crate::standin_process::home_vars(&home).to_vec();
+        vars.extend([
             ("CONSENSFLOW_HOME", self.consensflow()),
-            ("CLAUDE_CONFIG_DIR", home.join(".claude")),
-            ("CODEX_HOME", home.join(".codex")),
-            ("XDG_CONFIG_HOME", home.join(".config")),
             ("PATH", self.path_dir()),
             ("CONSENSFLOW_TOOL_FOLDERS", self.root().join("system-bin")),
             ("CONSENSFLOW_BIN_DIR", self.bin()),
-        ]
+        ]);
+        vars
     }
 
     /// `program` to run with the environment of the home and no other.
@@ -123,10 +122,18 @@ mod tests {
             names,
             [
                 "HOME",
-                "CONSENSFLOW_HOME",
+                "USERPROFILE",
                 "CLAUDE_CONFIG_DIR",
                 "CODEX_HOME",
+                "PI_CODING_AGENT_DIR",
+                "PI_CODING_AGENT_SESSION_DIR",
                 "XDG_CONFIG_HOME",
+                "XDG_DATA_HOME",
+                "XDG_STATE_HOME",
+                "XDG_CACHE_HOME",
+                "APPDATA",
+                "LOCALAPPDATA",
+                "CONSENSFLOW_HOME",
                 "PATH",
                 "CONSENSFLOW_TOOL_FOLDERS",
                 "CONSENSFLOW_BIN_DIR",

@@ -65,6 +65,10 @@ required-features = ["test-support"]
 
 [dev-dependencies]
 cf-harness = { path = ".", features = ["test-support"] }
+# Plant tests which exercise stand-ins run with the same process-home boundary
+# as the e2e rig, before the test harness makes any threads.
+cf-e2e = { path = "../cf-e2e" }
+ctor = { version = "1.0.13", default-features = false }
 # What a program a test starts holds.
 cf-process = { workspace = true, features = ["test-support"] }
 flate2.workspace = true

@@ -693,3 +693,9 @@ fn is_a_wait(failed: &std::io::Error) -> bool {
         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
     )
 }
+
+#[cfg(test)]
+const ALLOW_LIVE_MATRIX: bool = false;
+#[cfg(test)]
+#[path = "../../tests/support/standin_boot.rs"]
+mod standin_boot;

@@ -39,12 +39,128 @@
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 
 use super::login::SERVICE;
-use crate::process::{own_var, Run};
+use crate::process::{own_var, Ran, Run};
 use crate::{Error, Result};
+
+/// Whether this process belongs to the two explicitly selected hosted tests.
+pub fn hosted_test() -> bool {
+    own_var("GITHUB_ACTIONS").as_deref() == Some("true")
+        && own_var("CF_E2E_HOSTED_KEYCHAIN").as_deref() == Some("1")
+}
+
+/// Only the live kit may enable account discovery in the case it starts.
+pub(crate) fn live_case() -> bool {
+    !cfg!(test)
+        && own_var("CF_E2E_ISOLATED_LIVE").as_deref() == Some("1")
+        && own_var("CF_E2E_STAND_IN").as_deref() != Some("1")
+}
+
+/// Whether a stand-in may look at Keychain listings. Ordinarily it may not;
+/// a unit test may instead feed the seam fabricated results on its own thread.
+pub(crate) fn watching() -> bool {
+    #[cfg(test)]
+    if fake::active() {
+        return true;
+    }
+    hosted_test() || live_case()
+}
+
+/// The one way the kit starts the macOS Keychain utility. A stand-in cannot
+/// reach the real program: an accidental call fails naming its caller.
+pub fn security<I, S>(caller: &str, args: I, limit: Duration) -> Result<Ran>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    #[cfg(test)]
+    if let Some(result) = fake::next() {
+        return Ok(result);
+    }
+    assert!(watching(), "stand-in run attempted security from {caller}");
+    let mut security = Run::new("/usr/bin/security")
+        .args(args)
+        .inheriting_env()
+        .limit(limit);
+    if hosted_test() {
+        let home = crate::standin_process::inherited_home().ok_or_else(|| {
+            crate::Error::Daemon("hosted Keychain test has no inherited HOME".to_owned())
+        })?;
+        security = security.var("HOME", home);
+    }
+    security.run()
+}
+
+#[cfg(test)]
+pub(super) mod fake {
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+
+    use crate::process::Ran;
+
+    thread_local! { static RESULTS: RefCell<Option<VecDeque<Ran>>> = const { RefCell::new(None) }; }
+
+    pub(crate) struct Listings;
+
+    impl Listings {
+        pub(crate) fn new(results: impl IntoIterator<Item = Ran>) -> Self {
+            RESULTS.with(|slot| {
+                assert!(
+                    slot.borrow().is_none(),
+                    "a fabricated security seam is already active"
+                );
+                *slot.borrow_mut() = Some(results.into_iter().collect());
+            });
+            Self
+        }
+
+        #[cfg(unix)]
+        pub(crate) fn push(&self, result: Ran) {
+            RESULTS.with(|slot| {
+                slot.borrow_mut()
+                    .as_mut()
+                    .expect("fabricated security is not active")
+                    .push_back(result)
+            });
+        }
+    }
+
+    impl Drop for Listings {
+        fn drop(&mut self) {
+            RESULTS.with(|slot| *slot.borrow_mut() = None);
+        }
+    }
+
+    pub(crate) fn active() -> bool {
+        RESULTS.with(|slot| slot.borrow().is_some())
+    }
+    pub(crate) fn next() -> Option<Ran> {
+        RESULTS.with(|slot| {
+            slot.borrow_mut().as_mut().map(|queue| {
+                queue
+                    .pop_front()
+                    .expect("no fabricated security result remains")
+            })
+        })
+    }
+
+    pub(crate) fn listing(names: &[&str], code: i32) -> Ran {
+        Ran {
+            code: Some(code),
+            stdout: names
+                .iter()
+                .map(|name| format!("\"svce\"<blob>=\"{name}\"\n"))
+                .collect(),
+            stderr: String::new(),
+            timed_out: false,
+            held: false,
+        }
+    }
+}
 
 /// The names of the Keychain items of the service `Claude Code-credentials` now, and of the ones
 /// Claude Code names after a config folder; none where the machine has no Keychain, or it cannot
@@ -106,10 +222,11 @@ pub fn forget(folder: &Path) -> Result<bool> {
         .ok_or_else(|| {
             Error::Daemon("this run has no USER, which names the account of the item".to_owned())
         })?;
-    let ran = Run::new("/usr/bin/security")
-        .args(["delete-generic-password", "-s", &name, "-a", &user])
-        .inheriting_env()
-        .run()?;
+    let ran = security(
+        "keychain::forget",
+        ["delete-generic-password", "-s", &name, "-a", &user],
+        Duration::from_secs(60),
+    )?;
     Ok(ran.code == Some(0))
 }
 
