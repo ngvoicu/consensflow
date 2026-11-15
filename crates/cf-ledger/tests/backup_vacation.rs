@@ -169,6 +169,7 @@ fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
             compaction: None,
             advisor_tool: false,
             prompt_suggestion: false,
+            own_hands: false,
         })
         .expect("a project")
 }
@@ -1716,4 +1717,39 @@ fn a_release_of_unopened_sessions_never_sets_the_mark_and_does_nothing_after_a_b
             .assignee,
         None
     );
+}
+
+#[test]
+fn copied_staff_and_own_hands_are_kept_in_the_same_project_opening() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ledger = open_ledger(&dir.path().join("ledger.db"), Options::default()).unwrap();
+    let opened = ledger.create_project_with_staff(&json!({
+        "directory": "/work/copy", "name": "copy", "chief": {"harness": "codex"},
+        "ownHands": true,
+        "staff": [
+            {"id": 11, "harness": "codex", "model": "alpha", "roles": ["worker"], "tier": "standard"},
+            {"id": 12, "backupOf": 11, "harness": "codex", "model": "beta", "roles": ["worker"], "tier": "standard", "vacationSince": "2026-11-13T12:00:00.000Z"}
+        ]
+    })).unwrap();
+    assert!(opened.own_hands);
+    let owner = opened
+        .participants
+        .iter()
+        .find(|p| p.model.as_deref() == Some("alpha"))
+        .unwrap();
+    let backup = opened
+        .participants
+        .iter()
+        .find(|p| p.model.as_deref() == Some("beta"))
+        .unwrap();
+    assert_eq!(backup.backup_of, Some(owner.id));
+    assert!(backup.vacation_since.is_some());
+    let events: Vec<_> = ledger
+        .events(opened.id, 0, 500)
+        .unwrap()
+        .into_iter()
+        .filter(|event| event.kind == "project.own_hands")
+        .map(|event| event.data)
+        .collect();
+    assert_eq!(events, [json!({"from": false, "to": true})]);
 }

@@ -234,6 +234,43 @@ fn own_hands_changed_back_in_a_turn_tells_the_chief_nothing_on_every_harness() {
 }
 
 #[test]
+fn own_hands_chosen_at_creation_is_in_the_first_launch_without_a_change_note() {
+    for first in [FirstMessage::Delivered, FirstMessage::Opened] {
+        for harness in HARNESSES {
+            let context = made(first);
+            let project = context
+                .open_project(json!({
+                    "directory": "/work/app", "name": "app", "ownHands": true,
+                    "chief": { "harness": harness, "model": "diana" }, "staff": [],
+                }))
+                .unwrap()
+                .expect("the project");
+            let chief = at_rest(&context, &project);
+            let launches = chief_launches(&context.adapter);
+            assert_eq!(launches.len(), 1, "{harness}, {first:?}");
+            assert!(
+                launches[0]["instructions"]
+                    .as_str()
+                    .unwrap()
+                    .contains("own hands"),
+                "{harness}, {first:?}: first launch must have the chosen mode"
+            );
+            assert!(
+                role_notes(&context, chief).is_empty(),
+                "{harness}, {first:?}"
+            );
+            assert!(
+                !said_to_the_chief(&context.adapter)
+                    .iter()
+                    .any(|s| s.contains("The person turned \"Do with your own hands\"")),
+                "{harness}, {first:?}"
+            );
+            context.close();
+        }
+    }
+}
+
+#[test]
 fn own_hands_is_in_the_chiefs_next_launch_on_every_harness() {
     for harness in HARNESSES {
         let context = made(FirstMessage::Delivered);

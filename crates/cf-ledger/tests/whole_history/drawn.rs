@@ -356,6 +356,7 @@ fn a_tasks_transcript_says_what_each_call_was_and_shows_nothing_only_the_history
             compaction: None,
             advisor_tool: false,
             prompt_suggestion: false,
+            own_hands: false,
         })
         .expect("a project");
     ledger

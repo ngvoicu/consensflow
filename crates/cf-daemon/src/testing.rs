@@ -251,6 +251,7 @@ pub fn scene() -> Scene {
             compaction: None,
             advisor_tool: false,
             prompt_suggestion: false,
+            own_hands: false,
         })
         .unwrap();
     ledger

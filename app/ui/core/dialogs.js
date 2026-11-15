@@ -1107,7 +1107,7 @@ export class NewProjectDialog {
     }
     this.#starting = true
     const form = this.#form
-    const { gate, wakeUp, specs, rules, compaction, advisorTool, promptSuggestion } =
+    const { gate, wakeUp, specs, rules, compaction, advisorTool, promptSuggestion, ownHands } =
       this.#sections.values()
     const body = {
       directory: form.elements.directory.value,
@@ -1122,6 +1122,7 @@ export class NewProjectDialog {
     body.compaction = compaction
     if (advisorTool) body.advisorTool = true
     if (promptSuggestion) body.promptSuggestion = true
+    if (ownHands) body.ownHands = true
     this.#say('')
     let refused = null
     try {
@@ -1384,10 +1385,10 @@ export class SwitchChiefDialog {
  * current), the rules for the staff (`StaffRules`), the size its members' windows
  * compact at, whatever their harness (`Compaction`), whether its Claude Code members run
  * with Claude Code's own advisor tool (`AdvisorTool`), whether its Claude Code windows make
- * Claude Code's prompt suggestion (`PromptSuggestion`), and the sections New project has too
+ * Claude Code's prompt suggestion (`PromptSuggestion`), how the chief works (`OwnHands`), and the sections New project has too
  * (`ProjectSections`): human approval, wake-up calls and specs. Each saves as it
  * always did: the staff as it is added to or removed from, the approval as it is
- * ticked, the rules, the compaction, the advisor tool, the prompt suggestion, the calls and the
+ * ticked, the rules, the compaction, the advisor tool, the prompt suggestion, own hands, the calls and the
  * specs by their own Save.
  *
  * The dialog is for one project, the one it is asked for, from then until it
@@ -1411,6 +1412,7 @@ export class ProjectSettingsDialog {
   #compaction
   #advisorTool
   #promptSuggestion
+  #ownHands
   /** Computer use: a part for each of the project's harnesses that has one. */
   #computerUse
   /** The project the dialog was last opened for, by id: the one it is for until it closes. */
@@ -1474,6 +1476,7 @@ export class ProjectSettingsDialog {
     this.#compaction = sections.compaction
     this.#advisorTool = sections.advisorTool
     this.#promptSuggestion = sections.promptSuggestion
+    this.#ownHands = sections.ownHands
     this.#computerUse = sections.computerUse
     // What the dialog changes is its project's, whichever board the page shows now.
     this.#gate.addEventListener('change', () => {
@@ -1597,6 +1600,7 @@ export class ProjectSettingsDialog {
     this.#compaction.show(board.project)
     this.#advisorTool.show(board.project)
     this.#promptSuggestion.show(board.project)
+    this.#ownHands.show(board.project)
     this.#computerUse.show(computerUse)
     this.#draw()
     this.#specs.draw(board.project, true)
@@ -1655,6 +1659,7 @@ export class ProjectSettingsDialog {
     const board = this.#page.board()
     if (!this.#dialog.open || board?.project.id !== this.#project) return
     this.#board = board
+    this.#ownHands.update(board.project)
     this.#draw()
   }
 

@@ -824,6 +824,7 @@ async function open(page, given = model()) {
           if (typeof body.compaction === 'number') project.compaction = body.compaction
           if (body.advisorTool === true) project.advisorTool = true
           if (body.promptSuggestion === true) project.promptSuggestion = true
+          if (body.ownHands === true) project.ownHands = true
           data.projects.push(project)
           data.boards[3] = {
             project,
@@ -6116,6 +6117,7 @@ test('New project has Staff, the rules for the staff, compaction, the advisor to
     'Compaction',
     'Advisor tool',
     'Prompt suggestion',
+    'Do with your own hands',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -6192,7 +6194,7 @@ test('New project has Staff, the rules for the staff, compaction, the advisor to
     await markup('new-project-dialog'),
     await markup('project-settings-dialog'),
   ]
-  expect(here).toHaveLength(8)
+  expect(here).toHaveLength(9)
   expect(here).toEqual(there)
   // Left as it opened, the start says nothing of what a project has anyway: the request is the one it was.
   await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
@@ -6736,7 +6738,7 @@ test('New project holds every section Project settings holds, in its order, but 
     expect(reason.length, `${legend} has no reason`).toBeGreaterThan(20)
   }
   expect(made).toEqual(settings.filter((legend) => !(legend in NEW_PROJECT_LACKS)))
-  expect(made).toHaveLength(9)
+  expect(made).toHaveLength(10)
 })
 
 test('New project: the rules for the staff and the compaction are written as they are in Project settings, counted and checked as typed, and start with the project', async ({
@@ -7124,6 +7126,7 @@ test("names the board's button and its dialog Project settings, with Staff, Rule
     'Compaction',
     'Advisor tool',
     'Prompt suggestion',
+    'Do with your own hands',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -7135,6 +7138,7 @@ test("names the board's button and its dialog Project settings, with Staff, Rule
     'Compaction',
     'Advisor tool',
     'Prompt suggestion',
+    'Do with your own hands',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -9907,6 +9911,7 @@ test('project menu: Project settings… opens the dialog of the board’s Projec
     'Compaction',
     'Advisor tool',
     'Prompt suggestion',
+    'Do with your own hands',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -10782,6 +10787,7 @@ test('Project settings: the sections are the same distance apart and spaced alik
     'Compaction',
     'Advisor tool',
     'Prompt suggestion',
+    'Do with your own hands',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -10800,6 +10806,10 @@ test('Project settings: the sections are the same distance apart and spaced alik
     [
       'Prompt suggestion',
       { text: 'Save prompt suggestion', primary: true, inActions: true, fromEdge: 0 },
+    ],
+    [
+      'Do with your own hands',
+      { text: 'Save own hands', primary: true, inActions: true, fromEdge: 0 },
     ],
     ['Wake-up calls', { text: 'Save wake-up calls', primary: true, inActions: true, fromEdge: 0 }],
     ['Specs', { text: 'Save specs', primary: true, inActions: true, fromEdge: 0 }],
@@ -15013,6 +15023,176 @@ for (const scheme of ['dark', 'light']) {
     testInfo.annotations.push({ type: 'shots', description: SHOTS })
   })
 }
+
+const ownHandsSection = (dialog) => {
+  const group = dialog.getByRole('group', { name: 'Do with your own hands', exact: true })
+  return {
+    group,
+    control: group.getByRole('checkbox', { name: 'Do with your own hands' }),
+    save: group.getByRole('button', { name: 'Save own hands' }),
+    hint: group.locator('.own-hands-hint'),
+  }
+}
+
+test('own hands: New project starts off and sends an on choice with project.open', async ({
+  page,
+}) => {
+  if (process.env.CF_SWITCH_SCREENSHOTS) await page.setViewportSize({ width: 1440, height: 1800 })
+  await open(page)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  const section = ownHandsSection(made.dialog)
+  await expect(section.control).not.toBeChecked()
+  await expect(section.group.locator('.dialog-help')).toHaveText(
+    'The chief does the work itself and uses the board only when you ask.',
+  )
+  await expect(section.save).toBeHidden()
+  await section.control.check()
+  if (process.env.CF_SWITCH_SCREENSHOTS) {
+    await section.group.scrollIntoViewIfNeeded()
+    await made.dialog.screenshot({ path: `${process.env.CF_SWITCH_SCREENSHOTS}/new-project.png` })
+  }
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+        compaction: 300000,
+        ownHands: true,
+      },
+    ])
+  expect(await calls(page, 'project.own_hands')).toEqual([])
+})
+
+test('own hands: settings saves and survives reopening, and pane follows', async ({ page }) => {
+  if (process.env.CF_SWITCH_SCREENSHOTS) await page.setViewportSize({ width: 1440, height: 1800 })
+  await open(page)
+  const pane = page.locator('#stage').getByRole('switch', { name: 'Do with your own hands' })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const section = ownHandsSection(dialog)
+  await expect(section.control).not.toBeChecked()
+  await section.control.check()
+  expect(await calls(page, 'project.own_hands')).toEqual([])
+  await section.save.click()
+  await expect
+    .poll(() => calls(page, 'project.own_hands'))
+    .toEqual([{ project: 1, ownHands: true }])
+  if (process.env.CF_SWITCH_SCREENSHOTS) {
+    await section.group.scrollIntoViewIfNeeded()
+    await dialog.screenshot({ path: `${process.env.CF_SWITCH_SCREENSHOTS}/project-settings.png` })
+  }
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(pane).toHaveAttribute('aria-checked', 'true')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect(section.control).toBeChecked()
+  await section.control.uncheck()
+  await section.save.click()
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(pane).toHaveAttribute('aria-checked', 'false')
+  await pane.click()
+  await expect(pane).toHaveAttribute('aria-checked', 'true')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect(section.control).toBeChecked()
+  // An external page event updates an already-open dialog, without a page reload.
+  await changed(page, () => {
+    delete window.__model.boards[1].project.ownHands
+    delete window.__model.projects.find((project) => project.id === 1).ownHands
+  })
+  await expect(section.control).not.toBeChecked()
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(pane).toHaveAttribute('aria-checked', 'false')
+})
+
+test('own hands: a project without a chief window offers both controls', async ({ page }) => {
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  chief.pane = null
+  chief.activity = { state: 'closed' }
+  await open(page, data)
+  const pane = page.locator('#stage').getByRole('switch', { name: 'Do with your own hands' })
+  await expect(pane).toBeVisible()
+  await pane.click()
+  await expect(pane).toHaveAttribute('aria-checked', 'true')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const section = ownHandsSection(page.getByRole('dialog', { name: 'Project settings' }))
+  await expect(section.control).toBeChecked()
+})
+
+test('own hands: a project made on, its pane, and its settings share the choice', async ({
+  page,
+}) => {
+  const data = model()
+  data.openMakesBoard = true
+  await open(page, data)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await ownHandsSection(made.dialog).control.check()
+  await made.start.click()
+  const pane = page.locator('#stage').getByRole('switch', { name: 'Do with your own hands' })
+  await expect(pane).toHaveAttribute('aria-checked', 'true')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const section = ownHandsSection(dialog)
+  await expect(section.control).toBeChecked()
+  await section.control.uncheck()
+  await section.save.click()
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(pane).toHaveAttribute('aria-checked', 'false')
+})
+
+test('own hands: an unrelated update keeps an unsaved edit and a refusal is shown', async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const section = ownHandsSection(dialog)
+  await section.control.check()
+  await changed(page)
+  await expect(section.control).toBeChecked()
+  await page.evaluate(() => {
+    window.__ownHandsFailure = 'the change failed'
+  })
+  await section.save.click()
+  await expect(section.hint).toHaveText('the change failed')
+  await expect(section.control).toBeChecked()
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(
+    page.locator('#stage').getByRole('switch', { name: 'Do with your own hands' }),
+  ).toHaveAttribute('aria-checked', 'false')
+})
+
+test('own hands: canceling New project clears the choice and the default is omitted', async ({
+  page,
+}) => {
+  await open(page)
+  let made = await newProject(page)
+  await ownHandsSection(made.dialog).control.check()
+  await made.dialog.getByRole('button', { name: 'Cancel' }).click()
+  made = await newProject(page)
+  await expect(ownHandsSection(made.dialog).control).not.toBeChecked()
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+        compaction: 300000,
+      },
+    ])
+  expect(await calls(page, 'project.own_hands')).toEqual([])
+})
 
 test('BKV settings offers no backup for an image designer', async ({ page }) => {
   await open(page, shotData('after'))

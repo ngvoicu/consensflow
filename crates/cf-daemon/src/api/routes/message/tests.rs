@@ -134,6 +134,7 @@ async fn a_message_of_another_project_is_none_of_this_one_s_even_for_a_handle_th
             compaction: None,
             advisor_tool: false,
             prompt_suggestion: false,
+            own_hands: false,
         })
         .unwrap();
     let chief = other

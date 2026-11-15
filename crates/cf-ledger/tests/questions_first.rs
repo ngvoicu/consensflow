@@ -40,6 +40,7 @@ fn ledger() -> (tempfile::TempDir, Ledger, i64, i64) {
             compaction: None,
             advisor_tool: false,
             prompt_suggestion: false,
+            own_hands: false,
         })
         .expect("a project");
     let chief = created
