@@ -922,7 +922,10 @@ mod tests {
             serde_json::from_slice(&fs::read(run.join("plugins/installed.json")).unwrap()).unwrap();
         assert_eq!(
             copied["installPath"],
-            run.join("plugins/package").to_string_lossy().as_ref(),
+            run.join("plugins")
+                .join("package")
+                .to_string_lossy()
+                .as_ref(),
             "plugin path still reaches the owner's folder"
         );
         assert_eq!(
@@ -949,7 +952,10 @@ mod tests {
             serde_json::from_slice(&fs::read(run.join("plugins/installed.json")).unwrap()).unwrap();
         assert_eq!(
             copied["installPath"],
-            run.join("plugins/package").to_string_lossy().as_ref(),
+            run.join("plugins")
+                .join("package")
+                .to_string_lossy()
+                .as_ref(),
             "escaped plugin path still reaches the owner's folder"
         );
         assert_eq!(
