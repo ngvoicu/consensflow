@@ -48,17 +48,8 @@ const RECORDED: [Recorded; 7] = [
         env: &[],
     },
     Recorded {
-        golden: "eval-with-the-build",
-        words: &[
-            "npm",
-            "run",
-            "eval",
-            "--",
-            "--scenario",
-            "round-trip",
-            "--chief",
-            "devin",
-        ],
+        golden: "test-with-the-build",
+        words: &["npm", "run", "test:daemons", "--", "--test-threads", "4"],
         dir: DIR,
         inside: ".",
         steps: &BUILD_STEPS,
@@ -100,15 +91,7 @@ const RECORDED: [Recorded; 7] = [
     // The one with variables: what `--env` added.
     Recorded {
         golden: "env-with-the-build",
-        words: &[
-            "cargo",
-            "xtask",
-            "eval",
-            "--scenario",
-            "round-trip",
-            "--chief",
-            "devin",
-        ],
+        words: &["cargo", "test", "-p", "cf-engine", "--lib"],
         dir: DIR,
         inside: ".",
         steps: &BUILD_STEPS,

@@ -62,7 +62,7 @@ Write-Output "== env CONSENSFLOW_NOTE=$env:CONSENSFLOW_NOTE"
 Set-Location (Join-Path $dir '.')
 $run = Join-Path $dir '.windows-run.cmd'
 [IO.File]::WriteAllText($run, "@echo off␍
-" + 'cargo xtask eval --scenario round-trip --chief devin' + "␍
+" + 'cargo test -p cf-engine --lib' + "␍
 ")
 cmd /c "$run 2>&1"
 Exit-Run $LASTEXITCODE

@@ -2111,8 +2111,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/child.rs"
-find = "            end(pid, how, Reach::Process, true, self.live.job());"
-replace = "            end(pid, how, Reach::Process, true, &Job::unheld());"
+find = "            end(pid, how, self.reach, true, self.live.job());"
+replace = "            end(pid, how, self.reach, true, &Job::unheld());"
 
 [[plant]]
 name = "tooling (cf-process): on Windows a child let go is not ended: not forced, and its job does not end what is in it when its handle closes"

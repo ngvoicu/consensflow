@@ -437,29 +437,13 @@ pub struct Isolation {
     /// What the renewals made before the home came to, for the run's report.
     renewed: Mutex<Vec<Renewed>>,
     made: Mutex<Option<Made>>,
-    /// What `finish` found, kept for the run's report in place of failing the rig, where the run
-    /// keeps it ([`Isolation::keeping_what_it_finds`]); none where it fails the rig.
-    kept: Option<Mutex<Found>>,
     /// What making the home said of what it copied ([`Isolation::said`]).
     said: Mutex<Vec<String>>,
 }
 
-/// What the ends of the rigs that used a home found, for a run that keeps it in its report
-/// ([`Isolation::keeping_what_it_finds`]): an eval's, hours of evidence that a finding at its end
-/// is not to cost.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Found {
-    /// What the run did that it was not to, a line each and each once: a file of the owner's not
-    /// as it was, the copy of the login written again. Never what a login holds.
-    pub changed: Vec<String>,
-    /// What the last end checked: the owner's files, each with the first twelve digits of its
-    /// hash. None before a rig that used the home has ended.
-    pub checked: Option<String>,
-}
-
 impl Isolation {
     /// The home of `harness` for a run that takes `run` (a live case states its planned length,
-    /// [`super::Log::lasting`], and an eval its own), copying the login of the owner whose
+    /// [`super::Log::lasting`]), copying the login of the owner whose
     /// home is `home` (Codex's: its own folder, `CODEX_HOME`); none for Claude Code, whose config
     /// folder is [`super::login`]'s, and where the platform's layout is not known (Devin's on
     /// Windows). A login that would end before the run and [`MARGIN`] is refused when the home is made.
@@ -477,19 +461,7 @@ impl Isolation {
         Self::of_machine_on(TestMachine::detect(), harness, home, run, &pi)
     }
 
-    /// [`Isolation::of_machine_lasting`], for a run whose Pi windows are on the models `pi` (an
-    /// eval names its own, its chief's and its staff's): Pi's home holds the login of each one's
-    /// provider.
-    pub fn of_machine_for(
-        harness: Harness,
-        home: &Path,
-        run: Duration,
-        pi: &[String],
-    ) -> Result<Option<Self>> {
-        Self::of_machine_on(TestMachine::detect(), harness, home, run, pi)
-    }
-
-    /// [`Isolation::of_machine_for`] on `test_machine`, the test machine this run is on, if it
+    /// On `test_machine`, the test machine this run is on, if it
     /// is on one: only there is a Pi login that has run short renewed.
     fn of_machine_on(
         test_machine: Option<TestMachine>,
@@ -509,7 +481,7 @@ impl Isolation {
                     .map_or_else(|| home.join(".pi").join("agent"), PathBuf::from);
                 let mut made = Self::pi_on(home, &agent, pi, run);
                 // A test machine renews a login that has run short by a turn of Pi on the run's
-                // first Pi model (an eval's chief's, where its staff is on another).
+                // first Pi model.
                 made.renewal = test_machine.zip(pi.first()).map(|(machine, model)| {
                     pi::renewal(machine, home, &agent, model, || {
                         super::machine::command(Harness::Pi.name())
@@ -567,9 +539,8 @@ impl Isolation {
         Self::pi_on(home, agent, &[model.to_owned()], run)
     }
 
-    /// [`Isolation::pi`], for a run whose Pi windows are on the models `models` (an eval's chief
-    /// and staff may be on two): the logins of each one's provider, or every login that is fit
-    /// where one of them names none.
+    /// [`Isolation::pi`], for a run whose Pi windows are on the models `models`: the logins
+    /// of each one's provider, or every login that is fit where one of them names none.
     pub fn pi_on(home: &Path, agent: &Path, models: &[String], run: Duration) -> Self {
         let mut providers: Option<Vec<String>> = Some(Vec::new());
         for model in models {
@@ -604,7 +575,6 @@ impl Isolation {
             renewal: None,
             renewed: Mutex::new(Vec::new()),
             made: Mutex::new(None),
-            kept: None,
             said: Mutex::new(Vec::new()),
         }
     }
@@ -622,15 +592,6 @@ impl Isolation {
     /// (Codex's is `~/.codex`).
     pub fn owner_home(&self) -> &Path {
         &self.owner_home
-    }
-
-    /// This home, whose end keeps what it found ([`Isolation::found`]) in place of failing the
-    /// rig: for a run whose report is hours of evidence, which says the finding and fails there
-    /// (an eval's). The banner is said all the same.
-    #[must_use]
-    pub fn keeping_what_it_finds(mut self) -> Self {
-        self.kept = Some(Mutex::new(Found::default()));
-        self
     }
 
     /// What making the home said of what it copied, a line each (the version or the commit of a
@@ -654,14 +615,6 @@ impl Isolation {
     /// The harness whose home this is.
     pub fn harness(&self) -> Harness {
         self.harness
-    }
-
-    /// What the ends of the rigs that used the home found, where it keeps that
-    /// ([`Isolation::keeping_what_it_finds`]); none where it fails the rig instead.
-    pub fn found(&self) -> Option<Found> {
-        self.kept
-            .as_ref()
-            .map(|kept| kept.lock().unwrap_or_else(PoisonError::into_inner).clone())
     }
 
     /// The home, made as the clock says `now` is (milliseconds since the epoch): its path.
@@ -868,8 +821,7 @@ impl Isolation {
         let provider = match providers {
             Some([provider]) => provider,
             // The renewal runs Pi once on one model, for one login: a run whose windows are on two
-            // providers (an eval's chief and staff) is not renewed, and says so (no eval or live
-            // case seats two on a test machine, T-1373).
+            // providers is not renewed, and says so (T-1373).
             Some(many)
                 if many.len() > 1
                     && self.renewal.is_some()
@@ -954,25 +906,6 @@ impl Isolation {
             proper(self.harness),
             now.summary(&self.owner_home)
         ))
-    }
-
-    /// The owner's files when the home was made and now, each with the first twelve digits of its
-    /// hash, once where they are the same: what a run that keeps its findings has in its report
-    /// whatever they are. None where the home was never made.
-    fn checked(&self) -> Option<String> {
-        let made = self.made.lock().unwrap_or_else(PoisonError::into_inner);
-        let made = made.as_ref()?;
-        let now = Seen::look(&self.plan.watched, &self.plan.records);
-        let (before, after) = (
-            made.owner.summary(&self.owner_home),
-            now.summary(&self.owner_home),
-        );
-        let name = proper(self.harness);
-        Some(if before == after {
-            format!("the owner's {name} setup, before the run and after it: {after}")
-        } else {
-            format!("the owner's {name} setup before the run: {before}; after it: {after}")
-        })
     }
 
     /// What the run did to the owner's setup, and what became of the copies of the login.
@@ -1103,17 +1036,6 @@ impl HarnessHome for Isolation {
             }
         }
         let (touched, refreshed) = self.findings();
-        if let Some(kept) = &self.kept {
-            let mut kept = kept.lock().unwrap_or_else(PoisonError::into_inner);
-            for change in touched.iter().chain(&refreshed) {
-                if !kept.changed.contains(change) {
-                    kept.changed.push(change.clone());
-                }
-            }
-            if let Some(checked) = self.checked() {
-                kept.checked = Some(checked);
-            }
-        }
         if touched.is_empty() && refreshed.is_empty() {
             if let Some(evidence) = self.evidence() {
                 let _ = writeln!(std::io::stderr(), "{evidence}");
@@ -1121,12 +1043,8 @@ impl HarnessHome for Isolation {
             return Ok(());
         }
         let said = said(self.harness, &touched, &refreshed);
-        // The error is the case's to fail with; the banner is for whoever reads the output. A
-        // home that keeps what it found has it in the run's report, which fails there.
+        // The error is the case's to fail with; the banner is for whoever reads the output.
         let _ = writeln!(std::io::stderr(), "{said}");
-        if self.kept.is_some() {
-            return Ok(());
-        }
         Err(Error::Daemon(said))
     }
 }

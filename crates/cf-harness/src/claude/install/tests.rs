@@ -80,7 +80,7 @@ fn a_roles_front_matter_says_no_model_may_load_it_as_a_skill_and_keeps_the_rest_
         not_for_the_model(role),
         "---\ndisable-model-invocation: true\nname: consensflow-worker\ndescription: Carry out tasks.\n---\n\n# ConsensFlow worker\n\nYou carry out tasks.\n"
     );
-    // A text with no front matter of its own (an evaluation's card) is given one.
+    // A text with no front matter of its own is given one.
     assert_eq!(
         not_for_the_model("# A card\n"),
         "---\ndisable-model-invocation: true\n---\n\n# A card\n"

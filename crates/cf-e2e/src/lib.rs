@@ -129,7 +129,6 @@ pub mod shipped;
 pub mod smoke_harness;
 mod stand_in;
 pub mod stand_in_lists;
-pub mod terminal;
 pub mod wire;
 
 pub use error::{Error, Result};

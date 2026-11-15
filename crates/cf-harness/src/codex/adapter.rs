@@ -70,8 +70,8 @@ const QUESTION_TOOL: [&str; 4] = [
 /// A window that opens on Codex's "Update now?" prompt, whenever a newer
 /// release exists, never starts its thread, so a chief opened without a first
 /// message waited on it for good. And a login shell re-reads the user's
-/// profile, which can put another install's `cf` ahead of this daemon's (an
-/// eval worker's `cf` was the live app's older one): without it, commands keep
+/// profile, which can put another install's `cf` ahead of this daemon's:
+/// without it, commands keep
 /// the PATH the daemon gave the window. Both probed on Codex 0.156.1.
 const WINDOW: [&str; 4] = [
     "-c",

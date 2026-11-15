@@ -41,7 +41,7 @@ pub(crate) fn tier(added: &Value) -> &str {
     added["member"]["tier"].as_str().unwrap_or_default()
 }
 
-/// The keys of `/compact`, and the Enter that sends them, as the long run types them.
+/// The keys of `/compact`, and the Enter that sends them.
 const COMPACT: &[u8] = b"/compact";
 const ENTER: &[u8] = b"\r";
 

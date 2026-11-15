@@ -20,7 +20,7 @@
 //! rig opens none.
 //!
 //! What a window printed is kept as its last [`KEPT`] bytes or so, and how much was let
-//! go of before them: a long run's windows print for hours.
+//! go of before them: a window may print for hours.
 //!
 //! And a case can catch one paste of the daemon's ([`Catch`]): passed to the pane
 //! host or kept from it, its answer never reaches the daemon, which goes on
@@ -148,7 +148,7 @@ fn root_of(frame: &Value, read: impl FnOnce(u32) -> Option<Identity>) -> Option<
 }
 
 /// What the frames showed so far. A frame is kept for what a case reads of it and
-/// no more: a long run's windows print for hours, and every frame kept whole (a
+/// no more: windows may print for hours, and every frame kept whole (a
 /// window's output is a list of numbers, one to a byte) would hold gigabytes.
 #[derive(Debug, Default)]
 pub(super) struct Seen {
@@ -182,9 +182,6 @@ pub(super) struct Seen {
     pub roots: Vec<Root>,
     /// Lines a program wrote that are no frame, which a failure shows.
     pub stray: Vec<String>,
-    /// Whether the pane host's output has ended: every frame it wrote, its last
-    /// exits among them, has been read.
-    pub host_ended: bool,
 }
 
 /// Where the paste a case catches goes ([`crate::rig::Rig::catch_paste`]).

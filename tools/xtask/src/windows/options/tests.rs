@@ -46,9 +46,6 @@ fn a_run_waits_for_its_turn_an_hour_unless_told_how_long_and_zero_is_not_to_wait
             "{line}: {said}"
         );
     }
-    assert_eq!(matrix("--scenario s --pair a:b").unwrap().wait, 60);
-    assert_eq!(matrix("--wait 0 --scenario s --pair a:b").unwrap().wait, 0);
-    assert!(matrix("--wait many --scenario s --pair a:b").is_err());
 }
 
 #[test]
@@ -62,9 +59,6 @@ fn a_machine_is_named_or_a_host_given_and_with_neither_the_default_is_chosen_whe
     );
     assert_eq!(run("-- npm test").unwrap().machine, None);
     assert_eq!(run("--build npm test").unwrap().machine, None);
-    let options = matrix("--machine zeewin2 --scenario s --pair a:b").unwrap();
-    assert_eq!(options.machine, Machine::named("zeewin2"));
-    assert_eq!(matrix("--scenario s --pair a:b").unwrap().machine, None);
 }
 
 #[test]
@@ -80,12 +74,6 @@ fn a_host_that_is_a_machines_name_is_that_machine_with_its_guards_and_its_node()
         assert!(machine.shared.is_some(), "{line}");
         assert_eq!(machine.node, r"$env:USERPROFILE\cf-tools\node", "{line}");
     }
-    assert_eq!(
-        matrix("--host zeewin2 --scenario s --pair a:b")
-            .unwrap()
-            .machine,
-        Machine::named("zeewin2")
-    );
     // zeewin is the same machine whichever way it is named; any other host is reached as it is.
     assert_eq!(
         run("--host zeewin -- x").unwrap().machine,
@@ -224,84 +212,4 @@ fn a_word_that_is_no_text_is_refused_not_changed() {
         Options::parse(&args).unwrap_err(),
         "an argument is not UTF-8: a\u{fffd}"
     );
-}
-
-fn matrix(line: &str) -> Result<MatrixOptions, String> {
-    MatrixOptions::parse(&words(line))
-}
-
-#[test]
-fn a_matrix_is_a_host_scenarios_and_pairs_each_as_many_as_there_are() {
-    let options = matrix(
-        "--host zeewin --build --env CONSENSFLOW_TEST_DAEMON=native --scenario round-trip \
-         --scenario question-trip --pair devin:devin --pair claude:devin,pi \
-         --claude-model claude-sonnet-5 --pi-model openai/gpt-5.6-luna",
-    )
-    .unwrap();
-    assert_eq!(
-        options,
-        MatrixOptions {
-            machine: Machine::named("zeewin"),
-            build: true,
-            env: vec![("CONSENSFLOW_TEST_DAEMON".into(), "native".into())],
-            scenarios: strings(&["round-trip", "question-trip"]),
-            pairs: vec![
-                Pair {
-                    chief: "devin".into(),
-                    staff: "devin".into()
-                },
-                Pair {
-                    chief: "claude".into(),
-                    staff: "devin,pi".into()
-                },
-            ],
-            claude_model: Some("claude-sonnet-5".into()),
-            pi_model: Some("openai/gpt-5.6-luna".into()),
-            wait: 60,
-        }
-    );
-}
-
-#[test]
-fn a_matrix_that_is_missing_what_it_needs_or_names_a_pair_wrongly_is_refused_before_a_run() {
-    let usage = "windows-matrix takes a --scenario <name> and a --pair <chief>:<staff>";
-    for (line, said) in [
-        ("--host h --pair a:b", usage),
-        (
-            "--machine zeewin3 --scenario s --pair a:b",
-            "--machine is one of zeewin2, zeewin, not zeewin3",
-        ),
-        ("--host h --scenario s", usage),
-        (
-            "--host h --scenario s --pair devin",
-            "a pair is chief:staff, not devin",
-        ),
-        (
-            "--host h --scenario s --pair :devin",
-            "a pair is chief:staff, not :devin",
-        ),
-        (
-            "--host h --scenario s --pair devin:",
-            "a pair is chief:staff, not devin:",
-        ),
-        (
-            "--host h --scenario s --pair a:b stray",
-            "unexpected argument: stray",
-        ),
-        (
-            "--host h --scenario s --pair a:b --dir x",
-            "unknown option: --dir",
-        ),
-        (
-            "--host=-oProxyCommand=x --scenario s --pair a:b",
-            "--host is an ssh host, not an option of ssh: -oProxyCommand=x",
-        ),
-        (
-            "--host h --scenario s --pair a:b --env X",
-            "--env is NAME=VALUE, a variable's name and what to give it: X",
-        ),
-    ] {
-        let refused = matrix(line).unwrap_err();
-        assert!(refused.starts_with(said), "{line}: {refused}");
-    }
 }

@@ -46,12 +46,6 @@ fn every_command_of_the_plan_is_there_once() {
             "test load",
             "live",
             "windows",
-            "windows-matrix",
-            "eval summary",
-            "eval chiefs",
-            "eval long",
-            "eval",
-            "watch",
             "scrub-transcript",
             "scrub-muse-session",
             "specmint-sync",
@@ -93,22 +87,12 @@ fn a_command_is_named_by_its_words_and_takes_the_rest_as_they_are() {
 }
 
 #[test]
-fn the_live_tests_are_one_command_whatever_their_names_and_eval_summary_is_found_before_eval() {
+fn the_live_tests_are_one_command_whatever_their_names() {
     assert_eq!(
         parsed("live paste claude --long 8000 -- --list"),
         r#"run live ["paste", "claude", "--long", "8000", "--", "--list"]"#
     );
     assert_eq!(parsed("live"), "run live []");
-    assert_eq!(parsed("eval summary"), "run eval summary []");
-    assert_eq!(
-        parsed("eval --scenario round-trip --chief claude"),
-        r#"run eval ["--scenario", "round-trip", "--chief", "claude"]"#
-    );
-    assert_eq!(parsed("eval"), "run eval []");
-    assert_eq!(
-        parsed("eval long --hours 3 --quiet"),
-        r#"run eval long ["--hours", "3", "--quiet"]"#
-    );
     assert_eq!(
         parsed("windows --host zeewin -- cargo xtask check"),
         r#"run windows ["--host", "zeewin", "--", "cargo", "xtask", "check"]"#
@@ -118,9 +102,6 @@ fn the_live_tests_are_one_command_whatever_their_names_and_eval_summary_is_found
         r#"run scrub-transcript ["a.jsonl", "b.jsonl"]"#
     );
     // A command's own help is said for the one that is asked about.
-    assert!(parsed("eval summary --help").contains("evals/RESULTS.md"));
-    assert!(parsed("eval --help").contains("--scenario"));
-    assert!(parsed("eval long --help").contains("--devin-cut"));
     assert!(parsed("live --help").contains("Usage: cargo xtask live <name>"));
 }
 

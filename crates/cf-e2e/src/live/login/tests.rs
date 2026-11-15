@@ -119,13 +119,13 @@ fn a_login_that_ends_within_the_two_hours_is_refused_and_one_that_lasts_longer_i
 fn a_run_that_states_its_own_length_is_refused_a_login_that_would_end_before_it_does() {
     let home = crate::door::made("cf-test-").unwrap();
     let parent = crate::door::made("cf-test-").unwrap();
-    // A login with five hours left: a live suite (two hours) takes it, a six-hour eval does not.
+    // A login with five hours left: a two-hour run takes it; a six-hour run does not.
     let text = machine_text(hours(5));
     let suite = login(&text, home.path(), parent.path());
     assert!(suite.folder_at(at(NOW)).is_ok());
-    let mut eval = login(&text, home.path(), parent.path());
-    eval.left = hours(6);
-    let said = eval.folder_at(at(NOW)).unwrap_err().to_string();
+    let mut too_long = login(&text, home.path(), parent.path());
+    too_long.left = hours(6);
+    let said = too_long.folder_at(at(NOW)).unwrap_err().to_string();
     assert!(said.contains("expires in 5 h"), "{said}");
     assert!(said.contains("at least 6 h more"), "{said}");
     assert!(!said_anywhere(&said), "{said}");
@@ -137,7 +137,7 @@ fn a_run_that_states_its_own_length_is_refused_a_login_that_would_end_before_it_
 }
 
 #[test]
-fn a_login_asks_what_it_is_told_a_case_or_an_eval_plans_and_nothing_of_its_own() {
+fn a_login_asks_what_it_is_told_a_run_plans_and_nothing_of_its_own() {
     let source = Source::File(PathBuf::from("/nowhere/login.json"));
     let made = Login::new(
         source,
@@ -217,7 +217,7 @@ fn the_item_claude_code_made_for_the_runs_folder_is_the_runs_and_a_failure_with_
 
 #[test]
 fn an_item_another_process_made_is_a_note_of_this_run_and_not_its_failure() {
-    // T-1044: an eval was failed, and told its Claude Code had refreshed its login, for an item that
+    // T-1044: a run was failed, and told its Claude Code had refreshed its login, for an item that
     // another run on the machine made (the Keychain is the whole machine's).
     let folder = Path::new("/tmp/cf-keychain-vector-1");
     let had = BTreeSet::from(["Claude Code-credentials".to_owned()]);
@@ -722,46 +722,10 @@ fn a_prompt_typed_in_a_folder_of_the_run_and_a_conversation_kept_of_it_are_found
 }
 
 #[test]
-fn the_evals_workspace_is_a_runs_folder_too_and_what_a_run_of_theirs_left_in_the_persons_config_is_found_out(
-) {
-    let person = Person::new();
-    let before = person.owner.look();
-    person.append(
-        ".claude/history.jsonl",
-        "{\"display\":\"x\",\"project\":\"/Users/me/.consensflow-candidate/evals/workspace\",\"sessionId\":\"e\"}\n",
-    );
-    std::fs::create_dir_all(
-        person
-            .home
-            .path()
-            .join(".claude/projects/-Users-me--consensflow-candidate-evals-workspace"),
-    )
-    .unwrap();
-    person.write(
-        ".claude.json",
-        &json!({
-            "projects": { "/Users/me/.consensflow-candidate/evals/workspace": { "hasTrustDialogAccepted": true } },
-        })
-        .to_string(),
-    );
-    assert_eq!(
-        person.owner.changes_since(&before),
-        [
-            "~/.claude.json gained the project /Users/me/.consensflow-candidate/evals/workspace",
-            "~/.claude/projects gained -Users-me--consensflow-candidate-evals-workspace",
-            "~/.claude/history.jsonl gained 1 prompt(s) typed in a folder of the run",
-        ]
-    );
-    assert!(is_run_folder(
-        "/Users/me/.consensflow-candidate/evals/workspace"
-    ));
+fn live_and_rig_folders_are_runs_folders_but_the_owners_are_not() {
     assert!(is_run_folder("/Users/me/.consensflow-candidate/live/paste"));
     assert!(is_run_folder("/var/T/consensflow-integration-AB/workspace"));
-    assert!(is_run_name(
-        "-Users-me--consensflow-candidate-evals-workspace"
-    ));
     assert!(is_run_name("-Users-me--consensflow-candidate-live-paste"));
-    // The person's own folders are none of a run's.
     assert!(!is_run_folder("/Users/me/work"));
     assert!(!is_run_name("-Users-me-work"));
 }

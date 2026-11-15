@@ -3,8 +3,8 @@
 # config, and the wrapper and the shim, which are shell scripts, refused Windows
 # (`live/machine/wrapper.rs`), so no suite that starts Claude could run there. Now the login is read from
 # `%USERPROFILE%\.claude\.credentials.json` as on Linux and copied into a config folder of the run's own,
-# and each wrapper is a `.cmd` in npm's shape that names Node and a script written beside it (the shape
-# cf-evals wrote for itself, now the kit's), which starts the real Claude with the isolation flags, or the
+# and each wrapper is a `.cmd` in npm's shape that names Node and a script written beside it,
+# which starts the real Claude with the isolation flags, or the
 # stand-in for a window of a fake model. One plant takes one rule out; a test of it fails. Every name holds
 # `windows live`.
 

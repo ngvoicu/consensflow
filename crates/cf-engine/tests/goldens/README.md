@@ -125,7 +125,7 @@ leave nothing running", in those words alone. The rows were moved by a script th
 put the new text where the old stood.
 
 The 39 rows of the role texts, the 27 members' and the twelve of the chief's that hold the role's own text
-(the other chief rows read an eval's card, and hold the card), name `cf` in a different way
+name `cf` in a different way
 (`skill/core/chief.md` and `skill/core/staff.md`, T-1049, 2026-11-01). A window's shell can
 find another `cf` first on its PATH (Devin's login zsh on the Mac, Claude Code's login Git
 Bash on Windows, the Cloud Foundry CLI: T-972's live kit, 2026-10-31), so each command a text
