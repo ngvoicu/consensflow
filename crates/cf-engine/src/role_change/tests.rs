@@ -1054,7 +1054,6 @@ fn a_chief_that_comes_up_after_its_greeting_was_told_has_its_failed_starts_clear
         failures: 1,
         at: 0,
         reopens: false,
-        resume_failed: false,
     });
     context.dispatcher.came_up(&record);
     assert!(record.window.borrow().relaunch.is_none());

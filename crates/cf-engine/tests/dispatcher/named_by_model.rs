@@ -229,10 +229,6 @@ fn a_member_that_needs_an_edit_takes_no_task_and_opens_no_window_on_a_default() 
         ("open", None),
         "its task is back on the board"
     );
-    let human = context.id(project.id, "human");
-    assert!(context.inbox(human).iter().any(|note| {
-        note.body.contains("could not start") && note.body.contains("needs an edit")
-    }), "the human is told why the window did not start");
     // And a new one waits for a member that can take it.
     context.create_task(
         project.id,
@@ -256,6 +252,67 @@ fn a_member_that_needs_an_edit_takes_no_task_and_opens_no_window_on_a_default() 
         .filter(|event| event.kind == "task.assigned" && event.data["task"] == 2)
         .collect();
     assert!(given.is_empty(), "{given:?}");
+}
+
+#[test]
+fn a_member_at_rest_that_needs_an_edit_tells_the_human_why_it_did_not_open() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.create_task(
+        project.id,
+        NewTask {
+            from: "chief".to_owned(),
+            pool: Some("worker".to_owned()),
+            tier: Some("standard".to_owned()),
+            body: "Write the parser".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let task = context.task(project.id, 1).task;
+    assert_eq!(task.state, "working");
+    let window = task.assignee.as_deref().unwrap();
+    let window_id = context.id(project.id, window);
+    assert!(context
+        .ledger
+        .borrow()
+        .current_conversation(window_id)
+        .unwrap()
+        .unwrap()
+        .native_session
+        .is_some());
+    context.adapter.answer(window, "The turn ended.");
+    let member = context.id(project.id, "zeus");
+    context.edit_ledger(|file| {
+        let db = rusqlite::Connection::open(file).unwrap();
+        db.execute_batch(&format!(
+            "UPDATE participant SET model = NULL, effort = NULL, needs_edit = 1
+               WHERE id = {member} OR member_id = {member};"
+        ))
+        .unwrap();
+    });
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    after.resume_project(project.id).unwrap();
+    for _ in 0..4 {
+        after.pass().unwrap();
+    }
+    let task = context.task(project.id, 1).task;
+    assert_eq!(
+        (task.state.as_str(), task.assignee.as_deref()),
+        ("open", None)
+    );
+    let human = context.id(project.id, "human");
+    assert!(
+        context.inbox(human).iter().any(|note| {
+            note.body.contains("could not start") && note.body.contains("needs an edit")
+        }),
+        "the human is told why the window did not start"
+    );
 }
 
 /// Edit member (HMD-12) while the member's window is at work: the member and the window take

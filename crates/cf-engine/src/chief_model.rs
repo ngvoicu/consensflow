@@ -211,15 +211,11 @@ impl Dispatcher {
     pub(crate) fn reopen_without(&self, record: &Record, gone: String) {
         let mut window = record.window.borrow_mut();
         let failures = window.relaunch.map_or(0, |relaunch| relaunch.failures);
-        let resume_failed = window
-            .relaunch
-            .is_some_and(|relaunch| relaunch.resume_failed);
         window.gone = Some(gone);
         window.relaunch = Some(Relaunch {
             failures,
             at: self.now(),
             reopens: true,
-            resume_failed,
         });
         drop(window);
         self.changed();

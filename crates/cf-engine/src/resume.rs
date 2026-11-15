@@ -295,11 +295,7 @@ impl Dispatcher {
         let at_work = self.at_work(&resumed)?;
         if let Some(chief) = resumed.participants.iter().find(|p| p.role == "chief") {
             // The human asks for the chief now: a chief that failed before is tried at once.
-            let record = self.record_of(chief.id);
-            let mut window = record.window.borrow_mut();
-            window.relaunch = None;
-            window.resume_failure = None;
-            drop(window);
+            self.record_of(chief.id).window.borrow_mut().relaunch = None;
             self.open_soon(chief.id, Some(Coming::Chief)).await;
         }
         for (participant, coming) in at_work {

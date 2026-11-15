@@ -5,7 +5,7 @@
 //! resumed the chief at the start and paused what its windows were at, and its
 //! Resume after a Close resumed no task, so none of these is held to a Node trace.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use cf_engine::testing::{Context, FakeAdapter, Gate, Made, Restarted, TRUST_QUESTION};
@@ -243,132 +243,7 @@ resume_launch_failure_case!(resume_launch_failure_devin, "devin");
 resume_launch_failure_case!(resume_launch_failure_muse, "muse");
 
 #[test]
-fn resume_launch_failure_retries_an_idle_chief_without_a_message() {
-    let context = Context::new();
-    let project = context.with_staff(&["zeus"]).id;
-    let chief = context.id(project, "chief");
-    context.adapter.with("chief", |agent| agent.settled = true);
-    context.close_project(project).unwrap();
-    let attempts = Rc::new(Cell::new(0));
-    let calls = Rc::clone(&attempts);
-    *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |launch| {
-        if launch["participant"]["handle"] == "chief" {
-            calls.set(calls.get() + 1);
-            Err("cannot start".into())
-        } else {
-            Ok(())
-        }
-    }));
-    context.resume_project(project).unwrap();
-    assert_eq!(attempts.get(), 1);
-    let notes = to_human(&context, project);
-    let activity = context.dispatcher.activity(chief);
-    context.advance(4_999);
-    context.pass().unwrap();
-    assert_eq!(attempts.get(), 1, "the first retry waits five seconds");
-    context.advance(1);
-    context.pass().unwrap();
-    assert_eq!(attempts.get(), 2, "the idle chief is tried again");
-    assert_eq!(to_human(&context, project), notes, "no repeated note");
-    assert_eq!(
-        context.dispatcher.activity(chief),
-        activity,
-        "no repeated change of status"
-    );
-    *context.adapter.prepare.borrow_mut() = None;
-    context.advance(9_999);
-    context.pass().unwrap();
-    assert!(
-        context.dispatcher.pane(chief).is_none(),
-        "the next retry waits ten seconds"
-    );
-    context.advance(1);
-    context.pass().unwrap();
-    assert!(
-        context.dispatcher.pane(chief).is_some(),
-        "the chief reopens without a message"
-    );
-    context.pass().unwrap();
-    assert!(
-        given(&context, "chief")
-            .iter()
-            .all(|words| !words.contains(CHIEF_CUT)),
-        "an at-rest chief is not told its turn was cut"
-    );
-}
-
-#[test]
-fn resume_launch_failure_stops_retrying_the_chief_when_the_project_closes() {
-    let context = Context::new();
-    let project = context.with_staff(&["zeus"]).id;
-    context.adapter.with("chief", |agent| agent.settled = true);
-    context.close_project(project).unwrap();
-    let attempts = Rc::new(Cell::new(0));
-    let calls = Rc::clone(&attempts);
-    *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |launch| {
-        if launch["participant"]["handle"] == "chief" {
-            calls.set(calls.get() + 1);
-            Err("cannot start".into())
-        } else {
-            Ok(())
-        }
-    }));
-    context.resume_project(project).unwrap();
-    assert_eq!(attempts.get(), 1);
-    context.close_project(project).unwrap();
-    context.advance(300_000);
-    context.pass().unwrap();
-    assert_eq!(attempts.get(), 1, "a closed project does not retry");
-}
-
-#[test]
-fn resume_launch_failure_of_the_chief_repeated_exit_is_said_once() {
-    let context = Context::new();
-    let project = context.with_staff(&["zeus"]).id;
-    context.adapter.with("chief", |agent| agent.settled = true);
-    context.close_project(project).unwrap();
-    context.host.exits_showing(Some(3), None, None);
-    let host = Rc::clone(&context.host);
-    *context.adapter.after_prepare.borrow_mut() = Some(Rc::new(move |opened| {
-        if opened == "chief" {
-            *host.exit_after_open.borrow_mut() = Some("chief".to_owned());
-        }
-    }));
-    context.resume_project(project).unwrap();
-    let notes = to_human(&context, project);
-    let reasons = || {
-        context
-            .trace
-            .lines
-            .borrow()
-            .iter()
-            .filter(|line| {
-                let line = serde_json::to_value(line).unwrap();
-                line["participant"] == "chief"
-                    && line["kind"] == "window.activity"
-                    && line["reason"].as_str().is_some_and(|reason| {
-                        reason.starts_with("The chief's window could not be opened:")
-                    })
-            })
-            .count()
-    };
-    assert_eq!(reasons(), 1);
-    context.advance(5_000);
-    context.pass().unwrap();
-    assert_eq!(
-        to_human(&context, project),
-        notes,
-        "the same failure has no new note"
-    );
-    assert_eq!(reasons(), 1, "the same failure has no new board line");
-    context.host.exits_showing(Some(4), None, None);
-    context.advance(10_000);
-    context.pass().unwrap();
-    assert_eq!(reasons(), 2, "a changed failure updates the board line");
-}
-
-#[test]
-fn resume_launch_failure_of_the_chief_is_visible_and_retries_at_the_backoff() {
+fn resume_launch_failure_of_the_chief_is_visible_and_keeps_its_existing_retry() {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]).id;
     let chief = context.id(project, "chief");
@@ -395,8 +270,8 @@ fn resume_launch_failure_of_the_chief_is_visible_and_retries_at_the_backoff() {
     context.advance(5_000);
     context.pass().unwrap();
     assert!(
-        context.dispatcher.pane(chief).is_some(),
-        "the chief is tried even with nothing queued"
+        context.dispatcher.pane(chief).is_none(),
+        "nothing waiting for the chief"
     );
     context.note(project, "human", "chief", "Carry on");
     context.pass().unwrap();
@@ -404,6 +279,28 @@ fn resume_launch_failure_of_the_chief_is_visible_and_retries_at_the_backoff() {
         context.dispatcher.pane(chief).is_some(),
         "the failed chief is retried for its waiting message"
     );
+}
+
+#[test]
+fn resume_launch_failure_of_an_idle_chief_is_retried_by_close_then_resume() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]).id;
+    let chief = context.id(project, "chief");
+    context.adapter.with("chief", |agent| agent.settled = true);
+    context.close_project(project).unwrap();
+    *context.adapter.prepare.borrow_mut() = Some(Rc::new(|launch| {
+        if launch["participant"]["handle"] == "chief" {
+            Err("cannot start".into())
+        } else {
+            Ok(())
+        }
+    }));
+    context.resume_project(project).unwrap();
+    assert!(context.dispatcher.pane(chief).is_none());
+    *context.adapter.prepare.borrow_mut() = None;
+    context.close_project(project).unwrap();
+    context.resume_project(project).unwrap();
+    assert!(context.dispatcher.pane(chief).is_some());
 }
 
 #[test]

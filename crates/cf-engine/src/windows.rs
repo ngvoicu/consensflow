@@ -238,8 +238,6 @@ pub(crate) struct Relaunch {
     /// A window of the chief was given up for not coming up since one last came
     /// up: the next opens at its time whatever waits for it (`Dispatcher::step`).
     pub(crate) reopens: bool,
-    /// A failed project Resume is retried even without a queued message.
-    pub(crate) resume_failed: bool,
 }
 
 /// The record's window part.
@@ -309,8 +307,6 @@ pub(crate) struct WindowPart {
     /// Whether its last look said its turn settled.
     pub(crate) settled: bool,
     pub(crate) relaunch: Option<Relaunch>,
-    /// The screened failure already said for this chief's project Resume.
-    pub(crate) resume_failure: Option<String>,
     /// The model a chief's launch asked for, which its harness said it no longer has: the
     /// next launch starts on the harness's default (CHF-06).
     pub(crate) gone: Option<String>,
@@ -415,7 +411,6 @@ impl Default for WindowPart {
         Self {
             coming: None,
             failed_resume_window: None,
-            resume_failure: None,
             no_model_in_record: false,
             window: None,
             keys: None,
@@ -1659,32 +1654,20 @@ impl Dispatcher {
         let wait = RELAUNCH_MS
             .saturating_mul(2_i64.saturating_pow(failures - 1))
             .min(RELAUNCH_MAX_MS);
-        let resuming = matches!(record.window.borrow().coming, Some(Coming::Chief))
-            || before.is_some_and(|relaunch| relaunch.resume_failed);
+        let resuming = matches!(record.window.borrow().coming, Some(Coming::Chief));
         record.window.borrow_mut().relaunch = Some(Relaunch {
             failures,
             at: self.now() + wait,
             reopens: before.is_some_and(|relaunch| relaunch.reopens),
-            resume_failed: resuming,
         });
         if resuming {
-            let reason = format!("The chief's window could not be opened: {because}");
-            let repeated = record.window.borrow().resume_failure.as_deref() == Some(&reason);
-            let activity = Activity::because(ActivityState::Closed, reason.clone());
-            if repeated {
-                let changed = {
-                    let mut window = record.window.borrow_mut();
-                    let changed = window.activity != activity;
-                    window.activity = activity;
-                    changed
-                };
-                if changed {
-                    self.changed();
-                }
-            } else {
-                self.set_activity(record, activity)?;
-                record.window.borrow_mut().resume_failure = Some(reason);
-            }
+            self.set_activity(
+                record,
+                Activity::because(
+                    ActivityState::Closed,
+                    format!("The chief's window could not be opened: {because}"),
+                ),
+            )?;
         }
         if failures == 1 {
             self.seams.ledger.borrow_mut().note(
@@ -1758,7 +1741,6 @@ impl Dispatcher {
             let mut window = record.window.borrow_mut();
             window.relaunch = None;
             window.coming = None;
-            window.resume_failure = None;
         }
     }
 
