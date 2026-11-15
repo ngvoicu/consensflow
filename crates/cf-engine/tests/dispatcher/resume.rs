@@ -12,6 +12,7 @@ use cf_engine::testing::{Context, FakeAdapter, Gate, Made, Restarted, TRUST_QUES
 use cf_engine::{ActivityState, SwitchWhen};
 use cf_harness::contract::{FirstMessage, Pane, Readiness};
 use cf_ledger::{continuation_tasks, MessageView, NewNote, NewTask, RESUME_WORDS};
+use cf_proto::trace::{Traced, WindowEvent};
 use serde_json::{json, Value};
 
 use crate::chiefs::{to, to_human, with_codex};
@@ -518,6 +519,83 @@ fn review_1709_unanswered_open_with_an_unanswered_kill_says_only_what_is_known()
 }
 
 #[test]
+fn review_1709_close_during_an_unanswered_kill_leaves_the_next_resume_in_charge() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let project = tiers.project.id;
+    let session = tiers.assignee(1);
+    context.adapter.with(&session, |agent| agent.settled = true);
+    context.close_project(project).unwrap();
+    let handle = session.clone();
+    let preparing = context
+        .adapter
+        .prepare_holds
+        .hold(move |args| args[0]["participant"]["handle"] == handle);
+    let gates: Rc<RefCell<Vec<Gate>>> = Rc::default();
+    let (host, held, pane_id) = (
+        Rc::clone(&context.host),
+        Rc::clone(&gates),
+        format!("p{project}-{session}"),
+    );
+    context.host.open_holds.hold(move |args| {
+        if args[0]["id"] == pane_id && held.borrow().is_empty() {
+            let pane = Pane {
+                id: pane_id.clone(),
+                generation: args[0]["generation"].as_u64().unwrap(),
+            };
+            held.borrow_mut().extend(host.hold_kills(&pane, &[true]));
+        }
+        false
+    });
+    context.resume_project(project).unwrap();
+    context.settle();
+    context.host.unanswered.set(true);
+    preparing.open();
+    context.settle();
+    let old = context.host.last(&session).unwrap().pane;
+    let gate = gates.borrow()[0].clone();
+
+    let closing = context.begin_close_project(project);
+    context.settle();
+    assert_eq!(context.project(project).state, "suspended");
+    context.finish(closing).unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    context.resume_project(project).unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let current = context.host.last(&session).unwrap().pane;
+    assert_ne!(current, old);
+    assert_eq!(tiers.task(1).task.state, "working");
+    let failures = || {
+        context
+            .trace
+            .lines
+            .borrow()
+            .iter()
+            .filter(|line| {
+                matches!(
+                    &line.what,
+                    Traced::Window {
+                        event: WindowEvent::KillFailed { .. },
+                        ..
+                    }
+                )
+            })
+            .count()
+    };
+    let before = failures();
+    gate.open(); // The old kill is refused after the new window is up.
+    context.settle();
+    assert_eq!(context.dispatcher.pane(tiers.id(&session)), Some(current));
+    assert_eq!(tiers.task(1).task.state, "working");
+    assert_eq!(failures(), before, "an old kill cannot mark the new window");
+}
+
+#[test]
 fn review_1709_idle_chief_failure_tells_the_human_when_retry_happens() {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]).id;
@@ -532,6 +610,33 @@ fn review_1709_idle_chief_failure_tells_the_human_when_retry_happens() {
     }));
     context.resume_project(project).unwrap();
     assert_eq!(to_human(&context, project), ["The chief could not start: the launch failed (its cause is in ConsensFlow's log). What comes for the chief waits for it; ConsensFlow tries again when something comes for it. Close then Resume the project to try now, or switch the chief."]);
+}
+
+#[test]
+fn review_1709_idle_chief_after_an_earlier_give_up_does_not_promise_a_retry() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]).id;
+    context.adapter.with("chief", |agent| agent.settled = true);
+    let after = quit_and_start(&context);
+    context.advance(1_000);
+    never_up(&context.adapter);
+    after.resume_project(project).unwrap();
+    assert!(after.pane(context.id(project, "chief")).is_none());
+    assert_eq!(to_human(&context, project).len(), 1);
+
+    let closing = after.begin_close_project(project);
+    context.finish(closing).unwrap();
+    *context.adapter.started.borrow_mut() = None;
+    *context.adapter.prepare.borrow_mut() = Some(Rc::new(|launch| {
+        if launch["participant"]["handle"] == "chief" {
+            Err("cannot start".into())
+        } else {
+            Ok(())
+        }
+    }));
+    after.resume_project(project).unwrap();
+    let notes = to_human(&context, project);
+    assert!(notes.iter().any(|note| note == "The chief could not start: the launch failed (its cause is in ConsensFlow's log). What comes for the chief waits for it; ConsensFlow tries again when something comes for it. Close then Resume the project to try now, or switch the chief."), "{notes:?}");
 }
 
 #[test]
@@ -3904,7 +4009,7 @@ fn a_give_up_whose_kill_is_taken_after_a_close_pauses_its_task_once_for_the_resu
     assert_eq!(context.project(project).state, "suspended");
     assert_eq!(tiers.task(1).task.state, "paused");
     let kept = context.message(note.id);
-    let why = format!("@{session}'s window could not be opened: the window never came up (its cause is in ConsensFlow's log); its program could not be ended and may still run");
+    let why = format!("@{session}'s window could not be opened: the window never came up (its cause is in ConsensFlow's log); its program may still run");
     assert_eq!(
         (kept.state.as_str(), kept.reason.as_deref()),
         ("queued", None)

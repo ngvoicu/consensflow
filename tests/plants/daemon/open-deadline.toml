@@ -216,8 +216,8 @@ runs = ["od-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "        if !told {"
-replace = "        if true || !told {"
+find = "                Some(abandoned) if abandoned.pane == pane && !abandoned.told => {"
+replace = "                Some(abandoned) if abandoned.pane == pane => {"
 
 [[plant]]
 name = "open deadline: an exit is a window's by its id alone, and the end of the window given up on closes the next"
