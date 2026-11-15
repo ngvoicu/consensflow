@@ -184,8 +184,8 @@ runs = ["app-panics"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/lib.rs"
-find = '''        panics::contained("the app's handler of its event loop", || {'''
-replace = "        Some(()).map(|()| {"
+find = '''    panics::contained("the app's handler of its event loop", || {'''
+replace = "    Some(()).map(|()| {"
 
 [[plant]]
 name = "event-loop-panic: the app's handler of a window's event is not contained"

@@ -82,6 +82,20 @@ struct Heard {
 /// with none, and kept by none. The drag's other events are no drop, and a drop on
 /// any other window is not heard.
 pub fn hear<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
+    hear_with(
+        window,
+        event,
+        |target, name, body| window.emit_to(target, name, body),
+        |said| crate::diag::say(said),
+    );
+}
+
+fn hear_with<R: Runtime>(
+    window: &Window<R>,
+    event: &WindowEvent,
+    emit: impl FnOnce(EventTarget, &str, Value) -> tauri::Result<()>,
+    log: impl FnOnce(&str),
+) {
     let WindowEvent::DragDrop(DragDropEvent::Drop { paths, position }) = event else {
         return;
     };
@@ -92,11 +106,19 @@ pub fn hear<R: Runtime>(window: &Window<R>, event: &WindowEvent) {
         return;
     };
     let (id, paths) = dropped.record(paths, foreground());
-    let _ = window.emit_to(
+    if let Err(error) = emit(
         EventTarget::labeled(MAIN),
         DROP_EVENT,
         told(id, &paths, position),
-    );
+    ) {
+        let drop = id.map_or_else(
+            || "without a number".to_owned(),
+            |id| format!("number {id}"),
+        );
+        log(&format!(
+            "ConsensFlow could not send the page the {DROP_EVENT} event for the drop {drop}: {error}; if it did not appear, try dropping it again"
+        ));
+    }
 }
 
 /// What the page is told of a drop: its number, its paths, and where it was, as

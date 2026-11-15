@@ -1042,12 +1042,8 @@ runs = ["app-test-file-drop"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/file_drop.rs"
-find = '''    let _ = window.emit_to(
-        EventTarget::labeled(MAIN),
-        DROP_EVENT,
-        told(id, &paths, position),
-    );'''
-replace = "    let _ = (id, paths, position);"
+find = '''        |target, name, body| window.emit_to(target, name, body),'''
+replace = '''        |_target, _name, _body| Ok(()),'''
 
 [[plant]]
 name = "file drop: the page is told a drop at another place, its two numbers the wrong way round"
