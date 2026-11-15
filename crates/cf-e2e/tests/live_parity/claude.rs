@@ -80,6 +80,14 @@ pub fn loaded(debug: &str) -> Loaded {
         if let Some(name) = between(line, "Skill prompt: showing \"", "\"") {
             found.skill_names.insert(name.to_owned());
         }
+        if let Some((_, names)) = line.split_once("Skills and commands included in Skill tool:") {
+            found.skill_names = names
+                .split(',')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+                .collect();
+        }
         if line.contains("In-process Chrome MCP server started") {
             found.chrome = true;
         }
@@ -138,9 +146,9 @@ fn prepare_config(login: &dyn ClaudeConfig, folder: &Path) -> Result<std::path::
             (SERVER_NAME): {"type": "stdio", "command": "node", "args": [program]}
         }),
     );
-    let skill_file = config.join("skills").join(GLOBAL_SKILL).join("SKILL.md");
-    cf_e2e::door::make_dir(skill_file.parent().expect("skill has a parent"))?;
-    cf_e2e::door::write(&skill_file, skill(GLOBAL_SKILL))?;
+    let skill_dir = config.join("skills").join(GLOBAL_SKILL);
+    cf_e2e::door::make_dir(&skill_dir)?;
+    cf_e2e::door::write(skill_dir.join("SKILL.md"), skill(GLOBAL_SKILL))?;
     cf_e2e::door::write(&program, SERVER)?;
     // A signed-in Claude can otherwise download the owner's account skills and plugins
     // into even a fresh config. These are run-owned settings, not the owner's settings.
@@ -589,6 +597,31 @@ mod tests {
     }
 
     #[test]
+    fn t1700_debug_user_skill_list_uses_the_latest_complete_snapshot() {
+        let log = "MCP server \"cf-parity\": Successfully connected\n\
+                   Skills and commands included in Skill tool: unrelated, cf-parity-global\n\
+                   getSkills returning: 1 skill dir commands\n";
+        let found = loaded(log);
+        assert!(
+            plain_requirements(&found).is_empty(),
+            "the named user skill was missed"
+        );
+        let member = loaded("MCP server \"cf-parity\": Successfully connected\n\
+            Skills and commands included in Skill tool: unrelated, cf-parity-global, consensflow-worker\n\
+            getSkills returning: 2 skill dir commands\n");
+        assert!(differences(&found, &member).is_empty());
+        let vanished = loaded(&format!(
+            "{log}Skills and commands included in Skill tool: cf-parity-global-other\n"
+        ));
+        assert!(
+            plain_requirements(&vanished)
+                .join(" ")
+                .contains(GLOBAL_SKILL),
+            "a missing or merely similar skill passed"
+        );
+    }
+
+    #[test]
     fn t1700_config_refuses_a_folder_the_run_did_not_make() {
         let login = FakeLogin {
             config: std::env::temp_dir(),
@@ -626,7 +659,7 @@ mod tests {
     #[test]
     fn t1700_actual_kit_login_composes_with_parity_setup() {
         const CHILD: &str = "CF_T1700_FAKE_HOME";
-        if let Some(home) = std::env::var_os(CHILD) {
+        if let Some(home) = cf_e2e::process::own_var(CHILD) {
             let home = PathBuf::from(home);
             let source = home.join("login-source");
             let login =
@@ -673,24 +706,24 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args([
-                "--exact",
-                "claude::tests::t1700_actual_kit_login_composes_with_parity_setup",
-            ])
-            .env(CHILD, &home)
-            .env("HOME", &home)
-            .env("USERPROFILE", &home)
-            .env("TMPDIR", &temp)
-            .env("TMP", &temp)
-            .env("TEMP", &temp)
-            .output()
-            .unwrap();
+        let output = cf_e2e::process::case_of(
+            std::env::current_exe().unwrap(),
+            "claude::tests::t1700_actual_kit_login_composes_with_parity_setup",
+            Duration::from_secs(30),
+        )
+        .inheriting_env()
+        .var(CHILD, &home)
+        .var("HOME", &home)
+        .var("USERPROFILE", &home)
+        .var("TMPDIR", &temp)
+        .var("TMP", &temp)
+        .var("TEMP", &temp)
+        .run()
+        .unwrap();
         assert!(
-            output.status.success(),
-            "fabricated login child failed:\n{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
+            output.code == Some(0),
+            "fabricated login child failed:\n{}",
+            output.output()
         );
     }
 

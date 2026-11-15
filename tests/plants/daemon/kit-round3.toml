@@ -276,3 +276,22 @@ runs = ["round5-parity"]
 file = "crates/cf-e2e/tests/live_parity/claude.rs"
 find = '''json!({"syncClaudeAiSkills": false, "syncClaudeAiPlugins": false}).to_string(),'''
 replace = '''json!({"syncClaudeAiSkills": false, "syncClaudeAiPlugins": true}).to_string(),'''
+
+[[plant]]
+name = "kit parity: Claude keeps a skill missing from the latest list"
+meant = "t1700_debug_user_skill_list_uses_the_latest_complete_snapshot"
+runs = ["round5-parity"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''            found.skill_names = names
+                .split(',')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+                .collect();'''
+replace = '''            found.skill_names.extend(
+                names.split(',')
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned),
+            );'''
