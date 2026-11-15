@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use cf_engine::testing::{Context, FakeAdapter, Gate, Made, Restarted, TRUST_QUESTION};
 use cf_engine::{ActivityState, SwitchWhen};
-use cf_harness::contract::{Pane, Readiness};
+use cf_harness::contract::{FirstMessage, Pane, Readiness};
 use cf_ledger::{continuation_tasks, MessageView, NewNote, NewTask, RESUME_WORDS};
 use serde_json::{json, Value};
 
@@ -301,6 +301,177 @@ fn resume_launch_failure_of_an_idle_chief_is_retried_by_close_then_resume() {
     context.close_project(project).unwrap();
     context.resume_project(project).unwrap();
     assert!(context.dispatcher.pane(chief).is_some());
+}
+
+/// A failed Resume withdraws its continuation with the pause. The record still
+/// says the turn was cut, so a later project Resume must tell it again. The
+/// chief's task-resume words are the other way back.
+fn review_1709_member_way_back(early_exit: bool, project_resume: bool, first: FirstMessage) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let session = tiers.assignee(1);
+    let member = tiers.id(&session);
+    let native = native_of(&context, member);
+    let after = quit_and_start(&context);
+    context.adapter.first.set(first);
+    if early_exit {
+        // The host reports an exit before the open answer and the unhanded
+        // first message is absent from the retained conversation record.
+        let held = context.adapter.agent(&session).items;
+        let adapter = Rc::clone(&context.adapter);
+        let host = Rc::clone(&context.host);
+        let handle = session.clone();
+        *context.adapter.after_prepare.borrow_mut() = Some(Rc::new(move |opened| {
+            if opened == handle {
+                adapter.with(opened, |agent| {
+                    agent.items = held.clone();
+                    agent.settled = false;
+                });
+                *host.exit_after_open.borrow_mut() = Some(handle.clone());
+            }
+        }));
+    } else {
+        let handle = session.clone();
+        *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |launch| {
+            if launch["participant"]["handle"] == handle {
+                Err("no window".into())
+            } else {
+                Ok(())
+            }
+        }));
+    }
+    after.resume_project(project).unwrap();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let withdrawn = cut_notes(&context, member);
+    assert_eq!(withdrawn.len(), 1, "the first Resume made the cut note");
+    assert_eq!(withdrawn[0].state, "cancelled", "the pause withdrew it");
+    *context.adapter.prepare.borrow_mut() = None;
+    *context.adapter.after_prepare.borrow_mut() = None;
+
+    if project_resume {
+        let closing = after.begin_close_project(project);
+        context.settle();
+        closing.take().unwrap().unwrap();
+        after.resume_project(project).unwrap();
+    } else {
+        context.resume_task(project, 1, "Carry on with the lexer");
+    }
+    for _ in 0..5 {
+        after.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "working");
+    assert_eq!(native_of(&context, member), native);
+    let given = given(&context, &session);
+    if project_resume {
+        let notes = cut_notes(&context, member);
+        assert_eq!(
+            notes.len(),
+            2,
+            "the second Resume made a new cut note: {notes:?}"
+        );
+        assert_eq!(notes[1].body, WORKER_CUT);
+        assert_eq!(notes[1].state, "delivered", "{notes:?}");
+        assert_eq!(
+            given
+                .iter()
+                .filter(|words| words.contains(WORKER_CUT))
+                .count(),
+            1,
+            "{given:?}"
+        );
+    } else {
+        assert_eq!(
+            given
+                .iter()
+                .filter(|words| words.contains("Carry on with the lexer"))
+                .count(),
+            1,
+            "{given:?}"
+        );
+        assert!(tiers
+            .task(1)
+            .messages
+            .iter()
+            .any(|message| message.body.contains("Carry on with the lexer")
+                && message.state == "delivered"));
+    }
+}
+
+macro_rules! review_1709_member_case {
+    ($name:ident, $exit:expr, $project:expr) => {
+        #[test]
+        fn $name() {
+            for first in [FirstMessage::Opened, FirstMessage::Delivered] {
+                review_1709_member_way_back($exit, $project, first);
+            }
+        }
+    };
+}
+review_1709_member_case!(review_1709_preparation_failure_project_resume, false, true);
+review_1709_member_case!(review_1709_preparation_failure_task_resume, false, false);
+review_1709_member_case!(review_1709_early_exit_project_resume, true, true);
+review_1709_member_case!(review_1709_early_exit_task_resume, true, false);
+
+fn review_1709_unanswered_open(refuse_kill: bool) {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let project = tiers.project.id;
+    let session = tiers.assignee(1);
+    context.adapter.with(&session, |agent| agent.settled = true);
+    context.close_project(project).unwrap();
+    let handle = session.clone();
+    let preparing = context
+        .adapter
+        .prepare_holds
+        .hold(move |args| args[0]["participant"]["handle"] == handle);
+    context.resume_project(project).unwrap();
+    context.settle();
+    let before = context.host.killed().len();
+    context.host.refuse_kills.set(refuse_kill);
+    context.host.unanswered.set(true);
+    preparing.open();
+    context.settle();
+    assert!(context.host.killed().len() > before, "the kill was tried");
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let reason = last_pause_reason(&context, project, 1);
+    assert_eq!(
+        reason.contains(cf_ledger::MAY_STILL_RUN),
+        refuse_kill,
+        "{reason}"
+    );
+    let notes = tiers.notes("chief");
+    assert!(notes.iter().any(|note| note.contains(&reason)), "{notes:?}");
+}
+
+#[test]
+fn review_1709_unanswered_open_succeeded_kill_has_no_failed_kill_warning() {
+    review_1709_unanswered_open(false);
+}
+
+#[test]
+fn review_1709_unanswered_open_refused_kill_has_failed_kill_warning() {
+    review_1709_unanswered_open(true);
+}
+
+#[test]
+fn review_1709_idle_chief_failure_tells_the_human_when_retry_happens() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]).id;
+    context.adapter.with("chief", |agent| agent.settled = true);
+    context.close_project(project).unwrap();
+    *context.adapter.prepare.borrow_mut() = Some(Rc::new(|launch| {
+        if launch["participant"]["handle"] == "chief" {
+            Err("cannot start".into())
+        } else {
+            Ok(())
+        }
+    }));
+    context.resume_project(project).unwrap();
+    assert_eq!(to_human(&context, project), ["The chief could not start: the launch failed (its cause is in ConsensFlow's log). What comes for the chief waits for it; ConsensFlow tries again when something comes for it. Close then Resume the project to try now, or switch the chief."]);
 }
 
 #[test]
