@@ -34,10 +34,7 @@
 //!
 //! **The Keychain** is the owner's too (T-1102): the guard of Claude Code also lists the names of
 //! the login Keychain's items of `Claude Code-credentials` around the run, and an item gained fails
-//! the rig that ends ([`super::keychain`] says what writes one, and what keeps a run from it). Where
-//! an eval's Claude Code runs on the folder of a kit login, the [`super::login::Login`] is what looks
-//! ([`Guard::leaving_the_keychain_to_the_login`]): it knows the folder, so it fails for the item of
-//! its own and writes another process's as a note, which the eval keeps for its report.
+//! the rig that ends ([`super::keychain`] says what writes one, and what keeps a run from it).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -97,6 +94,8 @@ pub fn updates_off() -> impl Iterator<Item = (&'static str, &'static str)> {
 /// What to look at for one harness.
 #[derive(Debug, Clone)]
 pub struct Watch {
+    home: PathBuf,
+    harness: Harness,
     /// The launchers: each is looked at as a link and as the file it ends at.
     launchers: Vec<PathBuf>,
     /// The folders where the harness installs its versions, whose entries are listed, those that
@@ -126,9 +125,13 @@ impl Watch {
                 launchers.push(installed);
             }
         }
-        let data = own_var("XDG_DATA_HOME")
-            .filter(|folder| !folder.is_empty())
-            .map_or_else(|| home.join(".local").join("share"), PathBuf::from);
+        let data = if own_var("CF_E2E_STAND_IN").as_deref() == Some("1") {
+            home.join(".local").join("share")
+        } else {
+            own_var("XDG_DATA_HOME")
+                .filter(|folder| !folder.is_empty())
+                .map_or_else(|| home.join(".local").join("share"), PathBuf::from)
+        };
         let mut folders = Vec::new();
         let mut files = Vec::new();
         match harness {
@@ -140,10 +143,14 @@ impl Watch {
             }
             Harness::Muse => {
                 // The launcher keeps its binaries and its version line beside itself.
-                let install = fs::canonicalize(command)
-                    .ok()
-                    .and_then(|real| real.parent().map(Path::to_path_buf))
-                    .or_else(|| command.parent().map(Path::to_path_buf));
+                let install = if own_var("CF_E2E_STAND_IN").as_deref() == Some("1") {
+                    command.parent().map(Path::to_path_buf)
+                } else {
+                    fs::canonicalize(command)
+                        .ok()
+                        .and_then(|real| real.parent().map(Path::to_path_buf))
+                        .or_else(|| command.parent().map(Path::to_path_buf))
+                };
                 if let Some(install) = install {
                     folders.push((install.clone(), Some("muse")));
                     files.push(install.join(".muse-version"));
@@ -152,6 +159,8 @@ impl Watch {
             Harness::Codex | Harness::Pi => {}
         }
         Self {
+            home: home.to_path_buf(),
+            harness,
             launchers,
             folders,
             files,
@@ -169,6 +178,10 @@ impl Watch {
 
     /// What it is now.
     pub fn look(&self) -> Seen {
+        crate::standin_process::require_home(
+            &self.home,
+            &format!("{} launcher home lookup", self.harness.name()),
+        );
         Seen {
             keychain: self.keychain.and_then(|names| names()),
             launchers: self
@@ -185,6 +198,7 @@ impl Watch {
                 .files
                 .iter()
                 .map(|file| {
+                    crate::standin_process::require_watch_path(file, "launcher version lookup");
                     (
                         file.clone(),
                         fs::read(file).ok().map(|bytes| digest(&bytes)),
@@ -198,6 +212,7 @@ impl Watch {
 /// The names in `folder`, those that begin with `prefix` where there is one; none for a folder
 /// that is not there.
 fn entries(folder: &Path, prefix: Option<&str>) -> Option<BTreeSet<String>> {
+    crate::standin_process::require_watch_path(folder, "launcher versions lookup");
     let read = fs::read_dir(folder).ok()?;
     Some(
         read.flatten()
@@ -255,6 +270,7 @@ struct Launcher {
 
 impl Launcher {
     fn look(path: &Path) -> Self {
+        crate::standin_process::require_watch_path(path, "launcher lookup");
         let present = fs::symlink_metadata(path).is_ok();
         let ends_at = fs::canonicalize(path).ok();
         Self {
@@ -434,7 +450,7 @@ impl Guard {
         Self {
             harness,
             home: home.to_path_buf(),
-            watch: if harness == Harness::Claude {
+            watch: if harness == Harness::Claude && keychain::watching() {
                 watch.with_keychain(keychain::names)
             } else {
                 watch
@@ -442,14 +458,8 @@ impl Guard {
             before: Mutex::new(None),
         }
     }
-}
 
-impl Guard {
-    /// This guard, which does not list the Keychain: for a Claude Code whose config keeps its
-    /// findings for the run's report ([`ClaudeConfig::keeps_its_findings`](crate::rig::ClaudeConfig),
-    /// an eval's), which names the item of its own folder and no other process's. A rig that failed
-    /// as well for the machine's items would end an eval with its rig's error and cost it the
-    /// report (the scenario evals close the rig with `?`).
+    /// Leave Keychain findings to a config which records them itself.
     #[must_use]
     pub fn leaving_the_keychain_to_the_login(mut self) -> Self {
         self.watch.keychain = None;

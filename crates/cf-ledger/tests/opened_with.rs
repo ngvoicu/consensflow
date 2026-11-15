@@ -439,7 +439,7 @@ fn a_project_that_says_no_rules_and_the_harness_s_own_point_has_none_and_nothing
 }
 
 /// A new project that says nothing of its compaction (a request with no `compaction`, as `cf`,
-/// the API, the kit and the evals ask) has a size of 300,000 tokens, kept in the write that makes
+/// the API and the kit ask) has a size of 300,000 tokens, kept in the write that makes
 /// it and logged as if the human had said it right after; only an explicit `null` is each
 /// harness's own point (T-1400).
 #[test]

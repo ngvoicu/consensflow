@@ -146,14 +146,14 @@ mod on_a_claude_config_of_the_cases_own {
     use crate::kept_config::Kept;
     use crate::{secs, Outcome, FAKE_AGENT};
 
-    /// A rig on the machine `machine`, whose real Claude is `/nowhere/claude` (started through
+    /// A rig on the machine `machine`, whose Claude is a missing fixture (started through
     /// the shim made in `shims`) and whose Claude windows run on `folder`.
     fn started(
         machine: &Path,
         shims: &Path,
         folder: &Arc<Kept>,
     ) -> Result<Rig, Box<dyn std::error::Error>> {
-        let claude = Installed::at(Harness::Claude, "/nowhere/claude", machine)
+        let claude = Installed::at(Harness::Claude, machine.join("bin/claude"), machine)
             .with_claude_config(folder.clone());
         Ok(Rig::start(cf_e2e::live::rig_with_stand_ins(
             &[claude],

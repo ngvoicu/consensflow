@@ -871,37 +871,6 @@ fn keeps_the_authorization_boundary_in_the_chief_text_ships_no_harness_payload_a
     }
 }
 
-#[test]
-fn gives_the_chief_only_the_named_card_nothing_of_the_board_and_leaves_the_other_roles_alone() {
-    let dir = tempfile::tempdir().unwrap();
-    let card = dir.path().join("no-card.md");
-    fs::write(&card, "You work in this project for its owner.\n").unwrap();
-    let staff = [staff_row("zeus", &["worker"], WorkTier::Standard)];
-    let env = Env::from_vars([("CONSENSFLOW_EVAL_CHIEF_CARD", card.as_os_str())]);
-    assert_eq!(
-        role_instructions(
-            &env,
-            "chief",
-            &staff,
-            &CfWord::new("/app/bin/cf", Shell::Posix),
-            None
-        )
-        .unwrap(),
-        "You work in this project for its owner.\n",
-        "no tiers, no staff, no cf"
-    );
-    assert!(role_instructions(
-        &env,
-        "worker",
-        &staff,
-        &CfWord::new("/app/bin/cf", Shell::Posix),
-        None
-    )
-    .unwrap()
-    .contains("/app/bin/cf"));
-    assert!(instructions("chief", &staff).contains("You do not change the project yourself"));
-}
-
 // The rules of spec `smaller-contexts` (T-1009, SCX-06 to SCX-10): reviews that
 // end, fresh windows, targeted checks, briefs that say how a fact is known, and
 // results that begin with the outcome. Each sentence is held by a rule below, and

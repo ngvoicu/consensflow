@@ -263,7 +263,7 @@ fn the_daemon_stays_up_delivers_every_task_and_logs_nothing_wrong_while_several_
 }
 
 /// A window that prints as fast as it can, `CONSENSFLOW_LOAD_NOISE_MIB` of text (64 by
-/// default; 256 for a noisy window of the long run's two hours), and the rig that holds what it
+/// default), and the rig that holds what it
 /// printed (T-139, the rig's capture was unbounded: every byte a window printed was kept
 /// for the rig's life, and a failure's report made a string of each of its lines). What
 /// this process holds once the window is done, and at its peak as the rig makes the report

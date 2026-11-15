@@ -1,17 +1,12 @@
-// The app unwraps and prints where it needs to: it is older than the rewrite's
-// rules (clippy.toml, the workspace's lints) and not moved onto them yet. Where
-// it reads its environment or starts a process itself, the item says so with
-// its own `#[allow(clippy::disallowed_methods)]` and its reason; the lints that
-// refuse an HTTPS client are allowed only by the one constructor (update_page.rs)
-// and never for the crate (tools/xtask/tests/tls_clients.rs, T-1253).
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::print_stdout,
-    clippy::print_stderr
-)]
-
-use std::io::{BufRead, Write};
+//! ConsensFlow's desktop shell: the Tauri app that holds the page, its daemon and its panes.
+//!
+//! The crate answers to the workspace's lints (Cargo.toml: no `unwrap`, `expect` or print to
+//! stdout or stderr outside tests). A diagnostic is said through [`diag::say`], the app's door to
+//! its stderr, which is its error log; a module that still prints or unwraps allows that lint for
+//! itself on its `mod` line below, with its reason. Where the app reads its environment or starts
+//! a process itself, the item says so with its own `#[allow(clippy::disallowed_methods)]` and its
+//! reason (clippy.toml); the lints that refuse an HTTPS client are allowed only by the one
+//! constructor (update_page.rs) and never for the crate (tools/xtask/tests/tls_clients.rs, T-1253).
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder};
@@ -19,10 +14,19 @@ use tauri::{AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuil
 pub mod commands;
 mod daemon;
 mod daemon_command;
+mod diag;
 mod file_drop;
+#[allow(
+    clippy::print_stderr,
+    reason = "its repair failures are lines of the error log written straight to stderr, not through diag::say"
+)]
 mod launcher;
 mod link;
 #[cfg(windows)]
+#[allow(
+    clippy::print_stderr,
+    reason = "its reload and give-up lines are lines of the error log written straight to stderr, not through diag::say"
+)]
 mod page_crash;
 mod panics;
 // Only the Windows app loads a failed page again; tested everywhere.
@@ -31,7 +35,12 @@ mod page_reloads;
 // Only the Windows app reads a runtime from its own exe; tested everywhere.
 #[cfg_attr(not(windows), allow(dead_code))]
 mod portable;
+#[allow(
+    clippy::print_stderr,
+    reason = "its page-event, bridge and quit failures are lines of the error log written straight to stderr, not through diag::say"
+)]
 pub mod runtime;
+mod selftest;
 // The build script's reading of the identity a build is made with, tested with the app's tests.
 #[cfg(test)]
 #[path = "../build/identity.rs"]
@@ -42,193 +51,20 @@ mod test_manifest;
 mod testing;
 mod tls;
 #[cfg(target_os = "macos")]
+#[allow(
+    clippy::print_stderr,
+    reason = "its install failure is a line of the error log written straight to stderr, not through diag::say"
+)]
 mod update_install;
 mod update_page;
+#[allow(
+    clippy::print_stderr,
+    clippy::unwrap_used,
+    reason = "its check, download and install failures are lines of the error log written straight to stderr, not through diag::say; it parses the feed's URL built from a literal and serializes its own plain snapshot with unwrap"
+)]
 pub mod updates;
 
 use runtime::AppRuntime;
-
-/// The packaged smoke's only door into the shipping app.
-///
-/// Everything here is inert unless the app was STARTED with
-/// `CONSENSFLOW_SELFTEST=1`: the page is told nothing, the reporting command
-/// refuses, and neither extra thread exists. That is the whole guard, and it
-/// is deliberately an environment variable rather than a flag the page could
-/// set — a self-test channel that anything loaded later could open would be a
-/// way to read a real user's panes off their screen.
-///
-/// The quit is stdin EOF rather than a report, because the smoke has work to
-/// do WHILE the app is still up: the state root's kernel lock can only be
-/// proved against a live owner. So the page says when it is finished looking,
-/// the smoke does its own probes, and closing the pipe ends the app through
-/// its ordinary `RunEvent::Exit`.
-mod selftest {
-    use super::{json, AppHandle, BufRead, Value, Write};
-
-    static UPDATE_CONTINUE: std::sync::atomic::AtomicBool =
-        std::sync::atomic::AtomicBool::new(false);
-
-    pub fn wait_for_update_probe() -> bool {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
-        while !UPDATE_CONTINUE.load(std::sync::atomic::Ordering::Acquire) {
-            if std::time::Instant::now() >= deadline {
-                return false;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-        true
-    }
-
-    pub struct Config {
-        pub dir: String,
-        pub tag: String,
-        pub updater_expected_version: Option<String>,
-        /// How long the page waits for each step of the smoke
-        /// (`CONSENSFLOW_SELFTEST_STEP_MS`): the smoke tells it, from the patience it was
-        /// given. None: the page waits its own 45 s (app/ui/core/selftest-wait.js).
-        pub step_ms: Option<u64>,
-        /// Whether the page asks the app's command that panics, and nothing else
-        /// (`CONSENSFLOW_SELFTEST_PANIC=1`): the packaged smoke's case of a command's panic
-        /// (T-1050).
-        pub panic_probe: bool,
-    }
-
-    /// Read at every call, not cached: the guard is the environment the app
-    /// was started with, and nothing in the process may widen it later.
-    #[allow(clippy::disallowed_methods)] // The packaged smoke's own CONSENSFLOW_SELFTEST_* variables, read here: older than cf_base::env::Env.
-    pub fn enabled() -> bool {
-        matches!(std::env::var("CONSENSFLOW_SELFTEST").as_deref(), Ok("1"))
-    }
-
-    #[allow(clippy::disallowed_methods)] // The packaged smoke's own CONSENSFLOW_SELFTEST_* variables, read here: older than cf_base::env::Env.
-    pub fn config() -> Option<Config> {
-        if !enabled() {
-            return None;
-        }
-        Some(Config {
-            dir: std::env::var("CONSENSFLOW_SELFTEST_DIR").unwrap_or_default(),
-            tag: std::env::var("CONSENSFLOW_SELFTEST_TAG").unwrap_or_default(),
-            updater_expected_version: std::env::var("CONSENSFLOW_SELFTEST_UPDATER_EXPECTED").ok(),
-            step_ms: std::env::var("CONSENSFLOW_SELFTEST_STEP_MS")
-                .ok()
-                .and_then(|value| value.parse().ok()),
-            panic_probe: matches!(
-                std::env::var("CONSENSFLOW_SELFTEST_PANIC").as_deref(),
-                Ok("1")
-            ),
-        })
-    }
-
-    /// How long the whole self-test may take before the app quits itself.
-    ///
-    /// A wedged run must never leave a maximized window sitting on someone's
-    /// screen waiting to be noticed, so the app is its own dead man's switch
-    /// and exits non-zero, which the smoke reads as the failure it is.
-    #[allow(clippy::disallowed_methods)] // The packaged smoke's own CONSENSFLOW_SELFTEST_* variables, read here: older than cf_base::env::Env.
-    fn deadline_ms() -> u64 {
-        std::env::var("CONSENSFLOW_SELFTEST_DEADLINE_MS")
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(240_000)
-    }
-
-    /// Opens the channel BEFORE any page script runs.
-    ///
-    /// A page that dies on its first import reports nothing, and silence is
-    /// the one answer a smoke must never accept — it looks exactly like a
-    /// hang. So the flag arrives with two listeners that forward whatever
-    /// killed the page, queued until Tauri's own injection has landed.
-    pub fn initialization_script(config: &Config) -> String {
-        format!(
-            "window.__CONSENSFLOW_SELFTEST__ = {};\n{}",
-            json!({"dir": config.dir, "tag": config.tag, "updaterExpectedVersion":config.updater_expected_version, "stepMs": config.step_ms, "panicProbe": config.panic_probe}),
-            PAGE_CHANNEL,
-        )
-    }
-
-    const PAGE_CHANNEL: &str = r#"
-(function () {
-  var queued = [];
-  function core() {
-    var tauri = window.__TAURI__;
-    return tauri && tauri.core && typeof tauri.core.invoke === 'function' ? tauri.core : null;
-  }
-  function send(event, data) {
-    var ready = core();
-    if (ready === null) {
-      queued.push([event, data]);
-      return;
-    }
-    ready.invoke('selftest_report', { event: event, data: data });
-  }
-  function flush() {
-    if (core() === null) return;
-    var pending = queued;
-    queued = [];
-    for (var index = 0; index < pending.length; index += 1) {
-      send(pending[index][0], pending[index][1]);
-    }
-  }
-  window.addEventListener('error', function (event) {
-    send('page-error', {
-      message: String(event.message),
-      source: String(event.filename),
-      line: event.lineno,
-    });
-    flush();
-  });
-  window.addEventListener('unhandledrejection', function (event) {
-    send('page-rejection', { reason: String(event.reason && event.reason.stack ? event.reason.stack : event.reason) });
-    flush();
-  });
-  window.addEventListener('DOMContentLoaded', function () {
-    send('page-init', { tauri: core() !== null });
-    flush();
-  });
-  setInterval(flush, 250);
-})();
-"#;
-
-    /// One line of the self-test channel: the app's own stdout, which only
-    /// the process that launched it can read.
-    pub fn report(event: &str, data: &Value) {
-        let line = json!({"event": event, "data": data, "pid": std::process::id()});
-        let mut out = std::io::stdout().lock();
-        let _ = writeln!(out, "consensflow-selftest {line}");
-        let _ = out.flush();
-    }
-
-    pub fn watch_for_quit(handle: AppHandle) {
-        let deadline = deadline_ms();
-        let expiry = handle.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(deadline));
-            report("deadline", &json!({ "ms": deadline }));
-            // Deliberately abrupt. This path only runs when the self-test is
-            // already wedged, and a graceful exit here has been observed to
-            // end the process 0 — which would read as a pass. The smoke kills
-            // the whole process group after a failure, so nothing is orphaned.
-            let _ = expiry;
-            std::process::exit(2);
-        });
-        std::thread::spawn(move || {
-            // Whatever the smoke wrote first is drained and dropped: a stray
-            // byte must not be able to keep the app alive, and only the pipe
-            // closing means "done".
-            let stdin = std::io::stdin();
-            let mut lines = stdin.lock().lines();
-            while let Some(Ok(line)) = lines.next() {
-                if line == "continue-updater"
-                    && config().is_some_and(|c| c.updater_expected_version.is_some())
-                {
-                    UPDATE_CONTINUE.store(true, std::sync::atomic::Ordering::Release);
-                }
-            }
-            report("quit", &json!({"reason":"stdin-eof"}));
-            handle.exit(0);
-        });
-    }
-}
 
 /// The page's end of the self-test channel. Refuses unless the app itself was
 /// started in self-test mode, so a published page cannot open it.
@@ -542,30 +378,13 @@ pub(crate) fn with_page<R: Runtime, B: PageBuilder<R>>(builder: B) -> B {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-#[allow(clippy::disallowed_methods)] // The app's start settles its home from the environment, before any thread.
 pub fn run() {
     std::hint::black_box(BUILT_IDENTITY);
     // The process's one TLS provider, before the plugins, any client or any thread exists: reqwest
     // panics at the build of a client where the process has none (tls.rs, T-1247).
     tls::install_ring_as_default();
     let context = tauri::generate_context!();
-    // Settled before any thread exists, so the updater and the daemon —
-    // which inherits this environment, and passes it to every pane — all see
-    // the one home.
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
-    match isolated_home(
-        &context.config().identifier,
-        cfg!(debug_assertions),
-        std::env::var_os("CONSENSFLOW_HOME").as_deref(),
-        home.as_deref().map(std::path::Path::new),
-    ) {
-        Ok(Some(isolated)) => std::env::set_var("CONSENSFLOW_HOME", isolated),
-        Ok(None) => {}
-        Err(message) => {
-            eprintln!("consensflow: {message}");
-            std::process::exit(1);
-        }
-    }
+    settle_home(&context.config().identifier);
     remove_inherited_variables();
     // Every panic from here on is written down, and on macOS AppKit's dispatch of an event
     // ends what unwinds out of it there, before tao's frame aborts the app (panics.rs). Once
@@ -576,78 +395,123 @@ pub fn run() {
     if let Some(log) = error_log() {
         redirect_stderr(&log);
     }
-    let app = with_page(
-        tauri::Builder::default()
-            .plugin(tauri_plugin_dialog::init())
-            .plugin(tauri_plugin_updater::Builder::new().build()),
-    )
-    .setup(|app| {
-        let teller = app.handle().clone();
-        panics::tell_with(move || {
-            let shown = teller.clone();
-            // Told on a thread of its own (panics::stopped), so this posts the dialog to the event
-            // loop, which shows it after the dispatch that stopped the error has ended.
-            let _ = teller.run_on_main_thread(move || {
-                use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
-                let told = panics::told(error_log().as_deref());
-                shown
-                    .dialog()
-                    .message(told.clone())
-                    .title("ConsensFlow kept running")
-                    .kind(MessageDialogKind::Warning)
-                    .show(|_| {});
-                // The packaged smoke reads that the person was told (T-1050).
-                if selftest::enabled() {
-                    selftest::report("told", &json!({ "message": told }));
-                }
-            });
-        });
-        app.manage(AppRuntime::start(app.handle()));
-        // The terminal's command names this bundle's `cf`, whichever build wrote it.
-        launcher::repair_in_background(app.handle());
-        updates::setup(app)?;
-        // The product name, and the identity where it is not the release's, so that no
-        // candidate's or test's window reads as the live app's.
-        let title = window_title(&app.package_info().name, &app.config().identifier);
-        // The page runs on while its window is hidden, minimised or behind a locked
-        // screen: it acknowledges the windows' output, and the pane host stops reading a
-        // window that is owed too much of it, its agent waiting on its terminal. WebKit's
-        // own policy throttles a page not shown to a turn every second or so (T-454).
-        // Only macOS has the setting; elsewhere it does nothing.
-        let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-            .title(title)
-            .inner_size(1280.0, 820.0)
-            .min_inner_size(720.0, 520.0)
-            .maximized(true)
-            .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
-        if let Some(config) = selftest::config() {
-            window = window.initialization_script(selftest::initialization_script(&config));
-            selftest::watch_for_quit(app.handle().clone());
-        }
-        let window = window.build()?;
-        #[cfg(windows)]
-        page_crash::load_again_when_it_fails(&window);
-        #[cfg(not(windows))]
-        let _ = window;
-        Ok(())
-    })
-    .build(context)
-    .expect("error while building the ConsensFlow app");
+    let app = built(
+        with_page(
+            tauri::Builder::default()
+                .plugin(tauri_plugin_dialog::init())
+                .plugin(tauri_plugin_updater::Builder::new().build()),
+        )
+        .setup(setup)
+        .build(context),
+    );
+    app.run(on_event);
+}
 
-    app.run(|handle, event| {
-        panics::contained("the app's handler of its event loop", || {
-            if matches!(event, RunEvent::Exit) {
-                at_exit(|| {
-                    if let Some(runtime) = handle.try_state::<AppRuntime>() {
-                        runtime.shutdown();
-                    }
-                });
-                // An update's restart: its app is started here, not by Tauri (updates.rs).
-                #[cfg(target_os = "macos")]
-                updates::relaunch_installed(handle);
+/// Settles the home this build runs on, before any thread exists, so that the updater and the
+/// daemon — which inherits this environment, and passes it to every pane — all see the one home.
+/// A build that cannot have one is said, and ends the app with status 1.
+#[allow(clippy::disallowed_methods)] // The app's start settles its home from the environment, before any thread.
+fn settle_home(identifier: &str) {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+    match isolated_home(
+        identifier,
+        cfg!(debug_assertions),
+        std::env::var_os("CONSENSFLOW_HOME").as_deref(),
+        home.as_deref().map(std::path::Path::new),
+    ) {
+        Ok(Some(isolated)) => std::env::set_var("CONSENSFLOW_HOME", isolated),
+        Ok(None) => {}
+        Err(message) => {
+            diag::say(format!("consensflow: {message}"));
+            std::process::exit(1);
+        }
+    }
+}
+
+/// What the app does once Tauri has built it: its runtime and the daemon, the person told of a
+/// panic that was contained, the update check, and the main window.
+fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    tell_of_contained_panics(app.handle().clone());
+    app.manage(AppRuntime::start(app.handle()));
+    // The terminal's command names this bundle's `cf`, whichever build wrote it.
+    launcher::repair_in_background(app.handle());
+    updates::setup(app)?;
+    open_main_window(app)
+}
+
+/// A panic the app contained is told to the person in a dialog.
+fn tell_of_contained_panics(handle: AppHandle) {
+    panics::tell_with(move || {
+        let shown = handle.clone();
+        // Told on a thread of its own (panics::stopped), so this posts the dialog to the event
+        // loop, which shows it after the dispatch that stopped the error has ended.
+        let _ = handle.run_on_main_thread(move || {
+            use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+            let told = panics::told(error_log().as_deref());
+            shown
+                .dialog()
+                .message(told.clone())
+                .title("ConsensFlow kept running")
+                .kind(MessageDialogKind::Warning)
+                .show(|_| {});
+            // The packaged smoke reads that the person was told (T-1050).
+            if selftest::enabled() {
+                selftest::report("told", &json!({ "message": told }));
             }
         });
     });
+}
+
+/// The app's one window. The product name is its title, and the identity where it is not the
+/// release's, so that no candidate's or test's window reads as the live app's.
+fn open_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    let title = window_title(&app.package_info().name, &app.config().identifier);
+    // The page runs on while its window is hidden, minimised or behind a locked
+    // screen: it acknowledges the windows' output, and the pane host stops reading a
+    // window that is owed too much of it, its agent waiting on its terminal. WebKit's
+    // own policy throttles a page not shown to a turn every second or so (T-454).
+    // Only macOS has the setting; elsewhere it does nothing.
+    let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+        .title(title)
+        .inner_size(1280.0, 820.0)
+        .min_inner_size(720.0, 520.0)
+        .maximized(true)
+        .background_throttling(tauri::utils::config::BackgroundThrottlingPolicy::Disabled);
+    if let Some(config) = selftest::config() {
+        window = window.initialization_script(selftest::initialization_script(&config));
+        selftest::watch_for_quit(app.handle().clone());
+    }
+    let window = window.build()?;
+    #[cfg(windows)]
+    page_crash::load_again_when_it_fails(&window);
+    #[cfg(not(windows))]
+    let _ = window;
+    Ok(())
+}
+
+/// The app's end: the runtime shut down, and an update's restart.
+fn on_event(handle: &AppHandle, event: RunEvent) {
+    panics::contained("the app's handler of its event loop", || {
+        if matches!(event, RunEvent::Exit) {
+            at_exit(|| {
+                if let Some(runtime) = handle.try_state::<AppRuntime>() {
+                    runtime.shutdown();
+                }
+            });
+            // An update's restart: its app is started here, not by Tauri (updates.rs).
+            #[cfg(target_os = "macos")]
+            updates::relaunch_installed(handle);
+        }
+    });
+}
+
+/// The app a build made: an error a build ends in (a webview the system cannot give, a
+/// configuration it cannot read) is said in the error log and ends the app with status 1.
+fn built<R: Runtime>(built: tauri::Result<tauri::App<R>>) -> tauri::App<R> {
+    built.unwrap_or_else(|error| {
+        diag::say(format!("consensflow: the app could not be built: {error}"));
+        std::process::exit(1)
+    })
 }
 
 /// The app's last code, on the main thread, as its event loop ends: `shutdown`, then every
@@ -663,7 +527,9 @@ fn at_exit(shutdown: impl FnOnce()) {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(shutdown));
     #[cfg(target_os = "macos")]
     if let Err(failed) = cf_process::close_all_on_exec() {
-        eprintln!("ConsensFlow ends holding descriptors it could not mark close-on-exec: {failed}");
+        diag::say(format!(
+            "ConsensFlow ends holding descriptors it could not mark close-on-exec: {failed}"
+        ));
     }
 }
 
@@ -688,6 +554,30 @@ mod tests {
             "{}",
             config["build"]
         );
+    }
+
+    /// A build that fails is said in the error log and ends the app with status 1: the person who
+    /// reads the log finds the cause in a line of its own, not a panic's report. The test runs in
+    /// a child, its own binary again, since the end is the process's.
+    #[test]
+    #[allow(clippy::disallowed_methods)] // The test tells itself it is its own child by a CONSENSFLOW_TEST_* variable.
+    fn a_build_that_fails_is_said_and_ends_the_app_without_a_panic() {
+        const NAME: &str = "tests::a_build_that_fails_is_said_and_ends_the_app_without_a_panic";
+        const MARKER: &str = "CONSENSFLOW_TEST_BUILD_FAILS";
+        if std::env::var_os(MARKER).is_some() {
+            let failed = tauri::Error::Io(std::io::Error::other("no window system"));
+            built::<tauri::test::MockRuntime>(Err(failed));
+            return;
+        }
+        let ran = crate::testing::in_a_child(NAME, MARKER);
+        let said = crate::testing::said(&ran);
+        assert_eq!(ran.status.code(), Some(1), "{said}");
+        assert!(
+            said.contains("consensflow: the app could not be built: ")
+                && said.contains("no window system"),
+            "{said}"
+        );
+        assert!(!said.contains("panicked"), "{said}");
     }
 
     #[test]

@@ -8,8 +8,7 @@
 # adapter reads the box on the screen before the next paste and clears it with one Ctrl+C where it
 # shows text and the human typed nothing, pastes with no key where it reads empty, and holds the
 # paste as the human's unsent words where the screen shows no box, which the board says
-# (`holding`; `crates/cf-harness/src/claude/adapter.rs`, `shared/input_box.rs`). The long run's watch reads a command the system writes whole as no turn
-# (`crates/cf-evals/src/long_run/record.rs`, `Kind::Printed`). The reader's tests are
+# (`holding`; `crates/cf-harness/src/claude/adapter.rs`, `shared/input_box.rs`). The reader's tests are
 # `crates/cf-harness/src/claude/record/tests/commands.rs`, the adapter's
 # `crates/cf-harness/tests/launch/claude/compact_cancelled.rs` (on a live run's records), the
 # case `crates/cf-e2e/tests/regressions/a_cancelled_compact_held_the_chief_and_took_its_next_message.rs`,
@@ -23,7 +22,6 @@
 compact-cancelled-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 compact-cancelled-adapter = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::compact_cancelled"]
 compact-cancelled-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_cancelled_compact_held_the_chief_and_took_its_next_message::"]
-compact-cancelled-watch = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "long_run::record"]
 compact-cancelled-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_commands_at_rest"]
 compact-cancelled-live-product = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_compact_cancelled"]
 compact-cancelled-scrub = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "scrub_transcript::"]
@@ -162,21 +160,6 @@ find = '''
 replace = '''
                     self.put_back.set(false);
 '''
-
-[[plant]]
-name = "compact-cancelled: the watch reads what a command the system writes whole printed as a prompt, a phantom turn after a compaction"
-meant = "a_command_the_system_writes_whole_after_a_compaction_opens_no_turn_and_the_record_ends_in_it"
-runs = ["compact-cancelled-watch"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/record.rs"
-find = "                Kind::Printed => continue,\n"
-replace = ""
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/record.rs"
-find = "                Kind::Prompt | Kind::Output => {"
-replace = "                Kind::Prompt | Kind::Output | Kind::Printed => {"
 
 [[plant]]
 name = "compact-cancelled: the live suite takes a compaction that finished before the Escape for a cancel"

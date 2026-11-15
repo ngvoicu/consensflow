@@ -34,7 +34,8 @@ use cf_harness::admin::feed::Feed;
 use cf_harness::admin::HarnessAdmin;
 use cf_harness::records::{self, Thread};
 use cf_harness::seams::{
-    Bundle, LoopbackPorts, Probes, Services, SystemEntropy, SystemLoopback, SystemProcesses,
+    Bundle, Entropy, LoopbackPorts, Probes, Services, SystemEntropy, SystemLoopback,
+    SystemProcesses,
 };
 use cf_ledger::{open_ledger, LedgerError, Options as LedgerOptions};
 use cf_proto::page::HandleLine;
@@ -274,7 +275,7 @@ async fn run(
     // The tokens, and the HTTP front the agents' and the human's requests come
     // to. The pass loop does not exist yet: a kick waits for it.
     let credentials = Rc::new(Credentials::new());
-    let token = random_hex(24);
+    let token = ui_token(&SystemEntropy)?;
     let passes: Rc<OnceCell<PassLoop>> = Rc::new(OnceCell::new());
     let kick: Rc<dyn Fn()> = {
         let passes = Rc::clone(&passes);
@@ -363,7 +364,7 @@ async fn run(
         adapters: Rc::clone(&adapters) as _,
         records: Rc::clone(&records) as _,
         time: Rc::clone(&time) as _,
-        launch_ids: Rc::new(RandomLaunchIds),
+        launch_ids: Rc::new(RandomLaunchIds::new()),
         credentials: Rc::clone(&credentials) as _,
         pane_env: Rc::new(
             WindowEnv::new(&env, api.url(), &options.bundle.bin.to_string_lossy())
@@ -541,6 +542,12 @@ async fn settle(
 }
 
 mod finishing;
+
+/// The token the app opens the human's screens with: 24 random bytes in hex, or a start
+/// that is refused in the words of why the system gave none.
+fn ui_token(entropy: &dyn Entropy) -> Result<String, StartError> {
+    random_hex(entropy, 24).map_err(StartError::System)
+}
 
 #[cfg(test)]
 mod tests;

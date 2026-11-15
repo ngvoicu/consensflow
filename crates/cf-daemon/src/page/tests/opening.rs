@@ -327,7 +327,7 @@ async fn a_project_opened_without_the_flag_has_the_advisor_tool_off_and_one_the_
 }
 
 /// A project opened with no `compaction` (a request that says nothing of it, as `cf`, the API, the
-/// kit and the evals ask) starts on a size of 300,000 tokens; `null` is the harness's own point,
+/// kit asks) starts on a size of 300,000 tokens; `null` is the harness's own point,
 /// the one choice New project keeps beside a size; a project that was already there, with none,
 /// is as it was (T-1400).
 #[tokio::test]

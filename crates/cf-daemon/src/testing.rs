@@ -283,7 +283,7 @@ pub fn scene() -> Scene {
             .iter()
             .find(|p| p.handle == handle)
             .unwrap();
-        credentials.issue(project.id, participant.id)
+        credentials.issue(project.id, participant.id).unwrap()
     };
     let (chief, zeus) = (token("chief"), token("zeus"));
     let kicks = Rc::new(Cell::new(0));

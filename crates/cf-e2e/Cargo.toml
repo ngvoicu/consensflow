@@ -1,6 +1,6 @@
 [package]
 name = "cf-e2e"
-description = "ConsensFlow's black-box suites: the built `cf` and pane host run as processes and judged by what they print, write, answer and exit with. Test support and tests only; it depends on no crate of the product."
+description = "ConsensFlow's black-box suites: the built `cf` and pane host run as processes and are judged by what they print, write, answer and exit with. Test support and tests only."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -97,8 +97,7 @@ sha2.workspace = true
 # The home of a case, removed with it.
 tempfile.workspace = true
 thiserror.workspace = true
-# Plain HTTP to the daemon on loopback, as the proof of the agents screens and
-# the cases that ask the API directly make it.
+# The daemon's loopback HTTP.
 ureq.workspace = true
 # The WebSocket the stand-in Codex speaks, on a socket or on loopback.
 tungstenite.workspace = true
@@ -107,6 +106,10 @@ uuid.workspace = true
 
 [dev-dependencies]
 cf-e2e = { path = ".", features = ["test-support"] }
+# A test process gives itself its homes before libtest starts any threads.
+ctor = { version = "1.0.13", default-features = false }
+# The release-engine contract runs against the engine as a dependency, without its test-support.
+cf-engine.workspace = true
 # The rule that the kit ends and removes only through its door reads the kit's Rust as syntax
 # (`src/door/rule.rs`).
 syn = { version = "2", features = ["full", "visit"] }
@@ -144,7 +147,7 @@ nix = { workspace = true, features = ["fs"] }
 # to a process a live check ends, on which its creation time is read and through which
 # it is ended.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_Console", "Win32_System_Threading"] }
 
 [lints]
 workspace = true

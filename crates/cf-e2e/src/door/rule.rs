@@ -49,11 +49,8 @@
 //! (a write another crate does for the kit), a raw system call, an ending or a removal that a
 //! destructor does (a dropped terminal hangs its program up, a dropped `tempfile` folder is
 //! taken, a dropped child of another crate may be killed), the folders the rule does not read
-//! (`src/files.rs`, `src/cf.rs`, `tools/xtask`, the product's own crates, `crates/cf-evals` (the
-//! evals' runner: it runs real harnesses on a home and a Claude config of its own, made with
-//! `tempfile` and the plain writers of [`crate::files`], and takes its own folders away; it is no
-//! run of the live kit, and its `watch` only reads the folders it is handed), the tests that are no
-//! `live_*`: those that start the kit's stand-ins run on folders they make through the door
+//! (`src/files.rs`, `src/cf.rs`, `tools/xtask`, the product's own crates, and tests that are no
+//! `live_*`): those that start the kit's stand-ins run on folders they make through the door
 //! as well, and the programs the run starts, harnesses and `git` among them, write as they
 //! write: what they may reach is the isolation's (`live::isolation`, `live::login`) to hold, with
 //! the check at the end that the owner's own files are as they were. The door's writers refuse a

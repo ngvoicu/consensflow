@@ -471,7 +471,7 @@ meant = "the_final_answer_is_what_follows_the_last_tool_call_or_message_and_what
 runs = ["tem-engine-role-change-lib"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '            Role::Tool if !of_the_role => final_run.clear(),'
 replace = ''
 
@@ -481,7 +481,7 @@ meant = "a_turn_that_was_woken_has_the_final_answer_of_its_last_turn_and_none_of
 runs = ["tem-engine-final"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '''
                 if !of_the_role {
                     final_run.clear();
@@ -498,7 +498,7 @@ meant = "a_message_to_the_member_after_its_answer_leaves_the_turn_unanswered_and
 runs = ["tem-engine-role-change-lib", "tem-engine-turn-end"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '''
                     final_run.clear();
                     last = None;'''
@@ -510,7 +510,7 @@ meant = "finish_takes_the_answer_before_a_turn_its_jobs_end_woke_that_has_writte
 runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '    (last.is_some() || complete_run.is_some()).then_some(Answers {'
 replace = '    last.is_some().then_some(Answers {'
 
@@ -2068,7 +2068,7 @@ runs = ["tem-rig-held"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '            Role::Tool if !of_the_role => final_run.clear(),'
 replace = ''
 

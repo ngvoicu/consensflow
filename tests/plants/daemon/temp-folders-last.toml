@@ -2,7 +2,7 @@
 # they are written, and a `TempDir` before the ledger, the log or the trace that has a file open in
 # it asks the system to remove a folder with files open. Unix does; Windows will not, and `TempDir` says
 # nothing of it: the folder stayed for good with its `consensflow.db` (zeewin2: 460 of the daemon's 717
-# tests, 163 of the evals', 128 of the harnesses' left theirs in one run, 2026-11-08). The rule test
+# tests and 128 of the harnesses' left theirs in one run, 2026-11-08). The rule test
 # (`tools/xtask/tests/temp_folders.rs`) reads the Rust of the workspace and refuses the next.
 #
 # Every name holds `temp folder last`, so `npm run plants:daemon -- "temp folder last"` runs them all.
@@ -47,24 +47,6 @@ file = "crates/cf-daemon/src/testing.rs"
 find = "pub struct Scene {\n"
 replace = "pub struct Scene {\n    pub _home: tempfile::TempDir,\n"
 
-[[plant]]
-name = "temp folder last: the evals' scene has its folder first"
-meant = "no_struct_of_the_workspace_has_a_temporary_folder_before_a_field_with_a_file_open_in_it"
-runs = ["xtask-temp-folders"]
-
-[[plant.edit]]
-file = "crates/cf-evals/tests/long_run/scene.rs"
-find = "    // Last: the folder goes after the ledger file open in it, which Windows will not remove from under it.\n    _folder: Folder,\n}"
-replace = "}"
-
-[[plant.edit]]
-file = "crates/cf-evals/tests/long_run/scene.rs"
-find = "pub struct Scene {\n"
-replace = "pub struct Scene {\n    _folder: Folder,\n"
-
-# A fixture that something else still holds the ledger of (a task left in a local set, a closure) lets go
-# of the file as it goes, or the folder stays on Windows. These two are tried on Windows only: Unix
-# removes a folder with a file open in it.
 [[plant]]
 name = "temp folder last: the engine's context keeps its ledger's file open as it goes"
 meant = "a_context_leaves_nothing_of_its_folder_though_something_still_holds_its_ledger"

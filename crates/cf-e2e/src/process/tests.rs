@@ -276,7 +276,16 @@ mod shell {
         for kept in ["CARGO", "CARGO_HOME", "CARGO_TARGET_DIR", "RUSTC_BOOTSTRAP"] {
             assert!(!taken.iter().any(|name| name == kept), "{kept}: {taken:?}");
         }
-        assert!(taken.iter().all(|name| nested_cargo::given_to_a_test(name)));
+        // The door also clears inherited roots, or replaces them with this run's own.
+        assert!(command
+            .get_envs()
+            .any(|(name, _)| name == crate::door::MADE_ROOTS));
+        assert!(
+            taken
+                .iter()
+                .all(|name| name == crate::door::MADE_ROOTS || nested_cargo::given_to_a_test(name)),
+            "removed: {taken:?}"
+        );
         assert_eq!(command.get_program(), nested_cargo::CARGO);
     }
 

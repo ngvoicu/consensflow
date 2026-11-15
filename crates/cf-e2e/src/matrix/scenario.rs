@@ -397,7 +397,7 @@ mod tests {
         super::taken(&spent).unwrap();
         assert!(!spent.exists());
         // A file below a folder this run did not make is another's: the step fails and it stays.
-        let other = tempfile::tempdir().unwrap();
+        let other = crate::standin_process::unowned_tempdir();
         let theirs = other.path().join(".matrix-quota-spent");
         std::fs::write(&theirs, "").unwrap();
         assert!(super::taken(&theirs).is_err());

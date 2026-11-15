@@ -53,10 +53,9 @@
 //! window is told of. So is `stranger`: the rig keeps a process that is none of any
 //! window's beside them, which every case that ends a window holds the pane host to
 //! leaving as it was, and whose end of its own is no end the pane host gave it. So is
-//! `last_exits`: the exits the pane host tells as a rig closes, which the long run of
-//! the evals reads after the close. So is `layout`: a live run in a home laid out as the real
-//! one is, with another run's project folders, rig folder and login copies beside its own,
-//! which it writes over, ends and takes none of (T-1592). So is `reports`: a rig keeps a report of a case
+//! `layout`: a live run in a home laid out as the real one is, with another run's project
+//! folders, rig folder and login copies beside its own, which it writes over, ends and takes
+//! none of (T-1592). So is `reports`: a rig keeps a report of a case
 //! that failed and none of one that passed, and every case here and in the
 //! regressions that starts a rig closes it. So is `smoke_stand_in`: the packaged
 //! smoke's stand-in harness taking its brief and handing back its result on the
@@ -74,6 +73,10 @@
 
 // The cases are in `tests/rig/`: cargo looks for the modules of a test's root
 // file beside it, where each would be a suite of its own.
+#[path = "support/standin_boot.rs"]
+mod standin_boot;
+const ALLOW_LIVE_MATRIX: bool = false;
+
 #[path = "rig/advisor_off.rs"]
 mod advisor_off;
 #[path = "rig/approval.rs"]
@@ -122,8 +125,6 @@ mod homes;
 mod kept_config;
 #[path = "rig/kit_efforts.rs"]
 mod kit_efforts;
-#[path = "rig/last_exits.rs"]
-mod last_exits;
 #[path = "rig/layout.rs"]
 mod layout;
 #[path = "rig/live_base.rs"]
@@ -154,8 +155,6 @@ mod printed_output;
 mod prompt_suggestion_off;
 #[path = "rig/reports.rs"]
 mod reports;
-#[path = "rig/scripted_reviewer.rs"]
-mod scripted_reviewer;
 #[path = "rig/specs.rs"]
 mod specs;
 // The packaged smoke's stand-in is a shell script.
@@ -169,6 +168,8 @@ mod specs_codex;
 mod stand_in_codex;
 #[path = "rig/stand_ins.rs"]
 mod stand_ins;
+#[path = "rig/standin_homes.rs"]
+mod standin_homes;
 #[path = "rig/start_suspended.rs"]
 mod start_suspended;
 #[path = "rig/stranger.rs"]

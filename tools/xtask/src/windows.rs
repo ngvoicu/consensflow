@@ -1,6 +1,5 @@
-//! `cargo xtask windows` and `cargo xtask windows-matrix`: the Windows machines
-//! this checkout is tried on (`zeewin` and `zeewin2`, over ssh), and the matrix of
-//! the chief evals run there.
+//! `cargo xtask windows`: the Windows machines this checkout is tried on
+//! (`zeewin` and `zeewin2`, over ssh).
 //!
 //! `--machine zeewin2|zeewin` names the machine, `--host` an ssh host (one of those names is
 //! that machine, with all it is asked; any other is reached as zeewin is), and with neither
@@ -193,7 +192,6 @@
 //! ```text
 //! cargo xtask windows --machine zeewin2 [--build] -- cargo test --workspace --exclude app --exclude cf-e2e
 //! cargo xtask windows --host <ssh host> [--build] -- cargo xtask live paste
-//! cargo xtask windows --host <ssh host> -- cargo xtask eval --scenario round-trip --chief devin --staff devin
 //! cargo xtask windows --host <ssh host> --in app/src-tauri -- cargo test
 //! ```
 //!
@@ -207,7 +205,6 @@
 //!
 //! ```text
 //! cargo xtask windows --host <ssh host> -- cargo xtask test integration
-//! cargo xtask windows --host <ssh host> --env CONSENSFLOW_TEST_DAEMON=native -- cargo xtask eval ...
 //! ```
 //!
 //! The machine needs an OpenSSH server, Node, Rust, git and Windows' own
@@ -215,29 +212,23 @@
 //! names another under it. Run one at a time: a live run's windows are the
 //! machine's.
 //!
-//! A run that ended there with a status then has what it left in `evals/reports` there
-//! brought back to the main checkout's `evals/reports` here, the files it lacks (a long run's report and
-//! ledger among them: the sweep of a later run removes what is older than two weeks from the
-//! machine's copy), and says so on the error stream; the status is the command's own either way
-//! ([`fetch`]). Only a run that began has anything to bring back: one that ended before the
+//! A run that ended there with a status has the files it left in `app/src-tauri/target/live-matrix`
+//! brought back to the same folder in the main checkout, where they are missing. Both folders
+//! stay with their respective build outputs and can be removed when those are cleaned. The fetch
+//! says what it did on the error stream; the status is the command's own either way ([`fetch`]).
+//! Only a run that began has anything to bring back: one that ended before the
 //! machine said its tree (its lock refused it, with 75; its unpack failed) asks nothing of the
 //! machine after it ([`run::Outcome::NotStarted`]).
-//!
-//! `windows-matrix` is the evals there: each `--scenario` for each `--pair
-//! chief:staff`, one run after another through the same run, with `--env` given
-//! to each, the output of each kept in `evals/reports/windows/` and one line per
-//! run at the end.
 //!
 //! The modules: [`options`] (the words), [`machine`] (which machine, and how ssh reaches its
 //! PowerShell), [`reach`] (the one place that builds `ssh` and `scp`, with the bounds), [`script`] (the PowerShell that goes, as
 //! text, and the line it ends by), [`tree`] (the tarball), [`session`] (ssh, as it
 //! goes, and the answer), [`tail`] (the last line of what it said), [`interrupt`]
-//! (a stop), [`run`] (one run), [`fetch`] (the reports brought back) and [`matrix`].
+//! (a stop), [`run`] (one run), and [`fetch`] (the reports brought back).
 
 mod fetch;
 mod interrupt;
 mod machine;
-mod matrix;
 mod options;
 mod queue;
 mod reach;
@@ -253,15 +244,12 @@ use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use cf_base::time::SystemClock;
-
 use crate::context::Context;
 use crate::dispatch::{Command, Console, Failure, Run};
 use crate::process::{self, Invocation};
 use interrupt::Interrupt;
 use machine::Machine;
-use matrix::Reached;
-use options::{MatrixOptions, Options, DEFAULT_DIR};
+use options::Options;
 use run::Outcome;
 
 pub const COMMANDS: &[Command] = &[
@@ -271,12 +259,7 @@ pub const COMMANDS: &[Command] = &[
         usage: "[--machine zeewin2|zeewin | --host HOST] [--build] [--dir DIR] [--in DIR] [--wait MINUTES] [--env NAME=VALUE ...] -- <command ...>",
         run: Run::Native(windows),
     },
-    Command {
-        words: &["windows-matrix"],
-        about: "Run the chief evals on the Windows machine, a pair of chief and staff at a time",
-        usage: "[--machine zeewin2|zeewin | --host HOST] [--build] [--wait MINUTES] [--env NAME=VALUE ...] --scenario NAME ... --pair CHIEF:STAFF ... [--claude-model M] [--pi-model M]",
-        run: Run::Native(windows_matrix),
-    },
+
 ];
 
 /// Whether a run that the machine was asked to end is ended there.
@@ -412,37 +395,6 @@ fn windows(context: &Context, args: &[OsString], console: &mut Console) -> Resul
         Ok(Outcome::Stopped) => Ok(STOPPED),
         Err(error) => {
             writeln!(console.err, "windows: {error}")?;
-            Ok(error.status())
-        }
-    }
-}
-
-fn windows_matrix(
-    context: &Context,
-    args: &[OsString],
-    console: &mut Console,
-) -> Result<i32, Failure> {
-    let mut options = MatrixOptions::parse(args).map_err(Failure::Usage)?;
-    let interrupt = Interrupt::listen()?;
-    let Some(machine) = on(
-        context,
-        &mut options.machine,
-        DEFAULT_DIR,
-        console,
-        &interrupt,
-    )?
-    else {
-        return Ok(STOPPED);
-    };
-    let mut reached = Reached {
-        context,
-        machine: &machine,
-        interrupt: &interrupt,
-    };
-    match matrix::run(context, &options, &mut reached, &mut SystemClock, console) {
-        Ok(status) => Ok(status),
-        Err(error) => {
-            writeln!(console.err, "windows-matrix: {error}")?;
             Ok(error.status())
         }
     }

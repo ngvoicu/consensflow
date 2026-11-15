@@ -259,7 +259,7 @@ meant = "an_item_copied_as_the_users_and_copied_again_as_the_harness_s_own_is_re
 runs = ["ledger-healing"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/parts.rs"
 find = '''         SET role = excluded.role, bytes = excluded.bytes, parts = excluded.parts,'''
 replace = '''         SET bytes = excluded.bytes, parts = excluded.parts,'''
 
@@ -291,7 +291,7 @@ meant = "a_worker_resumed_with_words_that_name_a_picture_ends_its_turn_with_its_
 runs = ["engine-dispatcher-paste-shapes"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '''            Role::Tool if !of_the_role => final_run.clear(),'''
 replace = '''            Role::Tool if !of_the_role => final_run.clear(),
             Role::Custom if !of_the_role => {

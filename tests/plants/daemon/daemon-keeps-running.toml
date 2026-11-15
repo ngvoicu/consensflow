@@ -302,7 +302,7 @@ meant = "a_window_its_opener_no_longer_owns_is_not_opened_and_starts_no_program"
 runs = ["panes-fence"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/spawn.rs"
 find = '''
         if !owns() {
             return Err(PaneError::Fenced(key));
@@ -401,7 +401,7 @@ meant = "the_page_is_told_each_step_of_a_restart_in_the_words_it_draws"
 runs = ["app-daemon-restart"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/daemon.rs"
+file = "app/src-tauri/src/daemon/status.rs"
 find = "            closing: true,\n            ..Self::down(DAEMON_CLOSING_WINDOWS, true)"
 replace = "            closing: false,\n            ..Self::down(DAEMON_CLOSING_WINDOWS, true)"
 

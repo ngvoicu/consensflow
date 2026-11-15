@@ -1171,6 +1171,22 @@ const COLLECTED_MATRIX: &str =
 const COLLECTED_SMOKE: &str = "path: ${{ env.SMOKE_TEMP }}/cf-smoke-*";
 
 #[test]
+fn ci_uploads_no_hidden_files() -> Outcome {
+    let steps = ci_steps()?;
+    let uploads = steps_with(&steps, "uses: actions/upload-artifact@");
+    assert!(!uploads.is_empty(), "CI has no artifact uploads to check");
+    for upload in uploads {
+        assert!(
+            !upload
+                .iter()
+                .any(|line| line.starts_with("include-hidden-files:")),
+            "an upload enables or configures hidden files: {upload:?}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file() -> Outcome {
     let steps = ci_steps()?;
     let names = step_with(&steps, "echo \"RIG_TEMP=")?;
@@ -1247,7 +1263,7 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
         "if-no-files-found: ignore",
         "retention-days: 7",
         "app/src-tauri/target/live-reports/",
-        "evals/reports/live-matrix/",
+        "app/src-tauri/target/live-matrix/",
     ] {
         assert!(
             checks_upload.iter().any(|have| have == line),
@@ -1267,7 +1283,7 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
         "if: always()",
         "if-no-files-found: ignore",
         "retention-days: 7",
-        "path: evals/reports/live-matrix/",
+        "path: app/src-tauri/target/live-matrix/",
     ] {
         assert!(
             matrix_evidence.iter().any(|have| have == line),

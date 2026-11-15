@@ -1,23 +1,17 @@
-//! What a run leaves in `evals/reports` on the machine, brought back here once the run has
-//! ended: a long run's report and ledger (`evals/reports/long/`), an eval's report, a stop's. The
-//! sweep of the next run there removes what is older than [`REPORTS_KEPT_DAYS`] from that
-//! folder, so a report that lived only there would be gone in two weeks (T-141, P3-3). The
-//! folder here is the main checkout's `evals/reports` (the parent of the repository's common
-//! git folder), not that of the tree the run went from: a worker's tree goes with its task, and
-//! what lived only in it would go too (T-194, P3-3). It is ignored by git, and the privacy line
-//! holds: nothing of it goes anywhere but this machine. Where there is no repository to ask, it
-//! is the checkout's own.
+//! What a run leaves in `app/src-tauri/target/live-matrix` on the machine, brought back here once
+//! the run has ended. It stays with the build folder, which the Windows sweep keeps, but may be
+//! removed when that build folder is cleaned. The folder here is in the main checkout, not the
+//! worker's tree: a worker's tree goes with its task (T-194, P3-3). It is ignored by git. Where
+//! there is no repository to ask, the checkout's own folder is used.
 //!
 //! The machine lists what it holds ([`reports_script`]), each file with its size, and only a
 //! file this checkout does not have is copied (`scp`, one at a time, to a name of its own that is
 //! made the file's when its size is the one listed): what is here is never replaced, so a
-//! report brought back once is kept as it was. What the matrix writes under `windows/` is
-//! written here and is not listed. A name that is none of what a report's is (a path out of the
+//! report brought back once is kept as it was. A name that is none of what a report's is (a path out of the
 //! folder, a character no report's name holds) is not copied, and said. None of it changes how
 //! the run ended: what cannot be brought back is said on the error stream, and the run's status
 //! is the command's own.
 //!
-//! [`REPORTS_KEPT_DAYS`]: super::script::REPORTS_KEPT_DAYS
 //! [`reports_script`]: super::script::reports_script
 
 use std::fs;
@@ -38,10 +32,10 @@ use crate::process::{self, Invocation};
 const SAID: usize = 4;
 
 /// [`run::run`], and then, where the command ended there with a status, what it left in
-/// `evals/reports` brought back here. A run that could not be sent brings back nothing, nor does
+/// `app/src-tauri/target/live-matrix` brought back here. A run that could not be sent brings back nothing, nor does
 /// one the machine did not take (its lock refused it, its unpack failed: it said no tree, and the
 /// command never began, [`Outcome::NotStarted`]), and a run that was stopped here is not waited for
-/// any longer: it is ended there, and its half-written report is the next run's to be pruned.
+/// any longer: it is ended there, and its half-written report stays with the build folder.
 pub fn run_keeping(
     context: &Context,
     machine: &Machine,
@@ -57,7 +51,7 @@ pub fn run_keeping(
     Ok(ended)
 }
 
-/// One file the machine lists: its name from `evals/reports`, with `/`, and its size.
+/// One file the machine lists: its name from `app/src-tauri/target/live-matrix`, with `/`, and its size.
 #[derive(Debug, PartialEq, Eq)]
 struct Listed {
     name: String,
@@ -76,9 +70,6 @@ fn parse(text: &str) -> (Vec<Listed>, Vec<String>) {
         let Ok(size) = size.trim().parse::<u64>() else {
             continue;
         };
-        if name.starts_with("windows/") {
-            continue;
-        }
         if is_report_name(name) {
             files.push(Listed {
                 name: name.to_owned(),
@@ -106,7 +97,7 @@ fn is_report_name(name: &str) -> bool {
         })
 }
 
-/// Lists what the machine has in `evals/reports` and brings back what is not here, saying what it
+/// Lists what the machine has in `app/src-tauri/target/live-matrix` and brings back what is not here, saying what it
 /// did on the error stream. Nothing is said where there was nothing to do.
 fn bring_back(
     context: &Context,
@@ -172,12 +163,12 @@ fn bring_back(
 }
 
 /// Where the reports are kept here, and whether that is the main checkout's folder and not the
-/// tree's own: the main checkout's `evals/reports` (the parent of the repository's common git
+/// tree's own: the main checkout's `app/src-tauri/target/live-matrix` (the parent of the repository's common git
 /// folder), for a run that goes from a tree linked to it goes with its task, and what lived only
 /// in the tree would go too (T-194, P3-3). The checkout itself is where there is no repository
 /// to ask, or its common folder is no `.git` (a bare repository's is not a checkout's).
 fn reports_folder(context: &Context) -> (PathBuf, bool) {
-    let own = context.root.join("evals").join("reports");
+    let own = context.root.join("app/src-tauri/target/live-matrix");
     let asked = Invocation::new("git", &context.root).args(["rev-parse", "--git-common-dir"]);
     let Ok(answered) = process::capture(&asked, &context.env) else {
         return (own, false);
@@ -193,7 +184,7 @@ fn reports_folder(context: &Context) -> (PathBuf, bool) {
     match main {
         Some(main) if main.is_dir() => {
             let differs = fs::canonicalize(&main).ok() != fs::canonicalize(&context.root).ok();
-            (main.join("evals").join("reports"), differs)
+            (main.join("app/src-tauri/target/live-matrix"), differs)
         }
         _ => (own, false),
     }
@@ -207,7 +198,7 @@ fn told(brought: &[String], in_main: bool) -> Option<String> {
     let shown: Vec<&str> = brought.iter().take(SAID).map(String::as_str).collect();
     let more = brought.len().saturating_sub(SAID);
     Some(format!(
-        "brought back {} of the machine's reports into {}evals/reports: {}{}",
+        "brought back {} of the machine's reports into {}app/src-tauri/target/live-matrix: {}{}",
         brought.len(),
         if in_main { "the main checkout's " } else { "" },
         shown.join(", "),
@@ -253,7 +244,7 @@ fn fetch(
     let part = partial(to);
     let scp = reach::scp(context, reach::RUN)
         .arg(format!(
-            "{}:{}/evals/reports/{}",
+            "{}:{}/app/src-tauri/target/live-matrix/{}",
             machine.host, options.dir, file.name
         ))
         .arg(&part);

@@ -128,8 +128,20 @@ pub mod serial;
 pub mod shipped;
 pub mod smoke_harness;
 mod stand_in;
+#[doc(hidden)]
+#[allow(unsafe_code)]
+pub mod standin_process;
+#[cfg(test)]
+#[allow(unsafe_code)]
+mod standin_boot {
+    ctor::declarative::ctor! {
+        #[ctor(unsafe)]
+        fn begin_stand_in_process() {
+            crate::standin_process::start(false);
+        }
+    }
+}
 pub mod stand_in_lists;
-pub mod terminal;
 pub mod wire;
 
 pub use error::{Error, Result};

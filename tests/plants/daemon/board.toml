@@ -4,8 +4,8 @@
 # any member had it, one called off or failed before any member had it, and
 # the tasks of a member the human removed. One plant takes one case out of the
 # board, or one rule out of what draws it; a test of it fails: the ledger's own,
-# which holds the board to the placements, or the page's, the eval's and the
-# list's. A run written `{ node: [...] }` is `node --test`.
+# which holds the board to the placements, or the page's and the list's. A run written
+# `{ node: [...] }` is `node --test`.
 
 [run]
 # The ledger's board, on a ledger of its own: held to the placements.
@@ -71,16 +71,6 @@ runs = ["board-ui"]
 file = "app/ui/core/board.js"
 find = ".filter((task) => task.requester === lane.participant.handle)"
 replace = ".filter((task) => task.requester === lane.participant.handle && task.state === 'open')"
-
-[[plant]]
-name = "board: the eval counts as placed only the tasks waiting for a member"
-meant = "the_tasks_the_board_places_are_every_one_it_lists_one_no_lane_has_whatever_its_state_and_not_one_the_human_deleted"
-runs = ["evals-measure"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/measure/plumbing.rs"
-find = '"SELECT COUNT(*) FROM task WHERE deleted_at IS NULL"'
-replace = '''"SELECT COUNT(*) FROM task WHERE deleted_at IS NULL AND state = 'open' AND assignee_id IS NULL"'''
 
 [[plant]]
 name = "board: cf task list puts every task no lane has under the words for those that wait"

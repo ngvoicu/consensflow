@@ -3,7 +3,7 @@
 # of consensflow-sme), and each is held by a plant of the bug it is there for:
 #
 # - a write into a pane whose program reads nothing blocks for good, and neither another pane's
-#   write nor the kill of that pane waits for it (`crates/cf-panes/src/pty.rs`, `blocked_write_…`:
+#   write nor the kill of that pane waits for it (`crates/cf-panes/src/pty/tests.rs`, `blocked_write_…`:
 #   "blocked write unblocked after kill: Timeout" at a load of 15 to 25, T-971);
 # - the API front's tests of a handler, a client that leaves and a close (`crates/cf-daemon/src/api/server/tests.rs`:
 #   "Connection reset by peer" at a load of 48 and more, T-968, T-992) wait for the handler's word that it
@@ -40,7 +40,7 @@ platforms = ["macos"]
 runs = ["a4b-blocked-write"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/teardown.rs"
 find = '''    if pane.active_writes.load(Ordering::Acquire) == 0 {
         let result = terminate(&mut pane, grace);'''
 replace = '''    while pane.active_writes.load(Ordering::Acquire) != 0 {
@@ -61,7 +61,7 @@ find = '''        let _active_write = ActiveWrite(active_writes);
         let mut writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;'''
 replace = '''        let _active_write = ActiveWrite(active_writes);
         static EVERY_PANE: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let _every_pane = EVERY_PANE.lock().unwrap_or_else(PoisonError::into_inner);
+        let _every_pane = EVERY_PANE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut writer = writer.lock().map_err(|_| PaneError::LockPoisoned)?;'''
 
 [[plant]]

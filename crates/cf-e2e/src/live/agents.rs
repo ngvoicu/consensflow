@@ -398,6 +398,9 @@ fn model_of(harness: Harness, given: &str, flag: &str) -> std::result::Result<Mo
 /// anything is spent.
 pub fn asked() -> Result<Models> {
     let models = asked_of(requested)?;
+    if !super::keychain::live_case() {
+        return Ok(models);
+    }
     let machine = super::renew::TestMachine::detect();
     Ok(models.on_machine(
         machine.as_ref().map(super::renew::TestMachine::name),
@@ -407,7 +410,14 @@ pub fn asked() -> Result<Models> {
 
 /// The names of the logins in the owner's Pi `auth.json` (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`),
 /// never what they hold; none where the file cannot be read.
+#[cfg(test)]
+static PI_PROVIDER_READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 fn pi_providers() -> Option<Vec<String>> {
+    assert!(
+        super::keychain::live_case(),
+        "stand-in run attempted Pi provider lookup"
+    );
     let folder = crate::process::own_var("PI_CODING_AGENT_DIR")
         .filter(|value| !value.is_empty())
         .map(std::path::PathBuf::from)
@@ -416,6 +426,8 @@ fn pi_providers() -> Option<Vec<String>> {
                 .ok()
                 .map(|home| home.join(".pi").join("agent"))
         })?;
+    #[cfg(test)]
+    PI_PROVIDER_READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let text = std::fs::read_to_string(folder.join("auth.json")).ok()?;
     let logins: Value = serde_json::from_str(&text).ok()?;
     Some(logins.as_object()?.keys().cloned().collect())
@@ -606,6 +618,52 @@ pub fn question_tool(harness: Harness) -> Option<&'static str> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn standin_isolation_log_begin_never_reads_a_decoy_pi_auth() {
+        const CHILD: &str = "CF_T1647_PI_CHILD";
+        const OUTSIDE: &str = "CF_T1647_PI_OUTSIDE";
+        if crate::process::own_var(CHILD).is_some() {
+            let decoy =
+                std::path::PathBuf::from(crate::process::own_var("PI_CODING_AGENT_DIR").unwrap());
+            let inherited = std::path::PathBuf::from(crate::process::own_var(OUTSIDE).unwrap());
+            assert_ne!(decoy, inherited.join(".pi/agent"));
+            crate::door::make_dir(&decoy).unwrap();
+            crate::door::write(decoy.join("auth.json"), "{\"cliproxyapi\":{}}\n").unwrap();
+            super::super::Log::begin("stand-in decoy").unwrap();
+            assert_eq!(
+                PI_PROVIDER_READS.load(std::sync::atomic::Ordering::SeqCst),
+                0,
+                "Log::begin read the decoy Pi auth file"
+            );
+            return;
+        }
+        // This is the child's inherited decoy home, outside the home that its
+        // own bootstrap makes. With no PI_CODING_AGENT_DIR, the old lookup
+        // would have read this file through HOME.
+        let inherited = crate::door::made("pi-inherited-home-").unwrap();
+        let agent = inherited.path().join(".pi/agent");
+        crate::door::make_dir(&agent).unwrap();
+        crate::door::write(agent.join("auth.json"), "{\"outside-provider\":{}}\n").unwrap();
+        let output = crate::process::case_of(
+            std::env::current_exe().unwrap(),
+            "live::agents::tests::standin_isolation_log_begin_never_reads_a_decoy_pi_auth",
+            std::time::Duration::from_secs(120),
+        )
+        .inheriting_env()
+        .arg("--nocapture")
+        .var(CHILD, "1")
+        .var(OUTSIDE, inherited.path())
+        .var("HOME", inherited.path())
+        .var("USERPROFILE", inherited.path())
+        .var("CF_E2E_STAND_IN", "1")
+        .without("PI_CODING_AGENT_DIR")
+        .without("PI_CODING_AGENT_SESSION_DIR")
+        .without("CONSENSFLOW_TEST_MACHINE")
+        .run()
+        .unwrap();
+        assert!(output.code == Some(0), "{}{}", output.stdout, output.stderr);
+    }
+
     /// T-931 P2-2: the harnesses `--models` and `--claude-model` name are asked for: a
     /// machine that lacks one is the run's error, not a harness left out.
     #[test]
@@ -710,12 +768,7 @@ mod tests {
         // The run that sets no variable has them too, and its agents are on them.
         // Where it runs: on this machine, a test machine's Pi may be on the model the kit names
         // for it ([`Models::on_machine`]), which the gate's own run on zeewin2 is.
-        let here = parse(None, None).unwrap().on_machine(
-            crate::live::renew::TestMachine::detect()
-                .as_ref()
-                .map(crate::live::renew::TestMachine::name),
-            pi_providers().as_deref(),
-        );
+        let here = parse(None, None).unwrap();
         assert_eq!(asked().unwrap(), here);
         for harness in Harness::ALL {
             let model = model(harness);

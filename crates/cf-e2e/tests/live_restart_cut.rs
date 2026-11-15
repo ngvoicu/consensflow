@@ -219,7 +219,7 @@ fn cases(
 }
 
 /// What the check opens for a chief: a project whose chief is the real `chief`,
-/// on its harness's cheap model (Pi on its cheap eval model: the bench's own Pi
+/// on its harness's cheap model (Pi on its cheap model: the bench's own Pi
 /// model was one that hangs), and whose one member is the stand-in agent, which
 /// has no model.
 fn chief_plan(chief: Harness) -> Plan {

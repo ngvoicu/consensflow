@@ -29,6 +29,17 @@ const DIR: &str = "consensflow-build";
 const ID: &str = "0000abcd-12345678";
 const BUILD: [&str; 2] = ["npm ci --no-audit --no-fund", "npm run build:bridge"];
 
+#[test]
+fn t1655_the_sweep_leaves_old_evidence_alone() {
+    assert!(KEPT.contains(&"evals"));
+    assert!(!sweep_script().contains("$reports = Join-Path $dir 'evals/reports'"));
+}
+
+#[test]
+fn t1655_the_listing_reads_the_live_matrix_evidence() {
+    assert!(reports_script(DIR).contains(r"'app\src-tauri\target\live-matrix'"));
+}
+
 /// The run script of a run in the usual folder, in the copy's root: what it is asked for.
 fn script(steps: &[&str], command: &str, env: &[(String, String)]) -> String {
     run_script(&Script {
@@ -972,7 +983,7 @@ fn what_a_run_is_asked_for_is_in_the_run_script_and_the_bootstrap_does_not_depen
     }
     let (plain, heavy) = (
         asked(&[], "x", &[]),
-        asked(&BUILD_STEPS, "cargo xtask eval --scenario y", &env),
+        asked(&BUILD_STEPS, "cargo test --package example", &env),
     );
     assert_eq!(remote_script(&plain), remote_script(&heavy));
     let (light, full) = (run_script(&plain), run_script(&heavy));
@@ -980,7 +991,7 @@ fn what_a_run_is_asked_for_is_in_the_run_script_and_the_bootstrap_does_not_depen
     for what in [
         "'npm ci --no-audit --no-fund'",
         "$env:CONSENSFLOW_TEST_DAEMON = 'native'\n",
-        "'cargo xtask eval --scenario y'",
+        "'cargo test --package example'",
         "Set-Location (Join-Path $dir 'app/src-tauri')\n",
     ] {
         assert!(
@@ -1126,29 +1137,8 @@ fn a_mark_in_a_value_is_only_text_and_no_template_has_a_mark_nothing_fills() {
     assert_eq!(fill("a «b» «c»", &[("b", "x")]), "a x «c»");
 }
 
-/// The longest run there is: the build, and the matrix's longest eval line (a claude
-/// chief with a model, a staff with pi and its model, a chief switch), and as many
-/// variables as a run is likely to name.
+/// A long run: a workspace build and test, with as many variables as a run is likely to name.
 fn longest(env: &[&str]) -> Script<'static> {
-    use crate::windows::matrix::eval;
-    use crate::windows::options::{MatrixOptions, Pair};
-
-    let options = MatrixOptions {
-        machine: Some(crate::windows::machine::Machine::at("zeewin")),
-        build: true,
-        env: Vec::new(),
-        scenarios: vec!["chief-switch".into()],
-        pairs: Vec::new(),
-        claude_model: Some("claude-sonnet-5".into()),
-        pi_model: Some("openai/gpt-5.6-luna".into()),
-        wait: 0,
-    };
-    let pair = Pair {
-        chief: "claude".into(),
-        staff: "devin,pi".into(),
-    };
-    let command: &'static str =
-        Box::leak(command_line(&eval(&options, "chief-switch", &pair)).into_boxed_str());
     let env: &'static [(String, String)] =
         Box::leak(parse_env(&strings(env)).unwrap().into_boxed_slice());
     Script {
@@ -1156,7 +1146,7 @@ fn longest(env: &[&str]) -> Script<'static> {
         dir: DIR,
         inside: ".",
         steps: &BUILD_STEPS,
-        command,
+        command: "cargo test --workspace --all-targets -- --test-threads=4",
         env,
         node: r"C:\Program Files\nodejs",
         machine: "zeewin2",
@@ -1176,8 +1166,7 @@ fn the_script_goes_encoded_as_powershell_reads_it_and_comes_back_as_it_was() {
 #[test]
 fn the_longest_run_there_is_leaves_the_command_line_a_margin_of_a_thousand_and_more() {
     // The bootstrap is all that is on ssh's command line, and nothing a run is asked for
-    // changes it: the longest line of the matrix (the build, a chief switch with models,
-    // four variables) is as long as no line at all.
+    // changes it: a build and a command with four variables are as long as no line at all.
     let bare = Script {
         steps: &[],
         command: "x",
@@ -1211,7 +1200,8 @@ fn the_longest_run_there_is_leaves_the_command_line_a_margin_of_a_thousand_and_m
         "CONSENSFLOW_TEST_VARIABLE_ONE=a value that is long enough to count for something",
     ]));
     assert!(
-        run.contains("--switch-to") && run.contains("--pi-staff-model"),
+        run.contains("cargo test --workspace --all-targets -- --test-threads=4")
+            && run.contains("CONSENSFLOW_TEST_VARIABLE_ONE"),
         "{run}"
     );
     // It holds the job's C# besides, and is longer than the line could carry: that is what the

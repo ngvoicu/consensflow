@@ -13,6 +13,7 @@
 //! beside it ([`StandIn`]), and Muse is its child.
 
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
@@ -34,6 +35,7 @@ pub enum Run {
 /// being in the keychain, the one item every Muse of the machine reads; on Windows all of
 /// it, `credential_backend: file`). The person's file is read, never written.
 pub fn seed_live_home(rig_home: &Path, real_home: &Path) -> Result {
+    crate::standin_process::require_home(real_home, "Muse login lookup");
     let config = rig_home.join(".config").join("muse");
     crate::door::write(config.join("settings.json"), "{\"schema_version\":1}\n")?;
     let auth = real_home.join(".config").join("muse").join("auth.json");
@@ -112,19 +114,49 @@ pub fn installed() -> std::result::Result<Installed, String> {
     if !cfg!(any(target_os = "macos", windows)) {
         return Err("Muse Code's rig cases run on a Mac or on Windows with Muse installed: Muse ships for no other".to_owned());
     }
-    installed_on(
-        &own_var("PATH").unwrap_or_default(),
-        installer_place().as_deref(),
-    )
+    let path = crate::standin_process::inherited_path_value()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| own_var("PATH").unwrap_or_default());
+    installed_on(&path, installer_place().as_deref())
+}
+
+/// The installed executable used by an echo case.
+pub fn echo_required() -> std::result::Result<Installed, String> {
+    let found = installed().map_err(|why| format!("required Muse for echo is missing: {why}"))?;
+    let _ = writeln!(
+        std::io::stderr(),
+        "Muse echo uses {} (version {})",
+        found.binary.display(),
+        found.version
+    );
+    Ok(found)
+}
+
+/// The CI workflow names its machines as having no Muse, so its cases say why they do not run.
+pub fn runner_has_no_muse() -> bool {
+    if own_var("GITHUB_ACTIONS").as_deref() == Some("true")
+        && own_var("CF_E2E_NO_MUSE").as_deref() == Some("1")
+    {
+        let _ = writeln!(std::io::stderr(), "not run: this runner has no Muse");
+        true
+    } else {
+        false
+    }
 }
 
 /// Where Muse's installer puts its launcher for whoever runs the tests: `~/.local/bin` on
 /// a Mac (`install.sh`), `%LOCALAPPDATA%\Programs\muse` on Windows (`install.ps1`).
 fn installer_place() -> Option<PathBuf> {
     if cfg!(windows) {
-        own_var("LOCALAPPDATA").map(|local| Path::new(&local).join("Programs").join("muse"))
+        crate::standin_process::inherited_localappdata()
+            .map(PathBuf::from)
+            .or_else(|| own_var("LOCALAPPDATA").map(PathBuf::from))
+            .map(|local| local.join("Programs").join("muse"))
     } else {
-        own_var("HOME").map(|home| Path::new(&home).join(".local").join("bin"))
+        crate::standin_process::inherited_home()
+            .map(PathBuf::from)
+            .or_else(|| own_var("HOME").map(PathBuf::from))
+            .map(|home| home.join(".local").join("bin"))
     }
 }
 
@@ -139,16 +171,20 @@ pub(crate) fn installed_on(
     path: &str,
     place: Option<&Path>,
 ) -> std::result::Result<Installed, String> {
-    let launcher = match crate::live::machine::find("muse", path, Some(".CMD;.EXE")) {
+    let launcher = match crate::live::machine::find_muse_install(path) {
         Some(found) => found,
         None => place
             .ok_or("no muse on the PATH, and no folder of its installer to find Muse Code in")?
             .join(if cfg!(windows) { "muse.cmd" } else { "muse" }),
     };
+    if !crate::standin_process::outside_inherited_harness_homes(&launcher) {
+        return Err("Muse installation lookup is inside an inherited harness home".to_owned());
+    }
     let real = files::real_path(&launcher);
     let bin = real.parent().unwrap_or(Path::new("."));
     let exe = if cfg!(windows) { ".exe" } else { "" };
-    let version = fs::read_to_string(bin.join(".muse-version"))
+    let version_file = bin.join(".muse-version");
+    let version = fs::read_to_string(version_file)
         .map(|line| line.trim().to_owned())
         .map_err(|_| {
             format!(
@@ -995,18 +1031,15 @@ pub mod members {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(unix)]
     use std::path::Path;
 
     use serde_json::json;
 
-    #[cfg(unix)]
     use super::installed_on;
     #[cfg(unix)]
     use super::serve_list_script;
     use super::{allowance_left, question_tools, used_percent, Run, StandIn};
     use super::{echo_list, serve_reply};
-    #[cfg(unix)]
     use crate::files;
 
     #[test]
@@ -1069,18 +1102,60 @@ mod tests {
     }
 
     /// A Muse install in `bin`: its launcher, the version line, and the binary it names.
-    #[cfg(unix)]
     fn install(bin: &Path, version: &str) {
-        files::write_executable(&bin.join("muse"), "#!/bin/sh\n").unwrap();
+        let launcher = if cfg!(windows) { "muse.cmd" } else { "muse" };
+        let exe = if cfg!(windows) { ".exe" } else { "" };
+        files::write_executable(&bin.join(launcher), "#!/bin/sh\n").unwrap();
         files::write(&bin.join(".muse-version"), format!("{version}\n")).unwrap();
-        files::write_executable(&bin.join(format!("muse-bin-{version}")), "#!/bin/sh\n").unwrap();
+        files::write_executable(&bin.join(format!("muse-bin-{version}{exe}")), "#!/bin/sh\n")
+            .unwrap();
+    }
+
+    #[test]
+    fn discovery_names_a_missing_muse_when_path_and_installer_are_empty() {
+        let root = crate::door::made("missing-muse-").unwrap();
+        let absent = root.path().join("no-installer");
+        for (case, place) in [
+            ("no installer", None),
+            ("missing installer", Some(absent.as_path())),
+        ] {
+            let why = installed_on("", place).expect_err("discovery must reject a missing Muse");
+            assert!(why.to_lowercase().contains("muse"), "{case}: {why}");
+        }
+    }
+
+    #[test]
+    fn standin_isolation_muse_search_passes_over_an_inherited_harness_home() {
+        const CHILD_PATH: &str = "CF_T1687_MUSE_SEARCH_PATH";
+        if let Some(path) = crate::process::own_var(CHILD_PATH) {
+            let found = installed_on(&path, None).unwrap();
+            assert_eq!(found.version, "safe");
+            return;
+        }
+        let root = crate::door::made("muse-search-").unwrap();
+        let forbidden = root.path().join("decoy-codex");
+        let allowed = root.path().join("installed-muse");
+        install(&forbidden, "must-not-be-read");
+        install(&allowed, "safe");
+        let path = std::env::join_paths([&forbidden, &allowed]).unwrap();
+        let output = crate::process::case_of(
+            std::env::current_exe().unwrap(),
+            "muse::tests::standin_isolation_muse_search_passes_over_an_inherited_harness_home",
+            std::time::Duration::from_secs(120),
+        )
+        .inheriting_env()
+        .arg("--nocapture")
+        .var("CODEX_HOME", &forbidden)
+        .var(CHILD_PATH, path)
+        .run()
+        .unwrap();
+        assert_eq!(output.code, Some(0), "{}{}", output.stdout, output.stderr);
     }
 
     /// The tester's T-905: a Muse downloaded into a scratch folder is run by putting that
     /// folder first on the `PATH`, as the product's launch finds Muse, and never by moving
     /// the home, which would put the person's own Muse at risk. (A Mac's: the kit runs Muse
     /// on no other machine, and a Windows `PATH` takes a launcher by its extension.)
-    #[cfg(unix)]
     #[test]
     fn the_kit_runs_the_first_muse_on_the_path_and_the_home_s_only_where_the_path_has_none() {
         let home = crate::door::made("cf-test-").unwrap();
@@ -1093,12 +1168,17 @@ mod tests {
         let path = std::env::join_paths([empty.path(), scratch.path()]).unwrap();
         let found = installed_on(path.to_str().unwrap(), home_of).unwrap();
         assert_eq!(found.version, "1.4.14-R7309.1");
-        assert_eq!(
-            found.binary,
-            std::fs::canonicalize(scratch.path())
-                .unwrap()
-                .join("muse-bin-1.4.14-R7309.1")
-        );
+        let expected = crate::files::real_path(&scratch.path().join(if cfg!(windows) {
+            "muse.cmd"
+        } else {
+            "muse"
+        }));
+        let binary = if cfg!(windows) {
+            "muse-bin-1.4.14-R7309.1.exe"
+        } else {
+            "muse-bin-1.4.14-R7309.1"
+        };
+        assert_eq!(found.binary, expected.parent().unwrap().join(binary));
         // A `PATH` with no `muse`: the installer's place in the home.
         let found = installed_on(empty.path().to_str().unwrap(), home_of).unwrap();
         assert_eq!(found.version, "1.4.13-R6996.1");

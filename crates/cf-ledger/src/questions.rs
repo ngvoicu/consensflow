@@ -395,7 +395,7 @@ mod tests {
     #[test]
     fn a_pick_in_the_humans_own_words_is_taken_up_to_the_body_limit_less_its_header() {
         // 6,000 characters was refused as an empty pick when a pick was capped at
-        // `MAX_TITLE * 10` (the long-message evals, 2026-09-27). The limit counts UTF-16 units,
+        // `MAX_TITLE * 10`. The limit counts UTF-16 units,
         // as the body's does: two bytes of text are one unit, and an emoji is two.
         let own_words = [
             "x".repeat(6_000),

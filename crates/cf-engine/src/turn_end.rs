@@ -99,8 +99,7 @@ use self::earlier_turns::with_earlier;
 /// What a result says above the words the never-empty rule took (T-262): its turn wrote none
 /// after its last tool call, and these are the last it wrote before it, which may be a line of
 /// its progress and not a report (T-1310's review of T-878, T-1311). In the plain voice of the
-/// labels of the turns that ended before (`earlier_turns`). cf-evals' long run judges the
-/// result with the same line (`long_run::invariants::order`), held to this one by a test.
+/// labels of the turns that ended before (`earlier_turns`).
 pub(crate) const LAST_WORDS: &str =
     "Its turn ended with no words after its last command. The last words it wrote:";
 

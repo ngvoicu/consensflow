@@ -141,8 +141,6 @@ mod offers;
 mod records;
 #[path = "fake_agent/reply.rs"]
 mod reply;
-#[path = "fake_agent/scripted.rs"]
-mod scripted;
 #[path = "fake_agent/signals.rs"]
 mod signals;
 #[path = "fake_agent/status_line.rs"]
@@ -618,8 +616,7 @@ const CAVEAT: &str = "<local-command-caveat>The messages below were made by a co
 /// One message: the window works on it and is idle again once it is answered
 /// or an Escape stopped it. `/compact` is no message, alone or with words after it
 /// (its instructions): the window compacts its conversation as Claude Code does
-/// while idle (`compact`), and runs no turn (the long run's compaction, which its
-/// watch finds in the record).
+/// while idle (`compact`), and runs no turn.
 fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<(), String> {
     if let Some((model, effort)) = model_switch(text) {
         return switch_model(records, pid, model, effort);
@@ -1554,3 +1551,9 @@ mod tests {
         assert_eq!(model_switch("Use /model x"), None);
     }
 }
+
+#[cfg(test)]
+const ALLOW_LIVE_MATRIX: bool = false;
+#[cfg(test)]
+#[path = "../../tests/support/standin_boot.rs"]
+mod standin_boot;

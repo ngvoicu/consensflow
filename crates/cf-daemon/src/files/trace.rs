@@ -103,11 +103,23 @@ impl Trace {
 
     /// Drops every line of `project` from the trace and the file moved aside.
     /// A file with nothing of the project is not written at all, and one that
-    /// cannot be read or rewritten has nothing to forget.
-    pub fn forget(&self, project: i64) {
+    /// is not there has nothing to forget; one that cannot be read or rewritten
+    /// keeps its lines, and the first such failure is the answer, said with the
+    /// file's name once the other file was done too.
+    pub fn forget(&self, project: i64) -> io::Result<()> {
+        let mut failed = Ok(());
         for name in [self.file.clone(), aside(&self.file)] {
-            let _ = forget_in(&name, project);
+            match forget_in(&name, project) {
+                Err(error) if error.kind() != io::ErrorKind::NotFound && failed.is_ok() => {
+                    failed = Err(io::Error::new(
+                        error.kind(),
+                        format!("{}: {error}", name.display()),
+                    ));
+                }
+                _ => {}
+            }
         }
+        failed
     }
 }
 
@@ -157,8 +169,8 @@ impl cf_engine::seams::Trace for Trace {
         self.write(&line);
     }
 
-    fn forget(&self, project: i64) {
-        Trace::forget(self, project);
+    fn forget(&self, project: i64) -> Result<(), String> {
+        Trace::forget(self, project).map_err(|failed| failed.to_string())
     }
 }
 
@@ -296,7 +308,7 @@ mod tests {
         trace.event(&event(1, "one"));
         trace.event(&event(2, "two"));
         trace.error("kept: it names no project");
-        trace.forget(1);
+        trace.forget(1).unwrap();
         assert_eq!(
             lines(&previous),
             ["not json", "{\"at\":\"b\",\"project\":2,\"kind\":\"x\"}"],
@@ -313,16 +325,16 @@ mod tests {
     fn a_file_with_nothing_of_the_project_is_not_written_and_a_missing_one_is_no_failure() {
         let dir = tempfile::tempdir().unwrap();
         let trace = trace_in(dir.path(), LIMIT);
-        trace.forget(9);
+        trace.forget(9).unwrap();
         assert!(!trace.file().exists());
         trace.event(&event(2, "two"));
         // A rewrite renames another file over it, which is another file.
         let which = || cf_base::file::identity(&fs::File::open(trace.file()).unwrap()).unwrap();
         let before = which();
-        trace.forget(9);
+        trace.forget(9).unwrap();
         assert_eq!(which(), before);
         assert_eq!(lines(trace.file()).len(), 1);
-        trace.forget(2);
+        trace.forget(2).unwrap();
         assert_ne!(which(), before, "a file with a line of it is rewritten");
         assert!(lines(trace.file()).is_empty());
     }
@@ -348,7 +360,43 @@ mod tests {
         );
         trace.event(&event(1, "lost"));
         trace.error("lost");
-        trace.forget(1);
+        trace.forget(1).unwrap();
         assert!(!trace.file().exists());
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_read_keeps_its_lines_and_says_so_while_the_other_is_still_done() {
+        let dir = tempfile::tempdir().unwrap();
+        let trace = trace_in(dir.path(), LIMIT);
+        let previous = aside(trace.file());
+        fs::write(&previous, "{\"at\":\"a\",\"project\":1,\"kind\":\"x\"}\n").unwrap();
+        // A folder where the trace should be: it cannot be read.
+        fs::create_dir(trace.file()).unwrap();
+
+        let failed = trace.forget(1).unwrap_err();
+
+        assert!(failed.to_string().contains("events.jsonl"), "{failed}");
+        assert!(
+            lines(&previous).is_empty(),
+            "the file that could be was done"
+        );
+    }
+
+    #[test]
+    fn a_file_that_cannot_be_rewritten_keeps_its_lines_and_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let trace = trace_in(dir.path(), LIMIT);
+        trace.event(&event(1, "one"));
+        // A folder where the new file is written beside it.
+        fs::create_dir(dir.path().join("events.jsonl.tmp")).unwrap();
+
+        let failed = trace.forget(1).unwrap_err();
+
+        assert!(failed.to_string().contains("events.jsonl"), "{failed}");
+        assert_eq!(
+            lines(trace.file()).len(),
+            1,
+            "the deleted project's line stays"
+        );
     }
 }

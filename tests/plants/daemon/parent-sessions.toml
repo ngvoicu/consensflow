@@ -160,7 +160,7 @@ meant = "a_pane_inherits_nothing_of_a_session_the_host_was_started_in"
 runs = ["parent-sessions-host"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/spawn.rs"
 find = '''        forget_parent_sessions(&mut command, env);
 '''
 replace = ""
@@ -171,7 +171,7 @@ meant = "a_pane_inherits_nothing_of_a_session_the_host_was_started_in"
 runs = ["parent-sessions-host"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/spawn.rs"
 find = '''    for name in parent_session_variables() {
         if !env.contains_key(name) {
             command.env_remove(name);
@@ -245,7 +245,7 @@ builds = true
 platforms = ["macos"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/spawn.rs"
 find = '''        forget_parent_sessions(&mut command, env);
 '''
 replace = ""

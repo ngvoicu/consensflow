@@ -244,7 +244,7 @@ meant = "a_workers_turn_that_ends_with_agents_pending_keeps_its_task_working_and
 runs = ["engine-dispatcher-pending-agents"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '''
                 if !of_the_role {
                     final_run.clear();

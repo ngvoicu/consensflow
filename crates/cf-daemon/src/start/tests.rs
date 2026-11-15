@@ -528,3 +528,23 @@ async fn the_engine_s_work_is_driven_from_the_start_so_what_is_woken_outside_a_d
         })
         .await;
 }
+
+/// A system that gives no randomness.
+struct NoEntropy;
+
+impl Entropy for NoEntropy {
+    fn fill(&self, _bytes: &mut [u8]) -> Result<(), String> {
+        Err("unavailable".to_owned())
+    }
+}
+
+#[test]
+fn a_system_that_gives_no_randomness_refuses_the_start_in_words_and_never_makes_an_empty_ui_token()
+{
+    let refused = ui_token(&NoEntropy).unwrap_err();
+    assert_eq!(
+        refused.to_string(),
+        "the system gave no randomness: unavailable"
+    );
+    assert_eq!(ui_token(&SystemEntropy).unwrap().len(), UI_TOKEN_DIGITS);
+}

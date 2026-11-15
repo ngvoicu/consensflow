@@ -29,7 +29,6 @@ lt-sweep = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "group::t
 lt-group = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "group::tests::"]
 lt-spawning = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "spawning::"]
 lt-closed = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "execute::tests::a_program_out_of_time_that_writes_once_asked"]
-lt-held = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "stalls::held::tests::a_job_is_stopped_under_its_program"]
 lt-output-end = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "output_end::tests::what_a_program_says_after_an_end_of_its_output"]
 lt-live-member = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_member::a_devin_members_window_is_opened_whole"]
 lt-daemon-copy = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "daemon", "a_daemon_runs_a_copy_of_the_cf_in_its_home"]
@@ -238,7 +237,7 @@ runs = ["lt-pty"]
 platforms = ["macos", "linux"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/flow.rs"
 find = '''            state.unacked.pop_front();
             state.unacked_bytes -= byte_count;
         }
@@ -306,9 +305,6 @@ replace = '''    if program.exists() {
 
 # --- T-643: five more tests of the same kind ---
 #
-# - cf-evals `a_program_waiting_in_a_write_nobody_reads_and_one_stopped_are_told_apart`: its wait went on
-#   once two processes were listed, and took the look of a job that had not read the terminal yet (`R`, `S`,
-#   `U`), or of a program not yet waiting (`Rs+`); it waits for the job to be `T` under a program in `S`.
 # - cf-panes `what_a_program_says_after_an_end_of_its_output_and_before_it_is_seen_gone_is_read`: the test sent
 #   SIGKILL to the helper its program leaves, which was still dying when the close of the pane came for it, and
 #   the guard of the test's signals, which knew nothing of the helper, stopped the close's SIGTERM. The test
@@ -319,20 +315,6 @@ replace = '''    if program.exists() {
 #   the case reads `errors()` after the wait (3.0.6-alpha.3 integration B round 2, T-800).
 # - cf-panes `input_remains_responsive_while_output_waits_for_ack` is T-581's (the gates of T-610 failed it at
 #   the 10 s it had: "blocked input write resumes after output acks: Timeout").
-
-[[plant]]
-name = "load timing: a job is taken for stopped under its program once two processes are listed"
-meant = "a_job_is_stopped_under_its_program_only_when_the_states_say_so_not_when_it_is_listed"
-runs = ["lt-held"]
-platforms = ["macos", "linux"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/stalls/held/tests.rs"
-find = '''    matches!(
-        taken.processes.as_deref(),
-        Ok([program, job]) if state_in(program).starts_with('S') && state_in(job).starts_with('T')
-    )'''
-replace = '''    taken.processes.as_ref().is_ok_and(|lines| lines.len() == 2)'''
 
 [[plant]]
 name = "load timing: the helper a program leaves is not told to the guard of the test's signals"

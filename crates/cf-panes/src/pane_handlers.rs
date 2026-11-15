@@ -17,7 +17,9 @@ use crate::arbiter::{ArbiterSnapshot, InputArbiter, OutputClock};
 use crate::ended::Ended;
 use crate::input_queue::{wait_for_input_blocking, InputError, InputQueue};
 use crate::output_hub::OutputHub;
-use crate::pty::{validate_drop_env, Handed, PaneEnvironment, PaneKey, PaneTable, StreamedPane};
+use crate::pty::{
+    validate_drop_env, Handed, PaneEnvironment, PaneError, PaneKey, PaneTable, StreamedPane,
+};
 use crate::screen::PaneScreen;
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
@@ -189,9 +191,12 @@ fn register(
         {
             Ok(printed) => printed,
             Err(error) => {
-                let _ = open_panes.kill(&streamed.key);
-                open_inputs.retire(&streamed.key);
-                return Err(error);
+                return Err(end_unregistered(
+                    &open_panes,
+                    &open_inputs,
+                    &streamed.key,
+                    error,
+                ));
             }
         };
         let key = streamed.key.clone();
@@ -352,15 +357,15 @@ fn register(
             .map_err(|error| error.to_string())?
             .into_iter()
             .map(|pane| {
-                json!({
+                Ok(json!({
                     "id":pane.id,
                     "generation":pane.generation,
                     "alive":pane.alive,
                     "idleMs":pane.idle_ms,
-                    "processGroupId":list_panes.process_group_id(&PaneKey { id: pane.id.clone(), generation: pane.generation }).ok(),
-                })
+                    "processGroupId":group_id_answer(list_panes.process_group_id(&PaneKey { id: pane.id.clone(), generation: pane.generation }))?,
+                }))
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, String>>()?;
         Ok(json!({"ok":true,"panes":panes}))
     });
 
@@ -376,14 +381,15 @@ fn register(
         // The screen's last lines, for a request that asks for them. A pane
         // the table no longer holds has none to give.
         if let Some(lines) = request.tail {
-            if let Ok(tail) = snapshot_panes.tail(&key, lines.min(TAIL_LINES)) {
+            if let Some(tail) = screen_read(snapshot_panes.tail(&key, lines.min(TAIL_LINES)))? {
                 answer["tail"] = json!(tail);
             }
         }
         // The screen's last lines as drawn, for an adapter that reads its
         // harness's input box.
         if let Some(lines) = request.bottom {
-            if let Ok(drawn) = snapshot_panes.bottom(&key, lines.min(BOTTOM_LINES)) {
+            if let Some(drawn) = screen_read(snapshot_panes.bottom(&key, lines.min(BOTTOM_LINES)))?
+            {
                 answer["bottom"] = json!(drawn.lines);
                 answer["cursor"] = drawn.cursor.map_or(Value::Null, |cursor| {
                     json!({
@@ -395,6 +401,61 @@ fn register(
         }
         Ok(answer)
     });
+}
+
+/// A launch whose input could not be registered ends its window, and the answer says how
+/// that went: the cause alone when the window is gone (one already retired is), the cause
+/// and the failed ending when it is not proved gone, so that the caller does not take a
+/// window it cannot see for one that was cleaned up. Both go to the log.
+fn end_unregistered(
+    panes: &PaneTable,
+    inputs: &InputQueue,
+    key: &PaneKey,
+    cause: String,
+) -> String {
+    let ended = match panes.kill(key) {
+        Ok(()) | Err(PaneError::NotFound(_)) => None,
+        Err(error) => Some(error),
+    };
+    inputs.retire(key);
+    match ended {
+        None => cause,
+        Some(error) => {
+            let said = format!(
+                "{cause}; and the window {}#{} could not be ended: {error}",
+                key.id, key.generation
+            );
+            say(&said);
+            said
+        }
+    }
+}
+
+#[allow(clippy::print_stderr)] // The pane host's log is its error output.
+fn say(line: &str) {
+    eprintln!("consensflow-bridge: {line}");
+}
+
+/// A pane's process group for `pane.list`: `null` where it has none to give (a pane
+/// retired since the list was read, or a host with no process groups), an error for any
+/// other failure.
+fn group_id_answer(read: Result<i32, PaneError>) -> Result<Value, String> {
+    match read {
+        Ok(group) => Ok(json!(group)),
+        Err(PaneError::NotFound(_) | PaneError::Pty(_)) => Ok(Value::Null),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// A screen read of `pane.snapshot`: absent for a pane the table no longer holds, an error
+/// for any other failure, so that an unreadable screen is not taken for one the request
+/// did not get.
+fn screen_read<T>(read: Result<T, PaneError>) -> Result<Option<T>, String> {
+    match read {
+        Ok(value) => Ok(Some(value)),
+        Err(PaneError::NotFound(_)) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 /// What `pane.snapshot` says of a pane's input: the human's last writes as how long ago,
@@ -1167,6 +1228,118 @@ repaint 80 '> Ask anything'; repaint 1200 '> Tsk anything'"#;
         drop(reader);
         drop(node_stream);
         connected.bridge.wait_closed().expect("bridge closes");
+    }
+
+    /// What `pane.snapshot` answers for a pane's screen: a pane the table no longer holds
+    /// has none to give and the answer goes without it; a table that cannot be read says so.
+    #[cfg(unix)]
+    #[test]
+    fn a_snapshot_tells_an_unreadable_screen_from_a_retired_pane() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixStream;
+
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let key = PaneKey::new("p1-zeus", 1);
+        arbiter.register(&key).expect("register the pane");
+        let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
+        register_pane_handlers(
+            &mut builder,
+            Arc::clone(&panes),
+            Arc::clone(&arbiter),
+            Arc::new(OutputHub::new()),
+            Arc::clone(&inputs),
+        );
+        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
+        node_stream
+            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
+            .expect("write bridge handle");
+        let connected = builder
+            .connect(rust_stream.try_clone().expect("clone socket"), rust_stream)
+            .expect("connect bridge");
+        let mut reader = BufReader::new(node_stream.try_clone().expect("clone node reader"));
+        let mut ask = |id: &str, body: Value| -> Value {
+            let mut frame = serde_json::to_vec(&json!({
+                "v":1,"id":id,"kind":"req","op":"pane.snapshot","body":body,
+            }))
+            .expect("serialize the snapshot");
+            frame.push(b'\n');
+            node_stream.write_all(&frame).expect("ask for the snapshot");
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read a frame");
+                let frame: Value = serde_json::from_str(line.trim()).expect("frame JSON");
+                if frame["kind"] == "res" && frame["id"] == id {
+                    break frame["body"].clone();
+                }
+            }
+        };
+        let request = json!({"id":key.id,"generation":key.generation,"tail":5,"bottom":5});
+
+        let retired = ask("n-retired", request.clone());
+        assert_eq!(retired["ok"], true, "{retired}");
+        assert!(retired.get("tail").is_none() && retired.get("bottom").is_none());
+
+        panes.poison();
+        let unreadable = ask("n-poisoned", request);
+        assert_eq!(
+            unreadable,
+            json!({"ok":false,"error":"pane table lock is poisoned"})
+        );
+
+        inputs.close_and_drain();
+        drop(reader);
+        drop(node_stream);
+        connected.bridge.wait_closed().expect("bridge closes");
+    }
+
+    /// A window whose input could not be registered is ended, and a failure to end it is
+    /// said with the cause, not dropped.
+    #[cfg(unix)]
+    #[test]
+    fn a_window_that_could_not_be_ended_after_a_failed_open_says_so() {
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        let key = PaneKey::new("p1-zeus", 1);
+
+        // Gone (never held, or retired): the cause alone.
+        assert_eq!(
+            end_unregistered(&panes, &inputs, &key, "the cause".to_string()),
+            "the cause"
+        );
+
+        panes.poison();
+        let said = end_unregistered(&panes, &inputs, &key, "the cause".to_string());
+        assert_eq!(
+            said,
+            "the cause; and the window p1-zeus#1 could not be ended: pane table lock is poisoned"
+        );
+        inputs.close_and_drain();
+    }
+
+    /// `pane.list`'s process group: null where a pane has none to give, an error where the
+    /// table could not be read.
+    #[cfg(unix)]
+    #[test]
+    fn a_process_group_is_null_only_where_there_is_none() {
+        let panes = PaneTable::new();
+        let key = PaneKey::new("p1-zeus", 1);
+        assert_eq!(
+            group_id_answer(panes.process_group_id(&key)),
+            Ok(Value::Null)
+        );
+        assert_eq!(group_id_answer(Ok(42)), Ok(json!(42)));
+        assert_eq!(
+            group_id_answer(Err(PaneError::Pty("the PTY has no process group".into()))),
+            Ok(Value::Null)
+        );
+        panes.poison();
+        assert_eq!(
+            group_id_answer(panes.process_group_id(&key)),
+            Err("pane table lock is poisoned".to_string())
+        );
     }
 
     /// A pane whose kill failed takes its input with it all the same, and the

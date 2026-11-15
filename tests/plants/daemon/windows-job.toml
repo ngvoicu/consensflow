@@ -95,13 +95,14 @@ meant = "a_window_whose_exit_watcher_fails_lets_go_of_its_output_before_its_cons
 runs = ["panes-conpty"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/spawn.rs"
 find = """
-        if let Err(error) = self.watch_exit(&key) {
-            drop(reader);
+        drop(reader);
+        match self.kill(key) {
 """
 replace = """
-        if let Err(error) = self.watch_exit(&key) {
+        let _held = &reader;
+        match self.kill(key) {
 """
 
 [[plant]]
