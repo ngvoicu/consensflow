@@ -51,7 +51,9 @@
 //! whole of `~/.claude.json`: the person's own Claude Code sessions write the rest
 //! of it all day.) A run that fails any of them fails, with the Claude Code of the
 //! person's windows named as the other possible writer. The run's folders are the
-//! live suites' (`~/.consensflow-candidate/live/…`) and the rigs' homes.
+//! live suites' (`~/.consensflow-candidate/live/…`) and the rigs' homes. Claude parity
+//! deliberately reads none of that other configuration: it checks the login and its copy,
+//! but cannot report changes to the other owner files; it also never renews the login.
 //!
 //! **What a kept home keeps.** The folder goes with the run, because it holds a login.
 //! A rig whose home is kept (`--keep`, or a case that reads the home after it ended)
@@ -479,7 +481,7 @@ struct Made {
     /// compared with when the run ends.
     login: Value,
     /// The person's setup when it was made.
-    owner: Seen,
+    owner: Option<Seen>,
     /// The Keychain items of Claude Code then; none where they cannot be listed.
     services: Option<BTreeSet<String>>,
     /// What the renewal of the login came to, where the login had run short on a test machine.
@@ -679,6 +681,8 @@ impl Made {
 pub struct Login {
     source: Source,
     owner: Owner,
+    /// Whether this case reads the owner's non-login Claude configuration to watch it.
+    watch_owner: bool,
     /// Where the folder is made.
     parent: PathBuf,
     /// How long the access token must last more for the folder to be made.
@@ -694,6 +698,28 @@ pub struct Login {
 }
 
 impl Login {
+    /// Use the same login copy without consulting the owner's other Claude configuration.
+    /// It cannot check those files for changes, and it cannot renew on a test machine:
+    /// the renewal itself reads and runs on that configuration.
+    #[must_use]
+    pub fn without_owner_config_reads(mut self) -> Self {
+        self.watch_owner = false;
+        // Test-machine renewal opens the owner's Claude and reads its configuration.
+        // A login that does not last the case must instead be refused.
+        self.renewal = None;
+        self
+    }
+
+    fn owner_before(&self) -> Option<Seen> {
+        self.watch_owner.then(|| self.owner.look())
+    }
+
+    fn owner_after(&self, before: &Option<Seen>) -> Vec<String> {
+        before
+            .as_ref()
+            .map_or_else(Vec::new, |before| self.owner.changes_since(before))
+    }
+
     /// The login of this machine's Claude Code, for a run that takes `left` at the most, margin
     /// included: the folder is made only if the access token lasts that much more (a live case
     /// states its planned length and the margin, [`super::Log::lasting`]). Claude Code refreshes a
@@ -720,6 +746,7 @@ impl Login {
         Self {
             source,
             owner: Owner { home: owner_home },
+            watch_owner: true,
             parent,
             left,
             renewal: None,
@@ -834,7 +861,7 @@ impl Login {
             folder,
             oauth: copy,
             login: oauth,
-            owner: self.owner.look(),
+            owner: self.owner_before(),
             services: keychain_services(),
             renewed,
         });
@@ -996,7 +1023,7 @@ impl ClaudeConfig for Login {
         if let Some((renewed, renewal)) = made.renewed.as_ref().zip(self.renewal.as_ref()) {
             let _ = writeln!(io::stderr(), "{}", renewed.said(renewal.machine()));
         }
-        let mut touched = self.owner.changes_since(&made.owner);
+        let mut touched = self.owner_after(&made.owner);
         touched.extend(self.owner_login_changed(&made.login));
         if let Some(note) = made.rewritten() {
             let _ = writeln!(io::stderr(), "note: {note}");
@@ -1017,13 +1044,22 @@ impl ClaudeConfig for Login {
         if touched.is_empty() && refreshed.is_empty() && kept.is_empty() {
             // What was checked, with a hash that says nothing of what the files hold.
             let hash = |text: &str| digest(text.as_bytes())[..12].to_owned();
-            let _ = writeln!(
-                io::stderr(),
-                "the owner's Claude setup is as it was: login in {} {}, ~/.claude/settings.json {}; the copy of the login in the run's folder is as it was copied",
-                self.source.described(),
-                hash(&made.login.to_string()),
-                made.owner.settings.as_deref().map_or("none".to_owned(), |hash| hash[..12].to_owned())
-            );
+            if let Some(owner) = &made.owner {
+                let _ = writeln!(
+                    io::stderr(),
+                    "the owner's Claude setup is as it was: login in {} {}, ~/.claude/settings.json {}; the copy of the login in the run's folder is as it was copied",
+                    self.source.described(),
+                    hash(&made.login.to_string()),
+                    owner.settings.as_deref().map_or("none".to_owned(), |hash| hash[..12].to_owned())
+                );
+            } else {
+                let _ = writeln!(
+                    io::stderr(),
+                    "the owner's Claude login in {} {} and the run's login copy are as they were; the owner's other Claude configuration was not read or checked",
+                    self.source.described(),
+                    hash(&made.login.to_string())
+                );
+            }
             return Ok(());
         }
         let said = said(&touched, &refreshed, &kept);

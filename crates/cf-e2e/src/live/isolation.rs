@@ -13,7 +13,7 @@
 //!
 //! | Harness | Variables | Copied from the owner's | Watched in the owner's |
 //! |---|---|---|---|
-//! | Claude Code | `CLAUDE_CONFIG_DIR` ([`super::login`]) | the Keychain's login, without its refresh token, that lasts the case's planned length and the margin | `settings.json`, `.claude.json`'s projects, `history.jsonl`, `projects/`, the Keychain's items |
+//! | Claude Code | `CLAUDE_CONFIG_DIR` ([`super::login`]) | the Keychain's login, without its refresh token, that lasts the case's planned length and the margin | `settings.json`, `.claude.json`'s projects, `history.jsonl`, `projects/`, the Keychain's items; parity watches only the login and Keychain items, never the other Claude configuration |
 //! | Codex | `CODEX_HOME` | `auth.json`, without refresh-named keys except an empty `tokens.refresh_token` and a copy-time `last_refresh` for token-backed logins | `auth.json`, `config.toml` |
 //! | Pi | `PI_CODING_AGENT_DIR` | the entries of `auth.json` the run's model needs and that last the run and a margin, without their refresh tokens; and, where the model's provider is one the folder gives Pi by a package (`cliproxyapi`, [`pi::provider`]), the provider's files, its package and a `settings.json` that names it | `auth.json`, `settings.json`, `models.json`, `mcp-auth.json`, `sessions/`, and the provider's files, npm's manifests and the package |
 //! | Devin | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`, `GIT_CONFIG_GLOBAL` | `credentials.toml` if it has no refresh-named key, `config.json` | those two and `trusted_workspaces.json` |

@@ -6,6 +6,7 @@ round3-muse-reads = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "li
 round3-compaction = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_compaction_routes", "kit_round3"]
 round3-subagent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_subagent", "kit_round3"]
 round5-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "t1700_"]
+round5-login-only = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "t1700_login_only_"]
 round4-subagent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_subagent", "kit_round4"]
 round3-specs = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_specs", "kit_round3"]
 round3-dialog = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_harness_dialogs", "kit_round3"]
@@ -295,3 +296,35 @@ replace = '''            found.skill_names.extend(
                     .filter(|name| !name.is_empty())
                     .map(str::to_owned),
             );'''
+
+[[plant]]
+name = "kit parity: Claude login-only reads owner configuration"
+meant = "t1700_login_only_never_reads_owner_config_before_or_after"
+runs = ["round5-login-only"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''self.watch_owner = false;'''
+replace = '''self.watch_owner = true;'''
+
+[[plant]]
+name = "kit parity: Claude login-only renews on a test machine"
+meant = "t1700_login_only_refuses_to_renew_on_a_test_machine"
+runs = ["round5-login-only"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''        self.renewal = None;
+        self'''
+replace = '''        let _ = &self.renewal;
+        self'''
+
+[[plant]]
+name = "kit parity: Claude setup selects the owner configuration watcher"
+meant = "t1700_actual_kit_login_composes_with_parity_setup"
+runs = ["round5-parity"]
+platforms = ["linux"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''installed_with_owner_check(Harness::Claude, planned, false)'''
+replace = '''installed_with_owner_check(Harness::Claude, planned, true)'''

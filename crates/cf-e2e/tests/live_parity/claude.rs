@@ -20,7 +20,7 @@ use cf_e2e::live::ask;
 use cf_e2e::live::machine::live_folder;
 #[cfg(unix)]
 use cf_e2e::live::members::{self, Machine};
-use cf_e2e::live::{self, Harness, Log};
+use cf_e2e::live::{self, Log};
 use cf_e2e::rig::ClaudeConfig;
 use cf_e2e::{files, Error, Result};
 use cf_panes::pty::PaneTable;
@@ -408,7 +408,7 @@ pub fn differences(plain: &Loaded, member: &Loaded) -> Vec<String> {
 }
 
 pub fn run(log: &Log) -> Result {
-    let claude = live::installed_for(Harness::Claude, Duration::from_secs(2 * 60 * 60))?;
+    let claude = live::installed_for_claude_parity(Duration::from_secs(2 * 60 * 60))?;
     let folder = live_folder("parity-claude")?;
     cf_e2e::door::make_dir(Path::new(env!("CARGO_TARGET_TMPDIR")))?;
     let made_here = cf_e2e::door::made_in(
@@ -430,7 +430,7 @@ pub fn run(log: &Log) -> Result {
         claude.version(),
         folder.display()
     ));
-    // Finish the kit's owner and login checks even when setup or either window fails.
+    // Finish the kit's login checks even when setup or either window fails.
     let outcome = (|| -> Result {
         let config = prepare_config(login.as_ref(), &folder)?;
         let plain = opened(
@@ -661,10 +661,22 @@ mod tests {
         const CHILD: &str = "CF_T1700_FAKE_HOME";
         if let Some(home) = cf_e2e::process::own_var(CHILD) {
             let home = PathBuf::from(home);
-            let source = home.join("login-source");
-            let login =
-                cf_e2e::live::login::Login::of_folder(&source, Duration::from_secs(60)).unwrap();
-            let config = prepare_config(&login, &home.join("project")).unwrap();
+            #[cfg(unix)]
+            let login = live::installed_for_claude_parity(Duration::from_secs(60))
+                .unwrap()
+                .claude_config()
+                .unwrap()
+                .clone();
+            #[cfg(windows)]
+            let login: std::sync::Arc<dyn ClaudeConfig> = std::sync::Arc::new(
+                cf_e2e::live::login::Login::of_folder(
+                    &home.join("login-source"),
+                    Duration::from_secs(60),
+                )
+                .unwrap()
+                .without_owner_config_reads(),
+            );
+            let config = prepare_config(login.as_ref(), &home.join("project")).unwrap();
             let credentials: Value =
                 serde_json::from_slice(&fs::read(config.join(".credentials.json")).unwrap())
                     .unwrap();
@@ -696,17 +708,32 @@ mod tests {
             "owner skill",
         )
         .unwrap();
-        fs::write(home.join(".claude/settings.json"), "invalid owner settings").unwrap();
-        fs::write(home.join(".claude.json"), "invalid owner config").unwrap();
-        fs::write(
-            home.join("login-source/.credentials.json"),
-            json!({"claudeAiOauth": {"accessToken": "fake-access",
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for path in [
+                home.join(".claude/settings.json"),
+                home.join(".claude.json"),
+            ] {
+                nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
+            }
+            fs::create_dir(home.join("bin")).unwrap();
+            fs::write(home.join("bin/claude"), "stand-in; never executed").unwrap();
+            fs::set_permissions(home.join("bin/claude"), fs::Permissions::from_mode(0o700))
+                .unwrap();
+        }
+        #[cfg(windows)]
+        {
+            fs::write(home.join(".claude/settings.json"), "invalid owner settings").unwrap();
+            fs::write(home.join(".claude.json"), "invalid owner config").unwrap();
+        }
+        let credentials = json!({"claudeAiOauth": {"accessToken": "fake-access",
                 "refreshToken": "fake-refresh", "expiresAt": now_ms() + 3_600_000,
                 "nested": [{"REFRESH_key": "fake"}]}})
-            .to_string(),
-        )
-        .unwrap();
-        let output = cf_e2e::process::case_of(
+        .to_string();
+        fs::write(home.join("login-source/.credentials.json"), &credentials).unwrap();
+        fs::write(home.join(".claude/.credentials.json"), &credentials).unwrap();
+        let child = cf_e2e::process::case_of(
             std::env::current_exe().unwrap(),
             "claude::tests::t1700_actual_kit_login_composes_with_parity_setup",
             Duration::from_secs(30),
@@ -718,8 +745,10 @@ mod tests {
         .var("TMPDIR", &temp)
         .var("TMP", &temp)
         .var("TEMP", &temp)
-        .run()
-        .unwrap();
+        .var("CONSENSFLOW_LIVE_CLAUDE_CONFIG", "");
+        #[cfg(unix)]
+        let child = child.var("PATH", home.join("bin"));
+        let output = child.run().unwrap();
         assert!(
             output.code == Some(0),
             "fabricated login child failed:\n{}",

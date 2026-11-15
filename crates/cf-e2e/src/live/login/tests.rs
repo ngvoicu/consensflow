@@ -6,6 +6,48 @@ use std::os::unix::fs::PermissionsExt;
 use super::*;
 
 #[test]
+fn t1700_login_only_never_reads_owner_config_before_or_after() {
+    const CHILD: &str = "CF_T1700_LOGIN_ONLY_OWNER";
+    if let Some(home) = crate::process::own_var(CHILD) {
+        let home = PathBuf::from(home);
+        let login = Login::new(
+            Source::File(home.join("fake-login")),
+            home.clone(),
+            home,
+            Duration::ZERO,
+        )
+        .without_owner_config_reads();
+        let before = login.owner_before();
+        assert!(before.is_none());
+        assert!(login.owner_after(&before).is_empty());
+        return;
+    }
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir(home.path().join(".claude")).unwrap();
+    for file in [
+        home.path().join(".claude/settings.json"),
+        home.path().join(".claude.json"),
+    ] {
+        nix::unistd::mkfifo(&file, nix::sys::stat::Mode::S_IRUSR).unwrap();
+    }
+    let output = crate::process::case_of(
+        std::env::current_exe().unwrap(),
+        "live::login::tests::t1700_login_only_never_reads_owner_config_before_or_after",
+        Duration::from_secs(5),
+    )
+    .inheriting_env()
+    .var(CHILD, home.path())
+    .run()
+    .unwrap();
+    assert_eq!(
+        output.code,
+        Some(0),
+        "reading a fabricated owner config blocked the child: {}",
+        output.output()
+    );
+}
+
+#[test]
 fn claude_login_copy_has_no_nested_refresh_keys() {
     let copy = without_renewal(
         &json!({"accessToken":"fake", "refreshToken":"fake", "nested":[{"REFRESH_key":"fake"}]}),
@@ -1120,6 +1162,17 @@ impl Renewing {
     fn made(&self) -> usize {
         std::fs::read_dir(self.parent.path()).unwrap().count()
     }
+}
+
+#[test]
+fn t1700_login_only_refuses_to_renew_on_a_test_machine() {
+    let run = Renewing::new();
+    let ended = login_ending(at(NOW - 3600), ACCESS);
+    let login = run
+        .login(&ended, Some(zeewin2()), "", 1)
+        .without_owner_config_reads();
+    assert!(login.folder_at(at(NOW)).is_err());
+    assert!(run.started().is_none(), "the stand-in renewal was started");
 }
 
 #[test]
