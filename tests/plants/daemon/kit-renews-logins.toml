@@ -387,8 +387,8 @@ runs = ["planned-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''        let hazard = if harness == Harness::Pi {'''
-replace = '''        let hazard = if harness == Harness::Pi && false {'''
+find = '''        let hazard = if matches!(harness, Harness::Pi | Harness::Codex) {'''
+replace = '''        let hazard = if harness == Harness::Codex {'''
 
 [[plant]]
 name = "kit renews logins: a login must last the case and thirty minutes"

@@ -2010,14 +2010,14 @@ fn a_pi_run_is_given_the_access_token_and_no_refresh_token_and_the_owners_file_i
 }
 
 #[test]
-fn a_codex_copy_keeps_the_warning_that_it_may_have_used_up_the_machines_refresh_token() {
+fn a_codex_copy_does_not_claim_to_have_used_up_the_machines_refresh_token() {
     let said = said(
         Harness::Codex,
         &[],
         &["the run's Codex wrote a different login".to_owned()],
     );
-    assert!(said.contains("may now be stale"), "{said}");
-    assert!(!said.contains("holds no refresh token"), "{said}");
+    assert!(!said.contains("may now be stale"), "{said}");
+    assert!(said.contains("holds no refresh token"), "{said}");
 }
 
 #[test]
