@@ -1189,8 +1189,7 @@ export class BoardView {
     const elapsedNode = element('span', 'card-age', elapsed)
     elapsedNode.dataset.since = task.stateSince ?? ''
     elapsedNode.title = 'Time in this state'
-    const pauseReason = task.state === 'paused' && task.pauseReason ? `. ${task.pauseReason}` : ''
-    card.setAttribute('aria-description', `${STATE_LABEL[task.state]} for ${elapsed}${pauseReason}`)
+    card.setAttribute('aria-description', `${STATE_LABEL[task.state]} for ${elapsed}`)
     status.append(
       element('span', 'card-state', stateLabel(task)),
       task.questionPending ? ' · Waiting ' : ' · ',
@@ -1207,9 +1206,6 @@ export class BoardView {
       where,
       status,
     )
-    if (task.state === 'paused' && task.pauseReason) {
-      card.append(element('span', 'card-reason', task.pauseReason))
-    }
     // A result reads by its first line: its drawer has it whole.
     if (task.result) card.append(element('span', 'card-result', task.result.trim().split('\n')[0]))
     item.append(card)

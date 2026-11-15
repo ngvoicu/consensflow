@@ -1467,6 +1467,12 @@ impl Dispatcher {
                 .borrow()
                 .relaunch
                 .is_some_and(|relaunch| relaunch.reopens);
+        let resume_failed = participant.role == "chief"
+            && record
+                .window
+                .borrow()
+                .relaunch
+                .is_some_and(|relaunch| relaunch.resume_failed);
         let first = if reopens {
             self.cut_note(project, participant, &Coming::Chief)
                 .await?
@@ -1474,7 +1480,7 @@ impl Dispatcher {
         } else {
             next
         };
-        if first.is_some() || reopens {
+        if first.is_some() || reopens || resume_failed {
             let (this, held, at, who) = (
                 Rc::clone(self),
                 Rc::clone(&record),
@@ -1562,7 +1568,15 @@ impl Dispatcher {
         }
         let starting = drawing || (unnamed && !record.window.borrow().named);
         if !starting && record.delivery.borrow().prelude.is_none() {
-            record.window.borrow_mut().coming = None;
+            let mut window = record.window.borrow_mut();
+            window.coming = None;
+            if window
+                .relaunch
+                .is_some_and(|relaunch| relaunch.resume_failed)
+            {
+                window.relaunch = None;
+                window.resume_failure = None;
+            }
         }
         // An out member's window says so, and nothing else, until the reset.
         if !self.is_out(&owner) {

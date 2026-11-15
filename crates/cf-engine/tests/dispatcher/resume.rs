@@ -5,7 +5,7 @@
 //! resumed the chief at the start and paused what its windows were at, and its
 //! Resume after a Close resumed no task, so none of these is held to a Node trace.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use cf_engine::testing::{Context, FakeAdapter, Gate, Made, Restarted, TRUST_QUESTION};
@@ -27,6 +27,21 @@ const CHIEF_CUT: &str =
     "ConsensFlow stopped in the middle of your turn, which was cut. Go on where you stopped.";
 /// How the chief's note begins, whether or not it names the turn.
 const CHIEF_CUT_BEGINS: &str = "ConsensFlow stopped in the middle of your turn, which was cut";
+
+fn last_pause_reason(context: &Context, project: i64, task: i64) -> String {
+    context
+        .ledger
+        .borrow()
+        .events(project, 0, 5000)
+        .unwrap()
+        .into_iter()
+        .rev()
+        .find(|event| {
+            event.kind == "task.state" && event.data["task"] == task && event.data["to"] == "paused"
+        })
+        .and_then(|event| event.data["because"].as_str().map(str::to_owned))
+        .expect("the pause has a reason")
+}
 
 /// An at-rest member is resumed without a continuation message. A failed launch
 /// must still pause its existing work and tell the chief why.
@@ -83,18 +98,6 @@ fn resume_launch_failure_on(harness: &'static str) {
     assert!(
         !notes.iter().any(|note| note.body.contains("secret-value")),
         "{harness}: no secret in a note"
-    );
-    let board = context.ledger.borrow().board(project).unwrap();
-    let card = board
-        .lanes
-        .iter()
-        .flat_map(|lane| &lane.tasks)
-        .find(|card| card.number == 1)
-        .unwrap();
-    assert_eq!(
-        card.pause_reason.as_deref(),
-        Some(reason.as_str()),
-        "{harness}: card reason"
     );
     let native = native_of(&context, context.id(project, &session));
     *context.adapter.prepare.borrow_mut() = None;
@@ -184,57 +187,6 @@ fn resume_launch_failure_tells_the_chief_even_when_the_human_gave_the_task() {
 }
 
 #[test]
-fn resume_launch_failure_of_a_member_needing_an_edit_keeps_its_task_and_session() {
-    let context = Context::new();
-    let tiers = Tiers::new(&context, &["zeus"]);
-    tiers.open();
-    context.pass().unwrap();
-    context.pass().unwrap();
-    let project = tiers.project.id;
-    let session = tiers.assignee(1);
-    let native = native_of(&context, tiers.id(&session));
-    context.close_project(project).unwrap();
-    let member = tiers.id("zeus");
-    context
-        .ledger
-        .borrow()
-        .sqlite()
-        .execute(
-            "UPDATE participant SET needs_edit = 1 WHERE id = ?1 OR member_id = ?1",
-            [member],
-        )
-        .unwrap();
-    context.resume_project(project).unwrap();
-    context.settle();
-    let task = tiers.task(1).task;
-    assert_eq!(
-        (task.state.as_str(), task.assignee.as_deref()),
-        ("paused", Some(session.as_str()))
-    );
-    let notes = context.inbox(context.id(project, "chief"));
-    assert!(
-        notes.iter().any(|note| note.state != "cancelled"
-            && note.body.contains("needs an edit")
-            && note.body.contains("window could not be opened")),
-        "{notes:?}"
-    );
-    context
-        .ledger
-        .borrow()
-        .sqlite()
-        .execute(
-            "UPDATE participant SET needs_edit = 0 WHERE id = ?1 OR member_id = ?1",
-            [member],
-        )
-        .unwrap();
-    context.resume_task(project, 1, "Carry on");
-    context.pass().unwrap();
-    context.pass().unwrap();
-    assert_eq!(tiers.task(1).task.state, "working");
-    assert_eq!(native_of(&context, tiers.id(&session)), native);
-}
-
-#[test]
 fn resume_launch_failure_when_the_previous_unanswered_window_cannot_be_ended() {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);
@@ -291,7 +243,132 @@ resume_launch_failure_case!(resume_launch_failure_devin, "devin");
 resume_launch_failure_case!(resume_launch_failure_muse, "muse");
 
 #[test]
-fn resume_launch_failure_of_the_chief_is_visible_and_keeps_its_existing_retry() {
+fn resume_launch_failure_retries_an_idle_chief_without_a_message() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]).id;
+    let chief = context.id(project, "chief");
+    context.adapter.with("chief", |agent| agent.settled = true);
+    context.close_project(project).unwrap();
+    let attempts = Rc::new(Cell::new(0));
+    let calls = Rc::clone(&attempts);
+    *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |launch| {
+        if launch["participant"]["handle"] == "chief" {
+            calls.set(calls.get() + 1);
+            Err("cannot start".into())
+        } else {
+            Ok(())
+        }
+    }));
+    context.resume_project(project).unwrap();
+    assert_eq!(attempts.get(), 1);
+    let notes = to_human(&context, project);
+    let activity = context.dispatcher.activity(chief);
+    context.advance(4_999);
+    context.pass().unwrap();
+    assert_eq!(attempts.get(), 1, "the first retry waits five seconds");
+    context.advance(1);
+    context.pass().unwrap();
+    assert_eq!(attempts.get(), 2, "the idle chief is tried again");
+    assert_eq!(to_human(&context, project), notes, "no repeated note");
+    assert_eq!(
+        context.dispatcher.activity(chief),
+        activity,
+        "no repeated change of status"
+    );
+    *context.adapter.prepare.borrow_mut() = None;
+    context.advance(9_999);
+    context.pass().unwrap();
+    assert!(
+        context.dispatcher.pane(chief).is_none(),
+        "the next retry waits ten seconds"
+    );
+    context.advance(1);
+    context.pass().unwrap();
+    assert!(
+        context.dispatcher.pane(chief).is_some(),
+        "the chief reopens without a message"
+    );
+    context.pass().unwrap();
+    assert!(
+        given(&context, "chief")
+            .iter()
+            .all(|words| !words.contains(CHIEF_CUT)),
+        "an at-rest chief is not told its turn was cut"
+    );
+}
+
+#[test]
+fn resume_launch_failure_stops_retrying_the_chief_when_the_project_closes() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]).id;
+    context.adapter.with("chief", |agent| agent.settled = true);
+    context.close_project(project).unwrap();
+    let attempts = Rc::new(Cell::new(0));
+    let calls = Rc::clone(&attempts);
+    *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |launch| {
+        if launch["participant"]["handle"] == "chief" {
+            calls.set(calls.get() + 1);
+            Err("cannot start".into())
+        } else {
+            Ok(())
+        }
+    }));
+    context.resume_project(project).unwrap();
+    assert_eq!(attempts.get(), 1);
+    context.close_project(project).unwrap();
+    context.advance(300_000);
+    context.pass().unwrap();
+    assert_eq!(attempts.get(), 1, "a closed project does not retry");
+}
+
+#[test]
+fn resume_launch_failure_of_the_chief_repeated_exit_is_said_once() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]).id;
+    context.adapter.with("chief", |agent| agent.settled = true);
+    context.close_project(project).unwrap();
+    context.host.exits_showing(Some(3), None, None);
+    let host = Rc::clone(&context.host);
+    *context.adapter.after_prepare.borrow_mut() = Some(Rc::new(move |opened| {
+        if opened == "chief" {
+            *host.exit_after_open.borrow_mut() = Some("chief".to_owned());
+        }
+    }));
+    context.resume_project(project).unwrap();
+    let notes = to_human(&context, project);
+    let reasons = || {
+        context
+            .trace
+            .lines
+            .borrow()
+            .iter()
+            .filter(|line| {
+                let line = serde_json::to_value(line).unwrap();
+                line["participant"] == "chief"
+                    && line["kind"] == "window.activity"
+                    && line["reason"].as_str().is_some_and(|reason| {
+                        reason.starts_with("The chief's window could not be opened:")
+                    })
+            })
+            .count()
+    };
+    assert_eq!(reasons(), 1);
+    context.advance(5_000);
+    context.pass().unwrap();
+    assert_eq!(
+        to_human(&context, project),
+        notes,
+        "the same failure has no new note"
+    );
+    assert_eq!(reasons(), 1, "the same failure has no new board line");
+    context.host.exits_showing(Some(4), None, None);
+    context.advance(10_000);
+    context.pass().unwrap();
+    assert_eq!(reasons(), 2, "a changed failure updates the board line");
+}
+
+#[test]
+fn resume_launch_failure_of_the_chief_is_visible_and_retries_at_the_backoff() {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]).id;
     let chief = context.id(project, "chief");
@@ -318,8 +395,8 @@ fn resume_launch_failure_of_the_chief_is_visible_and_keeps_its_existing_retry() 
     context.advance(5_000);
     context.pass().unwrap();
     assert!(
-        context.dispatcher.pane(chief).is_none(),
-        "nothing waiting for the chief"
+        context.dispatcher.pane(chief).is_some(),
+        "the chief is tried even with nothing queued"
     );
     context.note(project, "human", "chief", "Carry on");
     context.pass().unwrap();
@@ -444,16 +521,7 @@ fn resume_launch_failure_of_pi_with_a_login_screen_withholds_it_from_the_board_a
     }));
     context.resume_project(project).unwrap();
     context.settle();
-    let board = context.ledger.borrow().board(project).unwrap();
-    let reason = board
-        .lanes
-        .iter()
-        .flat_map(|lane| &lane.tasks)
-        .find(|task| task.number == 1)
-        .unwrap()
-        .pause_reason
-        .as_deref()
-        .unwrap();
+    let reason = last_pause_reason(&context, project, 1);
     assert!(
         reason.contains("its last screen lines named a secret, so they are left out"),
         "{reason}"
@@ -3822,18 +3890,7 @@ fn a_failed_resume_whose_window_may_still_run_never_sends_resume_words_into_it()
     let context = Context::new();
     let (tiers, after, session, pane, gates) = given_up_with_its_kill_unanswered(&context, &[true]);
     let project = tiers.project.id;
-    let reason = context
-        .ledger
-        .borrow()
-        .board(project)
-        .unwrap()
-        .lanes
-        .into_iter()
-        .flat_map(|lane| lane.tasks)
-        .find(|task| task.number == 1)
-        .unwrap()
-        .pause_reason
-        .unwrap();
+    let reason = last_pause_reason(&context, project, 1);
     assert!(
         reason.contains("could not be ended and may still run"),
         "{reason}"

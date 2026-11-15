@@ -170,11 +170,7 @@ pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError
                       OR json_extract(data, '$.from') != json_extract(data, '$.to'))
                GROUP BY CAST(json_extract(data, '$.task') AS INTEGER)
              )
-             SELECT tasks.*, coalesce(move.at, tasks.created_at) AS state_since,
-                    CASE WHEN tasks.state = 'paused'
-                              AND json_extract(move.data, '$.resume_launch_failed') = 1
-                              AND json_type(move.data, '$.because') = 'text'
-                         THEN json_extract(move.data, '$.because') END AS pause_reason
+             SELECT tasks.*, coalesce(move.at, tasks.created_at) AS state_since
              FROM ({TASK_SELECT} WHERE t.project_id = ?1 AND t.deleted_at IS NULL) tasks
              LEFT JOIN last_moves ON last_moves.number = tasks.number
              LEFT JOIN event move ON move.id = last_moves.event_id
@@ -183,23 +179,20 @@ pub(crate) fn board(store: &Store, project_id: i64) -> Result<Board, LedgerError
         .query_map([project_id], |row| {
             let task = task_view(row)?;
             let state_since: String = row.get("state_since")?;
-            let pause_reason: Option<String> = row.get("pause_reason")?;
             let left: Option<String> = row.get("assignee_left_at")?;
             let member: Option<String> = row.get("assignee_member")?;
             let lane = match member {
                 Some(member) if left.is_some() => Some(member),
                 _ => task.assignee.clone(),
             };
-            Ok((task, lane, state_since, pause_reason))
+            Ok((task, lane, state_since))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let cards: Vec<(TaskCard, Option<String>)> = tasks
         .into_iter()
-        .map(|(task, lane, state_since, pause_reason)| {
+        .map(|(task, lane, state_since)| {
             let result = results.get(&task.id).map(|body| title_of(body));
-            let mut card = TaskCard::of(task, result, state_since);
-            card.pause_reason = pause_reason;
-            (card, lane)
+            (TaskCard::of(task, result, state_since), lane)
         })
         .collect();
     let gated = store

@@ -1249,20 +1249,28 @@ test('draws the kanban: a row per participant, a column per state, and cards tha
   expect(await page.evaluate(() => window.__pwned)).toBeUndefined()
 })
 
-test('shows a failed Resume on the paused card and the chief status', async ({ page }) => {
+test('shows a failed Resume on the chief card and a paused session can be reopened', async ({ page }) => {
   const data = model()
-  const reason = "@zeus-amber-pine's window could not be opened: the launch failed (its cause is in ConsensFlow's log)"
   const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
-  chief.activity = { state: 'closed', reason: "the chief's window could not be opened: the launch failed (its cause is in ConsensFlow's log)" }
+  chief.activity = { state: 'closed', reason: "The chief's window could not be opened: the launch failed (its cause is in ConsensFlow's log)" }
   chief.pane = null
   const zeus = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
-  zeus.tasks.push(task(91, 'Work that did not restart', 'paused', 'chief', 'zeus', 0, { pauseReason: reason }))
+  data.boards[1].lanes.push({
+    participant: session(20, zeus.participant, 'amber-pine'),
+    tasks: [task(91, 'Work that did not restart', 'paused', 'chief', 'zeus-amber-pine', 0)],
+    activity: { state: 'closed' },
+    pane: null,
+  })
   await open(page, data)
-  await expect(page.locator('button.card[data-task="91"] .card-reason')).toHaveText(reason)
-  expect(await page.locator('button.card[data-task="91"]').getAttribute('aria-description')).toContain(reason)
+  await unfold(page)
+  await expect(page.locator('button.card[data-task="91"] .card-state')).toHaveText('Paused')
   await expect(page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status')).toHaveText(
-    "the chief's window could not be opened: the launch failed (its cause is in ConsensFlow's log)",
+    "The chief's window could not be opened: the launch failed (its cause is in ConsensFlow's log)",
   )
+  const row = page.locator('tr[data-handle="zeus-amber-pine"]')
+  await expect(row.locator('[data-state="closed"]')).toHaveCount(1)
+  await row.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await expect.poll(() => calls(page, 'session.open')).toEqual([{ project: 1, handle: 'zeus-amber-pine' }])
   await expect(page.getByTestId('chief-asks')).toHaveCount(0)
 })
 

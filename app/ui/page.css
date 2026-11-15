@@ -502,7 +502,6 @@ tr[data-session] .row-name { font-weight: 500; }
   overflow: hidden;
 }
 .card-route { grid-area: route; font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
-.card-reason { grid-area: route; font: 11px var(--mono); color: var(--foam); overflow-wrap: anywhere; }
 /* What a task that goes on in the background waits on, on its card. */
 .card-held { color: var(--amber); font-weight: 600; }
 .card-status { grid-area: status; padding-bottom: 6px; font: 11px var(--mono); color: var(--foam); }
@@ -531,7 +530,7 @@ tr[data-session] .row-name { font-weight: 500; }
 @container (max-width: 150px) {
   .card { grid-template-columns: minmax(0, 1fr); grid-template-areas: "number" "title" "route" "status" "result"; padding: 0; }
   .card-number { padding: 3px 6px; }
-  .card-title, .card-route, .card-reason, .card-status, .card-result { padding-left: 6px; padding-right: 6px; }
+  .card-title, .card-route, .card-status, .card-result { padding-left: 6px; padding-right: 6px; }
   .card-title { padding-top: 4px; -webkit-line-clamp: 4; }
 }
 

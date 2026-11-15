@@ -175,7 +175,7 @@ fn a_window_paused_across_the_migration_is_resumed_finishes_its_task_and_is_deli
 /// A member the update could not run on what it ran on before (its agent was in no catalog
 /// and no agents file: T-1202) keeps its name and needs an edit: it takes no new task, and
 /// a window of it that comes back after a restart does not open on its harness's default.
-/// A project Resume pauses its task with the session, for an edit and a retry.
+/// Its task goes back to the board for another member.
 #[test]
 fn a_member_that_needs_an_edit_takes_no_task_and_opens_no_window_on_a_default() {
     let context = Context::new();
@@ -226,8 +226,8 @@ fn a_member_that_needs_an_edit_takes_no_task_and_opens_no_window_on_a_default() 
     let task = context.task(project.id, 1).task;
     assert_eq!(
         (task.state.as_str(), task.assignee.as_deref()),
-        ("paused", before.assignee.as_deref()),
-        "its task stays with its session"
+        ("open", None),
+        "its task is back on the board"
     );
     // And a new one waits for a member that can take it.
     context.create_task(

@@ -187,9 +187,6 @@ fn pause_task_inner(
             if let Some(because) = because {
                 detail.insert("because".into(), json!(because));
             }
-            if failed_project_resume {
-                detail.insert("resume_launch_failed".into(), json!(true));
-            }
             pause(store, &task, detail, with_project, Stops::Asked)?;
             if failed_project_resume {
                 store.db.execute(

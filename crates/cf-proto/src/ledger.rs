@@ -676,9 +676,6 @@ pub struct TaskCard {
     pub updated_at: String,
     /// The ledger event that moved this task into its present state.
     pub state_since: String,
-    /// A project Resume could not reopen this paused task's window.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pause_reason: Option<String>,
     pub result: Option<String>,
     /// What ConsensFlow shows of the task instead of telling its chief ([`TaskView::aside`]).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -708,7 +705,6 @@ impl TaskCard {
             created_at: task.created_at,
             updated_at: task.updated_at,
             state_since,
-            pause_reason: None,
             result,
             aside: task.aside,
         }
