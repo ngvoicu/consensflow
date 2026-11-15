@@ -150,11 +150,16 @@ fn prepare_config(login: &dyn ClaudeConfig, folder: &Path) -> Result<std::path::
     cf_e2e::door::make_dir(&skill_dir)?;
     cf_e2e::door::write(skill_dir.join("SKILL.md"), skill(GLOBAL_SKILL))?;
     cf_e2e::door::write(&program, SERVER)?;
-    // A signed-in Claude can otherwise download the owner's account skills and plugins
-    // into even a fresh config. These are run-owned settings, not the owner's settings.
+    // A signed-in Claude can otherwise download the owner's account skills, plugins and
+    // connectors into even a fresh config. These settings are the run's own.
     cf_e2e::door::write(
         config.join("settings.json"),
-        json!({"syncClaudeAiSkills": false, "syncClaudeAiPlugins": false}).to_string(),
+        json!({
+            "syncClaudeAiSkills": false,
+            "syncClaudeAiPlugins": false,
+            "disableClaudeAiConnectors": true
+        })
+        .to_string(),
     )?;
     cf_e2e::door::write(&file, configuration.to_string())?;
     Ok(config)
@@ -648,7 +653,26 @@ mod tests {
             serde_json::from_slice(&fs::read(config.join("settings.json")).unwrap()).unwrap();
         assert_eq!(
             settings,
-            json!({"syncClaudeAiSkills": false, "syncClaudeAiPlugins": false})
+            json!({"syncClaudeAiSkills": false, "syncClaudeAiPlugins": false, "disableClaudeAiConnectors": true})
+        );
+    }
+
+    #[test]
+    fn t1700_run_config_disables_account_connectors() {
+        let root = cf_e2e::door::made("cf-parity-account-connectors-").unwrap();
+        let config = root.path().join("config");
+        cf_e2e::door::make_dir_private(&config).unwrap();
+        fs::write(config.join(".claude.json"), "{}").unwrap();
+        let login = FakeLogin {
+            config: config.clone(),
+            calls: AtomicUsize::new(0),
+        };
+        prepare_config(&login, root.path()).unwrap();
+        let settings: Value =
+            serde_json::from_slice(&fs::read(config.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(
+            settings["disableClaudeAiConnectors"], true,
+            "account connectors were not disabled"
         );
     }
 

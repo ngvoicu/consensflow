@@ -266,8 +266,12 @@ meant = "t1700_run_config_disables_account_skill_and_plugin_sync"
 runs = ["round5-parity"]
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_parity/claude.rs"
-find = '''json!({"syncClaudeAiSkills": false, "syncClaudeAiPlugins": false}).to_string(),'''
-replace = '''json!({"syncClaudeAiSkills": true, "syncClaudeAiPlugins": false}).to_string(),'''
+find = '''"syncClaudeAiSkills": false,
+            "syncClaudeAiPlugins": false,
+            "disableClaudeAiConnectors": true'''
+replace = '''"syncClaudeAiSkills": true,
+            "syncClaudeAiPlugins": false,
+            "disableClaudeAiConnectors": true'''
 
 [[plant]]
 name = "kit parity: Claude syncs account plugins into the run"
@@ -275,8 +279,25 @@ meant = "t1700_run_config_disables_account_skill_and_plugin_sync"
 runs = ["round5-parity"]
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_parity/claude.rs"
-find = '''json!({"syncClaudeAiSkills": false, "syncClaudeAiPlugins": false}).to_string(),'''
-replace = '''json!({"syncClaudeAiSkills": false, "syncClaudeAiPlugins": true}).to_string(),'''
+find = '''"syncClaudeAiSkills": false,
+            "syncClaudeAiPlugins": false,
+            "disableClaudeAiConnectors": true'''
+replace = '''"syncClaudeAiSkills": false,
+            "syncClaudeAiPlugins": true,
+            "disableClaudeAiConnectors": true'''
+
+[[plant]]
+name = "kit parity: Claude connects the owner's account connectors"
+meant = "t1700_run_config_disables_account_connectors"
+runs = ["round5-parity"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''"syncClaudeAiSkills": false,
+            "syncClaudeAiPlugins": false,
+            "disableClaudeAiConnectors": true'''
+replace = '''"syncClaudeAiSkills": false,
+            "syncClaudeAiPlugins": false,
+            "disableClaudeAiConnectors": false'''
 
 [[plant]]
 name = "kit parity: Claude keeps a skill missing from the latest list"
