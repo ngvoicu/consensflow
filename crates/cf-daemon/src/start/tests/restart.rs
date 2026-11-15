@@ -600,10 +600,16 @@ async fn the_humans_resume_opens_the_chiefs_window_with_the_environment_the_app_
             let role = std::fs::read_to_string(argv[at + 1]).unwrap();
             // As the daemon names it: `cf.exe`, spelled with `/`, on Windows.
             let cf = machine::bundle_of(&bin.join("cf")).pane_cf;
+            let word = if cf_engine::roles::PATH_ONCE {
+                "cf"
+            } else {
+                cf.as_str()
+            };
             assert!(
-                role.contains(&format!("\n    {cf} task add --tier ")),
+                role.contains(&format!("\n    {word} task add --tier ")),
                 "{role}"
             );
+            assert!(role.contains(&format!("`{cf}`")), "its window's cf: {role}");
             // Every `cf` the window runs is told it, to say its hints with.
             assert_eq!(env["CONSENSFLOW_CF"], cf.as_str(), "{env}");
 

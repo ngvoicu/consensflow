@@ -50,8 +50,8 @@ fn with_specs_off_a_chief_s_text_holds_no_word_of_them_and_is_the_text_it_was() 
     let word = if crate::roles::PATH_ONCE { "cf" } else { CF };
     assert!(chief.contains(&format!("\n    {word} task get T-3 ")));
     assert_eq!(
-        chief.matches(CF).count(),
-        usize::from(crate::roles::PATH_ONCE),
+        chief.matches(CF).count() == 1,
+        crate::roles::PATH_ONCE,
         "the path, said once"
     );
     assert!(chief.contains("| zeus (Opus · max) | worker | "));

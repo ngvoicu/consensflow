@@ -238,12 +238,12 @@ use crate::specs::RoleText;
 pub(crate) use prelude::Prelude;
 
 /// What a replacement says before the role text.
-pub(crate) const OPENING: &str = "Your ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on, and where they differ from what you were told before, these are right. This is context, not a task: say in one short line that you have them, and wait for the next message.";
+pub(crate) const OPENING: &str = "Your ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on. This is context, not a task: say in one short line that you have them, and wait for the next message.";
 
 /// What a replacement says before the role text where the two together are too
 /// long for one message: the window is given only their opening and the command
 /// that prints the rest, and is told to read the rest now.
-pub(crate) const OPENING_IN_PART: &str = "Your ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on, and where they differ from what you were told before, these are right. They are too long for one message, so only their opening follows; the line at its end gives the command that prints all of them. Run that command now, before anything else, and read everything it prints. This is context, not a task: once you have read them, say in one short line that you have them, and wait for the next message.";
+pub(crate) const OPENING_IN_PART: &str = "Your ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on. They are too long for one message, so only their opening follows; the line at its end gives the command that prints all of them. Run that command now, before anything else, and read everything it prints. This is context, not a task: once you have read them, say in one short line that you have them, and wait for the next message.";
 
 /// What [`OPENING_IN_PART`] and [`BEGAN_WITHOUT_IN_PART`] say of the rest where `cf inbox
 /// read` prints the note in `parts` parts, as it does a role it cannot print within the
@@ -288,7 +288,7 @@ impl Telling {
     /// Its opening where the note goes in cut, and `cf inbox read` prints it in `parts`.
     fn in_parts(self, parts: usize) -> String {
         match self {
-            Self::Replaces => format!("Your ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on, and where they differ from what you were told before, these are right. {} This is context, not a task: once you have read them all, say in one short line that you have them, and wait for the next message.", read_in_parts(parts)),
+            Self::Replaces => format!("Your ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on. {} This is context, not a task: once you have read them all, say in one short line that you have them, and wait for the next message.", read_in_parts(parts)),
             Self::BeganWithout => format!("This conversation began without your ConsensFlow role instructions: it was started in your window (a /clear, or a new session), and your harness gave it none. {} Follow them from now on. This is context, not a task: once you have read them all, say in one short line that you have them, and wait for the next message.", read_in_parts(parts)),
         }
     }

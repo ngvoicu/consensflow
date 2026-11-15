@@ -177,7 +177,13 @@ fn own_hands_selects_the_chiefs_text_and_keeps_the_members_text() {
         own.contains("staff of agents, on a ConsensFlow board"),
         "{own}"
     );
-    assert!(own.contains("run `/bundle/bin/cf guide`"), "{own}");
+    let word = if cf_engine::roles::PATH_ONCE {
+        "cf"
+    } else {
+        "/bundle/bin/cf"
+    };
+    assert!(own.contains(&format!("run `{word} guide`")), "{own}");
+    assert!(own.contains("`/bundle/bin/cf`"), "the path is said: {own}");
     assert!(own.lines().count() < 40, "{own}");
     assert!(
         !own.contains("## Reviews") && !own.contains("| zeus |"),
@@ -206,9 +212,18 @@ fn the_chief_is_given_its_staff_and_every_role_the_cf_of_its_window() {
         chief.contains("| zeus | worker | Standard work |"),
         "{chief}"
     );
+    let word = if cf_engine::roles::PATH_ONCE {
+        "cf"
+    } else {
+        "/bundle/bin/cf"
+    };
     assert!(
-        chief.contains("\n    /bundle/bin/cf task add --tier "),
+        chief.contains(&format!("\n    {word} task add --tier ")),
         "{chief}"
+    );
+    assert!(
+        chief.contains("`/bundle/bin/cf`"),
+        "its window's cf: {chief}"
     );
     assert!(!chief.contains("This window's cf"), "{chief}");
     assert!(!chief.contains("specs"), "specs off: told nothing of them");
@@ -216,8 +231,12 @@ fn the_chief_is_given_its_staff_and_every_role_the_cf_of_its_window() {
         .instructions(participant(&scene.project, "zeus"), &scene.project, None)
         .unwrap();
     assert!(
-        worker.contains("\n    /bundle/bin/cf ask \"…\" "),
+        worker.contains(&format!("\n    {word} ask \"…\" ")),
         "{worker}"
+    );
+    assert!(
+        worker.contains("`/bundle/bin/cf`"),
+        "its window's cf: {worker}"
     );
 }
 
@@ -250,9 +269,18 @@ fn a_windows_first_word_is_the_path_as_its_harness_s_shell_runs_a_program_by_it(
             let text = texts(windows)
                 .instructions(&member, &scene.project, None)
                 .unwrap();
+            let word = if cf_engine::roles::PATH_ONCE {
+                "cf"
+            } else {
+                expected.as_str()
+            };
             assert!(
-                text.contains(&format!("\n    {expected} ask \"…\" ")),
+                text.contains(&format!("\n    {word} ask \"…\" ")),
                 "{harness:?}, windows {windows}: {text}"
+            );
+            assert!(
+                text.contains(&format!("`{expected}`")),
+                "{harness:?}, windows {windows}, its window's cf: {text}"
             );
         }
         // A participant that names no harness (or one this build does not run) is a bash-like
