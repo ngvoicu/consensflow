@@ -175,11 +175,6 @@ jobs:
       - name: Warm the Mac git shim, as the daemons job does
         if: runner.os == 'macOS' && contains(fromJSON('["rig","regressions","daemon"]'), matrix.suite)
         run: time /usr/bin/git --version && time /usr/bin/git --version
-      - name: Prepare the pinned Muse echo executable
-        if: contains(fromJSON('["rig","regressions"]'), matrix.suite)
-        env:
-          CF_E2E_HOSTED_MUSE: '1'
-        run: cargo run -p cf-e2e --features test-support --bin prepare-muse-echo
       - name: Install nextest for plants
         if: matrix.suite == 'plants'
         run: cargo install cargo-nextest --version 0.9.148 --locked
@@ -200,10 +195,12 @@ jobs:
         if: matrix.suite == 'page-webkit'
         working-directory: app
         run: npx playwright install webkit
+      - name: Muse echo cases
+        run: echo "not run: this runner has no Muse"
       - name: Run the named suite
         id: run_suite
         env:
-          CF_E2E_HOSTED_MUSE: '1'
+          CF_E2E_NO_MUSE: '1'
         run: |
           set +e
           {

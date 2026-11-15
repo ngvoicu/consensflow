@@ -170,10 +170,18 @@ runs = ["renew-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/login.rs"
-find = '''            services: keychain_services(),
+find = '''            services: if keychain::watching() {
+                keychain_services()
+            } else {
+                None
+            },
             renewed,
         });'''
-replace = '''            services: keychain_services(),
+replace = '''            services: if keychain::watching() {
+                keychain_services()
+            } else {
+                None
+            },
             renewed: None,
         });'''
 

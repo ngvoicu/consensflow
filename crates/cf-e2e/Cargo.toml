@@ -62,11 +62,6 @@ name = "muse-stand-in"
 path = "src/bin/muse_stand_in.rs"
 required-features = ["test-support"]
 
-[[bin]]
-name = "prepare-muse-echo"
-path = "src/bin/prepare_muse_echo.rs"
-required-features = ["test-support"]
-
 # A daemon that says it is Node's, for the case that holds the rig to refusing
 # a daemon that is not the native one.
 [[bin]]
@@ -102,7 +97,7 @@ sha2.workspace = true
 # The home of a case, removed with it.
 tempfile.workspace = true
 thiserror.workspace = true
-# The daemon's loopback HTTP and the pinned Muse echo artifact on hosted CI.
+# The daemon's loopback HTTP.
 ureq = { workspace = true, features = ["rustls"] }
 # The WebSocket the stand-in Codex speaks, on a socket or on loopback.
 tungstenite.workspace = true
@@ -142,11 +137,6 @@ cf-ledger.workspace = true
 # `TIOCOUTQ`, what a terminal holds that its reader has not read.
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["process", "signal", "term"] }
-
-# macOS compares canonically equivalent Unicode spellings of a path alike.
-[target.'cfg(target_os = "macos")'.dependencies]
-icu_casemap = "=2.3.0"
-icu_normalizer.workspace = true
 
 # A descriptor left open and not close-on-exec, for a test of what the programs a case starts
 # hold.

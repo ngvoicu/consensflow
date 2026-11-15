@@ -3044,7 +3044,7 @@ runs = ["muse-kit-find"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/muse.rs"
-find = '''    let launcher = match crate::live::machine::find("muse", path, Some(".CMD;.EXE")) {'''
+find = '''    let launcher = match crate::live::machine::find_muse_install(path) {'''
 replace = '''    let launcher = match None::<std::path::PathBuf>.filter(|_| !path.is_empty()) {'''
 
 [[plant]]

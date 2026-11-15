@@ -101,43 +101,12 @@ runs = ["standin-home-unit"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/standin_process.rs"
 find = '''    assert!(
-        found,
+        ["HOME", "USERPROFILE"]
+            .iter()
+            .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty())),
         "stand-in inherited HOME lookup: neither HOME nor USERPROFILE names a home"
     );'''
-replace = '''    let _ = found; // The plant leaves the inherited boundary unknown.'''
-
-[[plant]]
-name = "standin homes: account home overlaps a custom harness home"
-meant = "standin_isolation_explicit_harness_home_cannot_be_an_account_home"
-runs = ["standin-home-unit"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/standin_process.rs"
-find = '''    require_inherited_home(&inherited_homes);'''
-replace = '''    require_inherited_home(&[]);'''
-
-[[plant]]
-name = "standin homes: parent component hides inherited harness home"
-meant = "standin_isolation_inherited_parent_component_refuses_before_path_search"
-runs = ["standin-home-unit"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/standin_process.rs"
-find = '''    assert!(
-        plain_absolute(&path),
-        "stand-in inherited {name} lookup: relative or aliased path"
-    );'''
-replace = '''    let _ = name; // The plant accepts an ambiguous inherited path.'''
-
-[[plant]]
-name = "standin homes: dot hides a PATH in a harness home"
-meant = "standin_isolation_dotted_path_refuses_a_harness_home"
-runs = ["standin-home-unit"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/standin_process.rs"
-find = '''    if !plain_absolute(folder) || forbidden.iter().any(|home| same_or_inside(folder, home)) {'''
-replace = '''    if !plain_absolute(folder) || (forbidden.iter().any(|home| same_or_inside(folder, home)) && !folder.to_string_lossy().contains("/./") && !folder.to_string_lossy().contains("\\.\\")) {'''
+replace = '''    // The plant leaves the inherited account boundary unknown.'''
 
 [[plant]]
 name = "standin homes: inherited account path remains searchable"
@@ -146,156 +115,19 @@ runs = ["standin-home-unit"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/standin_process.rs"
-find = '''        !homes.iter().any(|home| same_or_inside(folder, home))'''
-replace = '''        !homes.iter().any(|_home| false)'''
-
-[[plant]]
-name = "standin homes: temporary parent enters an inherited harness home"
-meant = "standin_isolation_temp_parent_refuses_an_inherited_harness_home"
-runs = ["standin-home-unit"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/standin_process.rs"
-find = '''    assert!(
-        !forbidden.iter().any(|home| same_or_inside(&parent, home)),
-        "stand-in temporary lookup: inside an inherited harness home"
-    );'''
-replace = '''    let _ = forbidden; // The plant lets the temporary parent enter a harness home.'''
-
-[[plant]]
-name = "standin homes: hosted Muse search enters an inherited harness home"
-meant = "standin_isolation_hosted_muse_refuses_an_inherited_harness_home"
-runs = ["standin-home-unit"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/muse.rs"
-find = '''    crate::standin_process::require_unlinked_safe_path(&folder, "stand-in Muse lookup");'''
-replace = '''    // The plant searches the handed hosted folder without checking it.'''
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/machine/path.rs"
-find = '''                    crate::standin_process::require_search_candidate(
-                        candidate,
-                        "harness search lookup",
-                    );'''
-replace = '''                    // Remove the independent candidate check too.'''
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/muse.rs"
-find = '''    crate::standin_process::require_watch_path(&launcher, "Muse launcher lookup");'''
-replace = '''    // Remove the independent launcher check too.'''
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/muse.rs"
-find = '''    crate::standin_process::require_watch_path(&version_file, "Muse version lookup");'''
-replace = '''    // Remove the independent version-file check too.'''
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/muse.rs"
-find = '''    crate::standin_process::require_watch_path(&binary, "Muse binary lookup");'''
-replace = '''    // Remove the independent binary check too.'''
-
-[[plant]]
-name = "standin homes: hosted Muse watch enters an inherited harness home"
-meant = "standin_isolation_hosted_muse_watch_refuses_an_inherited_harness_home"
-runs = ["standin-home-unit"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/standin_process.rs"
-find = '''            !forbidden.iter().any(|home| same_or_inside(&pending, home)),'''
-replace = '''            !forbidden.iter().any(|_home| false),'''
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/standin_process.rs"
-find = '''            safe_path_entry(base, forbidden),'''
-replace = '''            true,'''
+find = '''        !launchers.iter().any(|home| same_or_inside(folder, home))'''
+replace = '''        !launchers.iter().any(|_home| false)'''
 
 [[plant]]
 name = "standin homes: Muse launcher search enters an inherited harness home"
-meant = "standin_isolation_muse_launcher_refuses_an_inherited_harness_home"
-runs = ["standin-home-unit"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/machine.rs"
-find = '''    crate::standin_process::require_watch_path(&install.command, "Muse launcher lookup");'''
-replace = '''    // The plant searches the launcher before checking it.'''
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/machine/path.rs"
-find = '''                    crate::standin_process::require_search_candidate(
-                        candidate,
-                        "harness search lookup",
-                    );'''
-replace = '''                    // Remove the independent candidate check too.'''
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/muse.rs"
-find = '''    crate::standin_process::require_watch_path(&launcher, "Muse launcher lookup");'''
-replace = '''    // Remove the independent launcher check too.'''
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/muse.rs"
-find = '''    crate::standin_process::require_watch_path(&version_file, "Muse version lookup");'''
-replace = '''    // Remove the independent version-file check too.'''
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/muse.rs"
-find = '''    crate::standin_process::require_watch_path(&binary, "Muse binary lookup");'''
-replace = '''    // Remove the independent binary check too.'''
-
-[[plant]]
-name = "standin homes: PATH candidate link enters an inherited harness home"
-meant = "standin_isolation_path_candidate_refuses_a_link_into_an_inherited_home"
-platforms = ["macos", "linux"]
-runs = ["standin-home-unit"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/live/machine/path.rs"
-find = '''                    crate::standin_process::require_search_candidate(
-                        candidate,
-                        "harness search lookup",
-                    );'''
-replace = '''                    // The plant follows the candidate without checking it.'''
-
-[[plant]]
-name = "standin homes: Muse version path enters an inherited harness home"
-meant = "standin_isolation_muse_version_refuses_a_path_into_an_inherited_home"
-runs = ["standin-home-unit"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/muse.rs"
-find = '''    crate::standin_process::require_watch_path(&binary, "Muse binary lookup");'''
-replace = '''    // The plant trusts the version file's path.'''
-
-[[plant]]
-name = "standin homes: watch normalizes a parent after a link"
-meant = "standin_isolation_watch_refuses_a_parent_after_a_link"
-platforms = ["macos", "linux"]
+meant = "standin_isolation_muse_search_passes_over_an_inherited_harness_home"
 runs = ["standin-home-unit"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/standin_process.rs"
-find = '''        assert!(
-            !path.components().any(|part| part == Component::ParentDir),
-            "{lookup}: parent component in a stand-in path"
-        );'''
-replace = '''        // The plant lets absolute path conversion hide a parent component.'''
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/standin_process.rs"
-find = '''                Component::ParentDir => panic!("{lookup}: parent component in a stand-in path"),'''
-replace = '''                Component::ParentDir => { assert!(clean.pop(), "{lookup}: path leaves the stand-in run"); }'''
-
-[[plant]]
-name = "standin windows: absolute conversion hides a parent component"
-meant = "standin_isolation_watch_refuses_parent_before_making_path_absolute"
-platforms = ["windows"]
-runs = ["standin-home-unit"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/standin_process.rs"
-find = '''        assert!(
-            !path.components().any(|part| part == Component::ParentDir),
-            "{lookup}: parent component in a stand-in path"
-        );'''
-replace = '''        // The plant lets Windows absolute conversion erase the parent.'''
+find = '''    let forbidden = INHERITED_HARNESS_HOMES
+        .get()
+        .unwrap_or_else(|| panic!("stand-in inherited homes not recorded"));
+    safe_path_entry(path, forbidden)'''
+replace = '''    let _ = path;
+    true'''

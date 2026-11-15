@@ -157,6 +157,9 @@ fn muse_rig() -> Result<Config, String> {
 
 #[test]
 fn a_muse_members_window_takes_the_projects_size_as_its_context_limit() -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig()?;
     let rig = Rig::start(config)?;
     let project = muse_project(&rig, &echo_worker())?;

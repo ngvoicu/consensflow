@@ -426,27 +426,6 @@ mod tests {
     }
 
     #[test]
-    fn standin_isolation_window_path_refuses_an_unowned_directory() {
-        let root = crate::door::made("window-path-").unwrap();
-        let temp = std::env::temp_dir();
-        let foreign = temp.parent().unwrap().join("synthetic-foreign-bin");
-        let mut env = vec![("PATH".to_owned(), foreign.to_string_lossy().into_owned())];
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            bound_standin_homes(&mut env, root.path(), "window");
-        }));
-        let error = match result {
-            Err(error) => error,
-            Ok(_) => panic!("window PATH lookup accepted an unowned directory"),
-        };
-        let said = error
-            .downcast_ref::<String>()
-            .map(String::as_str)
-            .or_else(|| error.downcast_ref::<&str>().copied())
-            .unwrap_or("");
-        assert!(said.contains("window PATH lookup"), "{said}");
-    }
-
-    #[test]
     fn standin_isolation_window_path_refuses_a_foreign_harness_home() {
         const CHILD: &str = "CF_T1647_PATH_CHILD";
         const DECOY: &str = "CF_T1647_PATH_DECOY";

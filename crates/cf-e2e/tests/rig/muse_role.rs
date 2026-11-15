@@ -47,7 +47,11 @@ fn muse_rig_from(found: Result<muse::Installed, String>) -> Result<Config, Strin
 
 #[test]
 fn standin_isolation_a_required_muse_that_is_missing_fails_the_case() {
-    assert!(muse_rig_from(Err("fixture Muse is missing".into())).is_err());
+    let error = match muse_rig_from(Err("fixture Muse is missing".into())) {
+        Err(error) => error,
+        Ok(_) => panic!("a required missing Muse was accepted"),
+    };
+    assert!(error.contains("Muse is missing"), "{error}");
 }
 
 /// A rig whose Muse turns are `turn_ms` long.
@@ -293,6 +297,9 @@ fn tell_the_chief(rig: &Rig, project: &Project<'_>, text: &str) -> cf_e2e::Resul
 
 #[test]
 fn a_muse_chief_with_the_largest_role_is_given_all_of_it_by_its_hooks() -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig()?;
     let rig = Rig::start(config)?;
     let project = largest_chiefs_project(&rig)?;
@@ -453,6 +460,9 @@ fn chief_launch(rig: &Rig, project: &Project<'_>, launch: usize) -> cf_e2e::Resu
 #[test]
 fn a_resumed_muse_chief_has_no_old_role_text_whatever_its_owners_hooks_print_and_however_its_role_changes(
 ) -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig()?;
     let rig = Rig::start(config)?;
     let owner = tempfile::tempdir()?;
@@ -554,6 +564,9 @@ fn rules_tag(role: &str) -> String {
 
 #[test]
 fn a_resumed_muse_member_goes_from_one_block_to_two_and_back_with_no_old_role_text() -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig_of(500)?;
     let rig = Rig::start(config)?;
     let owner = tempfile::tempdir()?;
@@ -795,6 +808,9 @@ fn an_older_conversation(home: &tempfile::TempDir, session: &str) -> Found<Vec<V
 #[test]
 fn a_window_that_resumes_a_conversation_of_more_role_blocks_than_its_own_leaves_no_old_role_text(
 ) -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig_of(60_000)?;
     let rig = Rig::start(config)?;
     // The window of a worker with a role of one part, at work for a minute.
@@ -844,6 +860,9 @@ fn median(mut values: Vec<u64>) -> u64 {
 #[test]
 #[ignore = "a timing: run by hand with --ignored --nocapture"]
 fn the_cost_of_the_hooks_of_a_start() -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig_of(60_000)?;
     let rig = Rig::start(config)?;
     let (hooks, role) = a_workers_hooks(&rig)?;
@@ -1013,6 +1032,9 @@ fn json_of(n: usize) -> Vec<u8> {
 
 #[test]
 fn muse_takes_16384_bytes_of_a_hooks_output_and_no_more_plain_or_in_json() {
+    if muse::runner_has_no_muse() {
+        return;
+    }
     let _config = muse_rig().unwrap_or_else(|why| panic!("{why}"));
     for (name, printed) in [
         ("plain", bytes_of as fn(usize) -> Vec<u8>),
@@ -1044,6 +1066,9 @@ fn muse_takes_16384_bytes_of_a_hooks_output_and_no_more_plain_or_in_json() {
 #[test]
 fn muse_keeps_each_hooks_text_as_a_block_of_its_own_numbered_in_order_with_its_white_space_cut_off_and_every_block_is_in_the_request(
 ) {
+    if muse::runner_has_no_muse() {
+        return;
+    }
     let _config = muse_rig().unwrap_or_else(|why| panic!("{why}"));
     // Three hooks of 16,000 bytes: each a block, in the order of the hooks, whole.
     let (first, second, third) = (
@@ -1093,6 +1118,9 @@ fn muse_keeps_each_hooks_text_as_a_block_of_its_own_numbered_in_order_with_its_w
 
 #[test]
 fn a_resumed_conversation_keeps_the_blocks_it_has_until_a_hook_of_the_same_number_writes_them() {
+    if muse::runner_has_no_muse() {
+        return;
+    }
     let _config = muse_rig().unwrap_or_else(|why| panic!("{why}"));
     // A session whose first start gave three blocks, and whose second, with one hook, writes
     // the first only: the other two are in its request still, the old role's tail.

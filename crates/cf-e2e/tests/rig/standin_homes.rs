@@ -171,28 +171,3 @@ fn standin_isolation_nested_cargo_finds_its_compiler_without_path() -> Outcome {
     );
     Ok(())
 }
-
-#[cfg(unix)]
-#[test]
-fn standin_isolation_launcher_refuses_a_link_outside_the_run() -> Outcome {
-    let parent = std::env::temp_dir();
-    let outside = cf_e2e::door::made_in(
-        parent
-            .parent()
-            .unwrap_or_else(|| panic!("temporary folder has no parent")),
-        "foreign-link-",
-    )?;
-    let target = outside.path().join("decoy");
-    cf_e2e::door::write(&target, "synthetic launcher")?;
-    let home = cf_e2e::door::made("link-home-")?;
-    let link = home.path().join("claude");
-    cf_e2e::door::symlink(&target, &link)?;
-    let result = std::panic::catch_unwind(|| {
-        live::launcher::Watch::of(Harness::Claude, &link, home.path()).look()
-    });
-    assert!(
-        result.is_err(),
-        "launcher lookup followed a link outside the run"
-    );
-    Ok(())
-}

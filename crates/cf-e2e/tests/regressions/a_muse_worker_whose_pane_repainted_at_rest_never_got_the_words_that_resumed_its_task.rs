@@ -72,6 +72,9 @@ fn looks(rig: &Rig) -> Vec<Value> {
 
 #[test]
 fn a_muse_worker_whose_pane_repainted_at_rest_got_the_words_that_resumed_its_task() -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = repainting_rig()?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;

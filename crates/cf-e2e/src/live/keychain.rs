@@ -82,11 +82,17 @@ where
         return Ok(result);
     }
     assert!(watching(), "stand-in run attempted security from {caller}");
-    Run::new("/usr/bin/security")
+    let mut security = Run::new("/usr/bin/security")
         .args(args)
         .inheriting_env()
-        .limit(limit)
-        .run()
+        .limit(limit);
+    if hosted_test() {
+        let home = crate::standin_process::inherited_home().ok_or_else(|| {
+            crate::Error::Daemon("hosted Keychain test has no inherited HOME".to_owned())
+        })?;
+        security = security.var("HOME", home);
+    }
+    security.run()
 }
 
 #[cfg(test)]

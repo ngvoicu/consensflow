@@ -185,7 +185,11 @@ impl Item {
             std::time::Duration::from_secs(60),
         )?;
         if made.code != Some(0) {
-            return Err(format!("security could not make the item {name}: {:?}", made.code).into());
+            return Err(format!(
+                "security could not make the item {name}: code {:?}, timed out {}, stderr: {}",
+                made.code, made.timed_out, made.stderr
+            )
+            .into());
         }
         Ok(Self { name, user })
     }
@@ -243,9 +247,8 @@ fn a_run_whose_claude_code_left_an_item_in_the_keychain_fails_the_rig_that_ends_
 fn a_claude_whose_config_keeps_its_findings_is_not_listed_by_the_guard_and_its_rig_ignores_another_processs_item(
 ) -> Outcome {
     require_hosted()?;
-    // An eval's config names the item of its own folder, and keeps what it finds for its report:
-    // a rig that failed as well, for an item some other process made (the Keychain is the whole
-    // machine's), would end an eval with `closed?` and cost it the report (T-1044, T-1102).
+    // A config that records its own findings names the item of its own folder. The guard
+    // leaves the shared Keychain to it, so another process's item cannot fail this rig.
     let owner = Owner::new()?;
     let rig = Rig::start(live::rig(&[owner.claude()], FAKE_AGENT))?;
     // An item made for a folder that is none of the run's.

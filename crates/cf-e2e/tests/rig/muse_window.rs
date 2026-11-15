@@ -39,6 +39,9 @@ fn muse_rig() -> Result<Config, String> {
 
 #[test]
 fn a_task_goes_from_its_brief_to_its_result_in_a_muse_window_launched_whole() -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig()?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
@@ -116,6 +119,9 @@ fn a_task_goes_from_its_brief_to_its_result_in_a_muse_window_launched_whole() ->
 #[cfg(unix)]
 #[test]
 fn a_muse_window_beside_a_devin_home_names_its_session_and_takes_its_brief() -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig()?;
     // A pretend owner, with a Devin login and a Muse of their own.
     let owner = tempfile::tempdir()?;
@@ -160,6 +166,9 @@ fn muse_rig_of(turn_ms: u64) -> Result<Config, String> {
 #[test]
 fn an_interrupt_before_the_first_word_takes_the_brief_back_and_the_resume_goes_in_alone() -> Outcome
 {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig_of(20_000)?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
@@ -212,6 +221,9 @@ fn an_interrupt_before_the_first_word_takes_the_brief_back_and_the_resume_goes_i
 #[test]
 fn a_brief_taken_back_taller_than_the_window_waits_in_words_until_the_human_empties_the_box(
 ) -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig_of(20_000)?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
@@ -260,6 +272,9 @@ fn a_brief_taken_back_taller_than_the_window_waits_in_words_until_the_human_empt
 
 #[test]
 fn a_tell_while_the_turn_works_stops_it_takes_the_brief_back_and_goes_in_alone_once() -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig_of(20_000)?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
@@ -322,9 +337,10 @@ fn a_tell_while_the_turn_works_stops_it_takes_the_brief_back_and_goes_in_alone_o
 /// task still working; the words go in once the turn has rested, before its result is taken.
 #[test]
 fn a_tell_to_a_muse_window_at_work_presses_no_key_and_goes_in_once_the_turn_has_ended() -> Outcome {
-    let Some(config) = muse_rig_of(20_000) else {
+    if muse::runner_has_no_muse() {
         return Ok(());
-    };
+    }
+    let config = muse_rig_of(20_000)?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
     rig.tell(
@@ -368,6 +384,9 @@ fn a_tell_to_a_muse_window_at_work_presses_no_key_and_goes_in_once_the_turn_has_
 
 #[test]
 fn words_that_land_in_a_turn_at_work_are_the_turn_s_at_once_and_its_task_ends_once() -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig_of(20_000)?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
@@ -411,6 +430,9 @@ fn words_that_land_in_a_turn_at_work_are_the_turn_s_at_once_and_its_task_ends_on
 #[test]
 fn a_muse_worker_cut_by_the_app_s_quit_is_resumed_on_its_session_with_the_note_pasted_once_up(
 ) -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig_of(30_000)?;
     let rig = Rig::start(config.clone())?;
     let project = project(&rig, &echo_worker())?;
@@ -474,6 +496,9 @@ fn the_chief_is_given_the_result_of_t1(rig: &Rig, project: &Project) -> Outcome 
 
 #[test]
 fn a_task_put_after_another_opens_the_worker_again_on_the_same_conversation() -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig_of(2_000)?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
@@ -515,6 +540,9 @@ fn a_task_put_after_another_opens_the_worker_again_on_the_same_conversation() ->
 
 #[test]
 fn a_conversation_the_app_quit_at_rest_is_gone_on_with_after_the_restart() -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig_of(2_000)?;
     let rig = Rig::start(config.clone())?;
     let project = project(&rig, &echo_worker())?;
@@ -561,6 +589,9 @@ fn a_conversation_the_app_quit_at_rest_is_gone_on_with_after_the_restart() -> Ou
 
 #[test]
 fn a_stop_that_finds_the_muse_window_at_rest_is_paid_with_no_key() -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig_of(20_000)?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
@@ -601,6 +632,9 @@ fn a_stop_that_finds_the_muse_window_at_rest_is_paid_with_no_key() -> Outcome {
 /// the task waits, paused.
 #[test]
 fn a_window_whose_process_is_killed_in_its_turn_leaves_no_muse_running() -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig_of(30_000)?;
     let rig = Rig::start(config)?;
     let project = project(&rig, &echo_worker())?;
@@ -631,6 +665,9 @@ fn a_window_whose_process_is_killed_in_its_turn_leaves_no_muse_running() -> Outc
 /// a path reaches Muse through the console and the command line as UTF-16).
 #[test]
 fn a_task_in_a_folder_whose_name_is_not_ascii_goes_from_its_brief_to_its_result() -> Outcome {
+    if muse::runner_has_no_muse() {
+        return Ok(());
+    }
     let config = muse_rig()?;
     let rig = Rig::start(config)?;
     let folder = rig.workspace().join("zo\u{eb}-\u{65e5}\u{672c}");

@@ -345,7 +345,7 @@ runs = ["launcher-unit"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
-find = '''            watch: if harness == Harness::Claude {
+find = '''            watch: if harness == Harness::Claude && keychain::watching() {
                 watch.with_keychain(keychain::names)
             } else {
                 watch
@@ -359,8 +359,8 @@ runs = ["launcher-unit"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/launcher.rs"
-find = '''            watch: if harness == Harness::Claude {'''
-replace = '''            watch: if harness != Harness::Pi {'''
+find = '''            watch: if harness == Harness::Claude && keychain::watching() {'''
+replace = '''            watch: if harness != Harness::Pi && keychain::watching() {'''
 
 [[plant]]
 name = "owner launcher: a rig that ends is not failed for a Keychain item gained"
