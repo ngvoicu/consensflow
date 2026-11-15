@@ -320,8 +320,8 @@ fn review_1709_member_way_back(early_exit: bool, project_resume: bool, first: Fi
     context.advance(1_000);
     context.adapter.first.set(first);
     if early_exit {
-        // The host reports an exit before the open answer and the unhanded
-        // first message is absent from the retained conversation record.
+        // The host reports an exit before the open answer; the first message
+        // did not arrive in the retained conversation record.
         let held = context.adapter.agent(&session).items;
         let adapter = Rc::clone(&context.adapter);
         let host = Rc::clone(&context.host);
