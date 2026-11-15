@@ -323,19 +323,19 @@ const MARKS = [
  * What a folded group holds that the human would look for, so nothing that needs
  * them hides in it: its windows at work, those whose task goes on in the background
  * while they rest (a server that never ends waits for a Finish), and those waiting for
- * them; its tasks waiting on a question, paused for the chief or the human to resume
- * (a window that closed, a pause, a window a Resume could not bring back: one held
- * for a quota goes on by itself, and its member's "out of quota" says it), done and
- * waiting for a decision, or failed; its members out of quota, and its rows whose
- * status asks for the human (a member to edit, a window that did not stop, a message
- * held by what they typed). Each with how many; none that is none.
+ * them; its tasks waiting on a question, paused whatever held them (a window that
+ * closed, a pause, a window a Resume could not bring back, a quota, a model the human
+ * must let go on: a session of a role its member no longer has shows no "out of
+ * quota", so its paused mark is all its group says), done and waiting for a decision,
+ * or failed; its members out of quota, and its rows whose status asks for the human
+ * (a member to edit, a window that did not stop, a message held by what they typed).
+ * Each with how many; none that is none.
  */
 function groupMarks(rows, board, now) {
   const lanes = rows.flatMap((row) => [row, ...(row.sessions ?? [])])
   const tasks = rows.flatMap((row) => rowCards(row, board, (row.sessions?.length ?? 0) > 0))
-  const tasksIn = (state, which = () => true) =>
-    new Set(tasks.filter((task) => task.state === state && which(task)).map((task) => task.number))
-      .size
+  const tasksIn = (state) =>
+    new Set(tasks.filter((task) => task.state === state).map((task) => task.number)).size
   const statuses = lanes.map((lane) => laneStatus(lane, board, now)?.[0])
   const out = new Set(
     lanes
@@ -350,7 +350,7 @@ function groupMarks(rows, board, now) {
     held: statuses.filter((status) => status === 'held').length,
     waiting: windows('waiting'),
     question: tasksIn('waiting'),
-    paused: tasksIn('paused', (task) => !task.heldUntil),
+    paused: tasksIn('paused'),
     done: tasksIn('done'),
     failed: tasksIn('failed'),
     out: out.size,

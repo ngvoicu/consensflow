@@ -1525,7 +1525,7 @@ test("says folded the work that goes on in the background, a session's too, and 
     pane: { id: 'p1-zeus-amber-pine', generation: 9 },
   })
   // Paused when its window closed, a task waits for the chief or the human to resume it; one
-  // held for its member's quota goes on by itself, as the member's "out of quota" says.
+  // held for its member's quota is paused too, beside the member's "out of quota".
   zeusLane.tasks.push(task(13, 'Index the docs', 'paused', 'chief', 'zeus', 6))
   const diana = data.boards[1].lanes.find((l) => l.participant.handle === 'diana')
   diana.tasks.push(task(14, 'Lint the docs', 'paused', 'chief', 'diana', 7, { heldUntil: at(-90) }))
@@ -1539,7 +1539,7 @@ test("says folded the work that goes on in the background, a session's too, and 
         open: false,
         marks: [
           '2 waiting on background work',
-          '1 paused, to resume',
+          '2 paused, to resume',
           '1 done, to decide',
           '1 failed',
           '1 out of quota',
@@ -1582,6 +1582,45 @@ test('names a group that holds only sessions of a role their member no longer ha
       },
       { group: 'Reviewers', count: '1 session', open: false, marks: ['1 done, to decide'] },
     ])
+})
+
+test("says folded a task held for the human's word in a session of a role its member no longer has", async ({
+  page,
+}) => {
+  // Zeus's harness moved its model (T-1718's case): the member is out until the human says it
+  // may go on, and the task in its former reviewer session is held for that word. The session
+  // keeps no time of its own, so its group has no "out of quota": its paused mark is all it says.
+  const data = model()
+  data.openGroups = false
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  zeusLane.participant.outUntil = '9999-12-31T23:59:59.999Z'
+  data.boards[1].lanes.push({
+    participant: session(20, zeusLane.participant, 'amber-pine', 'reviewer'),
+    tasks: [
+      task(21, 'Review the lexer', 'paused', 'chief', 'zeus-amber-pine', 3, {
+        heldUntil: '9999-12-31T23:59:59.999Z',
+      }),
+    ],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([
+      {
+        group: 'Workers',
+        count: '2 members',
+        open: false,
+        marks: ['1 done, to decide', '1 failed', '2 out of quota'],
+      },
+      { group: 'Reviewers', count: '1 session', open: false, marks: ['1 paused, to resume'] },
+    ])
+  // Opened, its card says what it waits for.
+  await page.getByRole('button', { name: 'Reviewers 1 session' }).click()
+  await expect(page.locator('button.card[data-task="21"] .card-route')).toHaveText(
+    /^held until you say its model may go on · from /,
+  )
 })
 
 test('gives a member with two roles a row per role, each with its own sessions and cards', async ({
