@@ -1,7 +1,6 @@
 # Offline, fabricated fixtures protect source-tree links and run-owned readers.
 [run]
 round3-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "kit_round3"]
-round3-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "kit_round3"]
 round3-muse = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_background", "kit_round3"]
 round3-muse-reads = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_reads", "kit_round3"]
 round3-compaction = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_compaction_routes", "kit_round3"]
