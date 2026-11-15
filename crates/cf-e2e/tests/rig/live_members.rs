@@ -289,7 +289,10 @@ fn a_chief_that_cannot_write_what_it_heard_ends_itself_and_the_refusal_says_how_
     let log = Log::new("live members");
     let members = open("members-records", &log)?;
     // Its conversation is where the stand-in cannot write: a folder in the place of the file.
-    let config = members.claude_config().join("projects").join("integration");
+    let config = members
+        .claude_config()?
+        .join("projects")
+        .join("integration");
     let session = members
         .rig()
         .started()

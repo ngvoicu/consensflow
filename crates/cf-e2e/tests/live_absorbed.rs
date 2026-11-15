@@ -65,7 +65,10 @@ const LOOK: Duration = Duration::from_millis(500);
 /// The transcript's records, as Claude Code wrote them.
 fn raw_records(window: &Window) -> Vec<Value> {
     let session = window.session().unwrap_or_default();
-    claude::transcript_file(&window.claude_config(), &session)
+    window
+        .claude_config()
+        .ok()
+        .and_then(|config| claude::transcript_file(&config, &session))
         .and_then(|file| fs::read_to_string(file).ok())
         .map(|text| {
             text.lines()

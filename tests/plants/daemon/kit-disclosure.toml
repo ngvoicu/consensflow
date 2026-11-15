@@ -1,0 +1,120 @@
+# Offline fixtures protect every route that puts a login or proxy login into a live run.
+# All inputs are fabricated; no real login, Keychain or live harness is involved.
+[run]
+disclosure-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "codex_login_copy_has_no_refresh_keys_at_any_depth"]
+disclosure-pi = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "pi_login_copy_has_no_nested_refresh_keys"]
+disclosure-pi-name = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "kit_disclosure_pi_refuses_a_refresh_named_provider_key"]
+disclosure-proxy = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "kit_disclosure_pi_proxy_config_copies_no_refresh_keys"]
+disclosure-devin = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "devin_login_with_a_refresh_key_is_never_copied"]
+disclosure-muse-seed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "a_live_rig_s_home_is_given_settings_and_the_login_copied_without_a_refresh_token"]
+disclosure-muse-guard = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "muse_reads_and_compaction_copy_no_refresh_keys"]
+disclosure-muse-tui = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_background", "tui_setup_copies_no_refresh_keys"]
+disclosure-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "parity_config_copies_no_refresh_keys"]
+
+[[plant]]
+name = "kit disclosure: Codex login copied without removing refresh"
+meant = "codex_login_copy_has_no_refresh_keys_at_any_depth"
+runs = ["disclosure-codex"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''Harness::Codex => super::login::json_copy(text, "Codex")?,'''
+replace = '''Harness::Codex => text.to_owned(),'''
+
+[[plant]]
+name = "kit disclosure: nested JSON login refresh keys are retained"
+meant = "codex_login_copy_has_no_refresh_keys_at_any_depth"
+runs = ["disclosure-codex"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''fields.values_mut().for_each(without_refresh);'''
+replace = '''let _ = fields;'''
+
+[[plant]]
+name = "kit disclosure: Pi login copied without removing nested refresh"
+meant = "pi_login_copy_has_no_nested_refresh_keys"
+runs = ["disclosure-pi"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''super::super::login::without_refresh(&mut copy);'''
+replace = '''let _ = &mut copy;'''
+
+[[plant]]
+name = "kit disclosure: Pi proxy config keeps refresh keys"
+meant = "kit_disclosure_pi_proxy_config_copies_no_refresh_keys"
+runs = ["disclosure-proxy"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''let config = super::login::json_copy(&config, "Pi provider")?;'''
+replace = '''let config = config;'''
+
+[[plant]]
+name = "kit disclosure: Devin copies a refresh-bearing login"
+meant = "devin_login_with_a_refresh_key_is_never_copied"
+runs = ["disclosure-devin"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''Harness::Devin => super::login::toml_copy(text, "Devin")?,'''
+replace = '''Harness::Devin => text.to_owned(),'''
+
+[[plant]]
+name = "kit disclosure: Muse live seed copies refresh keys"
+meant = "a_live_rig_s_home_is_given_settings_and_the_login_copied_without_a_refresh_token"
+runs = ["disclosure-muse-seed"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/muse.rs"
+find = '''crate::live::login::json_copy(text, "Muse")'''
+replace = '''Ok(text.to_owned())'''
+
+[[plant]]
+name = "kit disclosure: Muse reads and compaction copy refresh keys"
+meant = "muse_reads_and_compaction_copy_no_refresh_keys"
+runs = ["disclosure-muse-guard"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/guard.rs"
+find = '''crate::muse::login_copy(&text).map_err(|error| io::Error::other(error.to_string()))?'''
+replace = '''text'''
+
+[[plant]]
+name = "kit disclosure: Muse TUI copies refresh keys"
+meant = "tui_setup_copies_no_refresh_keys"
+runs = ["disclosure-muse-tui"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_muse/tui.rs"
+find = '''cf_e2e::live::guard::copy_muse_login('''
+replace = '''cf_e2e::live::guard::copy_kept('''
+
+[[plant]]
+name = "kit disclosure: Claude parity copies refresh keys"
+meant = "parity_config_copies_no_refresh_keys"
+runs = ["disclosure-parity"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''cf_e2e::live::login::without_refresh(&mut login);'''
+replace = '''let _ = &mut login;'''
+
+[[plant]]
+name = "kit disclosure: Claude parity configuration keeps refresh keys"
+meant = "parity_config_copies_no_refresh_keys"
+runs = ["disclosure-parity"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''cf_e2e::live::login::without_refresh(&mut configuration);'''
+replace = '''let _ = &mut configuration;'''
+
+[[plant]]
+name = "kit disclosure: Claude parity settings keep refresh keys"
+meant = "parity_config_copies_no_refresh_keys"
+runs = ["disclosure-parity"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''cf_e2e::live::login::without_refresh(&mut settings);'''
+replace = '''let _ = &mut settings;'''
+
+[[plant]]
+name = "kit disclosure: Pi copies a refresh-named provider key"
+meant = "kit_disclosure_pi_refuses_a_refresh_named_provider_key"
+runs = ["disclosure-pi-name"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation/pi.rs"
+find = '''if provider.to_ascii_lowercase().contains("refresh") {'''
+replace = '''if false && provider.to_ascii_lowercase().contains("refresh") {'''

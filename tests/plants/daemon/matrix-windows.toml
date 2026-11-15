@@ -198,9 +198,9 @@ runs = ["pi-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''            bytes: fs::read(from.join(provider.config))
-                .map_err(|_| missing(&format!("{} is missing", provider.config)))?,'''
-replace = '''            bytes: fs::read(from.join(provider.config)).unwrap_or_default(),'''
+find = '''        let config = fs::read_to_string(from.join(provider.config))
+            .map_err(|_| missing(&format!("{} is missing", provider.config)))?;'''
+replace = '''        let config = fs::read_to_string(from.join(provider.config)).unwrap_or_else(|_| "{}".to_owned());'''
 
 [[plant]]
 name = "matrix: a settings.json that names no package is let through"

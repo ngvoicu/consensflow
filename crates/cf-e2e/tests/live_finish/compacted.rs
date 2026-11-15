@@ -24,7 +24,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use cf_e2e::devin_store;
 use cf_e2e::live::ask;
 use cf_e2e::live::machine::home;
 use cf_e2e::live::members::{self, Plan};
@@ -174,32 +173,7 @@ fn compaction(folder: &Path, env: &[(String, String)]) -> Result<Option<Session>
 /// Check the resolved store against the door's run-owned roots before opening it, including
 /// the final file and any links in the path.
 fn store(windows: bool, env: &[(String, String)]) -> Result<PathBuf> {
-    let name = if windows { "APPDATA" } else { "XDG_DATA_HOME" };
-    let data = env
-        .iter()
-        .rev()
-        .find(|(key, _)| {
-            if windows {
-                key.eq_ignore_ascii_case(name)
-            } else {
-                key == name
-            }
-        })
-        .map(|(_, value)| value.as_str())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| Error::Daemon(format!("the rig gives Devin no {name}")))?;
-    let path = devin_store::location(
-        windows,
-        "",
-        windows.then_some(data),
-        (!windows).then_some(data),
-    );
-    if !cf_e2e::door::is_made_or_below(&path) {
-        return Err(Error::Daemon(
-            "Devin's store is outside the run's own roots".to_owned(),
-        ));
-    }
-    Ok(path)
+    cf_e2e::live::guard::devin_store_path(windows, env)
 }
 
 /// What the main chain of the session `id`, from `head` up, holds.
@@ -257,7 +231,7 @@ mod tests {
             std::fs::create_dir_all(owner.path().join(folder)).unwrap();
             std::fs::write(
                 owner.path().join(folder).join("credentials.toml"),
-                "fixture",
+                "api_key = 'fixture'\n",
             )
             .unwrap();
         }

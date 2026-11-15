@@ -62,6 +62,10 @@ impl Owner {
         ] {
             write(&owner.path(file), SENTINEL);
         }
+        write(
+            &owner.path("AppData/Roaming/devin/credentials.toml"),
+            "api_key = 'fake'\n",
+        );
         owner
     }
 
@@ -80,6 +84,28 @@ impl Owner {
     /// What is in the temporary folder the homes are made in.
     fn made(&self) -> usize {
         fs::read_dir(self.parent.path()).unwrap().count()
+    }
+}
+
+#[test]
+fn devin_login_with_a_refresh_key_is_never_copied_on_windows() {
+    let owner = Owner::new();
+    write(
+        &owner.path("AppData/Roaming/devin/credentials.toml"),
+        "api_key = 'fake'\n[nested]\nReFrEsH_secret = 'fake'\n",
+    );
+    let isolation = owner.devin();
+    match isolation.made_at(NOW) {
+        Err(_) => (),
+        Ok(home) => {
+            let copy =
+                fs::read_to_string(home.join("profile/AppData/Roaming/devin/credentials.toml"))
+                    .unwrap();
+            assert!(
+                !copy.to_ascii_lowercase().contains("refresh_secret"),
+                "refresh key was copied"
+            );
+        }
     }
 }
 
@@ -154,12 +180,14 @@ fn a_devin_run_on_windows_copies_its_login_and_config_to_the_roaming_folder_and_
             "profile/AppData/Roaming/devin/credentials.toml"
         ]
     );
-    for name in ["config.json", "credentials.toml"] {
-        assert_eq!(
-            fs::read_to_string(home.join("profile/AppData/Roaming/devin").join(name)).unwrap(),
-            SENTINEL
-        );
-    }
+    assert_eq!(
+        fs::read_to_string(home.join("profile/AppData/Roaming/devin/config.json")).unwrap(),
+        SENTINEL
+    );
+    assert_eq!(
+        fs::read_to_string(home.join("profile/AppData/Roaming/devin/credentials.toml")).unwrap(),
+        "api_key = 'fake'\n"
+    );
 }
 
 #[test]

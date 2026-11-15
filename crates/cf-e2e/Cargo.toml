@@ -97,6 +97,7 @@ sha2.workspace = true
 # The home of a case, removed with it.
 tempfile.workspace = true
 thiserror.workspace = true
+toml.workspace = true
 # Plain HTTP to the daemon on loopback, as the proof of the agents screens and
 # the cases that ask the API directly make it.
 ureq.workspace = true

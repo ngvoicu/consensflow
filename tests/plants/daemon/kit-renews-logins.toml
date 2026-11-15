@@ -357,8 +357,8 @@ runs = ["planned-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/login.rs"
-find = '''const RENEWING: [&str; 2] = ["refreshToken", "refreshTokenExpiresAt"];'''
-replace = '''const RENEWING: [&str; 2] = ["refreshToken", "refreshToken"];'''
+find = '''fields.retain(|name, _| !name.to_ascii_lowercase().contains("refresh"));'''
+replace = '''fields.retain(|name, _| !name.to_ascii_lowercase().contains("refresh") || name == "refreshTokenExpiresAt");'''
 
 [[plant]]
 name = "kit renews logins: the machine's Claude login is held to the copy and not to what was read"

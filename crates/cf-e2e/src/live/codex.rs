@@ -22,12 +22,76 @@ use crate::{Error, Result};
 
 /// The MCP servers Codex would start, as it lists them (`codex mcp list
 /// --json`): each with its `name` and, in a Codex that says it, its `transport`.
-pub fn mcp_servers(codex: &Path) -> Result<Value> {
+pub fn mcp_servers(codex: &Path, env: &[(String, String)]) -> Result<Value> {
+    let (home, safe) = mcp_environment(env)?;
     Run::new(codex)
         .args(["mcp", "list", "--json"])
-        .inheriting_env()
+        .vars(safe)
+        .cwd(home)
         .run()?
         .json()
+}
+
+/// A Codex listing gets no caller profile or config, even when launched outside a rig.
+fn mcp_environment(
+    env: &[(String, String)],
+) -> Result<(std::path::PathBuf, Vec<(String, String)>)> {
+    let same_name = |a: &str, b: &str| {
+        if cfg!(windows) {
+            a.eq_ignore_ascii_case(b)
+        } else {
+            a == b
+        }
+    };
+    let home = env
+        .iter()
+        .rev()
+        .find(|(name, _)| same_name(name, "CODEX_HOME"))
+        .map(|(_, value)| value)
+        .filter(|value| !value.is_empty())
+        .map(Path::new)
+        .ok_or_else(|| Error::Daemon("the run gives Codex no CODEX_HOME".to_owned()))?;
+    if !crate::door::is_made_or_below(home) {
+        return Err(Error::Daemon(
+            "Codex's home is outside the run's own roots".to_owned(),
+        ));
+    }
+    let mut safe: Vec<(String, String)> =
+        ["PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "LANG"]
+            .into_iter()
+            .filter_map(|name| {
+                env.iter()
+                    .rev()
+                    .find(|(key, _)| same_name(key, name))
+                    .map(|(_, value)| value.clone())
+                    .or_else(|| crate::process::own_var(name))
+                    .map(|value| (name.to_owned(), value))
+            })
+            .collect();
+    for name in [
+        "HOME",
+        "USERPROFILE",
+        "CODEX_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_STATE_HOME",
+        "APPDATA",
+        "LOCALAPPDATA",
+    ] {
+        safe.push((name.to_owned(), home.to_string_lossy().into_owned()));
+    }
+    // Run adds Windows' required process variables when absent. Override both parts of
+    // the Windows home as well, so neither can point back at the caller's profile.
+    let home_text = home.to_string_lossy();
+    let (drive, path) = if home_text.as_bytes().get(1) == Some(&b':') {
+        home_text.split_at(2)
+    } else {
+        ("", home_text.as_ref())
+    };
+    safe.push(("HOMEDRIVE".to_owned(), drive.to_owned()));
+    safe.push(("HOMEPATH".to_owned(), path.to_owned()));
+    Ok((home.to_path_buf(), safe))
 }
 
 /// The `-c` overrides that switch off every MCP server of `servers` (the answer
@@ -267,6 +331,80 @@ pub fn kept_commands(open: &Value) -> Result<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kit_disclosure_codex_mcp_environment_has_only_the_run_home() {
+        let run = crate::door::made("cf-codex-env-").unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        let home = run.path().join("codex");
+        let env = vec![
+            ("HOME".to_owned(), foreign.path().display().to_string()),
+            (
+                "USERPROFILE".to_owned(),
+                foreign.path().display().to_string(),
+            ),
+            (
+                "XDG_CONFIG_HOME".to_owned(),
+                foreign.path().display().to_string(),
+            ),
+            ("CODEX_HOME".to_owned(), home.display().to_string()),
+            ("FOREIGN_SETTING".to_owned(), "not inherited".to_owned()),
+        ];
+        let (chosen, safe) = mcp_environment(&env).unwrap();
+        assert_eq!(chosen, home);
+        for name in [
+            "HOME",
+            "USERPROFILE",
+            "CODEX_HOME",
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "APPDATA",
+            "LOCALAPPDATA",
+        ] {
+            assert_eq!(
+                safe.iter().find(|(key, _)| key == name).unwrap().1,
+                home.to_string_lossy()
+            );
+        }
+        assert!(!safe.iter().any(|(name, _)| name == "FOREIGN_SETTING"));
+        let get = |name: &str| safe.iter().find(|(key, _)| key == name).unwrap().1.clone();
+        assert_eq!(
+            format!("{}{}", get("HOMEDRIVE"), get("HOMEPATH")),
+            home.to_string_lossy()
+        );
+        assert!(mcp_environment(&[]).is_err());
+        assert!(mcp_environment(&[(
+            "CODEX_HOME".to_owned(),
+            foreign.path().display().to_string()
+        )])
+        .is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kit_disclosure_codex_mcp_uses_the_runs_home() {
+        let run = crate::door::made("cf-codex-mcp-").unwrap();
+        let program = run.path().join("fake-codex");
+        let home = run.path().join("codex");
+        std::fs::create_dir_all(&home).unwrap();
+        crate::door::write_executable(&program, format!("#!/bin/sh\nif [ \"$CODEX_HOME\" = '{}' ]; then printf '[true]'; else printf '[false]'; fi\n", home.display())).unwrap();
+        let env = vec![("CODEX_HOME".to_owned(), home.display().to_string())];
+        assert_eq!(
+            mcp_servers(&program, &env).unwrap(),
+            json!([true]),
+            "the listing did not use the run's Codex home"
+        );
+        assert!(mcp_servers(&program, &[]).is_err());
+        let foreign = tempfile::tempdir().unwrap();
+        assert!(mcp_servers(
+            &program,
+            &[(
+                "CODEX_HOME".to_owned(),
+                foreign.path().display().to_string()
+            )]
+        )
+        .is_err());
+    }
 
     fn flags(servers: Value) -> Vec<String> {
         isolation(&servers).unwrap()

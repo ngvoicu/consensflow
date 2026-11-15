@@ -160,7 +160,7 @@ struct Seen {
 /// The worker given its task and looked at until its result, or [`WORK`] is up.
 fn observe(members: &Members, agent: &str, log: &Log) -> Result<Account> {
     let mut case = Account::new();
-    let config = members.claude_config();
+    let config = members.claude_config()?;
     let number = members.give(agent, BRIEF)?;
     let started = Instant::now();
     log.say(format!("T-{number} is given"));
@@ -327,7 +327,7 @@ fn run(log: &Log) -> Result<Account> {
     let agent = plan.roster[1]["id"].as_str().unwrap_or_default().to_owned();
     let (digest_before, keys_before) = owners_config();
     let mut members = Members::open(&plan, Path::new(FAKE_AGENT), log)?;
-    seed_marketplace(&members.claude_config())?;
+    seed_marketplace(&members.claude_config()?)?;
     members.add(&agent, &[])?;
     let seen = observe(&members, &agent, log);
     let closed = members.close();

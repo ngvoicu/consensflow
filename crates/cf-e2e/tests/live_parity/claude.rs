@@ -170,6 +170,8 @@ fn throwaway_config(
     folder: &Path,
 ) -> Result {
     cf_e2e::door::make_dir(throwaway)?;
+    let mut login = login.clone();
+    cf_e2e::live::login::without_refresh(&mut login);
     cf_e2e::door::write(
         throwaway.join(".credentials.json"),
         json!({ "claudeAiOauth": login }).to_string(),
@@ -187,10 +189,9 @@ fn throwaway_config(
         if let Ok(Value::Object(mut settings)) = serde_json::from_str::<Value>(&text) {
             settings.remove("hooks");
             settings.remove("statusLine");
-            cf_e2e::door::write(
-                throwaway.join("settings.json"),
-                Value::Object(settings).to_string(),
-            )?;
+            let mut settings = Value::Object(settings);
+            cf_e2e::live::login::without_refresh(&mut settings);
+            cf_e2e::door::write(throwaway.join("settings.json"), settings.to_string())?;
         }
     }
     for part in ["skills", "plugins", "agents", "commands"] {
@@ -213,10 +214,9 @@ fn throwaway_config(
     projects.insert(name, entry);
     configuration.insert("projects".to_owned(), Value::Object(projects));
     configuration.insert("hasCompletedOnboarding".to_owned(), Value::Bool(true));
-    cf_e2e::door::write(
-        throwaway.join(".claude.json"),
-        Value::Object(configuration).to_string(),
-    )
+    let mut configuration = Value::Object(configuration);
+    cf_e2e::live::login::without_refresh(&mut configuration);
+    cf_e2e::door::write(throwaway.join(".claude.json"), configuration.to_string())
 }
 
 /// Writes `to` for `from` in every JSON file under `folder`, as JSON writes both.
@@ -582,6 +582,53 @@ pub fn run(log: &Log) -> Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parity_config_copies_no_refresh_keys() {
+        let root = cf_e2e::door::made("cf-parity-login-").unwrap();
+        let owner = root.path().join("owner");
+        let target = root.path().join("run");
+        let login = json!({"accessToken":"fake-access","refreshToken":"fake-refresh","nested":[{"REFRESH_key":"fake"}]});
+        fs::create_dir(&owner).unwrap();
+        fs::write(
+            owner.join(".claude.json"),
+            r#"{"oauth":{"refreshToken":"fake","accessToken":"kept"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            owner.join("settings.json"),
+            r#"{"nested":{"refresh_token":"fake","display":"kept"}}"#,
+        )
+        .unwrap();
+        throwaway_config(
+            &owner,
+            &owner.join(".claude.json"),
+            &target,
+            &login,
+            root.path(),
+        )
+        .unwrap();
+        let copied: Value =
+            serde_json::from_str(&fs::read_to_string(target.join(".credentials.json")).unwrap())
+                .unwrap();
+        assert!(
+            copied["claudeAiOauth"].get("refreshToken").is_none(),
+            "refresh key was copied"
+        );
+        assert!(copied["claudeAiOauth"]["nested"][0]
+            .get("REFRESH_key")
+            .is_none());
+        assert_eq!(copied["claudeAiOauth"]["accessToken"], "fake-access");
+        let config: Value =
+            serde_json::from_slice(&fs::read(target.join(".claude.json")).unwrap()).unwrap();
+        assert!(
+            config["oauth"].get("refreshToken").is_none(),
+            "a refresh key was copied in configuration"
+        );
+        let settings: Value =
+            serde_json::from_slice(&fs::read(target.join("settings.json")).unwrap()).unwrap();
+        assert!(settings["nested"].get("refresh_token").is_none());
+    }
 
     const LOG: &str = "\
 2026-10-25T08:46:13.590Z [DEBUG] MCP server \"computer-use\": Successfully connected (transport: stdio) in 871ms

@@ -31,7 +31,7 @@
 //! **The refresh hazard.** A refresh token is used once: if the copy refreshes the
 //! access token, the person's Keychain item holds a refresh token that no longer
 //! works, and they are logged out the next time theirs needs it. So the folder's
-//! `.credentials.json` holds the access token and **no refresh token** ([`RENEWING`]): a
+//! `.credentials.json` holds the access token and **no refresh token** ([`without_refresh`]): a
 //! Claude Code that cannot renew cannot use up the person's (measured on zeewin2, 2.1.316: it
 //! runs on such a copy, does not look at the copy's expiry, and where the server refuses the
 //! token it fails loudly with a 401, the person's login untouched). A run starts only on a login
@@ -473,7 +473,7 @@ fn changes(before: &Seen, after: &Seen, typed: &str) -> Vec<String> {
 
 /// The folder a run's Claude windows run on, once it is made.
 struct Made {
-    /// The login as it was copied: the machine's, without what renews it ([`RENEWING`]).
+    /// The login as it was copied: the machine's, without what renews it ([`without_refresh`]).
     oauth: Value,
     /// The machine's login as it was read, refresh token and all: what the machine's file is
     /// compared with when the run ends.
@@ -492,17 +492,65 @@ struct Made {
 /// ends. A copy that holds only the access token cannot renew it, so it cannot use up the refresh
 /// token the machine keeps (T-1067, measured on zeewin2: Claude Code 2.1.316 runs on such a copy,
 /// does not look at its expiry, and fails with a 401 where the server refuses the token).
-const RENEWING: [&str; 2] = ["refreshToken", "refreshTokenExpiresAt"];
-
 /// The part of `oauth`, the machine's login, that a run's folder is given: all but what renews it.
 fn without_renewal(oauth: &Value) -> Value {
     let mut copy = oauth.clone();
-    if let Some(fields) = copy.as_object_mut() {
-        for field in RENEWING {
-            fields.remove(field);
+    without_refresh(&mut copy);
+    copy
+}
+
+/// Remove refresh-named keys at every depth of a JSON login, including inside arrays.
+pub fn without_refresh(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            fields.retain(|name, _| !name.to_ascii_lowercase().contains("refresh"));
+            fields.values_mut().for_each(without_refresh);
+        }
+        Value::Array(items) => items.iter_mut().for_each(without_refresh),
+        _ => {}
+    }
+}
+
+/// Copy a JSON login only when it is an object whose refresh-named keys can be removed.
+/// Errors never include its contents.
+pub fn json_copy(text: &str, harness: &str) -> Result<String> {
+    let refused = || {
+        Error::Daemon(format!(
+            "{harness}'s login cannot be shown free of refresh keys, so it is not copied"
+        ))
+    };
+    let mut value: Value = serde_json::from_str(text).map_err(|_| refused())?;
+    if !value.is_object() {
+        return Err(refused());
+    }
+    without_refresh(&mut value);
+    let mut copy = serde_json::to_string_pretty(&value).map_err(|_| refused())?;
+    copy.push('\n');
+    Ok(copy)
+}
+
+/// A TOML login is copied whole only if it can be parsed and has no refresh-named key.
+/// Refusing an unknown format is safer than copying a token that cannot be removed.
+pub fn toml_copy(text: &str, harness: &str) -> Result<String> {
+    fn has_refresh(value: &toml::Value) -> bool {
+        match value {
+            toml::Value::Table(fields) => fields.iter().any(|(name, value)| {
+                name.to_ascii_lowercase().contains("refresh") || has_refresh(value)
+            }),
+            toml::Value::Array(items) => items.iter().any(has_refresh),
+            _ => false,
         }
     }
-    copy
+    let refused = || {
+        Error::Daemon(format!(
+            "{harness}'s login cannot be shown free of refresh keys, so it is not copied"
+        ))
+    };
+    let value: toml::Value = toml::from_str(text).map_err(|_| refused())?;
+    if has_refresh(&value) {
+        return Err(refused());
+    }
+    Ok(text.to_owned())
 }
 
 /// The fields of a login that a refresh changes: the tokens, and when the access token ends. A

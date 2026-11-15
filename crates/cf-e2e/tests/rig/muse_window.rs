@@ -143,6 +143,10 @@ fn a_muse_window_beside_a_devin_home_names_its_session_and_takes_its_brief() -> 
         std::fs::create_dir_all(file.parent().ok_or("a file has a folder")?)?;
         std::fs::write(&file, "the owner's own")?;
     }
+    std::fs::write(
+        at(".local/share/devin/credentials.toml"),
+        "api_key = 'fixture'\n",
+    )?;
     std::fs::create_dir_all(at(".local/share/muse/sessions"))?;
     let devin = Isolation::devin(owner.path(), &at(".config"), &at(".local/share"));
     let rig = Rig::start(config.isolated(Arc::new(devin)))?;

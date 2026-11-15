@@ -14,10 +14,10 @@
 //! | Harness | Variables | Copied from the owner's | Watched in the owner's |
 //! |---|---|---|---|
 //! | Claude Code | `CLAUDE_CONFIG_DIR` ([`super::login`]) | the Keychain's login, without its refresh token, that lasts the case's planned length and the margin | `settings.json`, `.claude.json`'s projects, `history.jsonl`, `projects/`, the Keychain's items |
-//! | Codex | `CODEX_HOME` | `auth.json` | `auth.json`, `config.toml` |
+//! | Codex | `CODEX_HOME` | `auth.json`, without refresh-named keys at any depth | `auth.json`, `config.toml` |
 //! | Pi | `PI_CODING_AGENT_DIR` | the entries of `auth.json` the run's model needs and that last the run and a margin, without their refresh tokens; and, where the model's provider is one the folder gives Pi by a package (`cliproxyapi`, [`pi::provider`]), the provider's files, its package and a `settings.json` that names it | `auth.json`, `settings.json`, `models.json`, `mcp-auth.json`, `sessions/`, and the provider's files, npm's manifests and the package |
-//! | Devin | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | `credentials.toml`, `config.json` | those two and `trusted_workspaces.json` |
-//! | Devin, on Windows | `USERPROFILE`, `APPDATA`, `LOCALAPPDATA` ([`Plan::devin_on_windows`]) | `credentials.toml`, `config.json` | those two and `trusted_workspaces.json`, in the owner's `%APPDATA%\devin` |
+//! | Devin | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | `credentials.toml` if it has no refresh-named key, `config.json` | those two and `trusted_workspaces.json` |
+//! | Devin, on Windows | `USERPROFILE`, `APPDATA`, `LOCALAPPDATA` ([`Plan::devin_on_windows`]) | `credentials.toml` if it has no refresh-named key, `config.json` | those two and `trusted_workspaces.json`, in the owner's `%APPDATA%\devin` |
 //!
 //! **Muse Code** sets none of these: its windows run through the rig's own launcher
 //! ([`crate::muse::write_live_stand_in`], given by [`super::machine::rig`] to every rig that
@@ -50,8 +50,8 @@
 //! fails loudly. The run is given an entry only if it lasts the run's length and [`MARGIN`]; one
 //! that does not is a refusal, in words, before anything is spent, except on a test machine, where
 //! Pi is first run once as the owner to renew an entry that has run short ([`super::renew`],
-//! T-1067). Codex and Devin keep a login that a run does not outlast (Devin's is a key); what
-//! Codex rewrote is said when the run ends. At the end the copies are compared with what was
+//! T-1067). Codex's copied JSON has refresh-named keys removed; Devin's TOML is copied only when
+//! it parses and has no such key. What Codex rewrote is said when the run ends. At the end the copies are compared with what was
 //! copied, and the owner's files with their hashes: a difference fails the run, naming the file, and
 //! nothing a login holds is said anywhere.
 //!
@@ -662,11 +662,33 @@ impl Isolation {
     fn read(&self, seed: &Seed, now: i64) -> Result<Vec<Placed>> {
         match seed {
             Seed::Copy { from, to, login } => match fs::read(from) {
-                Ok(bytes) => Ok(vec![Placed::File {
-                    to: to.clone(),
-                    bytes,
-                    login: *login,
-                }]),
+                Ok(bytes) => {
+                    let bytes = if *login {
+                        let text = std::str::from_utf8(&bytes).map_err(|_| {
+                            Error::Daemon(format!(
+                                "{}'s login is not text, so it is not copied",
+                                self.harness.name()
+                            ))
+                        })?;
+                        match self.harness {
+                            Harness::Codex => super::login::json_copy(text, "Codex")?,
+                            Harness::Devin => super::login::toml_copy(text, "Devin")?,
+                            _ => {
+                                return Err(Error::Daemon(
+                                    "the login format is not known, so it is not copied".to_owned(),
+                                ))
+                            }
+                        }
+                        .into_bytes()
+                    } else {
+                        bytes
+                    };
+                    Ok(vec![Placed::File {
+                        to: to.clone(),
+                        bytes,
+                        login: *login,
+                    }])
+                }
                 Err(_) if !login => Ok(Vec::new()),
                 Err(failed) => Err(Error::Daemon(format!(
                     "{}'s login is not in {} ({failed}): {}",
@@ -727,10 +749,12 @@ impl Isolation {
                 provider.name, provider.package, provider.package, provider.repository,
             ))
         };
+        let config = fs::read_to_string(from.join(provider.config))
+            .map_err(|_| missing(&format!("{} is missing", provider.config)))?;
+        let config = super::login::json_copy(&config, "Pi provider")?;
         let mut placed = vec![Placed::File {
             to: to.join(provider.config),
-            bytes: fs::read(from.join(provider.config))
-                .map_err(|_| missing(&format!("{} is missing", provider.config)))?,
+            bytes: config.into_bytes(),
             login: false,
         }];
         for file in provider.required.iter().chain(provider.optional.iter()) {

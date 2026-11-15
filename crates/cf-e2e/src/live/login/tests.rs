@@ -5,6 +5,19 @@ use std::os::unix::fs::PermissionsExt;
 
 use super::*;
 
+#[test]
+fn claude_login_copy_has_no_nested_refresh_keys() {
+    let copy = without_renewal(
+        &json!({"accessToken":"fake", "refreshToken":"fake", "nested":[{"REFRESH_key":"fake"}]}),
+    );
+    assert!(copy.get("refreshToken").is_none());
+    assert!(
+        copy["nested"][0].get("REFRESH_key").is_none(),
+        "nested refresh key was copied"
+    );
+    assert_eq!(copy["accessToken"], "fake");
+}
+
 /// What a login holds that must never be said or kept.
 const ACCESS: &str = "sk-ant-oat01-ACCESS-0123456789";
 const REFRESH: &str = "sk-ant-ort01-REFRESH-9876543210";

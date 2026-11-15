@@ -47,33 +47,7 @@ pub fn seed_live_home(rig_home: &Path, real_home: &Path) -> Result {
 /// later is given a login that cannot use up the person's (the rule of T-1067 for Claude Code and
 /// Pi). A file that is no JSON object cannot be shown free of one and is not copied.
 pub fn login_copy(text: &str) -> Result<String> {
-    let said = |why: String| {
-        Error::Daemon(format!(
-            "Muse's login is {why}: it cannot be shown free of a refresh token, so it is not copied"
-        ))
-    };
-    let mut login: Value =
-        serde_json::from_str(text).map_err(|failed| said(format!("no JSON ({failed})")))?;
-    if !login.is_object() {
-        return Err(said("no JSON object".to_owned()));
-    }
-    without_refresh(&mut login);
-    let mut copy = serde_json::to_string_pretty(&login)
-        .map_err(|failed| said(format!("not written again ({failed})")))?;
-    copy.push('\n');
-    Ok(copy)
-}
-
-/// `value` without the keys that name a refresh token, at any depth.
-fn without_refresh(value: &mut Value) {
-    match value {
-        Value::Object(map) => {
-            map.retain(|key, _| !key.to_ascii_lowercase().contains("refresh"));
-            map.values_mut().for_each(without_refresh);
-        }
-        Value::Array(items) => items.iter_mut().for_each(without_refresh),
-        _ => {}
-    }
+    crate::live::login::json_copy(text, "Muse")
 }
 
 /// The home of whoever runs the tests, where their Muse login is found: the profile on
@@ -555,7 +529,7 @@ pub fn sessions(home: &Path) -> Vec<(String, PathBuf)> {
             for day in dirs(&month) {
                 for session in dirs(&day) {
                     let log = session.join("session.jsonl");
-                    if log.is_file() {
+                    if fs::symlink_metadata(&log).is_ok_and(|meta| meta.file_type().is_file()) {
                         let id = session
                             .file_name()
                             .unwrap_or_default()
@@ -576,8 +550,9 @@ fn dirs(folder: &Path) -> Vec<PathBuf> {
         .into_iter()
         .flatten()
         .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
         .map(|entry| entry.path())
-        .filter(|path| path.is_dir() && path.file_name().is_some_and(|name| name != "subagent"))
+        .filter(|path| path.file_name().is_some_and(|name| name != "subagent"))
         .collect();
     found.sort();
     found

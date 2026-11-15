@@ -15,6 +15,7 @@ pub struct Watched {
     pub window: MemberWindow,
     pub session: String,
     pub status: Status,
+    config: std::path::PathBuf,
 }
 
 /// Watches the window of the member `agent`, which has opened by now.
@@ -27,11 +28,13 @@ pub fn watch(members: &Members, agent: &str) -> Result<Watched> {
             "the window of {agent} was opened on no conversation"
         ))
     })?;
-    let status = Status::watch(&members.claude_config(), &session);
+    let config = members.claude_config()?;
+    let status = Status::watch(&config, &session);
     Ok(Watched {
         window,
         session,
         status,
+        config,
     })
 }
 
@@ -48,8 +51,8 @@ impl Watched {
     }
 
     /// What Claude kept of its conversation so far.
-    pub fn record(&self, members: &Members) -> Vec<Entry> {
-        claude::record(&members.claude_config(), &self.session)
+    pub fn record(&self, _members: &Members) -> Vec<Entry> {
+        claude::record(&self.config, &self.session)
     }
 }
 

@@ -275,8 +275,14 @@ fn files_below(folder: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut next = vec![folder.to_path_buf()];
     while let Some(folder) = next.pop() {
+        if !cf_e2e::door::is_made_or_below(&folder) {
+            continue;
+        }
         for entry in fs::read_dir(&folder).into_iter().flatten().flatten() {
             let path = entry.path();
+            if !cf_e2e::door::is_made_or_below(&path) {
+                continue;
+            }
             match entry.file_type() {
                 Ok(kind) if kind.is_dir() => next.push(path),
                 Ok(kind) if kind.is_file() => found.push(path),
@@ -301,7 +307,11 @@ struct Record {
 fn child_records(harness: Harness, members: &Members) -> Vec<Record> {
     let read = |path: &Path| fs::read_to_string(path).unwrap_or_default();
     match harness {
-        Harness::Claude => files_below(&members.claude_config().join("projects"))
+        Harness::Claude => members
+            .claude_config()
+            .ok()
+            .map(|config| files_below(&config.join("projects")))
+            .unwrap_or_default()
             .into_iter()
             .filter(|path| {
                 path.parent()
@@ -325,7 +335,11 @@ fn child_records(harness: Harness, members: &Members) -> Vec<Record> {
                 }
             })
             .collect(),
-        Harness::Codex => rollout::rollouts(&members.codex_home())
+        Harness::Codex => members
+            .codex_home()
+            .ok()
+            .map(|home| rollout::rollouts(&home))
+            .unwrap_or_default()
             .into_iter()
             .filter_map(|path| {
                 let text = rollout::read(&path).ok()?;
@@ -383,7 +397,7 @@ fn holding(members: &Members, word: &str) -> Vec<String> {
     ] {
         folders.extend(members.var(name).map(PathBuf::from));
     }
-    folders.push(members.claude_config());
+    folders.extend(members.claude_config().ok());
     let mut found: Vec<String> = folders
         .iter()
         .flat_map(|folder| files_below(folder))

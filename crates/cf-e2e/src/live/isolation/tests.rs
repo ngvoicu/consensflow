@@ -121,6 +121,10 @@ impl Owner {
         }
         write(&h.join(".pi/agent/auth.json"), &auth(hours(9)));
         write(&h.join(".codex/auth.json"), &auth(hours(9)));
+        write(
+            &h.join(".local/share/devin/credentials.toml"),
+            "api_key = 'fake'\n",
+        );
         owner
     }
 
@@ -237,6 +241,106 @@ impl Owner {
 }
 
 // ---------------------------------------------------------------------- Pi's login
+
+#[test]
+fn codex_login_copy_has_no_refresh_keys_at_any_depth() {
+    let owner = Owner::new();
+    let isolation = owner.codex();
+    let home = isolation.made_at(at(NOW)).unwrap();
+    let copied: Value =
+        serde_json::from_slice(&fs::read(home.join("codex/auth.json")).unwrap()).unwrap();
+    assert!(
+        copied["openai"].get("refresh").is_none(),
+        "refresh key was copied"
+    );
+    assert_eq!(copied["openai"]["access"], ACCESS);
+}
+
+#[test]
+fn pi_login_copy_has_no_nested_refresh_keys() {
+    let text = json!({"openai":{"type":"oauth","access":"fake","refresh":"fake","expires":ends(hours(9)),"nested":[{"REFRESH_key":"fake"}]}}).to_string();
+    let copy = pi::login(
+        &text,
+        Some(&["openai".to_owned()]),
+        at(NOW),
+        LEFT_2H,
+        "fixture",
+    )
+    .unwrap();
+    assert!(
+        copy["openai"]["nested"][0].get("REFRESH_key").is_none(),
+        "nested refresh key was copied"
+    );
+    assert_eq!(copy["openai"]["access"], "fake");
+}
+
+#[test]
+fn kit_disclosure_pi_refuses_a_refresh_named_provider_key() {
+    let text = json!({"Refresh_provider":{"type":"api_key","key":"fake"}}).to_string();
+    let result = pi::login(
+        &text,
+        Some(&["Refresh_provider".to_owned()]),
+        at(NOW),
+        LEFT_2H,
+        "fixture",
+    );
+    assert!(
+        result.is_err(),
+        "a refresh-named key would be copied as a provider"
+    );
+}
+
+#[test]
+fn kit_disclosure_valid_devin_login_is_not_refused() {
+    let text = "api_key = 'fake'\n";
+    let parsed: std::result::Result<toml::Value, _> = toml::from_str(text);
+    assert!(parsed.is_ok(), "fabricated TOML did not parse: {parsed:?}");
+    assert!(super::super::login::toml_copy(text, "Devin").is_ok());
+    assert!(super::super::login::toml_copy(
+        "api_key = 'fake'\n[nested]\nrefreshToken = 'fake'\n",
+        "Devin"
+    )
+    .is_err());
+}
+
+#[test]
+fn devin_login_with_a_refresh_key_is_never_copied() {
+    let owner = Owner::new();
+    write(
+        &owner.path(".local/share/devin/credentials.toml"),
+        "api_key = 'fake'\nrefresh_token = 'fake'\n",
+    );
+    let isolation = owner.devin();
+    match isolation.made_at(at(NOW)) {
+        Err(_) => (),
+        Ok(home) => {
+            let copy = fs::read_to_string(home.join("data/devin/credentials.toml")).unwrap();
+            assert!(
+                !copy.to_ascii_lowercase().contains("refresh_token"),
+                "refresh key was copied"
+            );
+        }
+    }
+}
+
+#[test]
+fn kit_disclosure_pi_proxy_config_copies_no_refresh_keys() {
+    let owner = Owner::new();
+    owner.cliproxyapi(&proxy_answering());
+    let file = owner.path(".pi/agent/cliproxyapi.json");
+    let mut config: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    config["nested"] = json!([{"refreshToken":"fake"}]);
+    write(&file, &config.to_string());
+    let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
+    let home = isolation.made_at(at(NOW)).unwrap();
+    let copy: Value =
+        serde_json::from_slice(&fs::read(home.join("pi/agent/cliproxyapi.json")).unwrap()).unwrap();
+    assert!(
+        copy["nested"][0].get("refreshToken").is_none(),
+        "refresh key was copied"
+    );
+    assert_eq!(copy["apiKey"], PROXY_KEY);
+}
 
 #[test]
 fn a_pi_model_is_on_the_provider_before_its_first_slash() {
@@ -524,10 +628,14 @@ fn a_pi_run_on_a_provider_the_agent_folder_gives_pi_carries_its_files_and_its_lo
         !copied.contains(PROXY_META),
         "the refresh was copied: {copied}"
     );
-    // The config and the models come whole; the settings name the provider's package alone.
+    // The config retains its non-refresh fields; the settings name the provider's package alone.
     assert_eq!(
-        fs::read_to_string(home.join("pi/agent/cliproxyapi.json")).unwrap(),
-        fs::read_to_string(owner.path(".pi/agent/cliproxyapi.json")).unwrap()
+        serde_json::from_slice::<Value>(&fs::read(home.join("pi/agent/cliproxyapi.json")).unwrap())
+            .unwrap(),
+        serde_json::from_slice::<Value>(
+            &fs::read(owner.path(".pi/agent/cliproxyapi.json")).unwrap()
+        )
+        .unwrap()
     );
     assert_eq!(
         serde_json::from_str::<Value>(
@@ -986,10 +1094,11 @@ fn a_codex_run_is_given_the_login_alone_and_what_it_configures_goes_in_its_own_h
         )]
     );
     assert_eq!(files_below(&home), ["codex/auth.json"]);
-    assert_eq!(
-        fs::read_to_string(home.join("codex/auth.json")).unwrap(),
-        auth(hours(9))
-    );
+    let copied: Value =
+        serde_json::from_slice(&fs::read(home.join("codex/auth.json")).unwrap()).unwrap();
+    let mut expected: Value = serde_json::from_str(&auth(hours(9))).unwrap();
+    super::super::login::without_refresh(&mut expected);
+    assert_eq!(copied, expected);
     assert_eq!(mode(&home.join("codex/auth.json")), 0o600);
     // A check that configures Codex writes in the run's home; the owner's config is as it was.
     isolation

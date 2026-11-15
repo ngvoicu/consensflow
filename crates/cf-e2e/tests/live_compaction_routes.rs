@@ -67,6 +67,7 @@ use cf_e2e::live::guard::{copy_muse_into, login_in_keychain, Scratch};
 use cf_e2e::live::members::{self, find, is_over, Members, Plan};
 use cf_e2e::live::{agents, ask, codex, machine, Harness, Log};
 use cf_e2e::process::{own_var, Run};
+use cf_e2e::rig::HarnessHome;
 use cf_e2e::{files, rollout, Error, Result};
 use serde_json::{json, Value};
 
@@ -172,8 +173,11 @@ fn codex_compacts_a_thread_past_the_limit_its_launch_gives() -> Result {
             format!("model_reasoning_effort={}", Value::String(effort.clone())),
         ]);
     }
-    // Every MCP server of the owner's is switched off for the run.
-    words.extend(codex::isolation(&codex::mcp_servers(install.command())?)?);
+    // The list itself is read on the run's own home, before switching its servers off.
+    words.extend(codex::isolation(&codex::mcp_servers(
+        install.command(),
+        &home,
+    )?)?);
     let codex_program = install.command().to_string_lossy().into_owned();
     let run = |args: Vec<String>| {
         let argv = ask::program(&args, &machine_vars())?;
@@ -420,34 +424,24 @@ fn devin_compacts_at_the_thresholds_its_launch_gives() -> Result {
     Ok(())
 }
 
-/// Every file below `root` with a digest of its bytes, by name: what a run changed of the
-/// owner's folder is said by name, never by what it holds.
-fn digest(root: &Path) -> Vec<(PathBuf, u64)> {
-    use std::hash::{Hash, Hasher};
-    let mut found = Vec::new();
-    let mut folders = vec![root.to_path_buf()];
-    while let Some(folder) = folders.pop() {
-        let Ok(entries) = std::fs::read_dir(&folder) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                folders.push(path);
-            } else if let Ok(bytes) = std::fs::read(&path) {
-                let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                bytes.hash(&mut hasher);
-                found.push((path, hasher.finish()));
-            }
-        }
-    }
-    found.sort();
-    found
+fn watch_muse_owner(home: &Path) -> Result<cf_e2e::live::isolation::Isolation> {
+    let watch = cf_e2e::live::isolation::Isolation::muse(
+        home,
+        &home.join(".config"),
+        &home.join(".local/share"),
+    );
+    watch.vars()?;
+    Ok(watch)
 }
 
 /// What a Muse session log says of compaction: each record whose payload names a threshold
 /// or a compaction, by its payload type and those fields.
-fn muse_compaction_lines(data: &Path) -> Vec<String> {
+fn muse_compaction_lines(data: &Path) -> Result<Vec<String>> {
+    if !cf_e2e::door::is_made_or_below(data) {
+        return Err(Error::Daemon(
+            "Muse's session data is outside the run's own roots".to_owned(),
+        ));
+    }
     let mut lines = Vec::new();
     for path in files_saying(data, "\"payload_type\"") {
         if path.file_name().and_then(|name| name.to_str()) != Some("session.jsonl") {
@@ -487,7 +481,7 @@ fn muse_compaction_lines(data: &Path) -> Vec<String> {
             }
         }
     }
-    lines
+    Ok(lines)
 }
 
 #[test]
@@ -496,11 +490,10 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
     let log = Log::begin("live compaction-routes muse")?;
     ask::prepare()?;
     let home = machine::home()?;
+    let owner_watch = watch_muse_owner(&home)?;
     let auth = files::read_string(&home.join(".config/muse/auth.json"))?;
     login_in_keychain(&auth).map_err(Error::Daemon)?;
     let muse = machine::command("muse")?;
-    let owner = home.join(".config/muse");
-    let before = digest(&owner);
     let model = agents::model(Harness::Muse);
     let mut said = Vec::new();
     let mut failed = Vec::new();
@@ -573,7 +566,7 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
             .closed_input()
             .limit(TURN)
             .run()?;
-        let lines = muse_compaction_lines(&scratch.path().join("data"));
+        let lines = muse_compaction_lines(&scratch.path().join("data"))?;
         if ran.code != Some(0) {
             failed.push(format!("{name}: muse exec ended {:?}", ran.code));
         }
@@ -592,11 +585,7 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
         ));
     }
     log.block(&format!("muse on {}", model.name), &said.join("\n"));
-    assert_eq!(
-        digest(&owner),
-        before,
-        "the run changed a file of the owner's ~/.config/muse"
-    );
+    owner_watch.finish()?;
     assert!(failed.is_empty(), "{}", failed.join("; "));
     log.passed();
     Ok(())
@@ -616,10 +605,15 @@ const PI_COMPACTION: Duration = Duration::from_secs(330);
 const PI_CLOSE: Duration = Duration::from_secs(60);
 
 /// The `tokensBefore` of every `compaction` entry in the sessions Pi kept in `agent_dir`.
-fn pi_compactions(agent_dir: &Path) -> Vec<i64> {
+fn pi_compactions(agent_dir: &Path) -> Result<Vec<i64>> {
     let mut found = Vec::new();
     let mut folders = vec![agent_dir.join("sessions")];
     while let Some(folder) = folders.pop() {
+        if !cf_e2e::door::is_made_or_below(&folder) {
+            return Err(Error::Daemon(
+                "Pi's sessions are outside the run's own roots".to_owned(),
+            ));
+        }
         let Ok(entries) = std::fs::read_dir(&folder) else {
             continue;
         };
@@ -628,6 +622,11 @@ fn pi_compactions(agent_dir: &Path) -> Vec<i64> {
             match entry.file_type() {
                 Ok(kind) if kind.is_dir() => folders.push(path),
                 Ok(kind) if kind.is_file() => {
+                    if !cf_e2e::door::is_made_or_below(&path) {
+                        return Err(Error::Daemon(
+                            "a Pi session is outside the run's own roots".to_owned(),
+                        ));
+                    }
                     let text = std::fs::read_to_string(&path).unwrap_or_default();
                     found.extend(text.lines().filter_map(|line| {
                         let entry: Value = serde_json::from_str(line).ok()?;
@@ -640,7 +639,28 @@ fn pi_compactions(agent_dir: &Path) -> Vec<i64> {
             }
         }
     }
-    found
+    Ok(found)
+}
+
+/// A compaction with the same pane observed before and after reading its entry. A first
+/// observation of an already-written entry cannot prove the window was open at the write.
+fn observed_pi_entry(
+    seen: &mut Option<Value>,
+    before: Option<Value>,
+    entries: Vec<i64>,
+    after: Option<Value>,
+) -> Option<(bool, Vec<i64>)> {
+    if entries.is_empty() {
+        if before.is_some() && before == after {
+            *seen = before;
+        } else {
+            *seen = None;
+        }
+        return None;
+    }
+    let open =
+        seen.is_some() && before.as_ref() == seen.as_ref() && after.as_ref() == seen.as_ref();
+    Some((open, entries))
 }
 
 /// The project at the least size, one task of two dozen reads given to the Pi member, and what
@@ -668,6 +688,22 @@ fn pi_steps(members: &mut Members, log: &Log) -> Result<(bool, bool, Vec<i64>)> 
         .var("PI_CODING_AGENT_DIR")
         .map(PathBuf::from)
         .ok_or_else(|| Error::Daemon("the kit gave Pi no PI_CODING_AGENT_DIR".to_owned()))?;
+    // Start before the task ends: the same pane must be visible on both sides of the
+    // first completed entry, and in an earlier look with no entry.
+    let mut seen = None;
+    let (open_at_entry, entries) = find(
+        log,
+        "Pi's `compaction` entry",
+        PI_TASK + PI_COMPACTION,
+        Duration::from_secs(1),
+        || {
+            let before = pi_open_pane(members, &agent)?;
+            let entries = pi_compactions(&agent_dir)?;
+            let after = pi_open_pane(members, &agent)?;
+            Ok(observed_pi_entry(&mut seen, before, entries, after))
+        },
+    )?
+    .unwrap_or_default();
     find(
         log,
         "the task to be done",
@@ -676,23 +712,6 @@ fn pi_steps(members: &mut Members, log: &Log) -> Result<(bool, bool, Vec<i64>)> 
         || Ok(is_over(&members.task(number)?).then_some(())),
     )?
     .ok_or_else(|| Error::Daemon(format!("T-{number} never ended")))?;
-    // Past the size at its rest, its extension has asked: the window is open while the summary
-    // is written, and Pi's session says it was.
-    let mut open_at_entry = false;
-    let entries = find(
-        log,
-        "Pi's `compaction` entry",
-        PI_COMPACTION,
-        Duration::from_secs(1),
-        || {
-            let entries = pi_compactions(&agent_dir);
-            if !entries.is_empty() {
-                open_at_entry = members.window_of(&agent)?.is_some();
-            }
-            Ok((!entries.is_empty()).then_some(entries))
-        },
-    )?
-    .unwrap_or_default();
     let closed = find(
         log,
         "its window to close",
@@ -705,6 +724,14 @@ fn pi_steps(members: &mut Members, log: &Log) -> Result<(bool, bool, Vec<i64>)> 
         "compaction entries (tokensBefore): {entries:?}; the window was open when the first came: {open_at_entry}; it closed after: {closed}"
     ));
     Ok((open_at_entry, closed, entries))
+}
+
+/// A lane can still name a pane after its host has closed it: verify the pane itself.
+fn pi_open_pane(members: &Members, agent: &str) -> Result<Option<Value>> {
+    let Some(window) = members.window_of(agent)? else {
+        return Ok(None);
+    };
+    Ok(members.rig().snapshot(&window.pane, 1).map(|_| window.pane))
 }
 
 #[test]
@@ -738,4 +765,93 @@ fn pi_member_whose_task_ends_past_the_size_has_its_window_kept_open_for_the_comp
     assert!(closed, "the window was kept past the compaction");
     log.passed();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kit_disclosure_muse_compaction_keeps_the_owner_isolation_watch() {
+        let home = tempfile::tempdir().unwrap();
+        let settings = home.path().join(".config/muse/settings.json");
+        std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+        std::fs::write(&settings, "before").unwrap();
+        let watch = watch_muse_owner(home.path()).unwrap();
+        std::fs::write(&settings, "after").unwrap();
+        assert!(
+            watch.finish().is_err(),
+            "a change to the fabricated owner was missed"
+        );
+    }
+
+    #[test]
+    fn kit_disclosure_muse_oracle_does_not_read_a_foreign_tree() {
+        let owner = tempfile::tempdir().unwrap();
+        std::fs::write(owner.path().join("foreign.json"), "fabricated").unwrap();
+        assert!(
+            muse_compaction_lines(owner.path()).is_err(),
+            "the oracle accepted a foreign tree"
+        );
+    }
+
+    #[test]
+    fn kit_disclosure_pi_compaction_refuses_foreign_session_root() {
+        let foreign = tempfile::tempdir().unwrap();
+        std::fs::create_dir(foreign.path().join("sessions")).unwrap();
+        std::fs::write(
+            foreign.path().join("sessions/s.jsonl"),
+            "{\"type\":\"compaction\",\"tokensBefore\":42}\n",
+        )
+        .unwrap();
+        assert!(
+            pi_compactions(foreign.path()).is_err(),
+            "a foreign Pi session was accepted"
+        );
+        #[cfg(unix)]
+        {
+            let run = cf_e2e::door::made("cf-pi-sessions-").unwrap();
+            std::os::unix::fs::symlink(
+                foreign.path().join("sessions"),
+                run.path().join("sessions"),
+            )
+            .unwrap();
+            assert!(
+                pi_compactions(run.path()).is_err(),
+                "a linked-out Pi session was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn kit_disclosure_pi_observes_a_compaction_before_task_completion() {
+        let pane = json!({"id":"worker", "generation":1});
+        let mut seen = None;
+        assert_eq!(
+            observed_pi_entry(&mut seen, Some(pane.clone()), vec![], Some(pane.clone())),
+            None
+        );
+        assert_eq!(
+            observed_pi_entry(&mut seen, Some(pane.clone()), vec![250_123], Some(pane)),
+            Some((true, vec![250_123]))
+        );
+        assert_eq!(
+            observed_pi_entry(&mut None, None, vec![250_123], None),
+            Some((false, vec![250_123]))
+        );
+    }
+
+    #[test]
+    fn kit_disclosure_pi_does_not_reuse_an_observation_after_the_pane_was_gone() {
+        let pane = json!({"id":"worker", "generation":1});
+        let mut seen = None;
+        assert!(
+            observed_pi_entry(&mut seen, Some(pane.clone()), vec![], Some(pane.clone())).is_none()
+        );
+        assert!(observed_pi_entry(&mut seen, None, vec![], None).is_none());
+        assert_eq!(
+            observed_pi_entry(&mut seen, Some(pane.clone()), vec![250_123], Some(pane)),
+            Some((false, vec![250_123]))
+        );
+    }
 }

@@ -175,6 +175,38 @@ pub fn write(file: &Path, text: &str) -> Outcome {
     cf_e2e::door::write(file, text).map_err(|error| format!("{}: {error}", file.display()))
 }
 
+fn copy_login(owner: &Path, root: &Path) -> Outcome {
+    cf_e2e::live::guard::copy_muse_login(
+        &owner.join(".config/muse/auth.json"),
+        &root.join("config/muse/auth.json"),
+    )
+    .map_err(|error| format!("auth.json: {error}"))
+}
+
+#[cfg(test)]
+#[test]
+fn tui_setup_copies_no_refresh_keys() {
+    let root = cf_e2e::door::made("cf-muse-tui-login-").unwrap();
+    let owner = root.path().join("owner");
+    let run = root.path().join("run");
+    std::fs::create_dir_all(owner.join(".config/muse")).unwrap();
+    std::fs::create_dir_all(run.join("config/muse")).unwrap();
+    std::fs::write(
+        owner.join(".config/muse/auth.json"),
+        r#"{"access":"fake","refreshToken":"fake","nested":[{"REFRESH_key":"fake"}]}"#,
+    )
+    .unwrap();
+    copy_login(&owner, &run).unwrap();
+    let copied: Value =
+        serde_json::from_slice(&std::fs::read(run.join("config/muse/auth.json")).unwrap()).unwrap();
+    assert!(
+        copied.get("refreshToken").is_none(),
+        "refresh key was copied"
+    );
+    assert!(copied["nested"][0].get("REFRESH_key").is_none());
+    assert_eq!(copied["access"], "fake");
+}
+
 /// The run's home: its folders, the login's metadata and the feature gates, and a
 /// throwaway git project.
 pub fn set_up(root: &Path) -> Outcome {
@@ -189,11 +221,7 @@ pub fn set_up(root: &Path) -> Outcome {
         cf_e2e::door::make_dir(root.join(folder)).map_err(|error| error.to_string())?;
     }
     let owner = home();
-    cf_e2e::door::copy_keeping_mode(
-        owner.join(".config/muse/auth.json"),
-        root.join("config/muse/auth.json"),
-    )
-    .map_err(|error| format!("auth.json: {error}"))?;
+    copy_login(&owner, root)?;
     write(
         &root.join("config/muse/settings.json"),
         r#"{"schema_version":1,"context":{"foreign_personal_rules":false,"foreign_personal_skills":false}}"#,

@@ -98,6 +98,9 @@ impl Watch {
     /// the window has named none, or where the store cannot be read at the moment
     /// (its writer has it).
     pub fn messages(&self, window: &Window) -> Vec<Message> {
+        if !cf_e2e::live::guard::run_owned_devin_store(&self.store) {
+            return Vec::new();
+        }
         window
             .session()
             .and_then(|session| devin_store::messages_of(&self.store, &session).ok())

@@ -186,9 +186,10 @@ impl Window<'_> {
 
     /// The Claude config folder the window's Claude Code keeps its sessions and
     /// its transcripts in ([`super::claude`] reads them there): the
-    /// `CLAUDE_CONFIG_DIR` the window has, and else `.claude` in its home.
-    pub fn claude_config(&self) -> PathBuf {
-        claude_config_of(&self.env)
+    /// `CLAUDE_CONFIG_DIR` the window has, and else `.claude` in its home. A path
+    /// outside the run's registered roots is refused before anything reads it.
+    pub fn claude_config(&self) -> Result<PathBuf> {
+        owned_harness_dir(&self.env, "CLAUDE_CONFIG_DIR", ".claude")
     }
 
     /// Whether it has ended.
@@ -395,20 +396,41 @@ fn after(screen: &str, mark: usize) -> String {
     screen.chars().skip(mark).collect()
 }
 
-/// The Claude config folder of an environment: its `CLAUDE_CONFIG_DIR`, and
-/// else `.claude` in its `HOME` (the last of a name given twice is the one).
-fn claude_config_of(env: &[(String, String)]) -> PathBuf {
+/// A harness folder named by the rig, or the fallback in its HOME, only when the
+/// resolved path is in a root made by this run. The last variable wins, even when empty.
+pub(crate) fn owned_harness_dir(
+    env: &[(String, String)],
+    name: &str,
+    fallback: &str,
+) -> Result<PathBuf> {
     let var = |name: &str| {
         env.iter()
             .rev()
-            .find(|(given, value)| given == name && !value.is_empty())
+            .find(|(given, _)| {
+                if cfg!(windows) {
+                    given.eq_ignore_ascii_case(name)
+                } else {
+                    given == name
+                }
+            })
             .map(|(_, value)| value.as_str())
+            .filter(|value| !value.is_empty())
     };
-    match (var("CLAUDE_CONFIG_DIR"), var("HOME")) {
+    let path = match (var(name), var("HOME")) {
         (Some(config), _) => PathBuf::from(config),
-        (None, Some(home)) => Path::new(home).join(".claude"),
-        (None, None) => PathBuf::from(".claude"),
+        (None, Some(home)) => Path::new(home).join(fallback),
+        (None, None) => {
+            return Err(crate::Error::Daemon(format!(
+                "the rig gives no {name} or HOME"
+            )))
+        }
+    };
+    if !crate::door::is_made_or_below(&path) {
+        return Err(crate::Error::Daemon(format!(
+            "{name} is outside the run's own roots"
+        )));
     }
+    Ok(path)
 }
 
 /// Whether the answer is on what the screen printed since the message was

@@ -14,9 +14,9 @@ meant = "a_copy_of_muse_s_login_holds_no_refresh_token_at_any_depth"
 runs = ["muse-lib"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/muse.rs"
-find = '''            map.retain(|key, _| !key.to_ascii_lowercase().contains("refresh"));'''
-replace = '''            map.retain(|_, _| true);'''
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''fields.retain(|name, _| !name.to_ascii_lowercase().contains("refresh"));'''
+replace = '''fields.retain(|_, _| true);'''
 
 [[plant]]
 name = "kit windows muse: only the top of the login is cleared of a refresh token"
@@ -24,9 +24,9 @@ meant = "a_copy_of_muse_s_login_holds_no_refresh_token_at_any_depth"
 runs = ["muse-lib"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/muse.rs"
-find = '''            map.values_mut().for_each(without_refresh);'''
-replace = ''''''
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''fields.values_mut().for_each(without_refresh);'''
+replace = '''let _ = fields;'''
 
 [[plant]]
 name = "kit windows muse: a refresh token is known by its name in lower case alone"
@@ -34,9 +34,9 @@ meant = "a_copy_of_muse_s_login_holds_no_refresh_token_at_any_depth"
 runs = ["muse-lib"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/muse.rs"
-find = '''            map.retain(|key, _| !key.to_ascii_lowercase().contains("refresh"));'''
-replace = '''            map.retain(|key, _| !key.contains("refresh"));'''
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''fields.retain(|name, _| !name.to_ascii_lowercase().contains("refresh"));'''
+replace = '''fields.retain(|name, _| !name.contains("refresh"));'''
 
 [[plant]]
 name = "kit windows muse: a login that is a JSON array is copied"
@@ -44,9 +44,9 @@ meant = "a_login_that_is_not_a_json_object_is_not_copied"
 runs = ["muse-lib"]
 
 [[plant.edit]]
-file = "crates/cf-e2e/src/muse.rs"
-find = '''    if !login.is_object() {'''
-replace = '''    if false && !login.is_object() {'''
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''    if !value.is_object() {'''
+replace = '''    if false && !value.is_object() {'''
 
 [[plant]]
 name = "kit windows muse: a rig's home is given the person's login whole"

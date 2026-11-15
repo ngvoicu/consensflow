@@ -268,7 +268,7 @@ fn send_what_the_box_holds(
     lines: &mut Vec<String>,
 ) -> Result<bool> {
     let session = window.session().unwrap_or_default();
-    let config = window.claude_config();
+    let config = window.claude_config()?;
     let mark = claude::record(&config, &session).len();
     window.press(b"\r")?;
     let sent = live::until(Duration::from_secs(30), LOOK, || {
@@ -419,7 +419,7 @@ fn type_command(
             )],
         ));
     }
-    let config = window.claude_config();
+    let config = window.claude_config()?;
     let before = window.session().unwrap_or_default();
     let mark = claude::record(&config, &before).len();
     type_keys(window, command.typed())?;
@@ -543,8 +543,9 @@ fn each_command_typed_at_an_idle_claudes_prompt_leaves_the_window_at_rest() -> R
         )));
     }
     let session = window.session().unwrap_or_default();
+    let config = window.claude_config()?;
     let status = live::until(Duration::from_secs(30), LOOK, || {
-        status_file(&window.claude_config(), &session)
+        status_file(&config, &session)
     })
     .ok_or_else(|| Error::Daemon("Claude wrote no status of the window".to_owned()))?;
     let mut checks = Vec::new();

@@ -31,9 +31,7 @@ use crate::{Error, Result};
 /// the run loudly, the owner's file untouched).
 fn without_renewal(entry: &Value) -> Value {
     let mut copy = entry.clone();
-    if let Some(fields) = copy.as_object_mut() {
-        fields.remove("refresh");
-    }
+    super::super::login::without_refresh(&mut copy);
     copy
 }
 
@@ -157,6 +155,11 @@ pub fn login(
     };
     let (mut copied, mut unfit) = (Map::new(), Vec::new());
     for provider in wanted {
+        if provider.to_ascii_lowercase().contains("refresh") {
+            return Err(not_usable(
+                "a provider name contains refresh, so it cannot be copied",
+            ));
+        }
         match fit(held.get(provider), now, left) {
             Ok(()) => {
                 copied.insert(provider.to_owned(), without_renewal(&held[provider]));
