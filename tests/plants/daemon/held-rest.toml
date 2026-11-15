@@ -26,7 +26,7 @@
 # A1 of that page has its plant already, in `background.toml` ("background regression: a build's
 # daemon, its build ended, is taken for the turn's work and told as left"), and the rest of B7 in
 # `decisions-306.toml` ("transcript pages: …"). The T-139 plants of `the-rigs-capture-is-unbounded`
-# are in `long-run.toml` ("long run: the rig keeps every byte a window printed, …").
+# are in `rig-infrastructure.toml` ("rig: the rig keeps every byte a window printed, …").
 #
 # Every name here begins `held-rest:`, so `npm run plants:daemon -- "held-rest:"` runs them all.
 
@@ -212,7 +212,7 @@ runs = ["rest-rig-detached-job"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/process/pid.rs"
-find = "        .limit(STARTED_LIMIT)"
+find = "        .limit(super::POWERSHELL_LIMIT)"
 replace = "        .limit(std::time::Duration::from_millis(1))"
 
 # --- the page's bound (state-list-grows-toward-frame-cap) ---

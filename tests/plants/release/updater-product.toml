@@ -63,7 +63,7 @@ requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
 find = '''
-    eprintln!("consensflow: {}", starting(&cf));
+    diag::say(format!("consensflow: {}", starting(&cf)));
 '''
 replace = ""
 
@@ -173,7 +173,7 @@ requires = ["app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app"]
 [[plant.edit]]
 file = "app/src-tauri/src/lib.rs"
 find = '''
-        launcher::repair_in_background(app.handle());
+    launcher::repair_in_background(app.handle());
 '''
 replace = ""
 
@@ -225,7 +225,9 @@ file = "app/src-tauri/src/lib.rs"
 find = """
     #[cfg(target_os = "macos")]
     if let Err(failed) = cf_process::close_all_on_exec() {
-        eprintln!("ConsensFlow ends holding descriptors it could not mark close-on-exec: {failed}");
+        diag::say(format!(
+            "ConsensFlow ends holding descriptors it could not mark close-on-exec: {failed}"
+        ));
     }"""
 replace = ""
 

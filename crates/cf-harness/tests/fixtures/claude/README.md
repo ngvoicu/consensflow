@@ -1,7 +1,7 @@
 # Claude transcripts of live runs — provenance
 
 Kept 2026-10-07 by `npm run live:stops -- --case <case> --keep <folder>` (Claude
-Code 2.1.292, the native daemon of the receipt branch, the cheap eval model; the
+Code 2.1.292, the native daemon of the receipt branch, a cheap model; the
 flag that keeps the transcripts is `--transcripts <folder>` now, and `--keep`
 leaves a run's home where it is), then scrubbed with
 `cargo xtask scrub-transcript <transcript> <fixture>` (a Node script made these

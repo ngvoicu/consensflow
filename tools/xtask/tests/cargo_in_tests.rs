@@ -10,8 +10,8 @@
 //! - the real cargo is named in one file, `crates/cf-process/src/nested_cargo.rs`, which says what
 //!   cargo gives a test and takes it from the environment of the cargo it starts. A test that wants a
 //!   cargo takes it from there: `nested_cargo::cargo()`, or `Run::cargo()` in the rig. Any other file
-//!   that spells `env!("CARGO")`, or starts `cargo` by its name in a test, started one with all of
-//!   them;
+//!   that spells `env!("CARGO")`, or starts `cargo` by its name in a test, is held here. The one
+//!   exception inspects Cargo's path to locate rustc without starting Cargo;
 //! - every crate that uses that file includes it by its path (`#[path = ".../nested_cargo.rs"]`):
 //!   `tools/cf-publish` and `tools/cf-release` take no dependency, and a crate that took the feature
 //!   `test-support` of `cf-process` for it would be built twice (xtask's tests would replace the
@@ -36,6 +36,13 @@ const THE_PLACE: &str = "crates/cf-process/src/nested_cargo.rs";
 
 /// The cases of that file: they name the cargo by its constant, and start it as a test would.
 const ITS_CASES: &str = "crates/cf-process/src/nested_cargo_tests.rs";
+
+/// The stand-in setup reads Cargo's location to find the adjacent compiler.
+const STANDIN_SETUP: &str = "crates/cf-e2e/src/standin_process.rs";
+const COMPILER_LOOKUP: &str = concat!(
+    "letcargo=Path::new(env!(\"CARGO\"));",
+    "letcompiler=cargo.with_file_name(format!(\"rustc{}\",std::env::consts::EXE_SUFFIX));"
+);
 
 /// Every Rust file under `folder`, but for build folders.
 fn sources(folder: &Path, found: &mut Vec<PathBuf>) {
@@ -104,6 +111,35 @@ fn package(path: &str) -> String {
     path.split('/').take(2).collect::<Vec<_>>().join("/")
 }
 
+/// The stand-in setup may inspect this exact path to find rustc. Any other use
+/// of its cargo binding, or another use of the Cargo environment value, needs
+/// the same scrutiny as a test starting Cargo.
+fn names_real_cargo(shown: &str, text: &str) -> bool {
+    const CARGO_ENV: &str = "env!(\"CARGO\")";
+    match (shown == STANDIN_SETUP, text.split_once(COMPILER_LOOKUP)) {
+        (true, Some((before, after))) => [before, after]
+            .iter()
+            .any(|part| part.contains("cargo") || part.contains(CARGO_ENV)),
+        _ => text.contains(CARGO_ENV),
+    }
+}
+
+#[test]
+fn finding_rustc_beside_cargo_does_not_exempt_starting_cargo() {
+    assert!(!names_real_cargo(STANDIN_SETUP, COMPILER_LOOKUP));
+    assert!(names_real_cargo("somewhere/else.rs", COMPILER_LOOKUP));
+    // Assemble source text to scan; this test starts no program from it.
+    let start = ["Command", "::new(cargo);"].concat();
+    assert!(names_real_cargo(
+        STANDIN_SETUP,
+        &format!("{COMPILER_LOOKUP}{start}"),
+    ));
+    assert!(names_real_cargo(
+        STANDIN_SETUP,
+        &format!("{COMPILER_LOOKUP}env!(\"CARGO\");"),
+    ));
+}
+
 #[test]
 fn the_cargo_a_test_starts_is_named_in_one_file_and_has_none_of_the_variables_cargo_gave_the_test()
 {
@@ -117,7 +153,7 @@ fn the_cargo_a_test_starts_is_named_in_one_file_and_has_none_of_the_variables_ca
             continue;
         }
         let text = squeezed(&path);
-        if text.contains("env!(\"CARGO\")") {
+        if names_real_cargo(&shown, &text) {
             found.push(format!("{shown}: names the real cargo, env!(\"CARGO\")"));
         }
         if is_test(&shown) {

@@ -63,7 +63,8 @@ fn program(
     .inheriting_env()
     .var(cf_e2e::cf::BUILT, built)
     .var(CASE, case)
-    .var(SIGNALS, layout.signals());
+    .var(SIGNALS, layout.signals())
+    .var(cf_e2e::standin_process::FIXTURE_HOME, layout.home());
     for (name, value) in layout.vars().iter() {
         run = run.var(name, value);
     }

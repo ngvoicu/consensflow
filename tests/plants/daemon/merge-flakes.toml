@@ -249,9 +249,9 @@ meant = "a_window_consensflow_answered_itself_is_not_the_humans_yes_at_its_exit"
 runs = ["trust-engine"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = "                            record.window.borrow_mut().trust_keys += 1;"
-replace = "                            record.window.borrow_mut().trust_keys += 0;"
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '                w.record.window.borrow_mut().trust_keys += 1;'
+replace = '                w.record.window.borrow_mut().trust_keys += 0;'
 
 # T-502, the rig's two rules about a rig dropped unclosed meet (T-428's, a judged rig says
 # nothing for a case that passed and holds its report for one that fails; T-501's, a rig

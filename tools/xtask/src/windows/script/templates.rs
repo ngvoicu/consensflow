@@ -282,7 +282,6 @@ function Clear-Stale([IO.DirectoryInfo]$folder) {
   }
   $left
 }
-$cutoff = (Get-Date).ToUniversalTime().AddDays(-«days»)
 $unpruned = [Collections.Generic.List[string]]::new()
 function Clear-Old([IO.DirectoryInfo]$folder) {
   $left = 0
@@ -310,11 +309,6 @@ function Clear-Old([IO.DirectoryInfo]$folder) {
 $root = Get-Item -LiteralPath $dir
 $base = $root.FullName.TrimEnd('\').Length + 1
 $null = Clear-Stale $root
-$reports = Join-Path $dir 'evals/reports'
-if (Test-Path -LiteralPath $reports -PathType Container) {
-  $folder = Get-Item -LiteralPath $reports
-  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }
-}
 $cutoff = (Get-Date).ToUniversalTime().AddDays(-«runs_days»)
 $runs = Join-Path $dir '.runs'
 if (Test-Path -LiteralPath $runs -PathType Container) {
@@ -362,14 +356,14 @@ if (-not $failed.Count) {
 /// The script that lists the reports, with a mark where the copy's folder goes.
 pub(super) const REPORTS: &str = r##"
 $ProgressPreference = 'SilentlyContinue'
-$reports = Join-Path (Join-Path $env:USERPROFILE '«dir»') 'evals\reports'
+$reports = Join-Path (Join-Path $env:USERPROFILE '«dir»') 'app\src-tauri\target\live-matrix'
 if (Test-Path -LiteralPath $reports -PathType Container) {
   $folder = Get-Item -LiteralPath $reports
   if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
     $base = $folder.FullName.TrimEnd('\').Length + 1
     foreach ($file in Get-ChildItem -LiteralPath $reports -Recurse -File -Force) {
       $name = $file.FullName.Substring($base).Replace('\', '/')
-      if ($name -notlike 'windows/*') { "$name`t$($file.Length)" }
+      "$name`t$($file.Length)"
     }
   }
 }

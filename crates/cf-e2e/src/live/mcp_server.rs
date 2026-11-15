@@ -276,8 +276,8 @@ fn configuration(python: &Path, script: &Path, entries: &[(&str, PathBuf, bool)]
 
 #[cfg(test)]
 mod tests {
-    use cf_e2e::live;
-    use cf_e2e::process::Run;
+    use crate::live;
+    use crate::process::Run;
     use serde_json::Value;
 
     use super::*;

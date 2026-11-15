@@ -25,7 +25,7 @@
 //! whether the window opened on a conversation of its own. What is typed is a
 //! line the window's input box shows whole, pasted as the daemon pastes, and Enter
 //! is pressed again while the window keeps it (Devin's prompt box waited for an
-//! Enter of its own, as the evals' owner finds too). In the second a turn
+//! Enter of its own). In the second a turn
 //! is typed into the window that gives it a key, and the project is closed as soon
 //! as the harness's record has the turn and its answer: what is judged
 //! ([`continued`]) is that the window opened again on the conversation the turn was
@@ -143,7 +143,7 @@ fn answered(members: &Members, harness: Harness, thread: &str, token: &str) -> O
 /// Types `text` into the chief's window as the human does (a bracketed paste, and
 /// Enter once the window has drawn it, [`Members::paste`]), and presses Enter again,
 /// three times at most, while the window keeps it: Devin takes a pasted prompt into
-/// its box and waits for an Enter of its own, as the eval runner's owner finds too.
+/// its box and waits for an Enter of its own.
 /// The window took it once the harness's record holds a message of the human's with
 /// `mark` in it, or the chief reads at work.
 fn types(

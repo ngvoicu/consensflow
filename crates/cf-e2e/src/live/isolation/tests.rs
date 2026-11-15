@@ -941,7 +941,7 @@ fn a_login_that_is_too_short_is_refused_before_anything_is_made_and_one_that_fit
     assert_eq!(owner.made(), 1);
 }
 
-/// An eval's chief and staff may be on Pi models of two providers (T-785): the home holds the
+/// A chief and staff may be on Pi models of two providers (T-785): the home holds the
 /// login of each, and a run is refused where one of them does not last it. A model that names no
 /// provider leaves it to Pi, which gets every login that is fit.
 #[test]
@@ -971,70 +971,6 @@ fn a_pi_run_on_models_of_two_providers_needs_the_login_of_each_and_is_refused_wh
         copied.contains("openrouter") && !copied.contains(ACCESS),
         "{copied}"
     );
-}
-
-/// A home that keeps what it finds (an eval's, T-785) never fails the rig that ends on it: each
-/// change is kept once, however many rigs end (a long run restarts the app), with the owner's
-/// hashes before the run and after it, and none of what a file holds.
-#[test]
-fn a_home_that_keeps_what_it_finds_never_fails_the_rig_and_keeps_each_change_once_with_the_hashes()
-{
-    for which in ["pi", "codex", "devin", "muse"] {
-        let owner = Owner::new();
-        let isolation = isolation_of(&owner, which).keeping_what_it_finds();
-        assert_eq!(isolation.found(), Some(Found::default()), "{which}");
-        isolation.made_at(at(NOW)).unwrap();
-        assert!(isolation.finish().is_ok(), "{which}");
-        let found = isolation.found().unwrap();
-        assert!(found.changed.is_empty(), "{which}: {found:?}");
-        let checked = found.checked.unwrap();
-        assert!(
-            checked.contains("before the run and after it: ~/"),
-            "{which}: {checked}"
-        );
-        let file = watched(&owner, which).remove(0);
-        let shown = format!(
-            "~/{}",
-            file.strip_prefix(owner.home.path()).unwrap().display()
-        );
-        fs::write(&file, format!("{SENTINEL}-written-by-the-run")).unwrap();
-        for _ in 0..2 {
-            assert!(isolation.finish().is_ok(), "{which}: kept, not failed");
-        }
-        let found = isolation.found().unwrap();
-        assert_eq!(
-            found.changed,
-            [format!("{shown} is not as it was")],
-            "{which}"
-        );
-        let checked = found.checked.unwrap();
-        let (before, after) = checked
-            .strip_prefix(&format!(
-                "the owner's {} setup before the run: ",
-                proper(isolation.harness())
-            ))
-            .and_then(|hashes| hashes.split_once("; after it: "))
-            .unwrap_or_else(|| panic!("{which}: {checked}"));
-        let hash_of = |summary: &str| {
-            summary
-                .split(", ")
-                .find_map(|entry| entry.strip_prefix(&format!("{shown} ")))
-                .map(str::to_owned)
-        };
-        assert_ne!(hash_of(before), hash_of(after), "{which}: {checked}");
-        assert!(hash_of(before).is_some(), "{which}: {checked}");
-        assert!(
-            !checked.contains(SENTINEL) && !said_anywhere(&checked),
-            "{checked}"
-        );
-    }
-    // A home that does not keep them fails the rig, as it always has.
-    let owner = Owner::new();
-    let plain = owner.codex();
-    assert_eq!(plain.found(), None);
-    plain.made_at(at(NOW)).unwrap();
-    fs::write(owner.path(".codex/config.toml"), "written").unwrap();
-    assert!(plain.finish().is_err());
 }
 
 #[test]
@@ -1385,7 +1321,6 @@ fn a_session_the_run_leaves_in_the_owners_pi_folder_is_the_runs_and_the_owners_o
     assert!(isolation.finish().is_ok());
     for run in [
         "--Users-me-.consensflow-candidate-live-pi-parity--",
-        "--Users-me-.consensflow-candidate-evals-workspace--",
         "--var-folders-ab-T-consensflow-integration-AbC-workspace--",
     ] {
         write(&sessions.join(run).join("s.jsonl"), "{}");
@@ -1670,9 +1605,9 @@ fn a_pi_entry_that_ended_on_a_test_machine_is_renewed_by_pi_once_and_the_run_goe
     isolation.finish().unwrap();
 }
 
-/// A run whose Pi windows are on two providers (an eval's chief and staff) is not renewed: the
+/// A run whose Pi windows are on two providers is not renewed: the
 /// renewal runs Pi once on one model, for one login. Its refusal says so plainly, before Pi is
-/// run or anything is made (T-1373 item 6: no eval or live case seats two today).
+/// run or anything is made (T-1373 item 6).
 #[test]
 fn a_pi_run_on_two_providers_is_not_renewed_and_its_refusal_says_two_are_not_supported() {
     let run = Renewing::new();

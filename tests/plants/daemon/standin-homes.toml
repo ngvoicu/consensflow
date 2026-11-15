@@ -1,0 +1,133 @@
+# CLN-77: a stand-in's parent refuses a home outside its own run, for each
+# harness, and Log::begin never reads Pi's provider file. Each plant removes
+# one boundary; its named assertion must catch the silent wrong result.
+
+[run]
+standin-home-unit = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "standin_isolation_"]
+
+[[plant]]
+name = "standin homes: claude home lookup may escape"
+meant = "standin_isolation_claude_home_refuses_the_owner"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));'''
+replace = '''    if harness != Harness::Claude {
+    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));
+    }'''
+
+[[plant]]
+name = "standin homes: codex home lookup may escape"
+meant = "standin_isolation_codex_home_refuses_the_owner"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));'''
+replace = '''    if harness != Harness::Codex {
+    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));
+    }'''
+
+[[plant]]
+name = "standin homes: pi home lookup may escape"
+meant = "standin_isolation_pi_home_refuses_the_owner"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));'''
+replace = '''    if harness != Harness::Pi {
+    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));
+    }'''
+
+[[plant]]
+name = "standin homes: devin home lookup may escape"
+meant = "standin_isolation_devin_home_refuses_the_owner"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));'''
+replace = '''    if harness != Harness::Devin {
+    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));
+    }'''
+
+[[plant]]
+name = "standin homes: muse home lookup may escape"
+meant = "standin_isolation_muse_home_refuses_the_owner"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));'''
+replace = '''    if harness != Harness::Muse {
+    crate::standin_process::require_home(&home, &format!("{} home lookup", harness.name()));
+    }'''
+
+[[plant]]
+name = "standin homes: Log begins by reading Pi providers"
+meant = "standin_isolation_log_begin_never_reads_a_decoy_pi_auth"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''    if !super::keychain::live_case() {'''
+replace = '''    if false {'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '''    assert!(
+        super::keychain::live_case(),
+        "stand-in run attempted Pi provider lookup"
+    );'''
+replace = '''    // The plant lets provider discovery read the stand-in's decoy.'''
+
+[[plant]]
+name = "standin homes: audit lookup may open an unowned file"
+meant = "standin_isolation_unowned_audit_file_is_refused_before_it_is_opened"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''            && handed.iter().any(|root| same_or_inside(&file, root)),'''
+replace = '''            && (handed.iter().any(|root| same_or_inside(&file, root)) || true),'''
+
+[[plant]]
+name = "standin homes: missing inherited home permits PATH lookup"
+meant = "standin_isolation_missing_inherited_home_refuses_before_searching_path"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''    assert!(
+        ["HOME", "USERPROFILE"]
+            .iter()
+            .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty())),
+        "stand-in inherited HOME lookup: neither HOME nor USERPROFILE names a home"
+    );'''
+replace = '''    // The plant leaves the inherited account boundary unknown.'''
+
+[[plant]]
+name = "standin homes: inherited account path remains searchable"
+meant = "standin_isolation_inherited_account_home_is_not_searched_on_path"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''        !launchers.iter().any(|home| same_or_inside(folder, home))'''
+replace = '''        !launchers.iter().any(|_home| false)'''
+
+[[plant]]
+name = "standin homes: Muse launcher search enters an inherited harness home"
+meant = "standin_isolation_muse_search_passes_over_an_inherited_harness_home"
+runs = ["standin-home-unit"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/standin_process.rs"
+find = '''    let forbidden = INHERITED_HARNESS_HOMES
+        .get()
+        .unwrap_or_else(|| panic!("stand-in inherited homes not recorded"));
+    safe_path_entry(path, forbidden)'''
+replace = '''    let _ = path;
+    true'''

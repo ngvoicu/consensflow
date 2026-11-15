@@ -529,6 +529,12 @@ fn invocation(context: &Context, asked: &Asked) -> Invocation {
         .arg("--")
         .args(always)
         .args(test_program);
+    if asked.test == "matrix" && !test_program.iter().any(|word| word == "--exact") {
+        invocation = invocation.args([
+            "--exact",
+            "a_board_of_real_harnesses_goes_through_its_scenario_as_the_ledger_and_the_records_say",
+        ]);
+    }
     for (name, value) in &asked.vars {
         invocation = invocation.var(name, value);
     }
@@ -679,6 +685,8 @@ fn started(context: &Context, asked: &Asked) -> Invocation {
         .var(BUILT, &folder)
         .var(HELPERS, &folder)
         .var(NO_BUILD, "1")
+        .var("CF_E2E_LIVE_MATRIX", "1")
+        .var("CF_E2E_ISOLATED_LIVE", "1")
 }
 
 #[cfg(test)]

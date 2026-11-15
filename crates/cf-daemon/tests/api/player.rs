@@ -144,7 +144,8 @@ impl Player<'_> {
                     .front
                     .context
                     .credentials
-                    .issue(step["project"].as_i64().expect("a project"), participant);
+                    .issue(step["project"].as_i64().expect("a project"), participant)
+                    .unwrap();
                 self.names
                     .issued(step["token"].as_str().expect("a name"), token);
                 Ok(())

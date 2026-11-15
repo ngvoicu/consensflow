@@ -74,10 +74,11 @@ impl Supervised {
         vars: &[(&str, String)],
         codex: Option<&dyn Fn(&Path) -> PathBuf>,
     ) -> Result<Self> {
-        Self::start_in("cf-cx-", args, vars, codex)
+        Self::start_short("cx-", args, vars, codex)
     }
 
     /// [`Supervised::start`], the home in a folder named from `prefix`.
+    #[cfg(not(unix))]
     fn start_in(
         prefix: &str,
         args: &[&str],
@@ -91,7 +92,65 @@ impl Supervised {
             path: std::env::temp_dir(),
             source,
         })?;
-        let home = outer.path().join("home");
+        Self::start_on(outer, "home", args, vars, codex)
+    }
+
+    /// These tests need the socket under the window home itself. A hosted Mac's
+    /// temp path plus the stand-in process home can otherwise exceed sun_path
+    /// and put it in the fallback temp folder instead.
+    fn start_short(
+        prefix: &str,
+        args: &[&str],
+        vars: &[(&str, String)],
+        codex: Option<&dyn Fn(&Path) -> PathBuf>,
+    ) -> Result<Self> {
+        #[cfg(not(unix))]
+        {
+            Self::start_in(prefix, args, vars, codex)
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+
+            let temp = std::env::temp_dir();
+            let parent = temp
+                .parent()
+                .ok_or_else(|| Error::Daemon("stand-in temp has no parent".into()))?;
+            // macOS names the same temp through /private/var (or /private/tmp),
+            // but its /var (or /tmp) spelling gives a socket eight more bytes.
+            #[cfg(target_os = "macos")]
+            let parent = if let Ok(rest) = parent.strip_prefix("/private/var") {
+                Path::new("/var").join(rest)
+            } else if let Ok(rest) = parent.strip_prefix("/private/tmp") {
+                Path::new("/tmp").join(rest)
+            } else {
+                parent.to_path_buf()
+            };
+            #[cfg(not(target_os = "macos"))]
+            let parent = parent.to_path_buf();
+            let outer = cf_e2e::door::made_in(&parent, prefix).map_err(|source| Error::File {
+                action: "make a folder in",
+                path: parent,
+                source,
+            })?;
+            let socket = outer.path().join("h/tmp/codex-XXXXXX/native.sock");
+            if socket.as_os_str().as_bytes().len() >= 104 {
+                return Err(Error::Daemon(
+                    "test home makes the Codex socket path too long".into(),
+                ));
+            }
+            Self::start_on(outer, "h", args, vars, codex)
+        }
+    }
+
+    fn start_on(
+        outer: Made,
+        home_name: &str,
+        args: &[&str],
+        vars: &[(&str, String)],
+        codex: Option<&dyn Fn(&Path) -> PathBuf>,
+    ) -> Result<Self> {
+        let home = outer.path().join(home_name);
         cf_e2e::door::make_dir(&home)?;
         let root = Home {
             _outer: outer,
@@ -367,7 +426,12 @@ fn opens_codex_as_its_server_on_a_private_socket_and_its_tui_through_the_broker_
 #[test]
 fn says_why_codexs_server_could_not_start_in_the_window_and_leaves_nothing_behind() -> Outcome {
     let _turn = serial::turn();
-    let mut s = Supervised::start(&[], &[("CF_TEST_CODEX_BACKEND", "fail".to_owned())], None)?;
+    let mut s = Supervised::start_short(
+        "cx-",
+        &[],
+        &[("CF_TEST_CODEX_BACKEND", "fail".to_owned())],
+        None,
+    )?;
     // It ends with the status of why (79, the server stopped before it was ready): the third
     // reading of T-1322 found the server's own words, a path among them, quoted from a window
     // that ended with 1 (T-1328).
@@ -393,7 +457,7 @@ fn says_why_codexs_server_could_not_start_in_the_window_and_leaves_nothing_behin
     // error 2), not its path (3).
     // It ends with the status of why (70, the program was not found), which the engine reads from
     // how the window ended to say that Codex never ran, without quoting this screen (T-1328).
-    let mut missing = Supervised::start(&[], &[], Some(&|root| root.join("codex")))?;
+    let mut missing = Supervised::start_short("cx-", &[], &[], Some(&|root| root.join("codex")))?;
     assert_eq!(missing.exit()?, Some(70), "{}", missing.stderr());
     let gone = regex::escape(&missing.root.path().join("codex").to_string_lossy());
     let said = missing.stderr();
@@ -437,8 +501,8 @@ impl Drop for Unlocked {
 fn a_server_that_failed_and_a_socket_folder_that_cannot_be_removed_end_the_window_with_79_and_no_path(
 ) -> Outcome {
     let _turn = serial::turn();
-    let mut s = Supervised::start_in(
-        "cf-hunter22-",
+    let mut s = Supervised::start_short(
+        "hunter22-",
         &[],
         &[("CF_TEST_CODEX_BACKEND", "fail-locked".to_owned())],
         None,

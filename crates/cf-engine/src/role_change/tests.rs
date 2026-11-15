@@ -1281,3 +1281,30 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
         1
     );
 }
+
+/// The role-change concerns have separate owners, so each can be followed without
+/// reading the other decision paths in the same file.
+#[test]
+fn role_change_places_each_concern_in_its_own_module() {
+    let root = include_str!("../role_change.rs");
+    for (module, method) in [
+        ("comparison", "pub(crate) fn compare_role("),
+        ("replacement", "fn replace_role("),
+        ("greeting", "pub(crate) fn greet_switched("),
+        ("confirmation", "pub(crate) fn confirm_delivered("),
+    ] {
+        assert!(
+            !root.contains(method),
+            "{method} still shares the root module"
+        );
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/role_change")
+            .join(format!("{module}.rs"));
+        let source = std::fs::read_to_string(&path).expect("the concern's module");
+        assert!(
+            source.contains(method),
+            "{method} is not in {}",
+            path.display()
+        );
+    }
+}

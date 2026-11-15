@@ -1342,7 +1342,7 @@ meant = "a_table_that_goes_asks_every_window_to_end_before_it_waits_on_any"
 runs = ["panes-lib-close"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/teardown.rs"
 find = '''
         for (pane, _) in ask_all_to_exit(panes.values_mut(), self.close_grace) {
             let _ = terminate_asked(pane);
@@ -1994,7 +1994,7 @@ replace = """
 }"""
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/spawn.rs"
 find = """
         #[cfg(target_os = "macos")]
         let tree;"""
@@ -2005,7 +2005,7 @@ replace = """
         let job;"""
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/spawn.rs"
 find = """
             #[cfg(target_os = "macos")]
             {
@@ -2022,7 +2022,7 @@ replace = """
             }"""
 
 [[plant.edit]]
-file = "crates/cf-panes/src/pty.rs"
+file = "crates/cf-panes/src/pty/spawn.rs"
 find = "            owed: self.exits.owe(),"
 replace = """            owed: self.exits.owe(),
             #[cfg(windows)]

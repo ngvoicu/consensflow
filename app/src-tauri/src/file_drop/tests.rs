@@ -9,6 +9,70 @@ use tauri::{App, Listener, PhysicalPosition, WebviewWindowBuilder};
 
 use super::*;
 
+#[test]
+fn notification_failure_says_the_recorded_drop_was_not_sent() {
+    let rig = app();
+    let event = WindowEvent::DragDrop(DragDropEvent::Drop {
+        paths: vec![PathBuf::from(DASHED)],
+        position: PhysicalPosition::new(120.5, 64.0),
+    });
+    let said = std::cell::RefCell::new(Vec::new());
+    hear_with(
+        &rig.window.as_ref().window(),
+        &event,
+        |target, name, body| {
+            assert_eq!(target, EventTarget::labeled(MAIN));
+            assert_eq!(name, DROP_EVENT);
+            assert_eq!(
+                body,
+                json!({"id":1,"paths":[DASHED],"position":{"x":120.5,"y":64.0}})
+            );
+            Err(std::io::Error::other("webview gone").into())
+        },
+        |line| said.borrow_mut().push(line.to_owned()),
+    );
+    assert_eq!(
+        rig.app.state::<Dropped>().paths_of(1),
+        Some(vec![DASHED.to_owned()]),
+        "the drop was already recorded"
+    );
+    let said = said.into_inner();
+    assert_eq!(said.len(), 1, "one diagnostic for the failed send");
+    assert!(said[0].contains(DROP_EVENT), "{}", said[0]);
+    assert!(said[0].contains("webview gone"), "{}", said[0]);
+    assert!(said[0].contains("try dropping it again"), "{}", said[0]);
+    assert!(
+        !said[0].contains(DASHED),
+        "the diagnostic does not disclose the file's path"
+    );
+}
+
+#[test]
+fn a_notification_failure_for_a_drop_without_files_is_said_too() {
+    let rig = app();
+    let event = WindowEvent::DragDrop(dropping(&[]));
+    let said = std::cell::RefCell::new(Vec::new());
+    hear_with(
+        &rig.window.as_ref().window(),
+        &event,
+        |target, name, body| {
+            assert_eq!(target, EventTarget::labeled(MAIN));
+            assert_eq!(name, DROP_EVENT);
+            assert_eq!(
+                body,
+                json!({"id":null,"paths":[],"position":{"x":0.0,"y":0.0}})
+            );
+            Err(std::io::Error::other("webview gone").into())
+        },
+        |line| said.borrow_mut().push(line.to_owned()),
+    );
+    assert!(rig.app.state::<Dropped>().paths_of(1).is_none());
+    let said = said.into_inner();
+    assert_eq!(said.len(), 1);
+    assert!(said[0].contains("without a number"), "{}", said[0]);
+    assert!(said[0].contains("webview gone"), "{}", said[0]);
+}
+
 /// The page's origin, as the app's webview has it on this system: the app answers a
 /// page of any other as a remote one.
 const ORIGIN: &str = if cfg!(windows) {

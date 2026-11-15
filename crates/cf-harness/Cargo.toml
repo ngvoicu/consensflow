@@ -55,7 +55,7 @@ name = "pi-send"
 path = "src/bin/pi_send.rs"
 required-features = ["test-support"]
 
-# What the evals and the live tools ask of the harness code: a harness's own
+# What the live tools ask of the harness code: a harness's own
 # record of a conversation, its window's command line, the text a window
 # takes, and the settings of a Claude window (`tooling`).
 [[bin]]
@@ -65,6 +65,10 @@ required-features = ["test-support"]
 
 [dev-dependencies]
 cf-harness = { path = ".", features = ["test-support"] }
+# Plant tests which exercise stand-ins run with the same process-home boundary
+# as the e2e rig, before the test harness makes any threads.
+cf-e2e = { path = "../cf-e2e" }
+ctor = { version = "1.0.13", default-features = false }
 # What a program a test starts holds.
 cf-process = { workspace = true, features = ["test-support"] }
 flate2.workspace = true

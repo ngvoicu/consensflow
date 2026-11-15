@@ -116,12 +116,12 @@ const HOLD_SAID: &str = "a task held for its member's quota, whose first note of
 const TELL_WAYS_ON: &str = "a tell answer to a paused task records the tasks whose ways-on footer its paste carries in `delivery.begun`, so that paste is recognised after the task moves; Node's event has no such field";
 
 const DEPARTED: &[(&str, usize, &str)] = &[
-    ("evals-measure-002", 0, NAMED_BY_MODEL),
-    ("evals-measure-004", 0, NAMED_BY_MODEL),
-    ("evals-measure-006", 0, NAMED_BY_MODEL),
-    ("evals-measure-008", 0, NAMED_BY_MODEL),
-    ("evals-measure-010", 0, NAMED_BY_MODEL),
-    ("evals-measure-016", 0, NAMED_BY_MODEL),
+    ("ledger-history-002", 0, NAMED_BY_MODEL),
+    ("ledger-history-004", 0, NAMED_BY_MODEL),
+    ("ledger-history-006", 0, NAMED_BY_MODEL),
+    ("ledger-history-008", 0, NAMED_BY_MODEL),
+    ("ledger-history-010", 0, NAMED_BY_MODEL),
+    ("ledger-history-016", 0, NAMED_BY_MODEL),
     ("home-copies-002", 1, NAMED_BY_MODEL),
     ("home-copies-003", 1, NAMED_BY_MODEL),
     ("ledger-conversations-006", 1, NAMED_BY_MODEL),
@@ -176,8 +176,8 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-page-023", 8, WAITED_FOR),
     ("core-page-025", 8, UNREACHED),
     ("core-page-026", 14, UNREACHED),
-    ("evals-measure-001", 12, "a tell answer to a paused task records the tasks whose ways-on footer its paste carries in `delivery.begun`, so that paste is recognised after the task moves; Node's event has no such field; its later departure: the chief accepts the task while its result is still queued, so the result is withdrawn where Node leaves it to be pasted"),
-    ("evals-measure-015", 32, RESULT_ACCEPTED),
+    ("ledger-history-001", 12, "a tell answer to a paused task records the tasks whose ways-on footer its paste carries in `delivery.begun`, so that paste is recognised after the task moves; Node's event has no such field; its later departure: the chief accepts the task while its result is still queued, so the result is withdrawn where Node leaves it to be pasted"),
+    ("ledger-history-015", 32, RESULT_ACCEPTED),
     ("home-copies-001", 34, KEPT_IN_BRIEF),
     ("home-copies-004", 34, KEPT_IN_BRIEF),
     ("ledger-conversations-008", 20, RESULT_ACCEPTED),
@@ -453,6 +453,14 @@ const AT_ONCE: usize = 1;
 /// four minutes of its step on the 425 of them, one after another.
 fn alongside<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Vec<R> {
     let threads = thread::available_parallelism().map_or(1, |count| count.get().min(AT_ONCE));
+    alongside_with_threads(items, threads, work)
+}
+
+fn alongside_with_threads<T: Sync, R: Send>(
+    items: &[T],
+    threads: usize,
+    work: impl Fn(&T) -> R + Sync,
+) -> Vec<R> {
     let next = AtomicUsize::new(0);
     let answers: Vec<Mutex<Option<R>>> = items.iter().map(|_| Mutex::new(None)).collect();
     thread::scope(|scope| {
@@ -535,7 +543,8 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
 fn the_replays_are_shared_out_once_each_and_answered_in_the_order_they_came() {
     let items: Vec<usize> = (0..500).collect();
     let made: Vec<AtomicUsize> = items.iter().map(|_| AtomicUsize::new(0)).collect();
-    let answers = alongside(&items, |item| {
+    // Actual traces stay at one worker; this cheap work exercises the shared counter.
+    let answers = alongside_with_threads(&items, 2, |item| {
         made[*item].fetch_add(1, Ordering::Relaxed);
         item * 2
     });

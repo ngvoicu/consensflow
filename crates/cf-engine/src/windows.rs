@@ -754,7 +754,6 @@ impl Dispatcher {
             prelude,
             role,
         } = compared;
-        let launch_id = self.seams.launch_ids.draw();
         let generation = self.next_generation();
         let delivering = first.as_ref().map(|first| Delivering {
             message: first.id,
@@ -782,6 +781,19 @@ impl Dispatcher {
         let failing = delivering
             .clone()
             .or_else(|| self.displaced(participant, prelude.as_ref()));
+        // Without an id from the system the launch fails as any that did not come up
+        // does, in a note: nothing was written for it yet.
+        let launch_id = match self.seams.launch_ids.draw() {
+            Ok(drawn) => drawn,
+            Err(cause) => {
+                let said = self.startup_words(
+                    participant,
+                    Startup::new(Stage::Prepare, Why::Unsaid),
+                    &cause,
+                );
+                return self.launch_failed(record, project, participant, failing, &said);
+            }
+        };
         // Boxed, so that the work of an operation that launches stays small
         // (`dispatcher::tests`): the plan asks the harness and prepares the window,
         // and what it comes to is held on the heap through the waits after it.
@@ -844,7 +856,19 @@ impl Dispatcher {
             .conversation
             .as_ref()
             .and_then(|conversation| conversation.native_session.clone());
-        let token = self.seams.credentials.issue(project.id, participant.id);
+        let token = match self.seams.credentials.issue(project.id, participant.id) {
+            Ok(token) => token,
+            Err(cause) => {
+                // The plan wrote the launch's files; no window will read them.
+                self.seams.launch_files.forget(&launch_id);
+                let said = self.startup_words(
+                    participant,
+                    Startup::new(Stage::Prepare, Why::Unsaid),
+                    &cause,
+                );
+                return self.launch_failed(record, project, participant, failing, &said);
+            }
+        };
         let pane = Pane {
             id: format!("p{}-{}", project.id, participant.handle),
             generation: u64::try_from(generation).unwrap_or_default(),

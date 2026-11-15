@@ -37,7 +37,7 @@
 //! token it fails loudly with a 401, the person's login untouched). A run starts only on a login
 //! whose access token lasts at least as long as the run is to take, with a margin: the length the
 //! case plans for itself and the margin ([`Login::of_machine_lasting`]: a live case states its own,
-//! minutes long, and an eval its own, hours long). It says it if the copy changed all the same:
+//! minutes long). It says it if the copy changed all the same:
 //! the folder's `.credentials.json` is compared with what was copied, and the Keychain with the
 //! items it had. Nothing refreshes it by hand, here or anywhere. (On a test machine, the
 //! one exception: a login that has run short is renewed by Claude Code itself, run once as
@@ -51,8 +51,7 @@
 //! whole of `~/.claude.json`: the person's own Claude Code sessions write the rest
 //! of it all day.) A run that fails any of them fails, with the Claude Code of the
 //! person's windows named as the other possible writer. The run's folders are the
-//! live suites' (`~/.consensflow-candidate/live/…`), the rigs' homes, and the evals'
-//! workspace (`~/.consensflow-candidate/evals/…`).
+//! live suites' (`~/.consensflow-candidate/live/…`) and the rigs' homes.
 //!
 //! **What a kept home keeps.** The folder goes with the run, because it holds a login.
 //! A rig whose home is kept (`--keep`, or a case that reads the home after it ended)
@@ -74,7 +73,7 @@ use sha2::{Digest, Sha256};
 use super::keychain;
 use super::machine::Harness;
 use super::renew::{self, Kept, Renewal, Renewed, TestMachine};
-use crate::process::{own_var, Run};
+use crate::process::own_var;
 use crate::rig::ClaudeConfig;
 use crate::{files, Error, Result};
 
@@ -125,12 +124,15 @@ impl Source {
     /// What it holds, as its text; never said anywhere.
     fn read(&self) -> Result<String> {
         match self {
-            Self::File(file) => files::read_string(file).map_err(|failed| {
-                Error::Daemon(format!(
+            Self::File(file) => {
+                crate::standin_process::require_home(file, "Claude login lookup");
+                files::read_string(file).map_err(|failed| {
+                    Error::Daemon(format!(
                     "Claude Code's login is not in {} ({failed}): log in by running `claude` once",
                     file.display()
                 ))
-            }),
+                })
+            }
             Self::Keychain => {
                 let user = own_var("USER")
                     .or_else(|| own_var("LOGNAME"))
@@ -143,11 +145,11 @@ impl Source {
                     })?;
                 // The login Keychain asks the person once to let it be read; a run
                 // waits for the answer (the call is limited, below).
-                let ran = Run::new("/usr/bin/security")
-                    .args(keychain_args(&user))
-                    .inheriting_env()
-                    .limit(Duration::from_secs(120))
-                    .run()?;
+                let ran = super::keychain::security(
+                    "login::Source::read",
+                    keychain_args(&user),
+                    Duration::from_secs(120),
+                )?;
                 if ran.code != Some(0) {
                     // What it printed is the login, or nothing: only what it said is shown.
                     return Err(Error::Daemon(format!(
@@ -291,16 +293,16 @@ fn services(dump: &str) -> BTreeSet<String> {
 /// The names of those items now; none where the machine has no Keychain (or it cannot be
 /// listed, which a run then cannot check).
 pub fn keychain_services() -> Option<BTreeSet<String>> {
-    if !cfg!(target_os = "macos") {
+    if !cfg!(target_os = "macos") && !cfg!(test) {
         return None;
     }
-    let ran = Run::new("/usr/bin/security")
-        .arg("dump-keychain")
-        .inheriting_env()
-        .limit(Duration::from_secs(60))
-        .run()
-        .ok()
-        .filter(|ran| ran.code == Some(0))?;
+    let ran = super::keychain::security(
+        "login::keychain_services",
+        ["dump-keychain"],
+        Duration::from_secs(60),
+    )
+    .ok()
+    .filter(|ran| ran.code == Some(0))?;
     Some(services(&ran.stdout))
 }
 
@@ -343,21 +345,16 @@ fn keychain_of(folder: &Path, before: &BTreeSet<String>, now: &BTreeSet<String>)
 }
 
 /// Whether `path` is a folder a run worked in: a live folder of the candidate
-/// (`~/.consensflow-candidate/live/…`), the evals' (`~/.consensflow-candidate/evals/…`: the
-/// workspace of every eval), or in the home of a rig.
+/// (`~/.consensflow-candidate/live/…`) or in the home of a rig.
 fn is_run_folder(path: &str) -> bool {
     // Windows writes a folder with its own separator in some places and with ours in others.
     let path = path.replace('\\', "/");
-    path.contains("/.consensflow-candidate/live/")
-        || path.contains("/.consensflow-candidate/evals/")
-        || path.contains("consensflow-integration-")
+    path.contains("/.consensflow-candidate/live/") || path.contains("consensflow-integration-")
 }
 
 /// Whether `name` is the name Claude Code gives (in `~/.claude/projects`) to a folder of a run.
 fn is_run_name(name: &str) -> bool {
-    name.contains("-consensflow-candidate-live-")
-        || name.contains("-consensflow-candidate-evals-")
-        || name.contains("consensflow-integration-")
+    name.contains("-consensflow-candidate-live-") || name.contains("consensflow-integration-")
 }
 
 /// The hash of `bytes`, as hexadecimal.
@@ -633,9 +630,8 @@ pub struct Login {
 impl Login {
     /// The login of this machine's Claude Code, for a run that takes `left` at the most, margin
     /// included: the folder is made only if the access token lasts that much more (a live case
-    /// states its planned length and the margin, [`super::Log::lasting`]; an eval, hours long,
-    /// its own). Claude Code refreshes a token when five minutes of it are left, so a run that is
-    /// shorter than the token has left never does. None where the run has no home to look for it in.
+    /// states its planned length and the margin, [`super::Log::lasting`]). Claude Code refreshes a
+    /// token when five minutes of it are left, so a run shorter than the token has left never does. None where the run has no home to look for it in.
     pub fn of_machine_lasting(left: Duration) -> Option<Self> {
         Self::of_machine_on(TestMachine::detect(), left)
     }
@@ -773,7 +769,11 @@ impl Login {
             oauth: copy,
             login: oauth,
             owner: self.owner.look(),
-            services: keychain_services(),
+            services: if keychain::watching() {
+                keychain_services()
+            } else {
+                None
+            },
             renewed,
         });
         Ok(path)
@@ -941,7 +941,11 @@ impl ClaudeConfig for Login {
         }
         let mut refreshed: Vec<String> = made.refreshed().into_iter().collect();
         let mut kept = Vec::new();
-        if let (Some(before), Some(now)) = (&made.services, keychain_services()) {
+        if let Some((before, now)) = made
+            .services
+            .as_ref()
+            .and_then(|before| keychain_services().map(|now| (before, now)))
+        {
             let found = keychain_of(made.folder.path(), before, &now);
             for other in &found.others {
                 let _ = writeln!(io::stderr(), "note: {other}");

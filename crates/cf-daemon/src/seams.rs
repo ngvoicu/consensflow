@@ -14,7 +14,7 @@ use cf_engine::runtime::{Executor, LocalWork, Spawn};
 use cf_engine::seams::{Adapters, LaunchFiles, LaunchIds, PaneEnv, Roles};
 use cf_harness::contract::{Adapter, LaunchId};
 use cf_harness::launch::adapter;
-use cf_harness::seams::{uuid, Services, SystemEntropy};
+use cf_harness::seams::{uuid, Entropy, Services, SystemEntropy};
 use cf_ledger::{ParticipantView, ProjectView};
 use cf_proto::agents::{is_parent_session_variable, Harness};
 use cf_proto::cf_word::{CfWord, Shell, ENV as CF_ENV};
@@ -173,16 +173,35 @@ impl Roles for RoleTexts {
     }
 }
 
-/// Each launch's id, new (`randomUUID`). Panics where the system gives no
-/// randomness, which no launch may then be made without.
-pub struct RandomLaunchIds;
+/// Each launch's id, new (`randomUUID`). Where the system gives no randomness
+/// the draw says so, and no launch is made without.
+pub struct RandomLaunchIds {
+    entropy: Box<dyn Entropy>,
+}
+
+impl RandomLaunchIds {
+    /// Ids drawn from the system's randomness.
+    pub fn new() -> Self {
+        Self::with_entropy(Box::new(SystemEntropy))
+    }
+
+    /// Ids drawn from `entropy`.
+    pub fn with_entropy(entropy: Box<dyn Entropy>) -> Self {
+        Self { entropy }
+    }
+}
+
+impl Default for RandomLaunchIds {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl LaunchIds for RandomLaunchIds {
-    fn draw(&self) -> LaunchId {
-        let drawn = uuid(&SystemEntropy).unwrap_or_else(|failed| {
-            panic!("the system gave no randomness: {failed}");
-        });
-        LaunchId::new(&drawn).unwrap_or_else(|| panic!("a uuid that is none: {drawn}"))
+    fn draw(&self) -> Result<LaunchId, String> {
+        let drawn = uuid(self.entropy.as_ref())
+            .map_err(|failed| format!("the system gave no randomness: {failed}"))?;
+        LaunchId::new(&drawn).ok_or_else(|| format!("a uuid that is none: {drawn}"))
     }
 }
 

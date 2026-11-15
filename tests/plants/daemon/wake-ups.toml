@@ -526,7 +526,7 @@ meant = "the_human_typing_to_the_chief_in_its_window_counts_and_what_a_delivery_
 runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/read.rs"
 find = '        header_of(text).is_none() && delivered_at(*conversation).is_none_or(|at| *seq > at)'
 replace = '        !text.is_empty() || delivered_at(*conversation).is_none_or(|at| *seq > at)'
 

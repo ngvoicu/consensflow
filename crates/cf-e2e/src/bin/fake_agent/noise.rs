@@ -1,6 +1,6 @@
 //! A window that prints as fast as it can for as long as it is asked to, as a harness's
 //! screen does that repaints itself for hours: what tells how much of a window's output
-//! the rig holds (the long run's two hours, zeewin's 7 GB). It is this program started
+//! the rig holds. It is this program started
 //! with [`NOISE`] first: `fake-agent --noise <bytes> <done file>`. It prints lines of
 //! text until it has printed `<bytes>`, then [`DONE`] on a line of its own, writes
 //! `<done file>`, and waits to be ended.

@@ -96,10 +96,6 @@ const GONE: Duration = Duration::from_secs(3);
 #[cfg(windows)]
 const GONE: Duration = Duration::from_secs(10);
 
-/// How long the router is given to read what the pane host wrote last, once the
-/// host has gone.
-const LAST_FRAMES: Duration = Duration::from_secs(10);
-
 /// How long a window's first frame is waited for by default.
 pub const OPEN: Duration = Duration::from_secs(10);
 
@@ -129,54 +125,10 @@ pub struct Config {
     /// each turn this many milliseconds long.
     muse: Option<(crate::muse::Installed, crate::muse::Run)>,
     finder: bool,
-    masker: Option<Masker>,
     reports: Option<PathBuf>,
     homes: Option<PathBuf>,
     case: Option<String>,
     judged: bool,
-}
-
-/// What a rig passes what it says of itself through, where its owner gives it one
-/// ([`Config::masked_by`]): a run that hides what looks like a key or a token in all
-/// it says. Each text is passed whole, before any of it is cut; a window's screen as
-/// its rows, which the owner masks as one text. A rig with none says it as it is.
-#[derive(Clone)]
-pub struct Masker {
-    text: Arc<dyn Fn(&str) -> String + Send + Sync>,
-    screen: Arc<ScreenMask>,
-}
-
-/// What a masker passes the rows of a window's screen through.
-type ScreenMask = dyn Fn(&[String]) -> Vec<String> + Send + Sync;
-
-impl Masker {
-    /// A masker that passes each text through `text`, and the rows of each window's
-    /// screen through `screen`.
-    pub fn new(
-        text: impl Fn(&str) -> String + Send + Sync + 'static,
-        screen: impl Fn(&[String]) -> Vec<String> + Send + Sync + 'static,
-    ) -> Self {
-        Self {
-            text: Arc::new(text),
-            screen: Arc::new(screen),
-        }
-    }
-
-    /// `text` as it is said.
-    pub fn shown(&self, text: &str) -> String {
-        (self.text)(text)
-    }
-
-    /// The rows of a window's screen as they are said.
-    pub fn screen(&self, rows: &[String]) -> Vec<String> {
-        (self.screen)(rows)
-    }
-}
-
-impl std::fmt::Debug for Masker {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str("Masker")
-    }
 }
 
 impl Config {
@@ -199,7 +151,6 @@ impl Config {
             devin: None,
             muse: None,
             finder: false,
-            masker: None,
             reports: None,
             homes: None,
             case: None,
@@ -260,16 +211,6 @@ impl Config {
     #[must_use]
     pub fn homes_in(mut self, folder: impl Into<PathBuf>) -> Self {
         self.homes = Some(folder.into());
-        self
-    }
-
-    /// With what the rig says of itself, when a case leaves it unclosed (its windows'
-    /// screens, the programs' error output, the daemon's log), passed through
-    /// `masker` first: for an owner that hides what looks like a key or a token in all
-    /// it says (the long run of the evals). Every other rig says it as it is.
-    #[must_use]
-    pub fn masked_by(mut self, masker: Masker) -> Self {
-        self.masker = Some(masker);
         self
     }
 
@@ -463,26 +404,10 @@ pub trait ClaudeConfig: std::fmt::Debug + Send + Sync {
     /// the run did that it was not to, and fails the case that ends the rig.
     fn finish(&self) -> Result;
 
-    /// Whether what [`ClaudeConfig::finish`] finds is kept for the run's report and never ends the
-    /// rig in an error (an eval's, which must not lose hours of evidence to it). The guard of the
-    /// owner's Keychain then leaves it to this config, which names the item of its own folder
-    /// ([`crate::live::launcher::Guard::leaving_the_keychain_to_the_login`]).
+    /// Whether this config records its own Keychain findings instead of the launcher guard.
     fn keeps_its_findings(&self) -> bool {
         false
     }
-}
-
-/// What a rig that closed leaves: its root, kept, and the last word of the pane
-/// host on its windows, read to its end: every exit it told, those since a case last
-/// asked among them. (The host tells none of the windows it reaps as it shuts down:
-/// its panes' threads send `pane.exit` after its bridge has closed.)
-#[derive(Debug, Clone, PartialEq)]
-pub struct Last {
-    pub root: PathBuf,
-    /// Every `pane.exit` the host told, with when the rig saw it ([`Rig::timed_exits`]).
-    pub exits: Vec<(Value, i64)>,
-    /// Every `pane.kill` the daemon asked ([`Rig::kills`]).
-    pub kills: Vec<Value>,
 }
 
 /// A process a window's stand-in agent started, as it wrote it down.
@@ -513,8 +438,6 @@ pub struct Rig {
     /// config folder ([`Config::claude_config`]) and the harnesses' ([`Config::isolated`]),
     /// and whether they have been asked what the run came to ([`HarnessHome::finish`]).
     homes: Homes,
-    /// What it passes what it says of itself through ([`Config::masked_by`]).
-    masker: Option<Masker>,
     /// Where its report is kept, where it is not beside its home ([`Config::reports_in`]).
     reports: Option<PathBuf>,
     /// The case that started it, as its report names it ([`Config::case`]).
@@ -886,19 +809,6 @@ impl Rig {
         Ok(self.root.clone())
     }
 
-    /// [`Rig::close_keeping_the_root_within`], with what the pane host said last of
-    /// its windows, read to the end of its output: every exit it told, which a case
-    /// that took the exits before the close may not have seen yet (a process a
-    /// window's close ended, named in its `pane.exit` and nowhere before). Where the
-    /// router has not read to the end of the host's output a few seconds after the
-    /// host ended, [`Error::Unread`], with what it had read.
-    pub fn close_with_the_last_exits_within(mut self, within: Duration) -> Result<Last> {
-        self.keep_root = true;
-        // The host ends, and the router reads what it wrote to its end after it.
-        self.shutdown(within)?;
-        last_word(&self.shared, self.root.clone(), LAST_FRAMES)
-    }
-
     /// For a case that holds the close to fail (the rig's checks of what the pane host
     /// ended, of what a window left running): a close that fails keeps no report of
     /// the rig, since the failure is what the case is about and it says it. That is
@@ -999,7 +909,7 @@ impl Rig {
 impl Rig {
     /// What a failed case of the rig leaves of it, as the report the rig keeps says it: the
     /// windows' screens, the daemon's failure events and log, and what the stand-in agents
-    /// wrote, all told through the masker the rig was given.
+    /// wrote.
     pub fn failure_report(&self) -> String {
         report::report_of(self)
     }
@@ -1042,36 +952,6 @@ impl Drop for Rig {
             let _ = crate::door::Door::of_run().remove_made(&self.root);
         }
     }
-}
-
-/// The last word of the pane host the routers of `shared` read, once its output has
-/// ended, waited for up to `within`; the rig's root is `root`. Where it has not ended
-/// by then, [`Error::Unread`] with what was read so far: an exit the host tells after
-/// is none of it.
-fn last_word(shared: &Shared, root: PathBuf, within: Duration) -> Result<Last> {
-    let ended = wait::until(within, || shared.seen().host_ended);
-    let seen = shared.seen();
-    let last = Last {
-        root,
-        exits: seen
-            .exits
-            .iter()
-            .cloned()
-            .zip(seen.exit_times.iter().copied())
-            .collect(),
-        kills: seen.kills.clone(),
-    };
-    if ended {
-        return Ok(last);
-    }
-    Err(Error::Unread {
-        said: format!(
-            "the pane host's output had not ended {} s after the host did: what it told after is not read (host frames={})",
-            within.as_secs(),
-            seen.host
-        ),
-        last: Box::new(last),
-    })
 }
 
 /// The process the pane host said, among the windows it answered the open of (`roots`),
@@ -1200,40 +1080,5 @@ mod tests {
         assert_eq!(recorded(&config, "s-1"), whole);
         // A conversation nothing has been written of is nothing.
         assert_eq!(recorded(&config, "s-2"), "");
-    }
-
-    #[test]
-    fn a_last_word_not_read_to_its_end_in_time_is_an_error_that_holds_what_was_read() {
-        let shared = Arc::new(Shared::default());
-        let root = PathBuf::from("/nowhere");
-        {
-            let mut seen = shared.seen();
-            seen.exits
-                .push(serde_json::json!({ "id": "p1-chief", "generation": 1 }));
-            seen.exit_times.push(1_000);
-        }
-        // The host's last exit comes late: after the wait for its output's end.
-        let late = Arc::clone(&shared);
-        let telling = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(600));
-            let mut seen = late.seen();
-            seen.exits
-                .push(serde_json::json!({ "id": "p1-worker", "generation": 2 }));
-            seen.exit_times.push(2_000);
-            seen.host_ended = true;
-        });
-        let Err(Error::Unread { said, last }) =
-            last_word(&shared, root.clone(), Duration::from_millis(100))
-        else {
-            panic!("the output had not ended, and it was taken for the whole");
-        };
-        assert!(said.contains("had not ended"), "{said}");
-        assert_eq!(last.exits.len(), 1, "what was read: {:?}", last.exits);
-        assert_eq!(last.root, root);
-        // Waited for long enough, the last word holds the late exit.
-        telling.join().unwrap();
-        let whole = last_word(&shared, root, Duration::from_secs(5)).unwrap();
-        assert_eq!(whole.exits.len(), 2);
-        assert_eq!(whole.exits[1].1, 2_000);
     }
 }

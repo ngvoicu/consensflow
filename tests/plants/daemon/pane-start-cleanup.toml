@@ -1,0 +1,41 @@
+# What the pane host does where a window's start or its exit watcher fails (T-1540 F2,
+# T-1662): a window that failed to open after it was in the table is ended and the answer says
+# why it did not open, and the end's own failure with it; an exit watcher whose retirement of
+# a pane failed ends the pane as a close ends it, for a pane left in the table never has its
+# output end on Windows; an exit watcher whose wait failed leaves its pane alone (`crates/cf-panes/src/pty/spawn.rs` `abandon_open`, `crates/cf-panes/src/pty/teardown.rs` `retire_after_exit_by`).
+#
+# Every name holds `pane start cleanup`, so `npm run plants:daemon -- "pane start cleanup"` runs
+# them all.
+
+[run]
+psc-panes = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::tests::"]
+
+[[plant]]
+name = "pane start cleanup: a window that cannot be ended after a failed open says nothing of it"
+meant = "a_window_that_fails_to_open_and_cannot_be_ended_says_both"
+runs = ["psc-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/spawn.rs"
+find = "        match self.kill(key) {\n            Ok(()) => error,"
+replace = "        let _ = self.kill(key);\n        match Ok::<(), PaneError>(()) {\n            Ok(()) => error,"
+
+[[plant]]
+name = "pane start cleanup: an exit watcher whose retirement failed leaves the pane in the table"
+meant = "a_pane_whose_exit_watcher_could_not_retire_it_is_ended_all_the_same"
+runs = ["psc-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/teardown.rs"
+find = "        let ended = self.kill_detached(key);"
+replace = "        let ended: Result<(), PaneError> = Ok(());"
+
+[[plant]]
+name = "pane start cleanup: an exit watcher whose wait failed retires the pane all the same"
+meant = "an_exit_watcher_whose_wait_failed_leaves_a_working_pane_alone"
+runs = ["psc-panes"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/teardown.rs"
+find = "        match waited {\n            Ok(()) => self.retire_after_exit_by(key, retire),"
+replace = "        match waited.or(Ok::<(), io::Error>(())) {\n            Ok(()) => self.retire_after_exit_by(key, retire),"

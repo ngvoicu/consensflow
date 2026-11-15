@@ -74,7 +74,7 @@ async fn a_token_that_was_revoked_has_no_access_and_one_whose_project_is_gone_sa
     let (status, body) = through(&scene, Method::GET, "/api/nothing", Some(&scene.zeus), "").await;
     assert_eq!((status, body), (401, unauthorized(NO_ACCESS)));
 
-    let orphan = scene.context.credentials.issue(9_999, 9_999);
+    let orphan = scene.context.credentials.issue(9_999, 9_999).unwrap();
     let (status, body) = through(&scene, Method::GET, "/api/nothing", Some(&orphan), "").await;
     assert_eq!(
         (status, body),

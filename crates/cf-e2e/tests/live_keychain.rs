@@ -373,11 +373,11 @@ fn run(
 /// alone) holds, and the number of entries of each that is an object; never a value.
 fn shape_of(name: &str) -> Vec<String> {
     let user = own_var("USER").unwrap_or_default();
-    let Ok(ran) = Run::new("/usr/bin/security")
-        .args(["find-generic-password", "-s", name, "-a", &user, "-w"])
-        .inheriting_env()
-        .run()
-    else {
+    let Ok(ran) = keychain::security(
+        "live_keychain::shape_of",
+        ["find-generic-password", "-s", name, "-a", &user, "-w"],
+        Duration::from_secs(60),
+    ) else {
         return Vec::new();
     };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(ran.stdout.trim()) else {

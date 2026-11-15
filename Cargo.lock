@@ -471,10 +471,12 @@ version = "3.0.7-alpha.6"
 dependencies = [
  "cf-base",
  "cf-e2e",
+ "cf-engine",
  "cf-ledger",
  "cf-panes",
  "cf-process",
  "cf-proto",
+ "ctor",
  "flate2",
  "jiff",
  "nix 0.28.0",
@@ -516,29 +518,17 @@ dependencies = [
 ]
 
 [[package]]
-name = "cf-evals"
-version = "3.0.7-alpha.6"
-dependencies = [
- "cf-e2e",
- "jiff",
- "portable-pty",
- "regex",
- "rusqlite",
- "serde_json",
- "tempfile",
- "thiserror 2.0.20",
-]
-
-[[package]]
 name = "cf-harness"
 version = "3.0.7-alpha.6"
 dependencies = [
  "base64 0.22.1",
  "cf-base",
+ "cf-e2e",
  "cf-harness",
  "cf-launcher",
  "cf-process",
  "cf-proto",
+ "ctor",
  "flate2",
  "futures-util",
  "getrandom 0.4.3",

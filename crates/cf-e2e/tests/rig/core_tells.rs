@@ -1,12 +1,5 @@
-//! A tell and a cancel, end to end through the real pane host
-//! (`npm run test:daemons`). The chief eval `six-decisions` (2026-10-07, on the
-//! native daemon) counted "every tell the chief sent was answered (1/2)": the
-//! chief had told the window of T-2, was in a turn of its own for minutes, and
-//! called T-2 off. Nothing is delivered to a window that is at work, so an
-//! answer to the tell waited in the chief's queue, and a task called off takes
-//! back whatever of it is still on its way: the answer the window gave was
-//! cancelled before the chief read it, and the eval's count, which skips a
-//! cancelled answer, took the tell for unanswered.
+//! A tell and a cancel, end to end through the real pane host. A task called off takes back
+//! its pending answer; a cancelled answer does not count as a delivered response.
 
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
@@ -164,7 +157,7 @@ fn the_answer_a_window_gave_the_chiefs_tell_is_withdrawn_when_the_chiefs_task_is
         ],
         "the tell stays as it was delivered, and its answer is taken back"
     );
-    // What the chief eval counts as an answer to a tell is one that is not cancelled: none.
+    // No non-cancelled answer remains.
     let counted: Vec<Value> = thread(&project, "answer")?
         .into_iter()
         .filter(|m| m["state"] != "cancelled")

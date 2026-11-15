@@ -1,0 +1,13 @@
+# The kit preserves isolation across rigs.
+[run]
+ei-kit-isolation = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::isolation"]
+
+[[plant]]
+name = "live isolation: Pi's home on two providers holds the first one's login alone"
+meant = "a_pi_run_on_models_of_two_providers_needs_the_login_of_each_and_is_refused_where_one_ends_in_it"
+runs = ["ei-kit-isolation"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                (Some(provider), Some(held)) if !held.contains(&provider) => held.push(provider),'''
+replace = '''                (Some(provider), Some(held)) if held.is_empty() => held.push(provider),'''

@@ -326,7 +326,7 @@ meant = "the_state_of_a_checkout_is_its_commit_and_the_bytes_of_what_changed_and
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = '''        for path in changed(&status) {
             std::fs::read(self.checkout.root.join(path))
                 .ok()
@@ -341,7 +341,7 @@ meant = "the_state_of_a_checkout_is_its_commit_and_the_bytes_of_what_changed_and
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = '''"--untracked-files=all"'''
 replace = '''"--untracked-files=no"'''
 
@@ -469,7 +469,7 @@ meant = "a_node_test_file_that_ran_no_test_is_broken_whatever_the_other_files_ra
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "        self.tests().iter().any(|test| test.failed && !test.whole)"
 replace = "        self.tests().iter().any(|test| test.failed)"
 
@@ -481,7 +481,7 @@ meant = "the_tests_a_run_caught_are_those_its_report_says_failed_each_once_in_th
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "        if self.code == Some(0) {\n            return Vec::new();\n        }\n        match &self.report {"
 replace = "        match &self.report {"
 
@@ -491,7 +491,7 @@ meant = "nextest_says_a_build_that_failed_by_its_status_whatever_a_test_printed"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "        Reporter::of(&self.command) != Reporter::Nextest || self.code != Some(NEXTEST_BUILD_FAILED)"
 replace = "        Reporter::of(&self.command) != Reporter::Nextest || self.code != Some(NEXTEST_BUILD_FAILED) || true"
 
@@ -501,7 +501,7 @@ meant = "a_build_is_judged_by_what_cargo_says_of_it_in_its_structured_words_wher
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "        .reduce(|all, built| all && built)"
 replace = "        .reduce(|all, built| all || built)"
 
@@ -511,7 +511,7 @@ meant = "nextest_says_a_build_that_failed_by_its_status_whatever_a_test_printed"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "        Reporter::of(&self.command) != Reporter::Nextest || self.code != Some(NEXTEST_BUILD_FAILED)"
 replace = '''        Reporter::of(&self.command) != Reporter::Nextest || (self.code != Some(NEXTEST_BUILD_FAILED) && !self.output.contains("error[E"))'''
 
@@ -521,7 +521,7 @@ meant = "node_and_playwright_build_nothing_whatever_their_tests_say_of_a_build"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "        Reporter::of(&self.command) != Reporter::Nextest || self.code != Some(NEXTEST_BUILD_FAILED)"
 replace = '''        if Reporter::of(&self.command) != Reporter::Nextest { !self.output.contains("error[E0308]") } else { self.code != Some(NEXTEST_BUILD_FAILED) }'''
 
@@ -531,7 +531,7 @@ meant = "node_and_playwright_build_nothing_whatever_their_tests_say_of_a_build"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "        Reporter::of(&self.command) != Reporter::Nextest || self.code != Some(NEXTEST_BUILD_FAILED)"
 replace = '''        if Reporter::of(&self.command) != Reporter::Nextest { !self.output.contains("could not compile") } else { self.code != Some(NEXTEST_BUILD_FAILED) }'''
 
@@ -573,7 +573,7 @@ runs = ["xtask-lib-plants"]
 platforms = ["macos"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
 find = "            Self::Smoke(app) => crate::smoke::captured(context, app.as_deref()),"
 replace = "            Self::Smoke(app) => crate::smoke::invocation(context, app.as_deref()),"
 
@@ -583,7 +583,7 @@ meant = "each_option_of_cargo_test_is_given_to_nextest_as_it_names_what_cargo_me
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
 find = '            Some(threads) => words.extend([OsString::from("--test-threads"), threads]),'
 replace = '            Some(threads) => libtest.extend([OsString::from("--test-threads"), threads]),'
 
@@ -613,7 +613,7 @@ meant = "playwright_is_broken_by_an_error_outside_every_test_or_no_test_and_not_
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = '''                None => results
                     .tests
                     .is_empty()
@@ -626,7 +626,7 @@ meant = "playwright_is_broken_by_an_error_outside_every_test_or_no_test_and_not_
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "            Reporter::Playwright => match results.outside.first() {"
 replace = '''            Reporter::Playwright => match results.outside.first().map(String::as_str).or_else(|| {
                 self.output.lines().find(|line| line.contains("not a part of any test"))
@@ -638,7 +638,7 @@ meant = "a_run_of_rust_tests_is_broken_where_nextest_found_none_or_a_binary_coul
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = '''                Some(NEXTEST_NO_TESTS) => return Some("nextest found no test to run".to_owned()),
 '''
 replace = ""
@@ -691,7 +691,7 @@ meant = "node_writes_the_plants_report_to_the_run_beside_the_report_it_prints"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/node.rs"
 find = '''        format!("--test-reporter={reporter}"),
         format!("--test-reporter-destination={}", report.display()),
 '''
@@ -713,7 +713,7 @@ meant = "playwright_writes_the_plants_report_to_the_run_beside_the_list_it_print
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/playwright.rs"
 find = '''            format!("--reporter=list,{reporter}"),'''
 replace = '''            format!("--reporter=list{}", &reporter[..0]),'''
 
@@ -723,7 +723,7 @@ meant = "cargo_test_is_run_by_nextest_with_its_own_words_and_a_config_that_write
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
 find = '''\nretries = 0\n'''
 replace = '''\nretries = 2\n'''
 
@@ -804,7 +804,7 @@ meant = "a_command_that_writes_more_than_a_run_may_is_ended_and_said_to_have_ove
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = '''                let overflowed = failed.message.ends_with("maxBuffer length exceeded");'''
 replace = "                let overflowed = false;"
 
@@ -918,7 +918,7 @@ meant = "what_a_run_wrote_is_read_with_the_terminal_formatting_taken_out"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "            output: plain(&(stdout + &stderr)),"
 replace = "            output: stdout + &stderr,"
 
@@ -928,7 +928,7 @@ meant = "what_a_run_wrote_is_read_with_the_terminal_formatting_taken_out"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "        if characters.next_if_eq(&'[').is_some() {"
 replace = "        if characters.next_if_eq(&'[').is_some() && false {"
 
@@ -938,7 +938,7 @@ meant = "the_commands_run_with_no_colour_whatever_this_one_was_given"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = '''                    (OsString::from("NO_COLOR"), OsString::from("1")),
 '''
 replace = ""
@@ -974,7 +974,7 @@ meant = "a_run_whose_reporter_wrote_no_report_it_could_read_catches_nothing_what
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = '''
             Some(Err(_)) => Vec::new(),
             None if self.hung || self.overflowed => Vec::new(),
@@ -986,7 +986,7 @@ replace = '''
 '''
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = '''            Err(why) => return Some(format!("no report of its tests could be read: {why}")),'''
 replace = "            Err(_) => return None,"
 
@@ -996,7 +996,7 @@ meant = "a_run_whose_reporter_wrote_no_report_is_broken_and_no_catch_though_it_f
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = '''            Err(why) => return Some(format!("no report of its tests could be read: {why}")),'''
 replace = "            Err(_) => return None,"
 
@@ -1155,9 +1155,10 @@ replace = "                    Some(_) => Self::Status,"
 name = "tooling: the packaged smoke is taken for no suite of tests (a Mac's)"
 meant = "a_command_is_reported_by_the_runner_of_its_tests"
 runs = ["xtask-lib-plants"]
+platforms = ["macos"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
 find = '''            [smoke, rest @ ..] if smoke == "smoke" && cfg!(target_os = "macos") => {'''
 replace = '''            [smoke, rest @ ..] if smoke == "smoke" && cfg!(target_os = "none") => {'''
 
@@ -1167,8 +1168,8 @@ meant = "a_suite_of_xtask_s_is_the_cargo_test_it_runs_under_nextest_in_its_folde
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
-find = "                under_nextest(tests, words, nextest, &config)"
+file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
+find = "under_nextest(tests, words, nextest, &config)"
 replace = '''                under_nextest(
                     Invocation {
                         cwd: context.root.clone(),
@@ -1185,7 +1186,7 @@ meant = "a_suite_of_xtask_s_is_the_cargo_test_it_runs_under_nextest_in_its_folde
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
 find = "        vars: tests.vars,"
 replace = "        vars: Vec::new(),"
 
@@ -1195,7 +1196,7 @@ meant = "playwright_s_report_names_each_test_and_the_errors_outside_every_test"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = "                        .filter_map(|(name, value)| Some((name.clone(), value.clone()?))),"
 replace = "                        .filter_map(|_| None::<(OsString, OsString)>),"
 
@@ -1205,7 +1206,7 @@ meant = "node_s_report_names_each_test_as_written_and_a_file_that_ran_none_of_it
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = "        let cwd = invocation.cwd.as_path();"
 replace = '''        let cwd = Path::new(".");'''
 
@@ -1418,7 +1419,7 @@ meant = "node_s_frames_written_by_a_test_a_cancelled_test_a_todo_of_no_reason_an
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/node.rs"
 find = '''        "--test-isolation=none".to_owned(),'''
 replace = '''        "--test-isolation=process".to_owned(),'''
 
@@ -1428,7 +1429,7 @@ meant = "node_writes_the_plants_report_to_the_run_beside_the_report_it_prints"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/node.rs"
 find = '''    const SET: [&str; 4] = [
         "--test-reporter",
         "--test-reporter-destination",
@@ -1474,7 +1475,7 @@ meant = "a_run_of_cf_e2e_s_tests_is_given_the_programs_built_before_it_and_one_w
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = "            Some(folder) => invocation.var(CF_E2E_BUILT, folder),"
 replace = "            Some(_) => invocation,"
 
@@ -1484,7 +1485,7 @@ meant = "a_run_of_cf_e2e_s_tests_is_given_the_programs_built_before_it_and_one_w
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = "        let built = if reporter.runs_cf_e2e(command, &self.checkout) {"
 replace = "        let built = if false && reporter.runs_cf_e2e(command, &self.checkout) {"
 
@@ -1494,7 +1495,7 @@ meant = "a_run_of_cf_e2e_s_tests_is_given_the_programs_built_before_it_and_one_w
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = "                Execution::Ended(ran) if ran.code == Some(0) => {"
 replace = "                Execution::Ended(ran) if ran.code.is_some() => {"
 
@@ -1504,7 +1505,7 @@ meant = "a_run_of_cf_e2e_s_tests_is_given_the_programs_built_before_it_and_one_w
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = "                Execution::Ended(ran) if ran.hung || ran.overflowed => {\n                    return Ok(Err(Execution::Ended(ran)))\n                }\n"
 replace = ""
 
@@ -1672,7 +1673,7 @@ meant = "each_option_of_cargo_test_is_given_to_nextest_as_it_names_what_cargo_me
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
 find = '''        Given::As("--cargo-profile"),'''
 replace = '''        Given::Same,'''
 
@@ -1682,7 +1683,7 @@ meant = "nextest_runs_tests_beside_each_other_and_is_given_cargo_s_jobs_and_prof
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
 find = '''    ("--jobs", Some('j'), Takes::Value, Given::As("--build-jobs")),'''
 replace = '''    ("--jobs", Some('j'), Takes::Value, Given::Same),'''
 
@@ -1692,7 +1693,7 @@ meant = "each_option_of_cargo_test_is_given_to_nextest_as_it_names_what_cargo_me
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
 find = '''        Given::Refused("nextest runs no doctest"),'''
 replace = '''        Given::Same,'''
 
@@ -1702,7 +1703,7 @@ meant = "nextest_runs_tests_beside_each_other_and_is_given_cargo_s_jobs_and_prof
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = "        if let Some(why) = reporter.refused(command, &self.checkout) {"
 replace = "        if let Some(why) = reporter.refused(command, &self.checkout).filter(|_| false) {"
 
@@ -1822,7 +1823,7 @@ meant = "nextest_is_given_none_of_the_variables_of_its_own_that_this_run_was_giv
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
 find = '''        .filter(|name| name.to_string_lossy().starts_with("NEXTEST"))'''
 replace = '''        .filter(|name| name.to_string_lossy().starts_with("NEXTEST_PLANTS"))'''
 
@@ -1832,7 +1833,7 @@ meant = "a_run_of_cf_e2e_s_tests_is_told_from_another_and_every_run_s_tests_run_
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
 find = '''    let words: Vec<&OsString> = words.iter().take_while(|word| *word != "--").collect();'''
 replace = '''    let words: Vec<&OsString> = words.iter().collect();'''
 
@@ -1856,7 +1857,7 @@ meant = "a_stop_heard_while_git_is_asked_the_state_of_the_checkout_is_a_stop_and
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = "            Ok(Execution::Stopped) => None,\n            Ok(Execution::Ended(ran)) if ran.code == Some(0) => Some(Some(ran.output)),"
 replace = "            Ok(Execution::Stopped) => Some(None),\n            Ok(Execution::Ended(ran)) if ran.code == Some(0) => Some(Some(ran.output)),"
 
@@ -1900,7 +1901,7 @@ meant = "node_s_meant_test_aborted_catches_nothing_its_async_failures_are_its_ow
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = '''
             Some(Ok(results)) => results
                 .failed()
@@ -1911,7 +1912,7 @@ replace = '''
 '''
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = '''
             None if self.hung || self.overflowed => Vec::new(),
             None => {
@@ -1922,7 +1923,7 @@ replace = '''
 '''
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "        if self.code == Some(0) || self.names_tests() {"
 replace = "        if true || self.code == Some(0) || self.names_tests() {"
 
@@ -1932,7 +1933,7 @@ meant = "a_command_that_has_no_reporter_is_the_catch_itself_and_a_run_whose_repo
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "        if self.code == Some(0) || self.names_tests() {"
 replace = "        if true || self.code == Some(0) || self.names_tests() {"
 
@@ -1976,7 +1977,7 @@ meant = "what_cf_process_answered_is_what_the_run_did"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "                let code = if failed.killed { None } else { failed.code };"
 replace = "                let code = failed.code;"
 
@@ -2003,7 +2004,7 @@ runs = ["xtask-lib-plants"]
 platforms = ["macos", "linux"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = "            let mut running = pin!(capture_whole(&run, Some(cwd), &env, *limits, |_| {}));"
 replace = "            let mut running = pin!(cf_process::capture(&run, Some(cwd), &env, *limits, |_| {}));"
 
@@ -2016,7 +2017,7 @@ meant = "what_a_command_left_running_is_ended_with_it_before_the_sources_are_put
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = "            let mut running = pin!(capture_whole(&run, Some(cwd), &env, *limits, |_| {}));"
 replace = "            let mut running = pin!(cf_process::capture(&run, Some(cwd), &env, *limits, |_| {}));"
 
@@ -2111,8 +2112,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/child.rs"
-find = "            end(pid, how, Reach::Process, true, self.live.job());"
-replace = "            end(pid, how, Reach::Process, true, &Job::unheld());"
+find = "            end(pid, how, self.reach, true, self.live.job());"
+replace = "            end(pid, how, self.reach, true, &Job::unheld());"
 
 [[plant]]
 name = "tooling (cf-process): on Windows a child let go is not ended: not forced, and its job does not end what is in it when its handle closes"
@@ -2349,7 +2350,7 @@ runs = ["xtask-lib-plants"]
 platforms = ["macos", "linux"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = "            Some(folder) => Ok(folder),"
 replace = "            Some(_) => Ok(self.checkout.root.join(\"app/src-tauri/target/release\")),"
 
@@ -2360,7 +2361,7 @@ runs = ["xtask-lib-plants"]
 platforms = ["macos", "linux"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = "                    if let Some(other) = folder.as_ref().filter(|other| *other != there) {"
 replace = "                    if let Some(other) = folder.as_ref().filter(|_| false) {"
 
@@ -2371,7 +2372,7 @@ runs = ["xtask-lib-plants"]
 platforms = ["macos", "linux"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = '''
                         let why = format!("{} said nowhere it put {bin}", words.join(" "));
                         return Ok(Err(Execution::Ended(Self::unbuilt(command, ran, why))));
@@ -2390,7 +2391,7 @@ meant = "an_ignored_rust_test_of_the_meant_name_in_another_binary_makes_the_name
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
 find = '''path = \"junit.xml\"\nreport-skipped = \"all\"\n"'''
 replace = '''path = \"junit.xml\"\n"'''
 
@@ -2465,7 +2466,7 @@ meant = "a_cargo_test_whose_suite_turns_capture_off_is_refused_by_its_variable"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
 find = '''    const VARIABLES: [&str; 2] = ["NEXTEST_NO_CAPTURE", "RUST_TEST_NOCAPTURE"];'''
 replace = '''    const VARIABLES: [&str; 2] = ["", ""];'''
 
@@ -2475,7 +2476,7 @@ meant = "a_rust_test_nextest_could_not_start_is_no_catch_and_the_run_says_which"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = '''                Some(error) => Some(format!("{error}: it never ran")),'''
 replace = '''                Some(_) => none_ran.then(|| "it ran no test".to_owned()),'''
 
@@ -2548,7 +2549,7 @@ meant = "playwright_writes_the_plants_report_to_the_run_beside_the_list_it_print
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/playwright.rs"
 find = '''            "--retries=0".to_owned(),'''
 replace = ""
 
@@ -2559,7 +2560,7 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/reporters.rs"
-find = "            Self::Playwright => retried(command),"
+find = "            Self::Playwright => playwright::retried(command),"
 replace = "            Self::Playwright => None,"
 
 [[plant]]
@@ -2735,7 +2736,7 @@ meant = "the_state_of_a_checkout_is_its_commit_and_the_bytes_of_what_changed_and
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = "            Some(None) => Some(self.checkout.root.clone()),"
 replace = "            Some(None) => None,"
 
@@ -2745,7 +2746,7 @@ meant = "the_state_of_a_checkout_is_its_commit_and_the_bytes_of_what_changed_and
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/execution.rs"
 find = "            self.untold += 1;\n            return Some(format!(\"untold {}\", self.untold));"
 replace = "            return Some(\"untold\".to_owned());"
 
@@ -2879,7 +2880,7 @@ meant = "what_cf_process_answered_is_what_the_run_did"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "            Err(failed) if failed.message.starts_with(LEFT_RUNNING) => {"
 replace = "            Err(failed) if false && failed.message.starts_with(LEFT_RUNNING) => {"
 
@@ -3167,7 +3168,7 @@ meant = "a_playwright_test_that_failed_in_one_repeat_of_it_is_run_once_whatever_
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/playwright.rs"
 find = '''            "--repeat-each=1".to_owned(),
 '''
 replace = ""
@@ -3178,7 +3179,7 @@ meant = "playwright_writes_the_plants_report_to_the_run_beside_the_list_it_print
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/playwright.rs"
 find = '''        if word == "--retries" || word == "--repeat-each" {'''
 replace = '''        if word == "--retries" {'''
 
@@ -3337,7 +3338,7 @@ meant = "a_run_that_left_no_report_is_told_by_how_it_ended_and_the_end_of_what_i
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "            format!(\"{said}; {}\", self.ended())"
 replace = "            said"
 
@@ -3347,7 +3348,7 @@ meant = "a_run_that_left_no_report_is_told_by_how_it_ended_and_the_end_of_what_i
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs.rs"
+file = "tools/xtask/src/plants/runs/outcome.rs"
 find = "        Some(if why.ends_with(NONE_RAN) {"
 replace = "        Some(if false {"
 
@@ -3357,8 +3358,8 @@ meant = "the_threads_libtest_is_told_by_the_environment_are_the_threads_nextest_
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
-find = "                let words = with_the_threads_of_the_environment(words, context);\n"
+file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
+find = "    let words = with_the_threads_of_the_environment(words, context);\n"
 replace = ""
 
 [[plant]]
@@ -3367,7 +3368,7 @@ meant = "the_threads_libtest_is_told_by_the_environment_are_the_threads_nextest_
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters.rs"
+file = "tools/xtask/src/plants/runs/reporters/nextest.rs"
 find = "    if words[..before].iter().any(|word| word == \"--test-threads\") {\n        return words;\n    }\n"
 replace = "    words.retain(|word| word != \"--test-threads\");\n"
 

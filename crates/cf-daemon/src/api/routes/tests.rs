@@ -541,7 +541,11 @@ pub(super) mod support {
             .iter()
             .find(|participant| Some(&participant.handle) == moved.task.assignee.as_ref())
             .unwrap();
-        let token = scene.context.credentials.issue(project.id, session.id);
+        let token = scene
+            .context
+            .credentials
+            .issue(project.id, session.id)
+            .unwrap();
         (token, moved.message.unwrap().id)
     }
 

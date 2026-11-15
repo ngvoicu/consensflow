@@ -9,6 +9,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+use cf_harness::seams::{Entropy, SystemEntropy};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
@@ -20,22 +21,35 @@ pub struct Identity {
 }
 
 /// The tokens of the windows that are open now.
-#[derive(Default)]
 pub struct Credentials {
     by_digest: RefCell<HashMap<String, Identity>>,
+    entropy: Box<dyn Entropy>,
+}
+
+impl Default for Credentials {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Credentials {
-    /// No window has a token yet.
+    /// No window has a token yet; tokens are drawn from the system's randomness.
     pub fn new() -> Self {
-        Self::default()
+        Self::with_entropy(Box::new(SystemEntropy))
+    }
+
+    /// No window has a token yet; tokens are drawn from `entropy`.
+    pub fn with_entropy(entropy: Box<dyn Entropy>) -> Self {
+        Self {
+            by_digest: RefCell::new(HashMap::new()),
+            entropy,
+        }
     }
 
     /// A token for `participant`'s window in `project`: 32 random bytes in
-    /// hex. Panics where the system gives no randomness, which no token may
-    /// then be made without.
-    pub fn issue(&self, project: i64, participant: i64) -> String {
-        let token = random_hex(32);
+    /// hex, or why the system gave none: no token is made without.
+    pub fn issue(&self, project: i64, participant: i64) -> Result<String, String> {
+        let token = random_hex(self.entropy.as_ref(), 32)?;
         self.by_digest.borrow_mut().insert(
             digest(&token),
             Identity {
@@ -43,7 +57,7 @@ impl Credentials {
                 project_id: project,
             },
         );
-        token
+        Ok(token)
     }
 
     /// The token acts no longer. One that is not here is no matter.
@@ -61,7 +75,7 @@ impl Credentials {
 
 /// The engine's window tokens are these.
 impl cf_engine::seams::Credentials for Credentials {
-    fn issue(&self, project: i64, participant: i64) -> String {
+    fn issue(&self, project: i64, participant: i64) -> Result<String, String> {
         Credentials::issue(self, project, participant)
     }
 
@@ -70,14 +84,15 @@ impl cf_engine::seams::Credentials for Credentials {
     }
 }
 
-/// `bytes` random bytes as lower-case hex (`randomBytes(n).toString('hex')`).
-/// Panics where the system gives none: a secret is never made without.
-pub fn random_hex(bytes: usize) -> String {
+/// `bytes` random bytes from `entropy` as lower-case hex
+/// (`randomBytes(n).toString('hex')`), or why the system gave none: a secret is
+/// never made without.
+pub fn random_hex(entropy: &dyn Entropy, bytes: usize) -> Result<String, String> {
     let mut random = vec![0; bytes];
-    if let Err(failed) = getrandom::fill(&mut random) {
-        panic!("the system gave no randomness: {failed}");
-    }
-    random.iter().map(|byte| format!("{byte:02x}")).collect()
+    entropy
+        .fill(&mut random)
+        .map_err(|failed| format!("the system gave no randomness: {failed}"))?;
+    Ok(random.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
 fn digest(token: &str) -> String {
@@ -105,7 +120,10 @@ mod tests {
     #[test]
     fn a_token_is_32_random_bytes_in_hex_and_each_is_new() {
         let credentials = Credentials::new();
-        let (one, other) = (credentials.issue(1, 2), credentials.issue(1, 2));
+        let (one, other) = (
+            credentials.issue(1, 2).unwrap(),
+            credentials.issue(1, 2).unwrap(),
+        );
         for token in [&one, &other] {
             assert_eq!(token.len(), 64);
             assert!(token
@@ -118,8 +136,8 @@ mod tests {
     #[test]
     fn a_token_names_one_participant_of_one_project_until_it_is_revoked() {
         let credentials = Credentials::new();
-        let zeus = credentials.issue(3, 7);
-        let hera = credentials.issue(3, 8);
+        let zeus = credentials.issue(3, 7).unwrap();
+        let hera = credentials.issue(3, 8).unwrap();
         assert_eq!(
             credentials.resolve(Some(&zeus)),
             Some(Identity {
@@ -146,7 +164,7 @@ mod tests {
     #[test]
     fn what_was_never_issued_resolves_to_nobody() {
         let credentials = Credentials::new();
-        credentials.issue(1, 1);
+        credentials.issue(1, 1).unwrap();
         assert_eq!(credentials.resolve(None), None);
         assert_eq!(credentials.resolve(Some("")), None);
         assert_eq!(credentials.resolve(Some("not a token")), None);
@@ -155,7 +173,7 @@ mod tests {
     #[test]
     fn only_digests_are_kept() {
         let credentials = Credentials::new();
-        let token = credentials.issue(1, 1);
+        let token = credentials.issue(1, 1).unwrap();
         let kept = credentials.by_digest.borrow();
         assert!(!kept.contains_key(&token));
         assert_eq!(kept.keys().next().map(String::len), Some(64));
@@ -163,7 +181,7 @@ mod tests {
 
     #[test]
     fn the_ui_token_matches_itself_only() {
-        let token = random_hex(24);
+        let token = random_hex(&SystemEntropy, 24).unwrap();
         assert_eq!(token.len(), 48);
         assert!(token_matches(&token, &token));
         assert!(!token_matches("", &token));
@@ -175,12 +193,35 @@ mod tests {
     #[test]
     fn the_engine_s_issue_and_revoke_are_this_one_s() {
         let credentials = Credentials::new();
-        let token = cf_engine::seams::Credentials::issue(&credentials, 4, 9);
+        let token = cf_engine::seams::Credentials::issue(&credentials, 4, 9).unwrap();
         assert_eq!(
             credentials.resolve(Some(&token)).map(|who| who.project_id),
             Some(4)
         );
         cf_engine::seams::Credentials::revoke(&credentials, &token);
         assert_eq!(credentials.resolve(Some(&token)), None);
+    }
+
+    /// A system that gives no randomness.
+    struct NoEntropy;
+
+    impl Entropy for NoEntropy {
+        fn fill(&self, _bytes: &mut [u8]) -> Result<(), String> {
+            Err("unavailable".to_owned())
+        }
+    }
+
+    #[test]
+    fn a_system_that_gives_no_randomness_makes_no_token_and_says_so() {
+        let credentials = Credentials::with_entropy(Box::new(NoEntropy));
+        assert_eq!(
+            credentials.issue(1, 2),
+            Err("the system gave no randomness: unavailable".to_owned())
+        );
+        assert!(credentials.by_digest.borrow().is_empty());
+        assert_eq!(
+            random_hex(&NoEntropy, 24),
+            Err("the system gave no randomness: unavailable".to_owned())
+        );
     }
 }

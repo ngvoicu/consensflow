@@ -10,7 +10,19 @@
 //! command beside the Pi extension ([`prepare`], which, like
 //! the adapters' table, sits above the harnesses' modules).
 
-#![forbid(unsafe_code)]
+#![cfg_attr(not(test), forbid(unsafe_code))]
+#![cfg_attr(test, deny(unsafe_code))]
+
+#[cfg(test)]
+#[allow(unsafe_code)]
+mod standin_boot {
+    ctor::declarative::ctor! {
+        #[ctor(unsafe)]
+        fn begin_stand_in_process() {
+            cf_e2e::standin_process::start(false);
+        }
+    }
+}
 
 pub mod admin;
 pub mod background;
@@ -38,7 +50,7 @@ pub use shared::specmint::bundled_specmint;
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 pub mod testing;
 
-// The answers the evals and the live tools put to the harness code, through
+// The answers the live tools put to the harness code, through
 // the test binary `harness-ask`: they ship with nothing.
 #[cfg(any(test, feature = "test-support"))]
 pub mod tooling;

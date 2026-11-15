@@ -21,21 +21,13 @@ mod shells;
 mod skill;
 mod specs;
 
-use std::path::PathBuf;
-
 use cf_base::env::Env;
-use cf_base::file::{read_file_sync, FileError};
 use cf_proto::agents::{WorkTier, WORK_TIERS};
 use cf_proto::cf_word::{CfWord, CF_STANDS_FOR};
 use cf_proto::ledger::ProjectView;
 
 pub use skill::{team_table, work_tier_list};
 pub use specs::ProjectSpecs;
-
-/// Evals only: a chief measured without ConsensFlow's card gets this file's
-/// text instead of all of it (tiers, staff and its cf too), so nothing tells
-/// it the board exists. Nothing in the app sets it.
-const CARD: &str = "CONSENSFLOW_EVAL_CHIEF_CARD";
 
 /// Whether a text names its window's `cf` by path once, at its start, and says `cf` after
 /// it ("`cf` below stands for this command; type it in full every time"), or writes the path in
@@ -111,9 +103,6 @@ pub enum RoleError {
     /// Node threw a TypeError reading a tier that is none of the four.
     #[error("{member} has no work tier to name in the staff table")]
     NoWorkTier { member: String },
-    /// The card an eval named, said as Node's `readFileSync` said it.
-    #[error("{0}")]
-    Card(#[from] FileError),
 }
 
 /// A project's staff as its chief reads it: each member's name, the model it runs on,
@@ -190,7 +179,7 @@ pub fn role_instructions_for(
 /// a Mac (a member's text then has the paragraph on the home folder and the folders macOS asks
 /// the person about).
 pub fn role_instructions_on(
-    env: &Env,
+    _env: &Env,
     role: &str,
     staff: &[StaffRow],
     cf: &CfWord,
@@ -204,11 +193,6 @@ pub fn role_instructions_on(
     }
     if role != "chief" {
         return member::text(role, cf, mac);
-    }
-    if let Some(card) = env.path(CARD) {
-        // Node read its environment as UTF-8: a byte that is none was U+FFFD.
-        let card = PathBuf::from(card.to_string_lossy().into_owned());
-        return Ok(String::from_utf8_lossy(&read_file_sync(&card)?).into_owned());
     }
     if own_hands {
         // The short text has no table, no tiers and no shell paragraph to fill: those are the

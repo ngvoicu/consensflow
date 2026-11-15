@@ -60,8 +60,9 @@ impl EngineError {
 
 /// A window's token, for the `cf` in it to act as its participant.
 pub trait Credentials {
-    /// A token for `participant`'s window in `project` (`credentials.issue`).
-    fn issue(&self, project: i64, participant: i64) -> String;
+    /// A token for `participant`'s window in `project` (`credentials.issue`), or
+    /// why the system would not make one: no window opens without a token.
+    fn issue(&self, project: i64, participant: i64) -> Result<String, String>;
     /// A window's token acts no longer (`credentials.revoke`).
     fn revoke(&self, token: &str);
 }
@@ -71,7 +72,8 @@ pub trait Credentials {
 /// a ledger write too.
 pub trait Trace {
     fn line(&self, line: TraceLine);
-    fn forget(&self, project: i64);
+    /// Drops the project's lines, or says why some stayed in the file.
+    fn forget(&self, project: i64) -> Result<(), String>;
 }
 
 /// What the engine writes to the daemon's log: what failed apart from
@@ -167,7 +169,8 @@ pub trait Adapters {
 
 /// The launch ids, each new (`randomUUID`).
 pub trait LaunchIds {
-    fn draw(&self) -> LaunchId;
+    /// A new id, or why the system would not give one: no launch is made without.
+    fn draw(&self) -> Result<LaunchId, String>;
 }
 
 /// How long the engine waits on a window, and how often a delivery is tried.

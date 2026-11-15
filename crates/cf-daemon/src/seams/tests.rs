@@ -346,8 +346,8 @@ fn a_role_that_has_no_text_fails_its_launch_in_the_words_of_why() {
 
 #[test]
 fn every_launch_has_an_id_of_its_own_in_the_shape_of_a_uuid() {
-    let ids = RandomLaunchIds;
-    let drawn: Vec<LaunchId> = (0..20).map(|_| ids.draw()).collect();
+    let ids = RandomLaunchIds::new();
+    let drawn: Vec<LaunchId> = (0..20).map(|_| ids.draw().unwrap()).collect();
     for id in &drawn {
         assert_eq!(id.as_str().len(), 36);
         assert_eq!(LaunchId::new(id.as_str()).as_ref(), Some(id));
@@ -357,10 +357,28 @@ fn every_launch_has_an_id_of_its_own_in_the_shape_of_a_uuid() {
     }
 }
 
+/// A system that gives no randomness.
+struct NoEntropy;
+
+impl Entropy for NoEntropy {
+    fn fill(&self, _bytes: &mut [u8]) -> Result<(), String> {
+        Err("unavailable".to_owned())
+    }
+}
+
+#[test]
+fn a_system_that_gives_no_randomness_gives_no_launch_id_and_says_so() {
+    let ids = RandomLaunchIds::with_entropy(Box::new(NoEntropy));
+    assert_eq!(
+        ids.draw(),
+        Err("the system gave no randomness: unavailable".to_owned())
+    );
+}
+
 #[test]
 fn a_launch_s_files_are_forgotten_from_every_harness_s_folder() {
     let home = tempfile::tempdir().unwrap();
-    let launch = RandomLaunchIds.draw();
+    let launch = RandomLaunchIds::new().draw().unwrap();
     for harness in ["claude", "pi", "devin"] {
         let folder = home
             .path()

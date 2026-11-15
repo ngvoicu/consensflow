@@ -18,8 +18,8 @@ use cf_base::env::Env;
 use crate::context::{self, Context};
 use crate::process;
 use crate::{
-    app, bench, candidate, check, ci_times, clippy_windows, departures, evals, identity, live,
-    plants, portable, release, rust_version, scrub_muse_session, scrub_transcript, sidecar, smoke,
+    app, bench, candidate, check, ci_times, clippy_windows, departures, identity, live, plants,
+    portable, release, rust_version, scrub_muse_session, scrub_transcript, sidecar, smoke,
     specmint, suites, unreachable_pub, windows,
 };
 
@@ -92,7 +92,6 @@ pub fn commands() -> Vec<&'static Command> {
         suites::COMMANDS,
         live::COMMANDS,
         windows::COMMANDS,
-        evals::COMMANDS,
         scrub_transcript::COMMANDS,
         scrub_muse_session::COMMANDS,
         specmint::COMMANDS,

@@ -25,9 +25,7 @@ fn word() -> String {
 }
 
 /// The only files that may name it, and why.
-const KEPT: [&str; 2] = [
-    // The eval history, as the removal's Decision Log keeps it: the only shared copy of it.
-    "evals/RESULTS.md",
+const KEPT: [&str; 1] = [
     // The field's own word: the ledger a 3.0.6 install holds names the harness it ran, and the
     // regression test of an install whose harness this build does not run holds that shape.
     "crates/cf-e2e/tests/regressions/a_ledger_of_a_harness_this_build_does_not_run.rs",

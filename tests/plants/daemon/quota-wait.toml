@@ -309,7 +309,7 @@ runs = ["quota-wait-engine"]
 # Since the merge with turn-end (T-531) the task's turn is turn-end's final run: what the
 # window wrote after the last user's words since the paste, cleared at each of them.
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
+file = "crates/cf-engine/src/role_change/answers.rs"
 find = '''
                 if !of_the_role {
                     final_run.clear();

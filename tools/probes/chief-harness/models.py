@@ -33,15 +33,17 @@ DROPPED = ("CONSENSFLOW_", "CLAUDE_CODE_", "ANTHROPIC_", "OPENAI_", "CODEX_", "P
 
 
 def clean_env(**extra):
-    env = {k: v for k, v in os.environ.items() if not k.startswith(DROPPED)}
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith(DROPPED)}
     env.update(extra)
     return env
 
 
 def digest(path):
-    if not os.path.exists(path):
+    try:
+        fh = open(path, "rb")
+    except FileNotFoundError:
         return None
-    with open(path, "rb") as fh:
+    with fh:
         return hashlib.sha256(fh.read()).hexdigest()[:12]
 
 
@@ -53,10 +55,21 @@ def copy_secret(source, target):
 
 
 def remove(path):
-    for _ in range(10):
-        shutil.rmtree(path, ignore_errors=True)
-        if not os.path.exists(path):
+    for attempt in range(10):
+        try:
+            shutil.rmtree(path)
             return
+        except FileNotFoundError:
+            # A disappearing child is not proof that the root is gone.
+            try:
+                os.lstat(path)
+            except FileNotFoundError:
+                return
+            if attempt == 9:
+                raise
+        except OSError:
+            if attempt == 9:
+                raise
         time.sleep(0.5)
 
 
@@ -161,8 +174,14 @@ def pi(scratch):
     os.makedirs(agent)
     source = os.path.join(HOME, ".pi", "agent")
     for name in ("auth.json", "models-store.json", "models.json", "settings.json"):
-        if os.path.exists(os.path.join(source, name)) and not (SIGNED_OUT and name == "auth.json"):
-            copy_secret(os.path.join(source, name), os.path.join(agent, name))
+        if SIGNED_OUT and name == "auth.json":
+            continue
+        path = os.path.join(source, name)
+        try:
+            os.stat(path)
+        except FileNotFoundError:
+            continue
+        copy_secret(path, os.path.join(agent, name))
     env = clean_env(PI_CODING_AGENT_DIR=agent, PI_OFFLINE="1", HOME=scratch)
     child = Lines([shutil.which("pi"), "--mode", "rpc", "--no-session", "--no-extensions",
                    "--no-mcp", "--offline"], env, scratch)

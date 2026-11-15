@@ -1,9 +1,6 @@
-//! What a cancel leaves behind: the chief's re-plan of 2026-10-07 (the chief
-//! eval `six-decisions`, run on the native daemon) cancelled tasks that no
-//! member had yet and a task whose window it had told, and the eval counted
-//! fewer tasks on the board and fewer tells answered than it had made. The
-//! board then left such a task off both its lists, as it did a paused backlog
-//! task and a removed member's tasks; the owner decided (2026-10-07) that all
+//! What a cancel leaves behind: a chief's re-plan cancelled tasks that no member
+//! had yet and a task whose window it had told. The board left such a task off
+//! both its lists, as it did a paused backlog task and a removed member's tasks; the owner decided (2026-10-07) that all
 //! three stay in view, and the board places them so. Each test writes the
 //! states here and holds the ledger to what Node's ledger answered on the same
 //! file while Node's ledger existed (`21297242`, the last commit that held
@@ -340,9 +337,7 @@ fn cancelled(file: &Path, tell: i64, session: i64) -> (Value, Option<&'static st
     (thread(&found), late)
 }
 
-/// Whether the thread's one tell counts as answered the way the chief eval
-/// counts it (`plumbing` in `crates/cf-evals/src/measure/plumbing.rs`): an answer
-/// to it that is not cancelled.
+/// Whether the thread's one tell has an answer that is not cancelled.
 fn counted_answered(thread: &Value) -> bool {
     thread[1]
         .as_array()

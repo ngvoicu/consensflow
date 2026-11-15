@@ -220,7 +220,7 @@ pub fn brief_first(brief: &MessageView, carried: &[MessageView], cf: &CfWord) ->
 }
 
 /// The tag Claude Code wraps a paste in, in its record (2.1.296 on 2026-10-16, and
-/// the eval of 2026-10-08): `<pasted_content id="b118">` on a line of its own, the
+/// a run on 2026-10-08): `<pasted_content id="b118">` on a line of its own, the
 /// paste, and the same tag closed after it, `</pasted_content id="b118">`.
 const PASTED: &str = "pasted_content";
 

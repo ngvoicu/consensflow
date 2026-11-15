@@ -34,16 +34,6 @@ find = '"test:daemons": "cargo xtask test daemons",'
 replace = '"test:daemons": "cargo xtask test daemon",'
 
 [[plant]]
-name = "wiring: the summary of the evals hands over to the evals themselves"
-meant = "the_root_package_runs_each_driver_and_build_step_through_cargo_xtask"
-runs = ["xtask-test-scripts"]
-
-[[plant.edit]]
-file = "package.json"
-find = '"eval:summary": "cargo xtask eval summary",'
-replace = '"eval:summary": "cargo xtask eval",'
-
-[[plant]]
 name = "wiring: the npm check is the lint alone"
 meant = "the_npm_check_is_the_lint_and_the_tests_which_cargo_xtask_check_runs_as_two_steps"
 runs = ["xtask-test-scripts"]
@@ -108,6 +98,7 @@ find = """
         env:
           CF_TEST_SHARD: ${{ matrix.shard }}
           CF_TEST_SHARD_LIMIT_MINUTES: 40
+          CF_E2E_NO_MUSE: '1'
         timeout-minutes: 40
 """
 replace = ""
