@@ -23,6 +23,9 @@
 # them all.
 
 [run]
+# Check the meant chief-window tests first; retain the full dispatcher as a
+# fallback if another test is needed to diagnose a miss.
+engine-chief-window = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_chief_window_"]
 # The cases of the regressions, found by their module's name.
 rig-regression-chief-restart = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_codex_chief_opened_again_after_a_restart_read_starting_for_good::"], builds = true }
 # The tests of a Codex window once it is open.
@@ -73,7 +76,7 @@ replace = '''            let _ = (&pane, settling);'''
 [[plant]]
 name = "chief restart: a window whose exit came while it was waited for is given up again"
 meant = "a_chief_window_that_exits_while_it_is_waited_for_to_come_up_is_given_up_no_more"
-runs = ["engine-dispatcher"]
+runs = ["engine-chief-window", "engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/unstarted.rs"
@@ -83,7 +86,7 @@ replace = "        if false {"
 [[plant]]
 name = "chief restart: a window with a first message whose exit came while it was waited for is given up again"
 meant = "a_chief_window_with_a_first_message_that_exits_while_it_is_waited_for_is_given_up_no_more"
-runs = ["engine-dispatcher"]
+runs = ["engine-chief-window", "engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/unstarted.rs"

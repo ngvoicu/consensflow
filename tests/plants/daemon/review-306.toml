@@ -613,8 +613,8 @@ replace = '''        let _ = (why, except);
 
 [[plant]]
 name = "review 306: the words waiting for a window a give-up closed wait for its exit, not for why it was given up"
-meant = "a_member_opened_again_whose_window_never_comes_up_is_given_nothing_and_the_note_told_it_waits_for_its_resume"
-runs = ["engine-dispatcher-resume"]
+meant = "a_members_window_unfit_for_work_with_a_second_note_waiting_names_both_words_kept_for_its_resume"
+runs = ["engine-dispatcher-unfit", "engine-dispatcher-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
@@ -745,7 +745,7 @@ replace = '''                    .rposition(|_| true);'''
 
 [[plant]]
 name = "review 306: a give-up's exit after a Close is the window's own, not the Close's"
-meant = "a_give_up_whose_kill_is_taken_after_a_close_pauses_its_task_once_for_the_resume"
+meant = "a_give_up_whose_kill_is_refused_after_a_resume_and_a_second_close_leaves_the_second_closes_pause"
 runs = ["engine-dispatcher-resume"]
 
 [[plant.edit]]
