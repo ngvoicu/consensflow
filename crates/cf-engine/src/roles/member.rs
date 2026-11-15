@@ -20,14 +20,22 @@ const STAFF: &str = include_str!("../../../../skill/core/staff.md");
 /// `role`'s window instructions, from the shared text of `staff.md`, its
 /// commands starting with `cf`, and the paragraphs that depend on the shell of
 /// the window's `cf` as `shells.md` has them.
-pub(super) fn text(role: &str, cf: &CfWord) -> Result<String, RoleError> {
+pub(super) fn text(role: &str, cf: &CfWord, mac: bool) -> Result<String, RoleError> {
     let input = shells::paragraph(cf.shell(), "member_input")?;
     let removal = shells::paragraph(cf.shell(), "removal")?;
+    // The paragraph for a window on a Mac is none for any other.
+    let home = if mac { shells::mac_paragraph("home")? } else { "" };
+    let note = super::cf_note(cf);
     filled(
         STAFF,
         role,
-        cf.as_str(),
-        &[("member_input", input), ("removal", removal)],
+        super::cf_in_text(cf),
+        &[
+            ("member_input", input),
+            ("removal", removal),
+            ("mac_only", home),
+            ("cf_note", &note),
+        ],
     )
 }
 
@@ -124,8 +132,16 @@ fn fill<'a>(
             .take_while(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
             .count();
         if word > 0 && inside[word..].starts_with("}}") {
-            filled.push_str(slot(&inside[..word])?);
+            let text = slot(&inside[..word])?;
+            filled.push_str(text);
             rest = &inside[word + 2..];
+            // A slot left empty takes its paragraph break with it.
+            if text.is_empty()
+                && rest.starts_with("\n\n")
+                && (filled.is_empty() || filled.ends_with("\n\n"))
+            {
+                rest = &rest[2..];
+            }
         } else {
             // Not a slot: the match is tried again from the next character.
             filled.push('{');

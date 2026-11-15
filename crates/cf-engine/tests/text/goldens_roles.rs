@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use cf_base::env::Env;
-use cf_engine::roles::{role_instructions, staff_of, team_table, work_tier_list, RoleError};
+use cf_engine::roles::{role_instructions_on, staff_of, team_table, work_tier_list, RoleError};
 use cf_proto::cf_word::{CfWord, Shell};
 use serde_json::Value;
 
@@ -56,7 +56,7 @@ fn every_role_is_given_the_text_node_gave_it_or_refused_as_node_refused_it() {
         let cf = row["cf"]
             .as_str()
             .map_or_else(CfWord::bare, |path| CfWord::new(path, Shell::Posix));
-        let answer = role_instructions(&env, role, &staff, &cf, None);
+        let answer = role_instructions_on(&env, role, &staff, &cf, None, false, true);
         let what = format!(
             "the {role}'s text for {} (cf {}, card {})",
             row["staff"], row["cf"], row["card"]

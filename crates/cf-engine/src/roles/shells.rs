@@ -18,8 +18,16 @@ pub(super) fn paragraph(shell: Shell, slot: &str) -> Result<&'static str, RoleEr
     part(SHELLS, shell, slot)
 }
 
+/// The part marked `<!-- mac: slot -->`: a paragraph for a window on a Mac, whatever its shell.
+pub(super) fn mac_paragraph(slot: &str) -> Result<&'static str, RoleError> {
+    named(SHELLS, "mac", slot)
+}
+
 fn part(shells: &'static str, shell: Shell, slot: &str) -> Result<&'static str, RoleError> {
-    let name = name(shell);
+    named(shells, name(shell), slot)
+}
+
+fn named(shells: &'static str, name: &str, slot: &str) -> Result<&'static str, RoleError> {
     let (_, parts) = member::split(shells);
     parts
         .into_iter()

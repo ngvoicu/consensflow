@@ -1,7 +1,7 @@
 use cf_base::env::Env;
 use cf_engine::roles::{
     guide_instructions, ordinary_guide_instructions, role_instructions, role_instructions_for,
-    with_staff_rules, ProjectSpecs, StaffRow,
+    with_staff_rules, ProjectSpecs, StaffRow, PATH_ONCE,
 };
 use cf_proto::{cf_word::CfWord, specs::Variant};
 
@@ -41,7 +41,7 @@ fn own_hands_gives_a_short_text_that_is_whole_in_itself() {
         "never run `cf`",
         "Use it only when the human\nexplicitly asks",
         "run `cf guide`",
-        "begins `[ConsensFlow m-… · T-… · …]`",
+        "A message headed `[ConsensFlow m-… · T-… · …]` (its `·` may be `|`) is\nConsensFlow's delivery",
         "Work already on the board\ngoes on, and its results come to you",
         "turn \"Do with your own hands\" off on your pane, and you are told",
     ] {
@@ -87,10 +87,17 @@ fn the_short_text_names_the_window_s_own_cf() {
     let cf =
         CfWord::of_word("/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf").unwrap();
     let text = own(&cf, None);
-    assert!(
-        text.contains("run `/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf guide`")
-    );
+    let path = "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf";
+    if PATH_ONCE {
+        // Said once, in the paragraph that opens the text; the command after it is `cf`.
+        assert!(text.contains(&format!("type it in full every time:\n`{path}`")));
+        assert!(text.contains("run `cf guide`"));
+        assert_eq!(text.matches(path).count(), 1);
+    } else {
+        assert!(text.contains(&format!("run `{path} guide`")));
+    }
     assert!(!text.contains("{{cf}}"));
+    assert!(!text.contains("{{cf_note}}"));
 }
 
 #[test]
@@ -201,7 +208,9 @@ fn the_guide_has_the_staff_the_tiers_the_window_s_cf_and_the_staff_s_rules() {
     }];
     let guide = guide_instructions(&staff, &cf, None, Some("The person's exact rules.")).unwrap();
     assert!(guide.contains("crisp-comet"));
-    assert!(guide.contains("/opt/cf/bin/cf task add --tier"));
+    let word = if PATH_ONCE { "cf" } else { "/opt/cf/bin/cf" };
+    assert!(guide.contains(&format!("{word} task add --tier")));
+    assert_eq!(guide.matches("/opt/cf/bin/cf").count(), usize::from(PATH_ONCE));
     assert!(!guide.contains("{{"));
     let heading = "## The project's rules for the staff";
     assert!(guide.contains(heading));
