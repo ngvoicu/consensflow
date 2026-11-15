@@ -259,7 +259,7 @@ meant = "an_item_copied_as_the_users_and_copied_again_as_the_harness_s_own_is_re
 runs = ["ledger-healing"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations/transcripts.rs"
+file = "crates/cf-ledger/src/conversations/transcripts/parts.rs"
 find = '''         SET role = excluded.role, bytes = excluded.bytes, parts = excluded.parts,'''
 replace = '''         SET bytes = excluded.bytes, parts = excluded.parts,'''
 
