@@ -74,7 +74,7 @@ fn t1700_login_only_needs_no_owner_configuration_mark() {
     let bin = root.path().join("bin");
     fs::create_dir(&home).unwrap();
     fs::create_dir(&bin).unwrap();
-    crate::door::write_executable(&bin.join("claude"), "#!/bin/sh\nexit 0\n").unwrap();
+    crate::door::write_executable(bin.join("claude"), "#!/bin/sh\nexit 0\n").unwrap();
     let output = crate::process::case_of(
         std::env::current_exe().unwrap(),
         "live::machine::tests::t1700_login_only_needs_no_owner_configuration_mark",
