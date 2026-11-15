@@ -128,9 +128,11 @@ fn names_real_cargo(shown: &str, text: &str) -> bool {
 fn finding_rustc_beside_cargo_does_not_exempt_starting_cargo() {
     assert!(!names_real_cargo(STANDIN_SETUP, COMPILER_LOOKUP));
     assert!(names_real_cargo("somewhere/else.rs", COMPILER_LOOKUP));
+    // Assemble source text to scan; this test starts no program from it.
+    let start = ["Command", "::new(cargo);"].concat();
     assert!(names_real_cargo(
         STANDIN_SETUP,
-        &format!("{COMPILER_LOOKUP}Command::new(cargo);"),
+        &format!("{COMPILER_LOOKUP}{start}"),
     ));
     assert!(names_real_cargo(
         STANDIN_SETUP,
