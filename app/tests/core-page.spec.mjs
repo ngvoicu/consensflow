@@ -1249,6 +1249,20 @@ test('draws the kanban: a row per participant, a column per state, and cards tha
   expect(await page.evaluate(() => window.__pwned)).toBeUndefined()
 })
 
+test('shows a failed Resume on the paused card and the chief status', async ({ page }) => {
+  const data = model()
+  const reason = "@zeus-amber-pine's window could not be opened: the launch failed (its cause is in ConsensFlow's log)"
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  chief.activity = { state: 'waiting', reason: "the chief's window could not be opened: the launch failed (its cause is in ConsensFlow's log)" }
+  const zeus = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
+  zeus.tasks.push(task(91, 'Work that did not restart', 'paused', 'chief', 'zeus', 0, { pauseReason: reason }))
+  await open(page, data)
+  await expect(page.locator('button.card[data-task="91"] .card-reason')).toHaveText(reason)
+  await expect(page.locator('#stage .terminal-card[data-handle="chief"] .terminal-status')).toHaveText(
+    "Waiting: the chief's window could not be opened: the launch failed (its cause is in ConsensFlow's log)",
+  )
+})
+
 test('shows an agent-written title as text, never as markup', async ({ page }) => {
   await open(page)
   const title = page.locator('tr[data-handle="diana"] .card-title')

@@ -1205,6 +1205,9 @@ export class BoardView {
       where,
       status,
     )
+    if (task.state === 'paused' && task.pauseReason) {
+      card.append(element('span', 'card-reason', task.pauseReason))
+    }
     // A result reads by its first line: its drawer has it whole.
     if (task.result) card.append(element('span', 'card-result', task.result.trim().split('\n')[0]))
     item.append(card)

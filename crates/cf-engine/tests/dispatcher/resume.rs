@@ -57,18 +57,93 @@ fn resume_launch_failure_on(harness: &'static str) {
     }));
     context.resume_project(project).unwrap();
     let reason = format!("@{session}'s window could not be opened: the launch failed (its cause is in ConsensFlow's log)");
-    assert_eq!(context.task(project, 1).task.state, "paused", "{harness}: failed Resume must not leave work running");
+    assert_eq!(
+        context.task(project, 1).task.state,
+        "paused",
+        "{harness}: failed Resume must not leave work running"
+    );
     let events = context.ledger.borrow().events(project, 0, 5000).unwrap();
-    assert!(events.iter().any(|event| event.kind == "task.state" && event.data["to"] == "paused" && event.data["because"] == reason), "{harness}: pause event: {events:?}");
+    assert!(
+        events.iter().any(|event| event.kind == "task.state"
+            && event.data["to"] == "paused"
+            && event.data["because"] == reason),
+        "{harness}: pause event: {events:?}"
+    );
     let notes = context.inbox(context.id(project, "chief"));
-    assert!(notes.iter().any(|note| note.body.contains(&reason)), "{harness}: chief note: {notes:?}");
-    assert!(!notes.iter().any(|note| note.body.contains("secret-value")), "{harness}: no secret in a note");
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.state != "cancelled" && note.body.contains(&reason)),
+        "{harness}: chief note: {notes:?}"
+    );
+    assert!(
+        !notes.iter().any(|note| note.body.contains("secret-value")),
+        "{harness}: no secret in a note"
+    );
+    let board = context.ledger.borrow().board(project).unwrap();
+    let card = board
+        .lanes
+        .iter()
+        .flat_map(|lane| &lane.tasks)
+        .find(|card| card.number == 1)
+        .unwrap();
+    assert_eq!(
+        card.pause_reason.as_deref(),
+        Some(reason.as_str()),
+        "{harness}: card reason"
+    );
+    let native = native_of(&context, context.id(project, &session));
+    *context.adapter.prepare.borrow_mut() = None;
+    context.close_project(project).unwrap();
+    context.resume_project(project).unwrap();
+    assert_eq!(
+        context.task(project, 1).task.state,
+        "working",
+        "{harness}: Close and Resume retries the work"
+    );
+    assert_eq!(
+        native_of(&context, context.id(project, &session)),
+        native,
+        "{harness}: the conversation is kept"
+    );
+}
+
+#[test]
+fn resume_launch_failure_keeps_the_session_for_cf_task_resume() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let project = tiers.project.id;
+    let session = tiers.assignee(1);
+    context.adapter.with(&session, |agent| agent.settled = true);
+    let native = native_of(&context, tiers.id(&session));
+    context.close_project(project).unwrap();
+    let failed = session.clone();
+    *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |launch| {
+        if launch["participant"]["handle"] == failed {
+            Err("no window".into())
+        } else {
+            Ok(())
+        }
+    }));
+    context.resume_project(project).unwrap();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    *context.adapter.prepare.borrow_mut() = None;
+    context.resume_task(project, 1, "Carry on");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    assert_eq!(native_of(&context, tiers.id(&session)), native);
 }
 
 macro_rules! resume_launch_failure_case {
     ($name:ident, $harness:literal) => {
         #[test]
-        fn $name() { resume_launch_failure_on($harness); }
+        fn $name() {
+            resume_launch_failure_on($harness);
+        }
     };
 }
 resume_launch_failure_case!(resume_launch_failure_claude, "claude-code");
@@ -93,12 +168,20 @@ fn resume_launch_failure_of_the_chief_is_visible_and_retried_without_a_queued_me
     }));
     context.resume_project(project).unwrap();
     let activity = context.dispatcher.activity(chief);
-    assert!(activity.reason.as_deref().is_some_and(|reason| reason.contains("chief") && reason.contains("could not be opened")), "chief failure on board: {activity:?}");
+    assert!(
+        activity.reason.as_deref().is_some_and(
+            |reason| reason.contains("chief") && reason.contains("could not be opened")
+        ),
+        "chief failure on board: {activity:?}"
+    );
     assert!(!activity.reason.unwrap().contains("secret-value"));
     *context.adapter.prepare.borrow_mut() = None;
     context.advance(5_000);
     context.pass().unwrap();
-    assert!(context.dispatcher.pane(chief).is_some(), "the at-rest chief is retried even with no message waiting");
+    assert!(
+        context.dispatcher.pane(chief).is_some(),
+        "the at-rest chief is retried even with no message waiting"
+    );
 }
 
 #[test]
@@ -112,7 +195,9 @@ fn resume_launch_failure_of_a_window_that_exits_before_its_open_answer_pauses_it
     let session = tiers.assignee(1);
     context.adapter.with(&session, |agent| agent.settled = true);
     context.close_project(project).unwrap();
-    context.host.exits_showing(Some(3), None, Some(&["API key: secret-value"]));
+    context
+        .host
+        .exits_showing(Some(3), None, Some(&["API key: secret-value"]));
     let host = Rc::clone(&context.host);
     let handle = session.clone();
     *context.adapter.after_prepare.borrow_mut() = Some(Rc::new(move |opened| {
@@ -123,8 +208,16 @@ fn resume_launch_failure_of_a_window_that_exits_before_its_open_answer_pauses_it
     context.resume_project(project).unwrap();
     assert_eq!(tiers.task(1).task.state, "paused");
     let notes = tiers.notes("chief");
-    assert!(notes.iter().any(|note| note.contains(&format!("@{session}'s window could not be opened"))), "{notes:?}");
-    assert!(!notes.iter().any(|note| note.contains("secret-value")), "{notes:?}");
+    assert!(
+        notes
+            .iter()
+            .any(|note| note.contains(&format!("@{session}'s window could not be opened"))),
+        "{notes:?}"
+    );
+    assert!(
+        !notes.iter().any(|note| note.contains("secret-value")),
+        "{notes:?}"
+    );
 }
 
 /// Zeus and diana at work, each on a task of its own, their windows in the middle
@@ -2623,10 +2716,8 @@ fn a_task_held_for_a_job_at_the_close_whose_job_the_resume_could_not_retire_is_h
     );
 }
 
-/// A member at rest with its task in hand when the app quit, whose window the Resume
-/// cannot open (its harness's launch failed before any window), and a note the chief
-/// told it about T-1 before the Resume: T-1 is at work with no window, and the note is
-/// the first message of the window the next pass opens for it. Exits are held, as the
+/// An orphaned at-work task left by an earlier build, with a note the chief told it:
+/// the note is the first message of the window the next pass opens for it. Exits are held, as the
 /// bridge host sends a window's exit after it answers its kill (the test host's own
 /// raises the exit inside its kill). The staff, the engine started again, the member's
 /// handle and the note.
@@ -2658,14 +2749,6 @@ fn reopen_that_failed(context: &Context, with_note: bool) -> Failed<'_> {
     let after = quit_and_start(context);
     context.advance(1_000);
     context.host.hold_exits.set(true);
-    let reopening = session.clone();
-    *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |launch| {
-        if launch["participant"]["handle"] == reopening.as_str() {
-            Err("no harness".to_owned())
-        } else {
-            Ok(())
-        }
-    }));
     let note = with_note.then(|| {
         context
             .ledger
@@ -2681,15 +2764,18 @@ fn reopen_that_failed(context: &Context, with_note: bool) -> Failed<'_> {
             )
             .unwrap()
     });
-    after.resume_project(project).unwrap();
+    // A ledger from an older build can already have work with no window. Construct
+    // that state directly; the current Resume itself no longer leaves it behind.
+    context
+        .ledger
+        .borrow_mut()
+        .set_project_state(project, "open")
+        .unwrap();
+    after.open_window(project, "chief").unwrap();
     assert_eq!(tiers.task(1).task.state, "working", "with no window");
-    assert!(to_human(context, project).contains(&format!(
-        "@{session} could not start: the launch failed (its cause is in ConsensFlow's log)."
-    )));
     if let Some(note) = &note {
         assert_eq!(context.message(note.id).state, "queued");
     }
-    *context.adapter.prepare.borrow_mut() = None;
     Failed(tiers, after, session, note)
 }
 

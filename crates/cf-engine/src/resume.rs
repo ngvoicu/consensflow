@@ -142,6 +142,7 @@ impl Drop for Closing {
 
 /// A window the human's Resume brings back, as far as telling it its turn was
 /// cut goes.
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum Coming {
     /// The chief's.
     Chief,

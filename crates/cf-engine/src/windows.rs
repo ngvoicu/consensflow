@@ -33,6 +33,7 @@ use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::ownership::Kept;
 use crate::privacy::PrivacyPart;
 use crate::record::Record;
+use crate::resume::Coming;
 use crate::role_change::{Compared, Prelude};
 use crate::role_news::{NewsPart, Told};
 use crate::runtime::{begin, caught, returning};
@@ -241,6 +242,8 @@ pub(crate) struct Relaunch {
 
 /// The record's window part.
 pub(crate) struct WindowPart {
+    /// The project Resume which is bringing this window back, until it is up.
+    pub(crate) coming: Option<Coming>,
     /// A chief that needs an edit (T-1202) whose harness's record was read and named no
     /// model: it is held, and its record not read again, until the human switches it.
     pub(crate) no_model_in_record: bool,
@@ -404,6 +407,7 @@ pub(crate) struct Abandoned {
 impl Default for WindowPart {
     fn default() -> Self {
         Self {
+            coming: None,
             no_model_in_record: false,
             window: None,
             keys: None,
@@ -1593,6 +1597,13 @@ impl Dispatcher {
             return Ok(());
         }
         if participant.role != "chief" {
+            if record.window.borrow().coming.is_some() {
+                if let Some(delivering) = delivering {
+                    self.give_back(delivering.message, because)?;
+                }
+                self.resume_launch_failed(record, project, participant, because)?;
+                return Ok(());
+            }
             // What it was to say of the role first was written for a window that
             // never came up, and no queue of a member's would give it to another.
             self.withdraw_replacements(participant)?;
@@ -1626,12 +1637,22 @@ impl Dispatcher {
         let wait = RELAUNCH_MS
             .saturating_mul(2_i64.saturating_pow(failures - 1))
             .min(RELAUNCH_MAX_MS);
+        let resuming = matches!(record.window.borrow().coming, Some(Coming::Chief));
         record.window.borrow_mut().relaunch = Some(Relaunch {
             failures,
             at: self.now() + wait,
             // Until a window comes up, as a launch that fails for another reason after it.
-            reopens: before.is_some_and(|relaunch| relaunch.reopens),
+            reopens: resuming || before.is_some_and(|relaunch| relaunch.reopens),
         });
+        if resuming {
+            self.set_activity(
+                record,
+                Activity::because(
+                    ActivityState::Waiting,
+                    format!("the chief's window could not be opened: {because}"),
+                ),
+            )?;
+        }
         if failures == 1 {
             self.seams.ledger.borrow_mut().note(
                 project.id,
@@ -1649,13 +1670,52 @@ impl Dispatcher {
         Ok(())
     }
 
+    /// Pause only the work this Resume still owns; a later stop or task move wins.
+    pub(crate) fn resume_launch_failed(
+        &self,
+        record: &Record,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        cause: &str,
+    ) -> Result<(), EngineError> {
+        let coming = record.window.borrow().coming;
+        let Some(Coming::Member { task, paid }) = coming else {
+            return Ok(());
+        };
+        let current = self.project_of(participant.id)?;
+        let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
+        let thread = self
+            .seams
+            .ledger
+            .borrow()
+            .active_task(participant.id, false)?;
+        if current.is_some_and(|project| project.state == "open") && stop == paid {
+            if let Some(thread) = thread.filter(|thread| thread.task.number == task) {
+                let because = format!(
+                    "@{}'s window could not be opened: {cause}",
+                    participant.handle
+                );
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .pause_failed_project_resume(project.id, task, &because)?;
+                self.tell_stall(project, &thread.task, &because, &because, None)?;
+                self.changed();
+            }
+        }
+        record.window.borrow_mut().coming = None;
+        Ok(())
+    }
+
     /// A window said it is ready for a delivery: its launch came up, and a chief
     /// that failed to start before has its count of failures cleared, the next
     /// failure told the human again. A launch that is to say the role first has not
     /// come up until it has, and keeps its count (`role_change`).
     pub(crate) fn came_up(&self, record: &Record) {
         if record.delivery.borrow().prelude.is_none() {
-            record.window.borrow_mut().relaunch = None;
+            let mut window = record.window.borrow_mut();
+            window.relaunch = None;
+            window.coming = None;
         }
     }
 

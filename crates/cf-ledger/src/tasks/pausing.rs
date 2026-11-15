@@ -60,7 +60,18 @@ pub(crate) fn pause_task_naming(
     by: Option<&str>,
     because: Option<&str>,
 ) -> Result<(TaskView, Vec<MessageView>), LedgerError> {
-    pause_task_inner(store, project_id, number, by, because, false)
+    pause_task_inner(store, project_id, number, by, because, false, false)
+}
+
+/// A window the project's Resume could not bring back. The next project
+/// Close and Resume may try it again, unless the chief or human takes over.
+pub(crate) fn pause_failed_project_resume(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    because: &str,
+) -> Result<TaskView, LedgerError> {
+    Ok(pause_task_inner(store, project_id, number, None, Some(because), false, true)?.0)
 }
 
 /// ConsensFlow pauses a worker's task whose window it closed itself, as it
@@ -94,7 +105,7 @@ fn pause_task_as(
     because: Option<&str>,
     with_project: bool,
 ) -> Result<TaskView, LedgerError> {
-    Ok(pause_task_inner(store, project_id, number, by, because, with_project)?.0)
+    Ok(pause_task_inner(store, project_id, number, by, because, with_project, false)?.0)
 }
 
 fn pause_task_inner(
@@ -104,6 +115,7 @@ fn pause_task_inner(
     by: Option<&str>,
     because: Option<&str>,
     with_project: bool,
+    failed_project_resume: bool,
 ) -> Result<(TaskView, Vec<MessageView>), LedgerError> {
     if let Some(because) = because {
         model::require_text(because, "because", 1000)?;
@@ -175,7 +187,16 @@ fn pause_task_inner(
             if let Some(because) = because {
                 detail.insert("because".into(), json!(because));
             }
+            if failed_project_resume {
+                detail.insert("resume_launch_failed".into(), json!(true));
+            }
             pause(store, &task, detail, with_project, Stops::Asked)?;
+            if failed_project_resume {
+                store.db.execute(
+                    "UPDATE task SET paused_with_project = 1 WHERE id = ?",
+                    [task.id],
+                )?;
+            }
         }
         Ok((task_by_id(store, task.id)?, told))
     })

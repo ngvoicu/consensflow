@@ -1001,6 +1001,12 @@ impl Dispatcher {
         }
         // The task the window was given, whose requester hears what its close ended.
         let owner = record.window.borrow().owner;
+        let coming = record.window.borrow().coming;
+        let own_reason = record
+            .window
+            .borrow()
+            .own_exit_of(pane)
+            .and_then(|own| own.why.clone());
         let said_yes = trust::yes_at_exit(&record, &shown);
         // What the engine had sent this window, told before `closed` clears it.
         let sent = record.window.borrow().sent_to.contains(pane);
@@ -1067,6 +1073,13 @@ impl Dispatcher {
             ));
         }
         let shown = shown.with_start(start, who);
+        let resume_member_failed =
+            project.state == "open" && matches!(coming, Some(Coming::Member { .. }));
+        if resume_member_failed {
+            let cause =
+                own_reason.unwrap_or_else(|| shown.after("the window ended before it was up"));
+            self.resume_launch_failed(&record, &project, &participant, &cause)?;
+        }
         let closed = format!("@{}'s window closed", participant.handle);
         let because = if at_launch {
             self.unstarted_because(&record, &closed, &shown)
@@ -1092,7 +1105,7 @@ impl Dispatcher {
                 // T-523 left out: the alpha.1 release check T-1068 saw its brief and task
                 // fail at a Close, T-1076). One whose window ended by itself in an open
                 // project fails, as a launch that did not come up does.
-                let closed_with_project = project.state != "open";
+                let closed_with_project = project.state != "open" || resume_member_failed;
                 // A paste its harness's record shows it took is confirmed (`in_flight`).
                 let (this, told) = (Rc::clone(self), because.clone());
                 self.settle_gone(delivering, closed_with_project, move |delivering| {
@@ -1169,6 +1182,16 @@ impl Dispatcher {
                     self.reopen_without(&record, gone);
                     return Ok(());
                 }
+            }
+            if project.state == "open"
+                && !own
+                && !up
+                && at_its_launch
+                && matches!(coming, Some(Coming::Chief))
+            {
+                let cause = shown.after("the window ended before it was up");
+                self.launch_failed(&record, &project, &participant, None, &cause)?;
+                return Ok(());
             }
             if project.state == "open" && !own && !launch_owed {
                 self.seams
@@ -1533,6 +1556,9 @@ impl Dispatcher {
             return Ok(());
         }
         let starting = drawing || (unnamed && !record.window.borrow().named);
+        if !starting && record.delivery.borrow().prelude.is_none() {
+            record.window.borrow_mut().coming = None;
+        }
         // An out member's window says so, and nothing else, until the reset.
         if !self.is_out(&owner) {
             // The reason is given once the question is on its screen.
@@ -2134,7 +2160,33 @@ impl Dispatcher {
             };
             let (launching, at) = (Rc::clone(&this), Rc::clone(&held));
             this.act(&held, async move {
-                launching.launch(&at, &project, &who, first).await
+                at.window.borrow_mut().coming = coming;
+                let result = launching.launch(&at, &project, &who, first).await;
+                if let Err(cause) = result {
+                    if coming.is_some() {
+                        launching.write_down(&cause);
+                        let said = launching.startup_words(
+                            &who,
+                            crate::startup::Startup::new(
+                                crate::startup::Stage::Prepare,
+                                crate::startup::Why::Unsaid,
+                            ),
+                            "",
+                        );
+                        launching.launch_failed(&at, &project, &who, None, &said)
+                    } else {
+                        Err(cause)
+                    }
+                } else {
+                    let clear = {
+                        let window = at.window.borrow();
+                        window.pane.is_none() && window.relaunch.is_none()
+                    };
+                    if clear {
+                        at.window.borrow_mut().coming = None;
+                    }
+                    Ok(())
+                }
             })
             .await;
             Ok(())
