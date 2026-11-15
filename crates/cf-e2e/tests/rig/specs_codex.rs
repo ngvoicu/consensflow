@@ -27,7 +27,7 @@ const FAKE_CODEX: &str = env!("CARGO_BIN_EXE_fake-codex");
 const SECTION: &str = "## This project's specs";
 
 /// What a message that gives a role again says, which no other note does.
-const REPLACES: &str = "replace the ones you were given then";
+const REPLACES: &str = "Follow these instructions in place of the earlier ones.";
 
 /// The role text a Codex window was launched with: the file its environment names,
 /// which its broker gives its main thread as it starts. It goes with its window, so
@@ -43,7 +43,9 @@ fn codex_role_of(frame: &Value) -> String {
 fn no_role_on_the_line(frame: &Value) {
     let line = frame["argv"].to_string();
     assert!(
-        !line.contains("Your ConsensFlow role is") && !line.contains(SECTION),
+        !line.contains("Your ConsensFlow role follows")
+            && !line.contains("name: consensflow-chief")
+            && !line.contains(SECTION),
         "the role is on the command line: {line}"
     );
 }
@@ -90,7 +92,7 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
         first["argv"]
     );
     let first_role = codex_role_of(&first);
-    assert!(first_role.contains("Your ConsensFlow role is chief"));
+    assert!(first_role.contains("name: consensflow-chief\n"));
     assert!(!first_role.contains(SECTION), "specs are off");
     no_role_on_the_line(&first);
 
@@ -138,7 +140,7 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
         1,
         "its thread has the one set of instructions it began with"
     );
-    assert!(began_with[0].contains("Your ConsensFlow role is chief"));
+    assert!(began_with[0].contains("name: consensflow-chief\n"));
     assert!(!began_with[0].contains(SECTION));
     let thread = rollout::thread_of(&thread_text()?).expect("its thread");
 

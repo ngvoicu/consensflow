@@ -179,7 +179,7 @@ fn a_codex_chief_that_never_had_a_turn_comes_back_on_the_resume_and_the_project_
 #[cfg(unix)]
 const SECTION: &str = "## This project's specs";
 #[cfg(unix)]
-const REPLACES: &str = "replace the ones you were given then";
+const REPLACES: &str = "Follow these instructions in place of the earlier ones.";
 
 /// The same chief, given specs by the human while the project is closed. A Codex thread keeps
 /// the instructions it began with, so a chief that is resumed is told a role that

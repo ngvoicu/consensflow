@@ -42,14 +42,17 @@ use serde_json::{json, Value};
 use crate::{config_with_codex, secs, Outcome};
 
 /// What a message that tells a window its role again says, which no other note does.
-const REPLACES: &str = "replace the ones you were given then";
+const REPLACES: &str = "Follow these instructions in place of the earlier ones.";
 
 /// The brief that compacts the thread at its turn's start and asks the agent its role.
 const ASKS_ROLE: &str = "COMPACT 1 Say your role";
 
-/// What the stand-in says of a role it holds: its sentence, which names the member's role.
+/// Whether the stand-in's answer or the developer message names the member's role.
 fn names_role(said: &str, role: &str) -> bool {
     said.contains(&format!("Your ConsensFlow role is {role}."))
+        || said.contains(&format!(
+            "Your ConsensFlow role follows; it is already loaded, not a task.\n\n---\nname: consensflow-{role}\n"
+        ))
 }
 
 /// What the stand-in says of the command its role asks the chief with (none says "No command
