@@ -62,6 +62,38 @@ fn an_installed_harness_is_its_command_and_the_home_it_logs_in_at() {
 
 #[cfg(unix)]
 #[test]
+fn t1700_login_only_needs_no_owner_configuration_mark() {
+    const CHILD: &str = "CF_T1700_NO_CONFIG_MARK";
+    if crate::process::own_var(CHILD).is_some() {
+        let installed = installed_for_claude_parity(Duration::from_secs(60)).unwrap();
+        assert!(installed.claude_config().is_some());
+        return;
+    }
+    let root = crate::door::made("cf-parity-no-mark-").unwrap();
+    let home = root.path().join("owner");
+    let bin = root.path().join("bin");
+    fs::create_dir(&home).unwrap();
+    fs::create_dir(&bin).unwrap();
+    crate::door::write_executable(&bin.join("claude"), "#!/bin/sh\nexit 0\n").unwrap();
+    let output = crate::process::case_of(
+        std::env::current_exe().unwrap(),
+        "live::machine::tests::t1700_login_only_needs_no_owner_configuration_mark",
+        Duration::from_secs(30),
+    )
+    .inheriting_env()
+    .var(CHILD, "1")
+    .var("HOME", &home)
+    .var("USERPROFILE", &home)
+    .var("PATH", &bin)
+    .var("CONSENSFLOW_LIVE_CLAUDE_CONFIG", "")
+    .var("CONSENSFLOW_TEST_MACHINE", "")
+    .run()
+    .unwrap();
+    assert!(output.code == Some(0), "{}", output.output());
+}
+
+#[cfg(unix)]
+#[test]
 fn a_harness_says_its_version_by_the_word_it_is_asked_with_and_unknown_when_it_says_none() {
     // GNU echo interprets `--version` itself; this stand-in prints the actual argument.
     let folder = crate::door::made("cf-version-probe-").unwrap();

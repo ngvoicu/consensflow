@@ -487,7 +487,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn the_version_probe_uses_the_runs_claude_config() {
+    fn t1700_version_probe_uses_the_runs_claude_config() {
         let made = cf_e2e::door::made("cf-parity-version-").unwrap();
         let config = made.path().join("config");
         let program = made.path().join("claude");

@@ -699,7 +699,9 @@ fn installed_with_owner_check(
         ),
     })?;
     let places = login_places(harness, &home, own_var("APPDATA").as_deref(), cfg!(windows));
-    if !has_login(&places) {
+    // Claude parity will check the login itself when it creates the run's config.
+    // Do not even probe the owner's other Claude configuration for a login mark.
+    if (harness != Harness::Claude || watch_owner) && !has_login(&places) {
         return Err(no_login(harness, &places));
     }
     let installed = with_homes(Installed::at(harness, command, home), planned, watch_owner)?;

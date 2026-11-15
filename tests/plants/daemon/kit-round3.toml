@@ -352,7 +352,7 @@ replace = '''installed_with_owner_check(Harness::Claude, planned, true)'''
 
 [[plant]]
 name = "kit parity: Claude version probe uses the owner's config"
-meant = "the_version_probe_uses_the_runs_claude_config"
+meant = "t1700_version_probe_uses_the_runs_claude_config"
 runs = ["round5-parity"]
 platforms = ["linux", "macos"]
 [[plant.edit]]
@@ -360,3 +360,13 @@ file = "crates/cf-e2e/tests/live_parity/claude.rs"
 find = '''    claude.version_in_claude_config(config)'''
 replace = '''    let _ = config;
     claude.version()'''
+
+[[plant]]
+name = "kit parity: Claude setup checks the owner's configuration mark"
+meant = "t1700_login_only_needs_no_owner_configuration_mark"
+runs = ["round5-login-only"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    if (harness != Harness::Claude || watch_owner) && !has_login(&places) {'''
+replace = '''    if !has_login(&places) {'''
