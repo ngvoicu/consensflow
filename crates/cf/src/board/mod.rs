@@ -710,7 +710,7 @@ fn guide(rest: &[String], board: &Board) -> Result<Said, Failure> {
     let guide = js::text(answer.get("text")).into_owned();
     let (text, _) = guide_part(&guide, part, board.cf().as_str())
         .ok_or_else(|| a_guide_part_there_is_not(&part.to_string()))?;
-    Ok(Said::new(answer, text))
+    Ok(Said::new(json!({ "text": &text }), text))
 }
 
 /// `--part` named a part the guide does not have.

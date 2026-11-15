@@ -63,6 +63,7 @@ impl Front {
             trace,
             cf: Rc::new(|_| cf_proto::cf_word::CfWord::bare()),
             specs_folder: Rc::new(|_, _| None),
+            ordinary_specs: Rc::new(|_, _| Ok(None)),
             tooling_calls: false,
         });
         Self {

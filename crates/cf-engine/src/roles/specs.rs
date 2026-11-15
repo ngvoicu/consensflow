@@ -28,7 +28,7 @@ pub struct ProjectSpecs<'a> {
 
 impl ProjectSpecs<'_> {
     /// The section, which ends in a line break, for a chief's text.
-    pub(super) fn section(&self) -> String {
+    pub(crate) fn section(&self) -> String {
         self.section_for(false)
     }
 

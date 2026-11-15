@@ -4,6 +4,7 @@
 own-off = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_news::own_hands_going_off_gives_the_ordinary_role_whole"]
 own-rules = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_news::the_rules_for_the_staff_are_in_a_chiefs_launch_only_while_own_hands_is_off"]
 own-guide = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::guide"]
+own-guide-switch = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "the_guide_follows_the_project_s_own_hands_switch"]
 own-short = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "own_hands"]
 own-news = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_news::own_hands_switch_is_told_once_each_way_on_every_harness"]
 own-text = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "own_hands_selects_the_chiefs_text_and_keeps_the_members_text"]
@@ -63,8 +64,28 @@ runs = ["own-guide"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/guide.rs"
-find = '''        caller.project.staff_rules.as_deref(),'''
-replace = '''        None,'''
+find = '''        cf_engine::roles::guide_instructions(
+            &staff,
+            &cf,
+            folder.as_deref(),
+            caller.project.staff_rules.as_deref(),
+        )'''
+replace = '''        cf_engine::roles::guide_instructions(
+            &staff,
+            &cf,
+            folder.as_deref(),
+            None,
+        )'''
+
+[[plant]]
+name = "own hands: the guide ignores the project's switch"
+meant = "the_guide_follows_the_project_s_own_hands_switch"
+runs = ["own-guide-switch"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/guide.rs"
+find = '''    let text = if caller.project.own_hands {'''
+replace = '''    let text = if true {'''
 
 [[plant]]
 name = "own hands: the short text is the ordinary chief's whole role"

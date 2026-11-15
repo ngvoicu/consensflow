@@ -129,6 +129,28 @@ impl Dispatcher {
             .map(|setting| setting.folder)
     }
 
+    /// The ordinary chief's complete specs section, with its harness's current skill path.
+    /// A missing adapter or skill is an error rather than a silently incomplete guide.
+    pub fn ordinary_specs_section(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+    ) -> Result<Option<String>, EngineError> {
+        if self.specs_setting(project, participant).is_none() {
+            return Ok(None);
+        }
+        let harness = participant.harness.as_deref().unwrap_or_default();
+        let adapter = self.seams.adapters.adapter(harness).ok_or_else(|| {
+            EngineError::said(
+                "no-adapter",
+                format!("ConsensFlow cannot open {harness} windows"),
+            )
+        })?;
+        Ok(self
+            .chief_specs(project, participant, adapter.as_ref())?
+            .map(|specs| specs.text().section()))
+    }
+
     /// The specs `participant`'s launch is given in `project`: none for any
     /// member, and none for a chief whose project has them off. What the app
     /// says (whether, the folder and the variant) is read from its settings unless

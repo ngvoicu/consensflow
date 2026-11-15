@@ -1,7 +1,7 @@
 use cf_base::env::Env;
 use cf_engine::roles::{
-    guide_instructions, role_instructions, role_instructions_for, with_staff_rules, ProjectSpecs,
-    StaffRow,
+    guide_instructions, ordinary_guide_instructions, role_instructions, role_instructions_for,
+    with_staff_rules, ProjectSpecs, StaffRow,
 };
 use cf_proto::{cf_word::CfWord, specs::Variant};
 
@@ -152,6 +152,29 @@ fn the_guide_is_the_ordinary_text_with_its_four_parts_said_for_the_board() {
     assert!(guide.contains("task add --review"));
     assert!(!guide.contains("---\nname:"));
     assert!(!guide.contains("You do not change the project yourself"));
+}
+
+#[test]
+fn the_ordinary_guide_is_the_whole_ordinary_role_without_frontmatter() {
+    let cf = CfWord::of_word("/opt/cf/bin/cf").unwrap();
+    let staff = [StaffRow {
+        name: "crisp-comet".to_owned(),
+        model: None,
+        roles: vec!["worker".to_owned()],
+        work_tier: Some(cf_proto::agents::WorkTier::Standard),
+    }];
+    for specs in [None, Some(specs())] {
+        for rules in [None, Some("The person's exact rules.")] {
+            let role =
+                role_instructions(&Env::default(), "chief", &staff, &cf, specs.as_ref()).unwrap();
+            let section = role
+                .find("\n## This project's specs\n")
+                .map(|at| &role[at..]);
+            let guide = ordinary_guide_instructions(&staff, &cf, section, rules).unwrap();
+            let full = with_staff_rules(role, "chief", rules);
+            assert_eq!(guide, full.split_once("\n---\n\n").unwrap().1);
+        }
+    }
 }
 
 /// The text between `start` and `end` in `text`, each line end included.

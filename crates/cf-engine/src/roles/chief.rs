@@ -47,8 +47,8 @@ pub(super) fn text(own_hands: bool) -> Result<String, RoleError> {
 /// The board's guide, with its slots still in it: the ordinary text with its four marked
 /// parts said for a chief that uses the board when the human asks, and no frontmatter
 /// (it is read by a command, not loaded as a skill).
-pub(super) fn guide() -> Result<String, RoleError> {
-    let whole = assembled(|name| (name != "description").then_some(name))?;
+pub(super) fn guide(own_hands: bool) -> Result<String, RoleError> {
+    let whole = assembled(|name| (own_hands && name != "description").then_some(name))?;
     let missing = || RoleError::MissingChiefPart("frontmatter".to_owned());
     let (_, body) = whole
         .strip_prefix("---\n")

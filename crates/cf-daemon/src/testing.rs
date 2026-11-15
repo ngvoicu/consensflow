@@ -127,6 +127,8 @@ pub struct Scene {
     /// Where the scene's engine says the project's specs are kept for its chief: none, where
     /// it has them off.
     pub specs_folder: Rc<RefCell<Option<String>>>,
+    /// The complete ordinary specs section the scene's engine supplies.
+    pub ordinary_specs: Rc<RefCell<Option<String>>>,
     /// The chief's window's token.
     pub chief: String,
     /// The worker `zeus`'s window's token.
@@ -296,6 +298,7 @@ pub fn scene() -> Scene {
     let finishings = Rc::new(Finishings::default());
     let finishing = (Rc::clone(&finishings), Rc::clone(&ledger));
     let specs_folder: Rc<RefCell<Option<String>>> = Rc::default();
+    let ordinary_specs: Rc<RefCell<Option<String>>> = Rc::default();
     let context = Rc::new(Context {
         ledger,
         credentials: Rc::new(credentials),
@@ -338,6 +341,10 @@ pub fn scene() -> Scene {
             let folder = Rc::clone(&specs_folder);
             Rc::new(move |_, _| folder.borrow().clone())
         },
+        ordinary_specs: {
+            let section = Rc::clone(&ordinary_specs);
+            Rc::new(move |_, _| Ok(section.borrow().clone()))
+        },
         tooling_calls: false,
     });
     Scene {
@@ -346,6 +353,7 @@ pub fn scene() -> Scene {
         kicks,
         finishings,
         specs_folder,
+        ordinary_specs,
         project,
         chief,
         zeus,

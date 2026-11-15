@@ -1472,32 +1472,51 @@ fn the_guide_is_printed_in_parts_each_ending_with_the_command_for_the_next() {
         .collect::<Vec<_>>()
         .join("\n\n");
     let reply = || reply(200, json!({ "text": guide }));
-    let first = cf_as(WORD, &["guide"], false, vec![reply()]);
-    assert_eq!(first.code.unwrap(), 0, "{}", first.err);
-    assert_eq!(asked(&first), [("GET", "/api/guide")]);
-    assert!(first.out.len() < 10_000, "{}", first.out.len());
-    assert!(first
-        .out
-        .contains(&format!("Print part 2 with: {WORD} guide --part 2)")));
-    let mut printed = first.out.clone();
-    let mut part = 2;
-    loop {
-        let next = cf_as(
-            WORD,
-            &["guide", "--part", &part.to_string()],
-            false,
-            vec![reply()],
-        );
-        assert_eq!(next.code.unwrap(), 0, "{}", next.err);
-        assert!(next.out.len() < 10_000, "{}", next.out.len());
-        printed.push_str(&next.out);
-        if next.out.contains("the last: you have read all of it") {
-            break;
+    let mut text_parts = Vec::new();
+    for json in [false, true] {
+        let mut part = 1;
+        let mut printed = String::new();
+        loop {
+            let args = if part == 1 {
+                vec!["guide".to_owned()]
+            } else {
+                vec!["guide".to_owned(), "--part".to_owned(), part.to_string()]
+            };
+            let args: Vec<_> = args.iter().map(String::as_str).collect();
+            let next = cf_as(WORD, &args, json, vec![reply()]);
+            assert_eq!(next.code.unwrap(), 0, "{}", next.err);
+            assert_eq!(asked(&next), [("GET", "/api/guide")]);
+            assert!(
+                next.out.len() < 10_000,
+                "part {part}, json {json}: {} bytes",
+                next.out.len()
+            );
+            let text = if json {
+                serde_json::from_str::<Value>(&next.out).unwrap()["text"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            } else {
+                next.out.strip_suffix('\n').unwrap().to_owned()
+            };
+            if json {
+                assert_eq!(text, text_parts[part - 1], "part {part}");
+            } else {
+                text_parts.push(text.clone());
+            }
+            if part == 1 {
+                assert!(text.contains(&format!("Print part 2 with: {WORD} guide --part 2)")));
+                assert!(!text.contains("Guide paragraph 59"));
+            }
+            printed.push_str(&text);
+            if text.contains("the last: you have read all of it") {
+                break;
+            }
+            part += 1;
+            assert!(part < 20);
         }
-        part += 1;
-        assert!(part < 10);
+        assert!(printed.contains("Guide paragraph 59"));
     }
-    assert!(printed.contains("Guide paragraph 59"));
     let past = cf(&["guide", "--part", "99"], vec![reply()]);
     assert_eq!(past.code.unwrap(), 2);
     assert!(
@@ -1507,6 +1526,60 @@ fn the_guide_is_printed_in_parts_each_ending_with_the_command_for_the_next() {
     );
     let zero = cf(&["guide", "--part", "0"], vec![]);
     assert_eq!(zero.code.unwrap(), 2);
+}
+
+#[test]
+fn json_guide_parts_are_bounded_even_when_characters_need_json_escaping() {
+    let guide = format!("{}\n\nThe end.", "\\\"\u{1}".repeat(2_000));
+    let mut part = 1;
+    loop {
+        let number = part.to_string();
+        let ran = cf_as(
+            WORD,
+            &["guide", "--part", &number],
+            true,
+            vec![reply(200, json!({ "text": guide }))],
+        );
+        assert_eq!(ran.code.unwrap(), 0, "{}", ran.err);
+        assert!(
+            ran.out.len() < 10_000,
+            "part {part}: {} bytes",
+            ran.out.len()
+        );
+        let text = serde_json::from_str::<Value>(&ran.out).unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        if text.contains("the last: you have read all of it") {
+            assert!(text.contains("The end."));
+            break;
+        }
+        assert!(text.contains(&format!("guide --part {}", part + 1)));
+        part += 1;
+        assert!(part < 20);
+    }
+}
+
+#[test]
+fn guide_parts_leave_room_for_a_long_escaped_command_in_json() {
+    let word = format!("'{}'", "\\".repeat(1_000));
+    let guide = "A long guide. ".repeat(2_000);
+    let reply = || reply(200, json!({ "text": guide }));
+    let text = cf_as(&word, &["guide"], false, vec![reply()]);
+    let json = cf_as(&word, &["guide"], true, vec![reply()]);
+    assert_eq!(text.code.unwrap(), 0, "{}", text.err);
+    assert_eq!(json.code.unwrap(), 0, "{}", json.err);
+    assert!(text.out.len() < 10_000, "{}", text.out.len());
+    assert!(json.out.len() < 10_000, "{}", json.out.len());
+    let decoded = serde_json::from_str::<Value>(&json.out).unwrap();
+    assert_eq!(
+        decoded["text"].as_str().unwrap(),
+        text.out.strip_suffix('\n').unwrap()
+    );
+    assert!(decoded["text"]
+        .as_str()
+        .unwrap()
+        .contains(&format!("{word} guide --part 2")));
 }
 
 #[test]

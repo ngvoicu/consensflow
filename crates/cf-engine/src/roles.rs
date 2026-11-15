@@ -175,9 +175,24 @@ pub fn guide_instructions(
     specs_folder: Option<&str>,
     rules: Option<&str>,
 ) -> Result<String, RoleError> {
-    let guide = filled(chief::guide()?, staff, cf)?;
+    let guide = filled(chief::guide(true)?, staff, cf)?;
     let specs = specs_folder.map_or_else(String::new, ProjectSpecs::board_for);
     Ok(with_staff_rules(guide + &specs, "chief", rules))
+}
+
+/// The same guide for an ordinary chief, with its ordinary specs section and staff rules.
+pub fn ordinary_guide_instructions(
+    staff: &[StaffRow],
+    cf: &CfWord,
+    specs_section: Option<&str>,
+    rules: Option<&str>,
+) -> Result<String, RoleError> {
+    let guide = filled(chief::guide(false)?, staff, cf)?;
+    Ok(with_staff_rules(
+        guide + specs_section.unwrap_or_default(),
+        "chief",
+        rules,
+    ))
 }
 
 /// `text`, a chief's, with the shell paragraph, the work tiers, the staff table and the

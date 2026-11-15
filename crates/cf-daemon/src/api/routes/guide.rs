@@ -21,13 +21,23 @@ pub(super) async fn handle(
     }
     let cf = (context.cf)(&caller.participant);
     let staff = cf_engine::roles::staff_of(&caller.project);
-    let folder = (context.specs_folder)(&caller.project, &caller.participant);
-    let text = cf_engine::roles::guide_instructions(
-        &staff,
-        &cf,
-        folder.as_deref(),
-        caller.project.staff_rules.as_deref(),
-    )
+    let text = if caller.project.own_hands {
+        let folder = (context.specs_folder)(&caller.project, &caller.participant);
+        cf_engine::roles::guide_instructions(
+            &staff,
+            &cf,
+            folder.as_deref(),
+            caller.project.staff_rules.as_deref(),
+        )
+    } else {
+        let specs = (context.ordinary_specs)(&caller.project, &caller.participant)?;
+        cf_engine::roles::ordinary_guide_instructions(
+            &staff,
+            &cf,
+            specs.as_deref(),
+            caller.project.staff_rules.as_deref(),
+        )
+    }
     .map_err(|failed| Failure::Internal(failed.to_string()))?;
     Ok(Answer::ok(json!({ "text": text })))
 }
