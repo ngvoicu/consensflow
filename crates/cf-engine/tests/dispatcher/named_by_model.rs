@@ -229,6 +229,10 @@ fn a_member_that_needs_an_edit_takes_no_task_and_opens_no_window_on_a_default() 
         ("open", None),
         "its task is back on the board"
     );
+    let human = context.id(project.id, "human");
+    assert!(context.inbox(human).iter().any(|note| {
+        note.body.contains("could not start") && note.body.contains("needs an edit")
+    }), "the human is told why the window did not start");
     // And a new one waits for a member that can take it.
     context.create_task(
         project.id,
