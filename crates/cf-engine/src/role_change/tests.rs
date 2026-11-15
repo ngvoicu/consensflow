@@ -365,8 +365,8 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     let whole = |note: &MessageView, cf: &CfWord| goes_whole(note, &[], cf);
     let one = |note: &MessageView, cf: &CfWord| read_in_one(note, cf);
     for (cf, pins) in [
-        (a_mac(), [172, 197, 36, 61]),
-        (a_windows(), [173, 198, 37, 62]),
+        (a_mac(), [171, 195, 35, 60]),
+        (a_windows(), [172, 196, 36, 61]),
     ] {
         assert!(
             one(
@@ -418,7 +418,7 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
         .1
     };
     assert_eq!(
-        [parts(36), parts(37), parts(143), parts(300)],
+        [parts(35), parts(36), parts(143), parts(300)],
         [1, 2, 2, 3],
         "docs: past one piece, 2 parts to 143 rows, 3 at 300"
     );
@@ -1243,7 +1243,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
     type Case<'a> = (&'a str, CfWord, usize, bool, Option<&'a str>, &'a [&'a str]);
     // The paragraph on a second review in the chief's section on reviews, where the second part
     // begins in every case.
-    const FRONTEND: &str = "A second review checks the fixes: give it the earlier findin";
+    const FRONTEND: &str = "A finding blocks the work only when it would make it fail (a";
     let cases: [Case; 4] = [
         ("a Mac, no staff", a_mac(), 0, false, None, &[FRONTEND]),
         (

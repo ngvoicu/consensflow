@@ -1,7 +1,7 @@
 //! T-1513 (review T-1510): a role whose note `cf inbox read` cannot print within the bound
 //! a role is read whole at (`cf_base::role_read`, 29,000 bytes and 500 lines) is printed in
-//! parts, each within it, and is told once every part was printed. Where it starts: specs on, the most rules for the staff and a staff of 37 of
-//! two roles a row (36 are read in one piece, T-1681). The
+//! parts, each within it, and is told once every part was printed. Where it starts: specs on, the most rules for the staff and a staff of 36 of
+//! two roles a row (35 are read in one piece, T-1681). The
 //! review's case is the chief's real text, which the fake role texts carry here as words a
 //! release added to them. The window's `cf` is read the way `cf` reads it: each part
 //! printed as `cf` prints it (`printed_part`), said read only where it is read whole, which

@@ -330,6 +330,10 @@ the paragraph on the home folder and `~/Music` and `~/Pictures` only for a windo
 rows are recorded as a Mac's: `role_instructions_on(…, mac = true)`), and the window's `cf`
 said once in a note at the start of each text (`PATH_ONCE`), every command after it starting
 with `cf`; the twelve chief rows and the four `ownHandsChief` rows and `ownHandsGuide` say each
-rule once and have the same note. The ordinary role now fits in one piece to 172 rows with specs
-on and 197 without, or 36 and 61 with the most staff rules (a text that says its path once is not
+rule once and have the same note. The ordinary role now fits in one piece to 171 rows with specs
+on and 195 without, or 35 and 60 with the most staff rules (a text that says its path once is not
 given it again when it is printed, `CF_STANDS_FOR`).
+
+T-1681 also added to the chief's `cf tell` line that a long turn may not rest for an hour, so a correction to
+the work under way goes as a pause with words (the guide carries it, being the same text); the 12 chief rows and
+the four `ownHandsChief` rows and the guide row were moved by hand for that sentence alone.

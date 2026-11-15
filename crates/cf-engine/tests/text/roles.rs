@@ -587,7 +587,7 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
     );
     // A tell is read before the result without stopping; pause with words asks instead.
     assert!(found(
-        r#"cf tell T-3 "…"\s+say this to T-3's window without stopping it: a working or waiting window reads your words at rest before its result unless withdrawn first, and owes no answer\. A pause or finish may withdraw and name them"#,
+        r#"cf tell T-3 "…"\s+say this to T-3's window without stopping it: a working or waiting window reads your words at rest before its result unless withdrawn first, and owes no answer, and a long turn[^\n]*?not a tell\. A pause or finish may withdraw and name them"#,
         &text
     ));
     assert!(found(

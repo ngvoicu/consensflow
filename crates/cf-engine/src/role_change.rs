@@ -104,13 +104,13 @@
 //! by the write that confirms the delivery (`confirm_delivery`), in the conversation
 //! it was made in. `cf` prints a role in one piece up to a bound of its own
 //! (`cf_base::role_read`, 29,000 bytes and 500 lines, measured on Codex and Muse, the
-//! harnesses a role goes to by a note, less the room its line takes): a staff of 172
-//! rows with specs on, 197 without, two roles to a row and a name of twenty characters, the
+//! harnesses a role goes to by a note, less the room its line takes): a staff of 171
+//! rows with specs on, 195 without, two roles to a row and a name of twenty characters, the
 //! model's id and effort, which a member is named by, on the same text (its bytes are the
-//! bound; 173 and 198 on Windows, whose path is longer). A text that says its path once is
+//! bound; 172 and 196 on Windows, whose path is longer). A text that says its path once is
 //! printed as it is (`CfWord::in_text` leaves it, `CF_STANDS_FOR`), so the longest rules
-//! (8,000 bytes, 150 lines) with specs on still leave room for a staff of 36 rows, and without
-//! specs for 61 (37 and 62 on Windows).
+//! (8,000 bytes, 150 lines) with specs on still leave room for a staff of 35 rows, and without
+//! specs for 60 (36 and 61 on Windows).
 //! A role longer than that `cf` prints in parts, each within the bound
 //! (`cf_base::role_read::role_parts`, cut at a paragraph where it can be, and where a
 //! table goes on past a part, its line says so): the first by the command the paste
@@ -126,7 +126,7 @@
 //! every text that says a role, and the ledger bounds them for it (at most 8,000
 //! bytes and 150 lines, `cf_ledger::STAFF_RULES_MAX_BYTES`): a member's real text
 //! with the most rules goes into its window whole. A chief's with specs on and the most
-//! rules is printed in one piece with a staff of up to 36 rows, and without specs of up to 61, and
+//! rules is printed in one piece with a staff of up to 35 rows, and without specs of up to 60, and
 //! a larger one in parts: a row of the table is about 60 bytes.
 //! A role read so is said nothing of at the next Resume, unless it changed again.
 //! One the window has not read by its next Resume is said again then, and the

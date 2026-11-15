@@ -540,3 +540,13 @@ runs = ["cw-image"]
 file = "crates/cf-engine/src/image_facts.rs"
 find = '''            if !path.as_str().starts_with("//") && !named.iter().any(|seen| seen == path.as_str()) {'''
 replace = '''            if !named.iter().any(|seen| seen == path.as_str()) {'''
+
+[[plant]]
+name = "chief-words: the chief is not told a tell can come after the work it meant to change"
+meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_the_follow_up_waits_for_its_task_to_be_accepted_at_work_or_done"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = ', and a long turn (a build, a suite, a wait) may not rest for an hour: a correction to the work under way goes as `{{cf}} task pause T-3 "…"`, not a tell.'
+replace = "."
