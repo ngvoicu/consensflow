@@ -2105,7 +2105,14 @@ impl Dispatcher {
         let work = async move {
             let project = this.project_of(participant)?;
             let open = held.window.borrow().pane.is_some();
+            // A window the Resume asked for that opens nothing says why: no note carries it.
+            let resuming = coming.is_some();
             let Some(project) = project.filter(|project| !open && project.state == "open") else {
+                if resuming {
+                    this.seams.log.warn(&format!(
+                        "the Resume opened no window for participant {participant}: its project is closed or gone, or a window is already open"
+                    ));
+                }
                 return Ok(());
             };
             let Some(who) = project
@@ -2114,6 +2121,11 @@ impl Dispatcher {
                 .find(|p| p.id == participant)
                 .cloned()
             else {
+                if resuming {
+                    this.seams.log.warn(&format!(
+                        "the Resume opened no window for participant {participant}: it is not in its project"
+                    ));
+                }
                 return Ok(());
             };
             // A window the Resume brings back opens only for work still at work once
@@ -2126,6 +2138,10 @@ impl Dispatcher {
                 Some(coming) => {
                     let note = this.cut_note(&project, &who, coming).await?;
                     if !this.still_coming(&who, coming)? {
+                        this.seams.log.warn(&format!(
+                            "the Resume opened no window for @{}: a stop was asked of it meanwhile",
+                            who.handle
+                        ));
                         return Ok(());
                     }
                     note
