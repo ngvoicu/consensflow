@@ -77,6 +77,56 @@ resume_launch_failure_case!(resume_launch_failure_pi, "pi");
 resume_launch_failure_case!(resume_launch_failure_devin, "devin");
 resume_launch_failure_case!(resume_launch_failure_muse, "muse");
 
+#[test]
+fn resume_launch_failure_of_the_chief_is_visible_and_retried_without_a_queued_message() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]).id;
+    let chief = context.id(project, "chief");
+    context.adapter.with("chief", |agent| agent.settled = true);
+    context.close_project(project).unwrap();
+    *context.adapter.prepare.borrow_mut() = Some(Rc::new(|launch| {
+        if launch["participant"]["handle"] == "chief" {
+            Err("login: secret-value".to_owned())
+        } else {
+            Ok(())
+        }
+    }));
+    context.resume_project(project).unwrap();
+    let activity = context.dispatcher.activity(chief);
+    assert!(activity.reason.as_deref().is_some_and(|reason| reason.contains("chief") && reason.contains("could not be opened")), "chief failure on board: {activity:?}");
+    assert!(!activity.reason.unwrap().contains("secret-value"));
+    *context.adapter.prepare.borrow_mut() = None;
+    context.advance(5_000);
+    context.pass().unwrap();
+    assert!(context.dispatcher.pane(chief).is_some(), "the at-rest chief is retried even with no message waiting");
+}
+
+#[test]
+fn resume_launch_failure_of_a_window_that_exits_before_its_open_answer_pauses_its_task() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let project = tiers.project.id;
+    let session = tiers.assignee(1);
+    context.adapter.with(&session, |agent| agent.settled = true);
+    context.close_project(project).unwrap();
+    context.host.exits_showing(Some(3), None, Some(&["API key: secret-value"]));
+    let host = Rc::clone(&context.host);
+    let handle = session.clone();
+    *context.adapter.after_prepare.borrow_mut() = Some(Rc::new(move |opened| {
+        if opened == handle {
+            *host.exit_after_open.borrow_mut() = Some(handle.clone());
+        }
+    }));
+    context.resume_project(project).unwrap();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let notes = tiers.notes("chief");
+    assert!(notes.iter().any(|note| note.contains(&format!("@{session}'s window could not be opened"))), "{notes:?}");
+    assert!(!notes.iter().any(|note| note.contains("secret-value")), "{notes:?}");
+}
+
 /// Zeus and diana at work, each on a task of its own, their windows in the middle
 /// of a turn: the app quits now.
 pub(crate) fn at_work(context: &Context) -> Tiers<'_> {
