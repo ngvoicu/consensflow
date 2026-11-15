@@ -169,9 +169,9 @@ runs = ["folder-trust-rig-claude-outside"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = "Question::Toward(key) if inside || accepted => Some(key),"
-replace = "Question::Toward(key) if inside || accepted && false => Some(key),"
+file = "crates/cf-engine/src/trust/watch.rs"
+find = 'Question::Toward(key) if self.inside || accepted => Some(key),'
+replace = 'Question::Toward(key) if self.inside || accepted && false => Some(key),'
 
 [[plant]]
 name = "folder trust: the human's yes is never written down"
@@ -180,7 +180,7 @@ runs = ["folder-trust-rig-claude-outside"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
+file = "crates/cf-engine/src/trust/settle.rs"
 find = '        if asked && keys == 0 && at_prompt && cleared {'
 replace = '        if asked && keys == usize::MAX && at_prompt && cleared {'
 
@@ -191,13 +191,11 @@ runs = ["folder-trust-rig-claude"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-            .told
+file = "crates/cf-engine/src/trust/notes.rs"
+find = '''            .told
             .borrow_mut()
             .insert((project.id, folder.to_owned(), answered))'''
-replace = '''
-            .told
+replace = '''            .told
             .borrow_mut()
             .insert((project.id, folder.to_owned(), answered)) && false'''
 
@@ -221,9 +219,9 @@ runs = ["folder-trust-rig-slow"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = "                delivering.since = self.now();"
-replace = "                delivering.since = delivering.since.min(self.now());"
+file = "crates/cf-engine/src/trust/settle.rs"
+find = '                delivering.since = self.now();'
+replace = '                delivering.since = delivering.since.min(self.now());'
 
 [[plant]]
 name = "folder trust: the engine reads none of the screen's lines"
@@ -319,15 +317,13 @@ runs = ["folder-trust-rig-resumed"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-            if opened_with.is_none() {
-                opened_with = length;
-            }'''
-replace = '''
-            if opened_with.is_none() {
-                opened_with = Some(0);
-            }'''
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '''        if w.opened_with.is_none() {
+            w.opened_with = length;
+        }'''
+replace = '''        if w.opened_with.is_none() {
+            w.opened_with = Some(0);
+        }'''
 
 [[plant]]
 name = "folder trust: a linked worktree's yes is taken for its own folder, and the main checkout is answered for (round 1)"
@@ -411,9 +407,9 @@ runs = ["folder-trust-rig-redraw"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = "                        Some((on, looks, key)) if *on == lines => {"
-replace = "                        Some((on, looks, key)) if *on == lines && record.window.borrow().trust_keys == usize::MAX => {"
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            Some((on, looks, key)) if *on == lines => {'
+replace = '            Some((on, looks, key)) if *on == lines && self.record.window.borrow().trust_keys == usize::MAX => {'
 
 [[plant]]
 name = "folder trust: Claude's prompt is never read"
@@ -438,9 +434,9 @@ runs = ["folder-trust-rig-chief-plain"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = "                        if gone >= GONE_LOOKS {"
-replace = "                        if gone >= u32::MAX {"
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            if w.gone >= GONE_LOOKS {'
+replace = '            if w.gone >= u32::MAX {'
 
 [[plant]]
 name = "folder trust: a record that grows as a No ends the window is banked as the human's yes (round 2)"
@@ -449,15 +445,16 @@ runs = ["folder-trust-rig-grows"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-                    // answered it (or a process before it writing still).
-                    if grown {
-                        break (false, false);'''
-replace = '''
-                    // answered it (or a process before it writing still).
-                    if grown {
-                        break (true, true);'''
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '''        // answered it (or a process before it writing still).
+        if grown {
+            return Some(Ended::PAST);'''
+replace = '''        // answered it (or a process before it writing still).
+        if grown {
+            return Some(Ended {
+                at_prompt: true,
+                cleared: true,
+            });'''
 
 [[plant]]
 name = "folder trust: a record unread at the first look counts as empty (round 2)"
@@ -466,13 +463,11 @@ runs = ["folder-trust-rig-record-away"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-            if opened_with.is_none() {
-                opened_with = length;'''
-replace = '''
-            if opened_with.is_none() {
-                opened_with = Some(length.unwrap_or(0));'''
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '''        if w.opened_with.is_none() {
+            w.opened_with = length;'''
+replace = '''        if w.opened_with.is_none() {
+            w.opened_with = Some(length.unwrap_or(0));'''
 
 [[plant]]
 name = "folder trust: a window that went on without its prompt banks the human's yes (round 2)"
@@ -481,7 +476,7 @@ runs = ["folder-trust-rig-grows"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
+file = "crates/cf-engine/src/trust/settle.rs"
 find = '        if asked && keys == 0 && at_prompt && cleared {'
 replace = '        if asked && keys == 0 {'
 
@@ -521,9 +516,9 @@ runs = ["folder-trust-rig-dropped-key"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = "                            Some((looks, _)) => looks >= PRESS_AGAIN_LOOKS,"
-replace = "                            Some((looks, _)) => looks >= u32::MAX,"
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            Some((looks, _)) => looks >= PRESS_AGAIN_LOOKS,'
+replace = '            Some((looks, _)) => looks >= u32::MAX,'
 
 [[plant]]
 name = "folder trust: the stand-in takes one key a read, and drops the human's Enter that came with their Down (main's Windows CI, 2026-10-21)"
@@ -600,9 +595,9 @@ runs = ["folder-trust-rig-cursor"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '                    } else if asking >= TELL_LOOKS {'
-replace = '                    } else if asking >= u32::MAX {'
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            _ if w.asking >= TELL_LOOKS => {'
+replace = '            _ if w.asking >= u32::MAX => {'
 
 [[plant]]
 name = "folder trust: a choice is offered by any line that ends with it"
@@ -707,13 +702,12 @@ runs = ["folder-trust-rig-unread-grown"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-                Seen::Unread => {
-                    if grown {
-                        break (false, false);
-                    }'''
-replace = '                Seen::Unread => {'
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '''        if grown {
+            return Ok(Some(Ended::PAST));
+        }
+'''
+replace = ''
 
 [[plant]]
 name = "folder trust: looks with no screen hold a window that asked for good, and nobody is told (round 4, T-231)"
@@ -722,9 +716,9 @@ runs = ["folder-trust-rig-unread-bound"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '                        if unseen >= UNREAD_MS && !told_unread {'
-replace = '                        if unseen >= i64::MAX && !told_unread {'
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            if unseen >= UNREAD_MS && !w.told_unread {'
+replace = '            if unseen >= i64::MAX && !w.told_unread {'
 
 [[plant]]
 name = "folder trust: a conversation that quoted the choices before its prompt is banked as the human's yes (round 4, T-231)"
@@ -733,7 +727,7 @@ runs = ["folder-trust-rig-quoted-tail"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
+file = "crates/cf-engine/src/trust/settle.rs"
 find = '        if asked && keys == 0 && at_prompt && cleared {'
 replace = '        if asked && keys == 0 && at_prompt {'
 
@@ -753,9 +747,9 @@ runs = ["folder-trust-rig-quoted-tail"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '                    } else if asking >= TELL_LOOKS {'
-replace = '                    } else {'
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            _ if w.asking >= TELL_LOOKS => {'
+replace = '            _ => {'
 
 [[plant]]
 name = "folder trust: a chief at rest whose conversation lists the choices above its input box is held as asking (round 4, T-231)"
@@ -818,18 +812,14 @@ runs = ["folder-trust-rig-unread-chief"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-                            )?;
-                            self.changed();
-                        }
-                    } else if self.now() - began > ASKS_WITHIN_MS && !owes_first(record) {'''
-replace = '''
-                            )?;
-                            self.changed();
-                            break (false, false);
-                        }
-                    } else if self.now() - began > ASKS_WITHIN_MS && !owes_first(record) {'''
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '''                self.tell_unread(w.project, &w.folder, w.participant, unseen)?;
+            }
+            Ok(None)'''
+replace = '''                self.tell_unread(w.project, &w.folder, w.participant, unseen)?;
+                return Ok(Some(Ended::PAST));
+            }
+            Ok(None)'''
 
 [[plant]]
 name = "folder trust: a prompt below a conversation that quoted the dialog banks a yes (round 6, T-299)"
@@ -838,11 +828,9 @@ runs = ["folder-trust-rig-quoted-cursor"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-        if asked && keys == 0 && at_prompt && cleared {'''
-replace = '''
-        if asked && keys == 0 && at_prompt {'''
+file = "crates/cf-engine/src/trust/settle.rs"
+find = '        if asked && keys == 0 && at_prompt && cleared {'
+replace = '        if asked && keys == 0 && at_prompt {'
 
 [[plant]]
 name = "folder trust: a placed question not answered here is told at the first look (round 6, T-299)"
@@ -851,11 +839,9 @@ runs = ["folder-trust-rig-quoted-cursor"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-                    } else if asking >= TELL_LOOKS {'''
-replace = '''
-                    } else if asking >= TELL_LOOKS || matches!(question, Question::Toward(_)) {'''
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            _ if w.asking >= TELL_LOOKS => {'
+replace = '            _ if w.asking >= TELL_LOOKS || matches!(question, Question::Toward(_)) => {'
 
 [[plant]]
 name = "folder trust: an unplaced question counts as read for sure (round 6, T-299)"
@@ -864,13 +850,11 @@ runs = ["folder-trust-rig-cursor-again"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-                    if matches!(question, Question::Toward(_)) {
-                        record.window.borrow_mut().trust_sure = true;
-                    }'''
-replace = '''
-                    record.window.borrow_mut().trust_sure = true;'''
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '''        if matches!(question, Question::Toward(_)) {
+            w.record.window.borrow_mut().trust_sure = true;
+        }'''
+replace = '        w.record.window.borrow_mut().trust_sure = true;'
 
 [[plant]]
 name = "folder trust: the other windows are not told of again when the human's yes cannot be carried (round 6, T-299)"
@@ -902,14 +886,24 @@ runs = ["folder-trust-rig-unread-worker"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = """
-                            )?;
-                            self.changed();
-                        }"""
-replace = """
-                            )?;
-                        }"""
+file = "crates/cf-engine/src/trust/notes.rs"
+find = '''        self.note_to_human(project, body)
+    }
+
+    /// A note to the human that says `body`.'''
+replace = '''        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body,
+            },
+        )?;
+        Ok(())
+    }
+
+    /// A note to the human that says `body`.'''
 
 [[plant]]
 name = "folder trust: the rig keeps no word to the page that the board moved (round 7, T-325)"
@@ -1001,9 +995,9 @@ runs = ["folder-trust-rig-grants"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = "                    } else if asking >= TELL_LOOKS && matches!(question, Question::Grants(_)) {"
-replace = "                    } else if asking >= TELL_LOOKS && matches!(question, Question::Grants(_)) && false {"
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            Question::Grants(_) if w.asking >= TELL_LOOKS => {'
+replace = '            Question::Grants(_) if w.asking >= TELL_LOOKS && false => {'
 
 [[plant]]
 name = "folder trust: a no to the grants in one window leaves the other that asks them untold (T-354)"
@@ -1012,14 +1006,13 @@ runs = ["folder-trust-rig-grants-again"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = """
-        // A no to the grants is the window's alone, and the next window asks again; so
+file = "crates/cf-engine/src/trust/settle.rs"
+find = '''        // A no to the grants is the window's alone, and the next window asks again; so
         // is a window that went while it asked.
         if grants {
             self.forget_grants_told(project, &folder);
-        }"""
-replace = ""
+        }'''
+replace = ''
 
 [[plant]]
 name = "folder trust: the grants of the project's own folder are not answered (T-354, the owner's decision of 2026-10-23)"
@@ -1028,10 +1021,9 @@ runs = ["folder-trust-rig-grants-own"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-                        Question::Grants(Some(key)) if inside => Some(key),'''
-replace = ""
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            Question::Grants(Some(key)) if self.inside => Some(key),'
+replace = ''
 
 [[plant]]
 name = "folder trust: the grants are answered yes where the yes would trust a repository outside the project (T-354, T-381)"
@@ -1040,9 +1032,9 @@ runs = ["folder-trust-rig-grants"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = "                        Question::Grants(Some(key)) if inside => Some(key),"
-replace = "                        Question::Grants(Some(key)) => Some(key),"
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            Question::Grants(Some(key)) if self.inside => Some(key),'
+replace = '            Question::Grants(Some(key)) => Some(key),'
 
 [[plant]]
 name = "folder trust: each key toward the grants' yes is pressed twice (T-354)"
@@ -1051,9 +1043,9 @@ runs = ["folder-trust-rig-grants-own"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = "                        if press && self.press_toward_trust(pane, key).await {"
-replace = "                        if press && self.press_toward_trust(pane, key).await && self.press_toward_trust(pane, key).await {"
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            if w.may_press(unmoved) && self.press_toward_trust(w.pane, key).await {'
+replace = '            if w.may_press(unmoved) && self.press_toward_trust(w.pane, key).await && self.press_toward_trust(w.pane, key).await {'
 
 [[plant]]
 name = "folder trust: the grants' yes in the project's folder is told in the first question's words (T-354)"
@@ -1062,9 +1054,9 @@ runs = ["folder-trust-rig-grants-own"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = "                                if matches!(question, Question::Grants(_)) {"
-replace = "                                if matches!(question, Question::Grants(_)) && false {"
+file = "crates/cf-engine/src/trust/notes.rs"
+find = '            if matches!(question, Question::Grants(_)) {'
+replace = '            if matches!(question, Question::Grants(_)) && false {'
 
 [[plant]]
 name = "folder trust: the grants held outside the project are told without the folder a yes would trust (T-381)"
@@ -1073,9 +1065,9 @@ runs = ["folder-trust-rig-grants"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''format!("{folder} is outside the project's folder, so ConsensFlow does not answer it.")'''
-replace = '''"ConsensFlow could not answer it.".to_owned()'''
+file = "crates/cf-engine/src/trust/notes.rs"
+find = "format!(\"{folder} is outside the project's folder, so ConsensFlow does not answer it.\")"
+replace = '"ConsensFlow could not answer it.".to_owned()'
 
 [[plant]]
 name = "folder trust: the grants are told of at the first look, a quote of them too (T-381)"
@@ -1084,9 +1076,9 @@ runs = ["folder-trust-rig-grants-quoted"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = "                    } else if asking >= TELL_LOOKS && matches!(question, Question::Grants(_)) {"
-replace = "                    } else if matches!(question, Question::Grants(_)) {"
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            Question::Grants(_) if w.asking >= TELL_LOOKS => {'
+replace = '            Question::Grants(_) => {'
 
 [[plant]]
 name = "folder trust: the grants are told of at every look, not once for the windows that ask them (T-381)"
@@ -1095,9 +1087,8 @@ runs = ["folder-trust-rig-grants-again"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-        if !self
+file = "crates/cf-engine/src/trust/notes.rs"
+find = '''        if !self
             .trust
             .told_grants
             .borrow_mut()
@@ -1105,8 +1096,7 @@ find = '''
         {
             return Ok(());
         }'''
-replace = '''
-        self.trust
+replace = '''        self.trust
             .told_grants
             .borrow_mut()
             .insert((project.id, folder.to_owned()));'''
@@ -1118,14 +1108,13 @@ runs = ["folder-trust-rig-grants-gone"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = """
-        // A no to the grants is the window's alone, and the next window asks again; so
+file = "crates/cf-engine/src/trust/settle.rs"
+find = '''        // A no to the grants is the window's alone, and the next window asks again; so
         // is a window that went while it asked.
         if grants {
             self.forget_grants_told(project, &folder);
-        }"""
-replace = ""
+        }'''
+replace = ''
 
 [[plant]]
 name = "folder trust: a window that goes while it asks of the grants returns past the forget (T-354)"
@@ -1135,14 +1124,12 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = """
-            if !self.shows(record, pane) {
-                break (false, false);
-            }"""
-replace = """
-            if !self.shows(record, pane) {
+find = '''            if !self.shows(record, pane) {
+                break Ended::PAST;
+            }'''
+replace = '''            if !self.shows(record, pane) {
                 return Ok(());
-            }"""
+            }'''
 
 [[plant]]
 name = "folder trust: a chief at the grants' question is handed what came for it (T-381)"
@@ -1292,14 +1279,12 @@ runs = ["folder-trust-rig-servers"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-                        Question::Servers(Some(key)) if inside && servers_above.is_none() => {
-                            Some(key)
-                        }
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '''            Question::Servers(Some(key)) if self.inside && self.servers_above.is_none() => {
+                Some(key)
+            }
 '''
-replace = '''
-'''
+replace = ''
 
 [[plant]]
 name = "folder trust: the dialog of a new server is answered outside the project's folder (T-383)"
@@ -1308,11 +1293,9 @@ runs = ["folder-trust-rig-servers-outside"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-                        Question::Servers(Some(key)) if inside && servers_above.is_none() => {'''
-replace = '''
-                        Question::Servers(Some(key)) if servers_above.is_none() => {'''
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            Question::Servers(Some(key)) if self.inside && self.servers_above.is_none() => {'
+replace = '            Question::Servers(Some(key)) if self.servers_above.is_none() => {'
 
 [[plant]]
 name = "folder trust: the dialog of a new server is answered where a folder above has servers (T-383)"
@@ -1321,11 +1304,9 @@ runs = ["folder-trust-rig-servers-above"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-                        Question::Servers(Some(key)) if inside && servers_above.is_none() => {'''
-replace = '''
-                        Question::Servers(Some(key)) if inside => {'''
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            Question::Servers(Some(key)) if self.inside && self.servers_above.is_none() => {'
+replace = '            Question::Servers(Some(key)) if self.inside => {'
 
 [[plant]]
 name = "folder trust: the dialog of a new server after a folder's question left to the human is left to the human too (T-415)"
@@ -1334,11 +1315,10 @@ runs = ["folder-trust-rig-servers-frozen"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-                        stuck = false;
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '''            self.stuck = false;
 '''
-replace = ""
+replace = ''
 
 [[plant]]
 name = "folder trust: the dialog of a new server is told of at every look (T-383)"
@@ -1347,9 +1327,8 @@ runs = ["folder-trust-rig-servers-outside"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-        if !self
+file = "crates/cf-engine/src/trust/notes.rs"
+find = '''        if !self
             .trust
             .told_servers
             .borrow_mut()
@@ -1357,8 +1336,7 @@ find = '''
         {
             return Ok(());
         }'''
-replace = '''
-        self.trust
+replace = '''        self.trust
             .told_servers
             .borrow_mut()
             .insert((project.id, folder.to_owned()));'''
@@ -1404,11 +1382,9 @@ runs = ["folder-trust-rig-servers-refused"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-        if into_servers && !servers && !refused.is_empty() {'''
-replace = '''
-        if false && into_servers && !servers && !refused.is_empty() {'''
+file = "crates/cf-engine/src/trust/settle.rs"
+find = '        if into_servers && !servers && !refused.is_empty() {'
+replace = '        if false && into_servers && !servers && !refused.is_empty() {'
 
 [[plant]]
 name = "folder trust: a question is given six keys in all (T-415)"
@@ -1417,11 +1393,9 @@ runs = ["folder-trust-rig-servers-six"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-                            None if moves >= MOST_MOVES => {'''
-replace = '''
-                            None if moves >= MOST_KEYS => {'''
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            None if self.moves >= MOST_MOVES => {'
+replace = '            None if self.moves >= MOST_KEYS => {'
 
 [[plant]]
 name = "folder trust: a .mcp.json above that names no server holds the dialog (T-415)"
@@ -1470,11 +1444,9 @@ runs = ["folder-trust-rig-servers-later"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-                .insert((project.id, folder.to_owned(), name.clone()))'''
-replace = '''
-                .insert((project.id, folder.to_owned(), String::new()))'''
+file = "crates/cf-engine/src/trust/notes.rs"
+find = '                .insert((project.id, folder.to_owned(), name.clone()))'
+replace = '                .insert((project.id, folder.to_owned(), String::new()))'
 
 [[plant]]
 name = "folder trust: a server used is told of by no name (T-415)"
@@ -1483,11 +1455,9 @@ runs = ["folder-trust-rig-servers"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/trust.rs"
-find = '''
-                format!("the MCP server {name}")'''
-replace = '''
-                format!("a new MCP server{}", &name[..0])'''
+file = "crates/cf-engine/src/trust/notes.rs"
+find = '                format!("the MCP server {name}")'
+replace = '                format!("a new MCP server{}", &name[..0])'
 
 [[plant]]
 name = "folder trust: the kit's own copy of the login wins over a Claude config folder the run was given (T-501, the merge with the long run)"
