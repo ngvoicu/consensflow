@@ -196,7 +196,7 @@ jobs:
         working-directory: app
         run: npx playwright install webkit
       - name: Muse echo cases
-        run: echo "not run: this runner has no Muse"
+        run: 'echo "not run: this runner has no Muse"'
       - name: Run the named suite
         id: run_suite
         env:
