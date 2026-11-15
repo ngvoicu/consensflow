@@ -453,6 +453,14 @@ const AT_ONCE: usize = 1;
 /// four minutes of its step on the 425 of them, one after another.
 fn alongside<T: Sync, R: Send>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Vec<R> {
     let threads = thread::available_parallelism().map_or(1, |count| count.get().min(AT_ONCE));
+    alongside_with_threads(items, threads, work)
+}
+
+fn alongside_with_threads<T: Sync, R: Send>(
+    items: &[T],
+    threads: usize,
+    work: impl Fn(&T) -> R + Sync,
+) -> Vec<R> {
     let next = AtomicUsize::new(0);
     let answers: Vec<Mutex<Option<R>>> = items.iter().map(|_| Mutex::new(None)).collect();
     thread::scope(|scope| {
@@ -535,7 +543,8 @@ fn every_ledger_the_node_suite_opened_answers_here_as_it_answered_there() {
 fn the_replays_are_shared_out_once_each_and_answered_in_the_order_they_came() {
     let items: Vec<usize> = (0..500).collect();
     let made: Vec<AtomicUsize> = items.iter().map(|_| AtomicUsize::new(0)).collect();
-    let answers = alongside(&items, |item| {
+    // Actual traces stay at one worker; this cheap work exercises the shared counter.
+    let answers = alongside_with_threads(&items, 2, |item| {
         made[*item].fetch_add(1, Ordering::Relaxed);
         item * 2
     });
