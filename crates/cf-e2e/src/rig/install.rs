@@ -194,7 +194,6 @@ pub(super) fn bound_standin_homes(env: &mut Vec<(String, String)>, root: &Path, 
         crate::standin_process::require_search_path(
             path,
             &format!("stand-in {subject} PATH lookup"),
-            &system_folders(cfg!(windows), true, own_var("SystemRoot").as_deref()),
         );
     }
     env.retain(|(name, _)| !same_environment_name(name, "CF_E2E_STAND_IN"));

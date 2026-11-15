@@ -83,7 +83,7 @@ pub fn start(allow_live_matrix: bool) {
         .unwrap_or_else(|_| panic!("inherited PATH selected twice"));
     let inherited_homes = inherited_harness_homes();
     let launchers = inherited_launchers();
-    require_inherited_home(&inherited_homes);
+    require_inherited_home();
     let fixture_home = std::env::var_os(FIXTURE_HOME).map(PathBuf::from);
     std::env::remove_var(FIXTURE_HOME);
     let (path, compiler) = bounded_path(&inherited_homes);
@@ -156,7 +156,7 @@ pub(crate) fn inherited_path_value() -> Option<&'static std::ffi::OsStr> {
 
 /// A stand-in needs an inherited account home to bound its searches.
 #[allow(clippy::disallowed_methods)]
-fn require_inherited_home(_forbidden: &[PathBuf]) {
+fn require_inherited_home() {
     assert!(
         ["HOME", "USERPROFILE"]
             .iter()
@@ -180,7 +180,7 @@ fn checked_handed_roots(forbidden: &[PathBuf]) -> Vec<PathBuf> {
     for root in &roots {
         assert!(
             safe_path_entry(root, forbidden),
-            "stand-in handed folder lookup: forbidden, linked or ambiguous path"
+            "stand-in handed folder lookup: inside an inherited harness home"
         );
     }
     roots
@@ -233,7 +233,7 @@ fn require_audit_file(parent: &Path, handed: &[PathBuf], forbidden: &[PathBuf]) 
     );
     assert!(
         safe_path_entry(&file, forbidden),
-        "stand-in audit file lookup: forbidden, linked or ambiguous path"
+        "stand-in audit file lookup: inside an inherited harness home"
     );
     if named.is_none() {
         std::env::set_var(crate::door::AUDIT_FILE, file);
@@ -256,7 +256,7 @@ fn fixture_root(home: &Path, temp: &Path, forbidden: &[PathBuf]) -> PathBuf {
             && temp.file_name().is_some_and(|name| name == "temp")
             && temp.parent() == Some(root)
             && safe_path_entry(root, forbidden),
-        "stand-in fixture home lookup: invalid or linked layout"
+        "stand-in fixture home lookup: invalid layout or inherited harness home"
     );
     let handed = std::env::var_os(crate::door::MADE_ROOTS)
         .map(|value| std::env::split_paths(&value).any(|made| same_or_inside(root, &made)))
@@ -335,9 +335,8 @@ fn inherited_launchers() -> Vec<PathBuf> {
 fn bounded_path(forbidden: &[PathBuf]) -> (std::ffi::OsString, Option<PathBuf>) {
     let cargo = Path::new(env!("CARGO"));
     let compiler = cargo.with_file_name(format!("rustc{}", std::env::consts::EXE_SUFFIX));
-    let compiler = (safe_path_entry(&compiler, forbidden)
-        && std::fs::symlink_metadata(&compiler).is_ok_and(|entry| entry.is_file()))
-    .then_some(compiler);
+    let compiler =
+        (safe_path_entry(&compiler, forbidden) && compiler.is_file()).then_some(compiler);
     let inherited = std::env::var_os("PATH").unwrap_or_default();
     let launchers = inherited_launchers();
     let safe = std::env::split_paths(&inherited).filter(|folder| {
@@ -381,7 +380,7 @@ fn windows_ordinal_eq(left: &[u16], right: &[u16]) -> bool {
 }
 
 /// Refuse a rig PATH that points into an inherited harness home.
-pub(crate) fn require_search_path(value: &str, lookup: &str, _system: &[String]) {
+pub(crate) fn require_search_path(value: &str, lookup: &str) {
     if crate::process::own_var("CF_E2E_STAND_IN").as_deref() != Some("1") {
         return;
     }

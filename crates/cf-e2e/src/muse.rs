@@ -13,6 +13,7 @@
 //! beside it ([`StandIn`]), and Muse is its child.
 
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
@@ -122,22 +123,21 @@ pub fn installed() -> std::result::Result<Installed, String> {
 /// The installed executable used by an echo case.
 pub fn echo_required() -> std::result::Result<Installed, String> {
     let found = installed().map_err(|why| format!("required Muse for echo is missing: {why}"))?;
-    #[allow(clippy::print_stderr)]
-    {
-        eprintln!(
-            "Muse echo uses {} (version {})",
-            found.binary.display(),
-            found.version
-        );
-    }
+    let _ = writeln!(
+        std::io::stderr(),
+        "Muse echo uses {} (version {})",
+        found.binary.display(),
+        found.version
+    );
     Ok(found)
 }
 
 /// The CI workflow names its machines as having no Muse, so its cases say why they do not run.
-#[allow(clippy::print_stderr)]
 pub fn runner_has_no_muse() -> bool {
-    if own_var("CF_E2E_NO_MUSE").as_deref() == Some("1") {
-        eprintln!("not run: this runner has no Muse");
+    if own_var("GITHUB_ACTIONS").as_deref() == Some("true")
+        && own_var("CF_E2E_NO_MUSE").as_deref() == Some("1")
+    {
+        let _ = writeln!(std::io::stderr(), "not run: this runner has no Muse");
         true
     } else {
         false
