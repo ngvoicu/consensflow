@@ -10,7 +10,6 @@ disclosure-devin = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "devi
 disclosure-muse-seed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "a_live_rig_s_home_is_given_settings_and_the_login_copied_without_a_refresh_token"]
 disclosure-muse-guard = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "muse_reads_and_compaction_copy_no_refresh_keys"]
 disclosure-muse-tui = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_background", "tui_setup_copies_no_refresh_keys"]
-disclosure-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "parity_config_copies_no_refresh_keys"]
 
 [[plant]]
 name = "kit disclosure: Codex login copied without removing refresh"
@@ -111,33 +110,6 @@ runs = ["disclosure-muse-tui"]
 file = "crates/cf-e2e/tests/live_muse/tui.rs"
 find = '''cf_e2e::live::guard::copy_muse_login('''
 replace = '''cf_e2e::live::guard::copy_kept('''
-
-[[plant]]
-name = "kit disclosure: Claude parity copies refresh keys"
-meant = "parity_config_copies_no_refresh_keys"
-runs = ["disclosure-parity"]
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_parity/claude.rs"
-find = '''cf_e2e::live::login::without_refresh(&mut login);'''
-replace = '''let _ = &mut login;'''
-
-[[plant]]
-name = "kit disclosure: Claude parity configuration keeps refresh keys"
-meant = "parity_config_copies_no_refresh_keys"
-runs = ["disclosure-parity"]
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_parity/claude.rs"
-find = '''cf_e2e::live::login::without_refresh(&mut configuration);'''
-replace = '''let _ = &mut configuration;'''
-
-[[plant]]
-name = "kit disclosure: Claude parity settings keep refresh keys"
-meant = "parity_config_copies_no_refresh_keys"
-runs = ["disclosure-parity"]
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_parity/claude.rs"
-find = '''cf_e2e::live::login::without_refresh(&mut settings);'''
-replace = '''let _ = &mut settings;'''
 
 [[plant]]
 name = "kit disclosure: Pi copies a refresh-named provider key"

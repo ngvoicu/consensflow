@@ -70,10 +70,9 @@ pub use again::again_under_audit;
 #[cfg(unix)]
 pub use writes::symlink;
 pub use writes::{
-    append, copy, copy_cloning, copy_keeping_mode, copy_tree, copy_tree_with_links, create,
-    create_new, create_new_private, made_dir, made_file, make_dir, make_dir_private, rename,
-    say_its_process, set_modified, set_permissions, write, write_executable, write_whole,
-    OutsideLinks,
+    append, copy, copy_cloning, copy_keeping_mode, copy_tree, create, create_new,
+    create_new_private, made_dir, made_file, make_dir, make_dir_private, rename, say_its_process,
+    set_modified, set_permissions, write, write_executable, write_whole,
 };
 
 /// The variable that makes the door say only.
@@ -113,9 +112,9 @@ pub const STILL_ACTS: &[&str] = &[
     "Muse's window cases additionally read and fingerprint the owner's settings, trust, launcher and version file to check they stayed unchanged; a background case prints the path and fingerprint maps on change, while the posture case prints only that they changed",
     "Muse's reads case recursively lists and fingerprints ordinary files in the owner's Muse config before and after to check they stayed unchanged; it skips all links, keeps paths and fingerprints in memory and prints changed paths, not file contents",
     "Claude's dialog case reads the owner's .claude.json before and after to check it stayed unchanged; it keeps a hash and four LSP and hints settings in memory and prints the complete hashes and those settings in its report",
-    "Claude's parity case reads all of the owner's history and .claude.json and keeps the raw settings in memory before and after to check they stayed unchanged; it reports a change without printing their contents",
-    "for setup, Claude's dialog case recursively copies the owner's official plugin marketplace without links; its parity case reads settings.json and .claude.json through links, including a linked .claude folder, treats a missing file as an empty object and refuses unreadable, invalid or non-object JSON; it copies settings without hooks, status line or refresh-named keys, skills, plugins, agents, commands and most of .claude.json without refresh-named keys into run folders, replaces projects with the run's project and rewrites plugin paths; ordinary tree files are copied as they are except for plugin path rewrites, links inside a tree point to the copied target and dangling links are skipped; outside links in skills, agents and commands, including a linked tree root, point to the same real target, which Claude can read directly; an outside plugin link, including a linked plugin root, refuses the case; these copies stay in a say-only run",
-    "for setup, Pi's provider names are read from its owner auth.json; a named proxy's package and model cache are copied and its config is copied without refresh-named keys; Muse's window cases copy feature config and its reads case copies the model catalog; ordinary tree files are copied as they are, links outside their source tree and dangling links are skipped, and links inside it point to the copied target; linked Pi provider files and model cache are skipped or refused; Devin's config is copied and its compaction case reads it to make a run config; Devin's Git gets a generated config, and the kit copies no owner Git file",
+    "Claude's parity case uses the kit's standard Claude owner-state checks described above and makes no additional reads of the owner's Claude settings, project configuration or history",
+    "for setup, Claude's dialog case recursively copies the owner's official plugin marketplace without links; its parity case uses the kit's copy of the owner's Claude login without its refresh token in a config of the run's own, with a skill and an MCP server of the run's own, and reads no other owner Claude configuration for that setup; the login copy stays in a say-only run",
+    "for setup, Pi's provider names are read from its owner auth.json; a named proxy's package and model cache are copied and its config is copied without refresh-named keys; Muse's window cases copy feature config and its reads case copies the model catalog; ordinary tree files are copied as they are, links outside their source tree and dangling links are skipped, and links inside it point to the copied target; linked Pi provider files and model cache are skipped or refused; Devin's config is copied and its compaction case reads it to make a run config; Devin's Git gets a generated config, and the kit's seed copies no owner Git file",
     "the Muse window case checks whether the owner's Claude rules file exists and may print its path; the Claude launcher case reads and prints the owner's Claude launcher link target",
 ];
 

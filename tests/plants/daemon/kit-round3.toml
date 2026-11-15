@@ -6,7 +6,7 @@ round3-muse = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_mus
 round3-muse-reads = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_reads", "kit_round3"]
 round3-compaction = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_compaction_routes", "kit_round3"]
 round3-subagent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_subagent", "kit_round3"]
-round4-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "kit_round4"]
+round5-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "t1700_"]
 round4-subagent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_subagent", "kit_round4"]
 round3-specs = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_specs", "kit_round3"]
 round3-dialog = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_harness_dialogs", "kit_round3"]
@@ -38,16 +38,9 @@ platforms = ["linux", "macos"]
 file = "crates/cf-e2e/src/door/writes.rs"
 find = '''            let real = match fs::canonicalize(&source) {
                 Ok(real) => real,
-                Err(error)
-                    if error.kind() == io::ErrorKind::NotFound
-                        || matches!(outside, OutsideLinks::Skip) =>
-                {
-                    continue;
-                }
-                Err(error) => return Err(Error::file("read", &source)(error)),
+                Err(_) => continue,
             };
             let Ok(relative) = real.strip_prefix(source_root) else {
-                outside_link(&source, &target, &real, outside)?;
                 continue;
             };
             let destination = target_root.join(relative);
@@ -63,16 +56,9 @@ platforms = ["linux", "macos"]
 file = "crates/cf-e2e/src/door/writes.rs"
 find = '''            let real = match fs::canonicalize(&source) {
                 Ok(real) => real,
-                Err(error)
-                    if error.kind() == io::ErrorKind::NotFound
-                        || matches!(outside, OutsideLinks::Skip) =>
-                {
-                    continue;
-                }
-                Err(error) => return Err(Error::file("read", &source)(error)),
+                Err(_) => continue,
             };
             let Ok(relative) = real.strip_prefix(source_root) else {
-                outside_link(&source, &target, &real, outside)?;
                 continue;
             };
             let destination = target_root.join(relative);
@@ -88,116 +74,9 @@ platforms = ["linux", "macos"]
 file = "crates/cf-e2e/src/door/writes.rs"
 find = '''            let real = match fs::canonicalize(&source) {
                 Ok(real) => real,
-                Err(error)
-                    if error.kind() == io::ErrorKind::NotFound
-                        || matches!(outside, OutsideLinks::Skip) =>
-                {
-                    continue;
-                }
-                Err(error) => return Err(Error::file("read", &source)(error)),
+                Err(_) => continue,
             };
             let Ok(relative) = real.strip_prefix(source_root) else {
-                outside_link(&source, &target, &real, outside)?;
-                continue;
-            };
-            let destination = target_root.join(relative);
-            copied_link(&destination, &target, real.is_dir())?;'''
-replace = '''            copy_keeping_mode(&source, &target)?;'''
-
-[[plant]]
-name = "kit round3: Claude skills follows a link out"
-meant = "kit_round3_claude_skills_keep_links_out"
-runs = ["round3-parity"]
-platforms = ["linux", "macos"]
-[[plant.edit]]
-file = "crates/cf-e2e/src/door/writes.rs"
-find = '''            let real = match fs::canonicalize(&source) {
-                Ok(real) => real,
-                Err(error)
-                    if error.kind() == io::ErrorKind::NotFound
-                        || matches!(outside, OutsideLinks::Skip) =>
-                {
-                    continue;
-                }
-                Err(error) => return Err(Error::file("read", &source)(error)),
-            };
-            let Ok(relative) = real.strip_prefix(source_root) else {
-                outside_link(&source, &target, &real, outside)?;
-                continue;
-            };
-            let destination = target_root.join(relative);
-            copied_link(&destination, &target, real.is_dir())?;'''
-replace = '''            copy_keeping_mode(&source, &target)?;'''
-
-[[plant]]
-name = "kit round3: Claude plugins follows a link out"
-meant = "kit_round3_claude_plugins_refuse_links_out"
-runs = ["round3-parity"]
-platforms = ["linux", "macos"]
-[[plant.edit]]
-file = "crates/cf-e2e/src/door/writes.rs"
-find = '''            let real = match fs::canonicalize(&source) {
-                Ok(real) => real,
-                Err(error)
-                    if error.kind() == io::ErrorKind::NotFound
-                        || matches!(outside, OutsideLinks::Skip) =>
-                {
-                    continue;
-                }
-                Err(error) => return Err(Error::file("read", &source)(error)),
-            };
-            let Ok(relative) = real.strip_prefix(source_root) else {
-                outside_link(&source, &target, &real, outside)?;
-                continue;
-            };
-            let destination = target_root.join(relative);
-            copied_link(&destination, &target, real.is_dir())?;'''
-replace = '''            copy_keeping_mode(&source, &target)?;'''
-
-[[plant]]
-name = "kit round3: Claude agents follows a link out"
-meant = "kit_round3_claude_agents_keep_links_out"
-runs = ["round3-parity"]
-platforms = ["linux", "macos"]
-[[plant.edit]]
-file = "crates/cf-e2e/src/door/writes.rs"
-find = '''            let real = match fs::canonicalize(&source) {
-                Ok(real) => real,
-                Err(error)
-                    if error.kind() == io::ErrorKind::NotFound
-                        || matches!(outside, OutsideLinks::Skip) =>
-                {
-                    continue;
-                }
-                Err(error) => return Err(Error::file("read", &source)(error)),
-            };
-            let Ok(relative) = real.strip_prefix(source_root) else {
-                outside_link(&source, &target, &real, outside)?;
-                continue;
-            };
-            let destination = target_root.join(relative);
-            copied_link(&destination, &target, real.is_dir())?;'''
-replace = '''            copy_keeping_mode(&source, &target)?;'''
-
-[[plant]]
-name = "kit round3: Claude commands follows a link out"
-meant = "kit_round3_claude_commands_keep_links_out"
-runs = ["round3-parity"]
-platforms = ["linux", "macos"]
-[[plant.edit]]
-file = "crates/cf-e2e/src/door/writes.rs"
-find = '''            let real = match fs::canonicalize(&source) {
-                Ok(real) => real,
-                Err(error)
-                    if error.kind() == io::ErrorKind::NotFound
-                        || matches!(outside, OutsideLinks::Skip) =>
-                {
-                    continue;
-                }
-                Err(error) => return Err(Error::file("read", &source)(error)),
-            };
-            let Ok(relative) = real.strip_prefix(source_root) else {
-                outside_link(&source, &target, &real, outside)?;
                 continue;
             };
             let destination = target_root.join(relative);
@@ -339,36 +218,6 @@ find = '''crate::door::is_made_or_below(&sessions) && no_record_links(&sessions)
 replace = '''crate::door::is_made_or_below(&sessions)'''
 
 [[plant]]
-name = "kit round4: parity skips an outside skill link"
-meant = "kit_round4_linked_skill_keeps_the_real_target"
-runs = ["round4-parity"]
-platforms = ["linux", "macos"]
-[[plant.edit]]
-file = "crates/cf-e2e/src/door/writes.rs"
-find = '''OutsideLinks::Preserve => copied_link(real, target, real.is_dir()).map_err(|error| {
-            Error::Daemon(format!(
-                "cannot recreate link {}: {error}",
-                source.display()
-            ))
-        }),'''
-replace = '''OutsideLinks::Preserve => Ok(()),'''
-
-[[plant]]
-name = "kit round4: parity copies through an outside skill link"
-meant = "kit_round4_linked_skill_keeps_the_real_target"
-runs = ["round4-parity"]
-platforms = ["linux", "macos"]
-[[plant.edit]]
-file = "crates/cf-e2e/src/door/writes.rs"
-find = '''OutsideLinks::Preserve => copied_link(real, target, real.is_dir()).map_err(|error| {
-            Error::Daemon(format!(
-                "cannot recreate link {}: {error}",
-                source.display()
-            ))
-        }),'''
-replace = '''OutsideLinks::Preserve => copy_tree(real, target, &|_| false),'''
-
-[[plant]]
 name = "kit round4: kept WAL copies an outside shm"
 meant = "kit_round4_kept_wal_does_not_copy_linked_shm"
 runs = ["round4-subagent"]
@@ -381,24 +230,50 @@ find = '''        if !cf_e2e::door::is_made_or_below(path) {
         let name = path'''
 replace = '''        let name = path'''
 
-[[plant]]
-name = "kit round4: linked Claude config retains an owner plugin path"
-meant = "kit_round4_plugin_paths_use_copy_when_owner_config_is_linked"
-runs = ["round4-parity"]
-platforms = ["linux", "macos"]
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_parity/claude.rs"
-find = '''        names.push(real);'''
-replace = '''        let _ = real;'''
 
 [[plant]]
-name = "kit round4: escaped plugin paths still name the owner"
-meant = "kit_round4_plugin_paths_with_json_escapes_are_rewritten"
-runs = ["round4-parity"]
-platforms = ["linux", "macos"]
+name = "kit parity: Claude copies owner skills into its run config"
+meant = "t1700_run_config_excludes_owner_and_contains_its_own_items"
+runs = ["round5-parity"]
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_parity/claude.rs"
-find = '''        let Ok(value) = serde_json::from_str::<String>(&text[start..next]) else {
-            continue;
-        };'''
-replace = '''        let value = text[start + 1..next - 1].to_owned();'''
+find = '''    let config = login.folder()?;'''
+replace = '''    let config = login.folder()?;
+    let owner_skills = config.parent().unwrap().join("owner").join("skills");
+    cf_e2e::door::copy_tree(&owner_skills, &config.join("skills"), &|_| false)?;'''
+
+[[plant]]
+name = "kit parity: Claude plain window accepts a missing run skill"
+meant = "t1700_plain_missing_skill_fails_by_name"
+runs = ["round5-parity"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''    if !plain.skill_names.contains(GLOBAL_SKILL) {'''
+replace = '''    if false && !plain.skill_names.contains(GLOBAL_SKILL) {'''
+
+[[plant]]
+name = "kit parity: Claude plain window accepts a missing run MCP server"
+meant = "t1700_plain_missing_server_fails_by_name"
+runs = ["round5-parity"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''    if !plain.servers.contains(SERVER_NAME) {'''
+replace = '''    if false && !plain.servers.contains(SERVER_NAME) {'''
+
+[[plant]]
+name = "kit parity: Claude syncs account skills into the run"
+meant = "t1700_run_config_disables_account_skill_and_plugin_sync"
+runs = ["round5-parity"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''json!({"syncClaudeAiSkills": false, "syncClaudeAiPlugins": false}).to_string(),'''
+replace = '''json!({"syncClaudeAiSkills": true, "syncClaudeAiPlugins": false}).to_string(),'''
+
+[[plant]]
+name = "kit parity: Claude syncs account plugins into the run"
+meant = "t1700_run_config_disables_account_skill_and_plugin_sync"
+runs = ["round5-parity"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''json!({"syncClaudeAiSkills": false, "syncClaudeAiPlugins": false}).to_string(),'''
+replace = '''json!({"syncClaudeAiSkills": false, "syncClaudeAiPlugins": true}).to_string(),'''

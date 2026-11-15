@@ -1,12 +1,7 @@
-//! Claude Code's half of `cargo xtask live parity`: a window opened as ConsensFlow opens a
-//! member's has what the same Claude Code has opened plainly in that folder (T-540). Both
-//! run in a terminal of ConsensFlow's own (`cf-panes`, a ConPTY on Windows), in a folder of
-//! the run's, on a throwaway Claude config holding a copy of the machine's own (its login,
-//! settings without their hooks and status line, skills, plugins, agents and commands, and
-//! the user's MCP servers), so that nothing of the machine's `~/.claude` is written. Each
-//! writes Claude's debug log (`--debug-file`), which says what it loaded as it started: the
-//! MCP servers that connected, the plugins admitted, the skills (`getSkills returning: …`),
-//! and Claude in Chrome. The member's must say the same, with one skill more: its role's.
+//! Claude Code's half of `cargo xtask live parity`: a member window has what the same
+//! Claude Code loads in a plain terminal. Both use the kit's own Claude config, which holds
+//! a copy of the login without refresh keys, and a skill and MCP server of the run's own.
+//! Their debug logs say what loaded; the member also has its role's skill.
 //!
 //! The member is launched with the words ConsensFlow's adapter gives a worker
 //! (`crates/cf-harness/tests/goldens/launch/scenarios.*.json`, the first Claude scenario):
@@ -22,25 +17,26 @@ use cf_e2e::door::Door;
 #[cfg(unix)]
 use cf_e2e::door::Grounded;
 use cf_e2e::live::ask;
-use cf_e2e::live::machine::{home, live_folder};
+use cf_e2e::live::machine::live_folder;
 #[cfg(unix)]
 use cf_e2e::live::members::{self, Machine};
 use cf_e2e::live::{self, Harness, Log};
-use cf_e2e::process::{own_var, Run};
+use cf_e2e::rig::ClaudeConfig;
 use cf_e2e::{files, Error, Result};
 use cf_panes::pty::PaneTable;
 use portable_pty::PtySize;
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
+
+use super::codex_devin::{skill, GLOBAL_SKILL, SERVER};
 
 /// How long each window has to start and settle what it loads.
 const SETTLES: Duration = Duration::from_secs(45);
 
-/// The least life the login copy must have left, in milliseconds.
-pub(crate) const LOGIN_LEFT_MS: i64 = 2 * 60 * 60 * 1000;
-
 /// The cheap model both windows are opened on: neither is given a message, so neither
 /// spends a turn.
 const MODEL: &str = "haiku";
+const SERVER_NAME: &str = "cf-parity";
+const ROLE_SKILL: &str = "consensflow-worker";
 
 /// What a Claude window loaded as it started, by its debug log.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -52,6 +48,8 @@ pub struct Loaded {
     /// The skills, by kind: `skill dir commands`, `plugin skills`, `bundled skills`,
     /// `builtin plugin skills`, the last time it counted them.
     pub skills: Vec<(String, u64)>,
+    /// Skills named in Claude's skill prompt.
+    pub skill_names: BTreeSet<String>,
     /// Whether Claude in Chrome was set up.
     pub chrome: bool,
 }
@@ -79,6 +77,9 @@ pub fn loaded(debug: &str) -> Loaded {
                 })
                 .collect();
         }
+        if let Some(name) = between(line, "Skill prompt: showing \"", "\"") {
+            found.skill_names.insert(name.to_owned());
+        }
         if line.contains("In-process Chrome MCP server started") {
             found.chrome = true;
         }
@@ -93,249 +94,62 @@ fn between<'a>(line: &'a str, open: &str, close: &str) -> Option<&'a str> {
     Some(&line[start..end])
 }
 
-/// The machine's Claude login as its own `.credentials.json` holds it (`claudeAiOauth`):
-/// on macOS from the Keychain, by the user's account; elsewhere from the file in the
-/// config folder. Never printed.
-pub(crate) fn login(config: &Path) -> Result<Value> {
-    let read = |what: &str, text: String| -> Result<Value> {
-        let said: Value = serde_json::from_str(&text)
-            .map_err(|_| Error::Daemon(format!("{what} holds no login")))?;
-        said.get("claudeAiOauth")
-            .cloned()
-            .ok_or_else(|| Error::Daemon(format!("{what} holds no claude.ai login")))
-    };
-    if cfg!(target_os = "macos") {
-        let user = own_var("USER").unwrap_or_default();
-        let found = Run::new("security")
-            .args([
-                "find-generic-password",
-                "-s",
-                "Claude Code-credentials",
-                "-a",
-                &user,
-                "-w",
-            ])
-            .inheriting_env()
-            .run()?;
-        read("the Keychain", found.stdout)
-    } else {
-        read(
-            ".credentials.json",
-            files::read_string(&config.join(".credentials.json"))?,
-        )
-    }
-}
-
 /// The milliseconds since the epoch, now.
 pub(crate) fn now_ms() -> i64 {
     jiff::Timestamp::now().as_millisecond()
 }
 
-/// Copies a Claude tree without walking its links.
-fn copy_tree(from: &Path, to: &Path, outside: cf_e2e::door::OutsideLinks) -> Result {
-    let meta = match fs::symlink_metadata(from) {
-        Ok(meta) => meta,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(source) => {
-            return Err(Error::File {
-                action: "read",
-                path: from.to_owned(),
-                source,
-            });
-        }
-    };
-    if !meta.is_dir() && !meta.file_type().is_symlink() {
-        return Ok(());
+/// Add the run's own user skill, MCP server and project trust to the kit's login copy.
+/// `login.folder()` makes the private, refresh-free login and fresh onboarding config;
+/// no owner config or skill path is an input to this setup.
+fn prepare_config(login: &dyn ClaudeConfig, folder: &Path) -> Result<std::path::PathBuf> {
+    let config = login.folder()?;
+    if !cf_e2e::door::is_made_or_below(&config) {
+        return Err(Error::Daemon(
+            "Claude parity has no config of the run's own".to_owned(),
+        ));
     }
-    cf_e2e::door::copy_tree_with_links(from, to, &|_| false, outside)
-}
-
-/// A throwaway Claude config at `throwaway`, a copy of the machine's own at `own` that
-/// Claude can write in freely: the login (`login`), the settings without their hooks and
-/// status line (which would run the person's own commands), the skills, plugins (their
-/// paths written to name the copy), agents and commands, and the person's configuration
-/// with no project but `folder`'s, trusted and with Claude's computer use on.
-fn throwaway_config(
-    own: &Path,
-    own_json: &Path,
-    throwaway: &Path,
-    login: &Value,
-    folder: &Path,
-) -> Result {
-    let required_json = |path: &Path, name: &str| -> Result<Map<String, Value>> {
-        let failed = || Error::Daemon(format!("Claude parity cannot read or parse {name}"));
-        let text = match fs::read_to_string(path) {
-            Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Map::new());
-            }
-            Err(_) => return Err(failed()),
-        };
-        serde_json::from_str::<Value>(&text)
-            .ok()
-            .and_then(|value| value.as_object().cloned())
-            .ok_or_else(failed)
-    };
-    let mut settings = required_json(&own.join("settings.json"), "settings.json")?;
-    let mut configuration = required_json(own_json, ".claude.json")?;
-    cf_e2e::door::make_dir(throwaway)?;
-    let mut login = login.clone();
-    cf_e2e::live::login::without_refresh(&mut login);
-    cf_e2e::door::write(
-        throwaway.join(".credentials.json"),
-        json!({ "claudeAiOauth": login }).to_string(),
-    )?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = cf_e2e::door::set_permissions(throwaway, fs::Permissions::from_mode(0o700));
-        let _ = cf_e2e::door::set_permissions(
-            throwaway.join(".credentials.json"),
-            fs::Permissions::from_mode(0o600),
-        );
+    let file = config.join(".claude.json");
+    if fs::symlink_metadata(&file).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Err(Error::Daemon("Claude parity's config is a link".to_owned()));
     }
-    settings.remove("hooks");
-    settings.remove("statusLine");
-    let mut settings = Value::Object(settings);
-    cf_e2e::live::login::without_refresh(&mut settings);
-    cf_e2e::door::write(throwaway.join("settings.json"), settings.to_string())?;
-    for part in ["skills", "plugins", "agents", "commands"] {
-        let outside = if part == "plugins" {
-            cf_e2e::door::OutsideLinks::Refuse
-        } else {
-            cf_e2e::door::OutsideLinks::Preserve
-        };
-        copy_tree(&own.join(part), &throwaway.join(part), outside)?;
-    }
-    rewrite_plugin_paths(&throwaway.join("plugins"), own, throwaway)?;
-    let entry = json!({ "hasTrustDialogAccepted": true, "hasCompletedProjectOnboarding": true, "enabledMcpServers": ["computer-use"] });
-    let mut projects = Map::new();
-    let name = folder.to_string_lossy().into_owned();
-    projects.insert(name.replace('\\', "/"), entry.clone());
-    projects.insert(name, entry);
-    configuration.insert("projects".to_owned(), Value::Object(projects));
-    configuration.insert("hasCompletedOnboarding".to_owned(), Value::Bool(true));
-    let mut configuration = Value::Object(configuration);
-    cf_e2e::live::login::without_refresh(&mut configuration);
-    cf_e2e::door::write(throwaway.join(".claude.json"), configuration.to_string())
-}
-
-/// Plugin metadata can name either a linked Claude folder or its real path.
-fn rewrite_plugin_paths(plugins: &Path, own: &Path, throwaway: &Path) -> Result {
-    let mut names = vec![own.to_string_lossy().into_owned()];
-    if let Ok(real) = fs::canonicalize(own) {
-        let real = real.to_string_lossy().into_owned();
-        #[cfg(windows)]
-        if let Some(unc) = real.strip_prefix(r"\\?\UNC\") {
-            names.push(format!(r"\\{unc}"));
-        } else if let Some(plain) = real.strip_prefix(r"\\?\") {
-            names.push(plain.to_owned());
-        }
-        names.push(real);
-    }
-    #[cfg(windows)]
-    names.extend(
-        names
-            .clone()
-            .into_iter()
-            .map(|name| name.replace('\\', "/")),
+    let mut configuration: Value = serde_json::from_str(&files::read_string(&file)?)
+        .map_err(|_| Error::Daemon("Claude parity's run config is invalid".to_owned()))?;
+    let object = configuration
+        .as_object_mut()
+        .ok_or_else(|| Error::Daemon("Claude parity's run config is not an object".to_owned()))?;
+    object.insert("hasCompletedOnboarding".to_owned(), Value::Bool(true));
+    let projects = object.entry("projects").or_insert_with(|| json!({}));
+    let projects = projects.as_object_mut().ok_or_else(|| {
+        Error::Daemon("Claude parity's run projects are not an object".to_owned())
+    })?;
+    let project = cf_e2e::live::machine::claude_project_key(&folder.to_string_lossy());
+    projects.insert(
+        project,
+        json!({
+            "hasTrustDialogAccepted": true,
+            "hasCompletedProjectOnboarding": true
+        }),
     );
-    // Replace the longest spelling first, so one alias cannot consume a prefix of another.
-    names.sort_by_key(|name| std::cmp::Reverse(name.len()));
-    names.dedup();
-    for name in names {
-        rename_in_json_under(plugins, &name, &throwaway.to_string_lossy())?;
-    }
-    Ok(())
-}
-
-/// Writes `to` for `from` in every JSON file under `folder`, as JSON writes both.
-fn rename_in_json_under(folder: &Path, from: &str, to: &str) -> Result {
-    if fs::symlink_metadata(folder).is_ok_and(|meta| meta.file_type().is_symlink())
-        || !folder.is_dir()
-    {
-        return Ok(());
-    }
-    for entry in fs::read_dir(folder).map_err(|source| Error::File {
-        action: "read",
-        path: folder.to_owned(),
-        source,
-    })? {
-        let entry = entry.map_err(|source| Error::File {
-            action: "read",
-            path: folder.to_owned(),
-            source,
-        })?;
-        let path = entry.path();
-        let kind = entry.file_type().map_err(|source| Error::File {
-            action: "read",
-            path: path.clone(),
-            source,
-        })?;
-        if kind.is_dir() {
-            rename_in_json_under(&path, from, to)?;
-        } else if kind.is_file()
-            && path
-                .extension()
-                .is_some_and(|extension| extension == "json")
-        {
-            let text = files::read_string(&path)?;
-            if let Some(rewritten) = rename_json_strings(&text, from, to)? {
-                cf_e2e::door::write(&path, rewritten)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Replace paths in JSON string tokens, including escaped spellings, without changing other bytes.
-fn rename_json_strings(text: &str, from: &str, to: &str) -> Result<Option<String>> {
-    let bytes = text.as_bytes();
-    let mut next = 0;
-    let mut copied = 0;
-    let mut rewritten = String::new();
-    let mut changed = false;
-    while next < bytes.len() {
-        if bytes[next] != b'"' {
-            next += 1;
-            continue;
-        }
-        let start = next;
-        next += 1;
-        let mut closed = false;
-        while next < bytes.len() {
-            match bytes[next] {
-                b'\\' => next = (next + 2).min(bytes.len()),
-                b'"' => {
-                    next += 1;
-                    closed = true;
-                    break;
-                }
-                _ => next += 1,
-            }
-        }
-        if !closed {
-            break;
-        }
-        let Ok(value) = serde_json::from_str::<String>(&text[start..next]) else {
-            continue;
-        };
-        if value.contains(from) {
-            let value = value.replace(from, to);
-            let encoded = serde_json::to_string(&value)
-                .map_err(|_| Error::Daemon("Claude parity cannot rewrite a plugin path".into()))?;
-            rewritten.push_str(&text[copied..start]);
-            rewritten.push_str(&encoded);
-            copied = next;
-            changed = true;
-        }
-    }
-    if changed {
-        rewritten.push_str(&text[copied..]);
-        Ok(Some(rewritten))
-    } else {
-        Ok(None)
-    }
+    let program = config.join("server.cjs");
+    object.insert(
+        "mcpServers".to_owned(),
+        json!({
+            (SERVER_NAME): {"type": "stdio", "command": "node", "args": [program]}
+        }),
+    );
+    let skill_file = config.join("skills").join(GLOBAL_SKILL).join("SKILL.md");
+    cf_e2e::door::make_dir(skill_file.parent().expect("skill has a parent"))?;
+    cf_e2e::door::write(&skill_file, skill(GLOBAL_SKILL))?;
+    cf_e2e::door::write(&program, SERVER)?;
+    // A signed-in Claude can otherwise download the owner's account skills and plugins
+    // into even a fresh config. These are run-owned settings, not the owner's settings.
+    cf_e2e::door::write(
+        config.join("settings.json"),
+        json!({"syncClaudeAiSkills": false, "syncClaudeAiPlugins": false}).to_string(),
+    )?;
+    cf_e2e::door::write(&file, configuration.to_string())?;
+    Ok(config)
 }
 
 /// The words ConsensFlow's adapter gives a Claude worker, after the executable: its
@@ -496,23 +310,6 @@ fn ended_by_its_debug_log(debug: &Path) -> Result {
     }
 }
 
-/// What of the machine's own Claude config a run must leave as it was: its settings'
-/// bytes, the prompts its history holds of the run's folder, and whether it knows the
-/// folder. (The history's length is no measure: every Claude of the machine writes it,
-/// the session running this case among them.)
-fn own_state(own: &Path, own_json: &Path, folder: &Path) -> (Vec<u8>, usize, bool) {
-    let folder = folder.to_string_lossy();
-    let history = files::read_string(&own.join("history.jsonl")).map_or(0, |text| {
-        text.lines().filter(|line| line.contains(&*folder)).count()
-    });
-    let knows = files::read_string(own_json).is_ok_and(|text| text.contains(&*folder));
-    (
-        files::read(&own.join("settings.json")).unwrap_or_default(),
-        history,
-        knows,
-    )
-}
-
 /// The words of a window's account in the report.
 fn said(loaded: &Loaded) -> String {
     let skills: Vec<String> = loaded
@@ -521,10 +318,11 @@ fn said(loaded: &Loaded) -> String {
         .map(|(kind, count)| format!("{count} {kind}"))
         .collect();
     format!(
-        "MCP servers {:?}; plugins {:?}; skills {}; Claude in Chrome {}",
+        "MCP servers {:?}; plugins {:?}; skills {} (named {:?}); Claude in Chrome {}",
         loaded.servers,
         loaded.plugins,
         skills.join(", "),
+        loaded.skill_names,
         if loaded.chrome {
             "set up"
         } else {
@@ -533,10 +331,31 @@ fn said(loaded: &Loaded) -> String {
     )
 }
 
+/// The baseline must prove the run's own skill and server loaded, even if both windows
+/// would otherwise agree about their absence.
+fn plain_requirements(plain: &Loaded) -> Vec<String> {
+    let mut missing = Vec::new();
+    if !plain.skill_names.contains(GLOBAL_SKILL) {
+        missing.push(format!("the terminal did not load skill {GLOBAL_SKILL}"));
+    }
+    if !plain.servers.contains(SERVER_NAME) {
+        missing.push(format!(
+            "the terminal did not connect MCP server {SERVER_NAME}"
+        ));
+    }
+    missing
+}
+
 /// How the member's account differs from the plain window's, in words; none where it
 /// has what the plain one has, and its role's skill besides.
 pub fn differences(plain: &Loaded, member: &Loaded) -> Vec<String> {
-    let mut found = Vec::new();
+    let mut found = plain_requirements(plain);
+    for name in plain.skill_names.difference(&member.skill_names) {
+        found.push(format!("the member did not load skill {name}"));
+    }
+    if !member.skill_names.contains(ROLE_SKILL) {
+        found.push(format!("the member did not load role skill {ROLE_SKILL}"));
+    }
     if member.servers != plain.servers {
         found.push(format!(
             "MCP servers {:?} where the terminal's has {:?}",
@@ -581,9 +400,7 @@ pub fn differences(plain: &Loaded, member: &Loaded) -> Vec<String> {
 }
 
 pub fn run(log: &Log) -> Result {
-    let claude = live::installed(Harness::Claude)?;
-    let own = home()?.join(".claude");
-    let own_json = home()?.join(".claude.json");
+    let claude = live::installed_for(Harness::Claude, Duration::from_secs(2 * 60 * 60))?;
     let folder = live_folder("parity-claude")?;
     cf_e2e::door::make_dir(Path::new(env!("CARGO_TARGET_TMPDIR")))?;
     let made_here = cf_e2e::door::made_in(
@@ -595,72 +412,52 @@ pub fn run(log: &Log) -> Result {
         path: Path::new(env!("CARGO_TARGET_TMPDIR")).to_path_buf(),
         source,
     })?;
-    let made = made_here.path().to_path_buf();
-    let before = own_state(&own, &own_json, &folder);
-    let login = login(&own)?;
-    let left = login["expiresAt"].as_i64().unwrap_or(0) - now_ms();
-    if left < LOGIN_LEFT_MS {
-        return Err(Error::Daemon(format!(
-            "the machine's Claude login has {} min left: wait for Claude to refresh it",
-            left / 60_000
-        )));
-    }
+    let made = made_here.path();
+    let login = claude
+        .claude_config()
+        .ok_or_else(|| Error::Daemon("Claude parity needs the kit's own login copy".to_owned()))?;
     log.say(format!(
-        "Claude Code is {} ({}); both windows open in {}",
+        "Claude Code is {} ({}); both windows open in {} on the kit's login copy",
         claude.command().display(),
         claude.version(),
         folder.display()
     ));
-    let arms: [(&str, Vec<String>, Option<&str>); 2] = [
-        (
-            "terminal",
-            vec!["--model".to_owned(), MODEL.to_owned()],
+    // Finish the kit's owner and login checks even when setup or either window fails.
+    let outcome = (|| -> Result {
+        let config = prepare_config(login.as_ref(), &folder)?;
+        let plain = opened(
+            claude.command(),
+            &["--model".to_owned(), MODEL.to_owned()],
+            &folder,
+            &config,
             None,
-        ),
-        ("member", member_words(&made)?, Some("ConsensFlow")),
-    ];
-    let mut accounts = Vec::new();
-    let mut outcome = Ok(());
-    for (name, words, terminal) in arms {
-        let config = made.join(format!("config-{name}"));
-        let result = throwaway_config(&own, &own_json, &config, &login, &folder).and_then(|()| {
-            opened(
-                claude.command(),
-                &words,
-                &folder,
-                &config,
-                terminal,
-                &made.join(format!("debug-{name}.txt")),
-            )
-        });
-        // The copy of the login goes with the run, whatever came of it.
-        let _ = Door::of_run().remove_in_made(&config.join(".credentials.json"));
-        match result {
-            Ok(loaded) => {
-                log.say(format!("{name}: {}", said(&loaded)));
-                accounts.push(loaded);
-            }
-            Err(failed) => {
-                outcome = Err(failed);
-                break;
-            }
+            &made.join("debug-terminal.txt"),
+        )?;
+        log.say(format!("terminal: {}", said(&plain)));
+        let missing = plain_requirements(&plain);
+        if !missing.is_empty() {
+            return Err(Error::Daemon(missing.join("; ")));
         }
-    }
-    let _ = Door::of_run().remove_in_made(&made.join("config-terminal"));
-    let _ = Door::of_run().remove_in_made(&made.join("config-member"));
-    if own_state(&own, &own_json, &folder) != before {
-        return Err(Error::Daemon(
-            "!!! the machine's own Claude config changed during the run".to_owned(),
-        ));
-    }
+        let member = opened(
+            claude.command(),
+            &member_words(made)?,
+            &folder,
+            &config,
+            Some("ConsensFlow"),
+            &made.join("debug-member.txt"),
+        )?;
+        log.say(format!("member: {}", said(&member)));
+        let found = differences(&plain, &member);
+        if !found.is_empty() {
+            return Err(Error::Daemon(format!(
+                "the member's window lacks what the terminal's has:\n  - {}",
+                found.join("\n  - ")
+            )));
+        }
+        Ok(())
+    })();
+    claude.finish_homes()?;
     outcome?;
-    let found = differences(&accounts[0], &accounts[1]);
-    if !found.is_empty() {
-        return Err(Error::Daemon(format!(
-            "the member's window lacks what the terminal's has:\n  - {}",
-            found.join("\n  - ")
-        )));
-    }
     log.say("ok: the member's window loads what the terminal's does, and its role's skill");
     Ok(())
 }
@@ -668,459 +465,241 @@ pub fn run(log: &Log) -> Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    fn link_dir(from: &Path, to: &Path) {
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(from, to).unwrap();
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(from, to).unwrap();
+    /// A fabricated stand-in for the kit's ClaudeConfig. It returns the already-seeded
+    /// login folder; no Keychain or machine home is consulted by these tests.
+    #[derive(Debug)]
+    struct FakeLogin {
+        config: PathBuf,
+        calls: AtomicUsize,
     }
 
-    fn link_file(from: &Path, to: &Path) {
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(from, to).unwrap();
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_file(from, to).unwrap();
-    }
-
-    fn make_parity_copy(owner: &Path, config: &Path, run: &Path) -> Result {
-        throwaway_config(owner, config, run, &json!({"accessToken":"fake"}), run)
-    }
-
-    #[test]
-    fn kit_round4_missing_settings_is_empty() {
-        let root = cf_e2e::door::made("cf-parity-missing-settings-").unwrap();
-        let owner = root.path().join("owner");
-        fs::create_dir(&owner).unwrap();
-        let config = root.path().join("account.json");
-        fs::write(&config, "{}").unwrap();
-        let run = root.path().join("run");
-        make_parity_copy(&owner, &config, &run).expect("missing settings must be accepted");
-        assert_eq!(fs::read_to_string(run.join("settings.json")).unwrap(), "{}");
-    }
-
-    #[test]
-    fn kit_round4_missing_account_is_empty() {
-        let root = cf_e2e::door::made("cf-parity-missing-account-").unwrap();
-        let owner = root.path().join("owner");
-        fs::create_dir(&owner).unwrap();
-        fs::write(owner.join("settings.json"), "{}").unwrap();
-        let run = root.path().join("run");
-        make_parity_copy(&owner, &root.path().join("missing.json"), &run)
-            .expect("missing account config must be accepted");
-        let config: Value =
-            serde_json::from_slice(&fs::read(run.join(".claude.json")).unwrap()).unwrap();
-        assert_eq!(config["hasCompletedOnboarding"], true);
-    }
-
-    #[test]
-    fn kit_round4_linked_settings_is_read() {
-        let root = cf_e2e::door::made("cf-parity-linked-settings-").unwrap();
-        let real_owner = root.path().join("real-owner");
-        fs::create_dir(&real_owner).unwrap();
-        let settings = root.path().join("settings.json");
-        fs::write(&settings, r#"{"theme":"dark"}"#).unwrap();
-        link_file(&settings, &real_owner.join("settings.json"));
-        let owner = real_owner;
-        let config = root.path().join("account.json");
-        fs::write(&config, "{}").unwrap();
-        let run = root.path().join("run");
-        make_parity_copy(&owner, &config, &run).expect("linked settings must be accepted");
-        let copied: Value =
-            serde_json::from_slice(&fs::read(run.join("settings.json")).unwrap()).unwrap();
-        assert_eq!(copied["theme"], "dark");
-    }
-
-    #[test]
-    fn kit_round4_linked_config_folder_is_read() {
-        let root = cf_e2e::door::made("cf-parity-linked-owner-").unwrap();
-        let real_owner = root.path().join("real-owner");
-        fs::create_dir(&real_owner).unwrap();
-        fs::write(real_owner.join("settings.json"), r#"{"theme":"dark"}"#).unwrap();
-        let owner = root.path().join("owner-link");
-        link_dir(&real_owner, &owner);
-        let config = root.path().join("account.json");
-        fs::write(&config, "{}").unwrap();
-        let run = root.path().join("run");
-        make_parity_copy(&owner, &config, &run).expect("linked config folder must be accepted");
-        let copied: Value =
-            serde_json::from_slice(&fs::read(run.join("settings.json")).unwrap()).unwrap();
-        assert_eq!(copied["theme"], "dark");
-    }
-
-    #[test]
-    fn kit_round4_linked_skill_keeps_the_real_target() {
-        let root = cf_e2e::door::made("cf-parity-linked-skill-").unwrap();
-        let owner = root.path().join("owner");
-        let skills = owner.join("skills");
-        fs::create_dir_all(&skills).unwrap();
-        let foreign = tempfile::tempdir().unwrap();
-        let shared = foreign.path().join("shared-skill");
-        fs::create_dir(&shared).unwrap();
-        fs::write(shared.join("SKILL.md"), "fabricated skill").unwrap();
-        link_dir(&shared, &skills.join("mine"));
-        fs::write(owner.join("settings.json"), "{}").unwrap();
-        let config = root.path().join("account.json");
-        fs::write(&config, "{}").unwrap();
-        let run = root.path().join("run");
-        make_parity_copy(&owner, &config, &run).unwrap();
-        let copied = run.join("skills/mine");
-        assert!(
-            fs::symlink_metadata(&copied).is_ok_and(|m| m.file_type().is_symlink()),
-            "outside skill must remain a link"
-        );
-        assert_eq!(
-            fs::canonicalize(&copied).unwrap(),
-            fs::canonicalize(&shared).unwrap()
-        );
-        assert_eq!(
-            fs::read_to_string(copied.join("SKILL.md")).unwrap(),
-            "fabricated skill"
-        );
-    }
-
-    #[test]
-    fn kit_round4_linked_skills_root_keeps_the_real_target() {
-        let root = cf_e2e::door::made("cf-parity-linked-root-").unwrap();
-        let owner = root.path().join("owner");
-        fs::create_dir(&owner).unwrap();
-        let foreign = tempfile::tempdir().unwrap();
-        let shared = foreign.path().join("shared-skills");
-        fs::create_dir(&shared).unwrap();
-        link_dir(&shared, &owner.join("skills"));
-        fs::write(owner.join("settings.json"), "{}").unwrap();
-        let config = root.path().join("account.json");
-        fs::write(&config, "{}").unwrap();
-        let run = root.path().join("run");
-        make_parity_copy(&owner, &config, &run).unwrap();
-        let copied = run.join("skills");
-        assert!(
-            fs::symlink_metadata(&copied).is_ok_and(|m| m.file_type().is_symlink()),
-            "linked skills root must remain a link"
-        );
-        assert_eq!(
-            fs::canonicalize(copied).unwrap(),
-            fs::canonicalize(shared).unwrap()
-        );
-    }
-
-    #[test]
-    fn kit_round4_external_plugin_link_is_refused_by_name() {
-        let root = cf_e2e::door::made("cf-parity-linked-plugin-").unwrap();
-        let owner = root.path().join("owner");
-        let plugins = owner.join("plugins");
-        fs::create_dir_all(&plugins).unwrap();
-        let foreign = tempfile::tempdir().unwrap();
-        let shared = foreign.path().join("shared-plugin");
-        fs::create_dir(&shared).unwrap();
-        let link = plugins.join("mine");
-        link_dir(&shared, &link);
-        fs::write(owner.join("settings.json"), "{}").unwrap();
-        let config = root.path().join("account.json");
-        fs::write(&config, "{}").unwrap();
-        let error = make_parity_copy(&owner, &config, &root.path().join("run"))
-            .expect_err("external plugin link must be refused");
-        assert!(
-            error
-                .to_string()
-                .contains(&link.to_string_lossy().to_string()),
-            "{error}"
-        );
-    }
-
-    #[test]
-    fn kit_round4_linked_account_is_read_and_bad_objects_refuse_generically() {
-        let root = cf_e2e::door::made("cf-parity-account-link-").unwrap();
-        let owner = root.path().join("owner");
-        fs::create_dir(&owner).unwrap();
-        fs::write(owner.join("settings.json"), "{}").unwrap();
-        let account = root.path().join("real-account");
-        fs::write(&account, r#"{"custom":"kept"}"#).unwrap();
-        let link = root.path().join("account-link");
-        link_file(&account, &link);
-        let run = root.path().join("run");
-        make_parity_copy(&owner, &link, &run).unwrap();
-        let copied: Value =
-            serde_json::from_slice(&fs::read(run.join(".claude.json")).unwrap()).unwrap();
-        assert_eq!(copied["custom"], "kept");
-        for text in ["[]", "{broken"] {
-            fs::write(&account, text).unwrap();
-            let error = make_parity_copy(&owner, &link, &root.path().join("other")).unwrap_err();
-            assert_eq!(
-                error.to_string(),
-                "Claude parity cannot read or parse .claude.json"
-            );
+    impl ClaudeConfig for FakeLogin {
+        fn folder(&self) -> Result<PathBuf> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.config.clone())
         }
-        fs::write(owner.join("settings.json"), "[]").unwrap();
-        let error = make_parity_copy(&owner, &link, &root.path().join("other")).unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "Claude parity cannot read or parse settings.json"
-        );
+        fn described(&self) -> String {
+            "fabricated login".to_owned()
+        }
+        fn finish(&self) -> Result {
+            Ok(())
+        }
     }
 
     #[test]
-    fn kit_round4_parity_skips_dangling_links_and_retargets_internal_links() {
-        let root = cf_e2e::door::made("cf-parity-inside-").unwrap();
-        let source = root.path().join("skills");
-        fs::create_dir_all(source.join("real")).unwrap();
-        fs::write(source.join("real/SKILL.md"), "inside").unwrap();
-        link_dir(&source.join("real"), &source.join("inside"));
-        link_dir(&root.path().join("missing"), &source.join("dangling"));
-        let target = root.path().join("copy");
-        copy_tree(&source, &target, cf_e2e::door::OutsideLinks::Preserve).unwrap();
-        assert!(fs::symlink_metadata(target.join("inside"))
-            .unwrap()
-            .file_type()
-            .is_symlink());
-        assert_eq!(
-            fs::canonicalize(target.join("inside")).unwrap(),
-            fs::canonicalize(target.join("real")).unwrap()
-        );
-        assert!(fs::symlink_metadata(target.join("dangling")).is_err());
-    }
-
-    #[test]
-    fn kit_round4_plugin_root_link_is_refused_and_rewriter_skips_links() {
-        let root = cf_e2e::door::made("cf-parity-plugin-root-").unwrap();
-        let foreign = tempfile::tempdir().unwrap();
-        let source = root.path().join("plugins");
-        let external = foreign.path().join("plugins");
-        fs::create_dir(&external).unwrap();
-        fs::write(external.join("paths.json"), r#"{"path":"old"}"#).unwrap();
-        link_dir(&external, &source);
-        let error = copy_tree(
-            &source,
-            &root.path().join("copy"),
-            cf_e2e::door::OutsideLinks::Refuse,
-        )
-        .unwrap_err();
-        assert!(error
-            .to_string()
-            .contains(&source.to_string_lossy().to_string()));
-        rename_in_json_under(&source, "old", "new").unwrap();
-        assert_eq!(
-            fs::read_to_string(external.join("paths.json")).unwrap(),
-            r#"{"path":"old"}"#
-        );
-    }
-
-    #[test]
-    fn kit_round4_plugin_paths_use_copy_when_owner_config_is_linked() {
-        let root = cf_e2e::door::made("cf-parity-linked-plugin-path-").unwrap();
-        let real_owner = root.path().join("real-owner");
-        let plugins = real_owner.join("plugins");
-        fs::create_dir_all(plugins.join("package")).unwrap();
-        let real_path = fs::canonicalize(&plugins).unwrap().join("package");
-        let original = json!({"installPath": real_path.to_string_lossy()}).to_string();
-        fs::write(plugins.join("installed.json"), &original).unwrap();
-        let owner = root.path().join("owner-link");
-        link_dir(&real_owner, &owner);
-        let run = root.path().join("run");
-        make_parity_copy(&owner, &root.path().join("missing.json"), &run).unwrap();
-        let copied: Value =
-            serde_json::from_slice(&fs::read(run.join("plugins/installed.json")).unwrap()).unwrap();
-        assert_eq!(
-            copied["installPath"],
-            run.join("plugins")
-                .join("package")
-                .to_string_lossy()
-                .as_ref(),
-            "plugin path still reaches the owner's folder"
-        );
-        assert_eq!(
-            fs::read_to_string(plugins.join("installed.json")).unwrap(),
-            original
-        );
-    }
-
-    #[test]
-    fn kit_round4_plugin_paths_with_json_escapes_are_rewritten() {
-        let root = cf_e2e::door::made("cf-parity-escaped-plugin-").unwrap();
-        let owner = root.path().join("owner-escaped");
-        let plugins = owner.join("plugins");
-        fs::create_dir_all(plugins.join("package")).unwrap();
-        let real_path = fs::canonicalize(&plugins).unwrap().join("package");
-        let quoted = serde_json::to_string(&real_path.to_string_lossy().to_string())
-            .unwrap()
-            .replace("owner-escaped", r"\u006fwner-escaped");
-        let original = format!(r#"{{"installPath":{quoted}}}"#);
-        fs::write(plugins.join("installed.json"), &original).unwrap();
-        let run = root.path().join("run");
-        make_parity_copy(&owner, &root.path().join("missing.json"), &run).unwrap();
-        let copied: Value =
-            serde_json::from_slice(&fs::read(run.join("plugins/installed.json")).unwrap()).unwrap();
-        assert_eq!(
-            copied["installPath"],
-            run.join("plugins")
-                .join("package")
-                .to_string_lossy()
-                .as_ref(),
-            "escaped plugin path still reaches the owner's folder"
-        );
-        assert_eq!(
-            fs::read_to_string(plugins.join("installed.json")).unwrap(),
-            original
-        );
-    }
-
-    #[test]
-    fn kit_round4_removing_copy_leaves_external_skill_untouched() {
-        let root = cf_e2e::door::made("cf-parity-cleanup-").unwrap();
-        let foreign = tempfile::tempdir().unwrap();
-        fs::write(foreign.path().join("SKILL.md"), "unchanged").unwrap();
+    fn t1700_run_config_excludes_owner_and_contains_its_own_items() {
+        let root = cf_e2e::door::made("cf-parity-new-config-").unwrap();
         let owner = root.path().join("owner");
-        fs::create_dir_all(owner.join("skills")).unwrap();
-        link_dir(foreign.path(), &owner.join("skills/mine"));
-        let config = root.path().join("missing.json");
-        let run = root.path().join("run");
-        make_parity_copy(&owner, &config, &run).unwrap();
-        let removed = Door::of_run().remove_in_made(&run);
-        assert!(!run.exists(), "copy was not removed: {removed:?}");
-        assert_eq!(
-            fs::read_to_string(foreign.path().join("SKILL.md")).unwrap(),
-            "unchanged"
-        );
-    }
-
-    #[cfg(unix)]
-    fn linked_out_parity_tree(part: &str) {
-        let root = cf_e2e::door::made("cf-parity-tree-").unwrap();
-        let foreign = tempfile::tempdir().unwrap();
+        let config = root.path().join("run");
+        let project = root.path().join("project with spaces");
+        fs::create_dir_all(owner.join("skills/owner-secret")).unwrap();
+        fs::write(owner.join("skills/owner-secret/SKILL.md"), "owner skill").unwrap();
+        for part in ["plugins", "agents", "commands"] {
+            fs::create_dir(owner.join(part)).unwrap();
+            fs::write(owner.join(part).join("owner-secret"), "owner content").unwrap();
+        }
+        // A read and parse of either fabricated owner file would fail.
+        fs::write(owner.join("settings.json"), "invalid owner settings").unwrap();
+        fs::write(owner.join(".claude.json"), "invalid owner config").unwrap();
+        let source = json!({"claudeAiOauth": {"accessToken": "fake-access",
+            "refreshToken": "fake-refresh", "nested": [{"REFRESH_key": "fake"}]}})
+        .to_string();
+        cf_e2e::door::make_dir_private(&config).unwrap();
+        let login_copy = cf_e2e::live::login::json_copy(&source, "fabricated Claude").unwrap();
+        fs::write(config.join(".credentials.json"), login_copy).unwrap();
         fs::write(
-            foreign.path().join("login.json"),
-            "fabricated refresh token",
+            config.join(".claude.json"),
+            r#"{"hasCompletedOnboarding":true,"projects":{}}"#,
         )
         .unwrap();
-        let source = root.path().join(part);
-        fs::create_dir(&source).unwrap();
-        std::os::unix::fs::symlink(foreign.path().join("login.json"), source.join("leak.json"))
-            .unwrap();
-        let target = root.path().join("copy");
-        let outside = if part == "plugins" {
-            cf_e2e::door::OutsideLinks::Refuse
-        } else {
-            cf_e2e::door::OutsideLinks::Preserve
+        let login = FakeLogin {
+            config: config.clone(),
+            calls: AtomicUsize::new(0),
         };
-        let copied = copy_tree(&source, &target, outside);
-        if part == "plugins" {
-            assert!(copied.is_err(), "plugins accepted a linked-out file");
-        } else {
-            copied.unwrap();
-            let link = target.join("leak.json");
-            assert!(
-                fs::symlink_metadata(&link)
-                    .unwrap()
-                    .file_type()
-                    .is_symlink(),
-                "{part} copied instead of linking the outside file"
-            );
-            assert_eq!(
-                fs::canonicalize(link).unwrap(),
-                fs::canonicalize(foreign.path().join("login.json")).unwrap()
-            );
-        }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn kit_round3_claude_skills_keep_links_out() {
-        linked_out_parity_tree("skills");
-    }
-    #[cfg(unix)]
-    #[test]
-    fn kit_round3_claude_plugins_refuse_links_out() {
-        linked_out_parity_tree("plugins");
-    }
-    #[cfg(unix)]
-    #[test]
-    fn kit_round3_claude_agents_keep_links_out() {
-        linked_out_parity_tree("agents");
-    }
-    #[cfg(unix)]
-    #[test]
-    fn kit_round3_claude_commands_keep_links_out() {
-        linked_out_parity_tree("commands");
-    }
-
-    fn parity_rejects_bad_config(settings: &str, config: &str) {
-        let root = cf_e2e::door::made("cf-parity-invalid-").unwrap();
-        let owner = root.path().join("owner");
-        fs::create_dir(&owner).unwrap();
-        fs::write(owner.join("settings.json"), settings).unwrap();
-        fs::write(owner.join(".claude.json"), config).unwrap();
-        let result = throwaway_config(
-            &owner,
-            &owner.join(".claude.json"),
-            &root.path().join("run"),
-            &json!({"accessToken":"fake"}),
-            root.path(),
+        assert_eq!(prepare_config(&login, &project).unwrap(), config);
+        assert_eq!(
+            login.calls.load(Ordering::SeqCst),
+            1,
+            "the kit login was not asked for its folder"
         );
-        assert!(result.is_err(), "invalid parity configuration was accepted");
-    }
-
-    #[test]
-    fn kit_round3_claude_parity_refuses_invalid_settings() {
-        parity_rejects_bad_config("{invalid", "{}");
-    }
-    #[test]
-    fn kit_round3_claude_parity_refuses_invalid_account_config() {
-        parity_rejects_bad_config("{}", "[]");
-    }
-
-    #[test]
-    fn parity_config_copies_no_refresh_keys() {
-        let root = cf_e2e::door::made("cf-parity-login-").unwrap();
-        let owner = root.path().join("owner");
-        let target = root.path().join("run");
-        let login = json!({"accessToken":"fake-access","refreshToken":"fake-refresh","nested":[{"REFRESH_key":"fake"}]});
-        fs::create_dir(&owner).unwrap();
-        fs::write(
-            owner.join(".claude.json"),
-            r#"{"oauth":{"refreshToken":"fake","accessToken":"kept"}}"#,
-        )
-        .unwrap();
-        fs::write(
-            owner.join("settings.json"),
-            r#"{"nested":{"refresh_token":"fake","display":"kept"}}"#,
-        )
-        .unwrap();
-        throwaway_config(
-            &owner,
-            &owner.join(".claude.json"),
-            &target,
-            &login,
-            root.path(),
-        )
-        .unwrap();
-        let copied: Value =
-            serde_json::from_str(&fs::read_to_string(target.join(".credentials.json")).unwrap())
-                .unwrap();
         assert!(
-            copied["claudeAiOauth"].get("refreshToken").is_none(),
-            "refresh key was copied"
+            !config.join("skills/owner-secret").exists(),
+            "the owner's skill was copied"
         );
-        assert!(copied["claudeAiOauth"]["nested"][0]
+        for part in ["plugins", "agents", "commands"] {
+            assert!(!config.join(part).exists(), "the owner's {part} was copied");
+        }
+        let skill_file = config.join("skills").join(GLOBAL_SKILL).join("SKILL.md");
+        assert_eq!(fs::read_to_string(skill_file).unwrap(), skill(GLOBAL_SKILL));
+        assert_eq!(
+            fs::read_to_string(config.join("server.cjs")).unwrap(),
+            SERVER
+        );
+        let json: Value =
+            serde_json::from_slice(&fs::read(config.join(".claude.json")).unwrap()).unwrap();
+        let server = &json["mcpServers"][SERVER_NAME];
+        assert_eq!(server["type"], "stdio");
+        assert_eq!(server["command"], "node");
+        assert_eq!(
+            server["args"][0],
+            config.join("server.cjs").to_string_lossy().as_ref()
+        );
+        assert_eq!(json["hasCompletedOnboarding"], true);
+        let project_key = cf_e2e::live::machine::claude_project_key(&project.to_string_lossy());
+        assert_eq!(
+            json["projects"][&project_key]["hasTrustDialogAccepted"],
+            true
+        );
+        assert_eq!(
+            json["projects"][&project_key]["hasCompletedProjectOnboarding"],
+            true
+        );
+        let credentials: Value =
+            serde_json::from_slice(&fs::read(config.join(".credentials.json")).unwrap()).unwrap();
+        assert_eq!(credentials["claudeAiOauth"]["accessToken"], "fake-access");
+        assert!(credentials["claudeAiOauth"].get("refreshToken").is_none());
+        assert!(credentials["claudeAiOauth"]["nested"][0]
             .get("REFRESH_key")
             .is_none());
-        assert_eq!(copied["claudeAiOauth"]["accessToken"], "fake-access");
-        let config: Value =
-            serde_json::from_slice(&fs::read(target.join(".claude.json")).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn t1700_plain_missing_skill_fails_by_name() {
+        let plain = loaded("MCP server \"cf-parity\": Successfully connected\ngetSkills returning: 0 skill dir commands\n");
         assert!(
-            config["oauth"].get("refreshToken").is_none(),
-            "a refresh key was copied in configuration"
+            plain_requirements(&plain)
+                .join(" ")
+                .contains("cf-parity-global"),
+            "missing run skill was not named"
         );
+    }
+
+    #[test]
+    fn t1700_plain_missing_server_fails_by_name() {
+        let plain = loaded("Skill prompt: showing \"cf-parity-global\" (userFacingName=\"cf-parity-global\")\nMCP server \"cf-parity\": connection failed\ngetSkills returning: 1 skill dir commands\n");
+        assert!(
+            plain_requirements(&plain)
+                .join(" ")
+                .contains("MCP server cf-parity"),
+            "missing run server was not named"
+        );
+    }
+
+    #[test]
+    fn t1700_config_refuses_a_folder_the_run_did_not_make() {
+        let login = FakeLogin {
+            config: std::env::temp_dir(),
+            calls: AtomicUsize::new(0),
+        };
+        assert!(prepare_config(&login, Path::new("project"))
+            .unwrap_err()
+            .to_string()
+            .contains("run's own"));
+    }
+
+    #[test]
+    fn t1700_run_config_disables_account_skill_and_plugin_sync() {
+        let root = cf_e2e::door::made("cf-parity-sync-").unwrap();
+        let config = root.path().join("config");
+        cf_e2e::door::make_dir_private(&config).unwrap();
+        fs::write(config.join(".claude.json"), "{}").unwrap();
+        let login = FakeLogin {
+            config: config.clone(),
+            calls: AtomicUsize::new(0),
+        };
+        prepare_config(&login, root.path()).unwrap();
         let settings: Value =
-            serde_json::from_slice(&fs::read(target.join("settings.json")).unwrap()).unwrap();
-        assert!(settings["nested"].get("refresh_token").is_none());
+            serde_json::from_slice(&fs::read(config.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(
+            settings,
+            json!({"syncClaudeAiSkills": false, "syncClaudeAiPlugins": false})
+        );
+    }
+
+    // Login::folder lists the real Keychain on macOS even for a fabricated login.
+    // On other platforms this child has a fabricated HOME and temp folder and exercises
+    // the actual kit login together with the parity setup, without touching a real home.
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn t1700_actual_kit_login_composes_with_parity_setup() {
+        const CHILD: &str = "CF_T1700_FAKE_HOME";
+        if let Some(home) = std::env::var_os(CHILD) {
+            let home = PathBuf::from(home);
+            let source = home.join("login-source");
+            let login =
+                cf_e2e::live::login::Login::of_folder(&source, Duration::from_secs(60)).unwrap();
+            let config = prepare_config(&login, &home.join("project")).unwrap();
+            let credentials: Value =
+                serde_json::from_slice(&fs::read(config.join(".credentials.json")).unwrap())
+                    .unwrap();
+            assert_eq!(credentials["claudeAiOauth"]["accessToken"], "fake-access");
+            assert!(credentials["claudeAiOauth"].get("refreshToken").is_none());
+            assert!(credentials["claudeAiOauth"]["nested"][0]
+                .get("REFRESH_key")
+                .is_none());
+            assert!(config
+                .join("skills")
+                .join(GLOBAL_SKILL)
+                .join("SKILL.md")
+                .is_file());
+            assert!(!config.join("skills/owner-secret").exists());
+            let config_json: Value =
+                serde_json::from_slice(&fs::read(config.join(".claude.json")).unwrap()).unwrap();
+            assert_eq!(config_json["mcpServers"][SERVER_NAME]["command"], "node");
+            login.finish().unwrap();
+            return;
+        }
+        let root = cf_e2e::door::made("cf-parity-actual-login-").unwrap();
+        let home = root.path().join("owner");
+        let temp = root.path().join("temp");
+        fs::create_dir_all(home.join(".claude/skills/owner-secret")).unwrap();
+        fs::create_dir_all(home.join("login-source")).unwrap();
+        fs::create_dir(&temp).unwrap();
+        fs::write(
+            home.join(".claude/skills/owner-secret/SKILL.md"),
+            "owner skill",
+        )
+        .unwrap();
+        fs::write(home.join(".claude/settings.json"), "invalid owner settings").unwrap();
+        fs::write(home.join(".claude.json"), "invalid owner config").unwrap();
+        fs::write(
+            home.join("login-source/.credentials.json"),
+            json!({"claudeAiOauth": {"accessToken": "fake-access",
+                "refreshToken": "fake-refresh", "expiresAt": now_ms() + 3_600_000,
+                "nested": [{"REFRESH_key": "fake"}]}})
+            .to_string(),
+        )
+        .unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "claude::tests::t1700_actual_kit_login_composes_with_parity_setup",
+            ])
+            .env(CHILD, &home)
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env("TMPDIR", &temp)
+            .env("TMP", &temp)
+            .env("TEMP", &temp)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "fabricated login child failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     const LOG: &str = "\
-2026-10-25T08:46:13.590Z [DEBUG] MCP server \"computer-use\": Successfully connected (transport: stdio) in 871ms
+2026-10-25T08:46:13.590Z [DEBUG] MCP server \"cf-parity\": Successfully connected (transport: stdio) in 871ms
 2026-10-25T08:46:13.591Z [DEBUG] MCP server \"claude.ai Claude Docs\": Successfully connected (transport: http) in 90ms
 2026-10-25T08:46:13.592Z [DEBUG] plugin.register: cc-plugin-diff (builtin, cc-plugin-diff@builtin), judged by core alone: admitted
-2026-10-25T08:46:13.593Z [DEBUG] getSkills returning: 3 skill dir commands, 0 plugin skills, 37 bundled skills, 1 builtin plugin skills
-2026-10-25T08:46:13.594Z [DEBUG] getSkills returning: 4 skill dir commands, 0 plugin skills, 37 bundled skills, 1 builtin plugin skills
+2026-10-25T08:46:13.593Z [DEBUG] getSkills returning: 1 skill dir commands, 0 plugin skills, 37 bundled skills, 1 builtin plugin skills
+2026-10-25T08:46:13.594Z [DEBUG] Skill prompt: showing \"cf-parity-global\" (userFacingName=\"cf-parity-global\")
 ";
 
     #[test]
@@ -1128,26 +707,37 @@ mod tests {
         let found = loaded(LOG);
         assert_eq!(
             found.servers.into_iter().collect::<Vec<_>>(),
-            ["claude.ai Claude Docs", "computer-use"]
+            ["cf-parity", "claude.ai Claude Docs"]
         );
         assert_eq!(
             found.plugins.into_iter().collect::<Vec<_>>(),
             ["cc-plugin-diff"]
         );
-        assert_eq!(found.skills[0], ("skill dir commands".to_owned(), 4));
+        assert_eq!(found.skills[0], ("skill dir commands".to_owned(), 1));
+        assert_eq!(
+            found.skill_names.into_iter().collect::<Vec<_>>(),
+            [GLOBAL_SKILL]
+        );
         assert!(!found.chrome);
     }
 
     #[test]
-    fn a_member_with_its_roles_skill_besides_differs_in_nothing_and_one_without_a_server_does() {
-        let plain = loaded(&LOG.replace("4 skill dir", "3 skill dir"));
-        let member = loaded(LOG);
+    fn member_requires_plain_items_and_its_role_skill() {
+        let plain = loaded(LOG);
+        let member = loaded(&format!("{}\nSkill prompt: showing \"consensflow-worker\" (userFacingName=\"consensflow-worker\")\ngetSkills returning: 2 skill dir commands, 0 plugin skills, 37 bundled skills, 1 builtin plugin skills\n", LOG));
+        assert!(plain_requirements(&plain).is_empty());
         assert_eq!(differences(&plain, &member), Vec::<String>::new());
-        let without = loaded(
-            &LOG.replace("\"computer-use\"", "\"other\"")
-                .replace("4 skill dir", "3 skill dir"),
-        );
-        let found = differences(&plain, &without);
-        assert_eq!(found.len(), 2, "{found:?}");
+        let without_role = loaded(&LOG.replace("1 skill dir", "2 skill dir"));
+        assert!(differences(&plain, &without_role)
+            .join(" ")
+            .contains(ROLE_SKILL));
+        let without_global = loaded("MCP server \"cf-parity\": Successfully connected\nSkill prompt: showing \"consensflow-worker\"\ngetSkills returning: 2 skill dir commands\n");
+        assert!(differences(&plain, &without_global)
+            .join(" ")
+            .contains(GLOBAL_SKILL));
+        let without_server = loaded(&format!("{}\nSkill prompt: showing \"consensflow-worker\"\ngetSkills returning: 2 skill dir commands\n", LOG.replace("Successfully connected", "connection failed")));
+        assert!(differences(&plain, &without_server)
+            .join(" ")
+            .contains("MCP servers"));
     }
 }
