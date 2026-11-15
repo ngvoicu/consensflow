@@ -222,7 +222,7 @@ replace = "            let stay = if true {"
 
 [[plant]]
 name = "role news: the note is a task"
-meant = "specs_turned_on_give_the_section_and_say_it_is_context"
+meant = "short_text_t1715_news_context"
 runs = ["rn-news-lib"]
 
 [[plant.edit]]
