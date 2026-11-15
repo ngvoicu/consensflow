@@ -59,8 +59,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-launcher/src/install.rs"
-find = "let _ = std::fs::remove_file(script_of(&file));"
-replace = '''let _ = std::fs::write(script_of(&file), "@echo off\r\n");'''
+find = "std::fs::remove_file(&cmd)"
+replace = '''std::fs::write(&cmd, "@echo off\r\n")'''
 
 # What the shells pipe ends in a Windows line ending, which is not the text's.
 [[plant]]

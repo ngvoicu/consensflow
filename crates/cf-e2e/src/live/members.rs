@@ -224,7 +224,11 @@ impl Members {
             Some(claude) => Some(trusted(&rig, claude, &folder, log)?),
             None => None,
         };
-        let project = Project::open(&rig, &plan.chief, json!({ "directory": folder }))?.id();
+        let mut request = json!({ "directory": folder });
+        if let Some(rules) = &plan.rules {
+            request["rules"] = json!(rules);
+        }
+        let project = Project::open(&rig, &plan.chief, request)?.id();
         Ok(Self {
             rig,
             config,

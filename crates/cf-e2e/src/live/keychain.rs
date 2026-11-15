@@ -24,7 +24,7 @@
 //! - A Claude Code started with [`super::ISOLATION`] (`--strict-mcp-config --no-chrome`) connects
 //!   to no MCP server it was not given, so it writes none of that: shown on the machine's own by
 //!   `live keychain`, for the user-scope servers, the project's, and the plugins'. Every window
-//!   of a live run and of an eval has it (the wrappers of [`super::machine`]).
+//!   of a live run has it (the wrappers of [`super::machine`]).
 //! - A probe that cannot take the flag (`claude mcp list`, which connects to every server on
 //!   purpose) runs with [`without_keychain`] first on its `PATH`: Claude Code calls `security` by
 //!   its bare name, so a `security` that finds no item and writes none sends it to the folder's

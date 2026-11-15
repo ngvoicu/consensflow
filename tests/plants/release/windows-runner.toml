@@ -70,13 +70,13 @@ replace = '    "app/src-tauri/targets",'
 
 [[plant]]
 name = "windows runner: the evals' reports are not kept"
-meant = "the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else"
+meant = "t1655_the_sweep_leaves_old_evidence_alone"
 runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = '    "evals/reports",'
-replace = '    "evals/report",'
+find = '    "evals",'
+replace = '    "eval",'
 
 [[plant]]
 name = "windows runner: a kept folder is walked before it is passed over"
@@ -1009,16 +1009,6 @@ replace = "{ Remove-Item -LiteralPath $running -Force }\n}\n"
 # What the reports a run left keep (`script::REPORTS_KEPT_DAYS`, T-34 P3-6): older than the limit
 # is removed by the sweep, in that folder alone, and nothing newer is touched.
 [[plant]]
-name = "windows runner: the reports are never pruned"
-meant = "the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/script/templates.rs"
-find = "  $folder = Get-Item -LiteralPath $reports\n  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }\n"
-replace = "  $folder = Get-Item -LiteralPath $reports\n"
-
-[[plant]]
 name = "windows runner: what is newer than the limit is pruned"
 meant = "the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched"
 runs = ["xtask-lib-windows"]
@@ -1027,16 +1017,6 @@ runs = ["xtask-lib-windows"]
 file = "tools/xtask/src/windows/script/templates.rs"
 find = '    if ($inside -or $written -ge $cutoff) {'
 replace = '    if ($inside -or $written -lt $cutoff) {'
-
-[[plant]]
-name = "windows runner: the reports are kept a day"
-meant = "the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/script.rs"
-find = "pub const REPORTS_KEPT_DAYS: u32 = 14;"
-replace = "pub const REPORTS_KEPT_DAYS: u32 = 1;"
 
 [[plant]]
 name = "windows runner: a report that cannot be removed ends the run"
@@ -1090,11 +1070,11 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script/templates.rs"
-find = "  $folder = Get-Item -LiteralPath $reports\n  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }\n"
-replace = "  $folder = Get-Item -LiteralPath $reports\n  $null = Clear-Old $folder\n"
+find = "  $folder = Get-Item -Force -LiteralPath $runs\n  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }\n"
+replace = "  $folder = Get-Item -Force -LiteralPath $runs\n  $null = Clear-Old $folder\n"
 
-# What a run leaves in `evals/reports` there is brought back here (T-141, P3-3), the files this checkout
-# lacks and nothing it has, by names of a report's alone, whole; the runner and the matrix both do it.
+# What a run leaves in `app/src-tauri/target/live-matrix` there is brought back here (T-141, P3-3),
+# the files this checkout lacks and nothing it has, by names of a report's alone, whole.
 [[plant]]
 name = "windows runner: the reports a run left are not brought back"
 meant = "a_run_that_ended_there_with_a_status_brings_its_reports_back_and_answers_the_commands_status"
@@ -1106,16 +1086,6 @@ find = "        let _ = bring_back(context, machine, options, console);\n"
 replace = ""
 
 [[plant]]
-name = "windows runner: the matrix's machine does not bring the reports back"
-meant = "the_matrixs_machine_brings_the_reports_back_too"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/matrix.rs"
-find = "        super::fetch::run_keeping(self.context, self.machine, options, console, self.interrupt)"
-replace = "        super::run::run(self.context, self.machine, options, console, self.interrupt)"
-
-[[plant]]
 name = "windows runner: a report this checkout has is replaced"
 meant = "the_reports_this_checkout_lacks_are_brought_back_and_the_ones_it_has_are_kept_as_they_are"
 runs = ["xtask-lib-windows"]
@@ -1124,20 +1094,6 @@ runs = ["xtask-lib-windows"]
 file = "tools/xtask/src/windows/fetch.rs"
 find = '''
         if to.exists() {
-            continue;
-        }
-'''
-replace = ""
-
-[[plant]]
-name = "windows runner: what the matrix writes under windows is brought back"
-meant = "what_is_here_already_or_the_matrix_writes_is_not_asked_for_and_nothing_is_said_of_it"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/fetch.rs"
-find = '''
-        if name.starts_with("windows/") {
             continue;
         }
 '''
@@ -1435,7 +1391,7 @@ replace = '''        (Some(name), Some(_)) => Ok(Machine::named(name)),'''
 # - The disk script ends with `exit 0`: with no owner file `Get-Content` fails, `$?` stays false, and the
 #   script's last statement (an `if` that runs nothing) left the exit status 1 (the live run on zeewin2).
 # - A Ctrl-C ends the probes with the program: a stop, not a zeelin that did not answer; a refused
-#   run asks nothing more of the machine, and stops a matrix, whose later evals are `not run`.
+#   run asks nothing more of the machine.
 
 [[plant]]
 name = "windows runner: --host zeewin2 is reached as any host, without the laptop's guards"
@@ -1604,26 +1560,6 @@ runs = ["xtask-lib-windows"]
 file = "tools/xtask/src/windows/machine.rs"
 find = "    if matches!(free, Free::No(_)) && interrupt.heard_after_failure() {"
 replace = "    if false {"
-
-[[plant]]
-name = "windows runner: the matrix goes on after a refused run"
-meant = "a_run_the_machine_refuses_stops_the_matrix_and_the_rest_are_not_run"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/matrix.rs"
-find = "                    refused = Some(why);"
-replace = "                    let _ = why;"
-
-[[plant]]
-name = "windows runner: a matrix a machine stopped answers 1"
-meant = "a_run_the_machine_refuses_stops_the_matrix_and_the_rest_are_not_run"
-runs = ["xtask-lib-windows"]
-
-[[plant.edit]]
-file = "tools/xtask/src/windows/matrix.rs"
-find = "        return Ok(REFUSED);"
-replace = "        return Ok(1);"
 
 [[plant]]
 name = "windows runner: a refused run brings the reports back"

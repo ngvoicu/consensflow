@@ -11,13 +11,11 @@ use std::path::{Path, PathBuf};
 use super::super::login::digest;
 
 /// Whether `name` is the name a harness gives (in its folder of sessions) to a folder of a
-/// run: the live suites' (`~/.consensflow-candidate/live/…`), the evals' workspace
-/// (`~/.consensflow-candidate/evals/…`), or the home of a rig (`consensflow-integration-…`).
+/// run: the live suites' (`~/.consensflow-candidate/live/…`) or the home of a rig
+/// (`consensflow-integration-…`).
 /// A harness writes a path with its separators, and its dot, as `-`, or as `--` around it.
 pub fn names_a_run(name: &str) -> bool {
-    name.contains("consensflow-candidate-live-")
-        || name.contains("consensflow-candidate-evals-")
-        || name.contains("consensflow-integration-")
+    name.contains("consensflow-candidate-live-") || name.contains("consensflow-integration-")
 }
 
 /// What the owner's setup is.

@@ -471,6 +471,7 @@ version = "3.0.7-alpha.6"
 dependencies = [
  "cf-base",
  "cf-e2e",
+ "cf-engine",
  "cf-ledger",
  "cf-panes",
  "cf-process",
@@ -516,20 +517,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
-]
-
-[[package]]
-name = "cf-evals"
-version = "3.0.7-alpha.6"
-dependencies = [
- "cf-e2e",
- "jiff",
- "portable-pty",
- "regex",
- "rusqlite",
- "serde_json",
- "tempfile",
- "thiserror 2.0.20",
 ]
 
 [[package]]

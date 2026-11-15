@@ -37,7 +37,7 @@
 //! token it fails loudly with a 401, the person's login untouched). A run starts only on a login
 //! whose access token lasts at least as long as the run is to take, with a margin: the length the
 //! case plans for itself and the margin ([`Login::of_machine_lasting`]: a live case states its own,
-//! minutes long, and an eval its own, hours long). It says it if the copy changed all the same:
+//! minutes long). It says it if the copy changed all the same:
 //! the folder's `.credentials.json` is compared with what was copied, and the Keychain with the
 //! items it had. Nothing refreshes it by hand, here or anywhere. (On a test machine, the
 //! one exception: a login that has run short is renewed by Claude Code itself, run once as
@@ -51,8 +51,7 @@
 //! whole of `~/.claude.json`: the person's own Claude Code sessions write the rest
 //! of it all day.) A run that fails any of them fails, with the Claude Code of the
 //! person's windows named as the other possible writer. The run's folders are the
-//! live suites' (`~/.consensflow-candidate/live/…`), the rigs' homes, and the evals'
-//! workspace (`~/.consensflow-candidate/evals/…`).
+//! live suites' (`~/.consensflow-candidate/live/…`) and the rigs' homes.
 //!
 //! **What a kept home keeps.** The folder goes with the run, because it holds a login.
 //! A rig whose home is kept (`--keep`, or a case that reads the home after it ended)
@@ -346,21 +345,16 @@ fn keychain_of(folder: &Path, before: &BTreeSet<String>, now: &BTreeSet<String>)
 }
 
 /// Whether `path` is a folder a run worked in: a live folder of the candidate
-/// (`~/.consensflow-candidate/live/…`), the evals' (`~/.consensflow-candidate/evals/…`: the
-/// workspace of every eval), or in the home of a rig.
+/// (`~/.consensflow-candidate/live/…`) or in the home of a rig.
 fn is_run_folder(path: &str) -> bool {
     // Windows writes a folder with its own separator in some places and with ours in others.
     let path = path.replace('\\', "/");
-    path.contains("/.consensflow-candidate/live/")
-        || path.contains("/.consensflow-candidate/evals/")
-        || path.contains("consensflow-integration-")
+    path.contains("/.consensflow-candidate/live/") || path.contains("consensflow-integration-")
 }
 
 /// Whether `name` is the name Claude Code gives (in `~/.claude/projects`) to a folder of a run.
 fn is_run_name(name: &str) -> bool {
-    name.contains("-consensflow-candidate-live-")
-        || name.contains("-consensflow-candidate-evals-")
-        || name.contains("consensflow-integration-")
+    name.contains("-consensflow-candidate-live-") || name.contains("consensflow-integration-")
 }
 
 /// The hash of `bytes`, as hexadecimal.
@@ -636,9 +630,8 @@ pub struct Login {
 impl Login {
     /// The login of this machine's Claude Code, for a run that takes `left` at the most, margin
     /// included: the folder is made only if the access token lasts that much more (a live case
-    /// states its planned length and the margin, [`super::Log::lasting`]; an eval, hours long,
-    /// its own). Claude Code refreshes a token when five minutes of it are left, so a run that is
-    /// shorter than the token has left never does. None where the run has no home to look for it in.
+    /// states its planned length and the margin, [`super::Log::lasting`]). Claude Code refreshes a
+    /// token when five minutes of it are left, so a run shorter than the token has left never does. None where the run has no home to look for it in.
     pub fn of_machine_lasting(left: Duration) -> Option<Self> {
         Self::of_machine_on(TestMachine::detect(), left)
     }

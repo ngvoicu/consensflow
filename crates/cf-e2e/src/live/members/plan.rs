@@ -116,6 +116,8 @@ pub struct Plan {
     /// The variables the daemon alone is given, as the app gives its daemon what it took
     /// of the human's terminal: the pane host and its windows start without them.
     pub daemon_vars: Vec<(String, String)>,
+    /// Rules the human gives the project before the chief's first window starts.
+    pub rules: Option<String>,
     /// Files written in the homes of the run's own that the harnesses' windows run on, before
     /// anything opens.
     pub home_files: Vec<HomeFile>,
@@ -145,6 +147,7 @@ impl Plan {
             files: Vec::new(),
             vars: Vec::new(),
             daemon_vars: Vec::new(),
+            rules: None,
             home_files: Vec::new(),
             chief: chief["id"].as_str().unwrap_or_default().to_owned(),
             roster: vec![chief],
@@ -176,6 +179,13 @@ impl Plan {
     #[must_use]
     pub fn told(mut self, brief: &'static str) -> Self {
         self.brief = brief;
+        self
+    }
+
+    /// With the human's project rules present at the chief's first launch.
+    #[must_use]
+    pub fn with_rules(mut self, rules: impl Into<String>) -> Self {
+        self.rules = Some(rules.into());
         self
     }
 

@@ -18,15 +18,15 @@
 //! cheap model, in a Codex home of the run's own that holds a copy of the machine's
 //! login and a `config.toml` whose developer instructions give a word of the human's
 //! own (the kit's home, [`cf_e2e::live::isolation`], which fails the run if Codex
-//! refreshed the login or changed the owner's setup). The chief's role is
-//! an evaluation's card (`CONSENSFLOW_EVAL_CHIEF_CARD`), which gives it a code word.
+//! refreshed the login or changed the owner's setup). The human's project rules
+//! give the chief a code word at its first launch.
 //! The human asks it for its code words three times:
 //!
 //! 1. in the window the project opened (a thread that starts): it names the role's
 //!    word and the human's own;
 //! 2. in a window opened again on that thread (the project closed and resumed): the
 //!    same words, and the thread holds the developer message it began with, once;
-//! 3. after the card was changed to a new word, said to replace the first, and the
+//! 3. after the project rules were changed to a new word, said to replace the first, and the
 //!    project closed and resumed: the engine tells the thread the new role in a note
 //!    (a resumed thread keeps its first instructions, `role_change`), and the chief
 //!    names the new word.
@@ -48,7 +48,7 @@
 //! cargo xtask live codex-role
 //! ```
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use cf_e2e::live::members::{
@@ -103,8 +103,8 @@ impl Words {
     }
 }
 
-/// The chief's card: the whole of its role, which gives it `word`.
-fn card(word: &str, replaces: bool) -> String {
+/// The human's project rules, which give the chief `word`.
+fn rules(word: &str, replaces: bool) -> String {
     let again = if replaces {
         " It replaces any code word you were given before."
     } else {
@@ -349,11 +349,11 @@ fn developer_holding(home: &Path, word: &str) -> Result<usize> {
 }
 
 /// The run itself, Codex's home of the run's own holding `config` as its `config.toml`,
-/// with the card at `card_file`.
-fn check(config: &str, card_file: &Path, words: &Words, log: &Log) -> Result {
+/// with the human's project rules giving its role a word.
+fn check(config: &str, words: &Words, log: &Log) -> Result {
     let plan = Plan::new("codex-role", members::member(Harness::Codex))
         .with_home_file(Harness::Codex, "CODEX_HOME", "config.toml", config)
-        .with_daemon_var("CONSENSFLOW_EVAL_CHIEF_CARD", card_file.to_string_lossy());
+        .with_rules(rules(&words.role, false));
     let members = Members::open(&plan, Path::new(FAKE_AGENT), log)?;
     let codex_home = members.codex_home();
     let home = codex_home.as_path();
@@ -385,7 +385,13 @@ fn check(config: &str, card_file: &Path, words: &Words, log: &Log) -> Result {
         }
 
         log.say("3. the role changed, and the thread opened again");
-        cf_e2e::door::write(card_file, card(&words.changed, true))?;
+        let changed = members.page(
+            "project.rules",
+            json!({ "rules": rules(&words.changed, true) }),
+        )?;
+        if changed["ok"] != true {
+            return Err(Error::Daemon(format!("project.rules: {changed}")));
+        }
         closed_and_resumed(&members, log)?;
         let said = ask(&members, home, 3, log)?;
         names(&said, &[&words.changed], "the role changed")?;
@@ -421,14 +427,7 @@ fn a_codex_window_follows_a_role_no_command_line_holds_fresh_resumed_and_changed
         words.own
     );
     log.say("Codex runs on a home of the run's own, holding a copy of the machine's login");
-    let cards = cf_e2e::door::made("live-codex-role-").map_err(|source| Error::File {
-        action: "make a folder in",
-        path: std::env::temp_dir(),
-        source,
-    })?;
-    let card_file: PathBuf = cards.path().join("chief.md");
-    cf_e2e::door::write(&card_file, card(&words.role, false))?;
-    check(&config, &card_file, &words, &log)?;
+    check(&config, &words, &log)?;
     log.say("ok: the Codex chief followed its role, fresh, resumed and changed, and no command line held it");
     log.passed();
     Ok(())

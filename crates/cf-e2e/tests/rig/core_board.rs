@@ -1,13 +1,6 @@
-//! The board after a re-plan, end to end through the real pane host
-//! (`npm run test:daemons`). The chief eval `six-decisions` (2026-10-07, on the
-//! native daemon) cancelled tasks that were still open for a tier, and its
-//! check "the board showed every task" counted fewer than it had made: both
-//! daemons left such a task off the board, as a task paused in the backlog and a
-//! removed member's. The owner decided (2026-10-07) that none leaves it. The
-//! board lists a task by the lane of whoever has it, or among the open ones when
-//! no lane has it (waiting for a member, paused or called off before any member
-//! had it, or a removed member's), and `cf task list` lists both: the page draws
-//! the open ones on their requester's row.
+//! The board after a re-plan, end to end through the real pane host. Tasks remain on the board
+//! when cancelled, paused in the backlog, waiting for a member, or assigned to a removed member.
+//! The board lists a task in its member's lane or among the open tasks, and `cf task list` lists both.
 
 use cf_e2e::rig::{Project, OPEN};
 use regex::Regex;

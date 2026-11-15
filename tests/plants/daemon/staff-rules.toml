@@ -8,6 +8,7 @@
 # Every name holds `staff rules`, so `npm run plants:daemon -- "staff rules"` runs them all.
 
 [run]
+engine-release-contract = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "engine_release"]
 harness-devin-adapter-lib = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::adapter::tests::"]
 ledger-rules = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "described", "rules::"]
 ledger-rules-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "projects::staff_rules::"]
@@ -18,6 +19,19 @@ engine-dispatcher-rules = ["cargo", "test", "--offline", "-p", "cf-engine", "--t
 daemon-rules-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::staff_rules"]
 proto-page-rules = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "page::"]
 page-rules = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "rules for the staff|rules for its staff"]
+
+[[plant]]
+name = "staff rules: a retired environment variable replaces the chief's instructions"
+meant = "a_removed_eval_card_variable_cannot_replace_the_chiefs_instructions"
+runs = ["engine-release-contract"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = '''    // The `cf` goes in last, so nothing in a path is read as a slot.'''
+replace = '''    if let Some(card) = _env.path("CONSENSFLOW_EVAL_CHIEF_CARD") {
+        return Ok(std::fs::read_to_string(card).unwrap_or_default());
+    }
+    // The `cf` goes in last, so nothing in a path is read as a slot.'''
 
 # --- the ledger ---
 

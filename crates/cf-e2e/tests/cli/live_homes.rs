@@ -7,9 +7,7 @@
 //! would be reached by hand again, or not at all.
 //!
 //! A case that must give its windows another is in [`BY_HAND`] with the reason, and a case
-//! whose window runs on the home of its own says so ([`OWN_HOME`]). The evals are held to it
-//! too since T-785: they gave every window the owner's `CODEX_HOME`, and their installs no home
-//! of the kit's.
+//! whose window runs on the home of its own says so ([`OWN_HOME`]).
 
 use cf_e2e::checkout;
 
@@ -39,11 +37,10 @@ const COPIES: [&str; 3] = [
 
 /// The folders of the sources that run real harnesses: the matrix's among them (LMX-04), which
 /// seats every harness through the kit.
-const LOOKED_IN: [&str; 4] = [
+const LOOKED_IN: [&str; 3] = [
     "crates/cf-e2e/tests",
     "crates/cf-e2e/src/live",
     "crates/cf-e2e/src/matrix",
-    "crates/cf-evals/src",
 ];
 
 /// The kit itself, which sets these by design.
@@ -57,7 +54,7 @@ const KIT: [&str; 5] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 28] = [
+const BY_HAND: [(&str, &str, &str); 26] = [
     (
         "crates/cf-e2e/tests/live_pi_parity.rs",
         "HOME",
@@ -194,18 +191,6 @@ const BY_HAND: [(&str, &str, &str); 28] = [
          of the owner's is read there; `live::launcher` is what holds the owner's launcher",
     ),
     (
-        "crates/cf-evals/src/run/machine.rs",
-        "HOME",
-        "the person's home as the place the eval's folders are (`~/.consensflow-candidate/evals`), \
-         over the one the kit gives each install (Codex's is its login folder): every real window \
-         reads its login from the kit's home of the run's own (T-785), none by HOME",
-    ),
-    (
-        "crates/cf-evals/src/run/machine.rs",
-        "USERPROFILE",
-        "the same home, as Windows names it",
-    ),
-    (
         "crates/cf-e2e/src/live/layout.rs",
         "HOME",
         "the layout of a person's home that the kit's own tests give a program they start \
@@ -247,7 +232,7 @@ fn copies(text: &str, word: &str) -> bool {
 }
 
 /// Whether `file` (as the repository names it) is code that runs a real harness: a live
-/// suite (`tests/live_*`, with its parts in `tests/live_*/`), the kit's own, or the evals'.
+/// suite (`tests/live_*`, with its parts in `tests/live_*/`) or the kit's own.
 /// Not the stand-in suites (`tests/rig`, `tests/cli`, `tests/smoke`, `tests/regressions`),
 /// whose homes are the rig's own, nor a source's unit tests (`tests.rs`).
 fn runs_real_harnesses(file: &str) -> bool {

@@ -19,8 +19,8 @@
 //! window's processes, and a pattern of its words matches none, while the thread the
 //! window starts still begins with it, once, as its developer instructions; and a
 //! window opened again on that thread has nothing of it on its command line either,
-//! and the thread keeps what it began with. The chief's role here is an evaluation's
-//! card (`CONSENSFLOW_EVAL_CHIEF_CARD`), which holds a word that is nowhere else.
+//! and the thread keeps what it began with. The project's rules supply a word that is
+//! nowhere else, so the check follows a person's instructions through the actual path.
 
 use std::path::Path;
 
@@ -116,16 +116,15 @@ fn chief_windows(rig: &Rig, project: &Project) -> Vec<Value> {
 fn a_codex_chiefs_role_is_on_no_command_line_fresh_or_resumed_and_its_thread_begins_with_it_once(
 ) -> Outcome {
     let word = unique();
-    let card = tempfile::tempdir()?;
-    let file = card.path().join("chief.md");
-    files::write(
-        &file,
-        format!("# The chief\n\nYour code word is {word}. Put tasks on the board with cf.\n"),
+    let rig = Rig::start(config_with_codex())?;
+    let project = Project::open(
+        &rig,
+        "maia",
+        json!({
+            "rules": format!("Your code word is {word}."),
+            "staff": [{ "agent": "worker", "roles": ["worker"] }],
+        }),
     )?;
-    let rig = Rig::start(
-        config_with_codex().daemon_var("CONSENSFLOW_EVAL_CHIEF_CARD", file.to_string_lossy()),
-    )?;
-    let project = Project::open_with_staff(&rig, "maia", None, &[("worker", "worker")])?;
     let first = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
 
     // The chief has a turn, which begins its thread's record: a worker's result.

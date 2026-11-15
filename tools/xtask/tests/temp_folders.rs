@@ -9,7 +9,7 @@
 //! The rule reads the Rust of the workspace (its comments are not read): of the fields of a
 //! struct, the ones that own a temporary folder come after every one that does not. A field owns
 //! one where its type is a `TempDir`, or names a newtype of one in its crate (`struct Folder(
-//! TempDir)`, as the evals have), however many newtypes deep. The contract rig of the daemon has
+//! TempDir)`), however many newtypes deep. The contract rig of the daemon has
 //! said so in a comment since it was written.
 #![allow(clippy::disallowed_methods, clippy::unwrap_used)]
 

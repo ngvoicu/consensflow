@@ -172,7 +172,7 @@ fn codex_compacts_a_thread_past_the_limit_its_launch_gives() -> Result {
             format!("model_reasoning_effort={}", Value::String(effort.clone())),
         ]);
     }
-    // Every MCP server of the owner's is switched off for the run, as the evals do.
+    // Every MCP server of the owner's is switched off for the run.
     words.extend(codex::isolation(&codex::mcp_servers(install.command())?)?);
     let codex_program = install.command().to_string_lossy().into_owned();
     let run = |args: Vec<String>| {

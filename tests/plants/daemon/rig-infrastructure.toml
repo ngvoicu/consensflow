@@ -1,0 +1,360 @@
+# Mutations of the shared test rig and harness, caught by their own tests.
+[run]
+e2e-lib-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::left::"]
+e2e-lib-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "a_harness_whose_version_leaves_a_process_holding_its_output_says_it_and_holds_nothing"]
+e2e-lib-process = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::"]
+e2e-lib-process-shell = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::shell::"]
+e2e-lib-report = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::report"]
+e2e-lib-route = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::route"]
+fake-agent-compact = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "a_compaction"]
+fake-agent-records = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "records::tests::"]
+fake-agent-reply = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "reply::"]
+fake-devin-store = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-devin", "store::"]
+harness-claude-projection = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::projection"]
+rig-printed-output = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "printed_output::"]
+rig-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stranger::"]
+
+[[plant]]
+name = "rig: a version command that leaves a process holding its output holds the run's setup for as long as that process lives"
+meant = "a_program_that_leaves_a_process_holding_its_output_is_read_a_while_and_says_so"
+runs = ["e2e-lib-process"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process.rs"
+find = "    while !thread.is_finished() && Instant::now() < by {"
+replace = "    while !thread.is_finished() {"
+
+[[plant]]
+name = "rig: a harness whose version left its output held says nothing of it"
+meant = "a_harness_whose_version_leaves_a_process_holding_its_output_says_it_and_holds_nothing"
+runs = ["e2e-lib-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = "        if ran.is_some_and(|ran| ran.held) {"
+replace = "        if ran.is_some_and(|ran| ran.held && false) {"
+
+[[plant]]
+name = "rig: the rig's stranger, its own child, is left running when the rig is dropped"
+meant = "a_spawned_program_is_ended_when_it_goes_out_of_scope"
+runs = ["e2e-lib-process-shell"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/spawned.rs"
+find = """
+    fn drop(&mut self) {
+        self.kill();
+    }"""
+replace = """
+    fn drop(&mut self) {}"""
+
+[[plant]]
+name = "rig: the rig forgets the process each window was opened on"
+meant = "the_process_a_window_was_opened_on_and_the_windows_the_daemon_closed_are_kept"
+runs = ["e2e-lib-route"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = "                        seen.pids.push(window);"
+replace = "                        let _ = window;"
+
+[[plant]]
+name = "rig: the rig keeps no note of the windows the daemon closed, so every close reads as the window's own"
+meant = "the_process_a_window_was_opened_on_and_the_windows_the_daemon_closed_are_kept"
+runs = ["e2e-lib-route"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = '                seen.kills.push(frame["body"].clone());'
+replace = '                let _ = &frame["body"];'
+
+[[plant]]
+name = "rig: the rig keeps no time of a window's exit, and the watch times it at its next look"
+meant = "what_a_pane_prints_is_gathered_its_exit_kept_and_the_cursor_asked_for_is_told"
+runs = ["e2e-lib-route"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = """                seen.exit_times
+                    .push(jiff::Timestamp::now().as_millisecond());"""
+replace = """                seen.exit_times
+                    .push(0);"""
+
+[[plant]]
+name = "rig: the stand-in chief puts only the first of its DISPATCH lines on the board"
+meant = "each_dispatch_line_of_a_message_is_a_task_added_in_the_order_of_the_lines"
+runs = ["fake-agent-reply"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = "    line.captures_iter(text)"
+replace = "    line.captures_iter(text).take(1)"
+
+[[plant]]
+name = "rig: the stand-in chief accepts no result it is given, and the case never reaches its end"
+meant = "a_chief_accepts_the_result_its_delivery_opens_with_and_no_header_its_words_hold"
+runs = ["fake-agent-reply"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = """
+    if !accepting {
+        return Vec::new();
+    }"""
+replace = """
+    if accepting {
+        return Vec::new();
+    }"""
+
+[[plant]]
+name = "rig: the stand-in chief accepts a task it was given or a question it was asked, as if each were a result"
+meant = "a_chief_accepts_the_result_its_delivery_opens_with_and_no_header_its_words_hold"
+runs = ["fake-agent-reply"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = '(T-\d+) · result from @[^\]]+\]$";'
+replace = '(T-\d+) · \w+ from @[^\]]+\]$";'
+
+[[plant]]
+name = "rig: the stand-in chief accepts a result header a line only quotes"
+meant = "a_chief_accepts_the_result_its_delivery_opens_with_and_no_header_its_words_hold"
+runs = ["fake-agent-reply"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = 'const RESULT: &str = r"^\[ConsensFlow'
+replace = 'const RESULT: &str = r"\[ConsensFlow'
+
+[[plant]]
+name = "rig: the stand-in chief accepts a result header a line of a delivery's words holds (both reviewers')"
+meant = "a_chief_accepts_the_result_its_delivery_opens_with_and_no_header_its_words_hold"
+runs = ["fake-agent-reply"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = """
+    text.lines()
+        .next()"""
+replace = """
+    text.lines()
+        .find(|line| header.is_match(line))"""
+
+[[plant]]
+name = "rig: a worker's window started to accept results accepts them, as the chief's does"
+meant = "only_the_chiefs_window_started_to_accept_results_accepts_them"
+runs = ["fake-agent-reply"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = "    switched_on.is_some_and(|on| !on.is_empty()) && participant == CHIEF"
+replace = "    switched_on.is_some_and(|on| !on.is_empty()) && !participant.is_empty()"
+
+[[plant]]
+name = "rig: the stand-in's compaction writes no boundary Claude Code writes, and the case's /compact is never seen done"
+meant = "a_compaction_writes_claude_2_1_303s_records_each_the_child_of_the_one_before_and_no_turn"
+runs = ["fake-agent-compact"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent.rs"
+find = '        "type": "system", "subtype": "compact_boundary", "isSidechain": false,'
+replace = '        "type": "system", "subtype": "compacted", "isSidechain": false,'
+
+[[plant]]
+name = "rig: the rig's stranger ends by itself, and a run of hours fails its close"
+meant = "a_rig_closes_with_the_process_that_is_none_of_any_windows_still_running"
+runs = ["rig-stranger"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/stranger.rs"
+find = '    "/bin/cat".into()'
+replace = '    "/usr/bin/true".into()'
+
+[[plant]]
+name = "rig: two stand-in Devins that make their store at the same moment, and the second dies on a locked database"
+meant = "a_store_another_window_holds_while_it_makes_it_is_made_once_that_window_lets_go"
+runs = ["fake-devin-store"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/store.rs"
+find = "                if failure.code == rusqlite::ErrorCode::DatabaseBusy"
+replace = "                if failure.code == rusqlite::ErrorCode::DatabaseBusy && false"
+
+
+[[plant]]
+name = "rig: a stand-in Devin's store is written with a wait for the disk, and a slow disk keeps its lock from the other windows"
+meant = "a_store_is_written_with_no_wait_for_the_disk"
+runs = ["fake-devin-store"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/store.rs"
+find = '            "PRAGMA synchronous = OFF;'
+replace = '            "PRAGMA synchronous = FULL;'
+
+[[plant]]
+name = "rig: a stand-in Devin's store gives up on a lock another window holds as soon as SQLite does"
+meant = "a_store_another_window_holds_for_longer_than_sqlite_waits_is_waited_out"
+runs = ["fake-devin-store"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/store.rs"
+find = "                    && begun.elapsed() < PATIENCE =>"
+replace = "                    && begun.elapsed() < Duration::ZERO =>"
+
+[[plant]]
+name = "rig: a stand-in Devin's store writes a message once, and dies on a lock another window holds for seconds"
+meant = "a_store_another_window_holds_for_longer_than_sqlite_waits_is_waited_out"
+runs = ["fake-devin-store"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/store.rs"
+find = '''        patiently(|| {
+            let transaction'''
+replace = '''        (|| {
+            let transaction'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/store.rs"
+find = '''            transaction.commit()
+        })
+        .map_err(said)?;'''
+replace = '''            transaction.commit()
+        })()
+        .map_err(said)?;'''
+
+[[plant]]
+name = "rig: a stand-in Devin opens its session once, and dies on a lock another window holds for seconds"
+meant = "a_store_another_window_holds_for_longer_than_sqlite_waits_is_waited_out"
+runs = ["fake-devin-store"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/store.rs"
+find = "        let (head, messages) = patiently(|| {"
+replace = "        let (head, messages) = (|| -> rusqlite::Result<_> {"
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/store.rs"
+find = '''            Ok((head, messages_of(&db, session)?))
+        })
+        .map_err(said)?;'''
+replace = '''            Ok((head, messages_of(&db, session)?))
+        })()
+        .map_err(said)?;'''
+
+[[plant]]
+name = "the rig: a dropped rig's report says its words on the error output beside where it is kept"
+meant = "a_dropped_rigs_report_is_kept_beside_its_home_and_its_error_output_says_only_where"
+runs = ["e2e-lib-report"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = '''
+        Ok(()) => format!(
+            "\n--- the rig, as the failed case left it, is kept in {} (case: {case})\n",'''
+replace = '''
+        Ok(()) => format!(
+            "\n--- the rig, as the failed case left it, is kept in {} (case: {case}) {report}\n",'''
+
+[[plant]]
+name = "the rig: a dropped rig writes its report on the error output whole"
+meant = "t1655_a_dropped_rig_prints_only_where_its_report_was_kept"
+runs = ["e2e-lib-report"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = 'eprint!("{where_kept}");'
+replace = 'eprint!("{}", self.report);'
+
+
+[[plant]]
+name = "harness records: the product's reader takes Claude Code's request echo for a user's record"
+meant = "the_records_claude_code_writes_of_a_request_are_no_item_of_the_conversation"
+runs = ["harness-claude-projection"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '        Some("user") => user(record, session),'
+replace = '        Some("user" | "api-request-blob") => user(record, session),'
+
+[[plant]]
+name = "rig: the rig says nothing of what a window printed, and the host reads no more of it once 1 MiB waits"
+meant = "each_frame_a_pane_printed_is_taken_and_said_so_to_the_host_as_the_page_says_it"
+runs = ["e2e-lib-route"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = '            host.send(wire::request(&self.next_host_id(), "pane.ack", &body));'
+replace = '            let _ = body;'
+
+[[plant]]
+name = "rig: the rig says nothing of what a window printed, and a worker that prints 4 MiB never ends its turn"
+meant = "a_worker_whose_turn_prints_four_mib_to_its_screen_ends_it_and_the_chief_has_its_result"
+runs = ["rig-printed-output"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = '            host.send(wire::request(&self.next_host_id(), "pane.ack", &body));'
+replace = '            let _ = body;'
+
+[[plant]]
+name = "rig: the rig keeps every byte a window printed, for the rig's life"
+meant = "what_a_window_printed_is_kept_as_its_end_from_the_start_of_a_line_and_what_went_counted"
+runs = ["e2e-lib-route"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = "        if self.kept.len() <= kept + slack {"
+replace = "        if self.kept.len() <= usize::MAX - slack {"
+
+[[plant]]
+name = "rig: the rig's report reads all a window printed to show the end of its screen"
+meant = "the_end_of_what_a_window_printed_is_read_from_the_start_of_a_line"
+runs = ["e2e-lib-report"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = "    if printed.len() <= most {"
+replace = "    if printed.len() <= usize::MAX {"
+
+[[plant]]
+name = "rig: the stand-in prints nothing of a PRINT, and a window never prints its budget"
+meant = "a_worker_whose_turn_prints_four_mib_to_its_screen_ends_it_and_the_chief_has_its_result"
+runs = ["rig-printed-output"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = '        print_lines(bytes).map_err(|failed| format!("PRINT {bytes}: {failed}"))?;'
+replace = '        let _ = bytes;'
+
+[[plant]]
+name = "rig: a number still held is a window's whoever holds it"
+meant = "a_program_that_took_an_ended_windows_number_is_none_of_the_windows"
+runs = ["e2e-lib-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = "        if another_holds(pid, &began, pids_file) {"
+replace = "        if began_after(pid, pids_file) {"
+
+[[plant]]
+name = "rig: a window writes nothing of when its process began"
+meant = "the_processes_a_window_writes_down_go_to_the_files_beside_the_home_in_order"
+runs = ["fake-agent-records"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/records.rs"
+find = "    if let Some(began) = began.filter(|began| !began.is_empty()) {"
+replace = "    if let Some(began) = began.filter(|_| false) {"
+
+
+[[plant]]
+name = "rig: a window's start is read by a program it starts"
+meant = "a_processes_start_is_read_at_once_and_is_the_same_each_time"
+runs = ["e2e-lib-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/left.rs"
+find = '''    let identity = ThisMachine.identity(pid).ok()??;
+    Some(identity.started.to_string())'''
+replace = '''    let _ = ThisMachine.identity(pid);
+    process::started(pid)'''

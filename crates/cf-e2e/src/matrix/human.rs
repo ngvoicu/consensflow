@@ -416,7 +416,7 @@ impl<'a> Driver<'a> {
     }
 
     /// The human answers the open dialog of a Devin chief with `answer`, a question at a time,
-    /// as the eval's owner does (Devin 3000.11.3, probed 2026-10-03): its "Other" after the
+    /// as probed on Devin 3000.11.3 (2026-10-03): its "Other" after the
     /// options, the answer typed there.
     pub fn answer_dialog(
         &self,

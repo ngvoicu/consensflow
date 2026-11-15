@@ -8,8 +8,7 @@
 # it printed, where it follows the command with nothing open and the command is one of those
 # that run no model (`QUIET_COMMAND`: 2.1.303's `/plan <description>` goes on to ask the model,
 # Sol's look at round 1) (`crates/cf-harness/src/claude/record/replay.rs`, `project.rs`,
-# `patterns.rs`), and the long run's watch reads it the same way
-# (`crates/cf-evals/src/long_run/record.rs`). The reader's own tests are
+# `patterns.rs`). The reader's own tests are
 # `crates/cf-harness/src/claude/record/tests/commands.rs` and `clear.rs`; the case is
 # `crates/cf-e2e/tests/regressions/a_compact_typed_into_an_idle_chief_held_a_workers_result.rs`,
 # whose stand-in compacts as 2.1.303 does and finds nothing to compact as 2.1.304 does.
@@ -21,7 +20,6 @@
 [run]
 compact-rest-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 compact-rest-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_compact_typed_into_an_idle_chief_held_a_workers_result::"]
-compact-rest-watch = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "long_run::record"]
 compact-rest-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "a_compaction"]
 compact-rest-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_commands_at_rest"]
 
@@ -148,93 +146,6 @@ replace = '''
     fn output(&mut self, parent: &str) {
         if !parent.is_empty() {
 '''
-
-[[plant]]
-name = "compact-rest: the watch reads what a command typed at the prompt printed as a prompt"
-meant = "a_compact_typed_at_the_prompt_ends_at_what_it_printed_and_the_record_ends_in_its_compaction"
-runs = ["compact-rest-watch"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/record.rs"
-find = '''
-                Kind::Output | Kind::Printed
-                    if last.is_some_and(|said| follows_its_command(said, entry)) =>
-                {
-                    (open, candidate, ended, agents) = (false, None, None, 0);
-                }
-'''
-replace = ""
-
-[[plant]]
-name = "compact-rest: the watch's output ends the turn whatever it follows"
-meant = "a_compact_typed_at_the_prompt_ends_at_what_it_printed_and_the_record_ends_in_its_compaction"
-runs = ["compact-rest-watch"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/record.rs"
-find = "    quiet(last) && last.uuid.is_some() && last.uuid == output.parent"
-replace = "    quiet(last)"
-
-[[plant]]
-name = "compact-rest: the watch takes a /plan for a command that runs no model"
-meant = "a_command_that_may_go_on_to_the_model_ends_no_turn_and_no_compaction_is_the_last_thing_after_it"
-runs = ["compact-rest-watch"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/record.rs"
-find = '''const QUIET: [&str; 5] = ["clear", "compact", "effort", "model", "reload-skills"];'''
-replace = '''const QUIET: [&str; 6] = ["clear", "compact", "effort", "model", "reload-skills", "plan"];'''
-
-[[plant]]
-name = "compact-rest: the watch reads the system's record of what a command printed as nothing"
-meant = "a_compact_that_found_nothing_to_compact_ends_at_what_the_system_says_it_printed"
-runs = ["compact-rest-watch"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/record.rs"
-find = '''
-        Some("system")
-            if line["subtype"] == "local_command"
-'''
-replace = '''
-        Some("system")
-            if line["subtype"] == "local_command_planted"
-'''
-
-[[plant]]
-name = "compact-rest: the watch says a record a /compact typed at the prompt ends ends in no compaction, and the restart after it is never played"
-meant = "a_compact_typed_at_the_prompt_ends_at_what_it_printed_and_the_record_ends_in_its_compaction"
-runs = ["compact-rest-watch"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/record.rs"
-find = '''
-        while let Some(output) =
-            said.next_if(|entry| matches!(entry.kind, Kind::Output | Kind::Printed))
-        {
-            let its_command = |entry: &&Entry| {
-                quiet(entry) && entry.uuid.is_some() && entry.uuid == output.parent
-            };
-            if said.next_if(its_command).is_some() {
-                said.next_if(|entry| {
-                    entry.kind == Kind::Prompt && entry.content.starts_with(CAVEAT)
-                });
-            } else if output.kind == Kind::Output {
-                return false;
-            }
-        }
-'''
-replace = ""
-
-[[plant]]
-name = "compact-rest: the watch's look back from a compaction passes over any command, and a /plan after a summary leaves the record ending in it (Sol's P2)"
-meant = "a_command_that_may_go_on_to_the_model_ends_no_turn_and_no_compaction_is_the_last_thing_after_it"
-runs = ["compact-rest-watch"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/record.rs"
-find = "                quiet(entry) && entry.uuid.is_some() && entry.uuid == output.parent"
-replace = "                entry.kind == Kind::Prompt"
 
 [[plant]]
 name = "compact-rest: the stand-in compacts a conversation with nothing said in it"

@@ -11,7 +11,7 @@
 # - the rig names what it found left behind, and takes a program that began after the last window
 #   was noted for none of the windows (`crates/cf-e2e/src/rig/left.rs`);
 # - the rig's stranger, dropped with its handle, is ended and waited for, not left to the system
-#   (`crates/cf-e2e/src/process/spawned.rs`; the plant of `long run:` that edits the same drop names
+#   (`crates/cf-e2e/src/process/spawned.rs`; the plant of `rig:` that edits the same drop names
 #   a test of `process::` (T-407), and this one names the stranger's own);
 # - a chief's turn has ended when its record says so, not when the word its prompt held is there
 #   (`tests/regressions/idle_compaction_read_as_a_cut_turn.rs`, whose chief answers three seconds
