@@ -283,24 +283,31 @@ impl Installed {
     /// The version it says it is, as its first line says it; `unknown` when it
     /// says none.
     pub fn version(&self) -> String {
+        self.version_with_config(None)
+    }
+
+    /// Probe Claude using the config of the run's own, including for the version command.
+    pub fn version_in_claude_config(&self, config: &Path) -> String {
+        self.version_with_config(Some(config))
+    }
+
+    fn version_with_config(&self, config: Option<&Path>) -> String {
         let word = if self.harness == Harness::Devin {
             "version"
         } else {
             "--version"
         };
-        // The probe runs the owner's own program with the owner's environment, and a launcher
-        // that updates itself when it is run (Muse's, hourly) would do it here: it is told not to.
-        let ran = Run::new(&self.command)
-            .arg(word)
-            .inheriting_env()
-            .vars(
-                super::launcher::updates_off_of(self.harness)
-                    .iter()
-                    .copied(),
-            )
-            .run()
-            .ok()
-            .filter(|ran| ran.code == Some(0));
+        // Keep the ordinary probe's environment, but give Claude parity its own config.
+        // Launchers that update themselves (Muse's, hourly) are told not to.
+        let mut probe = Run::new(&self.command).arg(word).inheriting_env().vars(
+            super::launcher::updates_off_of(self.harness)
+                .iter()
+                .copied(),
+        );
+        if let Some(config) = config {
+            probe = probe.var("CLAUDE_CONFIG_DIR", config);
+        }
+        let ran = probe.run().ok().filter(|ran| ran.code == Some(0));
         let line = ran
             .as_ref()
             .and_then(|ran| ran.stdout.lines().next().map(|line| line.trim().to_owned()))

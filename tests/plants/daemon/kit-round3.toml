@@ -349,3 +349,14 @@ platforms = ["linux"]
 file = "crates/cf-e2e/src/live/machine.rs"
 find = '''installed_with_owner_check(Harness::Claude, planned, false)'''
 replace = '''installed_with_owner_check(Harness::Claude, planned, true)'''
+
+[[plant]]
+name = "kit parity: Claude version probe uses the owner's config"
+meant = "the_version_probe_uses_the_runs_claude_config"
+runs = ["round5-parity"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''    claude.version_in_claude_config(config)'''
+replace = '''    let _ = config;
+    claude.version()'''

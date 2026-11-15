@@ -412,6 +412,10 @@ pub fn differences(plain: &Loaded, member: &Loaded) -> Vec<String> {
     found
 }
 
+fn parity_version(claude: &live::machine::Installed, config: &Path) -> String {
+    claude.version_in_claude_config(config)
+}
+
 pub fn run(log: &Log) -> Result {
     let claude = live::installed_for_claude_parity(Duration::from_secs(2 * 60 * 60))?;
     let folder = live_folder("parity-claude")?;
@@ -429,15 +433,15 @@ pub fn run(log: &Log) -> Result {
     let login = claude
         .claude_config()
         .ok_or_else(|| Error::Daemon("Claude parity needs the kit's own login copy".to_owned()))?;
-    log.say(format!(
-        "Claude Code is {} ({}); both windows open in {} on the kit's login copy",
-        claude.command().display(),
-        claude.version(),
-        folder.display()
-    ));
     // Finish the kit's login checks even when setup or either window fails.
     let outcome = (|| -> Result {
         let config = prepare_config(login.as_ref(), &folder)?;
+        log.say(format!(
+            "Claude Code is {} ({}); both windows open in {} on the kit's login copy",
+            claude.command().display(),
+            parity_version(&claude, &config),
+            folder.display()
+        ));
         let plain = opened(
             claude.command(),
             &["--model".to_owned(), MODEL.to_owned()],
@@ -480,6 +484,22 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[cfg(unix)]
+    #[test]
+    fn the_version_probe_uses_the_runs_claude_config() {
+        let made = cf_e2e::door::made("cf-parity-version-").unwrap();
+        let config = made.path().join("config");
+        let program = made.path().join("claude");
+        cf_e2e::door::make_dir(&config).unwrap();
+        cf_e2e::door::write_executable(
+            &program,
+            "#!/bin/sh\nif [ \"$CLAUDE_CONFIG_DIR\" = \"$(dirname \"$0\")/config\" ]; then echo run-owned; else echo inherited; fi\n",
+        )
+        .unwrap();
+        let claude = live::machine::Installed::at(live::machine::Harness::Claude, program, "home");
+        assert_eq!(parity_version(&claude, &config), "run-owned");
+    }
 
     /// A fabricated stand-in for the kit's ClaudeConfig. It returns the already-seeded
     /// login folder; no Keychain or machine home is consulted by these tests.
