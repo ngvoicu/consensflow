@@ -2021,6 +2021,17 @@ fn a_codex_copy_does_not_claim_to_have_used_up_the_machines_refresh_token() {
 }
 
 #[test]
+fn a_devin_copy_does_not_claim_to_have_used_up_the_machines_refresh_token() {
+    let said = said(
+        Harness::Devin,
+        &[],
+        &["the run's Devin wrote a different login".to_owned()],
+    );
+    assert!(!said.contains("may now be stale"), "{said}");
+    assert!(said.contains("holds no refresh token"), "{said}");
+}
+
+#[test]
 fn a_pi_entry_with_twenty_five_minutes_left_runs_a_case_of_ten_minutes_and_one_with_fifteen_does_not(
 ) {
     let owner = Owner::new();

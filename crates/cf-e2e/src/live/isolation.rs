@@ -1100,8 +1100,8 @@ fn said(harness: Harness, touched: &[String], refreshed: &[String]) -> String {
         }
     }
     if !refreshed.is_empty() {
-        // Pi and Codex are given no refresh-named keys, so they cannot use the owner's token.
-        let hazard = if matches!(harness, Harness::Pi | Harness::Codex) {
+        // These copies have no refresh-named keys, so they cannot use the owner's token.
+        let hazard = if matches!(harness, Harness::Pi | Harness::Codex | Harness::Devin) {
             "The copy holds no refresh token, so it cannot have used up the one the owner's file keeps \
              (that file is checked above), but it was given a login and wrote another"
                 .to_owned()
