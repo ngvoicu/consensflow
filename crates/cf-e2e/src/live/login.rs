@@ -839,6 +839,14 @@ impl Login {
         }
     }
 
+    fn seed_trust(&self, config: &Path) -> Result {
+        if self.watch_owner {
+            super::machine::seed_claude_trust(config, &self.owner.home)
+        } else {
+            super::machine::seed_claude_trust_login_only(config, &self.owner.home)
+        }
+    }
+
     /// The folder, made as the clock says `now` is (milliseconds since the epoch).
     fn folder_at(&self, now: i64) -> Result<PathBuf> {
         let mut made = self.made.lock().unwrap_or_else(PoisonError::into_inner);
@@ -860,7 +868,7 @@ impl Login {
         write_private(&folder.path().join(".credentials.json"), &credentials)?;
         write_private(&folder.path().join(".claude.json"), CLAUDE_JSON)?;
         // The live folders trusted as the owner's own config trusts them (T-629).
-        super::machine::seed_claude_trust(folder.path(), &self.owner.home)?;
+        self.seed_trust(folder.path())?;
         let path = folder.path().to_path_buf();
         *made = Some(Made {
             folder,

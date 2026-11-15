@@ -7,6 +7,7 @@ round3-compaction = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "li
 round3-subagent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_subagent", "kit_round3"]
 round5-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "t1700_"]
 round5-login-only = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "t1700_login_only_"]
+round5-owner-skills = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "t1700_run_config_excludes_owner_and_contains_its_own_items"]
 round4-subagent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_subagent", "kit_round4"]
 round3-specs = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_specs", "kit_round3"]
 round3-dialog = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_harness_dialogs", "kit_round3"]
@@ -234,12 +235,12 @@ replace = '''        let name = path'''
 [[plant]]
 name = "kit parity: Claude copies owner skills into its run config"
 meant = "t1700_run_config_excludes_owner_and_contains_its_own_items"
-runs = ["round5-parity"]
+runs = ["round5-owner-skills"]
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_parity/claude.rs"
 find = '''    let config = login.folder()?;'''
 replace = '''    let config = login.folder()?;
-    let owner_skills = config.parent().unwrap().join("owner").join("skills");
+    let owner_skills = cf_e2e::live::machine::home()?.join(".claude").join("skills");
     cf_e2e::door::copy_tree(&owner_skills, &config.join("skills"), &|_| false)?;'''
 
 [[plant]]
@@ -370,3 +371,13 @@ platforms = ["linux", "macos"]
 file = "crates/cf-e2e/src/live/machine.rs"
 find = '''    if (harness != Harness::Claude || watch_owner) && !has_login(&places) {'''
 replace = '''    if !has_login(&places) {'''
+
+[[plant]]
+name = "kit parity: Claude trust resolves the owner's Claude folder"
+meant = "t1700_login_only_trust_does_not_resolve_owner_claude"
+runs = ["round5-login-only"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            super::machine::seed_claude_trust_login_only(config, &self.owner.home)'''
+replace = '''            super::machine::seed_claude_trust(config, &self.owner.home)'''

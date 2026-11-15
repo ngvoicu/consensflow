@@ -462,13 +462,25 @@ pub fn live_root(home: &Path) -> PathBuf {
 /// own config, a folder another run made and one a person made are refused, and so is a
 /// `.claude.json` that is a link.
 pub fn seed_claude_trust(config: &Path, home: &Path) -> Result {
+    seed_claude_trust_checked(config, home, true)
+}
+
+/// Seed a login-only parity config without looking up the owner's Claude folder.
+pub(super) fn seed_claude_trust_login_only(config: &Path, home: &Path) -> Result {
+    seed_claude_trust_checked(config, home, false)
+}
+
+fn seed_claude_trust_checked(config: &Path, home: &Path, check_owner: bool) -> Result {
     let real = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let (config, owners) = (real(config), real(&home.join(".claude")));
-    if config == real(home) || config.starts_with(&owners) {
-        return Err(Error::Daemon(format!(
-            "{} is the owner's own Claude config, which a run never writes",
-            config.display()
-        )));
+    let config = real(config);
+    if check_owner {
+        let owners = real(&home.join(".claude"));
+        if config == real(home) || config.starts_with(&owners) {
+            return Err(Error::Daemon(format!(
+                "{} is the owner's own Claude config, which a run never writes",
+                config.display()
+            )));
+        }
     }
     if !crate::door::is_made_or_below(&config) {
         return Err(Error::Daemon(format!(

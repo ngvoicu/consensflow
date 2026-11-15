@@ -524,8 +524,32 @@ mod tests {
 
     #[test]
     fn t1700_run_config_excludes_owner_and_contains_its_own_items() {
+        const CHILD: &str = "CF_T1700_FABRICATED_SKILL_HOME";
+        let Some(home) = cf_e2e::process::own_var(CHILD) else {
+            let home_root = cf_e2e::door::made("cf-parity-owner-home-").unwrap();
+            let home = home_root.path().join("owner");
+            fs::create_dir(&home).unwrap();
+            let output = cf_e2e::process::case_of(
+                std::env::current_exe().unwrap(),
+                "claude::tests::t1700_run_config_excludes_owner_and_contains_its_own_items",
+                Duration::from_secs(30),
+            )
+            .inheriting_env()
+            .var(CHILD, &home)
+            .var("HOME", &home)
+            .var("USERPROFILE", &home)
+            .run()
+            .unwrap();
+            assert!(
+                output.code == Some(0),
+                "fabricated owner child failed:\n{}",
+                output.output()
+            );
+            return;
+        };
+        let home = PathBuf::from(home);
         let root = cf_e2e::door::made("cf-parity-new-config-").unwrap();
-        let owner = root.path().join("owner");
+        let owner = home.join(".claude");
         let config = root.path().join("run");
         let project = root.path().join("project with spaces");
         fs::create_dir_all(owner.join("skills/owner-secret")).unwrap();
@@ -536,7 +560,7 @@ mod tests {
         }
         // A read and parse of either fabricated owner file would fail.
         fs::write(owner.join("settings.json"), "invalid owner settings").unwrap();
-        fs::write(owner.join(".claude.json"), "invalid owner config").unwrap();
+        fs::write(home.join(".claude.json"), "invalid owner config").unwrap();
         let source = json!({"claudeAiOauth": {"accessToken": "fake-access",
             "refreshToken": "fake-refresh", "nested": [{"REFRESH_key": "fake"}]}})
         .to_string();

@@ -6,6 +6,57 @@ use std::os::unix::fs::PermissionsExt;
 use super::*;
 
 #[test]
+fn t1700_login_only_trust_does_not_resolve_owner_claude() {
+    let owner = tempfile::tempdir().unwrap();
+    let run_parent = crate::door::made("cf-parity-trust-parent-").unwrap();
+    let config = crate::door::made_in(run_parent.path(), "config-").unwrap();
+    // If seeding resolves this fabricated owner link, it mistakes the run's
+    // own config for the owner's and refuses to seed it.
+    std::os::unix::fs::symlink(run_parent.path(), owner.path().join(".claude")).unwrap();
+    let login = Login::new(
+        Source::File(owner.path().join("fake-login")),
+        owner.path().to_path_buf(),
+        run_parent.path().to_path_buf(),
+        Duration::ZERO,
+    )
+    .without_owner_config_reads();
+    let seeded = login.seed_trust(config.path());
+    assert!(
+        seeded.is_ok(),
+        "parity resolved the fabricated owner's .claude: {seeded:?}"
+    );
+    let held: Value =
+        serde_json::from_str(&std::fs::read_to_string(config.path().join(".claude.json")).unwrap())
+            .unwrap();
+    let root = super::super::machine::claude_project_key(
+        &super::super::machine::live_root(owner.path()).to_string_lossy(),
+    );
+    assert_eq!(held["projects"][&root]["hasTrustDialogAccepted"], true);
+
+    // The parity route must still refuse a destination that the run did not make.
+    let stranger = tempfile::tempdir().unwrap();
+    assert!(login.seed_trust(stranger.path()).is_err());
+    assert!(!stranger.path().join(".claude.json").exists());
+
+    // A run-owned folder cannot write through a linked config file either.
+    let guarded = crate::door::made_in(run_parent.path(), "guarded-").unwrap();
+    let outside = stranger.path().join("outside.json");
+    std::fs::write(&outside, "{}\n").unwrap();
+    std::os::unix::fs::symlink(&outside, guarded.path().join(".claude.json")).unwrap();
+    assert!(login.seed_trust(guarded.path()).is_err());
+    assert_eq!(std::fs::read_to_string(outside).unwrap(), "{}\n");
+
+    // The ordinary path keeps checking the owner directory as before.
+    let ordinary = Login::new(
+        Source::File(owner.path().join("fake-login")),
+        owner.path().to_path_buf(),
+        run_parent.path().to_path_buf(),
+        Duration::ZERO,
+    );
+    assert!(ordinary.seed_trust(config.path()).is_err());
+}
+
+#[test]
 fn t1700_login_only_never_reads_owner_config_before_or_after() {
     const CHILD: &str = "CF_T1700_LOGIN_ONLY_OWNER";
     if let Some(home) = crate::process::own_var(CHILD) {
