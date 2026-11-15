@@ -63,10 +63,14 @@ fn an_installed_harness_is_its_command_and_the_home_it_logs_in_at() {
 #[cfg(unix)]
 #[test]
 fn a_harness_says_its_version_by_the_word_it_is_asked_with_and_unknown_when_it_says_none() {
-    let pi = Installed::at(Harness::Pi, "/bin/echo", "home");
+    // GNU echo interprets `--version` itself; this stand-in prints the actual argument.
+    let folder = crate::door::made("cf-version-probe-").unwrap();
+    let program = folder.path().join("probe");
+    crate::door::write_executable(&program, "#!/bin/sh\nprintf '%s\\n' \"$1\"\n").unwrap();
+    let pi = Installed::at(Harness::Pi, &program, "home");
     assert_eq!(pi.version(), "--version");
     // Devin's is a command of its own, not a flag.
-    let devin = Installed::at(Harness::Devin, "/bin/echo", "home");
+    let devin = Installed::at(Harness::Devin, &program, "home");
     assert_eq!(devin.version(), "version");
     let failing = Installed::at(Harness::Pi, "/usr/bin/false", "home");
     assert_eq!(failing.version(), "unknown");
