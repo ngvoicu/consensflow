@@ -137,13 +137,13 @@ impl Dispatcher {
             .iter()
             .find(|p| p.role == "chief" && task.requester != p.handle)
         {
-            let harness_gone = self.harness_gone(project, task);
+            let gone_harness = self.harness_gone(project, task);
             self.seams.ledger.borrow_mut().note_pause_to(
                 project.id,
                 task.number,
                 &chief.handle,
                 because,
-                harness_gone,
+                gone_harness,
             )?;
         }
         Ok(())
