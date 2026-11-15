@@ -184,6 +184,57 @@ fn resume_launch_failure_tells_the_chief_even_when_the_human_gave_the_task() {
 }
 
 #[test]
+fn resume_launch_failure_of_a_member_needing_an_edit_keeps_its_task_and_session() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let project = tiers.project.id;
+    let session = tiers.assignee(1);
+    let native = native_of(&context, tiers.id(&session));
+    context.close_project(project).unwrap();
+    let member = tiers.id("zeus");
+    context
+        .ledger
+        .borrow()
+        .sqlite()
+        .execute(
+            "UPDATE participant SET needs_edit = 1 WHERE id = ?1 OR member_id = ?1",
+            [member],
+        )
+        .unwrap();
+    context.resume_project(project).unwrap();
+    context.settle();
+    let task = tiers.task(1).task;
+    assert_eq!(
+        (task.state.as_str(), task.assignee.as_deref()),
+        ("paused", Some(session.as_str()))
+    );
+    let notes = context.inbox(context.id(project, "chief"));
+    assert!(
+        notes.iter().any(|note| note.state != "cancelled"
+            && note.body.contains("needs an edit")
+            && note.body.contains("window could not be opened")),
+        "{notes:?}"
+    );
+    context
+        .ledger
+        .borrow()
+        .sqlite()
+        .execute(
+            "UPDATE participant SET needs_edit = 0 WHERE id = ?1 OR member_id = ?1",
+            [member],
+        )
+        .unwrap();
+    context.resume_task(project, 1, "Carry on");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    assert_eq!(native_of(&context, tiers.id(&session)), native);
+}
+
+#[test]
 fn resume_launch_failure_when_the_previous_unanswered_window_cannot_be_ended() {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);

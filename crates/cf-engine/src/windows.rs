@@ -1158,9 +1158,19 @@ impl Dispatcher {
         prelude: Option<Prelude>,
     ) -> Result<Option<Planned>, EngineError> {
         // A member the update could not run on what it ran on (T-1202) opens no window on
-        // its harness's default: its work goes back to the board, and the human hears why.
+        // its harness's default. A project Resume keeps its work with that session, paused.
         if participant.role != "chief" && participant.needs_edit {
-            self.needs_an_edit(record, project, participant, delivering)?;
+            if matches!(record.window.borrow().coming, Some(Coming::Member { .. })) {
+                self.launch_failed(
+                    record,
+                    project,
+                    participant,
+                    delivering.cloned(),
+                    "its member needs an edit after the update; edit it under Project settings",
+                )?;
+            } else {
+                self.needs_an_edit(record, project, participant, delivering)?;
+            }
             return Ok(None);
         }
         // A first message withdrawn while the launch waited (a continuation whose
