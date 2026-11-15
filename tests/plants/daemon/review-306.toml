@@ -705,8 +705,12 @@ runs = ["engine-dispatcher-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''                        this.write_down(&cause);'''
-replace = '''                        let _ = (&this, cause);'''
+find = '''                    if let Err(cause) = closing.await {
+                        this.write_down(&cause);
+                    }'''
+replace = '''                    if let Err(cause) = closing.await {
+                        let _ = (&this, cause);
+                    }'''
 
 [[plant]]
 name = "review 306: a window is taken for the engine's own close by a close of an earlier one"
