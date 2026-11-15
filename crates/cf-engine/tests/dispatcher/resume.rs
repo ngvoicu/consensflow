@@ -314,6 +314,9 @@ fn review_1709_member_way_back(early_exit: bool, project_resume: bool, first: Fi
     let member = tiers.id(&session);
     let native = native_of(&context, member);
     let after = quit_and_start(&context);
+    // The fake host still has the old engine attached; keep the restarted
+    // engine's generations distinct from the windows the quit ended.
+    context.advance(1_000);
     context.adapter.first.set(first);
     if early_exit {
         // The host reports an exit before the open answer and the unhanded
@@ -360,7 +363,13 @@ fn review_1709_member_way_back(early_exit: bool, project_resume: bool, first: Fi
     for _ in 0..5 {
         after.pass().unwrap();
     }
-    assert_eq!(tiers.task(1).task.state, "working");
+    assert_eq!(
+        tiers.task(1).task.state,
+        "working",
+        "early_exit={early_exit}, first={first:?}, pause={}, cut={:?}",
+        last_pause_reason(&context, project, 1),
+        cut_notes(&context, member)
+    );
     assert_eq!(native_of(&context, member), native);
     let given = given(&context, &session);
     if project_resume {
@@ -455,6 +464,57 @@ fn review_1709_unanswered_open_succeeded_kill_has_no_failed_kill_warning() {
 #[test]
 fn review_1709_unanswered_open_refused_kill_has_failed_kill_warning() {
     review_1709_unanswered_open(true);
+}
+
+#[test]
+fn review_1709_unanswered_open_with_an_unanswered_kill_says_only_what_is_known() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let project = tiers.project.id;
+    let session = tiers.assignee(1);
+    context.adapter.with(&session, |agent| agent.settled = true);
+    context.close_project(project).unwrap();
+    let handle = session.clone();
+    let preparing = context
+        .adapter
+        .prepare_holds
+        .hold(move |args| args[0]["participant"]["handle"] == handle);
+    let gates: Rc<RefCell<Vec<Gate>>> = Rc::default();
+    let (host, held, pane_id) = (
+        Rc::clone(&context.host),
+        Rc::clone(&gates),
+        format!("p{project}-{session}"),
+    );
+    context.host.open_holds.hold(move |args| {
+        if args[0]["id"] == pane_id {
+            let pane = Pane {
+                id: pane_id.clone(),
+                generation: args[0]["generation"].as_u64().unwrap(),
+            };
+            held.borrow_mut().extend(host.hold_kills(&pane, &[false]));
+        }
+        false
+    });
+    context.resume_project(project).unwrap();
+    context.settle();
+    context.host.unanswered.set(true);
+    preparing.open();
+    context.settle();
+    let gate = gates.borrow()[0].clone();
+    assert!(!gate.is_open(), "the host has not answered the kill");
+    if tiers.task(1).task.state != "paused" {
+        assert!(context.timers.fire_next(), "the bounded kill wait ends");
+        context.settle();
+    }
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let reason = last_pause_reason(&context, project, 1);
+    assert!(reason.contains("its program may still run"), "{reason}");
+    assert!(!reason.contains(cf_ledger::MAY_STILL_RUN), "{reason}");
+    gate.open();
+    context.settle();
 }
 
 #[test]
@@ -3959,10 +4019,8 @@ fn a_failed_resume_whose_window_may_still_run_never_sends_resume_words_into_it()
     let (tiers, after, session, pane, gates) = given_up_with_its_kill_unanswered(&context, &[true]);
     let project = tiers.project.id;
     let reason = last_pause_reason(&context, project, 1);
-    assert!(
-        reason.contains("could not be ended and may still run"),
-        "{reason}"
-    );
+    assert!(reason.contains("its program may still run"), "{reason}");
+    assert!(!reason.contains(cf_ledger::MAY_STILL_RUN), "{reason}");
     gates[0].open();
     context.settle();
     let before = context.host.opened().len();
