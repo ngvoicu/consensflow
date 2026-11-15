@@ -398,11 +398,7 @@ fn after(screen: &str, mark: usize) -> String {
 
 /// A harness folder named by the rig, or the fallback in its HOME, only when the
 /// resolved path is in a root made by this run. The last variable wins, even when empty.
-pub(crate) fn owned_harness_dir(
-    env: &[(String, String)],
-    name: &str,
-    fallback: &str,
-) -> Result<PathBuf> {
+pub fn owned_harness_dir(env: &[(String, String)], name: &str, fallback: &str) -> Result<PathBuf> {
     let var = |name: &str| {
         env.iter()
             .rev()
