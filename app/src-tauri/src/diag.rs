@@ -64,7 +64,9 @@ mod tests {
         }
 
         let mut out = FailingWriter::default();
-        let result = catch_unwind(AssertUnwindSafe(|| super::write_line(&mut out, "diagnostic")));
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            super::write_line(&mut out, "diagnostic")
+        }));
         assert!(out.attempts > 0, "the diagnostic was not attempted");
         assert!(result.is_ok(), "a failed diagnostic write panicked");
     }

@@ -9,10 +9,10 @@ use std::time::{Duration, Instant};
 
 use super::close::{ask_all_to_exit, terminate, terminate_asked, terminate_detached};
 use super::flow::close_output;
-#[cfg(windows)]
-use super::EXIT_FLUSH;
 #[cfg(all(test, windows))]
 use super::test_support::WATCH_FAILS;
+#[cfg(windows)]
+use super::EXIT_FLUSH;
 use super::{Pane, PaneError, PaneKey, PaneTable, CANCELLED_KEPT, EXIT_GRACE};
 use crate::ended::{Ended, EndedSlot};
 
