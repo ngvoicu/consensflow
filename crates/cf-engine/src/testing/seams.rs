@@ -35,10 +35,15 @@ pub const MODELS: [(&str, &str); 6] = [
 pub struct FakeCredentials {
     pub(crate) recorder: Recorder,
     pub(crate) ledger: Rc<RefCell<Ledger>>,
+    /// Why the system gives no token, where a test says it does not.
+    pub fails: RefCell<Option<String>>,
 }
 
 impl Credentials for FakeCredentials {
-    fn issue(&self, project: i64, participant: i64) -> String {
+    fn issue(&self, project: i64, participant: i64) -> Result<String, String> {
+        if let Some(cause) = self.fails.borrow().clone() {
+            return Err(cause);
+        }
         let handle = self
             .ledger
             .borrow()
@@ -55,7 +60,7 @@ impl Credentials for FakeCredentials {
             json!([{ "participant": { "id": participant, "handle": handle }, "project": { "id": project } }]),
             json!(token),
         );
-        token
+        Ok(token)
     }
 
     fn revoke(&self, token: &str) {
@@ -209,6 +214,8 @@ pub struct FakeTrace {
     /// It forgets a deleted project's lines, as the event file in the home
     /// does; without, it has no `forget`, as the Node tests' own trace.
     pub forgets: Cell<bool>,
+    /// Why it cannot forget, where a test says the file cannot be rewritten.
+    pub forget_fails: RefCell<Option<String>>,
     /// The projects it forgot, in order.
     pub forgotten: RefCell<Vec<i64>>,
 }
@@ -221,9 +228,12 @@ impl Trace for FakeTrace {
         self.lines.borrow_mut().push(line);
     }
 
-    fn forget(&self, project: i64) {
+    fn forget(&self, project: i64) -> Result<(), String> {
         if !self.forgets.get() {
-            return;
+            return Ok(());
+        }
+        if let Some(cause) = self.forget_fails.borrow().clone() {
+            return Err(cause);
         }
         self.recorder
             .called("trace", Some("forget"), json!([project]), Value::Null);
@@ -231,6 +241,7 @@ impl Trace for FakeTrace {
         self.lines.borrow_mut().retain(
             |line| !matches!(&line.what, Traced::Window { project: of, .. } if *of == Some(project)),
         );
+        Ok(())
     }
 }
 
@@ -280,12 +291,17 @@ impl LaunchFiles for FakeLaunchFiles {
 #[derive(Default)]
 pub struct CountingLaunchIds {
     drawn: Cell<u64>,
+    /// Why the system gives no id, where a test says it does not.
+    pub fails: RefCell<Option<String>>,
 }
 
 impl LaunchIds for CountingLaunchIds {
-    fn draw(&self) -> LaunchId {
+    fn draw(&self) -> Result<LaunchId, String> {
+        if let Some(cause) = self.fails.borrow().clone() {
+            return Err(cause);
+        }
         self.drawn.set(self.drawn.get() + 1);
         let id = format!("00000000-0000-4000-8000-{:012}", self.drawn.get());
-        LaunchId::new(&id).unwrap_or_else(|| panic!("{id} is a launch id"))
+        Ok(LaunchId::new(&id).unwrap_or_else(|| panic!("{id} is a launch id")))
     }
 }

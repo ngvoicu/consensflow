@@ -314,7 +314,7 @@ async fn zeus_at_work() -> (Rig, Rc<Context>, String, Value) {
         .expect("zeus")
         .id;
     let credentials = Credentials::new();
-    let token = credentials.issue(project.id, zeus);
+    let token = credentials.issue(project.id, zeus).unwrap();
     let home = rig.pieces.home.path();
     let context = Rc::new(Context {
         ledger: Rc::clone(&rig.ledger),

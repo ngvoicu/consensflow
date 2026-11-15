@@ -69,7 +69,11 @@ async fn the_recipient_and_the_sender_read_the_whole_message_and_no_one_else_doe
             .iter()
             .find(|p| p.handle == "hera")
             .unwrap();
-        scene.context.credentials.issue(project.id, hera.id)
+        scene
+            .context
+            .credentials
+            .issue(project.id, hera.id)
+            .unwrap()
     };
     let (status, said) = api(&scene, Method::GET, &target, &hera, "").await;
     assert_eq!(status, 404);
@@ -141,7 +145,7 @@ async fn a_message_of_another_project_is_none_of_this_one_s_even_for_a_handle_th
         .iter()
         .find(|p| p.handle == "chief")
         .unwrap();
-    let token = scene.context.credentials.issue(other.id, chief.id);
+    let token = scene.context.credentials.issue(other.id, chief.id).unwrap();
     let (status, _) = api(
         &scene,
         Method::GET,

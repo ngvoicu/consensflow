@@ -142,6 +142,9 @@ pub struct Context {
     /// What the engine gives a window's environment: a test may say its home is the project's.
     pub pane_env: Rc<FakePaneEnv>,
     pub launch_files: Rc<FakeLaunchFiles>,
+    /// The launch ids and the tokens, which a test may say the system cannot give.
+    pub launch_ids: Rc<CountingLaunchIds>,
+    pub credentials: Rc<FakeCredentials>,
     /// What the machine says of computer use: none of it, unless a test says so.
     pub computer_use: Rc<FakeComputerUse>,
     pub dispatcher: Rc<Dispatcher>,
@@ -212,6 +215,7 @@ impl Context {
             recorder: recorder.clone(),
             lines: RefCell::new(Vec::new()),
             forgets: Cell::new(false),
+            forget_fails: RefCell::new(None),
             forgotten: RefCell::new(Vec::new()),
         });
         let pane_env = Rc::new(FakePaneEnv {
@@ -228,6 +232,12 @@ impl Context {
             forgotten: RefCell::new(Vec::new()),
         });
         let computer_use = Rc::new(FakeComputerUse::default());
+        let launch_ids = Rc::new(CountingLaunchIds::default());
+        let credentials = Rc::new(FakeCredentials {
+            recorder: recorder.clone(),
+            ledger: Rc::clone(&ledger),
+            fails: RefCell::new(None),
+        });
         let seams = Seams {
             ledger: Rc::clone(&ledger),
             host: Rc::clone(&host) as Rc<_>,
@@ -235,11 +245,8 @@ impl Context {
             adapters: Rc::clone(&adapters) as Rc<dyn Adapters>,
             records: Rc::new(FakeRecords::new(adapters)),
             time: Rc::clone(&timers) as Rc<dyn Time>,
-            launch_ids: Rc::new(CountingLaunchIds::default()),
-            credentials: Rc::new(FakeCredentials {
-                recorder: recorder.clone(),
-                ledger: Rc::clone(&ledger),
-            }),
+            launch_ids: Rc::clone(&launch_ids) as Rc<_>,
+            credentials: Rc::clone(&credentials) as Rc<_>,
             pane_env: Rc::clone(&pane_env) as Rc<_>,
             app_settings: Rc::clone(&app_settings) as Rc<_>,
             roles: Rc::clone(&roles) as Rc<_>,
@@ -284,6 +291,8 @@ impl Context {
             log,
             pane_env,
             launch_files,
+            launch_ids,
+            credentials,
             computer_use,
             dispatcher,
             seams,
@@ -473,11 +482,20 @@ impl Context {
             host,
             adapter,
             seams,
+            credentials,
             file,
             _dir: dir,
             ..
         } = self;
-        drop((executor, dispatcher, restarted, host, adapter, seams));
+        drop((
+            executor,
+            dispatcher,
+            restarted,
+            host,
+            adapter,
+            seams,
+            credentials,
+        ));
         let ledger = Rc::try_unwrap(ledger)
             .unwrap_or_else(|_| panic!("something of the test still holds the ledger"));
         drop(ledger.into_inner());
