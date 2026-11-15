@@ -291,7 +291,11 @@ impl Dispatcher {
             self.release_vacation_sessions(project, &resumed, member.id, &member.handle)
                 .await?;
         }
-        let at_work = self.at_work(&resumed)?;
+        let at_work = self.at_work(&resumed).inspect_err(|cause| {
+            self.seams.log.info(&format!(
+                "the Resume of project {project} could not tell the work at hand: {cause}"
+            ));
+        })?;
         if let Some(chief) = resumed.participants.iter().find(|p| p.role == "chief") {
             // The human asks for the chief now: a chief that failed before is tried at once.
             self.record_of(chief.id).window.borrow_mut().relaunch = None;

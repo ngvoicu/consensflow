@@ -97,6 +97,23 @@ async fn a_turn_was_cut_when_the_record_ends_in_one_with_no_end_not_when_at_rest
 }
 
 #[tokio::test]
+async fn a_turn_the_record_ends_in_an_abort_is_not_known_to_be_at_rest() {
+    // T-1707: Pi writes an abort for the quit as for an Escape, and the window it left was
+    // taken for one at rest, so its member was never told to go on.
+    let said = changed(
+        ending(Settlement::Settled, &[Role::User, Role::Assistant]),
+        |record| record.aborted = true,
+    );
+    for harness in HARNESSES {
+        assert_eq!(
+            said.turn_cut(harness, "a-session").await,
+            None,
+            "{harness:?}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn a_record_held_open_only_by_its_harness_s_notices_of_background_work_was_at_rest_on_every_harness(
 ) {
     // Background work is rest (T-814): what its harness queued of it began no turn.

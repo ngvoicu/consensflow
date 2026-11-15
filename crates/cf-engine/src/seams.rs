@@ -79,6 +79,8 @@ pub trait Trace {
 /// awaits), and what a window that did not come up showed (`log.warn`).
 pub trait Log {
     fn error(&self, message: &str, cause: &str);
+    /// What went its way and left no other trace, said in one line.
+    fn info(&self, message: &str);
     /// Something that went wrong and was gone past, said in one line.
     fn warn(&self, message: &str);
 }

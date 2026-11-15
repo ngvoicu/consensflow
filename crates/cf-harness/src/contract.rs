@@ -1368,6 +1368,9 @@ pub trait Records {
                 Reading::Known(record) => match record.settlement {
                     Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),
                     Settlement::InFlight => Some(TurnLeft::Cut(Opening::of(&record.items))),
+                    // An abort is a turn over for the harness and cannot say who ended it: a
+                    // window the quit closed leaves the step an Escape does (T-1707).
+                    Settlement::Settled if record.aborted => None,
                     Settlement::Settled if ends_in_a_reply(record) => Some(TurnLeft::AtRest),
                     Settlement::Settled | Settlement::Unknown => None,
                 },

@@ -2107,9 +2107,14 @@ impl Dispatcher {
             let open = held.window.borrow().pane.is_some();
             // A window the Resume asked for that opens nothing says why: no note carries it.
             let resuming = coming.is_some();
+            if resuming {
+                this.seams.log.info(&format!(
+                    "the Resume asks a window for participant {participant}"
+                ));
+            }
             let Some(project) = project.filter(|project| !open && project.state == "open") else {
                 if resuming {
-                    this.seams.log.warn(&format!(
+                    this.seams.log.info(&format!(
                         "the Resume opened no window for participant {participant}: its project is closed or gone, or a window is already open"
                     ));
                 }
@@ -2122,7 +2127,7 @@ impl Dispatcher {
                 .cloned()
             else {
                 if resuming {
-                    this.seams.log.warn(&format!(
+                    this.seams.log.info(&format!(
                         "the Resume opened no window for participant {participant}: it is not in its project"
                     ));
                 }
@@ -2138,7 +2143,7 @@ impl Dispatcher {
                 Some(coming) => {
                     let note = this.cut_note(&project, &who, coming).await?;
                     if !this.still_coming(&who, coming)? {
-                        this.seams.log.warn(&format!(
+                        this.seams.log.info(&format!(
                             "the Resume opened no window for @{}: a stop was asked of it meanwhile",
                             who.handle
                         ));

@@ -61,3 +61,25 @@ fn every_look_is_a_reading_of_its_own_and_the_reader_works_it_out_anew() {
     // The same transcript and a later clock: another answer.
     assert_ne!(first, stage.look(200_000, &Options::default()));
 }
+
+#[test]
+fn a_session_whose_last_step_was_aborted_says_so_and_a_later_step_takes_it_back() {
+    // What a window the quit closed leaves (T-1707), and what an Escape leaves too.
+    let steps = |stops: &[&str]| {
+        let mut all = vec![header(), user("u1", "go")];
+        for (n, stop) in stops.iter().enumerate() {
+            all.push(assistant(&format!("a{n}"), stop, "words"));
+        }
+        all
+    };
+    for (stops, aborted) in [
+        (vec!["aborted"], true),
+        (vec!["stop"], false),
+        (vec!["aborted", "stop"], false),
+        (vec!["aborted", "error"], false),
+        (vec!["stop", "aborted"], true),
+    ] {
+        let mut stage = Stage::with(&steps(&stops));
+        assert_eq!(stage.at(120_000).aborted, aborted, "{stops:?}");
+    }
+}

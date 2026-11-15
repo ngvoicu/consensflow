@@ -290,3 +290,16 @@ fn each_item_is_said_with_the_place_of_the_record_that_first_named_it() {
     assert_eq!(read.items.len(), 2);
     assert_eq!(read.lines.places, Some(vec![1, 3]));
 }
+
+#[test]
+fn a_turn_that_ended_in_an_abort_says_so() {
+    // T-1707: the quit and an Escape leave the same record, so the turn is not known at rest.
+    let cancelled = read(&[started(json!("t1")), aborted(json!("t1"))]).unwrap();
+    assert!(cancelled.aborted);
+    let completed = read(&[
+        started(json!("t1")),
+        event(json!({ "type": "task_complete", "turn_id": "t1" })),
+    ])
+    .unwrap();
+    assert!(!completed.aborted);
+}
