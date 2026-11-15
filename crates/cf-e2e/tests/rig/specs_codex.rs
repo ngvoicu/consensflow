@@ -151,7 +151,7 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
         json!({ "project": project.id(), "on": true, "folder": "plans", "variant": "core" }),
     )?;
     assert_eq!(said["ok"], true, "{said}");
-    const NOW: &str = "Specs are now on in this project: ";
+    const NOW: &str = "Your instructions now include:";
     rig.wait_for(
         "the chief's thread to be told of the specs",
         secs(60),
