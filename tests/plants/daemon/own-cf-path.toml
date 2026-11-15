@@ -206,8 +206,12 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles/member.rs"
-find = 'let home = if mac { shells::mac_paragraph("home")? } else { "" };'
-replace = 'let home = shells::mac_paragraph("home")?;'
+find = '''    let home = if mac {
+        shells::mac_paragraph("home")?
+    } else {
+        ""
+    };'''
+replace = '''    let home = shells::mac_paragraph("home")?;'''
 
 [[plant]]
 name = "own cf path: a window on a Mac is not told of the home folder"
@@ -216,8 +220,16 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles/member.rs"
-find = 'let home = if mac { shells::mac_paragraph("home")? } else { "" };'
-replace = 'let home = if !mac { shells::mac_paragraph("home")? } else { "" };'
+find = '''    let home = if mac {
+        shells::mac_paragraph("home")?
+    } else {
+        ""
+    };'''
+replace = '''    let home = if !mac {
+        shells::mac_paragraph("home")?
+    } else {
+        ""
+    };'''
 
 [[plant]]
 name = "own cf path: a slot left empty keeps its paragraph break"
