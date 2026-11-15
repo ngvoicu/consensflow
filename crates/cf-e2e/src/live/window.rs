@@ -416,8 +416,10 @@ pub(super) fn record_homes_safe(harness: Harness, env: &[(String, String)]) -> b
     match harness {
         Harness::Claude => owned("CLAUDE_CONFIG_DIR")
             .is_some_and(|home| crate::door::is_made_or_below(&home.join("projects"))),
-        Harness::Codex => owned("CODEX_HOME")
-            .is_some_and(|home| crate::door::is_made_or_below(&home.join("sessions"))),
+        Harness::Codex => owned("CODEX_HOME").is_some_and(|home| {
+            let sessions = home.join("sessions");
+            crate::door::is_made_or_below(&sessions) && no_record_links(&sessions)
+        }),
         Harness::Pi => {
             owned("PI_CODING_AGENT_DIR").is_some() && owned("PI_CODING_AGENT_SESSION_DIR").is_some()
         }
@@ -433,7 +435,7 @@ pub(super) fn record_homes_safe(harness: Harness, env: &[(String, String)]) -> b
     }
 }
 
-// Muse's reader follows dated folders and record-file links. Refuse such a tree before it runs.
+// Muse's and Codex's newest-session readers follow dated folders and record-file links.
 fn no_record_links(path: &Path) -> bool {
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,

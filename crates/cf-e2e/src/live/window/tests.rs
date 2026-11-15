@@ -101,6 +101,22 @@ fn kit_round3_window_record_refuses_linked_out_record_roots() {
     assert!(!asked.get());
 }
 
+#[cfg(unix)]
+#[test]
+fn kit_round3_window_record_refuses_a_link_inside_codex_sessions() {
+    let run = crate::door::made("cf-window-nested-").unwrap();
+    let foreign = tempfile::tempdir().unwrap();
+    std::fs::create_dir(run.path().join("sessions")).unwrap();
+    std::os::unix::fs::symlink(foreign.path(), run.path().join("sessions/2026")).unwrap();
+    let env = vec![("CODEX_HOME".to_owned(), run.path().display().to_string())];
+    let asked = Cell::new(false);
+    let _ = with_record_homes(Harness::Codex, &env, || {
+        asked.set(true);
+        None
+    });
+    assert!(!asked.get(), "a linked-out Codex session was accepted");
+}
+
 fn item(role: &str, text: &str) -> Item {
     Item {
         id: String::new(),

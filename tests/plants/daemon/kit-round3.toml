@@ -276,3 +276,13 @@ runs = ["round3-subagent"]
 file = "crates/cf-e2e/tests/live_subagent.rs"
 find = '''if !cf_e2e::door::is_made_or_below(path) {'''
 replace = '''if false && !cf_e2e::door::is_made_or_below(path) {'''
+
+[[plant]]
+name = "kit round3: Codex newest session follows a linked-out descendant"
+meant = "kit_round3_window_record_refuses_a_link_inside_codex_sessions"
+runs = ["round3-lib"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/window.rs"
+find = '''crate::door::is_made_or_below(&sessions) && no_record_links(&sessions)'''
+replace = '''crate::door::is_made_or_below(&sessions)'''
