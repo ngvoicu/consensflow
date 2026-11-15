@@ -98,7 +98,7 @@ sha2.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 # The daemon's loopback HTTP.
-ureq = { workspace = true, features = ["rustls"] }
+ureq.workspace = true
 # The WebSocket the stand-in Codex speaks, on a socket or on loopback.
 tungstenite.workspace = true
 # The conversation id a live test opens a Claude Code or Pi window on.

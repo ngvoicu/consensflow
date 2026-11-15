@@ -1112,6 +1112,19 @@ mod tests {
     }
 
     #[test]
+    fn discovery_names_a_missing_muse_when_path_and_installer_are_empty() {
+        let root = crate::door::made("missing-muse-").unwrap();
+        let absent = root.path().join("no-installer");
+        for (case, place) in [
+            ("no installer", None),
+            ("missing installer", Some(absent.as_path())),
+        ] {
+            let why = installed_on("", place).expect_err("discovery must reject a missing Muse");
+            assert!(why.to_lowercase().contains("muse"), "{case}: {why}");
+        }
+    }
+
+    #[test]
     fn standin_isolation_muse_search_passes_over_an_inherited_harness_home() {
         const CHILD_PATH: &str = "CF_T1687_MUSE_SEARCH_PATH";
         if let Some(path) = crate::process::own_var(CHILD_PATH) {
