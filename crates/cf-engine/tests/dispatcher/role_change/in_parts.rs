@@ -176,7 +176,7 @@ fn the_opening_of_a_role_read_in_parts_says_how_many_and_the_command_that_prints
     assert_eq!(said.len(), 1);
     assert!(
         said[0].contains(&format!(
-            "prints them in {of} parts: the first, which ends with the command that prints the next."
+            "prints the role in {of} parts; run the command at the end of each part until the last, and read every part."
         )),
         "{}",
         &said[0][..900]
@@ -296,7 +296,9 @@ fn a_session_no_hook_greeted_is_told_a_role_over_the_bound_once_it_read_every_pa
     assert_eq!(context.message(note.id).state, "delivered");
     let of = parts_of(&context, note.id);
     assert!(of > 1);
-    assert!(note.body.contains(&format!("prints them in {of} parts")));
+    assert!(note
+        .body
+        .contains(&format!("prints the role in {of} parts")));
     let order: Vec<usize> = (1..=of).collect();
     assert_eq!(read_like_cf(&context, project.id, note.id, &order), 1);
     assert!(recorded(&context, chief).is_some_and(|told| told.ends_with(&role)));

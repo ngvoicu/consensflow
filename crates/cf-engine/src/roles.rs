@@ -32,7 +32,7 @@ pub use specs::ProjectSpecs;
 /// Whether a text names its window's `cf` by path once, at its start, and says `cf` after
 /// it ("`cf` below stands for this command; type it in full every time"), or writes the path in
 /// every command. One switch for every text: the members', the chief's and the guide.
-pub const PATH_ONCE: bool = true;
+pub const PATH_ONCE: bool = false;
 
 /// What a text's commands start with: `cf`, where the path is said once ([`PATH_ONCE`]), else
 /// the window's own word.

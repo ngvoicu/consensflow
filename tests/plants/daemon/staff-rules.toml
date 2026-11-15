@@ -27,11 +27,11 @@ runs = ["engine-release-contract"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles.rs"
-find = '''    // The `cf` goes in last, so nothing in a path is read as a slot.'''
+find = '''    let chief = filled(chief::text(false)?, staff, cf)?;'''
 replace = '''    if let Some(card) = _env.path("CONSENSFLOW_EVAL_CHIEF_CARD") {
         return Ok(std::fs::read_to_string(card).unwrap_or_default());
     }
-    // The `cf` goes in last, so nothing in a path is read as a slot.'''
+    let chief = filled(chief::text(false)?, staff, cf)?;'''
 
 # --- the ledger ---
 

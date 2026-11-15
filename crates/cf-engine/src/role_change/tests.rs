@@ -12,7 +12,7 @@ use super::*;
 use crate::deliveries::Delivering;
 use crate::delivery_text::{delivery_text, goes_whole};
 use crate::roles::{
-    role_instructions, role_instructions_for, with_staff_rules, ProjectSpecs, StaffRow,
+    role_instructions, role_instructions_for, with_staff_rules, ProjectSpecs, StaffRow, PATH_ONCE,
 };
 use crate::testing::Context;
 
@@ -47,7 +47,7 @@ fn a_replacement_says_plainly_that_it_replaces_the_instructions_the_conversation
     let body = body_of("the role\nin full", &CfWord::bare());
     assert!(body.starts_with(OPENING));
     assert!(
-        OPENING.contains("replace the ones you were given then"),
+        OPENING.contains("Follow these instructions in place of the earlier ones"),
         "{OPENING}"
     );
     assert!(body.ends_with("\n\nthe role\nin full"), "{body}");
@@ -342,13 +342,12 @@ fn told_whole_or_told_and_read(text: &str, cf: &CfWord) {
 fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_docs_say() {
     let most = the_most_rules();
     // The rows a chief's role holds, with specs on or off and the rules, as `cf inbox read`
-    // prints it for a window whose `cf` is `cf`: a text that says its path once is not given it
-    // again in each command, so the longest rules and the specs leave room for a staff.
+    // prints it for each window's `cf`. `None` means that even an empty staff does not fit.
     let rows_while = |cf: &CfWord,
                       specs_on,
                       rules: Option<&str>,
                       holds: &dyn Fn(&MessageView, &CfWord) -> bool| {
-        (1..)
+        (0..)
             .take_while(|&rows| {
                 holds(
                     &note(
@@ -360,15 +359,14 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
                 )
             })
             .last()
-            .unwrap_or(0)
     };
     let whole = |note: &MessageView, cf: &CfWord| goes_whole(note, &[], cf);
     let one = |note: &MessageView, cf: &CfWord| read_in_one(note, cf);
     for (cf, pins) in [
-        (a_mac(), [171, 195, 35, 60]),
-        (a_windows(), [172, 196, 36, 61]),
+        (a_mac(), [Some(138), Some(163), None, Some(27)]),
+        (a_windows(), [Some(135), Some(159), None, Some(23)]),
     ] {
-        assert!(
+        assert_eq!(
             one(
                 &note(
                     None,
@@ -377,32 +375,31 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
                 ),
                 &cf
             ),
-            "{cf}: even with specs and the most rules an empty staff is read in one piece"
+            PATH_ONCE,
+            "{cf}: whether specs and the most rules fit with an empty staff"
         );
         assert_eq!(
             rows_while(&cf, true, None, &whole),
-            0,
+            None,
             "docs: never whole with specs on"
         );
         assert_eq!(
             rows_while(&cf, false, None, &whole),
-            0,
+            None,
             "docs: never whole without specs"
         );
-        assert_eq!(
-            [
-                rows_while(&cf, true, None, &one),
-                rows_while(&cf, false, None, &one),
-                rows_while(&cf, true, Some(&most), &one),
-                rows_while(&cf, false, Some(&most), &one),
-            ],
-            pins,
-            "{cf}: rows in one piece: specs, none; no specs, none; specs, the most rules; no specs, the most rules"
-        );
-        assert!(
-            pins[2] >= 10,
-            "{cf}: a staff of ten is read in one piece with specs and the most rules"
-        );
+        let measured = [
+            rows_while(&cf, true, None, &one),
+            rows_while(&cf, false, None, &one),
+            rows_while(&cf, true, Some(&most), &one),
+            rows_while(&cf, false, Some(&most), &one),
+        ];
+        if PATH_ONCE {
+            assert!(measured[2].is_some_and(|rows| rows >= 10));
+        } else {
+            assert_eq!(measured, pins,
+                "{cf}: rows in one piece: specs, none; no specs, none; specs, the most rules; no specs, the most rules");
+        }
     }
     let cf = a_mac();
     let parts = |rows| {
@@ -417,11 +414,13 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
         )
         .1
     };
-    assert_eq!(
-        [parts(35), parts(36), parts(143), parts(300)],
-        [1, 2, 2, 3],
-        "docs: past one piece, 2 parts to 143 rows, 3 at 300"
-    );
+    if !PATH_ONCE {
+        assert_eq!(
+            [parts(0), parts(295), parts(296), parts(300)],
+            [2, 2, 3, 3],
+            "docs: 2 parts through 295 rows, 3 at 296"
+        );
+    }
 }
 
 /// The real text of every member with the most rules for the staff the ledger
@@ -1241,18 +1240,21 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
     // A case: its name, the window's `cf`, the staff's rows, specs on or off, the rules, and the
     // lines the part after the first begins with.
     type Case<'a> = (&'a str, CfWord, usize, bool, Option<&'a str>, &'a [&'a str]);
-    // The paragraph on a second review in the chief's section on reviews, where the second part
-    // begins in every case.
-    const FRONTEND: &str = "A finding blocks the work only when it would make it fail (a";
+    // These first lines are measured for the active path mode and each shell.
+    const REVIEW: &str = "A finding blocks the work only when it would make it fail (a";
+    const INTEGRATOR: &str = "Where the staff has an integrator, it lands accepted work; a";
+    const DESIGN: &str = "Work big enough to need a design (a new module, a new API, a";
+    let mac = if PATH_ONCE { REVIEW } else { INTEGRATOR };
+    let windows = if PATH_ONCE { REVIEW } else { DESIGN };
     let cases: [Case; 4] = [
-        ("a Mac, no staff", a_mac(), 0, false, None, &[FRONTEND]),
+        ("a Mac, no staff", a_mac(), 0, false, None, &[mac]),
         (
             "a Mac, the largest chief",
             a_mac(),
             25,
             true,
             Some(&utf8),
-            &[FRONTEND],
+            &[mac],
         ),
         (
             "Windows, the largest chief",
@@ -1260,7 +1262,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&utf8),
-            &[FRONTEND],
+            &[windows],
         ),
         (
             "a Mac, the most escaped rules",
@@ -1268,7 +1270,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&escaped),
-            &[FRONTEND],
+            &[mac],
         ),
     ];
     for (name, cf, rows, specs, rules, expected) in cases {
@@ -1307,4 +1309,29 @@ fn role_change_places_each_concern_in_its_own_module() {
             path.display()
         );
     }
+}
+
+#[test]
+fn short_text_t1715_replacement_whole() {
+    assert_eq!(OPENING, "Your ConsensFlow role has changed. Follow these instructions in place of the earlier ones. This is context, not a task: acknowledge it in one line and wait for the next message.");
+}
+#[test]
+fn short_text_t1715_replacement_cut() {
+    assert_eq!(OPENING_IN_PART, "Your ConsensFlow role has changed. Follow these instructions in place of the earlier ones. Run the command at the end now and read all it prints. This is context, not a task: then acknowledge it in one line and wait for the next message.");
+}
+#[test]
+fn short_text_t1715_greeting_whole() {
+    assert_eq!(BEGAN_WITHOUT, "This conversation began without your ConsensFlow role. Follow these instructions. This is context, not a task: acknowledge it in one line and wait for the next message.");
+}
+#[test]
+fn short_text_t1715_greeting_cut() {
+    assert_eq!(BEGAN_WITHOUT_IN_PART, "This conversation began without your ConsensFlow role. Follow these instructions. Run the command at the end now and read all it prints. This is context, not a task: then acknowledge it in one line and wait for the next message.");
+}
+#[test]
+fn short_text_t1715_replacement_parts() {
+    assert_eq!(Telling::Replaces.in_parts(2), "Your ConsensFlow role has changed. Follow these instructions in place of the earlier ones. Run the command at the end now. It prints the role in 2 parts; run the command at the end of each part until the last, and read every part. This is context, not a task: then acknowledge it in one line and wait for the next message.");
+}
+#[test]
+fn short_text_t1715_greeting_parts() {
+    assert_eq!(Telling::BeganWithout.in_parts(2), "This conversation began without your ConsensFlow role. Follow these instructions. Run the command at the end now. It prints the role in 2 parts; run the command at the end of each part until the last, and read every part. This is context, not a task: then acknowledge it in one line and wait for the next message.");
 }

@@ -822,8 +822,8 @@ runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''The instructions below replace the ones you were given then: follow these from now on. This is context'''
-replace = '''The instructions below are these: follow them from now on. This is context'''
+find = '''Follow these instructions in place of the earlier ones. This is context'''
+replace = '''Follow these instructions. This is context'''
 
 [[plant]]
 name = "codex role: a replacement is longer than its window reads whole, with the text at its start"

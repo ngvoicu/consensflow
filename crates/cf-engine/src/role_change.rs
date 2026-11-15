@@ -104,19 +104,17 @@
 //! by the write that confirms the delivery (`confirm_delivery`), in the conversation
 //! it was made in. `cf` prints a role in one piece up to a bound of its own
 //! (`cf_base::role_read`, 29,000 bytes and 500 lines, measured on Codex and Muse, the
-//! harnesses a role goes to by a note, less the room its line takes): a staff of 171
-//! rows with specs on, 195 without, two roles to a row and a name of twenty characters, the
-//! model's id and effort, which a member is named by, on the same text (its bytes are the
-//! bound; 172 and 196 on Windows, whose path is longer). A text that says its path once is
-//! printed as it is (`CfWord::in_text` leaves it, `CF_STANDS_FOR`), so the longest rules
-//! (8,000 bytes, 150 lines) with specs on still leave room for a staff of 35 rows, and without
-//! specs for 60 (36 and 61 on Windows).
+//! harnesses a role goes to by a note, less the room its line takes). With `PATH_ONCE` off,
+//! the measured Mac fixture fits a staff of 138 rows with specs on or 163 without, two roles
+//! per row and a name of twenty characters with model id and effort. The Windows PowerShell
+//! fixture fits 135 and 159. With the longest rules (8,000 bytes, 150 lines), specs on and even
+//! an empty staff need parts; without specs, 27 Mac rows or 23 Windows rows fit in one read.
 //! A role longer than that `cf` prints in parts, each within the bound
 //! (`cf_base::role_read::role_parts`, cut at a paragraph where it can be, and where a
 //! table goes on past a part, its line says so): the first by the command the paste
 //! gives, each next by the command the part before ends with (`--part N`), and the
-//! opening says in how many ([`Telling::in_parts`]: two to a staff of 143 rows with
-//! specs on and the most rules, three at 300). Each part printed is said to the board, and
+//! opening says in how many ([`Telling::in_parts`]: on the Mac fixture, two through 295 rows
+//! with specs on and the most rules, three at 296). Each part printed is said to the board, and
 //! logged as `message.part_read` (`receive_read_part`) whatever state the note is in: the
 //! role is read once every part was printed in the conversation it goes to, in any order,
 //! and told then or once its paste is confirmed, whichever is last (T-1513, review T-1510:
@@ -126,8 +124,8 @@
 //! every text that says a role, and the ledger bounds them for it (at most 8,000
 //! bytes and 150 lines, `cf_ledger::STAFF_RULES_MAX_BYTES`): a member's real text
 //! with the most rules goes into its window whole. A chief's with specs on and the most
-//! rules is printed in one piece with a staff of up to 35 rows, and without specs of up to 60, and
-//! a larger one in parts: a row of the table is about 60 bytes.
+//! rules needs parts even with an empty staff; without specs it fits 27 Mac rows or 23 Windows
+//! rows in one piece. A row of the table is about 60 bytes.
 //! A role read so is said nothing of at the next Resume, unless it changed again.
 //! One the window has not read by its next Resume is said again then, and the
 //! human has a line on the board that says so ([`Dispatcher::not_read`](crate::dispatcher::Dispatcher::not_read)).
@@ -244,26 +242,26 @@ pub(crate) use comparison::Compared;
 pub(crate) use prelude::Prelude;
 
 /// What a replacement says before the role text.
-pub(crate) const OPENING: &str = "Your ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on. This is context, not a task: say in one short line that you have them, and wait for the next message.";
+pub(crate) const OPENING: &str = "Your ConsensFlow role has changed. Follow these instructions in place of the earlier ones. This is context, not a task: acknowledge it in one line and wait for the next message.";
 
 /// What a replacement says before the role text where the two together are too
 /// long for one message: the window is given only their opening and the command
 /// that prints the rest, and is told to read the rest now.
-pub(crate) const OPENING_IN_PART: &str = "Your ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on. They are too long for one message, so only their opening follows; the line at its end gives the command that prints all of them. Run that command now, before anything else, and read everything it prints. This is context, not a task: once you have read them, say in one short line that you have them, and wait for the next message.";
+pub(crate) const OPENING_IN_PART: &str = "Your ConsensFlow role has changed. Follow these instructions in place of the earlier ones. Run the command at the end now and read all it prints. This is context, not a task: then acknowledge it in one line and wait for the next message.";
 
 /// What [`OPENING_IN_PART`] and [`BEGAN_WITHOUT_IN_PART`] say of the rest where `cf inbox
 /// read` prints the note in `parts` parts, as it does a role it cannot print within the
 /// bound its window reads whole at (`cf_base::role_read::role_parts`).
 fn read_in_parts(parts: usize) -> String {
-    format!("They are too long for one message, so only their opening follows, and too long for one read, so the command the line at its end gives prints them in {parts} parts: the first, which ends with the command that prints the next. Run that command now, before anything else, then the command each part ends with, until a part says it is the last, and read everything they print.")
+    format!("Run the command at the end now. It prints the role in {parts} parts; run the command at the end of each part until the last, and read every part.")
 }
 
 /// What a note that gives the role to a session no hook greeted says before the role
 /// text ([`Dispatcher::greet_switched`]).
-pub(crate) const BEGAN_WITHOUT: &str = "This conversation began without your ConsensFlow role instructions: it was started in your window (a /clear, or a new session), and your harness gave it none. They follow in full: follow them from now on. This is context, not a task: say in one short line that you have them, and wait for the next message.";
+pub(crate) const BEGAN_WITHOUT: &str = "This conversation began without your ConsensFlow role. Follow these instructions. This is context, not a task: acknowledge it in one line and wait for the next message.";
 
 /// [`BEGAN_WITHOUT`] where the note is too long for one message.
-pub(crate) const BEGAN_WITHOUT_IN_PART: &str = "This conversation began without your ConsensFlow role instructions: it was started in your window (a /clear, or a new session), and your harness gave it none. They are too long for one message, so only their opening follows; the line at its end gives the command that prints all of them. Run that command now, before anything else, and read everything it prints: follow them from now on. This is context, not a task: once you have read them, say in one short line that you have them, and wait for the next message.";
+pub(crate) const BEGAN_WITHOUT_IN_PART: &str = "This conversation began without your ConsensFlow role. Follow these instructions. Run the command at the end now and read all it prints. This is context, not a task: then acknowledge it in one line and wait for the next message.";
 
 /// What a note that says a role says before it: that it replaces the role the conversation
 /// began with ([`OPENING`]), or that it gives one to a session that began with none
@@ -294,8 +292,8 @@ impl Telling {
     /// Its opening where the note goes in cut, and `cf inbox read` prints it in `parts`.
     fn in_parts(self, parts: usize) -> String {
         match self {
-            Self::Replaces => format!("Your ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on. {} This is context, not a task: once you have read them all, say in one short line that you have them, and wait for the next message.", read_in_parts(parts)),
-            Self::BeganWithout => format!("This conversation began without your ConsensFlow role instructions: it was started in your window (a /clear, or a new session), and your harness gave it none. {} Follow them from now on. This is context, not a task: once you have read them all, say in one short line that you have them, and wait for the next message.", read_in_parts(parts)),
+            Self::Replaces => format!("Your ConsensFlow role has changed. Follow these instructions in place of the earlier ones. {} This is context, not a task: then acknowledge it in one line and wait for the next message.", read_in_parts(parts)),
+            Self::BeganWithout => format!("This conversation began without your ConsensFlow role. Follow these instructions. {} This is context, not a task: then acknowledge it in one line and wait for the next message.", read_in_parts(parts)),
         }
     }
 }

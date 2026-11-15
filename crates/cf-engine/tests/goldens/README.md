@@ -299,7 +299,7 @@ one with a member in mind." (T-1513, changed by hand on 2026-11-12 with the file
 taken the ban out to pay for the four roles' words, and what was left of it no longer banned a
 brief written for one member (review T-1510). The same task has `cf inbox read` print a role
 past the bound a role is read whole at in parts (`cf_base::role_read::role_parts`): it prints in
-one piece to 142 rows with specs on (166 without), and to 5 and 30 with the most rules for the
+one piece to 141 rows with specs on (166 without), and to 5 and 30 with the most rules for the
 staff, and in parts past that, so no staff is too large to be read.
 
 On 2026-11-13 (T-1609), the 27 member rows gained the shared `cf tell` line
@@ -330,10 +330,25 @@ the paragraph on the home folder and `~/Music` and `~/Pictures` only for a windo
 rows are recorded as a Mac's: `role_instructions_on(…, mac = true)`), and the window's `cf`
 said once in a note at the start of each text (`PATH_ONCE`), every command after it starting
 with `cf`; the twelve chief rows and the four `ownHandsChief` rows and `ownHandsGuide` say each
-rule once and have the same note. The ordinary role now fits in one piece to 171 rows with specs
+rule once. Only non-bare `cf` variants have the note; bare-`cf` fixtures do not. The ordinary role then fit in one piece to 171 rows with specs
 on and 195 without, or 35 and 60 with the most staff rules (a text that says its path once is not
 given it again when it is printed, `CF_STANDS_FOR`).
 
 T-1681 also added to the chief's `cf tell` line that a long turn may not rest for an hour, so a correction to
 the work under way goes as a pause with words (the guide carries it, being the same text); the 12 chief rows and
-the four `ownHandsChief` rows and the guide row were moved by hand for that sentence alone.
+the two own-hands-off `ownHandsChief` rows and the guide row were moved by hand for that sentence alone.
+
+On T-1715, `PATH_ONCE` is off for the next alpha: each command again names its full,
+shell-quoted path. In the 19 non-bare `roleInstructions` rows the path note is removed and
+the command word in each template slot is restored (six chief, four advisor, three each
+worker, reviewer, and designer). The bare-`cf` rows and bare-`cf` guide do not change.
+The two own-hands-on rows also drop the duplicate request boundary from the description;
+the boundary remains in the body. The edits are explicit replacements of the existing
+golden text, not recordings from a test.
+The adapter launch recordings also contain the shorter Codex introduction and child
+sentence and the shorter Windows Devin path instruction; their counts and exact
+scope are in `cf-harness/tests/goldens/README.md`.
+With the shorter role-read framing, the one-read Mac bounds are 138 / 163 / none / 27
+rows for specs with no rules, no specs with no rules, specs with the most rules, and
+no specs with the most rules. The Windows PowerShell fixture measures 135 / 159 /
+none / 23. “None” means that even zero staff rows need more than one part.

@@ -20,6 +20,14 @@ The recorders ran Node's modules and went with them; they are in the flip releas
 A departure is kept on purpose, and the recordings it moves are moved by hand,
 once, with the reason here and in the commit.
 
+- **T-1715 shorter adapter text.** In each of the Darwin and Windows launch
+  recordings, 88 recorded role files use the shorter Codex introduction and 88
+  recorded child configuration files use its shorter identity/board sentence.
+  Three Darwin scenarios that simulate a Windows Devin launch and 106 Windows
+  recorded files use the shorter Windows path instruction. These are literal
+  edits to the file contents in the recordings; the scenarios, launch assembly,
+  paths, and native Codex instructions are unchanged.
+
 - **A Codex input told twice** (2026-10-10, found by the live image-designer
   test). Codex writes the input of a turn twice, in the same turn and with the
   same words: as the model's message (`response_item`, a user's message with an

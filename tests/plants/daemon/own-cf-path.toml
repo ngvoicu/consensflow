@@ -38,8 +38,8 @@
 #
 # T-1681: a text says the path once, in a note at its start (`cf` below stands for this command),
 # and `cf` after it, while `roles::PATH_ONCE` is true; false writes the path in each command, as
-# above. The plants that put the word `cf` in a command therefore also turn that switch off, or
-# nothing would differ.
+# above. The release configuration is off, so a plant that substitutes bare `cf` in a command
+# does not need a second edit to the switch; add that edit back if the switch is turned on.
 #
 # Every name holds `own cf path`, so `npm run plants:daemon -- "own cf path"` runs them all.
 
@@ -74,11 +74,6 @@ file = "skill/core/staff.md"
 find = '    {{cf}} ask "…"                    a question to the chief'
 replace = '    cf ask "…"                    a question to the chief'
 
-[[plant.edit]]
-file = "crates/cf-engine/src/roles.rs"
-find = "pub const PATH_ONCE: bool = true;"
-replace = "pub const PATH_ONCE: bool = false;"
-
 [[plant]]
 name = "own cf path: a member's text tells not to loop over the inbox with the word cf"
 meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
@@ -89,11 +84,6 @@ file = "skill/core/staff.md"
 find = "(no `sleep`, no loop over `{{cf}} inbox`)"
 replace = "(no `sleep`, no loop over `cf inbox`)"
 
-[[plant.edit]]
-file = "crates/cf-engine/src/roles.rs"
-find = "pub const PATH_ONCE: bool = true;"
-replace = "pub const PATH_ONCE: bool = false;"
-
 [[plant]]
 name = "own cf path: the chief's command table says the word cf"
 meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
@@ -103,11 +93,6 @@ runs = ["engine-text-roles"]
 file = "skill/core/chief.md"
 find = '    {{cf}} task done T-3 "…"          finish your own task with its result'
 replace = '    cf task done T-3 "…"          finish your own task with its result'
-
-[[plant.edit]]
-file = "crates/cf-engine/src/roles.rs"
-find = "pub const PATH_ONCE: bool = true;"
-replace = "pub const PATH_ONCE: bool = false;"
 
 [[plant]]
 name = "own cf path: the chief is told to record its own task with the word cf"
@@ -121,11 +106,6 @@ find = """Record what you did with
 replace = """Record what you did with
    `cf task done`"""
 
-[[plant.edit]]
-file = "crates/cf-engine/src/roles.rs"
-find = "pub const PATH_ONCE: bool = true;"
-replace = "pub const PATH_ONCE: bool = false;"
-
 [[plant]]
 name = "own cf path: a chief's text is given the word cf in place of the path"
 meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
@@ -135,11 +115,6 @@ runs = ["engine-text-roles", "engine-text-goldens-roles"]
 file = "crates/cf-engine/src/roles.rs"
 find = '.replace("{{cf}}", cf_in_text(cf));'
 replace = '.replace("{{cf}}", "cf");'
-
-[[plant.edit]]
-file = "crates/cf-engine/src/roles.rs"
-find = "pub const PATH_ONCE: bool = true;"
-replace = "pub const PATH_ONCE: bool = false;"
 
 [[plant]]
 name = "own cf path: a member's text is given the word cf in place of the path"

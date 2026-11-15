@@ -14,6 +14,21 @@ fn own(cf: &CfWord, specs: Option<&ProjectSpecs<'_>>) -> String {
     role_instructions_for(&Env::default(), "chief", &[], cf, specs, true).unwrap()
 }
 
+#[test]
+fn short_text_t1715_own_hands_uses_full_paths() {
+    let path = "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf";
+    let text = own(&CfWord::of_word(path).unwrap(), None);
+    assert!(text.contains(&format!("run `{path} guide`")), "{text}");
+    assert!(!text.contains("below stands for this command"), "{text}");
+}
+
+#[test]
+fn short_text_t1715_own_hands_says_the_request_boundary_once() {
+    let text = own(&CfWord::bare(), None);
+    assert!(text.contains("description: ConsensFlow chief.\n"));
+    assert_eq!(text.matches("explicitly asks").count(), 1, "{text}");
+}
+
 fn specs() -> ProjectSpecs<'static> {
     ProjectSpecs {
         variant: Variant::Core,

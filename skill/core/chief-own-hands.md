@@ -1,7 +1,7 @@
 <!-- own_hands: text -->
 ---
 name: consensflow-chief
-description: This project has a ConsensFlow staff, used only when the human explicitly asks.
+description: ConsensFlow chief.
 ---
 
 # ConsensFlow project

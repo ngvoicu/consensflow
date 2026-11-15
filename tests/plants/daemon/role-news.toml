@@ -187,8 +187,8 @@ runs = ["rn-news-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles/news.rs"
-find = "Plan new work as tasks, not specs; the specs already in `{}` stay."
-replace = "Plan new work as specs; the specs already in `{}` stay."
+find = "Plan new work as tasks, not specs; the specs in `{}` stay."
+replace = "Plan new work as specs; the specs in `{}` stay."
 
 [[plant]]
 name = "role news: a new folder is not said"
@@ -197,8 +197,8 @@ runs = ["rn-news-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles/news.rs"
-find = "            if was.folder != now.folder {"
-replace = "            if false {"
+find = "                section(now)\n            )\n        }"
+replace = "                section(&ProjectSpecs { folder: &was.folder, ..*now })\n            )\n        }"
 
 [[plant]]
 name = "role news: a new variant is not said"
@@ -207,8 +207,8 @@ runs = ["rn-news-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles/news.rs"
-find = "            if was.variant != now.variant {"
-replace = "            if false {"
+find = "                section(now)\n            )\n        }"
+replace = "                section(&ProjectSpecs { variant: was.variant, ..*now })\n            )\n        }"
 
 [[plant]]
 name = "role news: the specs left in the old folder are not said to stay"
@@ -227,8 +227,8 @@ runs = ["rn-news-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles/news.rs"
-find = "const CONTEXT: &str = \"This is context, not a task: say in one short line that you have it, and wait for the next message.\";"
-replace = "const CONTEXT: &str = \"This is a task: do it.\";"
+find = "const CONTEXT: &str =\n    \"This is context, not a task: acknowledge it in one line and wait for the next message.\";"
+replace = "const CONTEXT: &str =\n    \"This is a task: do it.\";"
 
 [[plant]]
 name = "role news: rules written are said changed"

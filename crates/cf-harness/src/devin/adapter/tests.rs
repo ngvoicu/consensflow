@@ -813,3 +813,8 @@ fn a_windows_devin_is_told_how_to_name_files_before_the_projects_rules_for_the_s
         format!("{role}\n\n{WINDOWS_PATHS}\n")
     );
 }
+
+#[test]
+fn short_text_t1715_devin_windows_path() {
+    assert_eq!(WINDOWS_PATHS, "On Windows, give file tools Windows paths (C:\\Users\\…) or project-relative paths, never /c/… paths.");
+}

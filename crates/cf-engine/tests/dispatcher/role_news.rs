@@ -30,8 +30,7 @@ const PLANS_SKILL: &str =
 
 /// What a note that gives a chief its ordinary role again begins with, as every note that says
 /// a role anew does.
-const OPENING: &str =
-    "Your ConsensFlow role instructions have changed since this conversation began.";
+const OPENING: &str = "Your ConsensFlow role has changed.";
 
 /// Rules a human writes.
 const RULES: &str = "- Push to origin only, never to upstream.";
@@ -59,7 +58,7 @@ fn own_hands_switch_is_told_once_each_way_on_every_harness() {
                 "{}",
                 on[0]
             );
-            assert!(on[0].contains("explicit asks only"));
+            assert!(on[0].contains("These instructions replace your earlier ones."));
             assert_eq!(said_to_the_chief(&context.adapter).iter().filter(|line| line.contains("The person turned \"Do with your own hands\" on.")).count(), 1);
             rests(&context, &project);
             passes(&context);
@@ -331,7 +330,7 @@ fn own_hands_going_off_gives_the_ordinary_role_whole_cut_for_cf_inbox_read_on_ev
         assert_eq!(notes.len(), 2, "{harness}");
         let off = &notes[1].body;
         assert!(
-            off.starts_with(OPENING) && off.contains("too long for one message"),
+            off.starts_with(OPENING) && off.contains("Run the command at the end now"),
             "{harness}: {}",
             &off[..300.min(off.len())]
         );
@@ -621,7 +620,7 @@ fn specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_res
             let on = told(&context, chief);
             assert_eq!(on.len(), 1, "{label}: {on:?}");
             assert!(
-                on[0].starts_with("Specs are now on in this project: "),
+                on[0].starts_with("Your instructions now include:"),
                 "{label}: {}",
                 on[0]
             );
@@ -631,10 +630,7 @@ fn specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_res
                 on[0].contains("Your specs and their registry are in `docs/specs`"),
                 "{label}"
             );
-            assert!(
-                on[0].contains("say in one short line that you have it"),
-                "{label}"
-            );
+            assert!(on[0].contains("acknowledge it in one line"), "{label}");
             assert!(
                 !on[0].contains("You are the chief"),
                 "{label}: only the section, not the whole role"
@@ -651,7 +647,7 @@ fn specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_res
             assert!(
                 said_to_the_chief(&context.adapter)
                     .last()
-                    .is_some_and(|last| last.contains("Specs are now on in this project: ")),
+                    .is_some_and(|last| last.contains("Your instructions now include:")),
                 "{label}: it went into the window"
             );
             rests(&context, &project);
@@ -664,14 +660,13 @@ fn specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_res
             let off = told(&context, chief);
             assert_eq!(off.len(), 2, "{label}: {off:?}");
             assert!(
-                off[1].starts_with("Specs are now off in this project: "),
+                off[1].starts_with("Specs are now off."),
                 "{label}: {}",
                 off[1]
             );
             assert!(
-                off[1].contains(
-                    "Plan new work as tasks, not specs; the specs already in `docs/specs` stay."
-                ),
+                off[1]
+                    .contains("Plan new work as tasks, not specs; the specs in `docs/specs` stay."),
                 "{label}: {}",
                 off[1]
             );
@@ -701,12 +696,12 @@ fn specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_res
             let moved = told(&context, chief);
             assert_eq!(moved.len(), 4, "{label}: {moved:?}");
             assert!(
-                moved[3].contains("the specs are now kept in `plans`, not `docs/specs`"),
+                moved[3].contains("Your specs and their registry are in `plans`"),
                 "{label}: {}",
                 moved[3]
             );
             assert!(
-                moved[3].contains("The specs already in `docs/specs` stay where they are."),
+                moved[3].contains("The specs in `docs/specs` stay where they are."),
                 "{label}: {}",
                 moved[3]
             );
@@ -747,11 +742,7 @@ fn a_variant_changed_is_told_with_the_new_skill_and_nothing_of_a_folder() {
     passes(&context);
     let notes = told(&context, chief);
     assert_eq!(notes.len(), 1, "{notes:?}");
-    assert!(
-        notes[0].contains("the Specmint skill is now `specmint-tdd-html`, not `specmint-core`"),
-        "{}",
-        notes[0]
-    );
+    assert!(notes[0].contains("`specmint-tdd-html`"), "{}", notes[0]);
     assert!(!notes[0].contains("are now kept in"), "{}", notes[0]);
     assert!(!notes[0].contains("stay where they are"), "{}", notes[0]);
     assert!(notes[0].contains("specmint-tdd-html"), "{}", notes[0]);
@@ -773,7 +764,7 @@ fn what_the_app_says_for_every_project_reaches_a_chief_whose_project_follows_it_
     let notes = told(&context, chief);
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(
-        notes[0].starts_with("Specs are now on in this project: "),
+        notes[0].starts_with("Your instructions now include:"),
         "{}",
         notes[0]
     );
@@ -877,7 +868,7 @@ fn a_note_that_waits_for_its_turn_is_withdrawn_when_the_setting_changes_again_an
     let notes = told(&context, chief);
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(
-        notes[0].starts_with("Specs are now on in this project: "),
+        notes[0].starts_with("Your instructions now include:"),
         "the chief was told nothing before, so these are the specs turning on: {}",
         notes[0]
     );
@@ -901,7 +892,7 @@ fn the_rules_for_the_staff_written_changed_and_taken_away_are_told_to_the_chief_
     let first = told(&context, chief);
     assert_eq!(first.len(), 1, "{first:?}");
     assert!(
-        first[0].starts_with("The human wrote the rules for your staff while you work."),
+        first[0].starts_with("The human wrote the rules for your staff."),
         "{}",
         first[0]
     );
@@ -909,9 +900,7 @@ fn the_rules_for_the_staff_written_changed_and_taken_away_are_told_to_the_chief_
     // One true thing about the windows: those that open from now on have the rules, one already
     // open keeps its own; the section that follows does not say every member already has them.
     assert!(
-        first[0].contains(
-            "Windows that open from now on are given them; one already open keeps its rules."
-        ),
+        first[0].contains("New windows get them; open windows keep theirs."),
         "{}",
         first[0]
     );
@@ -926,7 +915,7 @@ fn the_rules_for_the_staff_written_changed_and_taken_away_are_told_to_the_chief_
     let second = told(&context, chief);
     assert_eq!(second.len(), 2);
     assert!(
-        second[1].starts_with("The human changed the rules for your staff while you work."),
+        second[1].starts_with("The human changed the rules for your staff."),
         "{}",
         second[1]
     );
@@ -937,14 +926,12 @@ fn the_rules_for_the_staff_written_changed_and_taken_away_are_told_to_the_chief_
     let third = told(&context, chief);
     assert_eq!(third.len(), 3);
     assert!(
-        third[2].starts_with("The human took away the rules for your staff while you work."),
+        third[2].starts_with("The human took away the rules for your staff."),
         "{}",
         third[2]
     );
     assert!(
-        third[2].contains(
-            "Windows that open from now on are given none; one already open keeps its rules."
-        ),
+        third[2].contains("New windows get none; open windows keep theirs."),
         "{}",
         third[2]
     );
@@ -1128,7 +1115,7 @@ fn a_codex_chief_told_of_a_setting_now_is_not_told_the_same_again_when_it_is_res
     passes(&context);
     let notes = told(&context, chief);
     assert_eq!(notes.len(), 1, "{notes:?}");
-    assert!(notes[0].starts_with("Specs are now on in this project: "));
+    assert!(notes[0].starts_with("Your instructions now include:"));
     let with_specs = "instructions for chief with specs: core in .specs at /home/me/.agents/skills/specmint-core/SKILL.md";
     let recorded = {
         let ledger = context.ledger.borrow();
@@ -1171,7 +1158,10 @@ fn a_codex_chief_told_of_a_setting_now_is_not_told_the_same_again_when_it_is_res
     let notes = role_notes(&context, chief);
     let replacements: Vec<&MessageView> = notes
         .iter()
-        .filter(|note| note.body.contains("replace the ones you were given then"))
+        .filter(|note| {
+            note.body
+                .contains("Follow these instructions in place of the earlier ones")
+        })
         .collect();
     assert_eq!(replacements.len(), 1, "{notes:?}");
 }
@@ -1291,7 +1281,10 @@ fn a_staff_that_changed_while_the_chief_ran_is_still_the_resumes_to_say_whole_th
     let notes = role_notes(&context, chief);
     let replacements: Vec<&MessageView> = notes
         .iter()
-        .filter(|note| note.body.contains("replace the ones you were given then"))
+        .filter(|note| {
+            note.body
+                .contains("Follow these instructions in place of the earlier ones")
+        })
         .collect();
     assert_eq!(replacements.len(), 1, "{notes:?}");
     assert!(
@@ -1332,7 +1325,7 @@ fn a_skill_that_could_not_be_put_in_place_is_tried_again_when_the_setting_comes_
     passes(&context);
     let notes = told(&context, chief);
     assert_eq!(notes.len(), 1, "{notes:?}");
-    assert!(notes[0].starts_with("Specs are now on in this project: "));
+    assert!(notes[0].starts_with("Your instructions now include:"));
 }
 
 #[test]
@@ -1359,7 +1352,7 @@ fn a_chief_told_of_specs_now_and_then_cleared_is_given_the_role_with_them_and_no
     assert!(
         notes[1]
             .body
-            .contains("began without your ConsensFlow role instructions"),
+            .contains("began without your ConsensFlow role"),
         "{}",
         notes[1].body
     );
@@ -1402,7 +1395,7 @@ fn a_clear_that_comes_with_a_change_one_look_has_found_is_given_the_role_with_it
     assert!(
         notes[0]
             .body
-            .contains("began without your ConsensFlow role instructions")
+            .contains("began without your ConsensFlow role")
             && notes[0].body.contains("with specs: core in .specs"),
         "{}",
         notes[0].body
