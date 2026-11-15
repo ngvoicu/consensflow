@@ -201,8 +201,8 @@ fn the_turn_a_reopened_window_replays_is_no_work_however_it_is_stamped() {
     assert_eq!(both(&staged, &mut reader, "replayed"), settled());
 }
 
-#[test]
-fn a_turn_an_escape_ended_is_over_though_the_command_it_left_goes_on_saying_it_runs() {
+#[tokio::test]
+async fn a_turn_an_escape_ended_is_over_though_the_command_it_left_goes_on_saying_it_runs() {
     let staged = Staged::new();
     staged.chain(&[user("u-1", Some(json!("request-1")))]);
     let mut reader = staged.reader();
@@ -225,6 +225,10 @@ fn a_turn_an_escape_ended_is_over_though_the_command_it_left_goes_on_saying_it_r
     staged.wire("launch-1", &wire);
     let over = ("settled".to_owned(), false, false);
     assert_eq!(both(&staged, &mut reader, "cancelled"), over);
+    // The cancel is an abort, which nothing says a quit did not write (T-1707): the turn is
+    // over and not known to be at rest.
+    assert!(aborted(&staged), "cancelled");
+    assert_eq!(left(&staged).await, None);
     // The command the call began goes on saying it runs, stamped or not.
     wire.extend([
         running("in_progress"),
@@ -232,6 +236,19 @@ fn a_turn_an_escape_ended_is_over_though_the_command_it_left_goes_on_saying_it_r
     ]);
     staged.wire("launch-1", &wire);
     assert_eq!(both(&staged, &mut reader, "the command runs on"), over);
+    assert!(aborted(&staged), "the command runs on");
+}
+
+#[tokio::test]
+async fn a_turn_that_completed_failed_or_ran_out_of_quota_is_no_abort() {
+    for cause in ["complete", "error", "quota_exhausted"] {
+        let staged = Staged::new();
+        staged.chain(&[user("u-1", Some(json!("request-1")))]);
+        staged.node(Some("n-2"), Some("n-1"), &reply("a-1", json!("All done")));
+        staged.head("n-2");
+        staged.wire("launch-1", &ended(cause));
+        assert!(!aborted(&staged), "{cause}");
+    }
 }
 
 #[test]

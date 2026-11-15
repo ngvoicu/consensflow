@@ -83,6 +83,8 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
         )
     });
     record.failed = failed;
+    // A cancel is a turn over as an Escape's is, and nothing says whether a quit wrote it (T-1707).
+    record.aborted = outcome.is_some_and(|outcome| outcome.cause == Cause::Cancelled);
     record.failure = outcome
         .filter(|_| failed)
         .and_then(|outcome| outcome.error.clone());

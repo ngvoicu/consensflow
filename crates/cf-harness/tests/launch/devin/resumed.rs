@@ -50,6 +50,7 @@ fn record(items: Vec<Item>, settlement: Settlement, in_flight: bool) -> Record {
         failure_kind: None,
         last_call: None,
         took_back: false,
+        aborted: false,
         quota: None,
         model_moved: None,
         model_drift: None,

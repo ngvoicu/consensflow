@@ -791,3 +791,39 @@ fn a_turn_on_a_model_the_account_lacks_fails_in_the_providers_words() {
     assert_eq!(record.failure.as_deref(), Some(gone));
     assert!(crate::muse::models::gone(gone, "muse-gone-9"));
 }
+
+/// What a Resume reads of the turn a record ends in, with no window open.
+async fn left_by(record: &Record) -> Option<crate::contract::TurnLeft> {
+    use crate::contract::{tests::Says, Records};
+    Says(Reading::Known(record.clone()))
+        .turn_cut(cf_proto::agents::Harness::Muse, "a-session")
+        .await
+}
+
+#[tokio::test]
+async fn a_run_cancelled_after_its_answer_is_not_known_to_be_at_rest_and_the_others_read_as_before()
+{
+    use crate::contract::TurnLeft;
+    // T-1707: a quit and an Escape end the run the same way, and the answer it had
+    // committed is the last word.
+    let cancelled = read("clear-after");
+    assert_eq!(cancelled.settlement, Settlement::Settled);
+    assert!(cancelled.aborted);
+    assert_eq!(
+        said(&cancelled).last().map(|(role, _)| *role),
+        Some(Role::Assistant)
+    );
+    assert_eq!(left_by(&cancelled).await, None);
+    // A run that completed, and one killed at rest, are at rest.
+    for name in ["plain", "at-rest-killed"] {
+        let rest = read(name);
+        assert!(!rest.aborted, "{name}");
+        assert_eq!(left_by(&rest).await, Some(TurnLeft::AtRest), "{name}");
+    }
+    // A run with no end is cut; a quit before a word is no turn at rest.
+    assert!(matches!(
+        left_by(&read("cut")).await,
+        Some(TurnLeft::Cut(_))
+    ));
+    assert_eq!(left_by(&read("quit-mid-turn")).await, None);
+}

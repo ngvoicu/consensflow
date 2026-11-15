@@ -68,6 +68,20 @@ impl FakeRecords {
     }
 }
 
+/// What the engine reads of the turn `session`'s record ends in with no window open: an abort
+/// goes through the harness contract's own rule, so a test of it fails where that rule fails.
+fn cut_through(fake: &FakeAdapter, session: &str) -> Option<TurnLeft> {
+    if fake.aborted_of(session) {
+        if let Reading::Known(mut record) = record_of(fake, session) {
+            record.aborted = true;
+            record.in_flight = false;
+            record.settlement = Settlement::Settled;
+            return cf_harness::contract::turn_left(&Reading::Known(record));
+        }
+    }
+    fake.cut_of(session)
+}
+
 /// What the record of `session` holds: the latest window's on it, its turn
 /// in flight where the agent was not answered.
 fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
@@ -82,6 +96,7 @@ fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
             failure_kind: None,
             last_call: None,
             took_back: false,
+            aborted: false,
             model_moved: None,
             model_drift: None,
             quota: None,
@@ -176,10 +191,10 @@ impl Records for FakeRecords {
         };
         let wrapped = fake.cut_holds.wrap(&json!([session]));
         // Read when asked, or once the test lets a held ask go.
-        let early = (!matches!(wrapped, Wrapped::Held { .. })).then(|| fake.cut_of(session));
+        let early = (!matches!(wrapped, Wrapped::Held { .. })).then(|| cut_through(fake, session));
         Box::pin(async move {
             wrapped.before().await;
-            let cut = early.unwrap_or_else(|| fake.cut_of(session));
+            let cut = early.unwrap_or_else(|| cut_through(fake, session));
             wrapped.after().await;
             cut
         })

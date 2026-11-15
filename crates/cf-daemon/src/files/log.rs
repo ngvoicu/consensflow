@@ -78,6 +78,10 @@ impl cf_engine::seams::Log for Log {
         Log::error(self, message, Some(cause));
     }
 
+    fn info(&self, message: &str) {
+        Log::info(self, message);
+    }
+
     fn warn(&self, message: &str) {
         Log::warn(self, message, None);
     }

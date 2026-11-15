@@ -861,6 +861,7 @@ impl Answer for Rollout {
             .collect();
         record.in_flight = in_flight;
         record.failed = matches!(end, Some((_, End::Failed { .. })));
+        record.aborted = matches!(end, Some((_, End::Cancelled)));
         if let Some((_, End::Failed { said, kind, .. })) = end {
             record.failure.clone_from(said);
             record.failure_kind.clone_from(kind);
