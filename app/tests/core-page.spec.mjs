@@ -1509,6 +1509,81 @@ test("opens a session's terminal from its lane in an open group, and keeps it sh
   expect(await calls(page, 'session.hide')).toEqual([])
 })
 
+test("says folded the work that goes on in the background, a session's too, and each task paused for someone to resume", async ({
+  page,
+}) => {
+  // A worker whose turn ended with a server that never ends (T-12, `heldModel`), and a session of
+  // it whose agent runs on (T-21): both windows rest, both tasks are Working.
+  const data = heldModel()
+  data.openGroups = false
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  data.boards[1].lanes.push({
+    participant: session(20, zeusLane.participant, 'amber-pine'),
+    tasks: [task(21, 'Watch the build', 'working', 'chief', 'zeus-amber-pine', 3)],
+    activity: { state: 'idle' },
+    held: { task: 21, jobs: 0, agents: 1 },
+    pane: { id: 'p1-zeus-amber-pine', generation: 9 },
+  })
+  // Paused when its window closed, a task waits for the chief or the human to resume it; one
+  // held for its member's quota goes on by itself, as the member's "out of quota" says.
+  zeusLane.tasks.push(task(13, 'Index the docs', 'paused', 'chief', 'zeus', 6))
+  const diana = data.boards[1].lanes.find((l) => l.participant.handle === 'diana')
+  diana.tasks.push(task(14, 'Lint the docs', 'paused', 'chief', 'diana', 7, { heldUntil: at(-90) }))
+  await open(page, data)
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([
+      {
+        group: 'Workers',
+        count: '2 members',
+        open: false,
+        marks: [
+          '2 waiting on background work',
+          '1 paused, to resume',
+          '1 done, to decide',
+          '1 failed',
+          '1 out of quota',
+        ],
+      },
+    ])
+  // Opened, it is what the rows and cards say.
+  await page.getByRole('button', { name: 'Workers 2 members' }).click()
+  await expect(page.locator('tr[data-handle="zeus"] .row-status')).toHaveText(
+    'Waiting on a background job',
+  )
+  await expect(page.locator('button.card[data-task="12"]')).toHaveAttribute(
+    'data-pending',
+    'background',
+  )
+  await expect(page.locator('button.card[data-task="13"]')).toHaveAttribute('data-state', 'paused')
+})
+
+test('names a group that holds only sessions of a role their member no longer has by its sessions', async ({
+  page,
+}) => {
+  const data = model()
+  data.openGroups = false
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  data.boards[1].lanes.push({
+    participant: session(20, zeusLane.participant, 'amber-pine', 'reviewer'),
+    tasks: [task(21, 'Review the lexer', 'done', 'chief', 'zeus-amber-pine', 3)],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([
+      {
+        group: 'Workers',
+        count: '2 members',
+        open: false,
+        marks: ['1 waiting for you', '1 done, to decide', '1 failed', '1 out of quota'],
+      },
+      { group: 'Reviewers', count: '1 session', open: false, marks: ['1 done, to decide'] },
+    ])
+})
+
 test('gives a member with two roles a row per role, each with its own sessions and cards', async ({
   page,
 }) => {
@@ -2693,6 +2768,72 @@ test('says on the card of a task that goes on in the background what it waits on
   // A card of the same lane that waits on nothing says nothing of it.
   await expect(page.locator('button.card[data-task="2"] .card-held')).toHaveCount(0)
   await expect(page.locator('button.card[data-task="2"]')).not.toHaveAttribute('data-pending')
+})
+
+test("keeps a program's words readable in every ANSI colour and the window's own, on every ANSI background and the window's own", async ({
+  page,
+}) => {
+  await page.route(`${ui.origin}/terminal-colours`, (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/page.css"><link rel="stylesheet" href="/vendor/xterm.css"><body><div id="host" style="width:1400px;height:500px"></div></body>',
+    }),
+  )
+  await page.goto(`${ui.origin}/terminal-colours`)
+  const pairs = await page.evaluate(async () => {
+    const { XtermEmulator } = await import('/term.js')
+    const terminal = new XtermEmulator(document.getElementById('host'), { onLink: () => {} })
+    terminal.resizeObserver.disconnect()
+    clearTimeout(terminal.settling)
+    terminal.terminal.resize(140, 20)
+    // The window's own background (49) and each one a program may ask for (ESC[40m to 47m,
+    // 100m to 107m), a row each, with the window's own words (39) and each of the sixteen colours
+    // as words on it.
+    const eight = (first) => Array.from({ length: 8 }, (_, colour) => `${first}${colour}`)
+    const words = ['39', ...eight(3), ...eight(9)]
+    const grounds = ['49', ...eight(4), ...eight(10)]
+    const printed = grounds
+      .map((ground) => words.map((word) => `\x1b[${word};${ground}mAb\x1b[0m `).join(''))
+      .join('\r\n')
+    await new Promise((done) => terminal.terminal.write(printed, done))
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+    const rgb = (css) =>
+      css
+        .match(/[\d.]+/g)
+        .slice(0, 3)
+        .map(Number)
+    const light = (colour) => {
+      const [r, g, b] = colour.map((value) => {
+        const share = value / 255
+        return share <= 0.03928 ? share / 12.92 : ((share + 0.055) / 1.055) ** 2.4
+      })
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+    const ratio = (a, b) => {
+      const [high, low] = [light(a), light(b)].sort((x, y) => y - x)
+      return (high + 0.05) / (low + 0.05)
+    }
+    // A cell xterm gives no background shows what is under it: the nearest element painted.
+    const ground = (element) => {
+      for (let at = element; at; at = at.parentElement) {
+        const colour = getComputedStyle(at).backgroundColor
+        if (!/^rgba\(.*,\s*0\)$/.test(colour) && colour !== 'transparent') return rgb(colour)
+      }
+      return [255, 255, 255]
+    }
+    // The window's words on its own ground share a span with the space after them.
+    const cells = [...document.querySelectorAll('#host .xterm-rows span')].filter(
+      (span) => span.textContent.trim() === 'Ab',
+    )
+    return cells.map((span, at) => ({
+      word: words[at % words.length],
+      ground: grounds[Math.floor(at / words.length)],
+      ratio: ratio(rgb(getComputedStyle(span).color), ground(span)),
+    }))
+  })
+  expect(pairs).toHaveLength(17 * 17)
+  // WCAG AA for small words, 4.5 to 1, on every one of them.
+  expect(pairs.filter((pair) => pair.ratio < 4.5)).toEqual([])
 })
 
 for (const [held, words] of [

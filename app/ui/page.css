@@ -30,7 +30,9 @@
   --ui: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
   --mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
   /* The terminals' colours (term.js reads them): their words keep the system's monospace,
-     whose glyphs a program's drawing needs, on the well of their card. */
+     whose glyphs a program's drawing needs, on the well of their card. The sixteen are bright,
+     to read as words on the well; a program's words on one of them as a background are made
+     readable by xterm (term.js, `minimumContrastRatio`). */
   --term-background: #0e0e11;
   --term-foreground: #e4e4e7;
   --term-cursor: #c4b5fd;
@@ -486,7 +488,8 @@ button:disabled { opacity: .45; cursor: default; }
 .group-mark::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--mark); }
 .group-mark[data-mark="working"] { --mark: var(--violet); --mark-ground: rgba(167, 139, 250, .12); }
 .group-mark[data-mark="working"]::before { box-shadow: 0 0 8px var(--glow); }
-.group-mark:is([data-mark="waiting"], [data-mark="question"]) { --mark: var(--amber); --mark-ground: rgba(252, 211, 77, .1); }
+.group-mark:is([data-mark="held"], [data-mark="waiting"], [data-mark="question"]) { --mark: var(--amber); --mark-ground: rgba(252, 211, 77, .1); }
+.group-mark[data-mark="paused"] { --mark: var(--sky); --mark-ground: rgba(147, 197, 253, .1); }
 .group-mark[data-mark="done"] { --mark: var(--ok); --mark-ground: rgba(110, 231, 183, .1); }
 .group-mark:is([data-mark="failed"], [data-mark="out"], [data-mark="attention"]) { --mark: var(--danger); --mark-ground: rgba(248, 113, 113, .12); }
 .kanban tbody td, .kanban tbody th {
@@ -1336,9 +1339,9 @@ dialog.history-viewer {
     --history-grey: #f4f4f5;
     --history-compaction: #f5f3ff;
     --history-path: #4338ca;
-    --history-range: #b45309;
-    --history-heading: #b45309;
-    --history-marker: #c026d3;
+    --history-range: #92400e;
+    --history-heading: #92400e;
+    --history-marker: #a21caf;
     --history-code: #6d28d9;
     --history-removed: #b91c1c;
     --history-added: #047857;

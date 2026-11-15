@@ -309,8 +309,10 @@ function keepGroups(projectId, open) {
 /** What a group's head says folded, in the order it says it, and the words for each. */
 const MARKS = [
   ['working', (count) => `${count} working`],
+  ['held', (count) => `${count} waiting on background work`],
   ['waiting', (count) => `${count} waiting for you`],
   ['question', (count) => `${plural(count, 'question')} waiting`],
+  ['paused', (count) => `${count} paused, to resume`],
   ['done', (count) => `${count} done, to decide`],
   ['failed', (count) => `${count} failed`],
   ['out', (count) => `${count} out of quota`],
@@ -319,17 +321,22 @@ const MARKS = [
 
 /**
  * What a folded group holds that the human would look for, so nothing that needs
- * them hides in it: its windows at work and those waiting for them, its tasks
- * waiting on a question, done and waiting for a decision, or failed, its members out
- * of quota, and its rows whose status asks for the human (a member to edit, a window
- * that did not stop, a message held by what they typed). Each with how many; none
- * that is none.
+ * them hides in it: its windows at work, those whose task goes on in the background
+ * while they rest (a server that never ends waits for a Finish), and those waiting for
+ * them; its tasks waiting on a question, paused for the chief or the human to resume
+ * (a window that closed, a pause, a window a Resume could not bring back: one held
+ * for a quota goes on by itself, and its member's "out of quota" says it), done and
+ * waiting for a decision, or failed; its members out of quota, and its rows whose
+ * status asks for the human (a member to edit, a window that did not stop, a message
+ * held by what they typed). Each with how many; none that is none.
  */
 function groupMarks(rows, board, now) {
   const lanes = rows.flatMap((row) => [row, ...(row.sessions ?? [])])
   const tasks = rows.flatMap((row) => rowCards(row, board, (row.sessions?.length ?? 0) > 0))
-  const tasksIn = (state) =>
-    new Set(tasks.filter((task) => task.state === state).map((task) => task.number)).size
+  const tasksIn = (state, which = () => true) =>
+    new Set(tasks.filter((task) => task.state === state && which(task)).map((task) => task.number))
+      .size
+  const statuses = lanes.map((lane) => laneStatus(lane, board, now)?.[0])
   const out = new Set(
     lanes
       .filter((lane) => outOfQuota(lane.participant, now))
@@ -340,14 +347,15 @@ function groupMarks(rows, board, now) {
       .length
   const counts = {
     working: windows('working'),
+    held: statuses.filter((status) => status === 'held').length,
     waiting: windows('waiting'),
     question: tasksIn('waiting'),
+    paused: tasksIn('paused', (task) => !task.heldUntil),
     done: tasksIn('done'),
     failed: tasksIn('failed'),
     out: out.size,
-    attention: lanes.filter((lane) =>
-      ['missing', 'unstopped', 'holding'].includes(laneStatus(lane, board, now)?.[0]),
-    ).length,
+    attention: statuses.filter((status) => ['missing', 'unstopped', 'holding'].includes(status))
+      .length,
   }
   return MARKS.filter(([mark]) => counts[mark] > 0).map(([mark, words]) => [
     mark,
@@ -1077,6 +1085,8 @@ export class BoardView {
     const members = new Set(
       rows.filter((row) => row.participant.member === null).map((row) => row.participant.handle),
     ).size
+    // A group of sessions alone, of a role their member no longer has, counts its sessions.
+    const count = members > 0 ? plural(members, 'member') : plural(rows.length, 'session')
     const toggle = button('', 'fold-group', () => {
       const shown = this.#groupsOpen(this.#board.project.id)
       if (!shown.delete(role)) shown.add(role)
@@ -1088,7 +1098,7 @@ export class BoardView {
       icon(ICONS.fold),
       element('span', 'group-name', groupName(role)),
       ' ',
-      element('span', 'group-count', plural(members, 'member')),
+      element('span', 'group-count', count),
     )
     line.append(toggle)
     if (!open) {

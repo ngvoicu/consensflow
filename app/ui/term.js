@@ -149,6 +149,11 @@ export class XtermEmulator {
       fontSize: 12,
       lineHeight: 1.16,
       linkHandler: { ...link, allowNonHttpProtocols: false },
+      // A program's words, in any colour on any background it asks for (ESC[41m and the
+      // like), drawn at WCAG AA's 4.5 to 1 at least: the palette is bright for words on the
+      // well, which no colour can be and still be dark enough under light words. xterm moves
+      // the words' colour lighter or darker until they read; dim words, by its own rule, at half.
+      minimumContrastRatio: 4.5,
       scrollback: 10_000,
       theme: theme(),
     })
