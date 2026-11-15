@@ -36,11 +36,11 @@ exit "${CF_LIST_STATUS:-0}""#;
 const SCP: &str = r#"printf 'scp\t%s\t%s\n' "$2" "$3" >> "$CF_LOG"
 case "$2" in
   zeewin:*)
-    rel=${2#zeewin:consensflow-build/evals/reports/}
+    rel=${2#zeewin:consensflow-build/app/src-tauri/target/live-matrix/}
     if grep -qx "$rel" "$CF_FAIL" 2>/dev/null; then echo "scp: no such file" >&2; exit 4; fi
     cp "$CF_REMOTE/$rel" "$3" ;;
   zeewin2:*)
-    cp "$CF_REMOTE/${2#zeewin2:consensflow-build/evals/reports/}" "$3" ;;
+    cp "$CF_REMOTE/${2#zeewin2:consensflow-build/app/src-tauri/target/live-matrix/}" "$3" ;;
   *) cp "$2" "$CF_TARBALL" ;;
 esac"#;
 
@@ -164,7 +164,7 @@ impl Rig {
         fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
-    /// What the machine holds: the file `name` (from `evals/reports`, with `/`) and its text.
+    /// What the machine holds: the file `name` (from `app/src-tauri/target/live-matrix`, with `/`) and its text.
     fn remote(&self, name: &str, text: &str) {
         let path = self.bin.path().join("remote").join(name);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -180,13 +180,23 @@ impl Rig {
         fs::write(self.bin.path().join("listing"), text).unwrap();
     }
 
-    /// The file `name` of this checkout's `evals/reports`, if it has it.
+    /// The file `name` of this checkout's `app/src-tauri/target/live-matrix`, if it has it.
     fn here(&self, name: &str) -> Option<String> {
-        fs::read_to_string(self.checkout.path().join("evals/reports").join(name)).ok()
+        fs::read_to_string(
+            self.checkout
+                .path()
+                .join("app/src-tauri/target/live-matrix")
+                .join(name),
+        )
+        .ok()
     }
 
     fn put_here(&self, name: &str, text: &str) {
-        let path = self.checkout.path().join("evals/reports").join(name);
+        let path = self
+            .checkout
+            .path()
+            .join("app/src-tauri/target/live-matrix")
+            .join(name);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, text).unwrap();
     }
@@ -271,7 +281,7 @@ fn the_reports_this_checkout_lacks_are_brought_back_and_the_ones_it_has_are_kept
     );
     assert_eq!(
         said,
-        "windows: brought back 2 of the machine's reports into evals/reports: \
+        "windows: brought back 2 of the machine's reports into app/src-tauri/target/live-matrix: \
          long/2026-10-20T12-00-00-000Z-long-ledger.db, 2026-10-20T13-00-00-000Z-six+decisions-1.json\n"
     );
     // One ssh to list, then one scp for each file that was not here, from the folder of the copy.
@@ -280,12 +290,12 @@ fn the_reports_this_checkout_lacks_are_brought_back_and_the_ones_it_has_are_kept
     assert_eq!(
         copied(&log),
         [
-            "zeewin:consensflow-build/evals/reports/long/2026-10-20T12-00-00-000Z-long-ledger.db",
-            "zeewin:consensflow-build/evals/reports/2026-10-20T13-00-00-000Z-six+decisions-1.json",
+            "zeewin:consensflow-build/app/src-tauri/target/live-matrix/long/2026-10-20T12-00-00-000Z-long-ledger.db",
+            "zeewin:consensflow-build/app/src-tauri/target/live-matrix/2026-10-20T13-00-00-000Z-six+decisions-1.json",
         ]
     );
     // No copy under a name of its own is left.
-    let left: Vec<PathBuf> = walk(&rig.checkout.path().join("evals"));
+    let left: Vec<PathBuf> = walk(&rig.checkout.path().join("app/src-tauri/target/live-matrix"));
     assert!(
         left.iter()
             .all(|file| file.extension().is_none_or(|e| e != "part")),
@@ -331,16 +341,16 @@ fn zeewin2s_reports_are_listed_and_copied_from_its_profile_as_zeewins_are() {
         scp[..2],
         [
             "scp",
-            "zeewin2:consensflow-build/evals/reports/2026-10-25T13-00-00-000Z-round-trip-1.json"
+            "zeewin2:consensflow-build/app/src-tauri/target/live-matrix/2026-10-25T13-00-00-000Z-round-trip-1.json"
         ]
     );
 }
 
 #[test]
-fn what_is_here_already_or_the_matrix_writes_is_not_asked_for_and_nothing_is_said_of_it() {
+fn what_is_here_already_is_not_asked_for_and_nothing_is_said_of_it() {
     let rig = Rig::new();
     rig.put_here("long/a.md", "mine");
-    rig.lists(&[("long/a.md", 4), ("windows/2026-10-20T10-00-00/run.log", 9)]);
+    rig.lists(&[("long/a.md", 4)]);
     let (ended, said) = rig.bring();
     ended.unwrap();
     assert_eq!(said, "");
@@ -388,7 +398,7 @@ fn a_name_that_is_no_reports_is_said_and_is_never_copied_or_made_a_path() {
     assert_eq!(rig.here("long/ok.md").as_deref(), Some("fine"));
     assert_eq!(copied(&rig.log()).len(), 1, "{:?}", rig.log());
     assert!(!rig.checkout.path().join("outside.json").exists());
-    assert!(!rig.checkout.path().join("evals/outside.json").exists());
+    assert!(!rig.checkout.path().join(".runs/outside.json").exists());
 }
 
 #[test]
@@ -418,7 +428,7 @@ fn a_file_that_cannot_be_copied_is_said_and_the_others_are_still_brought() {
     assert_eq!(
         said,
         "windows: the report long/b.md could not be brought back: scp ended with status 4: scp: no such file\n\
-         windows: brought back 2 of the machine's reports into evals/reports: long/a.md, long/c.md\n"
+         windows: brought back 2 of the machine's reports into app/src-tauri/target/live-matrix: long/a.md, long/c.md\n"
     );
     assert_eq!(rig.here("long/a.md").as_deref(), Some("aaa"));
     assert_eq!(rig.here("long/b.md"), None);
@@ -447,12 +457,12 @@ fn many_files_are_counted_after_the_first_few() {
     let names: Vec<String> = (1..=6).map(|n| format!("long/{n}.md")).collect();
     assert_eq!(
         told(&names, false).unwrap(),
-        "brought back 6 of the machine's reports into evals/reports: \
+        "brought back 6 of the machine's reports into app/src-tauri/target/live-matrix: \
          long/1.md, long/2.md, long/3.md, long/4.md and 2 more"
     );
     assert!(told(&names, true)
         .unwrap()
-        .contains("into the main checkout's evals/reports: long/1.md"));
+        .contains("into the main checkout's app/src-tauri/target/live-matrix: long/1.md"));
     assert_eq!(told(&[], false), None);
 }
 
@@ -468,6 +478,10 @@ fn the_machines_listing_is_read_for_its_names_and_sizes_and_nothing_else() {
             Listed {
                 name: "long/a.md".into(),
                 size: 12
+            },
+            Listed {
+                name: "windows/x/run.log".into(),
+                size: 4
             },
             Listed {
                 name: "2026.json".into(),
@@ -518,7 +532,7 @@ fn a_run_that_ended_there_with_a_status_brings_its_reports_back_and_answers_the_
     );
     assert_eq!(
         String::from_utf8(err).unwrap(),
-        "windows: brought back 1 of the machine's reports into evals/reports: long/run.md\n"
+        "windows: brought back 1 of the machine's reports into app/src-tauri/target/live-matrix: long/run.md\n"
     );
     // The tree went, the run was asked, then the reports: listed, and the one copied.
     let log = rig.log();
@@ -532,7 +546,9 @@ fn a_run_that_ended_there_with_a_status_brings_its_reports_back_and_answers_the_
     );
     assert_eq!(&log[1..3], ["ssh\t1", "ssh\t2"]);
     assert!(
-        log[3].starts_with("scp\tzeewin:consensflow-build/evals/reports/long/run.md\t"),
+        log[3].starts_with(
+            "scp\tzeewin:consensflow-build/app/src-tauri/target/live-matrix/long/run.md\t"
+        ),
         "{log:?}"
     );
 }
@@ -603,38 +619,6 @@ fn a_command_that_ended_with_75_after_the_machine_took_it_brings_its_reports_bac
     assert_eq!(rig.here("long/run.md").as_deref(), Some("report"));
 }
 
-/// The matrix runs its evals through the same machine, and the eval's own report is one of what
-/// stays there: it is brought back after each run too.
-#[test]
-fn the_matrixs_machine_brings_the_reports_back_too() {
-    use crate::windows::matrix::{Reached, Remote};
-
-    let rig = Rig::with_tree().runs_ending_with(0);
-    rig.remote("2026-10-21T10-00-00-000Z-simple-fix-1.json", "{}");
-    rig.lists(&[("2026-10-21T10-00-00-000Z-simple-fix-1.json", 2)]);
-    let interrupt = Interrupt::default();
-    let zeewin = Machine::at("zeewin");
-    let mut machine = Reached {
-        context: &rig.context,
-        machine: &zeewin,
-        interrupt: &interrupt,
-    };
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    let ended = machine.run(
-        &rig.options(),
-        &mut Console {
-            out: &mut out,
-            err: &mut err,
-        },
-    );
-    assert_eq!(ended.unwrap(), Outcome::Exited(0));
-    assert_eq!(
-        rig.here("2026-10-21T10-00-00-000Z-simple-fix-1.json")
-            .as_deref(),
-        Some("{}")
-    );
-}
-
 #[test]
 fn a_run_that_could_not_be_sent_brings_nothing_back_and_asks_nothing() {
     let rig = Rig::with_tree().runs_ending_with(0);
@@ -689,7 +673,7 @@ fn a_run_the_machine_was_refused_asks_nothing_of_it_after_the_refusal() {
 
 /// A worker's runs go from its tree, and the tree goes with its task: what lived only there would
 /// go with it. The reports come into the main checkout's folder, the parent of the repository's
-/// common git folder, which the tree's own `evals/reports` is not (T-194, P3-3).
+/// common git folder, which the tree's own `app/src-tauri/target/live-matrix` is not (T-194, P3-3).
 #[test]
 fn the_reports_come_into_the_main_checkouts_folder_when_the_run_goes_from_a_tree_linked_to_it() {
     let rig = Rig::in_linked_tree();
@@ -699,12 +683,12 @@ fn the_reports_come_into_the_main_checkouts_folder_when_the_run_goes_from_a_tree
     ended.unwrap();
     assert_eq!(rig.here("long/run.md").as_deref(), Some("report"));
     assert!(
-        !rig.context.root.join("evals").exists(),
+        !rig.context.root.join(".runs").exists(),
         "nothing is kept in the tree"
     );
     assert_eq!(
         said,
-        "windows: brought back 1 of the machine's reports into the main checkout's evals/reports: long/run.md\n"
+        "windows: brought back 1 of the machine's reports into the main checkout's app/src-tauri/target/live-matrix: long/run.md\n"
     );
     // And what the main checkout has already is not asked for again.
     let (ended, said) = rig.bring();
@@ -781,7 +765,7 @@ fn a_copy_whose_connection_went_silent_is_said_and_the_others_are_not_tried() {
     ended.unwrap();
     assert_eq!(
         copied(&rig.log()),
-        ["zeewin:consensflow-build/evals/reports/a.md"]
+        ["zeewin:consensflow-build/app/src-tauri/target/live-matrix/a.md"]
     );
     assert_eq!(
         said,

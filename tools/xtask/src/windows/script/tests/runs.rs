@@ -4,7 +4,7 @@
 //! tree (untracked, so they go over with the tree's files, and a detached job on the machine
 //! writes there too), and the sweep of T-1328's run took nine of T-1329's, `.runs/t1329/*.log`,
 //! while T-1329 was still working (zeewin2, 2026-11-08). The copy cannot tell which tree wrote a
-//! file that is no tree's, so `.runs` is kept whole, as `evals/reports` is, and cleared by age.
+//! file that is no tree's, so `.runs` is kept whole and cleared by age.
 
 use std::fs;
 use std::path::Path;

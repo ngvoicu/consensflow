@@ -31,13 +31,7 @@
 //!   times of CI's runs against the limits `ci.yml` gives them;
 //! - the releases: `release` (`release alpha`, `release promote` of a tested
 //!   alpha to its plain version, and `release verify` of a published one);
-//! - what spends real quota and is no part of the gate: `live` (one command for
-//!   every live test of `crates/cf-e2e`, whatever its name) and `evals` (`eval`,
-//!   `eval summary`, `eval long` and `watch`, which hand their words to
-//!   `crates/cf-evals`);
-//! - the Windows machine: `windows` (`windows` and `windows-matrix`: a command,
-//!   and the matrix of the chief evals, run there over ssh), with `stops`, what
-//!   ends a run early, which it shares with `plants`;
+//! - the Windows runner: `windows`, and `stops`, which it shares with `plants`;
 //! - `scrub_transcript` and `scrub_muse_session`: the fixtures that are made of a
 //!   Claude transcript and of a Muse session log;
 //! - `specmint`: the Specmint skills vendored in `skill/specmint`, refreshed from
@@ -56,7 +50,6 @@ mod clippy_windows;
 pub mod context;
 mod departures;
 mod dispatch;
-mod evals;
 mod identity;
 mod live;
 mod plants;

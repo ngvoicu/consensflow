@@ -28,9 +28,8 @@ use crate::{Outcome, FAKE_AGENT};
 #[cfg(unix)]
 mod links;
 
-/// A config of the kit's that keeps its findings for the report (an eval's): a folder of the case's own,
-/// and nothing to say when the run ends. The guard leaves the Keychain to such a config, so a rig
-/// that seats a Claude Code on it does not depend on what other processes do to the machine's Keychain.
+/// A config folder of the case's own, with nothing to say when the run ends. The launcher guard
+/// is seated even when the case gives the rig its own config.
 #[derive(Debug)]
 pub(crate) struct Folder(pub(crate) PathBuf);
 
@@ -45,10 +44,6 @@ impl cf_e2e::rig::ClaudeConfig for Folder {
 
     fn finish(&self) -> cf_e2e::Result {
         Ok(())
-    }
-
-    fn keeps_its_findings(&self) -> bool {
-        true
     }
 }
 
@@ -262,21 +257,5 @@ fn a_run_whose_claude_code_left_an_item_in_the_keychain_fails_the_rig_that_ends_
     );
     // The launcher is as it was: only the Keychain is said.
     assert!(!failed.contains("LAUNCHER"), "{failed}");
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-#[test]
-fn a_claude_whose_config_keeps_its_findings_is_not_listed_by_the_guard_and_its_rig_ignores_another_processs_item(
-) -> Outcome {
-    // An eval's config names the item of its own folder, and keeps what it finds for its report:
-    // a rig that failed as well, for an item some other process made (the Keychain is the whole
-    // machine's), would end an eval with `closed?` and cost it the report (T-1044, T-1102).
-    let owner = Owner::new()?;
-    let rig = Rig::start(live::rig(&[owner.claude()], FAKE_AGENT))?;
-    // An item made for a folder that is none of the run's.
-    let other = tempfile::tempdir()?;
-    let _item = Item::make(other.path())?;
-    rig.close()?;
     Ok(())
 }

@@ -63,13 +63,11 @@
 # - the windows a pane host still has open when its peer ends its input are ended with it, and it
 #   tells the exit of each, with what the window left running, before it closes its own output
 #   (`crates/cf-panes/src/headless.rs`, `shut_down`; the bridge keeps its output past the end of its
-#   input for it, `crates/cf-bridge/src/shutdown.rs`): the long run's final drain learns what each window
-#   left from them, as it learns of a window that ended before. The host waits for the exits it owes
+#   input for it, `crates/cf-bridge/src/shutdown.rs`). The host waits for the exits it owes
 #   three seconds at most (`FAREWELL`) and for what it told to be written two (`FLUSH`), and a peer
 #   that reads nothing is not waited for any longer (3.0.6, item 8). The daemon is not told: both
 #   ends of a stop end the daemon's input first, and a daemon whose input has ended handles no event.
-#   The case of the rig is `crates/cf-e2e/tests/rig/last_exits.rs`, which builds the pane host from
-#   the sources as planted, so its plants say `builds`.
+#   `crates/cf-panes/tests/headless.rs` checks the exits after the peer ends its input.
 #
 # - the stand-in Codex's plugin servers and workers write their process whole from the moment their
 #   file is there (`cf_e2e::files::say_its_process`, in `crates/cf-e2e/src/files.rs`, which the
@@ -119,8 +117,6 @@ headless-peer-reads-nothing = ["cargo", "test", "--offline", "-p", "cf-panes", "
 panes-lib-owed = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::owed::"]
 # The bridge that keeps its output past the end of its input, and the one that does not.
 bridge-lib-kept-output = ["cargo", "test", "--offline", "-p", "cf-bridge", "--lib", "--", "keeps_its_output", "does_not_keep_its_output", "reads_nothing_gives_up", "an_output_the_bridge_kept"]
-# The last word of a closed rig: every exit the pane host told, the windows open as it closed among them.
-rig-last-exits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "last_exits::"]
 # The stand-in Codex's servers and workers, and the pid files they write.
 rig-stand-in-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stand_in_codex::"]
 
@@ -464,8 +460,8 @@ replace = ""
 
 [[plant]]
 name = "windows close: a host that stops has no output left when its peer ends its input"
-meant = "the_last_word_of_a_closed_rig_holds_the_exit_of_a_window_the_pane_host_ended_as_it_stopped"
-runs = ["rig-last-exits", "headless-shut-down"]
+meant = "a_host_shut_down_with_windows_open_tells_the_exit_of_each_before_it_closes_its_output"
+runs = ["headless-shut-down"]
 builds = true
 
 [[plant.edit]]

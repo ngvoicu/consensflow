@@ -10,7 +10,7 @@
 //! the room it leaves is not taken by another.
 //!
 //! What is read: every crate of the product (`crates/*` and the app) but the black-box
-//! suites' stand-in agents (`cf-e2e`) and the live evals (`cf-evals`), which are tools of
+//! suites' stand-in agents (`cf-e2e`), which are tools of
 //! the tests and name harnesses as their subjects, from the root of its library and of its
 //! program (`lib.rs`, `main.rs`) down the modules it declares. What is not: code gated to
 //! the tests or the test kit, the registry's own file, and the programs a crate has under
@@ -34,7 +34,7 @@ use std::path::Path;
 use scan::{Site, Sites, Vocabulary};
 
 /// Crates that are tools of the tests.
-const TOOLS_OF_THE_TESTS: [&str; 2] = ["cf-e2e", "cf-evals"];
+const TOOLS_OF_THE_TESTS: [&str; 1] = ["cf-e2e"];
 
 /// The registry: the one file that says which adapter a harness has.
 const REGISTRY: [&str; 1] = ["crates/cf-harness/src/launch.rs"];

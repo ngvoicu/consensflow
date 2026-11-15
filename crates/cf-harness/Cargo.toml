@@ -55,7 +55,7 @@ name = "pi-send"
 path = "src/bin/pi_send.rs"
 required-features = ["test-support"]
 
-# What the evals and the live tools ask of the harness code: a harness's own
+# What the live tools ask of the harness code: a harness's own
 # record of a conversation, its window's command line, the text a window
 # takes, and the settings of a Claude window (`tooling`).
 [[bin]]
