@@ -90,8 +90,8 @@
 //! ([`prelude`]).
 //!
 //! A role too long for one message (more than 16,000 units: a chief's at any staff, with
-//! specs on or not, on the real text, which names the window's `cf` by its whole path once, at
-//! its start, and says `cf` in each command) is
+//! specs on or not, on the real text; with `PATH_ONCE` off it spells the window's full
+//! `cf` path in each command) is
 //! delivered cut to its opening, with the way to read the rest (`cf inbox read`),
 //! and its opening says to read the rest now ([`OPENING_IN_PART`]). It is not given
 //! in several messages. Delivered so, it is a role told in part, and not recorded
