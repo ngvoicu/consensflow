@@ -107,6 +107,7 @@ tungstenite.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+serde.workspace = true
 cf-e2e = { path = ".", features = ["test-support"] }
 # The release-engine contract runs against the engine as a dependency, without its test-support.
 cf-engine.workspace = true

@@ -529,6 +529,27 @@ pub fn json_copy(text: &str, harness: &str) -> Result<String> {
     Ok(copy)
 }
 
+/// Codex's token-backed login needs both fields even though a run must not get the refresh token.
+/// An empty string is a non-token that still deserializes as Codex's required `String`. The copy's
+/// timestamp delays an age-based refresh; a near-expiry access token can still trigger one.
+pub fn codex_copy(text: &str, now: i64) -> Result<String> {
+    let refused = || Error::Daemon("Codex's login cannot be safely copied".to_owned());
+    let clean = json_copy(text, "Codex")?;
+    let mut value: Value = serde_json::from_str(&clean).map_err(|_| refused())?;
+    match value.get_mut("tokens") {
+        Some(Value::Object(tokens)) => {
+            tokens.insert("refresh_token".to_owned(), Value::String(String::new()));
+            let time = jiff::Timestamp::from_millisecond(now).map_err(|_| refused())?;
+            value["last_refresh"] = Value::String(time.to_string());
+        }
+        None | Some(Value::Null) => {} // API-key and other non-token-backed logins.
+        Some(_) => return Err(refused()),
+    }
+    let mut copy = serde_json::to_string_pretty(&value).map_err(|_| refused())?;
+    copy.push('\n');
+    Ok(copy)
+}
+
 /// A TOML login is copied whole only if it can be parsed and has no refresh-named key.
 /// Refusing an unknown format is safer than copying a token that cannot be removed.
 pub fn toml_copy(text: &str, harness: &str) -> Result<String> {

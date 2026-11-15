@@ -243,6 +243,81 @@ impl Owner {
 // ---------------------------------------------------------------------- Pi's login
 
 #[test]
+fn codex_copy_loads_the_0_169_token_shape_without_a_refresh_token() {
+    // Codex 0.169.0's AuthDotJson and TokenData deserialize these fields:
+    // https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/login/src/auth/storage.rs#L51-L64
+    // https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/login/src/token_data.rs#L10-L33
+    // get_token_data also requires last_refresh to be present:
+    // https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/login/src/auth/manager.rs#L656-L667
+    #[derive(serde::Deserialize)]
+    struct TokenData {
+        id_token: String,
+        access_token: String,
+        refresh_token: String,
+        account_id: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    struct AuthDotJson {
+        tokens: TokenData,
+        last_refresh: String,
+    }
+
+    let owner = Owner::new();
+    write(
+        &owner.path(".codex/auth.json"),
+        &json!({
+            "OPENAI_API_KEY": null,
+            "tokens": {
+                // Three nonempty JWT parts, with a base64url-encoded empty JSON payload.
+                "id_token": "a.e30.a",
+                "access_token": ACCESS,
+                "refresh_token": REFRESH,
+                "account_id": "fabricated-account",
+                "nested": [{"another_Refresh_token": REFRESH}]
+            },
+            "last_refresh": "2020-01-01T00:00:00Z"
+        })
+        .to_string(),
+    );
+    let isolation = owner.codex();
+    let home = isolation.made_at(at(NOW)).unwrap();
+    let text = fs::read_to_string(home.join("codex/auth.json")).unwrap();
+    assert!(
+        !text.contains(REFRESH),
+        "the input refresh token was copied"
+    );
+    let copy: AuthDotJson = serde_json::from_str(&text)
+        .unwrap_or_else(|error| panic!("Codex's required fields did not parse: {error}"));
+    assert_eq!(copy.tokens.id_token, "a.e30.a");
+    assert_eq!(copy.tokens.access_token, ACCESS);
+    assert_eq!(
+        copy.tokens.refresh_token, "",
+        "the placeholder must not be a token"
+    );
+    assert_eq!(
+        copy.tokens.account_id.as_deref(),
+        Some("fabricated-account")
+    );
+    let last_refresh: jiff::Timestamp = copy.last_refresh.parse().unwrap();
+    assert_eq!(last_refresh.as_millisecond(), at(NOW));
+}
+
+#[test]
+fn codex_api_key_copy_adds_no_token_fields_and_invalid_tokens_are_refused() {
+    let copy = super::super::login::codex_copy(
+        &json!({"OPENAI_API_KEY": "fake-api-key", "refresh_key": REFRESH}).to_string(),
+        at(NOW),
+    )
+    .unwrap();
+    let copy: Value = serde_json::from_str(&copy).unwrap();
+    assert_eq!(copy["OPENAI_API_KEY"], "fake-api-key");
+    assert!(copy.get("tokens").is_none());
+    assert!(copy.get("last_refresh").is_none());
+    assert!(!copy.to_string().contains(REFRESH));
+    assert!(super::super::login::codex_copy(r#"{"tokens": 3}"#, at(NOW)).is_err());
+}
+
+#[test]
 fn codex_login_copy_has_no_refresh_keys_at_any_depth() {
     let owner = Owner::new();
     let isolation = owner.codex();

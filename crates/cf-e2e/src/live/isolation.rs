@@ -14,7 +14,7 @@
 //! | Harness | Variables | Copied from the owner's | Watched in the owner's |
 //! |---|---|---|---|
 //! | Claude Code | `CLAUDE_CONFIG_DIR` ([`super::login`]) | the Keychain's login, without its refresh token, that lasts the case's planned length and the margin | `settings.json`, `.claude.json`'s projects, `history.jsonl`, `projects/`, the Keychain's items |
-//! | Codex | `CODEX_HOME` | `auth.json`, without refresh-named keys at any depth | `auth.json`, `config.toml` |
+//! | Codex | `CODEX_HOME` | `auth.json`, without refresh-named keys except an empty `tokens.refresh_token` and a copy-time `last_refresh` for token-backed logins | `auth.json`, `config.toml` |
 //! | Pi | `PI_CODING_AGENT_DIR` | the entries of `auth.json` the run's model needs and that last the run and a margin, without their refresh tokens; and, where the model's provider is one the folder gives Pi by a package (`cliproxyapi`, [`pi::provider`]), the provider's files, its package and a `settings.json` that names it | `auth.json`, `settings.json`, `models.json`, `mcp-auth.json`, `sessions/`, and the provider's files, npm's manifests and the package |
 //! | Devin | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | `credentials.toml` if it has no refresh-named key, `config.json` | those two and `trusted_workspaces.json` |
 //! | Devin, on Windows | `USERPROFILE`, `APPDATA`, `LOCALAPPDATA` ([`Plan::devin_on_windows`]) | `credentials.toml` if it has no refresh-named key, `config.json` | those two and `trusted_workspaces.json`, in the owner's `%APPDATA%\devin` |
@@ -50,7 +50,8 @@
 //! fails loudly. The run is given an entry only if it lasts the run's length and [`MARGIN`]; one
 //! that does not is a refusal, in words, before anything is spent, except on a test machine, where
 //! Pi is first run once as the owner to renew an entry that has run short ([`super::renew`],
-//! T-1067). Codex's copied JSON has refresh-named keys removed; Devin's TOML is copied only when
+//! T-1067). Codex's copied JSON keeps the empty token field and copy-time timestamp it needs to
+//! load, but no refresh token; Devin's TOML is copied only when
 //! it parses and has no such key. What Codex rewrote is said when the run ends. At the end the copies are compared with what was
 //! copied, and the owner's files with their hashes: a difference fails the run, naming the file, and
 //! nothing a login holds is said anywhere.
@@ -671,7 +672,7 @@ impl Isolation {
                             ))
                         })?;
                         match self.harness {
-                            Harness::Codex => super::login::json_copy(text, "Codex")?,
+                            Harness::Codex => super::login::codex_copy(text, now)?,
                             Harness::Devin => super::login::toml_copy(text, "Devin")?,
                             _ => {
                                 return Err(Error::Daemon(
@@ -1100,7 +1101,7 @@ fn said(harness: Harness, touched: &[String], refreshed: &[String]) -> String {
         }
     }
     if !refreshed.is_empty() {
-        // These copies have no refresh-named keys, so they cannot use the owner's token.
+        // These copies hold no refresh-token value, so they cannot use the owner's token.
         let hazard = if matches!(harness, Harness::Pi | Harness::Codex | Harness::Devin) {
             "The copy holds no refresh token, so it cannot have used up the one the owner's file keeps \
              (that file is checked above), but it was given a login and wrote another"

@@ -2,6 +2,7 @@
 # All inputs are fabricated; no real login, Keychain or live harness is involved.
 [run]
 disclosure-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "codex_login_copy_has_no_refresh_keys_at_any_depth"]
+disclosure-codex-shape = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "codex_copy_loads_the_0_169_token_shape_without_a_refresh_token"]
 disclosure-pi = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "pi_login_copy_has_no_nested_refresh_keys"]
 disclosure-pi-name = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "kit_disclosure_pi_refuses_a_refresh_named_provider_key"]
 disclosure-proxy = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "kit_disclosure_pi_proxy_config_copies_no_refresh_keys"]
@@ -17,8 +18,36 @@ meant = "codex_login_copy_has_no_refresh_keys_at_any_depth"
 runs = ["disclosure-codex"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''Harness::Codex => super::login::json_copy(text, "Codex")?,'''
+find = '''Harness::Codex => super::login::codex_copy(text, now)?,'''
 replace = '''Harness::Codex => text.to_owned(),'''
+
+[[plant]]
+name = "kit disclosure: Codex copy retains the original refresh token"
+meant = "codex_copy_loads_the_0_169_token_shape_without_a_refresh_token"
+runs = ["disclosure-codex-shape"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''tokens.insert("refresh_token".to_owned(), Value::String(String::new()));'''
+replace = '''let original: Value = serde_json::from_str(text).map_err(|_| refused())?;
+            tokens.insert("refresh_token".to_owned(), original["tokens"]["refresh_token"].clone());'''
+
+[[plant]]
+name = "kit disclosure: Codex copy drops its required refresh token field"
+meant = "codex_copy_loads_the_0_169_token_shape_without_a_refresh_token"
+runs = ["disclosure-codex-shape"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''tokens.insert("refresh_token".to_owned(), Value::String(String::new()));'''
+replace = '''let _ = tokens;'''
+
+[[plant]]
+name = "kit disclosure: Codex copy drops its required last refresh time"
+meant = "codex_copy_loads_the_0_169_token_shape_without_a_refresh_token"
+runs = ["disclosure-codex-shape"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''value["last_refresh"] = Value::String(time.to_string());'''
+replace = '''let _ = time;'''
 
 [[plant]]
 name = "kit disclosure: nested JSON login refresh keys are retained"
