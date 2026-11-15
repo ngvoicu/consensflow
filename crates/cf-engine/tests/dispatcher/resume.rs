@@ -27,6 +27,56 @@ const CHIEF_CUT: &str =
 /// How the chief's note begins, whether or not it names the turn.
 const CHIEF_CUT_BEGINS: &str = "ConsensFlow stopped in the middle of your turn, which was cut";
 
+/// An at-rest member is resumed without a continuation message. A failed launch
+/// must still pause its existing work and tell the chief why.
+fn resume_launch_failure_on(harness: &'static str) {
+    let context = Context::made(Made {
+        harnesses: vec!["claude-code", "codex", "pi", "devin", "muse"],
+        ..Made::default()
+    });
+    let project = context.open_project(json!({
+        "directory": "/work/app", "name": "app",
+        "chief": { "harness": harness, "model": "apollo" },
+        "staff": [{ "agent": "zeus", "harness": harness, "roles": ["worker"], "tier": "standard" }]
+    })).unwrap().unwrap().id;
+    context.pool_task(project, "worker", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let task = context.task(project, 1).task;
+    assert_eq!(task.state, "working", "{harness}");
+    let session = task.assignee.unwrap();
+    context.adapter.with(&session, |agent| agent.settled = true);
+    context.close_project(project).unwrap();
+    let failed = session.clone();
+    *context.adapter.prepare.borrow_mut() = Some(Rc::new(move |launch| {
+        if launch["participant"]["handle"] == failed {
+            Err("login: secret-value".to_owned())
+        } else {
+            Ok(())
+        }
+    }));
+    context.resume_project(project).unwrap();
+    let reason = format!("@{session}'s window could not be opened: the launch failed (its cause is in ConsensFlow's log)");
+    assert_eq!(context.task(project, 1).task.state, "paused", "{harness}: failed Resume must not leave work running");
+    let events = context.ledger.borrow().events(project, 0, 5000).unwrap();
+    assert!(events.iter().any(|event| event.kind == "task.state" && event.data["to"] == "paused" && event.data["because"] == reason), "{harness}: pause event: {events:?}");
+    let notes = context.inbox(context.id(project, "chief"));
+    assert!(notes.iter().any(|note| note.body.contains(&reason)), "{harness}: chief note: {notes:?}");
+    assert!(!notes.iter().any(|note| note.body.contains("secret-value")), "{harness}: no secret in a note");
+}
+
+macro_rules! resume_launch_failure_case {
+    ($name:ident, $harness:literal) => {
+        #[test]
+        fn $name() { resume_launch_failure_on($harness); }
+    };
+}
+resume_launch_failure_case!(resume_launch_failure_claude, "claude-code");
+resume_launch_failure_case!(resume_launch_failure_codex, "codex");
+resume_launch_failure_case!(resume_launch_failure_pi, "pi");
+resume_launch_failure_case!(resume_launch_failure_devin, "devin");
+resume_launch_failure_case!(resume_launch_failure_muse, "muse");
+
 /// Zeus and diana at work, each on a task of its own, their windows in the middle
 /// of a turn: the app quits now.
 pub(crate) fn at_work(context: &Context) -> Tiers<'_> {
