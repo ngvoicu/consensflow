@@ -177,7 +177,6 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-page-025", 8, UNREACHED),
     ("core-page-026", 14, UNREACHED),
     ("ledger-history-001", 12, "a tell answer to a paused task records the tasks whose ways-on footer its paste carries in `delivery.begun`, so that paste is recognised after the task moves; Node's event has no such field; its later departure: the chief accepts the task while its result is still queued, so the result is withdrawn where Node leaves it to be pasted"),
-    ("ledger-history-001", 20, RESULT_ACCEPTED),
     ("ledger-history-015", 32, RESULT_ACCEPTED),
     ("home-copies-001", 34, KEPT_IN_BRIEF),
     ("home-copies-004", 34, KEPT_IN_BRIEF),
