@@ -6,6 +6,112 @@ use std::os::unix::fs::PermissionsExt;
 use super::*;
 use crate::process::Run;
 
+#[test]
+fn t1700_login_only_trust_does_not_resolve_owner_claude() {
+    let owner = tempfile::tempdir().unwrap();
+    let run_parent = crate::door::made("cf-parity-trust-parent-").unwrap();
+    let config = crate::door::made_in(run_parent.path(), "config-").unwrap();
+    // If seeding resolves this fabricated owner link, it mistakes the run's
+    // own config for the owner's and refuses to seed it.
+    std::os::unix::fs::symlink(run_parent.path(), owner.path().join(".claude")).unwrap();
+    let login = Login::new(
+        Source::File(owner.path().join("fake-login")),
+        owner.path().to_path_buf(),
+        run_parent.path().to_path_buf(),
+        Duration::ZERO,
+    )
+    .without_owner_config_reads();
+    let seeded = login.seed_trust(config.path());
+    assert!(
+        seeded.is_ok(),
+        "parity resolved the fabricated owner's .claude: {seeded:?}"
+    );
+    let held: Value =
+        serde_json::from_str(&std::fs::read_to_string(config.path().join(".claude.json")).unwrap())
+            .unwrap();
+    let root = super::super::machine::claude_project_key(
+        &super::super::machine::live_root(owner.path()).to_string_lossy(),
+    );
+    assert_eq!(held["projects"][&root]["hasTrustDialogAccepted"], true);
+
+    // The parity route must still refuse a destination that the run did not make.
+    let stranger = crate::standin_process::unowned_tempdir();
+    assert!(login.seed_trust(stranger.path()).is_err());
+    assert!(!stranger.path().join(".claude.json").exists());
+
+    // A run-owned folder cannot write through a linked config file either.
+    let guarded = crate::door::made_in(run_parent.path(), "guarded-").unwrap();
+    let outside = stranger.path().join("outside.json");
+    std::fs::write(&outside, "{}\n").unwrap();
+    std::os::unix::fs::symlink(&outside, guarded.path().join(".claude.json")).unwrap();
+    assert!(login.seed_trust(guarded.path()).is_err());
+    assert_eq!(std::fs::read_to_string(outside).unwrap(), "{}\n");
+
+    // The ordinary path keeps checking the owner directory as before.
+    let ordinary = Login::new(
+        Source::File(owner.path().join("fake-login")),
+        owner.path().to_path_buf(),
+        run_parent.path().to_path_buf(),
+        Duration::ZERO,
+    );
+    assert!(ordinary.seed_trust(config.path()).is_err());
+}
+
+#[test]
+fn t1700_login_only_never_reads_owner_config_before_or_after() {
+    const CHILD: &str = "CF_T1700_LOGIN_ONLY_OWNER";
+    if let Some(home) = crate::process::own_var(CHILD) {
+        let home = PathBuf::from(home);
+        let login = Login::new(
+            Source::File(home.join("fake-login")),
+            home.clone(),
+            home,
+            Duration::ZERO,
+        )
+        .without_owner_config_reads();
+        let before = login.owner_before();
+        assert!(before.is_none());
+        assert!(login.owner_after(&before).is_empty());
+        return;
+    }
+    let home = tempfile::tempdir().unwrap();
+    std::fs::create_dir(home.path().join(".claude")).unwrap();
+    for file in [
+        home.path().join(".claude/settings.json"),
+        home.path().join(".claude.json"),
+    ] {
+        nix::unistd::mkfifo(&file, nix::sys::stat::Mode::S_IRUSR).unwrap();
+    }
+    let output = crate::process::case_of(
+        std::env::current_exe().unwrap(),
+        "live::login::tests::t1700_login_only_never_reads_owner_config_before_or_after",
+        Duration::from_secs(5),
+    )
+    .inheriting_env()
+    .var(CHILD, home.path())
+    .run()
+    .unwrap();
+    assert_eq!(
+        output.code,
+        Some(0),
+        "reading a fabricated owner config blocked the child: {}",
+        output.output()
+    );
+}
+
+#[test]
+fn claude_login_copy_has_no_nested_refresh_keys() {
+    let copy = without_renewal(
+        &json!({"accessToken":"fake", "refreshToken":"fake", "nested":[{"REFRESH_key":"fake"}]}),
+    );
+    assert!(copy.get("refreshToken").is_none());
+    assert!(
+        copy["nested"][0].get("REFRESH_key").is_none(),
+        "nested refresh key was copied"
+    );
+    assert_eq!(copy["accessToken"], "fake");
+}
+
 /// What a login holds that must never be said or kept.
 const ACCESS: &str = "sk-ant-oat01-ACCESS-0123456789";
 const REFRESH: &str = "sk-ant-ort01-REFRESH-9876543210";
@@ -1063,6 +1169,22 @@ impl Renewing {
     fn made(&self) -> usize {
         std::fs::read_dir(self.parent.path()).unwrap().count()
     }
+}
+
+#[test]
+fn t1700_login_only_refuses_to_renew_on_a_test_machine() {
+    let run = Renewing::new();
+    let ended = login_ending(at(NOW - 3600), ACCESS);
+    let login = run
+        .login(&ended, Some(zeewin2()), "", 1)
+        .without_owner_config_reads();
+    let said = login.folder_at(at(NOW)).unwrap_err().to_string();
+    assert!(said.contains("Claude parity does not renew"), "{said}");
+    assert!(
+        !said.contains("on a test machine the kit asks it to"),
+        "{said}"
+    );
+    assert!(run.started().is_none(), "the stand-in renewal was started");
 }
 
 #[test]

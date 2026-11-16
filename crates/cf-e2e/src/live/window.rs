@@ -186,9 +186,10 @@ impl Window<'_> {
 
     /// The Claude config folder the window's Claude Code keeps its sessions and
     /// its transcripts in ([`super::claude`] reads them there): the
-    /// `CLAUDE_CONFIG_DIR` the window has, and else `.claude` in its home.
-    pub fn claude_config(&self) -> PathBuf {
-        claude_config_of(&self.env)
+    /// `CLAUDE_CONFIG_DIR` the window has, and else `.claude` in its home. A path
+    /// outside the run's registered roots is refused before anything reads it.
+    pub fn claude_config(&self) -> Result<PathBuf> {
+        owned_harness_dir(&self.env, "CLAUDE_CONFIG_DIR", ".claude")
     }
 
     /// Whether it has ended.
@@ -224,16 +225,18 @@ impl Window<'_> {
     /// items, and whether its turn is over. None while there is no record, or none
     /// can be read.
     pub fn record(&self) -> Option<ask::Record> {
-        let known = self.session.borrow().clone();
-        let session = known.or_else(|| {
-            let found =
-                ask::newest_session(&self.kind, &self.workspace, self.opened_at_ms, &self.env)
-                    .ok()
-                    .flatten();
-            self.session.borrow_mut().clone_from(&found);
-            found
-        });
-        session.and_then(|session| ask::records(&self.kind, &session, &self.env).ok().flatten())
+        with_record_homes(self.harness, &self.env, || {
+            let known = self.session.borrow().clone();
+            let session = known.or_else(|| {
+                let found =
+                    ask::newest_session(&self.kind, &self.workspace, self.opened_at_ms, &self.env)
+                        .ok()
+                        .flatten();
+                self.session.borrow_mut().clone_from(&found);
+                found
+            });
+            session.and_then(|session| ask::records(&self.kind, &session, &self.env).ok().flatten())
+        })
     }
 
     /// What the harness's own record holds so far, as the daemon reads it:
@@ -383,6 +386,75 @@ impl Window<'_> {
     }
 }
 
+fn with_record_homes(
+    harness: Harness,
+    env: &[(String, String)],
+    read: impl FnOnce() -> Option<ask::Record>,
+) -> Option<ask::Record> {
+    if !record_homes_safe(harness, env) {
+        return None;
+    }
+    read()
+}
+
+pub(super) fn record_homes_safe(harness: Harness, env: &[(String, String)]) -> bool {
+    let owned = |name: &str| {
+        env.iter()
+            .rev()
+            .find(|(key, _)| {
+                if cfg!(windows) {
+                    key.eq_ignore_ascii_case(name)
+                } else {
+                    key == name
+                }
+            })
+            .map(|(_, value)| value)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute() && crate::door::is_made_or_below(path))
+    };
+    match harness {
+        Harness::Claude => owned("CLAUDE_CONFIG_DIR")
+            .is_some_and(|home| crate::door::is_made_or_below(&home.join("projects"))),
+        Harness::Codex => owned("CODEX_HOME").is_some_and(|home| {
+            let sessions = home.join("sessions");
+            crate::door::is_made_or_below(&sessions) && no_record_links(&sessions)
+        }),
+        Harness::Pi => {
+            owned("PI_CODING_AGENT_DIR").is_some() && owned("PI_CODING_AGENT_SESSION_DIR").is_some()
+        }
+        Harness::Devin => super::guard::devin_store_path(cfg!(windows), env).is_ok(),
+        Harness::Muse => owned("XDG_DATA_HOME").is_some_and(|home| {
+            let muse = home.join("muse");
+            let sessions = muse.join("sessions");
+            let index = muse.join("session-index.db");
+            crate::door::is_made_or_below(&sessions)
+                && super::guard::run_owned_devin_store(&index)
+                && no_record_links(&sessions)
+        }),
+    }
+}
+
+// Muse's and Codex's newest-session readers follow dated folders and record-file links.
+fn no_record_links(path: &Path) -> bool {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
+        Err(_) => return false,
+    };
+    if metadata.file_type().is_symlink() {
+        return false;
+    }
+    if !metadata.is_dir() {
+        return true;
+    }
+    std::fs::read_dir(path).is_ok_and(|entries| {
+        entries
+            .into_iter()
+            .all(|entry| entry.is_ok_and(|entry| no_record_links(&entry.path())))
+    })
+}
+
 impl Drop for Window<'_> {
     /// A window the test did not end is not left running.
     fn drop(&mut self) {
@@ -395,20 +467,37 @@ fn after(screen: &str, mark: usize) -> String {
     screen.chars().skip(mark).collect()
 }
 
-/// The Claude config folder of an environment: its `CLAUDE_CONFIG_DIR`, and
-/// else `.claude` in its `HOME` (the last of a name given twice is the one).
-fn claude_config_of(env: &[(String, String)]) -> PathBuf {
+/// A harness folder named by the rig, or the fallback in its HOME, only when the
+/// resolved path is in a root made by this run. The last variable wins, even when empty.
+pub fn owned_harness_dir(env: &[(String, String)], name: &str, fallback: &str) -> Result<PathBuf> {
     let var = |name: &str| {
         env.iter()
             .rev()
-            .find(|(given, value)| given == name && !value.is_empty())
+            .find(|(given, _)| {
+                if cfg!(windows) {
+                    given.eq_ignore_ascii_case(name)
+                } else {
+                    given == name
+                }
+            })
             .map(|(_, value)| value.as_str())
+            .filter(|value| !value.is_empty())
     };
-    match (var("CLAUDE_CONFIG_DIR"), var("HOME")) {
+    let path = match (var(name), var("HOME")) {
         (Some(config), _) => PathBuf::from(config),
-        (None, Some(home)) => Path::new(home).join(".claude"),
-        (None, None) => PathBuf::from(".claude"),
+        (None, Some(home)) => Path::new(home).join(fallback),
+        (None, None) => {
+            return Err(crate::Error::Daemon(format!(
+                "the rig gives no {name} or HOME"
+            )))
+        }
+    };
+    if !crate::door::is_made_or_below(&path) {
+        return Err(crate::Error::Daemon(format!(
+            "{name} is outside the run's own roots"
+        )));
     }
+    Ok(path)
 }
 
 /// Whether the answer is on what the screen printed since the message was

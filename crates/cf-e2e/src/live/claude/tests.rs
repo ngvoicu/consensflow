@@ -3,6 +3,31 @@
 
 use super::*;
 
+#[cfg(unix)]
+#[test]
+fn kit_disclosure_claude_record_helpers_refuse_links_outside_the_run() {
+    use std::os::unix::fs::symlink;
+    let run = crate::door::made("cf-claude-records-").unwrap();
+    let foreign = crate::standin_process::unowned_tempdir();
+    std::fs::write(
+        foreign.path().join("123.json"),
+        r#"{"sessionId":"s","status":"idle"}"#,
+    )
+    .unwrap();
+    std::fs::create_dir(foreign.path().join("project")).unwrap();
+    std::fs::write(foreign.path().join("project/s.jsonl"), "{}\n").unwrap();
+    symlink(foreign.path(), run.path().join("sessions")).unwrap();
+    symlink(foreign.path(), run.path().join("projects")).unwrap();
+    assert!(
+        status_of(run.path(), "s").is_none(),
+        "a foreign status was read"
+    );
+    assert!(
+        transcript_file(run.path(), "s").is_none(),
+        "a foreign transcript was found"
+    );
+}
+
 fn sample_of(at_ms: i64, status: Option<&str>, waiting: Option<&str>) -> Sample {
     Sample {
         at_ms,
@@ -14,7 +39,7 @@ fn sample_of(at_ms: i64, status: Option<&str>, waiting: Option<&str>) -> Sample 
 
 #[test]
 fn the_status_of_a_session_is_in_the_file_named_by_a_process_that_names_the_session() {
-    let config = tempfile::tempdir().unwrap();
+    let config = crate::door::made("cf-claude-reader-").unwrap();
     let write = |name: &str, text: &str| {
         crate::files::write(&config.path().join("sessions").join(name), text).unwrap();
     };
@@ -45,7 +70,7 @@ fn the_status_of_a_session_is_in_the_file_named_by_a_process_that_names_the_sess
 
 #[test]
 fn the_file_a_killed_window_left_is_not_the_status_of_the_window_resumed_on_its_conversation() {
-    let config = tempfile::tempdir().unwrap();
+    let config = crate::door::made("cf-claude-reader-").unwrap();
     // The killed window's file sorts first, as the older of two process ids may; its process
     // is gone (no process has an id this large). The resumed window's is this process's.
     let (gone, here) = ("004000000000".to_owned(), std::process::id().to_string());
@@ -92,7 +117,7 @@ fn the_file_a_killed_window_left_is_not_the_status_of_the_window_resumed_on_its_
 
 #[test]
 fn a_time_with_a_fraction_of_a_millisecond_is_that_millisecond() {
-    let config = tempfile::tempdir().unwrap();
+    let config = crate::door::made("cf-claude-reader-").unwrap();
     crate::files::write(
         &config.path().join("sessions/7.json"),
         r#"{"sessionId":"s","status":"idle","statusUpdatedAt":1791711000123.6}"#,
@@ -106,7 +131,7 @@ fn a_time_with_a_fraction_of_a_millisecond_is_that_millisecond() {
 
 #[test]
 fn a_watch_reads_the_status_as_it_changes_and_stops_when_it_is_told_to() {
-    let config = tempfile::tempdir().unwrap();
+    let config = crate::door::made("cf-claude-reader-").unwrap();
     let file = config.path().join("sessions/9.json");
     crate::files::write(&file, r#"{"sessionId":"s","status":"busy"}"#).unwrap();
     let status = Status::watch(config.path(), "s");
@@ -155,7 +180,7 @@ fn samples_that_read_alike_are_a_run_with_the_time_it_ran_and_how_many_reads_it_
 
 #[test]
 fn a_transcript_is_found_in_whichever_project_folder_holds_it() {
-    let config = tempfile::tempdir().unwrap();
+    let config = crate::door::made("cf-claude-reader-").unwrap();
     let at = |relative: &str, text: &str| {
         crate::files::write(&config.path().join(relative), text).unwrap();
     };
@@ -171,7 +196,7 @@ fn a_transcript_is_found_in_whichever_project_folder_holds_it() {
 
 #[test]
 fn a_transcript_is_read_as_records_with_what_each_says() {
-    let config = tempfile::tempdir().unwrap();
+    let config = crate::door::made("cf-claude-reader-").unwrap();
     let user = r#"{"type":"user","timestamp":"2026-10-11T09:30:00.123Z","message":{"role":"user","content":"Reply with the sum"}}"#;
     let answer = r#"{"type":"assistant","timestamp":"2026-10-11T09:30:04.000Z","message":{"role":"assistant","model":"claude-haiku-5-5","content":[{"type":"text","text":"5555"},{"type":"tool_use","name":"Bash","input":{"command":"ls"}},{"type":"thinking"}]}}"#;
     let result = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","is_error":true,"content":"no such file"}]}}"#;

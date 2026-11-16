@@ -97,6 +97,7 @@ sha2.workspace = true
 # The home of a case, removed with it.
 tempfile.workspace = true
 thiserror.workspace = true
+toml.workspace = true
 # The daemon's loopback HTTP.
 ureq.workspace = true
 # The WebSocket the stand-in Codex speaks, on a socket or on loopback.
@@ -105,6 +106,7 @@ tungstenite.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+serde.workspace = true
 cf-e2e = { path = ".", features = ["test-support"] }
 # A test process gives itself its homes before libtest starts any threads.
 ctor = { version = "1.0.13", default-features = false }

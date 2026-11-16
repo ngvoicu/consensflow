@@ -290,3 +290,30 @@ fn each_item_is_said_with_the_place_of_the_record_that_first_named_it() {
     assert_eq!(read.items.len(), 2);
     assert_eq!(read.lines.places, Some(vec![1, 3]));
 }
+
+/// What a Resume reads of a rollout's turn, with no window open.
+async fn left_by(records: &[Value]) -> Option<crate::contract::TurnLeft> {
+    use crate::contract::{tests::Says, Records};
+    Says(crate::records::Reading::Known(read(records).unwrap()))
+        .turn_cut(cf_proto::agents::Harness::Codex, "a-session")
+        .await
+}
+
+#[tokio::test]
+async fn a_turn_that_ended_in_an_abort_after_a_reply_is_not_known_to_be_at_rest() {
+    // T-1707: the quit and an Escape leave the same record. The reply is the last word, which
+    // read at rest before.
+    let said = response(json!({ "type": "message", "role": "assistant", "id": "m1",
+        "content": [{ "type": "output_text", "text": "Working on it" }] }));
+    let cancelled = [started(json!("t1")), said.clone(), aborted(json!("t1"))];
+    assert!(read(&cancelled).unwrap().aborted);
+    assert_eq!(left_by(&cancelled).await, None);
+    let completed = [
+        started(json!("t1")),
+        said,
+        event(
+            json!({ "type": "task_complete", "turn_id": "t1", "last_agent_message": "Working on it" }),
+        ),
+    ];
+    assert!(!read(&completed).unwrap().aborted);
+}

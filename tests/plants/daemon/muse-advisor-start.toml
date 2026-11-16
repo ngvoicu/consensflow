@@ -8,7 +8,7 @@
 #   (`crates/cf-e2e/src/rig/install.rs`, `give_muse_its_folders`), and puts back a link a rig
 #   before it left in the same home.
 # - Devin's home reaches none of the owner's Muse (`crates/cf-e2e/src/live/isolation.rs`,
-#   `XDG_CARRIED`).
+#   the run-owned Git seed).
 # - The rig's Muse on echo keeps its folders in the rig's home, as the live one does
 #   (`crates/cf-e2e/src/muse.rs`, `write_stand_in`).
 #
@@ -46,13 +46,21 @@ replace = '''    if true || config.muse.is_none() {
 
 [[plant]]
 name = "muse advisor start: Devin's home reaches the owner's Muse"
+platforms = ["linux", "macos"]
 meant = "a_devin_home_reaches_none_of_the_owners_muse"
 runs = ["muse-advisor-start-isolation"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''const XDG_CARRIED: [&str; 1] = ["git"];'''
-replace = '''const XDG_CARRIED: [&str; 2] = ["git", "muse"];'''
+find = '''                Seed::Fixed {
+                    to: "config/git/config".into(),'''
+replace = '''                Seed::Copy {
+                    from: config.join("muse").join("settings.json"),
+                    to: "config/muse/settings.json".into(),
+                    login: false,
+                },
+                Seed::Fixed {
+                    to: "config/git/config".into(),'''
 
 [[plant]]
 name = "muse advisor start: the rig's Muse on echo keeps its folders where a home moved them"

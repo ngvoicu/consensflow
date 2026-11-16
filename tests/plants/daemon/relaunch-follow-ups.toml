@@ -201,7 +201,7 @@ replace = "                relaunched: None,"
 [[plant.edit]]
 file = "crates/cf-harness/src/contract.rs"
 find = '''
-                    Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),'''
+            Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),'''
 replace = ""
 
 # Integration B round 2 (T-800): where the host did not name the window's Claude, the one found by the

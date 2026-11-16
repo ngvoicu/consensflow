@@ -252,6 +252,8 @@ pub struct FakeLog {
     pub failures: RefCell<Vec<String>>,
     /// The lines of `warn`, in order.
     pub warnings: RefCell<Vec<String>>,
+    /// The lines of `info`, in order.
+    pub infos: RefCell<Vec<String>>,
 }
 
 impl Log for FakeLog {
@@ -259,6 +261,11 @@ impl Log for FakeLog {
         self.recorder
             .called("log", Some("error"), json!([message, cause]), Value::Null);
         self.failures.borrow_mut().push(cause.to_owned());
+    }
+
+    // No call of a trace: Node's dispatcher said nothing of the kind, so no recorded trace moves.
+    fn info(&self, message: &str) {
+        self.infos.borrow_mut().push(message.to_owned());
     }
 
     fn warn(&self, message: &str) {

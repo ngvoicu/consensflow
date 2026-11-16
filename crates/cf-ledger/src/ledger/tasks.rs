@@ -215,6 +215,18 @@ impl Ledger {
         tasks::pause_with_project(&mut self.store, project_id, number, because)
     }
 
+    /// Pause a failed project Resume and allow the next Close/Resume to retry it.
+    pub fn pause_failed_project_resume(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        because: &str,
+    ) -> Result<TaskView, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("pause_task", Some(number))?;
+        tasks::pause_failed_project_resume(&mut self.store, project_id, number, because)
+    }
+
     /// The window of a task the engine paused with its project ended by itself
     /// after all (its kill was refused): no Resume of the project resumes it. Only
     /// the pause that is stop `stop` ([`Ledger::pause_with_project`]).

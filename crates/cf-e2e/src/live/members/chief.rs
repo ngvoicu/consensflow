@@ -93,7 +93,7 @@ impl Members {
             .started()
             .into_iter()
             .find(|started| started.session == session)?;
-        let config = self.claude_config();
+        let config = self.claude_config().ok()?;
         let conversation = config
             .join("projects")
             .join("integration")
@@ -101,6 +101,10 @@ impl Members {
         let status = config
             .join("sessions")
             .join(format!("{}.json", started.pid));
+        if !crate::door::is_made_or_below(&conversation) || !crate::door::is_made_or_below(&status)
+        {
+            return None;
+        }
         Some(records_line(
             std::fs::read_to_string(conversation)
                 .ok()

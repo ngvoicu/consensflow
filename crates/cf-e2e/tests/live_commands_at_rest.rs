@@ -183,29 +183,38 @@ fn hooks() -> Value {
     json!({ "PostCompact": say(POST_COMPACT), "SessionStart": say(SESSION_START) })
 }
 
-/// The owner's Claude settings file under the config folder `config`, as its bytes: none
-/// where there is none.
-fn settings_of(config: &Path) -> Option<Vec<u8>> {
-    fs::read(config.join("settings.json")).ok()
+/// The run's Claude settings file under `config`, as bytes: none where there is none.
+fn settings_of(config: &Path) -> Result<Option<Vec<u8>>> {
+    let settings = config.join("settings.json");
+    if !cf_e2e::door::is_made_or_below(&settings) {
+        return Err(Error::Daemon(
+            "Claude's settings are outside the run's own roots".to_owned(),
+        ));
+    }
+    Ok(fs::read(settings).ok())
 }
 
 /// The Claude config folder the rig gives its windows: its `CLAUDE_CONFIG_DIR`, else
 /// `.claude` in its home, as a window's is ([`Window::claude_config`]).
-fn claude_config_of_rig(rig: &Rig) -> PathBuf {
-    let var = |name: &str| rig.var(name).filter(|value| !value.is_empty());
-    match (var("CLAUDE_CONFIG_DIR"), var("HOME")) {
-        (Some(config), _) => PathBuf::from(config),
-        (None, Some(home)) => Path::new(home).join(".claude"),
-        (None, None) => PathBuf::from(".claude"),
-    }
+fn claude_config_of_environment(env: &[(String, String)]) -> Result<PathBuf> {
+    cf_e2e::live::window::owned_harness_dir(env, "CLAUDE_CONFIG_DIR", ".claude")
+}
+
+fn claude_config_of_rig(rig: &Rig) -> Result<PathBuf> {
+    claude_config_of_environment(rig.environment())
 }
 
 /// The status file of the running Claude whose status names `session`, under the
 /// config folder `config`: the window's, which names the conversation it shows.
 fn status_file(config: &Path, session: &str) -> Option<PathBuf> {
-    fs::read_dir(config.join("sessions"))
+    let sessions = config.join("sessions");
+    if !cf_e2e::door::is_made_or_below(&sessions) {
+        return None;
+    }
+    fs::read_dir(sessions)
         .ok()?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .filter(|file| cf_e2e::door::is_made_or_below(file))
         .filter(|file| {
             file.extension()
                 .is_some_and(|extension| extension == "json")
@@ -222,6 +231,9 @@ fn status_file(config: &Path, session: &str) -> Option<PathBuf> {
 
 /// What a status file says: nothing where it cannot be read.
 fn read(file: &Path) -> Value {
+    if !cf_e2e::door::is_made_or_below(file) {
+        return Value::Null;
+    }
     fs::read_to_string(file)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
@@ -268,7 +280,7 @@ fn send_what_the_box_holds(
     lines: &mut Vec<String>,
 ) -> Result<bool> {
     let session = window.session().unwrap_or_default();
-    let config = window.claude_config();
+    let config = window.claude_config()?;
     let mark = claude::record(&config, &session).len();
     window.press(b"\r")?;
     let sent = live::until(Duration::from_secs(30), LOOK, || {
@@ -419,7 +431,7 @@ fn type_command(
             )],
         ));
     }
-    let config = window.claude_config();
+    let config = window.claude_config()?;
     let before = window.session().unwrap_or_default();
     let mark = claude::record(&config, &before).len();
     type_keys(window, command.typed())?;
@@ -455,7 +467,7 @@ fn type_command(
         window.follow(&session);
     }
     let reading = window.record();
-    let kept = settings_of(&config).as_deref() == settings;
+    let kept = settings_of(&config)?.as_deref() == settings;
     let mut lines = vec![format!(
         "typed `{}`; {}; Claude's status {}; the record reads {}",
         command.typed(),
@@ -493,7 +505,7 @@ fn type_command(
     // owner's settings must still be as they were.
     let after_the_box = if command == Command::Cancelled {
         let idle = send_what_the_box_holds(window, status, &mut lines)?;
-        let still = settings_of(&config).as_deref() == settings;
+        let still = settings_of(&config)?.as_deref() == settings;
         if kept && !still {
             lines.push(format!(
                 "FAIL Claude changed the window's settings once what the box held was sent, {}",
@@ -524,8 +536,8 @@ fn each_command_typed_at_an_idle_claudes_prompt_leaves_the_window_at_rest() -> R
     let claude = log.found(Harness::Claude)?;
     let rig = Rig::start(live::rig(std::slice::from_ref(&claude), FAKE_AGENT))?;
     // The window's settings before anything of it ran: one baseline, to its end.
-    let config = claude_config_of_rig(&rig);
-    let settings = settings_of(&config);
+    let config = claude_config_of_rig(&rig)?;
+    let settings = settings_of(&config)?;
     let window = Open::new(&rig, &claude, FOLDER, FOLDER)
         .claude_alone_with_hooks(hooks())
         .open_telling(&log, "claude")?;
@@ -543,8 +555,9 @@ fn each_command_typed_at_an_idle_claudes_prompt_leaves_the_window_at_rest() -> R
         )));
     }
     let session = window.session().unwrap_or_default();
+    let config = window.claude_config()?;
     let status = live::until(Duration::from_secs(30), LOOK, || {
-        status_file(&window.claude_config(), &session)
+        status_file(&config, &session)
     })
     .ok_or_else(|| Error::Daemon("Claude wrote no status of the window".to_owned()))?;
     let mut checks = Vec::new();
@@ -579,7 +592,7 @@ fn each_command_typed_at_an_idle_claudes_prompt_leaves_the_window_at_rest() -> R
     ));
     drop(window);
     // From before the window opened to after it is gone.
-    let kept = settings_of(&config) == settings;
+    let kept = settings_of(&config)? == settings;
     checks.push(Check::new(
         "claude",
         "settings",
@@ -805,18 +818,18 @@ mod tests {
 
     #[test]
     fn the_owners_settings_are_read_as_their_bytes_and_as_none_where_there_are_none() {
-        let config = tempfile::tempdir().unwrap();
-        assert_eq!(settings_of(config.path()), None);
+        let config = cf_e2e::door::made("cf-settings-test-").unwrap();
+        assert_eq!(settings_of(config.path()).unwrap(), None);
         fs::write(config.path().join("settings.json"), b"{\"model\":\"x\"}").unwrap();
         assert_eq!(
-            settings_of(config.path()),
+            settings_of(config.path()).unwrap(),
             Some(b"{\"model\":\"x\"}".to_vec())
         );
     }
 
     #[test]
     fn a_status_file_is_the_running_claudes_that_names_the_conversation() {
-        let config = tempfile::tempdir().unwrap();
+        let config = cf_e2e::door::made("cf-status-test-").unwrap();
         let sessions = config.path().join("sessions");
         fs::create_dir_all(&sessions).unwrap();
         let mine = std::process::id();
@@ -838,5 +851,70 @@ mod tests {
         );
         assert_eq!(status_file(config.path(), "other"), None);
         assert_eq!(read(&sessions.join("none.json")), Value::Null);
+    }
+
+    #[test]
+    fn kit_disclosure_commands_at_rest_refuses_a_foreign_rig_home() {
+        let owner = tempfile::tempdir().unwrap();
+        let env = vec![("HOME".to_owned(), owner.path().display().to_string())];
+        assert!(
+            claude_config_of_environment(&env).is_err(),
+            "a foreign HOME was accepted"
+        );
+        let explicit = vec![(
+            "CLAUDE_CONFIG_DIR".to_owned(),
+            owner.path().display().to_string(),
+        )];
+        assert!(
+            claude_config_of_environment(&explicit).is_err(),
+            "a foreign CLAUDE_CONFIG_DIR was accepted"
+        );
+    }
+
+    #[test]
+    fn kit_disclosure_commands_at_rest_refuses_foreign_settings() {
+        let owner = tempfile::tempdir().unwrap();
+        assert!(
+            settings_of(owner.path()).is_err(),
+            "foreign settings were read"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kit_disclosure_commands_at_rest_refuses_linked_out_settings() {
+        use std::os::unix::fs::symlink;
+        let run = cf_e2e::door::made("cf-rest-run-").unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        fs::write(foreign.path().join("settings.json"), b"foreign").unwrap();
+        symlink(
+            foreign.path().join("settings.json"),
+            run.path().join("settings.json"),
+        )
+        .unwrap();
+        assert!(
+            settings_of(run.path()).is_err(),
+            "linked-out settings were read"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kit_disclosure_commands_at_rest_refuses_linked_out_status() {
+        use std::os::unix::fs::symlink;
+        let run = cf_e2e::door::made("cf-rest-run-").unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        let sessions = foreign.path().join("sessions");
+        fs::create_dir(&sessions).unwrap();
+        fs::write(
+            sessions.join("s.json"),
+            json!({ "pid": std::process::id(), "sessionId": "s" }).to_string(),
+        )
+        .unwrap();
+        symlink(&sessions, run.path().join("sessions")).unwrap();
+        assert!(
+            status_file(run.path(), "s").is_none(),
+            "linked-out status was read"
+        );
     }
 }

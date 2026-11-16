@@ -35,6 +35,33 @@ const TOLD: Duration = Duration::from_secs(120);
 /// What the note that tells a running chief its specs are on begins with.
 const NOW: &str = "Your instructions now include:";
 
+fn chief_rollout(home: &Path, thread: &str) -> std::result::Result<String, String> {
+    if !cf_e2e::door::is_made_or_below(home)
+        || !cf_e2e::door::is_made_or_below(&home.join("sessions"))
+    {
+        return Err("Codex's records are outside the run's own roots".to_owned());
+    }
+    let rollout = rollout::of_thread(home, thread)
+        .ok_or_else(|| format!("no rollout of the thread {thread} in {}", home.display()))?;
+    rollout::read(&rollout).map_err(|failed| failed.to_string())
+}
+
+#[cfg(test)]
+#[test]
+fn kit_round3_specs_refuses_a_foreign_codex_home() {
+    let foreign = tempfile::tempdir().unwrap();
+    std::fs::create_dir(foreign.path().join("sessions")).unwrap();
+    std::fs::write(
+        foreign.path().join("sessions/rollout-thread.jsonl"),
+        "{\"fake\":true}\n",
+    )
+    .unwrap();
+    assert!(
+        chief_rollout(foreign.path(), "thread").is_err(),
+        "a foreign rollout was read"
+    );
+}
+
 /// A project of the run.
 pub struct Ctx<'a> {
     pub rig: &'a Rig,
@@ -218,9 +245,7 @@ impl<'a> Ctx<'a> {
             .rig
             .var("CODEX_HOME")
             .ok_or("the windows are given no Codex home")?;
-        let rollout = rollout::of_thread(Path::new(home), &thread)
-            .ok_or_else(|| format!("no rollout of the thread {thread} in {home}"))?;
-        rollout::read(&rollout).map_err(|failed| failed.to_string())
+        chief_rollout(Path::new(home), &thread)
     }
 
     /// What the project's folder holds of specs, the specs folder being `folder`.

@@ -6,7 +6,7 @@ use super::*;
 use crate::records::{Item, LastCall, Record, Role};
 
 /// A record that says what a test says, whatever conversation it is asked of.
-struct Says(Reading);
+pub(crate) struct Says(pub(crate) Reading);
 
 impl Records for Says {
     fn look<'a>(
@@ -63,7 +63,13 @@ fn changed(says: Says, change: impl FnOnce(&mut Record)) -> Says {
     Says(Reading::Known(record))
 }
 
-const HARNESSES: [Harness; 4] = [Harness::Claude, Harness::Codex, Harness::Pi, Harness::Devin];
+const HARNESSES: [Harness; 5] = [
+    Harness::Claude,
+    Harness::Codex,
+    Harness::Pi,
+    Harness::Devin,
+    Harness::Muse,
+];
 
 #[tokio::test]
 async fn a_turn_was_cut_when_the_record_ends_in_one_with_no_end_not_when_at_rest_and_unknown_when_it_cannot_tell(
@@ -92,6 +98,23 @@ async fn a_turn_was_cut_when_the_record_ends_in_one_with_no_end_not_when_at_rest
             left,
             "{:?}",
             said.0
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_turn_the_record_ends_in_an_abort_is_not_known_to_be_at_rest() {
+    // T-1707: Pi writes an abort for the quit as for an Escape, and the window it left was
+    // taken for one at rest, so its member was never told to go on.
+    let said = changed(
+        ending(Settlement::Settled, &[Role::User, Role::Assistant]),
+        |record| record.aborted = true,
+    );
+    for harness in HARNESSES {
+        assert_eq!(
+            said.turn_cut(harness, "a-session").await,
+            None,
+            "{harness:?}"
         );
     }
 }

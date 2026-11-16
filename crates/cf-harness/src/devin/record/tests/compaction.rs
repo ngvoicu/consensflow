@@ -281,6 +281,12 @@ fn a_compacted_turn_an_escape_cancelled_is_over_by_the_model_request_the_wire_en
         }),
         ("settled".to_owned(), false, false)
     );
+    // And the cancel is an abort, read by the model request the wire ended.
+    let staged = Staged::new();
+    before(&staged);
+    compacted_anew(&staged, &answer("a-final", "Do", ANSWERED));
+    wired(&staged, &ended("cancelled", Some(ANSWERED), Some(ANSWERED)));
+    assert!(aborted(&staged));
 }
 
 #[test]

@@ -755,6 +755,8 @@ impl Answer for Log {
             record.failed = true;
             record.failure.clone_from(reason);
         }
+        // A run a quit cancels ends so, as an Escape's does: nothing says who (T-1707).
+        record.aborted = matches!(end, Some(End::Cancelled));
         record.took_back =
             matches!(end, Some(End::Cancelled)) && latest.is_some_and(|(_, turn)| turn.retracted);
         record.quota = latest.and_then(|(run, _)| self.provisional.quota(run));

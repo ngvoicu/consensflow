@@ -12,6 +12,10 @@ use crate::{Error, Result};
 /// Where the program `name` is, on the `PATH` of this run, as a shell finds it.
 /// A machine that has none is an error that says so.
 pub fn command(name: &str) -> Result<PathBuf> {
+    #[cfg(all(test, unix))]
+    if let Some(program) = fake::command(name) {
+        return Ok(program);
+    }
     if own_var("CF_E2E_STAND_IN").as_deref() == Some("1")
         && super::Harness::from_name(name).is_some()
     {
@@ -25,6 +29,48 @@ pub fn command(name: &str) -> Result<PathBuf> {
     }
     let path = own_var("PATH").unwrap_or_default();
     find(name, &path, own_var("PATHEXT").as_deref()).ok_or_else(|| not_found(name))
+}
+
+// The parity setup test must exercise the real installed-for route without
+// letting a stand-in search the machine's PATH. Its fake is local to the test
+// thread and cannot name a program outside the stand-in's own files.
+#[cfg(all(test, unix))]
+pub(super) mod fake {
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+
+    thread_local! { static CLAUDE: RefCell<Option<PathBuf>> = const { RefCell::new(None) }; }
+
+    pub(in super::super) struct Claude;
+
+    impl Claude {
+        pub(in super::super) fn new(program: PathBuf) -> Self {
+            crate::standin_process::require_watch_path(&program, "fabricated Claude lookup");
+            assert!(program.is_file(), "the fabricated Claude is missing");
+            CLAUDE.with(|slot| {
+                assert!(
+                    slot.borrow().is_none(),
+                    "a fabricated Claude is already active"
+                );
+                *slot.borrow_mut() = Some(program);
+            });
+            Self
+        }
+    }
+
+    impl Drop for Claude {
+        fn drop(&mut self) {
+            CLAUDE.with(|slot| *slot.borrow_mut() = None);
+        }
+    }
+
+    pub(super) fn command(name: &str) -> Option<PathBuf> {
+        if name == "claude" {
+            CLAUDE.with(|slot| slot.borrow().clone())
+        } else {
+            None
+        }
+    }
 }
 
 /// The error of a program `name` that is in no folder of the `PATH`.

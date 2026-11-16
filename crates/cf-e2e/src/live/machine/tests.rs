@@ -156,11 +156,55 @@ fn an_installed_harness_is_its_command_and_the_home_it_logs_in_at() {
 
 #[cfg(unix)]
 #[test]
+fn t1700_login_only_needs_no_owner_configuration_mark() {
+    const CHILD: &str = "CF_T1700_NO_CONFIG_MARK";
+    if crate::process::own_var(CHILD).is_some() {
+        let root = crate::door::made("cf-parity-fake-claude-").unwrap();
+        let program = root.path().join("claude");
+        crate::door::write_executable(&program, "#!/bin/sh\nexit 0\n").unwrap();
+        let _fake = path::fake::Claude::new(program.clone());
+        let home = super::home().unwrap();
+        assert!(Harness::Claude
+            .login_marks()
+            .iter()
+            .all(|mark| !home.join(mark).exists()));
+        assert!(installed_for(Harness::Claude, Duration::from_secs(60)).is_err());
+        let installed = installed_for_claude_parity(Duration::from_secs(60)).unwrap();
+        assert_eq!(installed.command(), program);
+        assert!(installed.claude_config().is_some());
+        return;
+    }
+    let root = crate::door::made("cf-parity-no-mark-").unwrap();
+    let home = root.path().join("owner");
+    fs::create_dir(&home).unwrap();
+    let output = crate::process::case_of(
+        std::env::current_exe().unwrap(),
+        "live::machine::tests::t1700_login_only_needs_no_owner_configuration_mark",
+        Duration::from_secs(30),
+    )
+    .inheriting_env()
+    .var(CHILD, "1")
+    .var("HOME", &home)
+    .var("USERPROFILE", &home)
+    .var("PATH", "")
+    .var("CONSENSFLOW_LIVE_CLAUDE_CONFIG", "")
+    .var("CONSENSFLOW_TEST_MACHINE", "")
+    .run()
+    .unwrap();
+    assert!(output.code == Some(0), "{}", output.output());
+}
+
+#[cfg(unix)]
+#[test]
 fn a_harness_says_its_version_by_the_word_it_is_asked_with_and_unknown_when_it_says_none() {
-    let pi = Installed::at(Harness::Pi, "/bin/echo", "home");
+    // GNU echo interprets `--version` itself; this stand-in prints the actual argument.
+    let folder = crate::door::made("cf-version-probe-").unwrap();
+    let program = folder.path().join("probe");
+    crate::door::write_executable(&program, "#!/bin/sh\nprintf '%s\\n' \"$1\"\n").unwrap();
+    let pi = Installed::at(Harness::Pi, &program, "home");
     assert_eq!(pi.version(), "--version");
     // Devin's is a command of its own, not a flag.
-    let devin = Installed::at(Harness::Devin, "/bin/echo", "home");
+    let devin = Installed::at(Harness::Devin, &program, "home");
     assert_eq!(devin.version(), "version");
     let failing = Installed::at(Harness::Pi, "/usr/bin/false", "home");
     assert_eq!(failing.version(), "unknown");
@@ -385,13 +429,19 @@ fn every_harness_found_runs_on_a_home_of_the_runs_own_but_for_the_two_that_are_n
         isolated.push(Harness::Devin);
     }
     for harness in isolated {
-        let found = with_homes(Installed::at(harness, "/opt/bin/h", "/home/me"), PLANNED).unwrap();
+        let found = with_homes(
+            Installed::at(harness, "/opt/bin/h", "/home/me"),
+            PLANNED,
+            true,
+        )
+        .unwrap();
         assert!(found.isolation().is_some(), "{harness:?}");
     }
     // Claude Code's is a config folder ([`Login`]).
     let found = with_homes(
         Installed::at(Harness::Claude, "/opt/bin/h", "/home/me"),
         PLANNED,
+        true,
     )
     .unwrap();
     assert!(found.isolation().is_none());

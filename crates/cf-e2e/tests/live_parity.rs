@@ -5,14 +5,12 @@
 //! machine's quota on one short task of each harness named, so it is ignored unless
 //! asked for and is no part of `check` or of CI.
 //!
-//! - **Claude Code's window** (`claude.rs`): a window opened as ConsensFlow opens a member's
-//!   loads the MCP servers, plugins, skills and Claude in Chrome that the same Claude Code
-//!   loads opened plainly in that folder, and its role's skill besides, on macOS and on
-//!   Windows (a ConPTY of ConsensFlow's own there).
+//! - **Claude Code's window** (`claude.rs`): the run's own user skill and MCP server must
+//!   load in a plain Claude window, and a member must load the same features and its role's
+//!   skill besides, on macOS and Windows (a ConPTY of ConsensFlow's own there).
 //!
-//! - **Codex's, Devin's and Muse Code's workers** (`codex_devin.rs`): the MCP servers, skills,
-//!   hooks and instructions of the human's own setup reach the worker, and it takes its
-//!   interrupt after the human typed.
+//! - **Codex's, Devin's and Muse Code's workers** (`codex_devin.rs`): the run's MCP server,
+//!   skills, hooks and instructions reach the worker, and it takes its interrupt after typing.
 //!
 //! ```text
 //! cargo xtask live parity                                   every part
@@ -106,7 +104,7 @@ fn a_codex_or_devin_worker_has_what_its_harness_has_in_a_terminal_and_takes_its_
 }
 
 #[test]
-#[ignore = "opt-in: opens the machine's Claude Code twice on a copy of its own config, no message given; cargo xtask live parity -- a_claude_member"]
+#[ignore = "opt-in: opens the machine's Claude Code twice on the kit's login copy, no message given; cargo xtask live parity -- a_claude_member"]
 fn a_claude_member_window_loads_what_the_same_claude_loads_in_a_terminal() -> Result {
     let log = Log::begin("live parity (Claude Code)")?;
     log.passing(claude::run(&log))

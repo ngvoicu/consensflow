@@ -226,6 +226,7 @@ impl Context {
             recorder: recorder.clone(),
             failures: RefCell::new(Vec::new()),
             warnings: RefCell::new(Vec::new()),
+            infos: RefCell::new(Vec::new()),
         });
         let launch_files = Rc::new(FakeLaunchFiles {
             recorder: recorder.clone(),

@@ -469,28 +469,33 @@ fn settled(rig: &Rig, window: &Window, harness: Harness) -> Result<Vec<String>> 
     }
 }
 
-/// Where Claude Code keeps its own record of folders: `.claude.json` in the config folder
-/// the rig gave its windows, and in the user's home where it gave none.
-fn claude_record(rig: &Rig, install: &Installed) -> PathBuf {
-    match rig
-        .var("CLAUDE_CONFIG_DIR")
-        .filter(|config| !config.is_empty())
-    {
-        Some(config) => Path::new(config).join(".claude.json"),
-        None => install.home().join(".claude.json"),
+/// Where Claude Code keeps the run's record of folders.
+fn claude_record(rig: &Rig) -> Result<PathBuf> {
+    let record = claude_config(rig)?.join(".claude.json");
+    if !cf_e2e::door::is_made_or_below(&record) {
+        return Err(Error::Daemon(
+            "Claude's trust record is outside the run's own roots".to_owned(),
+        ));
     }
+    Ok(record)
 }
 
-/// Claude Code's config folder: the one the rig gave its windows, and `~/.claude` where
-/// it gave none.
-fn claude_config(rig: &Rig, install: &Installed) -> PathBuf {
-    match rig
-        .var("CLAUDE_CONFIG_DIR")
-        .filter(|config| !config.is_empty())
-    {
-        Some(config) => PathBuf::from(config),
-        None => install.home().join(".claude"),
+/// Claude Code's config folder must belong to this run; no owner's-home fallback.
+fn config_path(config: Option<&str>) -> Result<PathBuf> {
+    let config = config
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| Error::Daemon("the rig gives Claude no config folder".to_owned()))?;
+    if !cf_e2e::door::is_made_or_below(&config) {
+        return Err(Error::Daemon(
+            "Claude's config is outside the run's own roots".to_owned(),
+        ));
     }
+    Ok(config)
+}
+
+fn claude_config(rig: &Rig) -> Result<PathBuf> {
+    config_path(rig.var("CLAUDE_CONFIG_DIR"))
 }
 
 /// The folders Claude Code keeps a yes for in its own record of them (`record`, its
@@ -522,24 +527,43 @@ fn claude_trusted(record: &Path, under: &str) -> Vec<String> {
 /// at rest only where it says idle, so one that says idle while it asks whether to trust
 /// its folder is held only by the watch for the question (Calliope's review of T-432,
 /// T-520). Read and never written.
-fn claude_status(config: &Path, pid: Option<u32>, directory: &Path) -> Vec<String> {
+fn claude_status(config: &Path, pid: Option<u32>, directory: &Path) -> Result<Vec<String>> {
     let real = fs::canonicalize(directory).unwrap_or_else(|_| directory.to_path_buf());
-    let Ok(entries) = fs::read_dir(config.join("sessions")) else {
-        return vec!["no status files".to_owned()];
+    let sessions = config.join("sessions");
+    if !cf_e2e::door::is_made_or_below(&sessions) {
+        return Err(Error::Daemon(
+            "Claude's sessions are outside the run's own roots".to_owned(),
+        ));
+    }
+    let Ok(entries) = fs::read_dir(sessions) else {
+        return Ok(vec!["no status files".to_owned()]);
     };
-    entries
-        .flatten()
-        .filter_map(|entry| fs::read_to_string(entry.path()).ok())
-        .filter_map(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .filter(|status| {
+    let mut found = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !cf_e2e::door::is_made_or_below(&path) {
+            return Err(Error::Daemon(
+                "a Claude status file is outside the run's own roots".to_owned(),
+            ));
+        }
+        let Some(status) = fs::read_to_string(path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        else {
+            continue;
+        };
+        let matches = {
             let ours = pid.is_some_and(|pid| status["pid"] == pid);
             let here = status["cwd"].as_str().is_some_and(|cwd| {
                 fs::canonicalize(cwd).unwrap_or_else(|_| PathBuf::from(cwd)) == real
             });
             ours || here
-        })
-        .map(|status| live::text(&status["status"]))
-        .collect()
+        };
+        if matches {
+            found.push(live::text(&status["status"]));
+        }
+    }
+    Ok(found)
 }
 
 /// `git` with `words` in `folder`, which must do what it is asked.
@@ -643,7 +667,9 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
                 "{name}: not at its prompt once answered"
             )));
         }
-        said_yes_once(&claude_record(rig, install), &directory)?;
+        if harness == Harness::Claude {
+            said_yes_once(&claude_record(rig)?, &directory)?;
+        }
         git(
             &live_folder_in(&home, &format!("{base}/granted-repository"))?,
             &["init", "-q"],
@@ -682,8 +708,13 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     let under = live_folder_in(&home, FOLDER)?
         .to_string_lossy()
         .into_owned();
-    let record = claude_record(rig, install);
-    let trusted_before = claude_trusted(&record, &under);
+    let record = (harness == Harness::Claude)
+        .then(|| claude_record(rig))
+        .transpose()?;
+    let trusted_before = record
+        .as_ref()
+        .map(|record| claude_trusted(record, &under))
+        .unwrap_or_default();
     let opening = Open::new(rig, install, &name, &id).without_trust();
     let window = if harness == Harness::Claude && servers_of(case).is_some() {
         opening.with_the_projects_servers()
@@ -707,7 +738,7 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
         let pid = window.process().map(|process| process.pid);
         lines.push(format!(
             "Claude Code's status while it asks: {:?}",
-            claude_status(&claude_config(rig, install), pid, &directory)
+            claude_status(&claude_config(rig)?, pid, &directory)?
         ));
     }
     let mut keys = 0;
@@ -764,15 +795,18 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     // nothing else: what tells the engine whether a yes is the project's. Where it asked
     // of the folder's grants and the engine did not answer, it keeps nothing.
     let mut kept_where_said = true;
-    if case == Case::GrantedInRepository {
-        let kept: Vec<String> = claude_trusted(&record, &under)
+    if let Some(record) = record
+        .as_ref()
+        .filter(|_| case == Case::GrantedInRepository)
+    {
+        let kept: Vec<String> = claude_trusted(record, &under)
             .into_iter()
             .filter(|folder| !trusted_before.contains(folder))
             .collect();
         kept_where_said = kept.is_empty();
         lines.push(format!("Claude Code kept a yes for {kept:?}"));
-    } else if asked && harness == Harness::Claude {
-        let kept: Vec<String> = claude_trusted(&record, &under)
+    } else if let (true, Some(record)) = (asked, &record) {
+        let kept: Vec<String> = claude_trusted(record, &under)
             .into_iter()
             .filter(|folder| !trusted_before.contains(folder))
             .collect();
@@ -1135,7 +1169,7 @@ fn resumed(install: &Installed, stamp: &str, log: &Log, report: &Path) -> Result
         git(&workspace, &["init", "-q"])?;
         let session = uuid::Uuid::new_v4().to_string();
         let real = fs::canonicalize(&workspace).unwrap_or_else(|_| workspace.clone());
-        let records = claude_project_folder(&claude_config(&rig, install), &real);
+        let records = claude_project_folder(&claude_config(&rig)?, &real);
         cf_e2e::door::make_dir(&records)?;
         // Taken away at the end of this window's turn of the loop, or as the run unwinds.
         let _written = Written(records.clone());
@@ -1436,6 +1470,21 @@ fn which_harness_asks_to_trust_a_folder_and_consensflow_answers_it_in_the_projec
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_trust_reader_refuses_an_owners_config() {
+        let owner = tempfile::tempdir().unwrap();
+        assert!(
+            config_path(None).is_err(),
+            "a missing run config must be refused"
+        );
+        assert!(
+            config_path(Some(owner.path().to_str().unwrap())).is_err(),
+            "an owner's config must be refused"
+        );
+        let run = cf_e2e::door::made("trust-reader-guard-").unwrap();
+        assert_eq!(config_path(run.path().to_str()).unwrap(), run.path());
+    }
 
     #[test]
     fn claude_must_ask_in_a_repository_nobody_answered_and_of_grants_and_servers_and_no_harness_ever_elsewhere(

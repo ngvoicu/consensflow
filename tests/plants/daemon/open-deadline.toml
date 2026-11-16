@@ -89,6 +89,19 @@ runs = ["od-engine"]
 file = "crates/cf-engine/src/windows.rs"
 find = '''
         if !self.end_abandoned(record).await? {
+            if record.window.borrow().coming.is_some()
+                && self
+                    .project_of(participant.id)?
+                    .is_some_and(|p| p.state == "open")
+            {
+                return self.launch_failed(
+                    record,
+                    project,
+                    participant,
+                    None,
+                    "its previous window could not be ended",
+                );
+            }
             return Ok(());
         }
         // A chief the update could not tell the model of'''
@@ -203,8 +216,8 @@ runs = ["od-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "        if !told {"
-replace = "        if true || !told {"
+find = "                Some(abandoned) if abandoned.pane == pane && !abandoned.told => {"
+replace = "                Some(abandoned) if abandoned.pane == pane => {"
 
 [[plant]]
 name = "open deadline: an exit is a window's by its id alone, and the end of the window given up on closes the next"

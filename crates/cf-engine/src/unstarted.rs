@@ -318,7 +318,7 @@ impl Dispatcher {
             }
             failing => failing,
         };
-        self.launch_failed(record, project, participant, failing, &said)?;
+        self.launch_failed_with_reopen(record, project, participant, failing, &said, true)?;
         // The chief opens again at its time whatever waits for it, told its turn was cut
         // where the window had begun one (`Dispatcher::step`).
         if let Some(relaunch) = record.window.borrow_mut().relaunch.as_mut() {

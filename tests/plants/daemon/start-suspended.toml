@@ -114,8 +114,8 @@ runs = ["harness-contract"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/contract.rs"
-find = '''                    Settlement::InFlight => Some(TurnLeft::Cut(Opening::of(&record.items))),'''
-replace = '''                    Settlement::InFlight => Some(TurnLeft::AtRest),'''
+find = '''            Settlement::InFlight => Some(TurnLeft::Cut(Opening::of(&record.items))),'''
+replace = '''            Settlement::InFlight => Some(TurnLeft::AtRest),'''
 
 [[plant]]
 name = "start suspended: a record settled on the message it was given is taken for one at rest"

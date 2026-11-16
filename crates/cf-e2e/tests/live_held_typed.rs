@@ -264,7 +264,7 @@ fn probe(rig: &Rig, install: &Installed, log: &Log) -> Result<Vec<Check>> {
     types(&window, "/recap")?;
     sleep(KEYED);
     window.types(ENTER)?;
-    let config = window.claude_config();
+    let config = window.claude_config()?;
     let waited = Instant::now();
     while !recapped(&config) && !recap_drawn(&screen_lines(&window)) && waited.elapsed() < RECAP {
         sleep(Duration::from_secs(2));

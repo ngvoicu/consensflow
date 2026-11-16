@@ -24,9 +24,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use cf_e2e::devin_store;
 use cf_e2e::live::ask;
-use cf_e2e::live::machine::{home, live_folder};
+use cf_e2e::live::machine::home;
 use cf_e2e::live::members::{self, Plan};
 use cf_e2e::live::{Harness, Log, Who};
 use cf_e2e::process::own_var;
@@ -104,8 +103,10 @@ pub fn run(stand_in: &Path, log: &Log) -> Result<Finished> {
     let plan = plan(&config()?);
     let task = Task::several(CALLS)?;
     let who = Who::Harness(Harness::Devin);
-    let mut finished = check::run(who, &plan, &task, stand_in, log)?;
-    match compaction(&live_folder(&plan.folder)?)? {
+    let (mut finished, session) = check::run_with(who, &plan, &task, stand_in, log, |members| {
+        compaction(members.folder(), members.rig().environment())
+    })?;
+    match session {
         Some(session) if session.summaries > 0 => {
             finished
                 .case
@@ -142,14 +143,8 @@ impl Session {
 
 /// The newest session of Devin's store in `folder`, read as the daemon reads the store
 /// (read-only, never waiting on Devin for long), or none where it holds none.
-fn compaction(folder: &Path) -> Result<Option<Session>> {
-    let home = home()?;
-    let store = devin_store::location(
-        cfg!(windows),
-        &home.to_string_lossy(),
-        own_var("APPDATA").as_deref(),
-        own_var("XDG_DATA_HOME").as_deref(),
-    );
+fn compaction(folder: &Path, env: &[(String, String)]) -> Result<Option<Session>> {
+    let store = store(cfg!(windows), env)?;
     let failed = |cause: rusqlite::Error| Error::Daemon(format!("{}: {cause}", store.display()));
     let db =
         Connection::open_with_flags(&store, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(failed)?;
@@ -172,6 +167,13 @@ fn compaction(folder: &Path) -> Result<Option<Session>> {
         }
     }
     Ok(None)
+}
+
+/// Devin's data folder must be the rig's, not the test process's home or a fallback to it.
+/// Check the resolved store against the door's run-owned roots before opening it, including
+/// the final file and any links in the path.
+fn store(windows: bool, env: &[(String, String)]) -> Result<PathBuf> {
+    cf_e2e::live::guard::devin_store_path(windows, env)
 }
 
 /// What the main chain of the session `id`, from `head` up, holds.
@@ -209,8 +211,137 @@ fn chain_of(db: &Connection, id: &str, head: Option<i64>) -> rusqlite::Result<Se
 #[cfg(test)]
 mod tests {
     use cf_e2e::files;
+    use cf_e2e::live::isolation::Isolation;
+    use cf_e2e::rig::HarnessHome;
 
     use super::*;
+
+    #[test]
+    fn the_compacted_plans_store_is_below_the_runs_home() {
+        let plan = plan(&json!({}));
+        assert!(plan.harnesses().contains(&Harness::Devin));
+        assert!(plan
+            .home_files
+            .iter()
+            .any(|file| { file.harness == Harness::Devin && file.variable == "XDG_CONFIG_HOME" }));
+        let root = cf_e2e::door::made("finish-store-guard-").unwrap();
+        // Exercise the kit's actual isolation layouts using only a fabricated owner and login.
+        let owner = tempfile::tempdir().unwrap();
+        for folder in ["data/devin", "roaming/devin"] {
+            std::fs::create_dir_all(owner.path().join(folder)).unwrap();
+            std::fs::write(
+                owner.path().join(folder).join("credentials.toml"),
+                "api_key = 'fixture'\n",
+            )
+            .unwrap();
+        }
+        let check_layout = |windows, isolation: Isolation| {
+            let isolation = isolation.made_in(root.path());
+            let env = isolation.vars().unwrap();
+            let found = store(windows, &env).unwrap();
+            assert!(
+                found.starts_with(root.path()),
+                "a planned store is outside the run's home"
+            );
+        };
+        check_layout(
+            true,
+            Isolation::devin_on_windows(owner.path(), &owner.path().join("roaming")),
+        );
+        #[cfg(unix)]
+        check_layout(
+            false,
+            Isolation::devin(
+                owner.path(),
+                &owner.path().join("config"),
+                &owner.path().join("data"),
+            ),
+        );
+        let data = root.path().join("data");
+        let env = [
+            (
+                "HOME".to_owned(),
+                root.path().to_string_lossy().into_owned(),
+            ),
+            (
+                "XDG_DATA_HOME".to_owned(),
+                data.to_string_lossy().into_owned(),
+            ),
+            ("APPDATA".to_owned(), data.to_string_lossy().into_owned()),
+        ];
+        for windows in [false, true] {
+            let found = store(windows, &env).unwrap();
+            assert_eq!(found, data.join("devin/cli/sessions.db"));
+            assert!(
+                found.starts_with(root.path()),
+                "Devin's store is outside the run's home"
+            );
+            let foreign = tempfile::tempdir().unwrap();
+            let name = if windows { "APPDATA" } else { "XDG_DATA_HOME" };
+            let mut outside = env.to_vec();
+            outside.push((
+                name.to_owned(),
+                foreign.path().to_string_lossy().into_owned(),
+            ));
+            assert!(
+                store(windows, &outside).is_err(),
+                "a foreign store must be refused"
+            );
+            assert!(
+                store(windows, &[]).is_err(),
+                "a missing data folder must be refused"
+            );
+        }
+        let db_path = store(cfg!(windows), &env).unwrap();
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let db = Connection::open(&db_path).unwrap();
+        db.execute_batch(
+            "create table sessions (id text, main_chain_id integer, working_directory text, created_at integer);
+             create table message_nodes (session_id text, node_id integer, parent_node_id integer, chat_message text);",
+        ).unwrap();
+        db.execute(
+            "insert into sessions values ('run-session', 1, ?, 1)",
+            [root.path().to_string_lossy().as_ref()],
+        )
+        .unwrap();
+        db.execute(
+            "insert into message_nodes values ('run-session', 1, null, ?)",
+            [r#"{"role":"user","metadata":{"extensions":{"devin-rs/summary":{}}}}"#],
+        )
+        .unwrap();
+        drop(db);
+        assert_eq!(
+            compaction(root.path(), &env).unwrap(),
+            Some(Session {
+                id: "run-session".to_owned(),
+                summaries: 1,
+                users: 1
+            }),
+        );
+        #[cfg(unix)]
+        {
+            let foreign = tempfile::tempdir().unwrap();
+            let other = foreign.path().join("sessions.db");
+            std::fs::write(&other, b"not this run's store").unwrap();
+            let linked_data = root.path().join("linked-data");
+            let link = linked_data.join("devin/cli/sessions.db");
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(&other, &link).unwrap();
+            let mut linked = env.to_vec();
+            linked.push((
+                "XDG_DATA_HOME".to_owned(),
+                linked_data.to_string_lossy().into_owned(),
+            ));
+            assert!(
+                store(false, &linked).is_err(),
+                "a store link outside the run must be refused"
+            );
+            assert!(
+                compaction(root.path(), &linked).is_err(),
+                "the oracle must not open that link"
+            );
+        }
+    }
 
     #[test]
     fn the_project_of_the_step_has_the_devin_worker_reading_its_config_from_the_runs_home() {
