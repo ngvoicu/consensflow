@@ -435,21 +435,6 @@ replace = '''
                handed_at = NULL, receipt = NULL
          WHERE id = ?",'''
 
-[[plant]]
-name = "role read: an answer read while its paste was on its way and given back leaves its task waiting"
-meant = "an_answer_read_in_a_thread_while_its_paste_is_on_its_way_is_read_when_the_paste_is_given_back"
-runs = ["ledger-read"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/receipt.rs"
-find = '''
-    received_as(store, &message, &json!({ "read": via.word() }))?;
-    reconcile_of(store, &message)?;
-    Ok(true)'''
-replace = '''
-    received_as(store, &message, &json!({ "read": via.word() }))?;
-    Ok(true)'''
-
 # The engine: a chief window that read its role the moment it had it, and went by itself, came up.
 
 [[plant]]

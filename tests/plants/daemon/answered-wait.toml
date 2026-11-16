@@ -2,6 +2,7 @@
 [run]
 answered-wait-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "questions::"]
 answered-wait-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "an_answer_to_a_busy_window_moves_its_card_to_working_but_waits_for_rest"]
+answered-wait-urgent = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "an_answer_to_an_urgent_question_does_not_hold_the_workers_result"]
 
 [[plant]]
 name = "answered wait: an answer on its way does not end the wait"
@@ -90,5 +91,20 @@ find = '''                    || thread.messages.iter().any(|message| {
                         message.kind == "answer"
                             && message.recipient_id == participant.id
                             && matches!(message.state.as_str(), "queued" | "delivering")
+                            && thread.messages.iter().any(|question| {
+                                Some(question.id) == message.reply_to
+                                    && question.kind == "question"
+                                    && !question.urgent
+                            })
                     })'''
 replace = ""
+
+
+[[plant]]
+name = "answered wait: an urgent answer holds back the result"
+meant = "an_answer_to_an_urgent_question_does_not_hold_the_workers_result"
+runs = ["answered-wait-urgent"]
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "                                    && !question.urgent"
+replace = "                                    && question.urgent"

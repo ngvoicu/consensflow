@@ -257,11 +257,13 @@ fn board_state_time_follows_named_creation_and_later_state_moves() {
     let answer = ledger
         .answer(question.id, chief, Some(&json!("Yes")), None)
         .expect("answer");
+    assert_eq!(card(&ledger, project.id, number)["state"], "working");
     assert_eq!(
         card(&ledger, project.id, number)["stateSince"],
-        "2026-10-13T12:02:00.000Z",
-        "answer in transit keeps waiting"
+        "2026-10-13T12:03:00.000Z",
+        "the answer on its way starts working time"
     );
+    now.set(now.get() + 30_000);
     ledger.begin_delivery(answer.id).expect("begin answer");
     ledger
         .confirm_delivery(answer.id, Some(&json!({"item":"answer"})))
@@ -269,9 +271,9 @@ fn board_state_time_follows_named_creation_and_later_state_moves() {
     assert_eq!(
         card(&ledger, project.id, number)["stateSince"],
         "2026-10-13T12:03:00.000Z",
-        "answer moves to working"
+        "delivery does not reset the working clock"
     );
-    now.set(now.get() + 60_000);
+    now.set(now.get() + 30_000);
     ledger
         .pause_task(project.id, number, Some("chief"), None)
         .expect("pause");

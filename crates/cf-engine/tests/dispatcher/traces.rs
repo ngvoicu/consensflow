@@ -266,7 +266,12 @@ const HANDOFF_AND_NO_CAUSE: &str = "before it closes the chief's window, whose h
 /// The same, where the note falls among other effects.
 const NOTE_TURNS_AND_NO_CAUSE: &str = "the engine asks the pane host what the window shows (`pane.snapshot` with `tail`) before it closes a window whose harness could not take its first message, which takes the turns the host's answer takes: the note falls among other effects than in Node's trace; and the reason of a launch that did not start says its stage and the kind of failure its producer typed, and no word of the adapter's or the host's, which the log holds, masked, in a line of its own, where Node's reason quoted them (T-1328)";
 
+const ANSWER_ON_ITS_WAY: &str = "an answer queued for its window moves the task from waiting to working at once, where Node waits for receipt; the answer is delivered as before";
+
 const DEPARTED: &[(&str, &str)] = &[
+    ("leaves a task waiting on a question alone, and resumes it with the answer", ANSWER_ON_ITS_WAY),
+    ("carries an advisor’s and a reviewer’s question to the chief and the answer back to their own window", ANSWER_ON_ITS_WAY),
+    ("is handed nothing when it was withdrawn while its window got ready, and fails nothing", ANSWER_ON_ITS_WAY),
     (
         "leaves the window alone once the chief's tell reaches it, answered or not, until the task goes on",
         "an answer to a tell while its task is still paused tells the chief both ways on, and its delivery records that footer so it can be recognised after the task moves; Node's answer did neither",

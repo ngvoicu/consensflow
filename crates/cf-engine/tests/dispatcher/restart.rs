@@ -115,8 +115,8 @@ fn a_task_whose_answer_a_stopped_start_let_go_of_is_not_finished_from_its_old_re
     });
     assert_eq!(
         context.task(project.id, 1).task.state,
-        "waiting",
-        "the start after it reconciles T-1: its question has no answer received"
+        "working",
+        "the released answer is on its way, so T-1 works"
     );
 
     context.ledger.borrow_mut().suspend_for_restart().unwrap();

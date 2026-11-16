@@ -784,8 +784,8 @@ fn an_answer_the_pane_host_held_goes_in_once_and_the_task_s_result_is_what_answe
     assert_eq!(results_of(&tiers, 1), Vec::<String>::new());
     assert_eq!(
         tiers.task(1).task.state,
-        "waiting",
-        "waiting for the answer, which nothing showed it had"
+        "working",
+        "the answer is on its way, though nothing showed it received"
     );
 
     // The host comes back and writes the paste it held only as the window is read
@@ -801,7 +801,7 @@ fn an_answer_the_pane_host_held_goes_in_once_and_the_task_s_result_is_what_answe
     context.pass().unwrap();
     assert_eq!(where_is(&context, &answer), ("delivering".to_owned(), 1));
     assert_eq!(results_of(&tiers, 1), Vec::<String>::new());
-    assert_eq!(tiers.task(1).task.state, "waiting");
+    assert_eq!(tiers.task(1).task.state, "working");
     shows(&context, "zeus", &context.message(answer.id));
     context.adapter.busy("zeus");
     context.pass().unwrap();

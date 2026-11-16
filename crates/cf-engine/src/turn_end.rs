@@ -345,6 +345,11 @@ impl Dispatcher {
                         message.kind == "answer"
                             && message.recipient_id == participant.id
                             && matches!(message.state.as_str(), "queued" | "delivering")
+                            && thread.messages.iter().any(|question| {
+                                Some(question.id) == message.reply_to
+                                    && question.kind == "question"
+                                    && !question.urgent
+                            })
                     })
             }
             _ => false,

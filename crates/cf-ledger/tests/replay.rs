@@ -82,8 +82,8 @@ enum Outcome {
 /// names `FOLLOW_UP_BEHIND_WORK`, which the follow-up queued behind a window's
 /// work moved: Node refuses it; and the one that names
 /// `REMOVAL_CANCELS_WAITING`, which the removal's cancel of the tasks waiting
-/// for a member moved; and the 4 that name `ANSWERED_AS_IT_WAITED`, which
-/// the settling of a question answered as it waited moved (T-260); and the one
+/// for a member moved; and the question answered as it waited (T-260), whose
+/// traces now first depart when the answer is queued; and the one
 /// that names `CRITICAL_WORDS`, which the rewording of a critical task's lead
 /// moved (T-1060); and the one that names `BUSY_NAMES_ITS_HOLDER`, which the
 /// naming of the task that holds a window in a `session-busy` refusal moved
@@ -115,7 +115,16 @@ const HOLD_SAID: &str = "a task held for its member's quota, whose first note of
 /// recognised after the task moves; Node's event had no footer to record.
 const TELL_WAYS_ON: &str = "a tell answer to a paused task records the tasks whose ways-on footer its paste carries in `delivery.begun`, so that paste is recognised after the task moves; Node's event has no such field";
 
+/// A question's answer on its way moves the task to working at once (T-1740).
+/// Node leaves the state move to receipt; this call logs it and reads the clock.
+const ANSWER_ON_ITS_WAY: &str = "an answer queued for a waiting window moves its task to working and logs the state change now, where Node waits until receipt; the call reads the clock for that event";
+
 const DEPARTED: &[(&str, usize, &str)] = &[
+    ("ledger-messages-007", 10, ANSWER_ON_ITS_WAY),
+    ("ledger-history-005", 14, ANSWER_ON_ITS_WAY),
+    ("core-dispatcher-108", 92, ANSWER_ON_ITS_WAY),
+    ("core-dispatcher-037", 95, ANSWER_ON_ITS_WAY),
+    ("core-dispatcher-036", 75, ANSWER_ON_ITS_WAY),
     ("ledger-history-002", 0, NAMED_BY_MODEL),
     ("ledger-history-004", 0, NAMED_BY_MODEL),
     ("ledger-history-006", 0, NAMED_BY_MODEL),
@@ -138,7 +147,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-projects-006", 6, NO_TIERS_FOLLOWED),
 
     ("core-api-003", 19, RESULT_ACCEPTED),
-    ("core-api-005", 17, ANSWERED_AS_IT_WAITED),
+    ("core-api-005", 16, ANSWER_ON_ITS_WAY), // Later departure: question answered while queued (T-260)
     ("core-api-006", 15, "the door's read `answerTo` is gone (a poll claims with `claim_answer`), and a choice answer lands queued, not read"),
     ("core-dispatcher-010", 121, REASON_PAUSE),
     ("core-dispatcher-011", 117, TELL_WAYS_ON),
@@ -152,7 +161,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-dispatcher-060", 236, WAIT_NOTE_TAKEN),
     ("core-dispatcher-063", 86, RELEASE_SHOWN),
     ("core-dispatcher-064", 86, RELEASE_SHOWN),
-    ("core-dispatcher-065", 147, KEPT_IN_BRIEF),
+    ("core-dispatcher-065", 90, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
     ("core-dispatcher-066", 304, RELEASE_SHOWN),
     ("core-dispatcher-067", 95, HOLD_SAID),
     ("core-dispatcher-068", 85, HOLD_SAID),
@@ -160,7 +169,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-dispatcher-070", 116, HOLD_SAID),
     ("core-dispatcher-071", 114, HOLD_SAID),
     ("core-dispatcher-074", 91, "the chief queues a follow-up (`--after T-n`) while T-n's result is in and not accepted: it is taken, open and waiting for T-n to be accepted, where Node queued it for the window at once; the trace's later departure (the daemon resumes T-3 when its hold ends, and the note that said T-3 waits, which the chief had not been given, is withdrawn, where Node leaves it queued) is no longer reached"),
-    ("core-dispatcher-080", 225, COPY_AFTER_THE_KEPT),
+    ("core-dispatcher-080", 136, ANSWER_ON_ITS_WAY), // Later departure: COPY_AFTER_THE_KEPT
     ("core-dispatcher-082", 87, FOLLOW_UP_BEHIND_RESULT),
     ("core-dispatcher-085", 227, COPY_AFTER_THE_KEPT),
     ("core-dispatcher-086", 185, COPY_AFTER_THE_KEPT),
@@ -168,7 +177,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-dispatcher-089", 95, DECIDED_BEFORE_PASTED),
     ("core-dispatcher-090", 93, DECIDED_BEFORE_PASTED),
     ("core-dispatcher-091", 87, FOLLOW_UP_BEHIND_RESULT),
-    ("core-dispatcher-107", 122, KEPT_IN_BRIEF),
+    ("core-dispatcher-107", 92, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
     ("core-dispatcher-075", 75, HOLD_SAID),
     ("core-dispatcher-113", 85, RELEASE_SHOWN),
     ("core-dispatcher-158", 87, FOLLOW_UP_BEHIND_RESULT),
@@ -178,9 +187,9 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-page-026", 14, UNREACHED),
     ("ledger-history-001", 12, "a tell answer to a paused task records the tasks whose ways-on footer its paste carries in `delivery.begun`, so that paste is recognised after the task moves; Node's event has no such field; its later departure: the chief accepts the task while its result is still queued, so the result is withdrawn where Node leaves it to be pasted"),
     ("ledger-history-015", 32, RESULT_ACCEPTED),
-    ("home-copies-001", 34, KEPT_IN_BRIEF),
-    ("home-copies-004", 34, KEPT_IN_BRIEF),
-    ("ledger-conversations-008", 20, RESULT_ACCEPTED),
+    ("home-copies-001", 32, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
+    ("home-copies-004", 32, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
+    ("ledger-conversations-008", 15, ANSWER_ON_ITS_WAY), // Later departure: RESULT_ACCEPTED
     ("ledger-conversations-013", 22, RESULT_SENT_BACK),
     ("ledger-conversations-014", 12, FOLLOW_UP_BEHIND_RESULT),
     ("ledger-conversations-015", 11, "a task taken back from its member, with no follow-up bound to that window and nothing taken back with it, tells its requester in a note that asks no decision: to the chief it is shown on the task's line, not typed (RS-25), `read` with its receipt `shown`, where Node leaves it `queued` to be pasted; the trace's later departure: the daemon gives the task to a member while the note that it was taken back or waits for a free member, which the chief had not been given, is queued: the note is withdrawn (`cancelled`, with the reason `T-n was taken by @member`), where Node leaves it `queued` to be pasted after the task was taken"),
@@ -190,37 +199,37 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-gate-006", 25, DOOR_READ),
     ("ledger-gate-007", 15, DOOR_READ),
     ("ledger-gate-008", 16, "the door's read `answerTo` is gone, and the choice answer the human approves lands queued, not read for the door"),
-    ("ledger-messages-009", 9, "the door's read `answerTo` is gone, and a choice answer lands queued: its task waits until it is received"),
+    ("ledger-messages-009", 9, "the door's read `answerTo` is gone, and a choice answer lands queued, ending its task's wait immediately"),
     ("ledger-messages-010", 11, READ_AT_ONCE),
     ("ledger-messages-011", 10, "the asker's own window answering first is received at once with the receipt `{window: true}` and its time; Node left both empty"),
     ("ledger-messages-013", 9, ANSWER_COUNT_SAID),
     ("ledger-messages-014", 9, ANSWER_COUNT_SAID),
     ("ledger-messages-015", 10, PICK_ROOM),
-    ("ledger-messages-016", 12, ANSWERED_AS_IT_WAITED),
+    ("ledger-messages-016", 9, ANSWER_ON_ITS_WAY), // Later departure: question answered while queued (T-260)
     ("ledger-messages-017", 10, DOOR_READ),
     ("ledger-messages-022", 12, DOOR_READ),
-    ("ledger-page-reads-004", 8, ANSWERED_AS_IT_WAITED),
-    ("ledger-page-reads-005", 9, ANSWERED_AS_IT_WAITED),
+    ("ledger-page-reads-004", 7, ANSWER_ON_ITS_WAY), // Later departure: question answered while queued (T-260)
+    ("ledger-page-reads-005", 7, ANSWER_ON_ITS_WAY), // Later departure: question answered while queued (T-260)
     ("ledger-page-reads-009", 41, REMOVAL_CANCELS_WAITING),
-    ("ledger-projects-002", 14, KEPT_IN_BRIEF),
+    ("ledger-projects-002", 12, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
     ("ledger-projects-011", 8, NO_MARK_TO_FORGET),
-    ("ledger-schema-005", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-005", 13, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
     ("ledger-schema-006", 1, NAMED_BY_MODEL),
-    ("ledger-schema-007", 15, KEPT_IN_BRIEF),
-    ("ledger-schema-010", 14, KEPT_IN_BRIEF),
-    ("ledger-schema-011", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-007", 13, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
+    ("ledger-schema-010", 12, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
+    ("ledger-schema-011", 13, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
     ("ledger-schema-012", 0, NAMED_BY_MODEL),
-    ("ledger-schema-013", 14, KEPT_IN_BRIEF),
-    ("ledger-schema-014", 15, KEPT_IN_BRIEF),
-    ("ledger-schema-016", 14, KEPT_IN_BRIEF),
-    ("ledger-schema-017", 15, KEPT_IN_BRIEF),
-    ("ledger-schema-019", 15, KEPT_IN_BRIEF),
-    ("ledger-schema-020", 14, KEPT_IN_BRIEF),
-    ("ledger-schema-021", 15, KEPT_IN_BRIEF),
-    ("ledger-schema-023", 14, KEPT_IN_BRIEF),
-    ("ledger-schema-024", 15, KEPT_IN_BRIEF),
-    ("ledger-schema-025", 15, KEPT_IN_BRIEF),
-    ("ledger-schema-027", 14, KEPT_IN_BRIEF),
+    ("ledger-schema-013", 12, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
+    ("ledger-schema-014", 13, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
+    ("ledger-schema-016", 12, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
+    ("ledger-schema-017", 13, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
+    ("ledger-schema-019", 13, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
+    ("ledger-schema-020", 12, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
+    ("ledger-schema-021", 13, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
+    ("ledger-schema-023", 12, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
+    ("ledger-schema-024", 13, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
+    ("ledger-schema-025", 13, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
+    ("ledger-schema-027", 12, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
     ("ledger-staff-008", 13, KEPT_BY_PAUSE),
     ("ledger-staff-015", 8, FOLLOW_UP_BEHIND_WORK),
     ("ledger-staff-016", 17, RESULT_ACCEPTED),
@@ -330,11 +339,9 @@ const STOP_IN_EVENT: &str =
 /// second review of B3, 2026-10-16): the window's copy was another task's.
 const UNREACHED: &str =
     "a task whose brief reached no window has no transcript of its own: the copy of the window its brief waits for, which shows none of its headers, is none of its, and it says so (`reached: false`), where Node gave the window's whole copy";
-/// The reason a release gives what the old window still held for the human.
-/// A question its recipient answered while it still waited in the queue is
-/// never typed in after (T-260).
-const ANSWERED_AS_IT_WAITED: &str =
-    "the chief answers a question still queued for it: the question is `read`, its receipt naming the answer and its time the answer's, so it is never typed in after, where Node leaves it `queued` to be pasted";
+// A question answered while queued is read with its answer's receipt and time,
+// and never typed in later (T-260); Node leaves it queued. In the traces above,
+// the earlier answer-state change now precedes that departure.
 /// A critical task's lead was reworded in the role texts' own terms (T-1060):
 /// it changes no project file and answers to the chief.
 const CRITICAL_WORDS: &str =

@@ -69,6 +69,54 @@ fn pasted(context: &Context, id: i64) -> usize {
 }
 
 #[test]
+fn an_answer_to_an_urgent_question_does_not_hold_the_workers_result() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.busy("zeus");
+    let question = context
+        .ledger
+        .borrow_mut()
+        .ask(
+            project.id,
+            &NewQuestion {
+                from: Some("zeus".to_owned()),
+                to: "chief".to_owned(),
+                task: Some(1),
+                body: Some("Stop: the grammar changed".to_owned()),
+                urgent: true,
+                ..NewQuestion::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "paused");
+    context.resume_task(project.id, 1, "Go on");
+    context.adapter.answer("zeus", "Ready to continue");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    context.adapter.busy("zeus");
+    let answer = context.answer(project.id, question.id, "Noted");
+    assert_eq!(answer.state, "queued");
+    context.adapter.answer("zeus", "Parser finished");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let thread = context.task(project.id, 1);
+    assert_eq!(
+        thread.task.state, "done",
+        "the urgent answer did not make this task wait"
+    );
+    assert!(thread
+        .messages
+        .iter()
+        .any(|message| message.kind == "result" && message.body.contains("Parser finished")));
+}
+
+#[test]
 fn an_answer_to_a_busy_window_moves_its_card_to_working_but_waits_for_rest() {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]);
@@ -125,7 +173,15 @@ fn an_answer_to_a_busy_window_moves_its_card_to_working_but_waits_for_rest() {
         .all(|m| m.kind != "result"));
     context.adapter.answer("zeus", "Parser in JSON");
     context.pass().unwrap();
-    assert_eq!(context.task(project.id, 1).task.state, "done");
+    let thread = context.task(project.id, 1);
+    assert_eq!(thread.task.state, "done");
+    let result = thread.messages.iter().find(|m| m.kind == "result").unwrap();
+    assert!(
+        result.body.contains("The first turn ended"),
+        "{}",
+        result.body
+    );
+    assert!(result.body.contains("Parser in JSON"), "{}", result.body);
 }
 
 /// What voided each claim the log says was given back, in order.
@@ -166,8 +222,8 @@ fn an_unacknowledged_claim_is_voided_at_the_look_that_finds_the_window_at_rest_a
 /// harness's own dialog took over: the window waits on it, which is neither
 /// at work nor at rest. Nobody that holds the claim is left, so the look gives
 /// it up; a dialog is no place to paste into, so the answer waits for the
-/// window to leave it, and is then pasted once and received: the task leaves
-/// waiting.
+/// window to leave it, and is then pasted once and received. The task is
+/// already working because its answer is on its way.
 #[test]
 fn a_claim_whose_door_gave_up_for_the_windows_own_dialog_is_voided_and_the_answer_is_pasted_once_the_dialog_is_gone(
 ) {
@@ -175,7 +231,7 @@ fn a_claim_whose_door_gave_up_for_the_windows_own_dialog_is_voided_and_the_answe
     let (project, question, answer) = answered_through_a_door(&context);
     claim(&context, project, question);
     let zeus = context.id(project, "zeus");
-    assert_eq!(context.task(project, 1).task.state, "waiting");
+    assert_eq!(context.task(project, 1).task.state, "working");
     context.adapter.with("zeus", |agent| {
         agent.waiting = Some(Waiting {
             reason: Some("a question".to_owned()),
