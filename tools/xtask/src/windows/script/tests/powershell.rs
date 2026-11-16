@@ -12,6 +12,12 @@ use cf_base::time::{iso, Clock, SystemClock};
 use super::said;
 use crate::process::{self, Captured, Invocation};
 
+// Hosted macOS once started three of these together; one pwsh 7.6.9 then died
+// in SIGSEGV before it said anything. Keep all of this test binary's helper
+// shells, including the diagnostic probe, to one at a time on macOS.
+#[cfg(target_os = "macos")]
+static POWERSHELL_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// A PowerShell of this machine: the Mac's (`pwsh`) or Windows' own; none where the
 /// machine has neither on its PATH, and the tests that run it say so. One that is there
 /// and does not run is a failure of the test, not a reason to skip it: a PowerShell
@@ -158,6 +164,12 @@ pub(super) fn capture(
     invocation: Invocation,
     written: &Written,
 ) -> Report {
+    // Take the turn before recording the start: the reported interval must not
+    // include time spent waiting for another test's PowerShell.
+    #[cfg(target_os = "macos")]
+    let _turn = POWERSHELL_TURN
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let started = iso(SystemClock.now_ms());
     trace(&started, "starting", &invocation);
     let ran = output(&invocation, &env);
@@ -190,9 +202,15 @@ fn why(report: &Report) -> String {
         "-Command",
         "Write-Output ('PWSH-OK ' + $PSVersionTable.PSVersion.ToString())",
     ]);
-    let alone = match output(&probe, &report.env) {
-        Ok(alone) => format!("{}\n{}", probe.display(), said_output(&alone)),
-        Err(failed) => format!("{}\n{failed}", probe.display()),
+    let alone = {
+        #[cfg(target_os = "macos")]
+        let _turn = POWERSHELL_TURN
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        match output(&probe, &report.env) {
+            Ok(alone) => format!("{}\n{}", probe.display(), said_output(&alone)),
+            Err(failed) => format!("{}\n{failed}", probe.display()),
+        }
     };
     format!(
         "{}\n--- the command, in {}\n{}\nwith XDG_CACHE_HOME of its own: {}\nstarted (capture called): {}\nended (capture returned): {}\n--- the file of the run, as it left it\n{}\n--- the script the run was given\n{}\n--- the same shell alone on the folder\n{}",
@@ -294,4 +312,44 @@ fn a_script_that_ends_1_with_no_word_is_said_with_all_that_can_tell_why() {
         );
         assert!(killed.contains("signal: 15"), "{killed}");
     }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_running_powershell_holds_the_shared_turn_until_it_ends() {
+    use std::time::{Duration, Instant};
+
+    let Some(shell) = shell() else {
+        eprintln!("skipped: no PowerShell on this machine");
+        return;
+    };
+    let folder = tempfile::tempdir().unwrap();
+    let ready = folder.path().join("ready");
+    let release = folder.path().join("release");
+    let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
+    let script = format!(
+        "[IO.File]::WriteAllText('{}', 'ready')\nwhile (-not (Test-Path -LiteralPath '{}')) {{ [Threading.Thread]::Sleep(25) }}\n",
+        quoted(&ready),
+        quoted(&release),
+    );
+    let path = folder.path().to_owned();
+    let run = std::thread::spawn(move || told(shell, &path, &script));
+    let until = Instant::now() + Duration::from_secs(30);
+    while !ready.exists() && Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let started = ready.exists();
+    let held = matches!(
+        POWERSHELL_TURN.try_lock(),
+        Err(std::sync::TryLockError::WouldBlock)
+    );
+    // Release and join before asserting, even on a red: no test-owned shell is left behind.
+    fs::write(&release, "go").unwrap();
+    let ended = run.join().unwrap();
+    assert!(
+        started,
+        "the shell never reached its ready marker: {ended:?}"
+    );
+    assert!(held, "the running shell did not hold the shared turn");
+    assert!(ended.is_ok(), "{ended:?}");
 }
