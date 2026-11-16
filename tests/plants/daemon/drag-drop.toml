@@ -941,9 +941,9 @@ runs = ["page-drop"]
 
 [[plant.edit]]
 file = "app/ui/page.css"
-find = '''  background: rgba(99, 199, 178, .14);
+find = '''  background: rgba(165, 180, 252, .14);
   pointer-events: none;'''
-replace = '''  background: rgba(99, 199, 178, .14);'''
+replace = '''  background: rgba(165, 180, 252, .14);'''
 
 [[plant]]
 name = "file drop: the mark's tint covers what the card is not the box of"
@@ -959,14 +959,14 @@ replace = '''.terminal-card[data-drop="true"] {
 '''
 
 [[plant]]
-name = "file drop: the mark is not the app's seafoam"
+name = "file drop: the mark is not the app's lavender"
 meant = "marks the window a drop would go to, from the enter to the leave or the drop"
 runs = ["page-drop"]
 
 [[plant.edit]]
 file = "app/ui/page.css"
-find = "box-shadow: 0 0 0 2px var(--seafoam), 0 0 16px rgba(99, 199, 178, .5);"
-replace = "box-shadow: 0 0 0 2px var(--amber), 0 0 16px rgba(231, 185, 104, .5);"
+find = "box-shadow: 0 0 0 2px var(--accent), 0 0 18px rgba(165, 180, 252, .5);"
+replace = "box-shadow: 0 0 0 2px var(--amber), 0 0 18px rgba(252, 211, 77, .5);"
 
 # --- the app: what it hears of a drop, and for whom it looks up ---
 
