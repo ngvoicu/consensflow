@@ -45,8 +45,9 @@ passwords and needs no API keys.
   agent's harness, and the window closes when the work is done. Its
   conversation is kept, so a follow-up continues where it stopped.
 - **Work by tier.** For worker, advisor, reviewer and tester tasks, the chief
-  asks for a tier (critical, complex, standard or light), and ConsensFlow
-  picks an available member of that role. The other roles need no tier.
+  asks for a tier (critical, complex, standard or light). Each task gets a
+  new window of a member of that role and tier. If nobody of that role holds
+  the tier, the nearest one with a member is used. The other roles need no tier.
 - **Backups and Vacation.** Give a member an optional backup on any harness
   or model. When no eligible member is free, the backup can take new work if
   its member is out of quota or its login is refused. The chief and image
@@ -60,6 +61,10 @@ passwords and needs no API keys.
 - **Tell, pause and resume.** A tell lets a member keep working and reaches
   its window at the next rest. A pause stops the task and can ask a question;
   resume sends it on in the same window.
+- **Meet with the chief.** Choose **Start meeting** on the chief's window.
+  The staff's results and questions wait on the board while you talk, and no
+  wake-up calls arrive. **Stop meeting** lets the held messages reach the chief
+  one at a time.
 - **Notes without interruption.** ConsensFlow types notes that need the
   chief's attention into its window. Other status notes are available to the
   chief in `cf inbox`.
@@ -76,6 +81,14 @@ passwords and needs no API keys.
 - **Switch the chief anytime.** Move the chief to another model or harness.
   The new chief starts with a handoff: what is on the board, your last words,
   and the history of the chiefs before it.
+- **Read specs.** The board's **Specs** button opens the project's specs folder
+  as a tree, with its registry and Markdown, including Mermaid diagrams. HTML
+  specs open in your browser from a copy. The button appears when specs are on
+  or the folder holds a file.
+- **Search History.** Open **History** on a window to search the participant's
+  stored conversations, including a chief's history across chief switches.
+- **The project menu.** Right-click a project in the sidebar to rename it, add
+  a private one-line description, or open its Project settings or Specs.
 
 ## Supported agents
 
