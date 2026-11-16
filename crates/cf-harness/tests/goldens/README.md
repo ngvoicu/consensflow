@@ -375,10 +375,8 @@ and the hash that names a bundle of an extension is `$HASH`.
     for it (`-c agents.<type>.config_file=…`, `-c agents.<type>.description=…`,
     `cf_proto::codex::agent_types`), which no recording holds.
   `no_codex_launch_of_either_platform_puts_its_role_on_a_command_line` holds every Codex
-  launch of both files to naming it. The move is `tools/move_subagent_role_goldens.py`,
-  which replays each scenario's files and says each step's `tree` again; a step already
-  moved is moved to itself, so after a merge brings rows of the old shape, run it on each
-  file and let the scenarios test check it.
+  launch of both files to naming it. A one-off mover replayed each scenario's files
+  and wrote each step's `tree`; it was removed after the migration.
 
 - **A failed Pi turn is settled by the session file's quiet, as a stopped or an aborted
   one is** (2026-11-01, T-781). Node's Pi reader settled a turn whose last step stopped
@@ -471,3 +469,8 @@ and the hash that names a bundle of an extension is `$HASH`.
   where Node said `true`). A `steps` line that lists ids anew with no prompt behind them (after
   Devin's "Revert to step", a fork or a compaction) would open a turn no `cause` ends; no kept
   log shows one.
+
+On T-1730 the 106 Windows Devin launch steps in `launch/scenarios.win32.json`
+were moved by hand to drop the redundant "On Windows," from the paths sentence.
+The three Mac-recorded launch steps that simulate Windows received the same edit;
+no other launch step was changed.

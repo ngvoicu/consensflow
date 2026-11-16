@@ -352,3 +352,15 @@ With the shorter role-read framing, the one-read Mac bounds are 138 / 163 / none
 rows for specs with no rules, no specs with no rules, specs with the most rules, and
 no specs with the most rules. The Windows PowerShell fixture measures 135 / 159 /
 none / 23. “None” means that even zero staff rows need more than one part.
+
+On T-1730 the delivery-header note was moved by hand in the 11 ordinary-chief
+and 23 member `roleInstructions` rows, all four `ownHandsChief` rows, and the
+`ownHandsGuide`: it now survives the Windows console transform. The chief's
+result-header example gained the same note in the 11 ordinary-chief rows, two
+own-hands-off rows, and the guide. The two own-hands-on rows gained the session-file
+rule in the short role; the guide's opening lost its duplicate. These are literal
+edits of those leaves, not recorded test output. Researcher text is covered by the
+role-text tests; this golden has no researcher row.
+With these texts, the measured one-read fixture bounds are 138 / 162 / none / 26
+rows on Mac and 134 / 159 / none / 23 on Windows PowerShell, in the same order;
+the two-part Mac boundary stays at 295 rows, with three parts at 296.

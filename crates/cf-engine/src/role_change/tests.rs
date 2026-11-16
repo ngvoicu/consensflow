@@ -363,8 +363,8 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     let whole = |note: &MessageView, cf: &CfWord| goes_whole(note, &[], cf);
     let one = |note: &MessageView, cf: &CfWord| read_in_one(note, cf);
     for (cf, pins) in [
-        (a_mac(), [Some(138), Some(163), None, Some(27)]),
-        (a_windows(), [Some(135), Some(159), None, Some(23)]),
+        (a_mac(), [Some(138), Some(162), None, Some(26)]),
+        (a_windows(), [Some(134), Some(159), None, Some(23)]),
     ] {
         assert_eq!(
             one(
@@ -1312,26 +1312,26 @@ fn role_change_places_each_concern_in_its_own_module() {
 }
 
 #[test]
-fn short_text_t1715_replacement_whole() {
+fn whole_replacement_intro_says_the_role_is_context() {
     assert_eq!(OPENING, "Your ConsensFlow role has changed. Follow these instructions in place of the earlier ones. This is context, not a task: acknowledge it in one line and wait for the next message.");
 }
 #[test]
-fn short_text_t1715_replacement_cut() {
+fn cut_replacement_intro_says_to_read_the_rest() {
     assert_eq!(OPENING_IN_PART, "Your ConsensFlow role has changed. Follow these instructions in place of the earlier ones. Run the command at the end now and read all it prints. This is context, not a task: then acknowledge it in one line and wait for the next message.");
 }
 #[test]
-fn short_text_t1715_greeting_whole() {
+fn whole_greeting_intro_says_the_role_is_context() {
     assert_eq!(BEGAN_WITHOUT, "This conversation began without your ConsensFlow role. Follow these instructions. This is context, not a task: acknowledge it in one line and wait for the next message.");
 }
 #[test]
-fn short_text_t1715_greeting_cut() {
+fn cut_greeting_intro_says_to_read_the_rest() {
     assert_eq!(BEGAN_WITHOUT_IN_PART, "This conversation began without your ConsensFlow role. Follow these instructions. Run the command at the end now and read all it prints. This is context, not a task: then acknowledge it in one line and wait for the next message.");
 }
 #[test]
-fn short_text_t1715_replacement_parts() {
+fn replacement_intro_says_to_read_each_part() {
     assert_eq!(Telling::Replaces.in_parts(2), "Your ConsensFlow role has changed. Follow these instructions in place of the earlier ones. Run the command at the end now. It prints the role in 2 parts; run the command at the end of each part until the last, and read every part. This is context, not a task: then acknowledge it in one line and wait for the next message.");
 }
 #[test]
-fn short_text_t1715_greeting_parts() {
+fn greeting_intro_says_to_read_each_part() {
     assert_eq!(Telling::BeganWithout.in_parts(2), "This conversation began without your ConsensFlow role. Follow these instructions. Run the command at the end now. It prints the role in 2 parts; run the command at the end of each part until the last, and read every part. This is context, not a task: then acknowledge it in one line and wait for the next message.");
 }
