@@ -68,6 +68,66 @@ fn pasted(context: &Context, id: i64) -> usize {
         .count()
 }
 
+#[test]
+fn an_answer_to_a_busy_window_moves_its_card_to_working_but_waits_for_rest() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.adapter.busy("zeus");
+    let question = context.ask(project.id, "zeus", "chief", 1, "Which format?");
+    crate::resumed_at_work::works_on(&context, "Continued working after asking");
+    context.pass().unwrap();
+    let card = || {
+        context
+            .ledger
+            .borrow()
+            .board(project.id)
+            .unwrap()
+            .lanes
+            .into_iter()
+            .flat_map(|lane| lane.tasks)
+            .find(|task| task.number == 1)
+            .unwrap()
+    };
+    let waiting = card();
+    assert_eq!(waiting.state, "waiting");
+    context.advance(5_000);
+    let answer = context.answer(project.id, question.id, "JSON");
+    let working = card();
+    assert_eq!(working.state, "working", "the card belongs under Working");
+    assert!(
+        working.state_since > waiting.state_since,
+        "the waiting timer ended"
+    );
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(answer.id).state, "queued");
+    assert_eq!(
+        pasted(&context, answer.id),
+        0,
+        "nothing is typed while busy"
+    );
+
+    context.adapter.answer("zeus", "The first turn ended");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(answer.id).state, "delivered");
+    assert_eq!(pasted(&context, answer.id), 1, "the answer goes in at rest");
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    assert!(context
+        .task(project.id, 1)
+        .messages
+        .iter()
+        .all(|m| m.kind != "result"));
+    context.adapter.answer("zeus", "Parser in JSON");
+    context.pass().unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "done");
+}
+
 /// What voided each claim the log says was given back, in order.
 fn unclaimed(context: &Context, project: i64) -> Vec<String> {
     context

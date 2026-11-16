@@ -100,7 +100,7 @@ fn a_hold_with_the_question_open_lands_waiting_and_the_answers_confirm_makes_it_
         Some(answer.id),
         "no carrier waits: it is pasted on its own"
     );
-    assert_eq!(w.state(task), "waiting", "until it is received");
+    assert_eq!(w.state(task), "working", "its answer is on its way");
     w.deliver(answer.id);
     assert_eq!(w.state(task), "working");
 }
