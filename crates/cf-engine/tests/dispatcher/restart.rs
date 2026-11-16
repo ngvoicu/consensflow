@@ -75,6 +75,8 @@ fn gives_a_message_its_window_never_showed_back_to_the_queue_with_its_attempt_an
 /// question rode in words Node was pasting and was never received. The next start read
 /// schema 19 and reconciled nothing, the words' marker was not in the record, and on
 /// the human's Resume the task was finished from the worker's reply before the answer.
+/// A second question is still unanswered, so the next start must reconcile the task to
+/// waiting even though the first answer is on its way.
 #[test]
 fn a_task_whose_answer_a_stopped_start_let_go_of_is_not_finished_from_its_old_reply_on_resume() {
     let context = Context::new();
@@ -92,6 +94,8 @@ fn a_task_whose_answer_a_stopped_start_let_go_of_is_not_finished_from_its_old_re
         .adapter
         .answer("zeus", "I asked the chief which format to use.");
     let answer = context.answer(project.id, question.id, "JSON");
+    let second = context.ask(project.id, "zeus", "chief", 1, "Which schema?");
+    assert_eq!(context.task(project.id, 1).task.state, "waiting");
     // Node was pasting words that carried the answer, T-1 `working` as its own confirm
     // left it; 0019 let go of the answer, and the start stopped there.
     context.edit_ledger(|file| {
@@ -115,8 +119,8 @@ fn a_task_whose_answer_a_stopped_start_let_go_of_is_not_finished_from_its_old_re
     });
     assert_eq!(
         context.task(project.id, 1).task.state,
-        "working",
-        "the released answer is on its way, so T-1 works"
+        "waiting",
+        "the released answer is on its way, but the second question is unanswered"
     );
 
     context.ledger.borrow_mut().suspend_for_restart().unwrap();
@@ -129,9 +133,11 @@ fn a_task_whose_answer_a_stopped_start_let_go_of_is_not_finished_from_its_old_re
     assert_eq!(context.message(answer.id).state, "delivered");
     assert_eq!(
         context.task(project.id, 1).task.state,
-        "working",
-        "not finished from the reply before its answer"
+        "waiting",
+        "the other question still waits, with no result from the earlier reply"
     );
+    context.answer(project.id, second.id, "The new schema");
+    assert_eq!(context.task(project.id, 1).task.state, "working");
     context.close();
 }
 
