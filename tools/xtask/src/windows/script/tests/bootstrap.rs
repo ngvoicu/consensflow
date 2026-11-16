@@ -85,6 +85,7 @@ fn listing(dir: &Path) -> BTreeMap<String, Vec<u8>> {
 struct Ran {
     code: Option<i32>,
     out: String,
+    report: powershell::Report,
 }
 
 /// The bootstrap of a run that sends a tree of `README.md` (the tree's) and `keep.txt`, run in `shell`
@@ -130,34 +131,41 @@ fn bootstrap_run(shell: &str, scratch: &Path, label: &str, profile: &Path) -> Ra
         format!("$env:SystemRoot = '{}'\n", system.display())
     };
     let file = scratch.join("bootstrap.ps1");
-    fs::write(
-        &file,
-        format!(
-            "$env:USERPROFILE = '{}'\n{set_system}{}",
-            profile.display(),
-            remote_script(&script)
-        ),
-    )
-    .unwrap();
-    let ran = process::capture(
-        &Invocation::new(shell, scratch)
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-            ])
-            .arg(file.display().to_string()),
-        &Env::from_process().with_var(
-            "XDG_CACHE_HOME",
-            &scratch.join("cache").display().to_string(),
-        ),
-    )
-    .unwrap();
+    let text = format!(
+        "$env:USERPROFILE = '{}'\n{set_system}{}",
+        profile.display(),
+        remote_script(&script)
+    );
+    fs::write(&file, &text).unwrap();
+    let invocation = Invocation::new(shell, scratch)
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(file.display().to_string());
+    let env = Env::from_process().with_var(
+        "XDG_CACHE_HOME",
+        &scratch.join("cache").display().to_string(),
+    );
+    let report = powershell::capture(
+        shell,
+        scratch,
+        env,
+        invocation,
+        &powershell::Written {
+            file: &file,
+            wrapped: &text,
+            script: &text,
+        },
+    );
+    let ran = report.ran.as_ref().unwrap_or_else(|_| panic!("{report}"));
     Ran {
-        code: Some(ran.code),
-        out: ran.stdout.replace("\r\n", "\n"),
+        code: Some(ran.status.code().unwrap_or(1)),
+        out: String::from_utf8_lossy(&ran.stdout).replace("\r\n", "\n"),
+        report,
     }
 }
 
@@ -192,30 +200,31 @@ fn a_copy_that_is_a_link_is_refused_before_the_unpack_can_replace_a_file_of_the_
         fs::read(elsewhere.join("README.md")).unwrap(),
         OWNERS,
         "the owner's file is as it was: {}",
-        ran.out
+        ran.report
     );
     assert_eq!(
         listing(&elsewhere),
         before,
         "nothing was made, locked or unpacked in the folder the link leads to: {}",
-        ran.out
+        ran.report
     );
-    assert_eq!(ran.code, Some(1), "{}", ran.out);
+    assert_eq!(ran.code, Some(1), "{}", ran.report);
     assert!(
         ran.out.contains(&format!("{} is a link", copy.display())),
         "the link is named: {}",
-        ran.out
+        ran.report
     );
     assert!(
         ran.out.contains("\n== exit 1"),
         "it ends with its exit line: {}",
-        ran.out
+        ran.report
     );
-    assert!(!ran.out.contains("== tree "), "{}", ran.out);
+    assert!(!ran.out.contains("== tree "), "{}", ran.report);
     assert!(
         tarballs(&profile).is_empty(),
-        "its own tarball is taken away: {:?}",
-        tarballs(&profile)
+        "its own tarball is taken away: {:?}\n{}",
+        tarballs(&profile),
+        ran.report
     );
 }
 
@@ -238,23 +247,23 @@ fn a_profile_that_is_a_link_is_refused_before_anything_is_made_in_the_folder_it_
         fs::read(real.join(DIR).join("README.md")).unwrap(),
         OWNERS,
         "{}",
-        ran.out
+        ran.report
     );
     // The tarball was put in the profile before the run, and is gone after it: the folder is as it was.
     assert_eq!(
         listing(&real),
         before,
         "nothing was made, locked or unpacked behind the link: {}",
-        ran.out
+        ran.report
     );
-    assert_eq!(ran.code, Some(1), "{}", ran.out);
+    assert_eq!(ran.code, Some(1), "{}", ran.report);
     assert!(
         ran.out
             .contains(&format!("{} is a link", profile.display())),
         "the profile is named: {}",
-        ran.out
+        ran.report
     );
-    assert!(!ran.out.contains("== tree "), "{}", ran.out);
+    assert!(!ran.out.contains("== tree "), "{}", ran.report);
 }
 
 #[test]
@@ -268,20 +277,26 @@ fn a_copy_that_is_a_real_folder_or_not_there_yet_is_unpacked_as_it_always_was() 
     fs::create_dir(&profile).unwrap();
     // The first run: no copy yet.
     let first = bootstrap_run(shell, scratch.path(), "first", &profile);
-    assert!(!first.out.contains("is a link"), "{}", first.out);
-    assert!(first.out.contains("== tree "), "{}", first.out);
+    assert!(!first.out.contains("is a link"), "{}", first.report);
+    assert!(first.out.contains("== tree "), "{}", first.report);
     assert_eq!(
-        fs::read(profile.join(DIR).join("README.md")).unwrap(),
-        TREES
+        fs::read(profile.join(DIR).join("README.md"))
+            .unwrap_or_else(|error| panic!("{error}\n{}", first.report)),
+        TREES,
+        "{}",
+        first.report
     );
     // The next: a real folder with an old README.md of the tree's own, which the unpack replaces.
     fs::write(profile.join(DIR).join("README.md"), b"an old one").unwrap();
     let second = bootstrap_run(shell, scratch.path(), "second", &profile);
-    assert!(!second.out.contains("is a link"), "{}", second.out);
-    assert!(second.out.contains("== tree "), "{}", second.out);
+    assert!(!second.out.contains("is a link"), "{}", second.report);
+    assert!(second.out.contains("== tree "), "{}", second.report);
     assert_eq!(
-        fs::read(profile.join(DIR).join("README.md")).unwrap(),
-        TREES
+        fs::read(profile.join(DIR).join("README.md"))
+            .unwrap_or_else(|error| panic!("{error}\n{}", second.report)),
+        TREES,
+        "{}",
+        second.report
     );
 }
 
