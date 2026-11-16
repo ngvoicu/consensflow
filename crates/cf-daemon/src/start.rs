@@ -302,6 +302,8 @@ async fn run(
                 crate::seams::cf_word_of(participant, &pane_cf, cfg!(windows))
             })
         },
+        specs_folder: finishing::specs_folder(&engine),
+        ordinary_specs: finishing::ordinary_specs(&engine),
         tooling_calls: crate::api::calls::switched_on(env.os(crate::api::calls::TOOLING_API_CALLS)),
     });
     // The programs the daemon runs and the time it reads: the engine's windows

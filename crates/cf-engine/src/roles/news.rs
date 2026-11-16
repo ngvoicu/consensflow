@@ -12,13 +12,13 @@
 //! ([`OPENING`](crate::role_change::OPENING)): the window says in one line that it has
 //! it, and waits for the next message.
 
-use cf_proto::cf_word::CfWord;
 use cf_proto::specs::SpecsSetting;
 
-use super::{chief, with_staff_rules, ProjectSpecs, RoleError};
+use super::{with_staff_rules, ProjectSpecs};
 
 /// What a note that tells a running chief of a change ends with.
-pub(crate) const CONTEXT: &str = "This is context, not a task: say in one short line that you have it, and wait for the next message.";
+pub(crate) const CONTEXT: &str =
+    "This is context, not a task: acknowledge it in one line and wait for the next message.";
 
 /// The change the human made to a running chief's role, in the words it is told.
 /// `specs` is what its specs were and are, and `rules` the project's rules for its
@@ -65,40 +65,25 @@ fn specs_said(
     };
     match (was, now) {
         (None, Some(now)) => format!(
-            "Specs are now on in this project: the human turned them on while you work. This is now a section of your instructions:\n{}",
+            "Your instructions now include:\n{}",
             section(now)
         ),
         (Some(was), None) if own_hands => format!(
-            "Specs are now off in this project: the human turned them off while you work. Do new work yourself unless the human explicitly asks for it on the board; the specs already in `{}` stay. The section of your instructions on this project's specs no longer applies.\n",
+            "Specs are now off; the specs in `{}` stay. Your earlier specs instructions no longer apply.\n",
             was.folder
         ),
         (Some(was), None) => format!(
-            "Specs are now off in this project: the human turned them off while you work. Plan new work as tasks, not specs; the specs already in `{}` stay. The section of your instructions on this project's specs no longer applies.\n",
+            "Specs are now off. Plan new work as tasks, not specs; the specs in `{}` stay. Your earlier specs instructions no longer apply.\n",
             was.folder
         ),
         (Some(was), Some(now)) => {
-            let mut changed = Vec::new();
-            if was.folder != now.folder {
-                changed.push(format!(
-                    "the specs are now kept in `{}`, not `{}`",
-                    now.folder, was.folder
-                ));
-            }
-            if was.variant != now.variant {
-                changed.push(format!(
-                    "the Specmint skill is now `{}`, not `{}`",
-                    now.variant.skill_name(),
-                    was.variant.skill_name()
-                ));
-            }
             let stay = if was.folder == now.folder {
                 String::new()
             } else {
-                format!(" The specs already in `{}` stay where they are.", was.folder)
+                format!(" The specs in `{}` stay where they are.", was.folder)
             };
             format!(
-                "The human changed this project's specs while you work: {}.{stay} This section replaces the one on specs in your instructions; follow it from now on:\n{}",
-                changed.join(", and "),
+                "The project's specs changed.{stay} This section replaces your earlier specs instructions:\n{}",
                 section(now)
             )
         }
@@ -107,41 +92,27 @@ fn specs_said(
     }
 }
 
-/// The changed parts of the role, without the staff table or the person's rules.
-pub(crate) fn own_hands_said(
-    on: bool,
-    cf: &CfWord,
-    specs: Option<&ProjectSpecs<'_>>,
-) -> Result<String, RoleError> {
-    let intro = if on {
-        "The person turned \"Do with your own hands\" on: do the work yourself in the project's folder; put work on the board only when the person explicitly asks."
-    } else {
-        "The person turned \"Do with your own hands\" off: return to your ordinary chief role and put work on the board as your instructions say."
-    };
-    let part = |name| Ok::<_, RoleError>(chief::part(on, name)?.replace("{{cf}}", cf.as_str()));
-    let opening = part("opening")?;
-    let duty = part("duty")?;
-    let never = part("never")?;
-    let specs = specs.map_or_else(String::new, |specs| {
-        format!(
-            "\n\n## This project's specs\n\n{}\n\n{}\n\n{}",
-            ProjectSpecs::small_ask_for(on),
-            specs.work_for(on),
-            ProjectSpecs::phases_for(on)
-        )
-    });
-    Ok(format!("{intro}\n\nThese replace the earlier directions on how you work and use the board:\n\n{opening}\n\n## What you do\n\n{duty}\n\n## What you never do\n\n{never}{specs}"))
+/// What a running chief is told when the human turns "Do with your own hands" on, before
+/// its role as it now is, the short text, in full: that text is what the conversation holds
+/// once the note is in. (Off, it is told its ordinary role whole, in the words of every role
+/// that is said again: `role_change`.)
+const OWN_HANDS_ON: &str = "The person turned \"Do with your own hands\" on. These instructions replace your earlier ones.";
+
+/// The note that tells a running chief its switch went on: `instructions` is its role as it
+/// now is, the short text and the section of its specs.
+pub(crate) fn own_hands_on(instructions: &str) -> String {
+    format!("{OWN_HANDS_ON}\n\n{instructions}\n\n{CONTEXT}")
 }
 
 /// What the human changed of the project's rules for its staff.
 fn rules_said(was: Option<&str>, now: Option<&str>) -> String {
     match now {
         Some(now) => format!(
-            "The human {} the rules for your staff while you work. Windows that open from now on are given them; one already open keeps its rules. This replaces the section of your instructions on them:\n{}",
+            "The human {} the rules for your staff. New windows get them; open windows keep theirs. This section replaces your earlier rules:\n{}",
             if was.is_some() { "changed" } else { "wrote" },
             with_staff_rules(String::new(), "chief", Some(now))
         ),
-        None => "The human took away the rules for your staff while you work. Windows that open from now on are given none; one already open keeps its rules. The section of your instructions on them no longer applies.\n".to_owned(),
+        None => "The human took away the rules for your staff. New windows get none; open windows keep theirs. Your earlier rules no longer apply.\n".to_owned(),
     }
 }
 

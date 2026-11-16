@@ -7,7 +7,7 @@
 //! opened applies at its first launch, since it is kept in the write that makes the
 //! project. Node's dispatcher had no specs, so no trace holds these.
 
-use cf_engine::testing::Context;
+use cf_engine::testing::{Context, Made};
 use cf_ledger::{ProjectView, SpecsChange};
 use cf_proto::specs::{AppSpecs, Variant};
 use serde_json::{json, Value};
@@ -114,6 +114,64 @@ fn launches(context: &Context, project: i64, role: &str) -> Vec<Value> {
 /// The last launch of the chief of `project`.
 fn chief_launch(context: &Context, project: i64) -> Value {
     launches(context, project, "chief").pop().expect("a launch")
+}
+
+#[test]
+fn the_ordinary_guide_s_specs_section_uses_the_chiefs_current_harness_and_settings() {
+    for harness in ["claude-code", "codex", "pi", "devin", "muse"] {
+        let context = Context::made(Made {
+            harnesses: vec!["claude-code", "codex", "pi", "devin", "muse"],
+            ..Made::default()
+        });
+        let mut request = request_at("/work/app", &json!({}));
+        request["chief"]["harness"] = json!(harness);
+        let project = context.open_project(request).unwrap().unwrap();
+        let chief = project
+            .participants
+            .iter()
+            .find(|p| p.role == "chief")
+            .unwrap();
+        assert!(context
+            .dispatcher
+            .ordinary_specs_section(&project, chief)
+            .unwrap()
+            .is_none());
+        says(
+            &context,
+            project.id,
+            Some(true),
+            "docs/specs",
+            Some(Variant::TddHtml),
+        );
+        let current = context.project(project.id);
+        let chief = current
+            .participants
+            .iter()
+            .find(|p| p.role == "chief")
+            .unwrap();
+        let section = context
+            .dispatcher
+            .ordinary_specs_section(&current, chief)
+            .unwrap()
+            .unwrap();
+        assert!(
+            section.contains("Specmint skill `specmint-tdd-html`"),
+            "{harness}: {section}"
+        );
+        assert!(section.contains("/consensflow/integrations/specmint/fake/tdd-html-docs-specs/.claude/skills/specmint-tdd-html/SKILL.md"));
+        assert!(section.contains("Your specs and their registry are in `docs/specs`"));
+        assert!(section.contains("Use a spec when the human asks"));
+        let member = current
+            .participants
+            .iter()
+            .find(|p| p.role != "chief")
+            .unwrap();
+        assert!(context
+            .dispatcher
+            .ordinary_specs_section(&current, member)
+            .unwrap()
+            .is_none());
+    }
 }
 
 #[test]

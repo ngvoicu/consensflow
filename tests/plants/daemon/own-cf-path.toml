@@ -36,10 +36,16 @@
 # dispatcher can tell from the bare word without a failed turn that carries a note of
 # ConsensFlow's, and the word `cf hook` prints (`main.rs`, from the program's own path).
 #
+# T-1681: a text says the path once, in a note at its start (`cf` below stands for this command),
+# and `cf` after it, while `roles::PATH_ONCE` is true; false writes the path in each command, as
+# above. The release configuration is off, so a plant that substitutes bare `cf` in a command
+# does not need a second edit to the switch; add that edit back if the switch is turned on.
+#
 # Every name holds `own cf path`, so `npm run plants:daemon -- "own cf path"` runs them all.
 
 [run]
 engine-text-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles::", "--", "--skip", "goldens_roles"]
+engine-text-path-on = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles::every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"]
 engine-text-goldens-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "goldens_roles"]
 engine-text-delivery = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "delivery_text::"]
 engine-text-handoff = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "handoff::"]
@@ -70,18 +76,14 @@ find = '    {{cf}} ask "…"                    a question to the chief'
 replace = '    cf ask "…"                    a question to the chief'
 
 [[plant]]
-name = "own cf path: a worker's closing line asks with the word cf"
+name = "own cf path: a member's text tells not to loop over the inbox with the word cf"
 meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
 runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-complete: what you did, the evidence, and anything left open. If you cannot go
-on without an answer, ask with `{{cf}} ask "…"` and end your turn; the answer'''
-replace = '''
-complete: what you did, the evidence, and anything left open. If you cannot go
-on without an answer, ask with `cf ask "…"` and end your turn; the answer'''
+find = "(no `sleep`, no loop over `{{cf}} inbox`)"
+replace = "(no `sleep`, no loop over `cf inbox`)"
 
 [[plant]]
 name = "own cf path: the chief's command table says the word cf"
@@ -112,7 +114,7 @@ runs = ["engine-text-roles", "engine-text-goldens-roles"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles.rs"
-find = '.replace("{{cf}}", cf.as_str());'
+find = '.replace("{{cf}}", cf_in_text(cf));'
 replace = '.replace("{{cf}}", "cf");'
 
 [[plant]]
@@ -122,8 +124,122 @@ runs = ["engine-text-roles", "engine-text-goldens-roles"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles.rs"
-find = "return member::text(role, cf);"
-replace = "return member::text(role, &CfWord::bare());"
+find = "return member::text(role, cf, mac);"
+replace = "return member::text(role, &CfWord::bare(), mac);"
+
+# The path said once (T-1681): a text names its window's cf in a note at its start and says `cf`
+# after it, behind the one switch `PATH_ONCE`. The next four plants switch it on in their own
+# mutations and run the mode-aware text test; the off-mode goldens are not an oracle for these
+# plants. A text for a window on a Mac also has the home-folder paragraph, which no other window is
+# given.
+
+[[plant]]
+name = "own cf path: a text's note of the path is never put in"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-path-on"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = 'text.replacen("{{cf_note}}", &note, 1)'
+replace = 'text.replacen("{{cf_note}}", "", 1)'
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = 'pub const PATH_ONCE: bool = false;'
+replace = 'pub const PATH_ONCE: bool = true;'
+
+[[plant]]
+name = "own cf path: a path is given no note, the commands saying cf"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-path-on"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = 'if PATH_ONCE && cf.as_str() != "cf" {'
+replace = "if false {"
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = 'pub const PATH_ONCE: bool = false;'
+replace = 'pub const PATH_ONCE: bool = true;'
+
+[[plant]]
+name = "own cf path: a text that says its path once also writes it in every command"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-path-on"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = """    if PATH_ONCE {
+        "cf"
+    } else {"""
+replace = """    if false {
+        "cf"
+    } else {"""
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = 'pub const PATH_ONCE: bool = false;'
+replace = 'pub const PATH_ONCE: bool = true;'
+
+[[plant]]
+name = "own cf path: a member's text has no note of the path"
+meant = "every_command_a_text_teaches_names_this_window_s_cf_by_its_full_path"
+runs = ["engine-text-path-on"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/member.rs"
+find = '("cf_note", &note),'
+replace = '("cf_note", ""),'
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles.rs"
+find = 'pub const PATH_ONCE: bool = false;'
+replace = 'pub const PATH_ONCE: bool = true;'
+
+[[plant]]
+name = "own cf path: a window not on a Mac is told of the home folder too"
+meant = "a_member_is_told_of_the_home_folder_and_the_folders_macos_asks_about_only_on_a_mac"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/member.rs"
+find = '''    let home = if mac {
+        shells::mac_paragraph("home")?
+    } else {
+        ""
+    };'''
+replace = '''    let home = shells::mac_paragraph("home")?;'''
+
+[[plant]]
+name = "own cf path: a window on a Mac is not told of the home folder"
+meant = "a_member_is_told_of_the_home_folder_and_the_folders_macos_asks_about_only_on_a_mac"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/member.rs"
+find = '''    let home = if mac {
+        shells::mac_paragraph("home")?
+    } else {
+        ""
+    };'''
+replace = '''    let home = if !mac {
+        shells::mac_paragraph("home")?
+    } else {
+        ""
+    };'''
+
+[[plant]]
+name = "own cf path: a slot left empty keeps its paragraph break"
+meant = "a_slot_left_empty_takes_its_paragraph_break_with_it"
+runs = ["engine-lib-roles"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/member.rs"
+find = '''            if text.is_empty()
+                && rest.starts_with("\n\n")'''
+replace = '''            if false
+                && rest.starts_with("\n\n")'''
 
 [[plant]]
 name = "own cf path: the parts of a member's text are not given the cf"

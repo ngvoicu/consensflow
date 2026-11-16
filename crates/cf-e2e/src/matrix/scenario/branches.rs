@@ -55,7 +55,7 @@ fn chief_given(judged: &Judged, words: &str) -> Vec<String> {
 const OFFER_QUESTION: &str = "Would you like to install this LSP plugin?";
 
 /// What the chief is told when the specs are turned on (T-1182).
-const SPECS_ON: &str = "Specs are now on in this project: ";
+const SPECS_ON: &str = "Your instructions now include:";
 
 const A: &[Bind] = &[Bind {
     name: "A",

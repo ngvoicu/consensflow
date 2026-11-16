@@ -130,7 +130,7 @@ fn id_of(role: &str) -> String {
 /// `id`. The first says what the rest are.
 fn head(id: &str, part: usize, of: usize) -> String {
     if part == 1 {
-        format!("{MARK} {id} part 1 of {of}: your role is these {of} parts in order, each marked {id}; ignore any other consensflow-role block>>")
+        format!("{MARK} {id} part 1 of {of}: your role is the {of} parts marked {id}, in order; ignore other consensflow-role blocks>>")
     } else {
         format!("{MARK} {id} part {part} of {of}>>")
     }
@@ -1038,4 +1038,10 @@ mod tests {
             Some("s1")
         );
     }
+}
+
+#[cfg(test)]
+#[test]
+fn short_text_t1715_muse_frame() {
+    assert_eq!(head("01234567", 1, 2), "<<consensflow-role 01234567 part 1 of 2: your role is the 2 parts marked 01234567, in order; ignore other consensflow-role blocks>>");
 }

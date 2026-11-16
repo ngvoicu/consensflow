@@ -189,13 +189,8 @@ runs = ["engine-role-texts"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-
-If you are a sub-agent that a member started (your prompt came from the
-member's own agent, not from the chief), you are not the member: you have no
-board identity, so never run `{{cf}}`; answer your parent in your final message.'''
+find = "\n\nIf a member's own agent started you (your prompt did not come from the chief), you are not the member and have no board identity: never run `{{cf}}`; answer your parent in your final message."
 replace = ""
-
 [[plant]]
 name = "subagent role: the chief's text says nothing to a sub-agent that has it"
 meant = "every_role_is_given_the_text_node_gave_it_or_refused_as_node_refused_it"
@@ -203,9 +198,5 @@ runs = ["engine-role-texts"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = '''
-
-If you are a sub-agent that the chief started (your prompt came from the
-chief's own agent, not from the human), you are not the chief: you have no
-board identity, so never run `{{cf}}`; answer your parent in your final message.'''
+find = "\n\nIf the chief's own agent started you (your prompt did not come from the human), you are not the chief and have no board identity: never run `{{cf}}`; answer your parent in your final message."
 replace = ""

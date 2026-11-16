@@ -75,8 +75,8 @@ runs = ["engine-told"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = " Run that command now, before anything else, and read everything it prints. This is context"
-replace = " This is context"
+find = "earlier ones. Run the command at the end now and read all it prints. This is context"
+replace = "earlier ones. This is context"
 
 [[plant]]
 name = "role read: a greeting too long for one message opens as a whole one"

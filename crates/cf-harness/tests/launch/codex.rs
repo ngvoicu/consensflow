@@ -444,7 +444,7 @@ fn runs_codex_under_its_supervisor_in_full_permission_mode_its_task_on_no_comman
         toml::from_str(&fs::read_to_string(children_file).unwrap()).unwrap();
     let told = configured["developer_instructions"].as_str().unwrap();
     assert!(
-        told.ends_with("You are a sub-agent that a ConsensFlow worker started. You are not the worker: you have no board identity, so never run cf; answer your parent in your final message."),
+        told.ends_with("You are a sub-agent of a ConsensFlow worker; you have no board identity, so never run cf."),
         "{told}"
     );
     assert!(!told.contains(ROLE), "a sub-agent is given no role: {told}");

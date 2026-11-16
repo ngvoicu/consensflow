@@ -1,7 +1,7 @@
 //! T-1513 (review T-1510): a role whose note `cf inbox read` cannot print within the bound
 //! a role is read whole at (`cf_base::role_read`, 29,000 bytes and 500 lines) is printed in
-//! parts, each within it, and is told once every part was printed. Where it starts: specs on, the most rules for the staff and a staff of 8 of
-//! two roles a row (6 since T-1513 put the ban on a task for a member by name back). The
+//! parts, each within it, and is told once every part was printed. Where it starts: specs on, the most rules for the staff and a staff of 36 of
+//! two roles a row (35 are read in one piece, T-1681). The
 //! review's case is the chief's real text, which the fake role texts carry here as words a
 //! release added to them. The window's `cf` is read the way `cf` reads it: each part
 //! printed as `cf` prints it (`printed_part`), said read only where it is read whole, which
@@ -140,7 +140,7 @@ fn resumed_again(context: &Context, project: i64) -> usize {
 
 #[test]
 fn the_reviews_role_read_in_every_part_is_told_and_said_nothing_of_at_the_next_resume() {
-    for rows in [8, 12, 20] {
+    for rows in [44, 50, 60] {
         let context = codex();
         let project = project_of(&context, "codex");
         let chief = context.id(project.id, "chief");
@@ -170,13 +170,13 @@ fn the_reviews_role_read_in_every_part_is_told_and_said_nothing_of_at_the_next_r
 fn the_opening_of_a_role_read_in_parts_says_how_many_and_the_command_that_prints_the_first() {
     let context = codex();
     let project = project_of(&context, "codex");
-    let id = the_reviews_role_told(&context, project.id, 12, true);
+    let id = the_reviews_role_told(&context, project.id, 50, true);
     let of = parts_of(&context, id);
     let said = said_to_the_chief(&context);
     assert_eq!(said.len(), 1);
     assert!(
         said[0].contains(&format!(
-            "prints them in {of} parts: the first, which ends with the command that prints the next."
+            "prints the role in {of} parts; run the command at the end of each part until the last, and read every part."
         )),
         "{}",
         &said[0][..900]
@@ -206,7 +206,7 @@ fn parts_read_while_the_paste_is_on_its_way_tell_the_role_once_it_is_confirmed_a
         let context = codex();
         let project = project_of(&context, "codex");
         let chief = context.id(project.id, "chief");
-        let id = the_reviews_role_told(&context, project.id, 12, false);
+        let id = the_reviews_role_told(&context, project.id, 50, false);
         assert_eq!(parts_of(&context, id), 2);
         assert_eq!(read_like_cf(&context, project.id, id, &before), 0);
         assert_eq!(context.message(id).state, "delivering");
@@ -221,7 +221,7 @@ fn parts_read_while_the_paste_is_on_its_way_tell_the_role_once_it_is_confirmed_a
         );
         assert_eq!(
             recorded(&context, chief)
-                .is_some_and(|text| text.ends_with(&the_reviews_role(&context, 12))),
+                .is_some_and(|text| text.ends_with(&the_reviews_role(&context, 50))),
             told,
             "{case}"
         );
@@ -246,7 +246,7 @@ fn parts_read_while_the_paste_is_on_its_way_tell_the_role_once_it_is_confirmed_a
 fn parts_read_out_of_order_or_twice_tell_the_role_once_every_part_was_printed() {
     let context = codex();
     let project = project_of(&context, "codex");
-    let id = the_reviews_role_told(&context, project.id, 20, true);
+    let id = the_reviews_role_told(&context, project.id, 60, true);
     assert_eq!(parts_of(&context, id), 2);
     assert_eq!(
         read_like_cf(&context, project.id, id, &[2, 2]),
@@ -276,7 +276,7 @@ fn parts_read_out_of_order_or_twice_tell_the_role_once_every_part_was_printed() 
 fn a_session_no_hook_greeted_is_told_a_role_over_the_bound_once_it_read_every_part() {
     let context = Context::new();
     on_a_mac(&context);
-    let role = the_reviews_role(&context, 12);
+    let role = the_reviews_role(&context, 50);
     context.roles.rewritten.replace(format!("\n\n{role}"));
     let project = context.with_staff(&["zeus"]);
     let chief = context.id(project.id, "chief");
@@ -296,7 +296,9 @@ fn a_session_no_hook_greeted_is_told_a_role_over_the_bound_once_it_read_every_pa
     assert_eq!(context.message(note.id).state, "delivered");
     let of = parts_of(&context, note.id);
     assert!(of > 1);
-    assert!(note.body.contains(&format!("prints them in {of} parts")));
+    assert!(note
+        .body
+        .contains(&format!("prints the role in {of} parts")));
     let order: Vec<usize> = (1..=of).collect();
     assert_eq!(read_like_cf(&context, project.id, note.id, &order), 1);
     assert!(recorded(&context, chief).is_some_and(|told| told.ends_with(&role)));

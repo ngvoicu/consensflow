@@ -46,10 +46,52 @@ pub(super) fn held(engine: &Rc<OnceCell<Rc<Dispatcher>>>) -> Rc<crate::api::cont
     })
 }
 
+/// Where the project's specs are kept for its chief, as the engine, once it exists, says
+/// ([`crate::api::context::Specing`]).
+pub(super) fn specs_folder(
+    engine: &Rc<OnceCell<Rc<Dispatcher>>>,
+) -> Rc<crate::api::context::Specing> {
+    let engine = Rc::clone(engine);
+    Rc::new(move |project, participant| engine.get()?.specs_folder(project, participant))
+}
+
+/// The ordinary chief's complete specs section, resolved by its adapter.
+pub(super) fn ordinary_specs(
+    engine: &Rc<OnceCell<Rc<Dispatcher>>>,
+) -> Rc<crate::api::context::OrdinarySpecs> {
+    let engine = Rc::clone(engine);
+    Rc::new(move |project, participant| {
+        let Some(engine) = engine.get() else {
+            return Err(Refusal::with_status(
+                "starting",
+                "the daemon is starting: try again in a moment",
+                503,
+            ));
+        };
+        engine
+            .ordinary_specs_section(project, participant)
+            .map_err(|error| error.refusal())
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testing::worked;
+
+    #[test]
+    fn an_ordinary_guide_asked_before_the_engine_exists_does_not_omit_specs() {
+        let engine = Rc::new(OnceCell::new());
+        let scene = crate::testing::scene();
+        let chief = scene
+            .project
+            .participants
+            .iter()
+            .find(|p| p.role == "chief")
+            .unwrap();
+        let refused = ordinary_specs(&engine)(&scene.project, chief).unwrap_err();
+        assert_eq!((refused.code, refused.status), ("starting", 503));
+    }
 
     #[tokio::test]
     async fn a_finish_asked_before_the_engine_exists_is_told_the_daemon_is_starting() {

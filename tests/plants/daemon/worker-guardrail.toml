@@ -3,8 +3,8 @@
 # restored files they had not). The rule is held by tests:
 #
 # Every member's text (`skill/core/staff.md`) says others work in the same folder, never to throw
-# away a change it did not make (no `git checkout` or `git restore` that overwrites a file, while
-# `git restore --staged` of its own change is fine; no `git reset --hard`, `git stash` or
+# away a change it did not make (no `git checkout` or `git restore` over a file, with unstaging its own change still allowed;
+# no `git reset --hard`, `git stash` or
 # `git clean` over work that is not committed), and to say a file is restored only once it has
 # checked it (`crates/cf-engine/tests/text/roles.rs`, and the 27 members' rows of
 # `crates/cf-engine/tests/goldens/text.json`, moved by hand).
@@ -25,14 +25,8 @@ runs = ["engine-text-roles-guardrail"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-Others work in this folder too, and not all of their work is committed. Never
-throw away a change you did not make: no `git checkout` or `git restore` that
-overwrites a file (`git restore --staged` of your own change is fine), and no
-`git reset --hard`, `git stash` or `git clean` over work that is not committed;
-take a change of yours out by hand. Say'''
-replace = "Say"
-
+find = "Others work in this folder too, with work not committed. Never throw away a change you did not make: no `git checkout` or `git restore` over a file, no `git reset --hard`, `git stash` or `git clean` over uncommitted work; take out a change of yours by hand, and say a file is restored only once you have checked it."
+replace = "Others work in this folder too. Say a file is restored only once you have checked it."
 [[plant]]
 name = "worker guardrail: the staff's text forbids git checkout and git restore but lets a stash or a hard reset through"
 meant = "teach_the_worker_only_the_board_s_commands"
@@ -40,11 +34,8 @@ runs = ["engine-text-roles-guardrail"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-(`git restore --staged` of your own change is fine), and no
-`git reset --hard`, `git stash` or `git clean` over work that is not committed;'''
-replace = "(`git restore --staged` of your own change is fine);"
-
+find = "no `git checkout` or `git restore` over a file, no `git reset --hard`, `git stash` or `git clean` over uncommitted work;"
+replace = "no `git checkout` or `git restore` over a file;"
 [[plant]]
 name = "worker guardrail: the staff's text does not say a restore is said only once it is checked"
 meant = "teach_the_worker_only_the_board_s_commands"
@@ -52,30 +43,5 @@ runs = ["engine-text-roles-guardrail"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = ''' Say a file is restored only once you have
-checked it: its diff, or what it holds.'''
-replace = ""
-
-[[plant]]
-name = "worker guardrail: the staff's text forbids any git checkout or git restore of a file, an unstaging too"
-meant = "teach_the_worker_only_the_board_s_commands"
-runs = ["engine-text-roles-guardrail"]
-
-[[plant.edit]]
-file = "skill/core/staff.md"
-find = '''
-no `git checkout` or `git restore` that
-overwrites a file (`git restore --staged` of your own change is fine), and no'''
-replace = '''
-no `git checkout` or `git restore` of a
-file, and no'''
-
-[[plant]]
-name = "worker guardrail: the staff's text does not say a worker may unstage its own change"
-meant = "teach_the_worker_only_the_board_s_commands"
-runs = ["engine-text-roles-guardrail"]
-
-[[plant.edit]]
-file = "skill/core/staff.md"
-find = " (`git restore --staged` of your own change is fine)"
-replace = ""
+find = ", and say a file is restored only once you have checked it."
+replace = "."

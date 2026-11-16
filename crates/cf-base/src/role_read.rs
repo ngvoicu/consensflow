@@ -72,9 +72,87 @@ pub struct Part<'a> {
 /// of a line (never of a character) only where a line is longer than a part. No words are
 /// one part, of none.
 pub fn role_parts(words: &str) -> Vec<Part<'_>> {
+    parts_within(words, ROLE_READ_WHOLE_BYTES, ROLE_READ_WHOLE_LINES)
+}
+
+/// The most bytes `cf guide` prints in a part, with its own line: the 10,000 bytes
+/// every harness shows whole (`cf`'s `cut`), which is what a chief on any of the five is
+/// proven to read. A part's words take what is left once its line is printed with them.
+pub const GUIDE_PART_BYTES: usize = 10_000;
+
+/// The parts `cf guide` prints in either output format. JSON escaping can take more bytes
+/// than the words, so its envelope and the next-command line have room in every part too.
+/// None means the command for the next part alone leaves no room for the guide.
+pub fn guide_parts<'a>(words: &'a str, cf: &str) -> Option<Vec<Part<'a>>> {
+    // This is the pretty-printed JSON object and final newline with an empty `text`.
+    const JSON_ENVELOPE: usize = "{\n  \"text\": \"\"\n}\n".len();
+    if json_bytes(words) + JSON_ENVELOPE < GUIDE_PART_BYTES
+        && words.matches('\n').count() + ONE_ROOM.1 < 500
+    {
+        return Some(vec![Part {
+            words,
+            table_goes_on: false,
+        }]);
+    }
+
+    // There cannot be more parts than bytes in the guide. Reserve the longest possible
+    // line, including a continued table, using that many digits for every part number.
+    let number = "9".repeat(words.len().max(1).to_string().len());
+    let next = format!("\n\n(Part {number} of {number} of the guide. The table above goes on in part {number}. Print part {number} with: {cf} guide --part {number})");
+    let last = format!("\n\n(Part {number} of {number} of the guide, the last: you have read all of it once you have read every part.)");
+    let room = PART_ROOM
+        .0
+        .max(JSON_ENVELOPE + json_bytes(&next).max(json_bytes(&last)));
+    let budget = GUIDE_PART_BYTES.checked_sub(room + 1)?;
+    let mut parts = Vec::new();
+    let mut start = 0;
+    while start < words.len() {
+        let rest = &words[start..];
+        let bytes = json_prefix(rest, budget);
+        if bytes == 0 {
+            return None;
+        }
+        let end = start + part_end(rest, bytes, 500 - PART_ROOM.1 - 1);
+        let before = words[start..end].lines().last().unwrap_or("");
+        let after = words[end..].lines().next().unwrap_or("");
+        parts.push(Part {
+            words: &words[start..end],
+            table_goes_on: end < words.len() && before.starts_with('|') && after.starts_with('|'),
+        });
+        start = end;
+    }
+    Some(parts)
+}
+
+/// Bytes a character occupies inside a JSON string, as serde_json writes it.
+fn json_char_bytes(ch: char) -> usize {
+    match ch {
+        '"' | '\\' | '\n' | '\r' | '\t' | '\u{8}' | '\u{c}' => 2,
+        '\u{0}'..='\u{1f}' => 6,
+        _ => ch.len_utf8(),
+    }
+}
+
+fn json_bytes(text: &str) -> usize {
+    text.chars().map(json_char_bytes).sum()
+}
+
+/// The longest whole-character prefix whose JSON string bytes fit in `budget`.
+fn json_prefix(text: &str, budget: usize) -> usize {
+    let mut used = 0;
+    for (at, ch) in text.char_indices() {
+        used += json_char_bytes(ch);
+        if used > budget {
+            return at;
+        }
+    }
+    text.len()
+}
+
+/// [`role_parts`] for printed pieces of fewer than `bound_bytes` bytes and `bound_lines` lines.
+fn parts_within(words: &str, bound_bytes: usize, bound_lines: usize) -> Vec<Part<'_>> {
     let fits = |room: (usize, usize), text: &str| {
-        text.len() + room.0 < ROLE_READ_WHOLE_BYTES
-            && text.matches('\n').count() + room.1 < ROLE_READ_WHOLE_LINES
+        text.len() + room.0 < bound_bytes && text.matches('\n').count() + room.1 < bound_lines
     };
     if fits(ONE_ROOM, words) {
         return vec![Part {
@@ -82,8 +160,8 @@ pub fn role_parts(words: &str) -> Vec<Part<'_>> {
             table_goes_on: false,
         }];
     }
-    let bytes = ROLE_READ_WHOLE_BYTES - PART_ROOM.0 - 1;
-    let lines = ROLE_READ_WHOLE_LINES - PART_ROOM.1 - 1;
+    let bytes = bound_bytes - PART_ROOM.0 - 1;
+    let lines = bound_lines - PART_ROOM.1 - 1;
     let mut parts = Vec::new();
     let mut start = 0;
     while start < words.len() {
@@ -220,6 +298,34 @@ pub fn printed_part(
     ))
 }
 
+/// What `cf guide` prints of part `part` (the first is 1) of the guide `words`, in the window
+/// whose `cf` is `cf`, and how many parts there are; none where it has no such part. A guide
+/// of one part is printed as it is; a part of more has its own line under it, which names
+/// the command for the next.
+pub fn guide_part(words: &str, part: usize, cf: &str) -> Option<(String, usize)> {
+    let parts = guide_parts(words, cf)?;
+    let of = parts.len();
+    let this = parts.get(part.checked_sub(1)?)?;
+    if of == 1 {
+        return Some((this.words.to_owned(), 1));
+    }
+    let under = if part >= of {
+        format!("(Part {part} of {of} of the guide, the last: you have read all of it once you have read every part.)")
+    } else {
+        let next = part + 1;
+        let table = if this.table_goes_on {
+            format!(" The table above goes on in part {next}.")
+        } else {
+            String::new()
+        };
+        format!("(Part {part} of {of} of the guide.{table} Print part {next} with: {cf} guide --part {next})")
+    };
+    Some((
+        format!("{}\n\n{under}", this.words.trim_end_matches('\n')),
+        of,
+    ))
+}
+
 /// The line `cf inbox read` prints under part `part` (the first is 1) of `of` of the note
 /// `id`, read in the window whose `cf` is `cf`: which part it is and the command that prints
 /// the next, or that it is the last. A part that ends in a table says the table goes on.
@@ -248,6 +354,93 @@ mod tests {
         assert!(!role_read_whole(&"\n".repeat(ROLE_READ_WHOLE_LINES)));
         // Bytes, not characters: 15,000 two-byte characters are 30,000 bytes.
         assert!(!role_read_whole(&"é".repeat(15_000)));
+    }
+
+    #[test]
+    fn the_guide_is_cut_to_what_every_harness_shows_whole_with_the_command_for_the_next() {
+        let guide = paragraphs(40, 900);
+        let parts = guide_parts(&guide, "/opt/cf").unwrap();
+        assert!(parts.len() > 1);
+        assert_eq!(
+            parts.iter().map(|part| part.words).collect::<String>(),
+            guide
+        );
+        for at in 1..=parts.len() {
+            let (printed, of) = guide_part(&guide, at, "/opt/cf").unwrap();
+            assert_eq!(of, parts.len());
+            // The smallest cut a harness makes: Codex's 10,000 tokens, never fewer bytes.
+            assert!(
+                printed.len() < GUIDE_PART_BYTES,
+                "part {at}: {}",
+                printed.len()
+            );
+            if at < of {
+                assert!(printed.ends_with(&format!(
+                    "Print part {} with: /opt/cf guide --part {})",
+                    at + 1,
+                    at + 1
+                )));
+            } else {
+                assert!(printed.ends_with(
+                    "the last: you have read all of it once you have read every part.)"
+                ));
+            }
+        }
+        assert!(guide_part(&guide, 0, "cf").is_none());
+        assert!(guide_part(&guide, parts.len() + 1, "cf").is_none());
+        // A guide that is read whole is printed as it is.
+        assert_eq!(
+            guide_part("short\n", 1, "cf"),
+            Some(("short\n".to_owned(), 1))
+        );
+    }
+
+    #[test]
+    fn json_byte_count_matches_serde_for_controls_quotes_and_unicode() {
+        let text: String = (0..=127).map(|n| char::from_u32(n).unwrap()).collect();
+        let text = format!("{text}日😀");
+        assert_eq!(
+            json_bytes(&text),
+            serde_json::to_string(&text).unwrap().len() - 2
+        );
+    }
+
+    #[test]
+    fn a_next_command_that_cannot_fit_is_not_printed_as_a_guide_part() {
+        let guide = "words ".repeat(4_000);
+        assert!(guide_part(&guide, 1, &"x".repeat(GUIDE_PART_BYTES)).is_none());
+    }
+
+    #[test]
+    fn escaped_guide_parts_keep_all_the_words_and_fit_in_both_formats() {
+        let long_cf = format!("'{}'", "\\".repeat(1_000));
+        let cases = [
+            "\\\"\u{1}".repeat(4_000),
+            "日😀\n\n".repeat(4_000),
+            (0..600).map(|n| format!("| {n} | \\\" |\n")).collect(),
+        ];
+        for words in &cases {
+            for cf in ["cf", long_cf.as_str()] {
+                let parts = guide_parts(words, cf).unwrap();
+                assert!(parts.len() > 1);
+                assert_eq!(
+                    parts.iter().map(|part| part.words).collect::<String>(),
+                    *words
+                );
+                for at in 1..=parts.len() {
+                    let (text, count) = guide_part(words, at, cf).unwrap();
+                    assert_eq!(count, parts.len());
+                    assert!(text.len() + 1 < GUIDE_PART_BYTES);
+                    let json =
+                        serde_json::to_string_pretty(&serde_json::json!({ "text": text })).unwrap();
+                    assert!(
+                        json.len() + 1 < GUIDE_PART_BYTES,
+                        "part {at}: {}",
+                        json.len() + 1
+                    );
+                }
+            }
+        }
     }
 
     /// What `cf` prints of part `at` of `parts` of the note 12: the message's line, the

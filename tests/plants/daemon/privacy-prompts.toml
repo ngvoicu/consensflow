@@ -627,12 +627,6 @@ meant = "every_role_is_given_the_text_node_gave_it_or_refused_as_node_refused_it
 runs = ["pv-text"]
 
 [[plant.edit]]
-file = "skill/core/staff.md"
-find = '''
-
-Look for files inside the project folder, never over the home folder or in
-`~/Music` or `~/Pictures` (`find ~`, `grep -r ~`, `ls ~/Music`): on a Mac that
-makes macOS ask the person at the screen, in ConsensFlow's name, and your command
-waits until they answer.
-'''
+file = "skill/core/shells.md"
+find = "Look for files inside the project folder, never over the home folder or in `~/Music` or `~/Pictures` (`find ~`, `grep -r ~`, `ls ~/Music`): macOS then asks the person at the screen, in ConsensFlow's name, and your command waits until they answer.\n"
 replace = ""

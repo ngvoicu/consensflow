@@ -76,6 +76,7 @@ pub fn request(name: &str, directory: &str) -> NewProject {
         compaction: None,
         advisor_tool: false,
         prompt_suggestion: false,
+        own_hands: false,
     }
 }
 

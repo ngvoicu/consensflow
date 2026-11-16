@@ -276,6 +276,7 @@ async fn a_line_may_name_any_message_number_and_only_this_project_s_are_read_out
                 compaction: None,
                 advisor_tool: false,
                 prompt_suggestion: false,
+                own_hands: false,
             })
             .unwrap();
         let note = ledger

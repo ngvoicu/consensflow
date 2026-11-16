@@ -218,6 +218,9 @@ find = '''        store.log(
             "project.created",
             json!({ "name": request.name, "directory": request.directory }),
         )?;
+        if request.own_hands {
+            set_own_hands(store, id, true)?;
+        }
         // Said as the project opens, kept and logged as if the human had said
         // them the moment after: a setting that is the default changes nothing.
         if let Some(wake_up) = wake_up {
@@ -238,6 +241,9 @@ replace = '''        if let Some(wake_up) = wake_up {
             "project.created",
             json!({ "name": request.name, "directory": request.directory }),
         )?;
+        if request.own_hands {
+            set_own_hands(store, id, true)?;
+        }
 '''
 
 [[plant]]

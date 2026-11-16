@@ -27,8 +27,8 @@ pub(super) async fn list(page: &Page) -> Result<Fields, Said> {
 /// here. The gate, the wake-up calls
 /// (`wakeUp`, as `wakeup.set` takes them), the specs (`specs`, as
 /// `project.specs` takes them), the rules for the staff (`rules`, as `project.rules`
-/// takes them) and the compaction (`compaction`, as `project.compaction` takes it) are
-/// the human's word for the project, kept in the write that makes it, so the chief's
+/// takes them), the compaction (`compaction`, as `project.compaction` takes it) and the chief's
+/// mode (`ownHands`, as `project.own_hands` takes it) are the human's word for the project, kept in the write that makes it, so the chief's
 /// first launch has them; one the ledger refuses refuses the whole start, in the words
 /// the Project settings dialog shows for it, and no project is made. A `compaction` that
 /// is left out starts the project on the ledger's default size, and `null` on each
@@ -98,6 +98,9 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         if let Some(said) = body.get(key) {
             request.insert(key.to_owned(), said.clone());
         }
+    }
+    if let Some(said) = body.get("ownHands") {
+        request.insert("ownHands".to_owned(), said.clone());
     }
     request.insert("staff".to_owned(), Value::Array(staff));
     let project = page
@@ -508,6 +511,7 @@ mod tests {
                     compaction: Some(COMPACTION_DEFAULT),
                     advisor_tool: false,
                     prompt_suggestion: false,
+                    own_hands: false,
                 },
                 "{what}"
             );

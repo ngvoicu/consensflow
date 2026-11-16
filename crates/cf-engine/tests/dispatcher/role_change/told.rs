@@ -277,8 +277,7 @@ fn a_role_too_long_for_one_message_goes_cut_with_the_word_to_read_the_rest_now_a
     let said = said_to_the_chief(&context);
     assert_eq!(said.len(), 1);
     assert!(
-        said[0]
-            .contains("Run that command now, before anything else, and read everything it prints."),
+        said[0].contains("Run the command at the end now and read all it prints."),
         "its opening says to read the rest now: {}",
         &said[0][..600]
     );
@@ -574,7 +573,7 @@ fn replacement_with(extra: usize) -> (usize, bool, bool) {
     context.pass().unwrap();
     let note = replacements(&context, chief).remove(0);
     let recorded = recorded(&context, chief).is_some_and(|told| told.ends_with('x'));
-    let in_part = note.body.contains("Run that command now");
+    let in_part = note.body.contains("Run the command at the end now");
     context.close();
     (utf16_len(&note.body), recorded, in_part)
 }

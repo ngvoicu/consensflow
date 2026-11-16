@@ -348,8 +348,18 @@ runs = ["harness-codex-role", "harness-launch-codex"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/role.rs"
-find = '''            "{existing}\n\nYour ConsensFlow role is {role}.'''
-replace = '''            "Your ConsensFlow role is {role}.'''
+find = '''            "{existing}\n\nYour ConsensFlow role follows;'''
+replace = '''            "Your ConsensFlow role follows;'''
+
+[[plant]]
+name = "codex role file: the role is put before Codex's native instructions"
+meant = "the_role_follows_what_codex_has_of_its_own_in_one_text"
+runs = ["harness-codex-role", "harness-launch-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/role.rs"
+find = '''"{existing}\n\nYour ConsensFlow role follows; it is already loaded, not a task.\n\n{content}"'''
+replace = '''"{content}\n\nYour ConsensFlow role follows; it is already loaded, not a task.\n\n{existing}"'''
 
 # --- the stand-in Codex ---
 

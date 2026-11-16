@@ -82,3 +82,34 @@ fn setter_changes_only_its_project_and_logs_each_change() {
     assert!(events_of(&home.ledger, other.id, "project.own_hands").is_empty());
     assert!(home.ledger.set_own_hands(99, true).is_err());
 }
+
+#[test]
+fn creation_keeps_own_hands_in_the_first_project_view_and_logs_the_choice() {
+    use cf_ledger::NewProject;
+    let mut home = home();
+    let body = json!({
+        "directory": "/work/on", "name": "on",
+        "chief": {"harness": "claude-code"}, "staff": [], "ownHands": true
+    });
+    let request = NewProject::from_json(&body).unwrap();
+    let on = home.ledger.create_project(&request).unwrap();
+    assert!(on.own_hands, "the first view, before a chief starts, is on");
+    assert!(home.ledger.project(on.id).unwrap().unwrap().own_hands);
+    assert_eq!(
+        events_of(&home.ledger, on.id, "project.own_hands"),
+        [json!({"from": false, "to": true})]
+    );
+    let mut off_body = body.clone();
+    off_body.as_object_mut().unwrap().remove("ownHands");
+    let off = home
+        .ledger
+        .create_project(&NewProject::from_json(&off_body).unwrap())
+        .unwrap();
+    assert!(!off.own_hands);
+    assert!(events_of(&home.ledger, off.id, "project.own_hands").is_empty());
+    for bad in [json!(null), json!(1), json!("true"), json!([])] {
+        let mut invalid = body.clone();
+        invalid["ownHands"] = bad.clone();
+        assert!(NewProject::from_json(&invalid).is_err(), "{bad}");
+    }
+}

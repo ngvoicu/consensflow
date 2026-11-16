@@ -39,7 +39,7 @@ use serde_json::{json, Value};
 use crate::chiefs::{to, with_codex};
 
 /// The words that tell a note that replaces a role from any other.
-const REPLACES: &str = "replace the ones you were given then";
+const REPLACES: &str = "Follow these instructions in place of the earlier ones";
 
 /// Where the human has Specmint installed for Codex, so that the text a chief
 /// is given names a path that stays from one launch to the next.
@@ -186,7 +186,8 @@ fn a_resumed_conversation_whose_harness_keeps_its_first_instructions_is_given_a_
         told.body
     );
     assert!(
-        told.body.contains("follow these from now on"),
+        told.body
+            .contains("Follow these instructions in place of the earlier ones"),
         "{}",
         told.body
     );

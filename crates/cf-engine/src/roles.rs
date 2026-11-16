@@ -23,11 +23,55 @@ mod specs;
 
 use cf_base::env::Env;
 use cf_proto::agents::{WorkTier, WORK_TIERS};
-use cf_proto::cf_word::CfWord;
+use cf_proto::cf_word::{CfWord, CF_STANDS_FOR};
 use cf_proto::ledger::ProjectView;
 
 pub use skill::{team_table, work_tier_list};
 pub use specs::ProjectSpecs;
+
+/// Whether a text names its window's `cf` by path once, at its start, and says `cf` after
+/// it ("`cf` below stands for this command; type it in full every time"), or writes the path in
+/// every command. One switch for every text: the members', the chief's and the guide.
+pub const PATH_ONCE: bool = false;
+
+/// What a text's commands start with: `cf`, where the path is said once ([`PATH_ONCE`]), else
+/// the window's own word.
+pub(crate) fn cf_in_text(cf: &CfWord) -> &str {
+    if PATH_ONCE {
+        "cf"
+    } else {
+        cf.as_str()
+    }
+}
+
+/// The paragraph that says the path once, for the `{{cf_note}}` of a text: none where the
+/// path is written in each command, or where a window has no path to say.
+pub(crate) fn cf_note(cf: &CfWord) -> String {
+    if PATH_ONCE && cf.as_str() != "cf" {
+        format!(
+            "{CF_STANDS_FOR}; type it in full every time:\n`{}`",
+            cf.as_str()
+        )
+    } else {
+        String::new()
+    }
+}
+
+/// `text` with its `{{cf_note}}` and the paragraph break after it put in or taken out.
+fn with_cf_note(text: String, cf: &CfWord) -> String {
+    let note = cf_note(cf);
+    if note.is_empty() {
+        text.replacen("{{cf_note}}\n\n", "", 1)
+    } else {
+        text.replacen("{{cf_note}}", &note, 1)
+    }
+}
+
+/// Whether this program runs on a Mac: the window's platform is the daemon's, since a window
+/// is a process of the machine its daemon runs on.
+pub fn on_a_mac() -> bool {
+    cfg!(target_os = "macos")
+}
 
 /// A member of the staff as its chief reads it: its name, roles and work
 /// tier, its sessions left out.
@@ -119,24 +163,85 @@ pub fn role_instructions(
     role_instructions_for(env, role, staff, cf, specs, false)
 }
 
-/// The same role with the person's choice of how the chief works.
+/// The same role for a window on the machine this runs on.
 pub fn role_instructions_for(
-    _env: &Env,
+    env: &Env,
     role: &str,
     staff: &[StaffRow],
     cf: &CfWord,
     specs: Option<&ProjectSpecs<'_>>,
     own_hands: bool,
 ) -> Result<String, RoleError> {
+    role_instructions_on(env, role, staff, cf, specs, own_hands, on_a_mac())
+}
+
+/// The same role with the person's choice of how the chief works and whether the window is on
+/// a Mac (a member's text then has the paragraph on the home folder and the folders macOS asks
+/// the person about).
+pub fn role_instructions_on(
+    _env: &Env,
+    role: &str,
+    staff: &[StaffRow],
+    cf: &CfWord,
+    specs: Option<&ProjectSpecs<'_>>,
+    own_hands: bool,
+    mac: bool,
+) -> Result<String, RoleError> {
     // The staff's members, who have one window a task, hold the roles of the ledger's table.
     if role != "chief" && !cf_ledger::roles::is_role(role) {
         return Err(RoleError::Unknown(role.to_owned()));
     }
     if role != "chief" {
-        return member::text(role, cf);
+        return member::text(role, cf, mac);
     }
-    // The `cf` goes in last, so nothing in a path is read as a slot.
-    let chief = chief::text(own_hands)?
+    if own_hands {
+        // The short text has no table, no tiers and no shell paragraph to fill: those are the
+        // guide's (`guide_instructions`). The `cf` goes in last, so nothing in a path is read
+        // as a slot.
+        let chief = with_cf_note(chief::text(true)?.replace("{{cf}}", cf_in_text(cf)), cf);
+        let specs = specs.map_or_else(String::new, |specs| specs.section_for(true));
+        return Ok(chief + &specs);
+    }
+    let chief = filled(chief::text(false)?, staff, cf)?;
+    Ok(chief + &specs.map_or_else(String::new, ProjectSpecs::section))
+}
+
+/// The board's guide a chief that does the work with its own hands reads on demand
+/// (`cf guide`): the ordinary chief's text for the board, with the project's rules for its
+/// staff after it, as they are now and the staff as it is now; where the project has specs on
+/// (`specs_folder`, where they are kept), what the ordinary chief is told of specs and the
+/// board comes before the rules. It is made from the same `chief.md` and the same specs text
+/// as the ordinary chief's text, so the two cannot drift.
+pub fn guide_instructions(
+    staff: &[StaffRow],
+    cf: &CfWord,
+    specs_folder: Option<&str>,
+    rules: Option<&str>,
+) -> Result<String, RoleError> {
+    let guide = filled(chief::guide(true)?, staff, cf)?;
+    let specs = specs_folder.map_or_else(String::new, ProjectSpecs::board_for);
+    Ok(with_staff_rules(guide + &specs, "chief", rules))
+}
+
+/// The same guide for an ordinary chief, with its ordinary specs section and staff rules.
+pub fn ordinary_guide_instructions(
+    staff: &[StaffRow],
+    cf: &CfWord,
+    specs_section: Option<&str>,
+    rules: Option<&str>,
+) -> Result<String, RoleError> {
+    let guide = filled(chief::guide(false)?, staff, cf)?;
+    Ok(with_staff_rules(
+        guide + specs_section.unwrap_or_default(),
+        "chief",
+        rules,
+    ))
+}
+
+/// `text`, a chief's, with the shell paragraph, the work tiers, the staff table and the
+/// window's `cf` put in its slots. The `cf` goes in last, so nothing in a path is read as a slot.
+fn filled(text: String, staff: &[StaffRow], cf: &CfWord) -> Result<String, RoleError> {
+    let text = text
         .replacen(
             "{{chief_input}}",
             shells::paragraph(cf.shell(), "chief_input")?,
@@ -144,15 +249,8 @@ pub fn role_instructions_for(
         )
         .replacen("{{tiers}}", &work_tier_list(), 1)
         .replacen("{{staff}}", &team_table(staff)?, 1)
-        .replace("{{cf}}", cf.as_str());
-    let specs = specs.map_or_else(String::new, |specs| {
-        if own_hands {
-            specs.section_for(true)
-        } else {
-            specs.section()
-        }
-    });
-    Ok(chief + &specs)
+        .replace("{{cf}}", cf_in_text(cf));
+    Ok(with_cf_note(text, cf))
 }
 
 /// The heading of the project's rules for its staff, in every text that has them.

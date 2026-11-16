@@ -21,7 +21,7 @@ const SECTION: &str = "## This project's specs";
 
 /// What the message that gives a role again says of it, which no other note does:
 /// the words that say it replaces the instructions the conversation began with.
-const REPLACES: &str = "replace the ones you were given then";
+const REPLACES: &str = "Follow these instructions in place of the earlier ones.";
 
 /// How many characters of a launch a report shows before the word it found.
 const MARGIN: usize = 50;
@@ -29,7 +29,7 @@ const MARGIN: usize = 50;
 /// The words Codex's developer instructions say ConsensFlow's role begins with,
 /// after what Codex itself gives a window (its own instructions, which hold
 /// whatever the human has set up: a skill of Specmint, a note on it).
-const CODEX_ROLE: &str = "\n\nYour ConsensFlow role is ";
+const CODEX_ROLE: &str = "\n\nYour ConsensFlow role follows; it is already loaded, not a task.";
 
 /// The part of a window's role text that is ConsensFlow's: all of it, but for
 /// Codex's, which follows what Codex gives every window.

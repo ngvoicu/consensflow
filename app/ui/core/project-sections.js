@@ -1,6 +1,7 @@
 import { AdvisorTool } from './advisor-tool.js'
 import { Compaction } from './compaction.js'
 import { ComputerUseSection } from './computer-use.js'
+import { OwnHands } from './own-hands.js'
 import { PromptSuggestion } from './prompt-suggestion.js'
 import { SpecsGroup } from './specs.js'
 import { StaffRules } from './staff-rules.js'
@@ -27,7 +28,7 @@ export function holdEnter(root) {
 /**
  * The sections of a project's settings that Project settings and New project
  * both have, after Staff, which each dialog draws for itself: the rules for the
- * staff, the compaction, the advisor tool, the prompt suggestion, Human approval, Wake-up calls, Specs and
+ * staff, the compaction, the advisor tool, the prompt suggestion, own hands, Human approval, Wake-up calls, Specs and
  * Computer use.
  * They are one markup (the page's `project-sections` template, copied into each
  * dialog) and one code for what each holds, shows and refuses, so the two
@@ -36,7 +37,7 @@ export function holdEnter(root) {
  *
  * - in Project settings (`page` is given) each saves as it always did, for the
  *   project the dialog is for: the approval when it is ticked or unticked, the
- *   rules, the compaction, the advisor tool, the prompt suggestion, the calls and the specs by
+ *   rules, the compaction, the advisor tool, the prompt suggestion, own hands, the calls and the specs by
  *   their own Save;
  * - in New project (no `page`) nothing is saved, for there is no project yet:
  *   the sections hold what the human sets, and `values` is what the project
@@ -57,6 +58,7 @@ export class ProjectSections {
   #compaction
   #advisorTool
   #promptSuggestion
+  #ownHands
   #computerUse
 
   /**
@@ -78,6 +80,7 @@ export class ProjectSections {
       sections.querySelector('.prompt-suggestion'),
       page,
     )
+    this.#ownHands = new OwnHands(sections.querySelector('.own-hands-section'), page)
     this.#gate = sections.querySelector('[name="gate"]')
     this.#wakeUp = new WakeUpCalls(sections.querySelector('.wakeup-section'), page)
     this.#specs = new SpecsGroup(sections.querySelector('.project-specs'), page, app)
@@ -118,13 +121,17 @@ export class ProjectSections {
     return this.#promptSuggestion
   }
 
+  get ownHands() {
+    return this.#ownHands
+  }
+
   get computerUse() {
     return this.#computerUse
   }
 
   /**
    * What a new project starts with: whether the human approves each message,
-   * and the rules, the compaction, the advisor tool, the prompt suggestion, the calls and the specs as the human set
+   * and the rules, the compaction, the advisor tool, the prompt suggestion, own hands, the calls and the specs as the human set
    * them, each none while its section is as it opened (the project is then as
    * one that never said it), but the compaction: a size, or none for each
    * harness's own point, always said, since a request that says nothing of it
@@ -139,6 +146,7 @@ export class ProjectSections {
       compaction: this.#compaction.values(),
       advisorTool: this.#advisorTool.values(),
       promptSuggestion: this.#promptSuggestion.values(),
+      ownHands: this.#ownHands.values(),
     }
   }
 
@@ -158,6 +166,7 @@ export class ProjectSections {
     this.#compaction.reset()
     this.#advisorTool.reset()
     this.#promptSuggestion.reset()
+    this.#ownHands.reset()
     this.#wakeUp.reset()
     this.#specs.reset()
   }

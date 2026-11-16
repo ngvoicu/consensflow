@@ -109,6 +109,13 @@ impl NewsPart {
     }
 }
 
+/// The project's rules for its staff as the chief's role says them: a chief that does the
+/// work with its own hands has no rules in its role (they are in the board's guide, as they
+/// are now), so a change to them is no change to tell it.
+fn rules_told(project: &ProjectView) -> Option<String> {
+    project.staff_rules.clone().filter(|_| !project.own_hands)
+}
+
 impl Told {
     /// What a window given `specs` as its role's section of them is told of, in
     /// `project`.
@@ -116,7 +123,7 @@ impl Told {
         Self {
             parts: Parts {
                 specs: specs.cloned(),
-                rules: project.staff_rules.clone(),
+                rules: rules_told(project),
                 own_hands: project.own_hands,
             },
             staff: project.participants.clone(),
@@ -130,7 +137,7 @@ impl Dispatcher {
     fn parts_of(&self, project: &ProjectView, participant: &ParticipantView) -> Parts {
         Parts {
             specs: self.specs_setting(project, participant),
-            rules: project.staff_rules.clone(),
+            rules: rules_told(project),
             own_hands: project.own_hands,
         }
     }
@@ -290,21 +297,13 @@ impl Dispatcher {
             change.note()
         };
         let body = if told.parts.own_hands != wanted.own_hands {
-            let first = match crate::roles::news::own_hands_said(
-                wanted.own_hands,
-                &self.seams.roles.cf(participant),
-                now.as_ref(),
-            ) {
-                Ok(first) => first,
-                Err(cause) => {
-                    let cause = EngineError::said("no-role-text", cause.to_string());
-                    return self.news_refused(project, participant, record, wanted, &cause);
-                }
-            };
-            format!(
-                "{first}\n\n{}",
-                other.unwrap_or_else(|| crate::roles::news::CONTEXT.to_owned())
-            )
+            // The role as it is now is told whole: the short text, and the ordinary chief's
+            // whole role where the switch went off.
+            if wanted.own_hands {
+                crate::roles::news::own_hands_on(&role.instructions)
+            } else {
+                crate::role_change::body_of(&role.instructions, &self.seams.roles.cf(participant))
+            }
         } else if let Some(body) = other {
             body
         } else {

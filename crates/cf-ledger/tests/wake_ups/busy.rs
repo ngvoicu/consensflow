@@ -335,6 +335,7 @@ fn work_on_its_way_in_another_project_holds_nothing_back() {
             compaction: None,
             advisor_tool: false,
             prompt_suggestion: false,
+            own_hands: false,
         })
         .expect("another project");
     w.ledger

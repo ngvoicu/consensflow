@@ -13,7 +13,7 @@ use crate::chiefs::to_human;
 use crate::resume::at_work;
 
 /// The words that tell the note that gives a cleared session its role.
-const BEGAN_WITHOUT: &str = "began without your ConsensFlow role instructions";
+const BEGAN_WITHOUT: &str = "began without your ConsensFlow role";
 
 /// The notes ConsensFlow wrote to `participant` that give a session its role, oldest first.
 fn greetings(context: &Context, participant: i64) -> Vec<MessageView> {
@@ -109,7 +109,7 @@ fn a_session_no_hook_greeted_is_given_a_long_role_in_part_and_told_it_once_it_is
     assert_eq!(note.state, "delivered");
     assert!(
         note.body.starts_with(
-            "This conversation began without your ConsensFlow role instructions: it was started in your window (a /clear, or a new session), and your harness gave it none. They are too long for one message, so only their opening follows; the line at its end gives the command that prints all of them. Run that command now, before anything else, and read everything it prints"
+            "This conversation began without your ConsensFlow role. Follow these instructions. Run the command at the end now and read all it prints"
         ),
         "{}",
         &note.body[..400]

@@ -82,11 +82,13 @@ impl Dispatcher {
             .roles
             .instructions(participant, project, told.as_ref())
             .map_err(|cause| EngineError::said("no-role-text", cause))?;
-        let instructions = with_staff_rules(
-            instructions,
-            &participant.role,
-            project.staff_rules.as_deref(),
-        );
+        // A chief that does the work with its own hands has the rules in the board's guide
+        // (`cf guide`), not in its role: they bind the staff's work, not its own.
+        let rules = project
+            .staff_rules
+            .as_deref()
+            .filter(|_| !(participant.role == "chief" && project.own_hands));
+        let instructions = with_staff_rules(instructions, &participant.role, rules);
         Ok(RoleText {
             specs,
             instructions,
@@ -113,6 +115,40 @@ impl Dispatcher {
             self.seams.app_settings.app_specs()
         };
         project.specs_setting(&app)
+    }
+
+    /// Where `project`'s specs are kept for `participant`, a chief, now: none where its
+    /// project has them off. The board's guide tells a chief with its own hands what an
+    /// ordinary chief's text says of specs and the board where this is some.
+    pub fn specs_folder(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+    ) -> Option<String> {
+        self.specs_setting(project, participant)
+            .map(|setting| setting.folder)
+    }
+
+    /// The ordinary chief's complete specs section, with its harness's current skill path.
+    /// A missing adapter or skill is an error rather than a silently incomplete guide.
+    pub fn ordinary_specs_section(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+    ) -> Result<Option<String>, EngineError> {
+        if self.specs_setting(project, participant).is_none() {
+            return Ok(None);
+        }
+        let harness = participant.harness.as_deref().unwrap_or_default();
+        let adapter = self.seams.adapters.adapter(harness).ok_or_else(|| {
+            EngineError::said(
+                "no-adapter",
+                format!("ConsensFlow cannot open {harness} windows"),
+            )
+        })?;
+        Ok(self
+            .chief_specs(project, participant, adapter.as_ref())?
+            .map(|specs| specs.text().section()))
     }
 
     /// The specs `participant`'s launch is given in `project`: none for any

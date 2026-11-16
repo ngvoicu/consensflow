@@ -5,7 +5,7 @@
 //! of `tests/goldens/text.json` hold those, played for `Shell::Posix`).
 
 use cf_base::env::Env;
-use cf_engine::roles::{role_instructions, ProjectSpecs, StaffRow};
+use cf_engine::roles::{role_instructions, ProjectSpecs, StaffRow, PATH_ONCE};
 use cf_proto::agents::WorkTier;
 use cf_proto::cf_word::{CfWord, Shell};
 use cf_proto::specs::Variant;
@@ -41,31 +41,31 @@ fn specs() -> ProjectSpecs<'static> {
     }
 }
 
+/// What the commands of a text start with: `cf`, where the text says the path once, else the
+/// window's own word.
+fn said(cf: &CfWord) -> &str {
+    if PATH_ONCE {
+        "cf"
+    } else {
+        cf.as_str()
+    }
+}
+
 /// What a PowerShell window is taught of passing a text to `cf`, for the chief and for a
 /// member, and of a removal, with this window's word for `cf` in it.
 fn chief_input(word: &str) -> String {
     format!(
-        "Any \"…\" can be `--file brief.md` instead: the text then comes from that file,\n\
-         as written. Write a brief that holds backticks, `$` or quotes to it with your\n\
-         file tool, never with `>` (Windows PowerShell 5.1 writes UTF-16) or a pipe into\n\
-         `-` (it loses non-ASCII there). In double quotes PowerShell evaluates `$( )`,\n\
-         expands `$name` and treats a backtick as an escape before ConsensFlow sees the\n\
-         text, and 5.1 splits it at an inner `\"`; to put a value in, write it out:\n\n    {word} task add --tier standard --file brief.md\n"
+        "Any \"…\" can be `--file brief.md`: the text then comes from that file, as written. Write a brief that holds backticks, `$` or quotes to it with your file tool, never with `>` (Windows PowerShell 5.1 writes UTF-16) or a pipe into `-` (it loses non-ASCII there). In double quotes PowerShell evaluates `$( )`, expands `$name` and treats a backtick as an escape before ConsensFlow sees the text, and 5.1 splits it at an inner `\"`; to put a value in, write it out:\n\n    {word} task add --tier standard --file brief.md\n"
     )
 }
 
 fn member_input(word: &str) -> String {
     format!(
-        "Any \"…\" can be `--file ask.md` instead, the text in that file, written with your\n\
-         file tool and taken as written: `{word} ask --file ask.md`. In double quotes\n\
-         PowerShell evaluates `$( )`, expands `$name`; a backtick escapes.\n"
+        "Any \"…\" can be `--file ask.md`, the text in that file, written with your file tool and taken as written: `{word} ask --file ask.md`. In double quotes PowerShell evaluates `$( )` and expands `$name`; a backtick escapes.\n"
     )
 }
 
-const REMOVAL: &str = "Nobody watches this window, and a harness may stop for a human even with\n\
-every permission granted: Claude Code does on any removal (`rm`, `rm -f`,\n\
-`rmdir`) whose path a variable makes, and no permission lets it through.\n\
-Write a removal's paths out in full.\n";
+const REMOVAL: &str = "Nobody watches this window: Claude Code stops for a human on any removal (`rm`, `rm -f`, `rmdir`) whose path a variable makes, whatever the permissions. Write the paths out in full.\n";
 
 fn powershell_words() -> Vec<CfWord> {
     [SPACED, PLAIN, ""]
@@ -79,7 +79,7 @@ fn powershell_words() -> Vec<CfWord> {
 #[test]
 fn a_powershell_window_is_taught_a_file_and_no_heredoc() {
     for cf in powershell_words() {
-        let word = cf.as_str();
+        let word = said(&cf);
         for role in ROLES {
             for specs in [None, Some(&specs())] {
                 let text = text(role, &cf, specs);
@@ -123,7 +123,7 @@ fn a_powershell_member_is_told_the_removal_rule_in_words_and_no_bash() {
 fn a_bash_like_window_keeps_its_heredoc_and_its_removal_example() {
     for path in [SPACED, PLAIN, ""] {
         let cf = CfWord::new(path, Shell::Posix);
-        let word = cf.as_str();
+        let word = said(&cf);
         let chief = text("chief", &cf, None);
         assert!(
             chief.contains(&format!(
@@ -169,16 +169,16 @@ fn a_powershell_text_is_no_longer_than_the_bash_like_text_with_the_same_word() {
                     posix.len()
                 );
                 // The lines of one that the other lacks are those of the paragraphs, and no other:
-                // the chief's input (9 lines of the bash text are not in the PowerShell text, 7
+                // the chief's input (5 lines of the bash text are not in the PowerShell text, 2
                 // of the PowerShell text are not in the bash text) and, for a member, its input
-                // (3 and 3) and its removal (2 and 2).
+                // and its removal (a line each).
                 let lines = |text: &str| text.lines().map(str::to_owned).collect::<Vec<_>>();
                 let (posix, powershell) = (lines(&posix), lines(&powershell));
                 let lacks = |of: &[String], from: &[String]| {
                     from.iter().filter(|line| !of.contains(line)).count()
                 };
                 let counts = (lacks(&powershell, &posix), lacks(&posix, &powershell));
-                let expected = if role == "chief" { (9, 7) } else { (5, 5) };
+                let expected = if role == "chief" { (5, 2) } else { (2, 2) };
                 assert_eq!(counts, expected, "the {role}'s, {path:?}");
             }
         }

@@ -22,59 +22,7 @@ fn given<'a>(folder: &'a str, variant: Variant, skill: &'a str) -> ProjectSpecs<
 const SKILL: &str = "/home/me/.consensflow/integrations/specmint/claude/core-0123abcd/.claude/skills/specmint-core/SKILL.md";
 
 #[test]
-fn own_hands_notice_gives_only_the_changed_parts() {
-    use cf_base::env::Env;
-    use cf_proto::cf_word::CfWord;
-    let specs = given("plans", Variant::Core, SKILL);
-    for on in [true, false] {
-        for chosen in [None, Some(&specs)] {
-            let instructions = crate::roles::role_instructions_for(
-                &Env::default(),
-                "chief",
-                &[],
-                &CfWord::bare(),
-                chosen,
-                on,
-            )
-            .unwrap();
-            let note = own_hands_said(on, &CfWord::bare(), chosen).unwrap();
-            let description = instructions
-                .lines()
-                .find(|line| line.starts_with("description: "))
-                .unwrap();
-            let opening = instructions
-                .split_once("# ConsensFlow Chief of Staff\n\n")
-                .unwrap()
-                .1
-                .split_once("\n\n")
-                .unwrap()
-                .0;
-            let never = instructions
-                .split_once("## What you never do\n\n")
-                .unwrap()
-                .1
-                .split_once("\n## ")
-                .unwrap()
-                .0;
-            assert!(
-                !note.contains(description),
-                "front matter is not a direction"
-            );
-            assert!(note.contains(opening));
-            assert!(note.contains(never.trim_end()));
-            assert!(note.contains("## What you do"));
-            assert!(note.contains("## What you never do"));
-            assert_eq!(note.contains("## This project's specs"), chosen.is_some());
-            assert!(!note.contains("1. The human works with you here"));
-            assert!(!note.contains("## Reviews"));
-            assert!(!note.contains("## The staff"));
-            assert!(note.lines().count() < 80, "{} lines", note.lines().count());
-        }
-    }
-}
-
-#[test]
-fn own_hands_news_has_each_changed_section_and_fits_in_one_piece() {
+fn the_own_hands_on_note_is_the_short_text_whole_and_fits_in_one_piece() {
     use cf_base::env::Env;
     use cf_proto::cf_word::{CfWord, Shell};
     let specs = given("plans", Variant::Core, SKILL);
@@ -89,52 +37,32 @@ fn own_hands_news_has_each_changed_section_and_fits_in_one_piece() {
             Shell::PowerShell,
         ),
     ] {
-        for on in [true, false] {
+        for chosen in [None, Some(&specs)] {
             let instructions = crate::roles::role_instructions_for(
                 &Env::default(),
                 "chief",
                 &[],
                 &cf,
-                Some(&specs),
-                on,
+                chosen,
+                true,
             )
             .unwrap();
-            let note = own_hands_said(on, &cf, Some(&specs)).unwrap();
-            assert!(note.starts_with(if on {
-                "The person turned \"Do with your own hands\" on:"
+            let note = own_hands_on(&instructions);
+            assert!(note.starts_with("The person turned \"Do with your own hands\" on."));
+            // What the conversation holds once the note is in is the role, whole: the note
+            // carries it word for word.
+            assert!(note.contains(&instructions));
+            let word = if crate::roles::PATH_ONCE {
+                "cf"
             } else {
-                "The person turned \"Do with your own hands\" off:"
-            }));
-            assert!(note.contains("## What you do"));
-            let whole_duty = instructions
-                .split_once("## What you do\n")
-                .unwrap()
-                .1
-                .split_once("\n1. ")
-                .unwrap()
-                .0;
-            assert!(
-                note.contains(whole_duty.trim_end()),
-                "the changed duty replaces the earlier one"
-            );
-            assert!(!note.contains("## Reviews"));
-            assert!(note.contains("## This project's specs"));
-            assert!(note.contains(&specs.work_for(on)));
-            if on {
-                assert!(note.contains("A small ask is no spec: you do it yourself."));
-                assert!(note.contains(
-                    "Write the spec before you start its work, and do it in phase order."
-                ));
-            } else {
-                assert!(note
-                    .contains("A small ask is no spec: it goes straight on the board as a task."));
-                assert!(note.contains("Write the spec before any of its tasks go on the board."));
-            }
-            assert!(!note.contains("## The staff"));
-            assert!(!note.contains("## The project's rules for the staff"));
-            let complete = format!("{note}\n\n{CONTEXT}");
-            assert!(fits_whole(&complete), "{} bytes", complete.len());
-            assert!(cf_base::role_read::role_read_whole(&complete));
+                cf.as_str()
+            };
+            assert!(note.contains(&format!("run `{word} guide`")));
+            assert_eq!(note.contains("## This project's specs"), chosen.is_some());
+            assert!(!note.contains("## The staff") && !note.contains("task add"));
+            assert!(note.ends_with(CONTEXT));
+            assert!(fits_whole(&note), "{} bytes", note.len());
+            assert!(cf_base::role_read::role_read_whole(&note));
         }
     }
 }
@@ -166,7 +94,7 @@ fn specs_turned_on_give_the_section_and_say_it_is_context() {
     assert_eq!(
         note,
         format!(
-            "Specs are now on in this project: the human turned them on while you work. This is now a section of your instructions:\n{}\n\nThis is context, not a task: say in one short line that you have it, and wait for the next message.",
+            "Your instructions now include:\n{}\n\n{CONTEXT}",
             now.section()
         )
     );
@@ -184,7 +112,7 @@ fn specs_turned_off_say_to_plan_as_tasks_and_that_the_specs_there_stay() {
     assert_eq!(
         note,
         format!(
-            "Specs are now off in this project: the human turned them off while you work. Plan new work as tasks, not specs; the specs already in `docs/specs` stay. The section of your instructions on this project's specs no longer applies.\n\n\n{CONTEXT}"
+            "Specs are now off. Plan new work as tasks, not specs; the specs in `docs/specs` stay. Your earlier specs instructions no longer apply.\n\n\n{CONTEXT}"
         )
     );
 }
@@ -196,11 +124,12 @@ fn a_new_folder_names_both_and_gives_the_section_with_the_skill_of_the_new_one()
     let note = specs_note(Some(&was), Some(&now)).unwrap();
     assert!(
         note.starts_with(
-            "The human changed this project's specs while you work: the specs are now kept in `plans`, not `docs/specs`. The specs already in `docs/specs` stay where they are. This section replaces the one on specs in your instructions; follow it from now on:\n"
+            "The project's specs changed. The specs in `docs/specs` stay where they are. This section replaces your earlier specs instructions:\n"
         ),
         "{note}"
     );
     assert!(note.contains(&now.section()) && note.ends_with(CONTEXT));
+    assert!(note.contains("`plans`"));
     assert!(!note.contains("Specmint skill is now"));
 }
 
@@ -211,11 +140,13 @@ fn a_new_variant_names_both_and_leaves_the_folder_unsaid() {
     let note = specs_note(Some(&was), Some(&now)).unwrap();
     assert!(
         note.starts_with(
-            "The human changed this project's specs while you work: the Specmint skill is now `specmint-tdd`, not `specmint-core`. This section replaces"
+            "The project's specs changed. This section replaces your earlier specs instructions:"
         ),
         "{note}"
     );
     assert!(!note.contains("stay where they are"));
+    assert!(note.contains("`specmint-tdd`"), "{note}");
+    assert!(!note.contains("`specmint-core`"), "{note}");
 }
 
 #[test]
@@ -224,7 +155,9 @@ fn both_changed_say_both() {
     let now = given("plans", Variant::Tdd, SKILL);
     let note = specs_note(Some(&was), Some(&now)).unwrap();
     assert!(
-        note.contains("the specs are now kept in `plans`, not `docs/specs`, and the Specmint skill is now `specmint-tdd`, not `specmint-core`."),
+        note.contains("The specs in `docs/specs` stay where they are.")
+            && note.contains("`plans`")
+            && note.contains("`specmint-tdd`"),
         "{note}"
     );
 }
@@ -241,7 +174,7 @@ fn rules_written_changed_and_taken_away_each_have_their_words() {
     };
     let wrote = rules(None, Some("- Push to origin only."));
     assert!(
-        wrote.starts_with("The human wrote the rules for your staff while you work."),
+        wrote.starts_with("The human wrote the rules for your staff."),
         "{wrote}"
     );
     assert!(wrote.contains(&with_staff_rules(
@@ -254,7 +187,7 @@ fn rules_written_changed_and_taken_away_each_have_their_words() {
     assert!(changed.contains("- B.") && !changed.contains("- A."));
     let away = rules(Some("- A."), None);
     assert!(
-        away.starts_with("The human took away the rules for your staff while you work."),
+        away.starts_with("The human took away the rules for your staff."),
         "{away}"
     );
     assert!(!away.contains("- A."));
@@ -270,7 +203,9 @@ fn specs_and_rules_changed_together_are_one_note() {
     .note()
     .unwrap();
     assert_eq!(note.matches(CONTEXT).count(), 1);
-    assert!(note.contains("Specs are now on") && note.contains("rules for your staff"));
+    assert!(
+        note.contains("Your instructions now include:") && note.contains("rules for your staff")
+    );
 }
 
 #[test]
@@ -295,4 +230,58 @@ fn the_largest_note_a_setting_makes_goes_into_a_window_whole() {
         fits_whole(&note),
         "a note of a setting is never cut: it says nothing the window could miss"
     );
+}
+
+// T-1715: each distinct news form keeps the information needed to act on the new role.
+#[test]
+fn short_text_t1715_news_context() {
+    assert_eq!(
+        CONTEXT,
+        "This is context, not a task: acknowledge it in one line and wait for the next message."
+    );
+}
+
+#[test]
+fn short_text_t1715_specs_on() {
+    let now = given("docs/specs", Variant::Core, SKILL);
+    assert_eq!(
+        specs_said(None, Some(&now), false),
+        format!("Your instructions now include:\n{}", now.section())
+    );
+}
+
+#[test]
+fn short_text_t1715_specs_off_ordinary() {
+    let old = setting("old-specs", Variant::Tdd);
+    assert_eq!(specs_said(Some(&old), None, false), "Specs are now off. Plan new work as tasks, not specs; the specs in `old-specs` stay. Your earlier specs instructions no longer apply.\n");
+}
+
+#[test]
+fn short_text_t1715_specs_off_own_hands() {
+    let old = setting("old-specs", Variant::Tdd);
+    assert_eq!(specs_said(Some(&old), None, true), "Specs are now off; the specs in `old-specs` stay. Your earlier specs instructions no longer apply.\n");
+}
+
+#[test]
+fn short_text_t1715_specs_changed() {
+    let old = setting("old-specs", Variant::Tdd);
+    let now = given("docs/specs", Variant::Core, SKILL);
+    assert_eq!(specs_said(Some(&old), Some(&now), false), format!("The project's specs changed. The specs in `old-specs` stay where they are. This section replaces your earlier specs instructions:\n{}", now.section()));
+}
+
+#[test]
+fn short_text_t1715_rules_written_and_changed() {
+    for (was, verb) in [(None, "wrote"), (Some("old"), "changed")] {
+        assert_eq!(rules_said(was, Some("new")), format!("The human {verb} the rules for your staff. New windows get them; open windows keep theirs. This section replaces your earlier rules:\n{}", with_staff_rules(String::new(), "chief", Some("new"))));
+    }
+}
+
+#[test]
+fn short_text_t1715_rules_removed() {
+    assert_eq!(rules_said(Some("old"), None), "The human took away the rules for your staff. New windows get none; open windows keep theirs. Your earlier rules no longer apply.\n");
+}
+
+#[test]
+fn short_text_t1715_own_hands() {
+    assert_eq!(own_hands_on("role"), format!("The person turned \"Do with your own hands\" on. These instructions replace your earlier ones.\n\nrole\n\n{CONTEXT}"));
 }
