@@ -658,14 +658,15 @@ impl Isolation {
         let source = match seed {
             Seed::Copy { from, .. }
             | Seed::PiLogin { from, .. }
-            | Seed::PiProvider { from, .. } => from,
-            #[cfg(unix)]
-            Seed::Carry { from, .. } => from,
+            | Seed::PiProvider { from, .. } => Some(from),
+            Seed::Fixed { .. } => None,
         };
-        crate::standin_process::require_home(
-            source,
-            &format!("{} isolation lookup", self.harness.name()),
-        );
+        if let Some(source) = source {
+            crate::standin_process::require_home(
+                source,
+                &format!("{} isolation lookup", self.harness.name()),
+            );
+        }
         match seed {
             Seed::Copy { from, to, login } => match fs::read(from) {
                 Ok(bytes) => {
