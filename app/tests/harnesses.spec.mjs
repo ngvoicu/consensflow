@@ -25,7 +25,8 @@ for (const [harness, label] of [['pi', 'Pi']]) {
         .filter({ has: page.locator('strong', { hasText: new RegExp(`^${harness}$`) }) })
       await expect(pi).toContainText('Version 1.2.3')
       await expect(pi).toContainText(`${label} setup failed`)
-      await expect(pi.getByText(`${label} setup failed`)).toHaveCSS('color', 'rgb(244, 119, 105)')
+      // In the page's red for the light scheme the test browser has (#B91C1C).
+      await expect(pi.getByText(`${label} setup failed`)).toHaveCSS('color', 'rgb(185, 28, 28)')
       await expect(page.locator('body')).not.toContainText(
         /Integration:|result receipt|live connection|connection status/,
       )

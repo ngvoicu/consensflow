@@ -84,8 +84,28 @@ function model() {
   }
 }
 
+/**
+ * Every role's group open on each project of the model, as a human who opened them all has
+ * them: the board's tests read the members' rows. A test of the groups themselves starts as a
+ * human does, with none kept and every group folded (`openGroups: false`).
+ */
+function groupsOpen(data) {
+  if (data.openGroups === false) return
+  try {
+    for (const project of data.projects ?? []) {
+      const key = `cf.board.groups.${project.id}`
+      if (localStorage.getItem(key) === null) {
+        localStorage.setItem(key, JSON.stringify(data.roles.map((role) => role.id)))
+      }
+    }
+  } catch {
+    // A frame with no storage of its own draws no board.
+  }
+}
+
 async function open(page, given = model()) {
   const data = { roles: ROLES, ...given }
+  await page.addInitScript(groupsOpen, data)
   // The order the page opens its modals in, which is the order of the top layer: counted as
   // `showModal` is called, whatever the order of the dialogs in the document.
   await page.addInitScript(() => {
@@ -536,13 +556,13 @@ test.describe('no state of the page touches an open modal', () => {
 
   /**
    * Whether the notice is drawn as it is styled, not under a dialog or its backdrop: the middle of
-   * its left border is `--buoy` (255, 120, 104), which a backdrop over it would darken to about
-   * (104, 55, 51). A notice drawn over a modal is inert with the page, so nothing hits it.
+   * its left border is `--danger` (248, 113, 113), which a backdrop over it would darken to about
+   * (94, 43, 43). A notice drawn over a modal is inert with the page, so nothing hits it.
    */
   async function drawn(page, selector) {
     const box = await page.locator(selector).boundingBox()
     const colour = await pixelAt(page, box.x + 1, box.y + box.height / 2)
-    return [255, 120, 104].every((channel, at) => Math.abs(colour[at] - channel) <= 14)
+    return [248, 113, 113].every((channel, at) => Math.abs(colour[at] - channel) <= 14)
   }
 
   const daemonStatus = (page, payload) =>

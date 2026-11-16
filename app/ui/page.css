@@ -2,25 +2,57 @@
   /* The projects' panel, open: the windows' share of the width is taken of
      the room beside it, folded or not, so folding it moves no window. */
   --projects-width: 224px;
-  --ink: #08181d;
-  --deep: #0c2026;
-  --panel: #112a31;
-  --panel-raised: #17343c;
-  --line: #28464d;
-  --line-soft: #1c373e;
-  --foam: #e9f1ef;
-  --muted: #8ea8ad;
-  --seafoam: #63c7b2;
-  --seafoam-dim: #2b7569;
-  --buoy: #ff7868;
-  --amber: #e7b968;
-  --sky: #9cc3f0;
-  --slate: #3d5b62;
-  --strip: #0e252b;
-  --strip-hover: #133139;
-  --shadow: rgba(0, 0, 0, .36);
-  --ui: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
-  --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  /* Black with violet, as providers.dev is drawn: zinc surfaces, white words, its lavender for
+     links and focus, and a neon violet for what is live: a member at work, the window typed
+     into, the act a dialog is for. Green says done, amber waits for the human, red failed. */
+  --ink: #09090b;
+  --deep: #0e0e11;
+  --panel: #18181b;
+  --panel-raised: #222226;
+  --line: #3f3f46;
+  --line-soft: #27272a;
+  --text: #fafafa;
+  --muted: #a1a1aa;
+  --accent: #a5b4fc;
+  --accent-dim: #3730a3;
+  --violet: #a78bfa;
+  --violet-strong: #7c3aed;
+  --glow: rgba(139, 92, 246, .45);
+  --ok: #6ee7b7;
+  --ok-dim: #065f46;
+  --amber: #fcd34d;
+  --danger: #f87171;
+  --sky: #93c5fd;
+  --slate: #3f3f46;
+  --strip: #111114;
+  --strip-hover: #18181c;
+  --shadow: rgba(0, 0, 0, .55);
+  --ui: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  /* The terminals' colours (term.js reads them): their words keep the system's monospace,
+     whose glyphs a program's drawing needs, on the well of their card. The sixteen are bright,
+     to read as words on the well; a program's words on one of them as a background are made
+     readable by xterm (term.js, `minimumContrastRatio`). */
+  --term-background: #0e0e11;
+  --term-foreground: #e4e4e7;
+  --term-cursor: #c4b5fd;
+  --term-selection: rgba(139, 92, 246, .4);
+  --term-black: #27272a;
+  --term-red: #f87171;
+  --term-green: #4ade80;
+  --term-yellow: #fcd34d;
+  --term-blue: #60a5fa;
+  --term-magenta: #c084fc;
+  --term-cyan: #22d3ee;
+  --term-white: #d4d4d8;
+  --term-bright-black: #8a8a93;
+  --term-bright-red: #fca5a5;
+  --term-bright-green: #86efac;
+  --term-bright-yellow: #fde68a;
+  --term-bright-blue: #93c5fd;
+  --term-bright-magenta: #d8b4fe;
+  --term-bright-cyan: #67e8f9;
+  --term-bright-white: #fafafa;
 }
 
 * { box-sizing: border-box; }
@@ -28,15 +60,17 @@ html, body { width: 100%; height: 100%; }
 body {
   margin: 0;
   overflow: hidden;
+  /* The night of providers.dev: black, lit violet from the corner the brand sits in. */
   background:
-    linear-gradient(90deg, rgba(99, 199, 178, .025) 1px, transparent 1px) 0 0 / 24px 24px,
+    radial-gradient(760px 420px at 0 0, rgba(124, 58, 237, .16), transparent 70%),
+    radial-gradient(900px 520px at 100% 100%, rgba(99, 102, 241, .06), transparent 70%),
     var(--ink);
-  color: var(--foam);
+  color: var(--text);
   font: 13px/1.4 var(--ui);
   -webkit-font-smoothing: antialiased;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
-:focus-visible { outline: 2px solid var(--seafoam); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 [hidden] { display: none !important; }
 
 .shell {
@@ -60,7 +94,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   color: var(--muted);
   cursor: pointer;
 }
-.fold-icon:hover { color: var(--foam); border-color: var(--line); }
+.fold-icon:hover { color: var(--text); border-color: var(--line); }
 .shell[data-projects="hidden"] { grid-template-columns: 34px minmax(0, 1fr); }
 .shell[data-projects="hidden"] .sidebar { padding: 10px 4px; }
 .shell[data-projects="hidden"] .sidebar-title, .shell[data-projects="hidden"] #projects { display: none; }
@@ -88,10 +122,22 @@ button, input, select, textarea { font: inherit; color: inherit; }
   white-space: nowrap;
 }
 .quiet-button:hover:not(:disabled) { background: var(--panel-raised); }
-.primary-button { background: var(--seafoam); border-color: var(--seafoam); color: var(--ink); font-weight: 650; }
-.primary-button:hover:not(:disabled) { background: #7bd6c3; }
-.danger-button { border-color: rgba(255, 120, 104, .55); color: var(--buoy); }
-.danger-button:hover:not(:disabled) { background: rgba(255, 120, 104, .1); }
+.quiet-button:hover:not(:disabled) { border-color: #52525b; }
+/* The primary act glows: violet under white words, lit brighter under the pointer. */
+.primary-button {
+  background: var(--violet-strong);
+  border-color: #8b5cf6;
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 0 0 1px rgba(139, 92, 246, .2), 0 4px 18px -6px var(--glow);
+}
+.primary-button:hover:not(:disabled) {
+  background: #6d28d9;
+  border-color: var(--violet);
+  box-shadow: 0 0 0 1px rgba(167, 139, 250, .45), 0 0 22px -4px var(--glow);
+}
+.danger-button { border-color: rgba(248, 113, 113, .5); color: var(--danger); }
+.danger-button:hover:not(:disabled) { background: rgba(248, 113, 113, .1); }
 button:disabled { opacity: .45; cursor: default; }
 
 /* The command bar: which project, which view, and what waits for you. */
@@ -101,17 +147,18 @@ button:disabled { opacity: .45; cursor: default; }
   align-items: center;
   gap: 14px;
   padding: 0 16px;
-  border-bottom: 1px solid var(--line);
-  background: rgba(12, 32, 38, .92);
+  border-bottom: 1px solid var(--line-soft);
+  background: rgba(14, 14, 17, .62);
 }
 .brand {
-  font: 700 10px/1 var(--mono);
+  font: 700 11px/1 var(--mono);
   letter-spacing: .19em;
   text-transform: uppercase;
-  color: var(--seafoam);
+  color: var(--violet);
+  text-shadow: 0 0 14px rgba(139, 92, 246, .7);
 }
 .session-id { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.session-id h1 { margin: 0; font-size: 15px; font-weight: 650; white-space: nowrap; }
+.session-id h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
 #project-directory {
   font: 11px var(--mono);
   color: var(--muted);
@@ -127,12 +174,12 @@ button:disabled { opacity: .45; cursor: default; }
   grid-area: down;
   margin: 0;
   padding: 10px 16px;
-  border-bottom: 1px solid rgba(255, 120, 104, .45);
-  border-left: 4px solid var(--buoy);
-  background: rgba(255, 120, 104, .1);
+  border-bottom: 1px solid rgba(248, 113, 113, .45);
+  border-left: 4px solid var(--danger);
+  background: rgba(248, 113, 113, .1);
   font-size: 13px;
 }
-.daemon-down strong { color: var(--buoy); }
+.daemon-down strong { color: var(--danger); }
 /* Over an open modal (core/app.js, `placeDaemonDown`): a notice of its own at the top of the
    window, opaque, for the dialog's backdrop is under it. */
 .daemon-down:popover-open {
@@ -141,11 +188,11 @@ button:disabled { opacity: .45; cursor: default; }
   width: fit-content;
   max-width: min(760px, calc(100vw - 24px));
   margin: 0 auto;
-  border: 1px solid rgba(255, 120, 104, .6);
-  border-left: 4px solid var(--buoy);
+  border: 1px solid rgba(248, 113, 113, .6);
+  border-left: 4px solid var(--danger);
   border-radius: 8px;
-  background: linear-gradient(rgba(255, 120, 104, .14), rgba(255, 120, 104, .14)), var(--panel-raised);
-  color: var(--foam);
+  background: linear-gradient(rgba(248, 113, 113, .14), rgba(248, 113, 113, .14)), var(--panel-raised);
+  color: var(--text);
   box-shadow: 0 8px 24px var(--shadow);
   overflow: visible;
 }
@@ -153,8 +200,8 @@ button:disabled { opacity: .45; cursor: default; }
 /* Projects. */
 .sidebar {
   grid-area: side;
-  border-right: 1px solid var(--line);
-  background: rgba(12, 32, 38, .7);
+  border-right: 1px solid var(--line-soft);
+  background: rgba(14, 14, 17, .5);
   overflow: auto;
   padding: 14px 10px;
 }
@@ -177,10 +224,11 @@ button:disabled { opacity: .45; cursor: default; }
   overflow: hidden;
 }
 .project:hover { background: var(--panel); }
+/* The project shown: lit from its left edge. */
 .project[data-current="true"] {
-  border-color: var(--seafoam-dim);
-  background: var(--panel-raised);
-  box-shadow: inset 3px 0 0 var(--seafoam);
+  border-color: rgba(167, 139, 250, .45);
+  background: linear-gradient(90deg, rgba(124, 58, 237, .2), transparent 75%), var(--panel);
+  box-shadow: inset 3px 0 0 var(--violet), 0 0 20px -8px var(--glow);
 }
 .project-select {
   display: grid;
@@ -276,7 +324,7 @@ button:disabled { opacity: .45; cursor: default; }
   border-radius: 2px;
   background: var(--line);
 }
-.divider-grip:hover::after, .divider-grip:focus-visible::after { background: var(--seafoam); }
+.divider-grip:hover::after, .divider-grip:focus-visible::after { background: var(--violet); box-shadow: 0 0 10px var(--glow); }
 .divider-grip:focus-visible { outline: none; }
 /* While the divider moves, the terminals under the pointer must not take it. */
 .main[data-resizing="true"] { cursor: col-resize; user-select: none; }
@@ -298,8 +346,10 @@ button:disabled { opacity: .45; cursor: default; }
   color: var(--muted);
 }
 
-/* The board: what waits for the human, then the kanban of every task. */
+/* The board: what waits for the human, then the kanban of every task. A size container, so a
+   role group's head holds its marks within the width the board shows. */
 .board {
+  container-type: inline-size;
   overflow: auto;
   padding: 16px 20px 56px;
   display: grid;
@@ -315,10 +365,10 @@ button:disabled { opacity: .45; cursor: default; }
   gap: 12px;
   flex-wrap: wrap;
   padding: 12px 14px;
-  border: 1px solid rgba(231, 185, 104, .45);
+  border: 1px solid rgba(252, 211, 77, .4);
   border-left: 4px solid var(--amber);
   border-radius: 8px;
-  background: rgba(231, 185, 104, .08);
+  background: rgba(252, 211, 77, .07);
   font-size: 13px;
 }
 .suspended strong { color: var(--amber); }
@@ -327,10 +377,10 @@ button:disabled { opacity: .45; cursor: default; }
 .main[data-suspended="true"] .kanban,
 .main[data-suspended="true"] .dock { opacity: .45; }
 .foryou {
-  border: 1px solid rgba(231, 185, 104, .32);
+  border: 1px solid rgba(252, 211, 77, .28);
   border-radius: 10px;
   padding: 10px 12px 12px;
-  background: linear-gradient(90deg, rgba(231, 185, 104, .07), transparent 45%), var(--deep);
+  background: linear-gradient(90deg, rgba(252, 211, 77, .06), transparent 45%), var(--deep);
 }
 .foryou-head { display: flex; align-items: center; gap: 10px; min-height: 30px; flex-wrap: wrap; }
 .foryou-name {
@@ -381,6 +431,67 @@ button:disabled { opacity: .45; cursor: default; }
 .fold-sessions .icon { width: 14px; height: 14px; transition: transform .15s; }
 .fold-sessions[aria-expanded="true"] .icon { transform: rotate(90deg); }
 @media (prefers-reduced-motion: reduce) { .fold-sessions .icon { transition: none; } }
+/* A role's group: a band across the board, its name and how many, a button that opens it;
+   folded, what of it needs the human beside it, each in its state's colour. */
+.kanban tr.group-head > th {
+  padding: 0;
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+  background: linear-gradient(90deg, rgba(124, 58, 237, .1), transparent 55%), var(--deep);
+  text-align: left;
+}
+.kanban tbody.role-group + tbody.role-group tr.group-head > th { border-top: 0; }
+.group-line {
+  position: sticky;
+  left: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  box-sizing: border-box;
+  max-width: 100cqi;
+  padding: 0 10px 0 4px;
+  min-height: 36px;
+}
+.fold-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.fold-group:hover { background: rgba(167, 139, 250, .08); }
+.fold-group .icon { width: 14px; height: 14px; color: var(--muted); transition: transform .15s; }
+.fold-group[aria-expanded="true"] .icon { transform: rotate(90deg); color: var(--violet); }
+@media (prefers-reduced-motion: reduce) { .fold-group .icon { transition: none; } }
+.group-name { font: 700 11px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; }
+.group-count { font: 11px/1 var(--mono); color: var(--muted); }
+.group-marks { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.group-mark {
+  --mark: var(--muted);
+  --mark-ground: rgba(161, 161, 170, .1);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px 2px 7px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--mark-ground);
+  color: var(--mark);
+  font: 600 11px/1.5 var(--mono);
+  white-space: nowrap;
+}
+.group-mark::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--mark); }
+.group-mark[data-mark="working"] { --mark: var(--violet); --mark-ground: rgba(167, 139, 250, .12); }
+.group-mark[data-mark="working"]::before { box-shadow: 0 0 8px var(--glow); }
+.group-mark:is([data-mark="held"], [data-mark="waiting"], [data-mark="question"]) { --mark: var(--amber); --mark-ground: rgba(252, 211, 77, .1); }
+.group-mark[data-mark="paused"] { --mark: var(--sky); --mark-ground: rgba(147, 197, 253, .1); }
+.group-mark[data-mark="done"] { --mark: var(--ok); --mark-ground: rgba(110, 231, 183, .1); }
+.group-mark:is([data-mark="failed"], [data-mark="out"], [data-mark="attention"]) { --mark: var(--danger); --mark-ground: rgba(248, 113, 113, .12); }
 .kanban tbody td, .kanban tbody th {
   vertical-align: top;
   padding: 8px;
@@ -388,7 +499,7 @@ button:disabled { opacity: .45; cursor: default; }
   border-left: 1px solid var(--line-soft);
 }
 .kanban tbody th { border-left: 0; }
-.kanban td[data-state="finished"] { background: rgba(0, 0, 0, .12); }
+.kanban td[data-state="finished"] { background: rgba(0, 0, 0, .22); }
 .row-head { text-align: left; font-weight: normal; }
 .row-title { display: flex; align-items: flex-start; gap: 8px; }
 .row-title .lamp { margin-top: 2px; }
@@ -404,7 +515,7 @@ tr[data-session] .row-name { font-weight: 500; }
 /* Under the name: the role first, then the tier with a mark of its weight, then the harness and,
    where the name holds no model, what it runs on. */
 .row-meta { display: block; margin-top: 5px; font: 11px/1.45 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
-.row-meta .meta-role { color: var(--foam); font-weight: 600; }
+.row-meta .meta-role { color: var(--text); font-weight: 600; }
 .row-meta .meta-harness { white-space: nowrap; }
 .row-meta .meta-tier::before {
   content: "";
@@ -416,18 +527,18 @@ tr[data-session] .row-name { font-weight: 500; }
   vertical-align: 1px;
   background: var(--tier, var(--slate));
 }
-.row-meta .meta-tier[data-tier="critical"] { --tier: var(--buoy); }
+.row-meta .meta-tier[data-tier="critical"] { --tier: var(--danger); }
 .row-meta .meta-tier[data-tier="complex"] { --tier: var(--amber); }
-.row-meta .meta-tier[data-tier="standard"] { --tier: var(--seafoam); }
+.row-meta .meta-tier[data-tier="standard"] { --tier: var(--accent); }
 .row-meta .meta-tier[data-tier="light"] { --tier: var(--sky); }
 .row-status { display: block; margin-top: 6px; font: 600 11px var(--mono); color: var(--muted); }
 .try-again { margin-top: 6px; padding: 2px 9px; font-size: 12px; }
 .terminal-about .try-again { margin: 0 0 0 8px; }
-:is(.row-status, .terminal-status)[data-state="working"] { color: var(--seafoam); }
+:is(.row-status, .terminal-status)[data-state="working"] { color: var(--violet); }
 :is(.row-status, .terminal-status)[data-state="waiting"] { color: var(--amber); }
 /* A window at rest whose task goes on in the background: waiting, not idle. */
 :is(.row-status, .terminal-status)[data-state="held"] { color: var(--amber); }
-:is(.row-status, .terminal-status):is([data-state="out"], [data-state="missing"], [data-state="unstopped"]) { color: var(--buoy); }
+:is(.row-status, .terminal-status):is([data-state="out"], [data-state="missing"], [data-state="unstopped"]) { color: var(--danger); }
 .row-tools { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 /* A button stays in its column: a label too long for it wraps. */
 .row-tools > button { max-width: 100%; white-space: normal; }
@@ -439,23 +550,24 @@ tr[data-session] .row-name { font-weight: 500; }
   border-radius: 50%;
   border: 1.5px solid var(--line);
 }
+/* A member at work burns violet, and breathes (still where motion is reduced). */
 .lamp[data-state="working"] {
-  background: var(--seafoam);
-  border-color: var(--seafoam);
-  box-shadow: 0 0 0 3px rgba(99, 199, 178, .16), 0 0 12px rgba(99, 199, 178, .5);
+  background: var(--violet);
+  border-color: var(--violet);
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, .18), 0 0 12px rgba(139, 92, 246, .8);
   animation: lamp-pulse 1.8s ease-in-out infinite;
 }
 .lamp[data-state="waiting"] {
   background: var(--amber);
   border-color: var(--amber);
-  box-shadow: 0 0 10px rgba(231, 185, 104, .6);
+  box-shadow: 0 0 10px rgba(252, 211, 77, .55);
 }
-.lamp[data-state="idle"] { border-color: var(--seafoam-dim); }
-.lamp[data-state="starting"] { border-color: var(--seafoam); animation: lamp-blink 1s steps(2) infinite; }
+.lamp[data-state="idle"] { border-color: rgba(165, 180, 252, .5); }
+.lamp[data-state="starting"] { border-color: var(--violet); animation: lamp-blink 1s steps(2) infinite; }
 .lamp[data-state="unknown"] { border-style: dashed; }
-.lamp[data-state="out"] { border-color: var(--buoy); background: rgba(255, 120, 104, .25); }
+.lamp[data-state="out"] { border-color: var(--danger); background: rgba(248, 113, 113, .25); }
 @keyframes lamp-pulse {
-  50% { box-shadow: 0 0 0 5px rgba(99, 199, 178, .06), 0 0 16px rgba(99, 199, 178, .3); }
+  50% { box-shadow: 0 0 0 5px rgba(167, 139, 250, .07), 0 0 20px rgba(139, 92, 246, .45); }
 }
 @keyframes lamp-blink { 50% { border-color: transparent; } }
 
@@ -465,7 +577,7 @@ tr[data-session] .row-name { font-weight: 500; }
 .cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; container-type: inline-size; }
 .card {
   --state: var(--slate);
-  --state-ink: var(--foam);
+  --state-ink: var(--text);
   width: 100%;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -475,12 +587,12 @@ tr[data-session] .row-name { font-weight: 500; }
   padding: 0 10px 0 0;
   background: var(--strip);
   border: 1px solid var(--line-soft);
-  border-radius: 5px;
+  border-radius: 6px;
   text-align: left;
   cursor: pointer;
   overflow: hidden;
 }
-.card:hover { background: var(--strip-hover); }
+.card:hover { background: var(--strip-hover); border-color: var(--line); }
 .card-number {
   grid-area: number;
   display: flex;
@@ -504,7 +616,7 @@ tr[data-session] .row-name { font-weight: 500; }
 .card-route { grid-area: route; font: 11px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 /* What a task that goes on in the background waits on, on its card. */
 .card-held { color: var(--amber); font-weight: 600; }
-.card-status { grid-area: status; padding-bottom: 6px; font: 11px var(--mono); color: var(--foam); }
+.card-status { grid-area: status; padding-bottom: 6px; font: 11px var(--mono); color: var(--text); }
 /* The longest duration representable by Date fits, without ticks changing wrapping. */
 .card-age { display: inline-block; width: 14ch; max-width: 100%; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .card:has(.card-result) .card-status { padding-bottom: 0; }
@@ -512,18 +624,24 @@ tr[data-session] .row-name { font-weight: 500; }
   grid-area: result;
   padding-bottom: 6px;
   font-size: 12px;
-  color: var(--seafoam);
+  color: var(--ok);
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.card[data-state="working"] { --state: var(--seafoam); --state-ink: var(--ink); }
+/* A task at work glows as its member's lamp does. */
+.card[data-state="working"] {
+  --state: var(--violet);
+  --state-ink: var(--ink);
+  border-color: rgba(167, 139, 250, .4);
+  box-shadow: 0 0 16px -5px var(--glow);
+}
 .card[data-state="waiting"] { --state: var(--amber); --state-ink: var(--ink); }
 .card[data-state="paused"] { --state: var(--slate); opacity: .7; }
 .card[data-state="paused"] .card-route { display: none; }
-.card[data-state="done"] { --state: var(--foam); --state-ink: var(--ink); }
-.card[data-state="failed"] { --state: var(--buoy); --state-ink: var(--ink); }
-.card[data-state="accepted"] { --state: var(--seafoam-dim); }
+.card[data-state="done"] { --state: var(--ok); --state-ink: var(--ink); }
+.card[data-state="failed"] { --state: var(--danger); --state-ink: var(--ink); }
+.card[data-state="accepted"] { --state: var(--ok-dim); }
 .card[data-state="cancelled"] { opacity: .6; }
 /* A column too narrow for the number beside the title: the number heads
    the card, and the title has the card's whole width. */
@@ -546,23 +664,23 @@ tr[data-session] .row-name { font-weight: 500; }
   margin-bottom: 6px;
   background: var(--strip);
   border: 1px solid var(--line-soft);
-  border-radius: 5px;
+  border-radius: 6px;
   color: var(--muted);
   cursor: pointer;
   box-shadow:
     0 4px 0 -2px var(--strip), 0 4px 0 -1px var(--line-soft),
     0 8px 0 -4px var(--strip), 0 8px 0 -3px var(--line-soft);
 }
-.stack:hover { background: var(--strip-hover); color: var(--foam); }
+.stack:hover { background: var(--strip-hover); color: var(--text); }
 .stack .icon { width: 18px; height: 18px; }
-.stack-count { font: 700 13px var(--mono); color: var(--foam); }
+.stack-count { font: 700 13px var(--mono); color: var(--text); }
 
 /* A message waiting for the human: a strip with what they may do with it.
    The list is what a strip measures itself against, as a card's does. */
 .strips { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; container-type: inline-size; }
 .strip {
   --state: var(--slate);
-  --state-ink: var(--foam);
+  --state-ink: var(--text);
   min-height: 38px;
   background: var(--strip);
   border: 1px solid var(--line-soft);
@@ -609,14 +727,14 @@ tr[data-session] .row-name { font-weight: 500; }
   min-height: 38px;
 }
 .strip-message[data-kind="question"] { --state: var(--amber); --state-ink: var(--ink); }
-.strip-message[data-kind="result"] { --state: var(--seafoam); --state-ink: var(--ink); }
-.strip-message[data-kind="answer"] { --state: var(--seafoam-dim); }
+.strip-message[data-kind="result"] { --state: var(--ok); --state-ink: var(--ink); }
+.strip-message[data-kind="answer"] { --state: var(--accent-dim); }
 .strip-actions { display: flex; gap: 8px; padding: 8px 12px 10px 78px; align-items: flex-start; }
 /* The chief waits for the human in its terminal: the way there, in a question's amber. */
 .strip-chief { --state: var(--amber); --state-ink: var(--ink); }
 .strip-chief .strip-route { color: var(--amber); }
-.strip[data-gated="true"] .strip-route { color: var(--seafoam); }
-.strip[data-gated="true"] { border-left: 3px solid var(--seafoam-dim); }
+.strip[data-gated="true"] .strip-route { color: var(--accent); }
+.strip[data-gated="true"] { border-left: 3px solid var(--accent-dim); }
 /* What a meeting holds for the chief only reads: marked apart from what waits for approval. */
 .strip[data-held="true"] { border-left: 3px solid var(--line); }
 /* A list too narrow for the text beside who sent it (For you at the
@@ -652,13 +770,13 @@ tr[data-session] .row-name { font-weight: 500; }
   padding: 3px 8px;
   border-radius: 4px;
   background: var(--state, var(--slate));
-  color: var(--state-ink, var(--foam));
+  color: var(--state-ink, var(--text));
 }
-.drawer[data-state="working"] { --state: var(--seafoam); --state-ink: var(--ink); }
+.drawer[data-state="working"] { --state: var(--violet); --state-ink: var(--ink); }
 .drawer[data-state="waiting"] { --state: var(--amber); --state-ink: var(--ink); }
-.drawer[data-state="done"] { --state: var(--foam); --state-ink: var(--ink); }
-.drawer[data-state="failed"] { --state: var(--buoy); --state-ink: var(--ink); }
-.drawer[data-state="accepted"] { --state: var(--seafoam-dim); }
+.drawer[data-state="done"] { --state: var(--ok); --state-ink: var(--ink); }
+.drawer[data-state="failed"] { --state: var(--danger); --state-ink: var(--ink); }
+.drawer[data-state="accepted"] { --state: var(--ok-dim); }
 .drawer-meta { margin: 8px 0 14px; font: 11px var(--mono); color: var(--muted); }
 .dialog-help { margin: 0 0 12px; font-size: 12px; color: var(--muted); }
 .staff { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
@@ -666,12 +784,15 @@ tr[data-session] .row-name { font-weight: 500; }
 .staff td { padding: 10px 10px; border-top: 1px solid var(--line-soft); vertical-align: middle; font-size: 14px; }
 .staff .member-name { font: 600 13px var(--mono); }
 .staff .member-meta { color: var(--muted); font: 11px/1.6 var(--mono); }
-.staff .member-out { color: var(--buoy); font-size: 12px; margin-right: 8px; }
+.staff .member-out { color: var(--danger); font-size: 12px; margin-right: 8px; }
 .staff .try-again { margin-top: 2px; }
+/* The chief's pick in New project and Switch chief, and Switch chief's turn choice: boxed as
+   the sections are, not in the browser's own frame. */
+.chief-pick, .dialog-form > fieldset:not([class]) { min-width: 0; margin: 0; border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; }
 /* A section of a project's settings, in Project settings and in New project alike: Staff, Human
    approval, Wake-up calls and Specs, each a group of its own, one under another. */
 .project-section { display: grid; gap: 12px; min-width: 0; border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; margin: 0; }
-.project-section legend, .staff-add legend { padding: 0 6px; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.project-section legend, .staff-add legend, .chief-pick legend, .dialog-form > fieldset:not([class]) legend { padding: 0 6px; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
 .project-section > .dialog-help, .project-section > .staff { margin: 0; }
 .staff-add { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin: 0; border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; }
 .staff-add label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
@@ -680,28 +801,28 @@ tr[data-session] .row-name { font-weight: 500; }
 .staff-hint { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted); }
 .staff-add .member-help { flex-basis: 100%; margin: 0; }
 /* A member whose harness no longer lists its model (T-1143): the model marked, and said. */
-.staff .model-gone { background: none; color: var(--buoy); text-decoration: line-through; }
-.staff .member-gone { color: var(--buoy); font-size: 11px; }
+.staff .model-gone { background: none; color: var(--danger); text-decoration: line-through; }
+.staff .member-gone { color: var(--danger); font-size: 11px; }
 /* The project's wake-up calls: whether, how often and what is said. */
 .wakeup-section .wakeup-help { margin: 0; font-size: 12px; color: var(--muted); }
 .wakeup-section .wakeup-when { display: flex; gap: 12px; }
 .wakeup-section .wakeup-when input[type="number"] { width: 6em; }
-.wakeup-section .staff-hint { color: var(--buoy); }
-.wakeup-section textarea { padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--foam); font: inherit; resize: vertical; }
+.wakeup-section .staff-hint { color: var(--danger); }
+.wakeup-section textarea { padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--text); font: inherit; resize: vertical; }
 /* The rules for the staff: the human's text, and its count against the ledger's bounds. */
-.staff-rules textarea { padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--foam); font: 13px/1.45 var(--mono); resize: vertical; min-height: 9em; }
+.staff-rules textarea { padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--text); font: 13px/1.45 var(--mono); resize: vertical; min-height: 9em; }
 .staff-rules .staff-rules-count { margin: 0; font: 11px var(--mono); color: var(--muted); text-align: right; }
-.staff-rules .staff-rules-count.over { color: var(--buoy); }
-.staff-rules textarea[aria-invalid="true"] { border-color: var(--buoy); }
-.staff-rules .staff-hint { color: var(--buoy); }
+.staff-rules .staff-rules-count.over { color: var(--danger); }
+.staff-rules textarea[aria-invalid="true"] { border-color: var(--danger); }
+.staff-rules .staff-hint { color: var(--danger); }
 /* The size the project's members compact at: each harness's own point, or a size. */
-.members-compaction input[type="text"] { width: 10em; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--foam); font: 13px var(--mono); }
-.members-compaction input[aria-invalid="true"] { border-color: var(--buoy); }
-.members-compaction .staff-hint { color: var(--buoy); }
+.members-compaction input[type="text"] { width: 10em; padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--text); font: 13px var(--mono); }
+.members-compaction input[aria-invalid="true"] { border-color: var(--danger); }
+.members-compaction .staff-hint { color: var(--danger); }
 /* Whether the project's members run with Claude Code's own advisor tool: a switch. */
-.members-advisor-tool .staff-hint { color: var(--buoy); }
+.members-advisor-tool .staff-hint { color: var(--danger); }
 /* Whether the project's Claude Code windows make Claude Code's prompt suggestion: a switch. */
-.prompt-suggestion .staff-hint { color: var(--buoy); }
+.prompt-suggestion .staff-hint { color: var(--danger); }
 /* The project's specs: the controls one under another. */
 .project-specs .specs-help { margin: 0; font-size: 12px; color: var(--muted); }
 .project-specs :disabled { opacity: .5; }
@@ -721,18 +842,18 @@ tr[data-session] .row-name { font-weight: 500; }
 .computer-use-title { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .computer-use-head { margin: 0; font-size: 13px; font-weight: 650; }
 .computer-use-status { font-size: 13px; color: var(--muted); }
-.computer-use-status[data-state="on"], .computer-use-status[data-state="allowed"] { color: var(--seafoam); }
-.computer-use-status[data-state="missing"] { color: var(--buoy); font-weight: 650; }
+.computer-use-status[data-state="on"], .computer-use-status[data-state="allowed"] { color: var(--ok); }
+.computer-use-status[data-state="missing"] { color: var(--danger); font-weight: 650; }
 /* The permissions are the staff table's own component: a row for each pane, its name first, and the
    button last, set against the block's edges. */
 .computer-use .computer-use-table { margin: 0; }
 .computer-use-table :is(th, td) { font-size: 13px; }
 .computer-use-table :is(th, td):first-child { padding-left: 0; }
 .computer-use-table :is(th, td):last-child { padding-right: 0; text-align: right; }
-.computer-use-table tbody th { padding: 10px; border-top: 1px solid var(--line-soft); font: inherit; letter-spacing: normal; text-transform: none; color: var(--foam); }
+.computer-use-table tbody th { padding: 10px; border-top: 1px solid var(--line-soft); font: inherit; letter-spacing: normal; text-transform: none; color: var(--text); }
 .computer-use-table td button { white-space: nowrap; }
 .specmint .staff { margin: 0; }
-.member-confirm { color: var(--buoy); font-size: 12px; margin-right: 8px; }
+.member-confirm { color: var(--danger); font-size: 12px; margin-right: 8px; }
 /* Each part of a task is a panel of its own, headed by what it is. */
 .drawer-section {
   margin: 0 0 12px;
@@ -760,7 +881,7 @@ details.drawer-section > summary::-webkit-details-marker { display: none; }
 details.drawer-section > summary::before { content: '▾'; letter-spacing: 0; }
 details.drawer-section:not([open]) > summary { margin-bottom: 0; }
 details.drawer-section:not([open]) > summary::before { content: '▸'; }
-details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoam); outline-offset: 4px; border-radius: 2px; }
+details.drawer-section > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 2px; }
 /* A task's story: its steps on a line that joins their markers, each marker
    in the colour of its kind. A folded step is its line and the first line
    of its body; open, it reads whole. */
@@ -768,10 +889,10 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
 .story::before { content: ''; position: absolute; left: 4px; top: 8px; bottom: 0; width: 2px; background: var(--line-soft); }
 .story > li { position: relative; padding-left: 20px; }
 .step { --marker: var(--slate); }
-.step[data-kind="task"] { --marker: var(--foam); }
+.step[data-kind="task"] { --marker: var(--text); }
 .step[data-kind="question"] { --marker: var(--amber); }
-.step[data-kind="answer"] { --marker: var(--seafoam-dim); }
-.step[data-kind="result"] { --marker: var(--seafoam); }
+.step[data-kind="answer"] { --marker: var(--accent); }
+.step[data-kind="result"] { --marker: var(--ok); }
 .step > summary { cursor: pointer; list-style: none; }
 .step > summary::-webkit-details-marker { display: none; }
 .step > summary::before {
@@ -786,11 +907,11 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
   box-shadow: 0 0 0 3px var(--ink);
 }
 .step-head { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; row-gap: 2px; font: 11px var(--mono); color: var(--muted); }
-.step-label { color: var(--foam); font-weight: 700; }
-.step > summary:hover .step-label { color: var(--seafoam); }
+.step-label { color: var(--text); font-weight: 700; }
+.step > summary:hover .step-label { color: var(--accent); }
 .step-route { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .step-state { color: var(--amber); }
-.step-state[data-state="failed"] { color: var(--buoy); }
+.step-state[data-state="failed"] { color: var(--danger); }
 .step-time { white-space: nowrap; }
 .step-preview { flex-basis: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--ui); color: var(--muted); }
 .step[open] .step-preview { display: none; }
@@ -816,10 +937,10 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
 .step-body hr { margin: 8px 0; border: 0; border-top: 1px solid var(--line-soft); }
 /* A task's box, ticked or not, where its bullet would be. */
 .md-task { list-style: none; }
-.md-task > input { margin: 0 6px 0 -18px; vertical-align: -2px; accent-color: var(--seafoam); }
+.md-task > input { margin: 0 6px 0 -18px; vertical-align: -2px; accent-color: var(--violet); }
 .transcript { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .transcript-item { border-left: 3px solid var(--line); padding: 2px 0 2px 12px; }
-.transcript-item[data-role="assistant"] { border-color: var(--seafoam-dim); }
+.transcript-item[data-role="assistant"] { border-color: var(--accent-dim); }
 .transcript-item[data-role="user"] { border-color: var(--slate); }
 .transcript-head { font: 11px var(--mono); color: var(--muted); margin-bottom: 4px; }
 .transcript-body {
@@ -894,20 +1015,24 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
   border-radius: 8px;
   overflow: hidden;
 }
-.terminal-card[data-focused="true"] { border-color: var(--seafoam); }
+/* The window typed into is lit. */
+.terminal-card[data-focused="true"] {
+  border-color: rgba(167, 139, 250, .7);
+  box-shadow: 0 0 0 1px rgba(139, 92, 246, .3), 0 0 26px -6px var(--glow);
+}
 /* A file dragged over a window: dropping it types its path there. A ring
    and a tint over the whole card, the terminal's black too, that the pointer
    passes through. */
 .terminal-card[data-drop="true"] {
   position: relative;
-  border-color: var(--seafoam);
-  box-shadow: 0 0 0 2px var(--seafoam), 0 0 16px rgba(99, 199, 178, .5);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent), 0 0 18px rgba(165, 180, 252, .5);
 }
 .terminal-card[data-drop="true"]::after {
   content: "";
   position: absolute;
   inset: 0;
-  background: rgba(99, 199, 178, .14);
+  background: rgba(165, 180, 252, .14);
   pointer-events: none;
 }
 .terminal-head {
@@ -937,7 +1062,7 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
    narrow card they go under the name together, and wrap there, each line at the end. */
 .terminal-tools { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 3px 8px; margin-left: auto; }
 .terminal-tools > .quiet-button { padding: 2px 9px; }
-.terminal-tools > .own-hands[aria-checked="true"] { background: var(--seafoam); border-color: var(--seafoam); color: var(--ink); font-weight: 650; }
+.terminal-tools > .own-hands[aria-checked="true"] { background: var(--violet); border-color: var(--violet); color: var(--ink); font-weight: 650; box-shadow: 0 0 14px -4px var(--glow); }
 .terminal-about { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 2px 10px; min-width: 0; padding-left: 18px; }
 .terminal-about .terminal-meta { flex: 0 1 auto; }
 .terminal-status { font-weight: 600; color: var(--muted); }
@@ -946,10 +1071,10 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
    terminal's scrollback, and a board too narrow for its columns, which
    would otherwise hide the last of them with no sign they are there. */
 .xterm-viewport::-webkit-scrollbar, .board::-webkit-scrollbar { width: 10px; height: 10px; }
-.xterm-viewport::-webkit-scrollbar-track, .board::-webkit-scrollbar-track { background: var(--panel); }
-.xterm-viewport::-webkit-scrollbar-thumb, .board::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid var(--panel); border-radius: 5px; }
+.xterm-viewport::-webkit-scrollbar-track, .board::-webkit-scrollbar-track { background: var(--deep); }
+.xterm-viewport::-webkit-scrollbar-thumb, .board::-webkit-scrollbar-thumb { background: var(--line); border: 2px solid var(--deep); border-radius: 5px; }
 .xterm-viewport::-webkit-scrollbar-thumb:hover, .board::-webkit-scrollbar-thumb:hover { background: var(--muted); }
-.board::-webkit-scrollbar-corner { background: var(--panel); }
+.board::-webkit-scrollbar-corner { background: var(--deep); }
 
 .status {
   position: absolute;
@@ -960,43 +1085,44 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
   color: var(--muted);
   pointer-events: none;
 }
-.status[data-tone="error"] { color: var(--buoy); }
+.status[data-tone="error"] { color: var(--danger); }
 
 dialog {
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-soft);
   border-radius: 12px;
   background: var(--panel);
-  color: var(--foam);
+  color: var(--text);
   padding: 0;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .6), 0 0 0 1px rgba(167, 139, 250, .06);
   width: min(1040px, calc(100vw - 48px));
   max-height: calc(100vh - 48px);
   overflow: auto;
 }
-dialog::backdrop { background: rgba(4, 12, 15, .6); }
+dialog::backdrop { background: rgba(0, 0, 0, .62); }
 /* The dialogs: Delete (a project, or finished tasks), Settings, New project,
    Switch chief, a crowded cell's cards and Project settings. */
 .dialog-form { display: grid; gap: 16px; padding: 22px 26px 24px; }
-.dialog-form h2 { margin: 0; font-size: 20px; }
+.dialog-form h2 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
 .dialog-form label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
-.dialog-form label.check { grid-template-columns: auto 1fr; align-items: start; gap: 10px; color: var(--foam); }
-.dialog-form label.check input { margin: 2px 0 0; accent-color: var(--seafoam); }
+.dialog-form label.check { grid-template-columns: auto 1fr; align-items: start; gap: 10px; color: var(--text); }
+.dialog-form label.check input { margin: 2px 0 0; accent-color: var(--violet); }
 .dialog-form input, .dialog-form select {
   padding: 7px 9px;
   border-radius: 6px;
   border: 1px solid var(--line);
   background: var(--ink);
-  color: var(--foam);
+  color: var(--text);
 }
 .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
 /* What the daemon refused, said under the field the human typed in. */
-.dialog-refusal { margin: 0; font-size: 12px; color: var(--buoy); }
+.dialog-refusal { margin: 0; font-size: 12px; color: var(--danger); }
 /* What a delete takes, and what it keeps on the board and why; a long list scrolls. */
-.dialog-note { margin: 0; font-size: 12px; color: var(--foam); overflow-wrap: anywhere; max-height: 30vh; overflow-y: auto; }
+.dialog-note { margin: 0; font-size: 12px; color: var(--text); overflow-wrap: anywhere; max-height: 30vh; overflow-y: auto; }
 .dialog-kept { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; color: var(--amber); max-height: 30vh; overflow-y: auto; }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
-.icon-button:hover { color: var(--foam); border-color: var(--foam); }
-.icon-button.danger-button { color: var(--buoy); border-color: rgba(255, 120, 104, .55); }
-.icon-button.danger-button:hover { color: var(--buoy); border-color: var(--buoy); background: rgba(255, 120, 104, .1); }
+.icon-button:hover { color: var(--text); border-color: var(--muted); }
+.icon-button.danger-button { color: var(--danger); border-color: rgba(248, 113, 113, .5); }
+.icon-button.danger-button:hover { color: var(--danger); border-color: var(--danger); background: rgba(248, 113, 113, .1); }
 .icon { flex: none; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 /* A tip names an icon button on hover and keyboard focus. */
 .icon-button[data-tip] { position: relative; }
@@ -1010,7 +1136,7 @@ dialog::backdrop { background: rgba(4, 12, 15, .6); }
   border: 1px solid var(--line);
   border-radius: 5px;
   background: var(--panel-raised);
-  color: var(--foam);
+  color: var(--text);
   font: 400 11px/1.3 var(--ui);
   letter-spacing: normal;
   text-transform: none;
@@ -1053,7 +1179,7 @@ dialog.specs-viewer .dialog-actions { grid-row: 5; }
   border: 1px solid transparent;
   border-radius: 6px;
   background: transparent;
-  color: var(--foam);
+  color: var(--text);
   font-size: 12px;
   text-align: left;
   cursor: pointer;
@@ -1062,13 +1188,13 @@ dialog.specs-viewer .dialog-actions { grid-row: 5; }
   white-space: nowrap;
 }
 .tree-file:hover { background: var(--strip-hover); }
-.tree-file[aria-current="true"] { background: var(--panel-raised); border-color: var(--line); color: var(--seafoam); }
+.tree-file[aria-current="true"] { background: var(--panel-raised); border-color: var(--line); color: var(--accent); }
 .tree-folder > summary {
   padding: 4px 6px;
   border-radius: 6px;
   font-size: 12px;
   font-weight: 650;
-  color: var(--foam);
+  color: var(--text);
   cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1078,10 +1204,10 @@ dialog.specs-viewer .dialog-actions { grid-row: 5; }
 .tree-folder > summary:hover { background: var(--strip-hover); }
 .specs-file { min-width: 0; overflow: auto; padding: 16px 28px 32px; display: flex; flex-direction: column; }
 .specs-caption { margin: 0 0 14px; font: 11px var(--mono); color: var(--muted); }
-.specs-path { color: var(--foam); }
+.specs-path { color: var(--text); }
 :is(.specs-note, .specs-withheld) { margin: 0; color: var(--muted); font-size: 13px; }
 .specs-withheld { padding: 12px 14px; border: 1px dashed var(--line); border-radius: 8px; }
-.specs-refusal { margin: 0; color: var(--buoy); font-size: 13px; }
+.specs-refusal { margin: 0; color: var(--danger); font-size: 13px; }
 .specs-plain { margin: 0; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--deep); font: 12px/1.5 var(--mono); overflow: auto; white-space: pre; }
 .specs-image { align-self: flex-start; max-width: 100%; padding: 12px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--deep); }
 /* An HTML file: a card that opens it in the browser, its title read as text. */
@@ -1089,9 +1215,9 @@ dialog.specs-viewer .dialog-actions { grid-row: 5; }
 .spec-html-title { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
 .spec-html-meta { margin: 0; font: 11.5px var(--mono); color: var(--muted); }
 .spec-html-help { margin: 0 0 4px; font-size: 12.5px; color: var(--muted); }
-.spec-html-said { margin: 0; font-size: 12px; color: var(--seafoam); }
+.spec-html-said { margin: 0; font-size: 12px; color: var(--ok); }
 .spec-html-said:empty { display: none; }
-.spec-html-said[data-tone="error"] { color: var(--buoy); }
+.spec-html-said[data-tone="error"] { color: var(--danger); }
 .registry-more { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
 
 /* A Markdown file: the board's own reading, at a document's size, its headings as headings. */
@@ -1109,7 +1235,7 @@ dialog.specs-viewer .dialog-actions { grid-row: 5; }
 .spec-markdown code { font: 12px var(--mono); padding: 1px 5px; border-radius: 4px; background: var(--panel-raised); }
 .spec-markdown pre { padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--deep); overflow-x: auto; line-height: 1.45; }
 .spec-markdown pre code { padding: 0; background: none; }
-.spec-markdown blockquote { padding: 2px 0 2px 12px; border-left: 3px solid var(--seafoam-dim); color: var(--muted); }
+.spec-markdown blockquote { padding: 2px 0 2px 12px; border-left: 3px solid var(--accent-dim); color: var(--muted); }
 .spec-markdown hr { margin: 20px 0; border: 0; border-top: 1px solid var(--line); }
 .spec-markdown .md-table { overflow-x: auto; }
 .spec-markdown table { border-collapse: collapse; font-size: 12.5px; }
@@ -1117,17 +1243,17 @@ dialog.specs-viewer .dialog-actions { grid-row: 5; }
 .spec-markdown th { color: var(--muted); font-weight: 600; }
 .spec-markdown .md-task > input { margin-left: -20px; }
 /* A link to another file of the folder: it opens that file here. Any other link is words. */
-.md-link { padding: 0; border: 0; background: none; color: var(--seafoam); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.md-link { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 .spec-markdown span[title] { text-decoration: underline dotted var(--muted); text-underline-offset: 2px; }
 .spec-fields { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 18px; }
 .spec-fields > div { display: flex; gap: 6px; padding: 3px 9px; border: 1px solid var(--line-soft); border-radius: 999px; font-size: 11.5px; }
 .spec-fields dt { color: var(--muted); }
-.spec-fields dd { margin: 0; color: var(--foam); }
+.spec-fields dd { margin: 0; color: var(--text); }
 /* A diagram, drawn by Mermaid in the page's colours, or its source and why it was not. */
 .spec-diagram { padding: 14px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--deep); overflow-x: auto; }
 .spec-diagram svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
 .spec-diagram-note { margin: 0; color: var(--muted); font-size: 12px; }
-.spec-diagram-error { margin: 0 0 8px; color: var(--buoy); font-size: 12px; }
+.spec-diagram-error { margin: 0 0 8px; color: var(--danger); font-size: 12px; }
 .spec-diagram .spec-diagram-source { margin: 0; }
 
 /* The registry: a row for each spec, its status a chip, its progress a bar. */
@@ -1144,55 +1270,55 @@ dialog.specs-viewer .dialog-actions { grid-row: 5; }
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   background: var(--panel-raised);
-  color: var(--foam);
+  color: var(--text);
   font-size: 12.5px;
   text-align: left;
 }
 button.registry-row { cursor: pointer; }
-button.registry-row:hover:not(:disabled) { border-color: var(--seafoam-dim); }
+button.registry-row:hover:not(:disabled) { border-color: rgba(167, 139, 250, .5); }
 .registry-head { padding-block: 0 4px; border: 0; background: none; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
 .registry-title { display: grid; min-width: 0; }
 .registry-title > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .registry-title strong { font-size: 13.5px; font-weight: 650; }
 .registry-title small { font: 11px var(--mono); color: var(--muted); }
-.registry-title small.registry-link { color: var(--seafoam); text-decoration: underline; text-underline-offset: 2px; }
+.registry-title small.registry-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .registry-priority, .registry-updated { color: var(--muted); }
 .registry-updated { font: 11.5px var(--mono); }
 .status-chip { justify-self: start; padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; font-weight: 650; text-transform: capitalize; }
-.status-chip[data-status="active"] { border-color: var(--seafoam); background: rgba(99, 199, 178, .14); color: var(--seafoam); }
-.status-chip[data-status="paused"] { border-color: var(--amber); background: rgba(231, 185, 104, .14); color: var(--amber); }
-.status-chip[data-status="completed"] { border-color: var(--sky); background: rgba(156, 195, 240, .14); color: var(--sky); }
+.status-chip[data-status="active"] { border-color: var(--violet); background: rgba(167, 139, 250, .14); color: var(--violet); }
+.status-chip[data-status="paused"] { border-color: var(--amber); background: rgba(252, 211, 77, .12); color: var(--amber); }
+.status-chip[data-status="completed"] { border-color: var(--ok); background: rgba(110, 231, 183, .12); color: var(--ok); }
 .status-chip[data-status="archived"] { border-color: var(--slate); background: transparent; color: var(--muted); }
 .registry-progress { display: flex; align-items: center; gap: 8px; }
 .progress-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--line-soft); overflow: hidden; }
-.progress-fill { display: block; height: 100%; border-radius: 3px; background: var(--seafoam); }
+.progress-fill { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--violet-strong), var(--violet)); }
 .progress-words { font: 11.5px var(--mono); color: var(--muted); }
 
-/* The history viewer: one stream, drawn to the approved mock (chief-harness CHF-20,
-   history-dark.png and history-light.png) in its own colours, dark or light as the system
-   is: the app's own page is dark only, so the viewer alone follows the system. Its words
-   are in a monospace the Mac has (SF Mono, Menlo) or Windows has (Cascadia, Consolas). */
+/* The history viewer: one stream, laid out to the approved mock (chief-harness CHF-20) in
+   providers.dev's colours, dark or light as the system is: the app's own page is dark only,
+   so the viewer alone follows the system. Its words are in a monospace the Mac has (SF Mono,
+   Menlo) or Windows has (Cascadia, Consolas). */
 dialog.history-viewer {
   --history-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Mono", "Cascadia Code", Consolas, monospace;
-  --history-surface: #1e2124;
-  --history-field: #2a2e32;
-  --history-line: #34383c;
-  --history-words: #e6e8ea;
-  --history-quiet: #b0b5ba;
-  --history-thinking: #a3a8ae;
-  --history-prompt: #1f4a63;
-  --history-ok: #2a4a35;
-  --history-failed: #6e2828;
-  --history-grey: #34383c;
-  --history-compaction: #3e2e5c;
-  --history-path: #d4a5f0;
-  --history-range: #ebb050;
-  --history-heading: #f2b134;
-  --history-marker: #e06c9f;
-  --history-code: #b98cf5;
-  --history-removed: #f7a097;
-  --history-added: #81e08f;
-  --history-refusal: #ff8a80;
+  --history-surface: #18181b;
+  --history-field: #27272a;
+  --history-line: #3f3f46;
+  --history-words: #fafafa;
+  --history-quiet: #a1a1aa;
+  --history-thinking: #a1a1aa;
+  --history-prompt: #1e1b4b;
+  --history-ok: #052e21;
+  --history-failed: #450a0a;
+  --history-grey: #27272a;
+  --history-compaction: #2e1065;
+  --history-path: #c4b5fd;
+  --history-range: #fcd34d;
+  --history-heading: #fcd34d;
+  --history-marker: #f0abfc;
+  --history-code: #a5b4fc;
+  --history-removed: #fca5a5;
+  --history-added: #86efac;
+  --history-refusal: #f87171;
   width: min(1100px, calc(100vw - 48px));
   border-color: var(--history-line);
   background: var(--history-surface);
@@ -1201,25 +1327,25 @@ dialog.history-viewer {
 @media (prefers-color-scheme: light) {
   dialog.history-viewer {
     color-scheme: light;
-    --history-surface: #f6f5f1;
-    --history-field: #e8e7e2;
-    --history-line: #d6d5cf;
-    --history-words: #222426;
-    --history-quiet: #5b5f63;
-    --history-thinking: #686c70;
-    --history-prompt: #d6e6f0;
-    --history-ok: #dcebd9;
-    --history-failed: #f2d4d4;
-    --history-grey: #e4e4e1;
-    --history-compaction: #e6dcf2;
-    --history-path: #6f42c1;
-    --history-range: #825700;
-    --history-heading: #825700;
-    --history-marker: #3b5bdb;
-    --history-code: #8250df;
-    --history-removed: #b42318;
-    --history-added: #166b2e;
-    --history-refusal: #b42318;
+    --history-surface: #ffffff;
+    --history-field: #f4f4f5;
+    --history-line: #e4e4e7;
+    --history-words: #09090b;
+    --history-quiet: #52525b;
+    --history-thinking: #52525b;
+    --history-prompt: #eef2ff;
+    --history-ok: #ecfdf5;
+    --history-failed: #fef2f2;
+    --history-grey: #f4f4f5;
+    --history-compaction: #f5f3ff;
+    --history-path: #4338ca;
+    --history-range: #92400e;
+    --history-heading: #92400e;
+    --history-marker: #a21caf;
+    --history-code: #6d28d9;
+    --history-removed: #b91c1c;
+    --history-added: #047857;
+    --history-refusal: #b91c1c;
   }
 }
 dialog.history-viewer[open] { grid-template-rows: auto minmax(0, 1fr); }

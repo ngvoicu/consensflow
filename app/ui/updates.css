@@ -7,13 +7,13 @@
   align-items: center;
   gap: 8px;
   max-width: min(520px, calc(100vw - 28px));
-  border: 1px solid var(--seafoam-dim);
-  border-radius: 7px;
+  border: 1px solid rgba(167, 139, 250, .45);
+  border-radius: 8px;
   background: var(--panel-raised);
   padding: 8px 10px 8px 12px;
-  box-shadow: 0 16px 36px var(--shadow);
+  box-shadow: 0 16px 36px var(--shadow), 0 0 24px -8px var(--glow);
 }
-.update-banner span { min-width: 0; color: var(--foam); }
+.update-banner span { min-width: 0; color: var(--text); }
 .update-banner .icon-button { min-height: 26px; padding: 2px 7px; }
 
 #updates-dialog {
@@ -31,7 +31,8 @@
 }
 .updates-header h2 { margin: 0; font-size: 17px; }
 .updates-brand {
-  color: var(--seafoam);
+  color: var(--violet);
+  text-shadow: 0 0 12px rgba(139, 92, 246, .6);
   font: 700 10px/1 var(--mono);
   letter-spacing: .15em;
   text-transform: uppercase;
@@ -40,8 +41,8 @@
 .updates-content { display: grid; gap: 12px; padding: 18px 20px; }
 .updates-description, .updates-state, .updates-feedback, .updates-date { margin: 0; }
 .updates-description, .updates-date { color: var(--muted); }
-.updates-feedback { border-left: 3px solid var(--seafoam); padding: 7px 9px; background: rgba(99, 199, 178, .08); }
-.updates-feedback[data-tone="error"] { border-left-color: var(--buoy); background: rgba(255, 120, 104, .08); }
+.updates-feedback { border-left: 3px solid var(--accent); padding: 7px 9px; background: rgba(165, 180, 252, .08); }
+.updates-feedback[data-tone="error"] { border-left-color: var(--danger); background: rgba(248, 113, 113, .08); }
 .updates-metadata { display: grid; grid-template-columns: 1fr minmax(150px, 180px); gap: 12px; align-items: end; }
 .updates-installed { margin: 0; }
 .updates-metadata label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
@@ -49,7 +50,7 @@
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--ink);
-  color: var(--foam);
+  color: var(--text);
   padding: 7px 8px;
 }
 .updates-candidate, .updates-blockers { border-top: 1px solid var(--line-soft); padding-top: 12px; }
@@ -58,7 +59,7 @@
 .updates-notes { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .updates-blockers p { margin: 8px 0 0; color: var(--amber); }
 .updates-blockers ul { margin: 7px 0 0; padding-left: 20px; color: var(--muted); }
-.updates-progress { margin: 0; color: var(--seafoam); font: 11px/1.3 var(--mono); }
+.updates-progress { margin: 0; color: var(--accent); font: 11px/1.3 var(--mono); }
 .updates-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 0 20px 18px; }
 
 @media (max-width: 520px) {
