@@ -1364,16 +1364,25 @@ pub trait Records {
                 relaunched: self.transcript_left(harness, session).await.ok().flatten(),
                 ..Options::default()
             };
-            match &*self.look(harness, session, &options).await {
-                Reading::Known(record) => match record.settlement {
-                    Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),
-                    Settlement::InFlight => Some(TurnLeft::Cut(Opening::of(&record.items))),
-                    Settlement::Settled if ends_in_a_reply(record) => Some(TurnLeft::AtRest),
-                    Settlement::Settled | Settlement::Unknown => None,
-                },
-                _ => None,
-            }
+            turn_left(&*self.look(harness, session, &options).await)
         })
+    }
+}
+
+/// What a record read with no window open says of the turn its window was left in: the rule
+/// of [`Records::turn_cut`], apart from the reading of it.
+pub fn turn_left(reading: &Reading) -> Option<TurnLeft> {
+    match reading {
+        Reading::Known(record) => match record.settlement {
+            Settlement::InFlight if record.lines.held_by_notices => Some(TurnLeft::AtRest),
+            Settlement::InFlight => Some(TurnLeft::Cut(Opening::of(&record.items))),
+            // An abort is a turn over for the harness and cannot say who ended it: a window
+            // the quit closed leaves the step an Escape does (T-1707).
+            Settlement::Settled if record.aborted => None,
+            Settlement::Settled if ends_in_a_reply(record) => Some(TurnLeft::AtRest),
+            Settlement::Settled | Settlement::Unknown => None,
+        },
+        _ => None,
     }
 }
 
@@ -1397,4 +1406,4 @@ fn last_word(items: &[Item]) -> Option<&Item> {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

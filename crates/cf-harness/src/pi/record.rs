@@ -131,6 +131,8 @@ struct Session {
     /// The tool calls made and not yet answered in the turn.
     open_tools: HashSet<Key>,
     turn_open: bool,
+    /// The last assistant step ended in an abort.
+    aborted: bool,
     /// The last assistant step, if it ended: it stopped, was aborted or failed.
     terminal: Option<Arc<str>>,
     failed: bool,
@@ -161,6 +163,7 @@ impl Session {
             reading: 0,
             open_tools: HashSet::new(),
             turn_open: false,
+            aborted: false,
             terminal: None,
             failed: false,
             failure: None,
@@ -336,9 +339,11 @@ impl Session {
         let cut_tool_calls = stop == Some("length")
             && matches!(field("content"), Some(Value::Array(blocks))
                 if blocks.iter().any(|block| block.get("type").and_then(Value::as_str) == Some("toolCall")));
+        self.aborted = false;
         match stop {
             // An abort is a turn over, not a failed one.
             Some("stop" | "aborted") => {
+                self.aborted = stop == Some("aborted");
                 self.failed = false;
                 self.failure = None;
                 self.failure_kind = None;
@@ -480,6 +485,7 @@ impl Session {
             self.failed && (self.failure_kind.is_none() || native_settled || can_settle);
         record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
         record.failure_kind = self.failure_kind.map(str::to_owned);
+        record.aborted = self.aborted;
         record.last_call.clone_from(&self.last_call);
         record.quota = self.quota.clone();
         record.settlement = if native_settled || can_settle {

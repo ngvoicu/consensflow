@@ -33,6 +33,7 @@ use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::ownership::Kept;
 use crate::privacy::PrivacyPart;
 use crate::record::Record;
+use crate::resume::Coming;
 use crate::role_change::{Compared, Prelude};
 use crate::role_news::{NewsPart, Told};
 use crate::runtime::{begin, caught, returning};
@@ -241,6 +242,10 @@ pub(crate) struct Relaunch {
 
 /// The record's window part.
 pub(crate) struct WindowPart {
+    /// The project Resume which is bringing this window back, until it is up.
+    pub(crate) coming: Option<Coming>,
+    /// A failed Resume whose window has not been proven closed: no delivery may use it.
+    pub(crate) failed_resume_window: Option<Pane>,
     /// A chief that needs an edit (T-1202) whose harness's record was read and named no
     /// model: it is held, and its record not read again, until the human switches it.
     pub(crate) no_model_in_record: bool,
@@ -404,6 +409,8 @@ pub(crate) struct Abandoned {
 impl Default for WindowPart {
     fn default() -> Self {
         Self {
+            coming: None,
+            failed_resume_window: None,
             no_model_in_record: false,
             window: None,
             keys: None,
@@ -587,6 +594,7 @@ impl Dispatcher {
             let taken = (window.token.take(), window.launch_id.take());
             window.window = None;
             window.pane = None;
+            window.failed_resume_window = None;
             window.retiring = false;
             window.kill_taken = None;
             window.sent_to.clear();
@@ -693,6 +701,19 @@ impl Dispatcher {
         // A window whose open went unanswered is ended before another opens; until the
         // host says it has, the launch waits for the next step.
         if !self.end_abandoned(record).await? {
+            if record.window.borrow().coming.is_some()
+                && self
+                    .project_of(participant.id)?
+                    .is_some_and(|p| p.state == "open")
+            {
+                return self.launch_failed(
+                    record,
+                    project,
+                    participant,
+                    None,
+                    "its previous window could not be ended",
+                );
+            }
             return Ok(());
         }
         // A chief the update could not tell the model of (T-1202) opens on no default,
@@ -963,6 +984,28 @@ impl Dispatcher {
                     pane: pane.clone(),
                     told: false,
                 });
+                if matches!(record.window.borrow().coming, Some(Coming::Member { .. })) {
+                    // Revoke the launch immediately, even if the host never answers
+                    // the kill. Wait only long enough to say whether it was refused.
+                    self.seams.credentials.revoke(&token);
+                    self.seams.launch_files.forget(&launch_id);
+                    self.end_abandoned_within(record).await?;
+                    if self.launch_over(
+                        record,
+                        participant,
+                        delivering.as_ref(),
+                        planned.stop,
+                        "a pause came while its window was ended",
+                    )? {
+                        return Ok(());
+                    }
+                    let said = self.startup_words(
+                        participant,
+                        Startup::new(Stage::Open, Why::HostSilent),
+                        DEADLINE,
+                    );
+                    return self.launch_failed(record, project, participant, failing, &said);
+                }
                 let failed = self.not_opened(
                     record,
                     project,
@@ -1597,6 +1640,9 @@ impl Dispatcher {
             participant.agent.as_deref(),
         );
         self.release_its_work(project, participant, &because, delivering.cloned())?;
+        // Releasing this member's work is its own existing rule, not a failed
+        // project Resume. Preserve its notice when it has no message to fail.
+        record.window.borrow_mut().coming = None;
         if delivering.is_none() {
             self.launch_failed(record, project, participant, None, &because)?;
         }
@@ -1613,10 +1659,30 @@ impl Dispatcher {
         delivering: Option<Delivering>,
         because: &str,
     ) -> Result<(), EngineError> {
+        self.launch_failed_with_reopen(record, project, participant, delivering, because, false)
+    }
+
+    /// `reopens` says this particular give-up retries the chief even at rest.
+    pub(crate) fn launch_failed_with_reopen(
+        &self,
+        record: &Rc<Record>,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        delivering: Option<Delivering>,
+        because: &str,
+        reopens: bool,
+    ) -> Result<(), EngineError> {
         if self.forgotten(record) {
             return Ok(());
         }
         if participant.role != "chief" {
+            if record.window.borrow().coming.is_some() {
+                if let Some(delivering) = delivering {
+                    self.give_back(delivering.message, because)?;
+                }
+                self.resume_launch_failed(record, project, participant, because)?;
+                return Ok(());
+            }
             // What it was to say of the role first was written for a window that
             // never came up, and no queue of a member's would give it to another.
             self.withdraw_replacements(participant)?;
@@ -1650,26 +1716,96 @@ impl Dispatcher {
         let wait = RELAUNCH_MS
             .saturating_mul(2_i64.saturating_pow(failures - 1))
             .min(RELAUNCH_MAX_MS);
+        let resuming = matches!(record.window.borrow().coming, Some(Coming::Chief));
+        // A chief given up after it opened is retried even with nothing queued;
+        // `give_up_unstarted` marks `reopens` just after this call.
+        let retries_at_rest = reopens || before.is_some_and(|relaunch| relaunch.reopens);
         record.window.borrow_mut().relaunch = Some(Relaunch {
             failures,
             at: self.now() + wait,
-            // Until a window comes up, as a launch that fails for another reason after it.
             reopens: before.is_some_and(|relaunch| relaunch.reopens),
         });
+        if resuming {
+            self.set_activity(
+                record,
+                Activity::because(
+                    ActivityState::Closed,
+                    format!("The chief's window could not be opened: {because}"),
+                ),
+            )?;
+        }
         if failures == 1 {
+            let retry = if resuming && !retries_at_rest {
+                "What comes for the chief waits for it; ConsensFlow tries again when something comes for it. Close then Resume the project to try now, or switch the chief."
+            } else {
+                "What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief."
+            };
             self.seams.ledger.borrow_mut().note(
                 project.id,
                 &NewNote {
                     from: None,
                     to: "human".to_owned(),
                     task: None,
-                    body: format!(
-                        "The chief could not start: {because}. What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief."
-                    ),
+                    body: format!("The chief could not start: {because}. {retry}"),
                 },
             )?;
         }
         self.changed();
+        Ok(())
+    }
+
+    /// Pause only the work this Resume still owns; a later stop or task move wins.
+    pub(crate) fn resume_launch_failed(
+        &self,
+        record: &Record,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        cause: &str,
+    ) -> Result<(), EngineError> {
+        let coming = record.window.borrow().coming;
+        let Some(Coming::Member { task, paid }) = coming else {
+            return Ok(());
+        };
+        let current = self.project_of(participant.id)?;
+        let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
+        let thread = self
+            .seams
+            .ledger
+            .borrow()
+            .active_task(participant.id, false)?;
+        if current.is_some_and(|project| project.state == "open") && stop == paid {
+            if let Some(thread) = thread.filter(|thread| thread.task.number == task) {
+                let mut because = format!(
+                    "@{}'s window could not be opened: {cause}",
+                    participant.handle
+                );
+                let (may_run, refused) = {
+                    let window = record.window.borrow();
+                    let refused = window.abandoned.as_ref().is_some_and(|pane| pane.told)
+                        || window.pane.as_ref().is_some_and(|pane| {
+                            window.sent_to.contains(pane)
+                                && !window.killing.iter().any(|killing| killing.pane == *pane)
+                        });
+                    (window.pane.is_some() || window.abandoned.is_some(), refused)
+                };
+                if may_run {
+                    if refused {
+                        because.push_str(&format!("; its program {}", cf_ledger::MAY_STILL_RUN));
+                    } else {
+                        because.push_str("; its program may still run");
+                    }
+                    let mut window = record.window.borrow_mut();
+                    window.failed_resume_window = window.pane.clone();
+                }
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .pause_failed_project_resume(project.id, task, &because)?;
+                self.tell_resume_failure(project, &thread.task, &because)?;
+                self.changed();
+            }
+        }
+        record.window.borrow_mut().coming = None;
         Ok(())
     }
 
@@ -1679,7 +1815,9 @@ impl Dispatcher {
     /// come up until it has, and keeps its count (`role_change`).
     pub(crate) fn came_up(&self, record: &Record) {
         if record.delivery.borrow().prelude.is_none() {
-            record.window.borrow_mut().relaunch = None;
+            let mut window = record.window.borrow_mut();
+            window.relaunch = None;
+            window.coming = None;
         }
     }
 
@@ -1818,7 +1956,7 @@ impl Dispatcher {
         self: &Rc<Self>,
         record: &Rc<Record>,
     ) -> Result<bool, EngineError> {
-        let Some(Abandoned { pane, told }) = record.window.borrow().abandoned.clone() else {
+        let Some(Abandoned { pane, .. }) = record.window.borrow().abandoned.clone() else {
             return Ok(true);
         };
         let killed = returning(self.seams.host.kill(&pane)).await;
@@ -1838,13 +1976,43 @@ impl Dispatcher {
             Err(error) => error.message,
         };
         // Said once: the kill is asked again at every step until the host takes it.
-        if !told {
-            if let Some(abandoned) = record.window.borrow_mut().abandoned.as_mut() {
-                abandoned.told = abandoned.pane == pane;
+        let tell = {
+            let mut window = record.window.borrow_mut();
+            match window.abandoned.as_mut() {
+                Some(abandoned) if abandoned.pane == pane && !abandoned.told => {
+                    abandoned.told = true;
+                    true
+                }
+                _ => false,
             }
+        };
+        if tell {
             self.trace_window(record, WindowEvent::KillFailed { error: Some(error) })?;
         }
         Ok(false)
+    }
+
+    /// A failed project Resume must not wait forever for a host's kill answer.
+    /// The kill stays in progress after the bound; `abandoned` keeps the next
+    /// window out until the host says this one is gone.
+    async fn end_abandoned_within(self: &Rc<Self>, record: &Rc<Record>) -> Result<(), EngineError> {
+        let (this, held) = (Rc::clone(self), Rc::clone(record));
+        let ending = begin(&*self.seams.spawn, async move {
+            this.end_abandoned(&held).await
+        })
+        .await;
+        match select(ending, self.seams.time.sleep(KILL_ANSWER_WAIT)).await {
+            Either::Left((ended, _)) => ended.map(|_| ()),
+            Either::Right(((), ending)) => {
+                let this = Rc::clone(self);
+                self.seams.spawn.spawn(Box::pin(async move {
+                    if let Err(cause) = ending.await {
+                        this.write_down(&cause);
+                    }
+                }));
+                Ok(())
+            }
+        }
     }
 
     /// Kills a window: whether the pane host took the kill; the trace says

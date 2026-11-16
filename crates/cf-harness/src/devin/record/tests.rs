@@ -169,6 +169,23 @@ fn show(reading: &Reading) -> String {
 }
 
 /// What one fresh look at the store and logs reads.
+/// Whether a fresh look reads the last turn as ended in a cancel (`Record::aborted`).
+fn aborted(staged: &Staged) -> bool {
+    match &*look(&mut staged.reader()) {
+        Reading::Known(record) => record.aborted,
+        other => panic!("not known: {other:?}"),
+    }
+}
+
+/// What a Resume reads of the turn a fresh look of `staged` ends in, with no window open.
+async fn left(staged: &Staged) -> Option<crate::contract::TurnLeft> {
+    use crate::contract::{tests::Says, Records};
+    let reading = (*look(&mut staged.reader())).clone();
+    Says(reading)
+        .turn_cut(cf_proto::agents::Harness::Devin, "a-session")
+        .await
+}
+
 fn read_once(staged: &Staged) -> String {
     show(&look(&mut staged.reader()))
 }

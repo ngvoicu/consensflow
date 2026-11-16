@@ -61,3 +61,41 @@ fn every_look_is_a_reading_of_its_own_and_the_reader_works_it_out_anew() {
     // The same transcript and a later clock: another answer.
     assert_ne!(first, stage.look(200_000, &Options::default()));
 }
+
+#[test]
+fn a_session_whose_last_step_was_aborted_says_so_and_a_later_step_takes_it_back() {
+    // What a window the quit closed leaves (T-1707), and what an Escape leaves too.
+    let steps = |stops: &[&str]| {
+        let mut all = vec![header(), user("u1", "go")];
+        for (n, stop) in stops.iter().enumerate() {
+            all.push(assistant(&format!("a{n}"), stop, "words"));
+        }
+        all
+    };
+    for (stops, aborted) in [
+        (vec!["aborted"], true),
+        (vec!["stop"], false),
+        (vec!["aborted", "stop"], false),
+        (vec!["aborted", "error"], false),
+        (vec!["stop", "aborted"], true),
+    ] {
+        let mut stage = Stage::with(&steps(&stops));
+        assert_eq!(stage.at(120_000).aborted, aborted, "{stops:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_turn_whose_last_step_was_aborted_is_not_known_to_be_at_rest_where_one_that_stopped_is() {
+    use crate::contract::{tests::Says, Records, TurnLeft};
+    for (stop, left) in [("aborted", None), ("stop", Some(TurnLeft::AtRest))] {
+        let mut stage = Stage::with(&[header(), user("u1", "go"), assistant("a1", stop, "words")]);
+        let reading = (*stage.look(120_000, &Options::default())).clone();
+        assert_eq!(
+            Says(reading)
+                .turn_cut(cf_proto::agents::Harness::Pi, "a-session")
+                .await,
+            left,
+            "{stop}"
+        );
+    }
+}

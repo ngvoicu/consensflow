@@ -495,9 +495,9 @@ fn the_answer_a_session_gave_its_task_before_its_role_was_said_is_the_result_and
     );
 }
 
-/// A session at work on T-1 when the app quit, its role rewritten meanwhile, whose
-/// window the Resume cannot open (its harness's launch failed before any window), and a
-/// note the chief told it about T-1 before the Resume: the note is what the next launch
+/// A session at work on T-1 when the app quit, its role rewritten meanwhile, left
+/// working without a window by an older build's failed Resume, and a note the chief
+/// told it about T-1: the note is what the next launch
 /// is for, and the role goes ahead of it. Every window from then on refuses every
 /// paste, so the note that says the role fails. Exits are held, as the bridge host sends
 /// a window's exit after it answers its kill (the test host's own raises the exit inside
@@ -514,17 +514,6 @@ fn told_before_a_reopen_that_failed(
     let after = context.make();
     after.settle_after_restart().unwrap();
     context.host.hold_exits.set(true);
-    let reopening = session.clone();
-    context
-        .codex
-        .prepare
-        .replace(Some(Rc::new(move |launch: &Value| {
-            if launch["participant"]["handle"] == reopening.as_str() {
-                Err("no Codex".to_owned())
-            } else {
-                Ok(())
-            }
-        })));
     let note = context
         .ledger
         .borrow_mut()
@@ -538,13 +527,18 @@ fn told_before_a_reopen_that_failed(
             },
         )
         .unwrap();
-    after.resume_project(project.id).unwrap();
+    // The current Resume pauses this task; an older ledger can already hold the orphan.
+    context
+        .ledger
+        .borrow_mut()
+        .set_project_state(project.id, "open")
+        .unwrap();
+    after.open_chief(context.id(project.id, "chief"));
     assert_eq!(
         context.task(project.id, 1).task.state,
         "working",
         "with no window"
     );
-    context.codex.prepare.replace(None);
     refusing_pastes(context);
     (project, after, session, member, note)
 }
@@ -565,13 +559,14 @@ fn a_session_whose_launch_cannot_say_its_role_ahead_of_a_note_told_it_pauses_its
     let launch = context.codex.prepared().last().cloned().expect("a launch");
     assert_eq!(launch["participant"]["handle"], session.as_str());
     assert_eq!(launch["message"], Value::Null, "the role goes in first");
-    // The reopen's note that says the role was withdrawn with it; the launch's own failed.
+    // The later launch's role note failed: the historical orphan was constructed without
+    // replaying the earlier failed launch that would have left a cancelled note.
     let notes = replacements(&context, member);
     let states: Vec<(&str, i64)> = notes
         .iter()
         .map(|note| (note.state.as_str(), note.attempts))
         .collect();
-    assert_eq!(states, [("cancelled", 0), ("failed", 3)]);
+    assert_eq!(states, [("failed", 3)]);
     let window = context.host.last(&session).unwrap().pane;
     assert!(
         context.host.killed().contains(&window),

@@ -154,23 +154,14 @@ fn an_install_of_a_harness_the_build_does_not_run_opens_reads_its_history_and_mo
     let told_why = |messages: &Value| {
         notes(messages).iter().any(|note| {
             note.starts_with("T-1 is paused")
-                && note.contains("window is gone")
+                && note.contains("window could not be opened")
+                && note.contains(&cannot)
                 && note.contains(WAY_OUT)
                 && !note.contains("cf task resume")
         })
     };
     let task = project.task(1)?;
     assert!(told_why(&task["messages"]), "{task}");
-    assert!(
-        task["messages"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|message| message["reason"]
-                .as_str()
-                .is_some_and(|reason| reason.contains(&cannot))),
-        "{task}"
-    );
     // Switch chief takes the project off the harness, and the new chief works.
     let switched = rig.page(
         "chief.switch",

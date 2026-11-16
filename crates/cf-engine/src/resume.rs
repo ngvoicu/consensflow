@@ -142,6 +142,7 @@ impl Drop for Closing {
 
 /// A window the human's Resume brings back, as far as telling it its turn was
 /// cut goes.
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum Coming {
     /// The chief's.
     Chief,
@@ -348,6 +349,15 @@ impl Dispatcher {
     /// its work goes back to the board at the next pass, as it does whenever it is
     /// found so (the roster is asked of those with a task in hand alone).
     fn at_work(&self, project: &ProjectView) -> Result<Vec<(i64, Coming)>, EngineError> {
+        self.work_at_hand(project).inspect_err(|cause| {
+            self.seams.log.info(&format!(
+                "the Resume of project {} could not tell the work at hand: {cause}",
+                project.id
+            ));
+        })
+    }
+
+    fn work_at_hand(&self, project: &ProjectView) -> Result<Vec<(i64, Coming)>, EngineError> {
         let board = self.seams.ledger.borrow().board(project.id)?;
         board
             .lanes

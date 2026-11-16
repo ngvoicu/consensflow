@@ -107,6 +107,11 @@ pub struct Record {
     /// reading Node wrote has it.
     #[serde(skip)]
     pub took_back: bool,
+    /// The last turn the record shows ended in an abort its harness writes as a turn over
+    /// (Pi's `stopReason: "aborted"`): whoever pressed Escape or ended the program leaves the
+    /// same step, so no window's quit can be told from a pause by it. Never said.
+    #[serde(skip)]
+    pub aborted: bool,
     /// The model the window answers from moved to another that nobody the window answers
     /// to chose: its harness switched on its own (Muse after a refused turn, MUS-24). The
     /// latest such move the record shows, where its reader reads one. Never said: no
@@ -345,6 +350,7 @@ impl Record {
             failure_kind: None,
             last_call: None,
             took_back: false,
+            aborted: false,
             model_moved: None,
             model_drift: None,
             quota: None,
