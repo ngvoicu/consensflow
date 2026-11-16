@@ -16,29 +16,64 @@ passwords and needs no API keys.
 - **One chief, a whole staff.** Give the chief your goal in its terminal. It
   breaks the work into tasks, does what is its own, and hands the rest to the
   staff you picked for the project.
-- **Workers, advisors, reviewers and testers.** Workers do the tasks. Advisors
-  answer the chief's questions with findings. Reviewers check finished work.
-  Testers check it by running it. Advisors and reviewers never change a file,
-  and testers change no product code.
-- **A board you can read.** Each task shows who has it and where it stands,
-  from backlog to done. Open a task to read its brief, its result, and
-  everything its agent wrote.
+- **Nine roles.** The chief gives each member work for its role:
+  - **Worker:** a task; completed work and evidence come back.
+  - **Frontend designer:** a screen's purpose; its design and implementation
+    come back.
+  - **Architect:** a design problem; documents, contracts and a code frame
+    come back.
+  - **Researcher:** a question; findings and where they were found come back.
+  - **Advisor:** a question; findings and recommendations come back.
+  - **Reviewer:** finished work to check; findings and evidence come back.
+  - **Tester:** work to run and check; test results and evidence come back.
+  - **Integrator:** accepted work; the merged, checked and landed work comes
+    back.
+  - **Image designer (on Codex):** a drawing order; the saved image comes back.
+
+  Researchers, advisors and reviewers change no project files; testers change
+  no product code.
+- **Do with your own hands.** Turn this on in New project, Project settings or
+  the chief's pane, and the chief does your work itself, using the board only
+  when you ask. Work already on the board continues. The chief can read the
+  board's guide in parts with `cf guide`.
+- **A board you can read.** The dark board groups the staff by role. Each task
+  shows who has it, where it stands, and how long it has been in that state.
+  Open a task to read its brief, result and messages, and see what the agent
+  did. History and the standalone Harnesses page follow your system's light
+  or dark appearance.
 - **Each task in its own window.** A task opens a fresh terminal of its
   agent's harness, and the window closes when the work is done. Its
   conversation is kept, so a follow-up continues where it stopped.
-- **Work by tier, not by name.** The chief asks for the kind of member a task
-  needs (critical, complex, standard or light), and ConsensFlow gives each
-  task a new window of a member of that tier. Work is shared across the staff.
+- **Work by tier.** For worker, advisor, reviewer and tester tasks, the chief
+  asks for a tier (critical, complex, standard or light), and ConsensFlow
+  picks an available member of that role. The other roles need no tier.
+- **Backups and Vacation.** Give a member an optional backup on any harness
+  or model. When no eligible member is free, the backup can take new work if
+  its member is out of quota or its login is refused. The chief and image
+  designer have no backup. Send a member or backup on Vacation from the board
+  or Project settings to stop new tasks; work already in a window finishes
+  there. A member on Vacation is not covered by its backup.
 - **Plans with an order.** A task can wait for others to be accepted first,
-  so a plan of many tasks runs in its own order, in parallel where it can.
-- **Pause, resume and tell.** Stop any task and keep its window and work, or
-  send an urgent word into a window mid-task.
-- **Quota-aware.** When an agent runs out of quota, its task waits in its
-  window, with its work, and goes on there at the reset or when you say the
-  agent is back.
+  so a plan runs in its own order, in parallel where it can. The chief can
+  add a plan and its dependencies in one command with
+  `cf task add --plan plan.md`.
+- **Tell, pause and resume.** A tell lets a member keep working and reaches
+  its window at the next rest. A pause stops the task and can ask a question;
+  resume sends it on in the same window.
+- **Notes without interruption.** ConsensFlow types notes that need the
+  chief's attention into its window. Other status notes are available to the
+  chief in `cf inbox`.
+- **Resume after a quit or update.** Resume a project to bring its windows
+  back on their conversations. A member cut mid-turn is told to go on. If a
+  member's window cannot come back, its task is paused with the reason.
+- **Quota-aware.** A member works up to 100% of its quota and waits when its
+  harness says it is out, keeping its work in its window until the reset. If
+  the account's quota is renewed early, **Try again now** brings it back; for
+  harnesses with a shared login, it also brings back chiefs and members across
+  projects.
 - **Your approval, if you want it.** Turn on human approval for a project,
   and every message between agents waits for you to pass it on.
-- **Switch the chief anytime.** Move the chief to another agent or harness.
+- **Switch the chief anytime.** Move the chief to another model or harness.
   The new chief starts with a handoff: what is on the board, your last words,
   and the history of the chiefs before it.
 
@@ -60,8 +95,9 @@ shows which are installed, their versions, and whether ConsensFlow is set up
 for each. ConsensFlow prepares what it needs for a harness by itself, the
 first time one of its windows opens.
 
-**Settings → Agents** lists ready-made agents (a harness, a model and an
-effort) and lets you define your own with any model your harness accepts.
+In New project, Project settings and Switch chief, pick a harness, its model
+and, where offered, an effort. The lists are read from the installed harnesses
+when the dialog opens, and members are named by their model.
 
 **Settings → Specs** says whether a chief plans big work as specs in every
 project that doesn't say otherwise, in which folder and with which variant of
@@ -114,10 +150,16 @@ are the harnesses you want to use.
 
 1. Install at least one harness and sign in to it.
 2. Open ConsensFlow and choose **New project**: pick the project's folder,
-   the agent the chief runs on, and the staff; human approval, wake-up calls
-   and specs can be set there too. Once the project is running, the board's
-   **Project settings** (and the project's right-click menu) change the same
-   four.
+   the chief's harness and model, and the staff. You can also choose backups,
+   own hands, human approval, wake-up calls and specs. Change them later in
+   **Project settings**.
+
+   Project settings also lets you set **Compaction** for members: a size from
+   250,000 to 1,000,000 tokens, or the harness's own point. A new project
+   starts at 300,000. **Prompt suggestion** controls Claude Code's next-prompt
+   guess for the chief and members; **Advisor tool** controls Claude Code's
+   own advisor tool for members. Both are off by default; when on, Claude
+   Code follows its own settings.
 3. Tell the chief what you want, in its terminal.
 4. Watch the board. Open a task to read it, or open a member's terminal from
    its row to see it work.
