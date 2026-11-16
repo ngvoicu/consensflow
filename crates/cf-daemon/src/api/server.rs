@@ -331,12 +331,16 @@ async fn respond(server: &Rc<Server>, request: hyper::Request<Incoming>) -> Resp
     response(&begun.await)
 }
 
-/// An answer as a response: a page as `text/html; charset=utf-8`, nothing as a
-/// status alone, anything else as `application/json`, written as
-/// `JSON.stringify` writes it.
+/// An answer as a response: a page as `text/html; charset=utf-8`, a bundled
+/// asset with its own type, nothing as a status alone, and JSON as
+/// `application/json`, written as `JSON.stringify` writes it.
 fn response(answer: &Answer) -> Response<Full<Bytes>> {
     let (kind, body) = match &answer.content {
         Content::Html(page) => (Some("text/html; charset=utf-8"), Bytes::from(page.clone())),
+        Content::Asset {
+            content_type,
+            bytes,
+        } => (Some(*content_type), Bytes::from_static(bytes)),
         Content::Nothing => (None, Bytes::new()),
         Content::Json(value) => (Some("application/json"), Bytes::from(js::stringify(value))),
     };

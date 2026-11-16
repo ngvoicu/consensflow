@@ -4,7 +4,8 @@
 //! with the UI token and puts it on every request; the agents' own tokens open
 //! none of this, and the UI token opens none of the agents' API.
 //!
-//! [`Screens::handle`] is Node's `handle`, in its order:
+//! [`Screens::handle`] also serves the app's public bundled font files by GET;
+//! they carry no user data. For everything else it is Node's `handle`, in its order:
 //!
 //! 1. a path that is none of the screens' is the agents' API's: none is
 //!    answered ([`recognize`]);
@@ -25,6 +26,7 @@
 //! - [`body`] what a route reads of its body, and
 //! - [`network`] where the harness feeds are asked.
 
+mod assets;
 mod body;
 mod harnesses;
 pub mod network;
@@ -72,6 +74,13 @@ impl Screens {
     /// Answers a request that is one of the screens', or none when its path is
     /// not theirs.
     pub async fn handle(&self, request: &mut Request) -> Option<Answer> {
+        // A stylesheet's relative font requests carry no token. Only the fixed,
+        // public files bundled into the app are served without one.
+        if request.method == Method::GET {
+            if let Some(asset) = assets::get(&request.path) {
+                return Some(asset);
+            }
+        }
         let screen = recognize(&request.path)?;
         if !self.opens(request) {
             return Some(Answer::json(401, json!({ "error": "unauthorized" })));

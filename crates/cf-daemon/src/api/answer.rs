@@ -3,7 +3,7 @@
 //! their own.
 //!
 //! An answer is a status and what goes with it: a JSON body, a page of HTML,
-//! or nothing. A failure is a [`Refusal`] (or the ledger's), said with its
+//! a bundled static asset, or nothing. A failure is a [`Refusal`] (or the ledger's), said with its
 //! status as `{error: <code>, message}`, or anything else, said as 500
 //! `{error: "internal", message}`.
 
@@ -27,6 +27,11 @@ pub enum Content {
     Json(Value),
     /// A page, sent as `text/html; charset=utf-8`.
     Html(String),
+    /// An immutable asset, with its content type and bytes.
+    Asset {
+        content_type: &'static str,
+        bytes: &'static [u8],
+    },
     /// Nothing, and no content type.
     Nothing,
 }
@@ -55,6 +60,17 @@ impl Answer {
         Self {
             status: 200,
             content: Content::Html(page.into()),
+        }
+    }
+
+    /// 200 and an asset bundled into the daemon.
+    pub(crate) fn asset(content_type: &'static str, bytes: &'static [u8]) -> Self {
+        Self {
+            status: 200,
+            content: Content::Asset {
+                content_type,
+                bytes,
+            },
         }
     }
 
