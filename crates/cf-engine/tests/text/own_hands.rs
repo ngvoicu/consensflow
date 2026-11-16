@@ -15,7 +15,7 @@ fn own(cf: &CfWord, specs: Option<&ProjectSpecs<'_>>) -> String {
 }
 
 #[test]
-fn short_text_t1715_own_hands_uses_full_paths() {
+fn own_hands_uses_the_full_cf_path() {
     let path = "/fixture/ConsensFlow-test.app/Contents/Resources/cli/bin/cf";
     let text = own(&CfWord::of_word(path).unwrap(), None);
     assert!(text.contains(&format!("run `{path} guide`")), "{text}");
@@ -23,7 +23,7 @@ fn short_text_t1715_own_hands_uses_full_paths() {
 }
 
 #[test]
-fn short_text_t1715_own_hands_says_the_request_boundary_once() {
+fn own_hands_says_the_request_boundary_once() {
     let text = own(&CfWord::bare(), None);
     assert!(text.contains("description: ConsensFlow chief.\n"));
     assert_eq!(text.matches("explicitly asks").count(), 1, "{text}");
@@ -56,7 +56,7 @@ fn own_hands_gives_a_short_text_that_is_whole_in_itself() {
         "never run `cf`",
         "Use it only when the human\nexplicitly asks",
         "run `cf guide`",
-        "A message headed `[ConsensFlow m-… · T-… · …]` (its `·` may be `|`) is\nConsensFlow's delivery",
+        "A message headed `[ConsensFlow m-… · T-… · …]` (separators may vary) is\nConsensFlow's delivery",
         "Work already on the board\ngoes on, and its results come to you",
         "turn \"Do with your own hands\" off on your pane, and you are told",
     ] {
@@ -174,6 +174,15 @@ fn the_guide_is_the_ordinary_text_with_its_four_parts_said_for_the_board() {
     assert!(guide.contains("task add --review"));
     assert!(!guide.contains("---\nname:"));
     assert!(!guide.contains("You do not change the project yourself"));
+}
+
+#[test]
+fn text_contract_own_hands_guide_does_not_repeat_the_session_file_rule() {
+    let guide = guide_instructions(&[], &CfWord::bare(), None, None).unwrap();
+    assert!(
+        !guide.contains("read another agent's session files"),
+        "the starting role carries this rule once"
+    );
 }
 
 #[test]

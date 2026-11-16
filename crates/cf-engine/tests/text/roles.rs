@@ -19,6 +19,104 @@ use regex::Regex;
 
 use super::support::{found, staff_row, MEMBER_BANS, OLD_COMMANDS};
 
+fn as_windows_console(text: &str) -> String {
+    cf_base::text::console_text(&cf_base::text::window_text(text))
+}
+
+#[test]
+fn text_contract_every_starting_role_forbids_reading_other_agents_session_files() {
+    let roles = std::iter::once(("chief", true))
+        .chain(std::iter::once(("chief", false)))
+        .chain(
+            cf_ledger::roles::ids()
+                .into_iter()
+                .map(|role| (role, false)),
+        );
+    for (role, own_hands) in roles {
+        for (mac, cf) in [
+            (true, CfWord::bare()),
+            (
+                false,
+                CfWord::new("C:/Program Files/ConsensFlow/cf.exe", Shell::PowerShell),
+            ),
+        ] {
+            let text = role_instructions_on(&Env::default(), role, &[], &cf, None, own_hands, mac)
+                .unwrap();
+            let prohibition = if own_hands {
+                "never read another agent's session files"
+            } else if role == "chief" {
+                "never type into another window or read another agent's session files"
+            } else {
+                "read no other agent's session files"
+            };
+            assert!(
+                text.contains(prohibition),
+                "{role}, own hands {own_hands}, mac {mac}: missing prohibition"
+            );
+            assert!(
+                as_windows_console(&text).contains(prohibition),
+                "{role}: console text lost the prohibition"
+            );
+        }
+    }
+}
+
+#[test]
+fn text_contract_delivery_header_examples_explain_separator_variations_after_console_transform() {
+    let mut missing = Vec::new();
+    let expected = "`[ConsensFlow m-… · T-… · …]` (separators may vary)";
+    for (role, own_hands) in std::iter::once(("chief", true))
+        .chain(std::iter::once(("chief", false)))
+        .chain(
+            cf_ledger::roles::ids()
+                .into_iter()
+                .map(|role| (role, false)),
+        )
+    {
+        let text = role_instructions_on(
+            &Env::default(),
+            role,
+            &[],
+            &CfWord::bare(),
+            None,
+            own_hands,
+            false,
+        )
+        .unwrap();
+        if !text.contains(expected) {
+            missing.push(format!("{role}, own hands {own_hands}: header"));
+        }
+        let console = as_windows_console(&text);
+        if !console.contains(&as_windows_console(expected)) {
+            missing.push(format!("{role}, own hands {own_hands}: console header"));
+        }
+    }
+    let chief = instructions("chief", &[]);
+    let result = "`[ConsensFlow m-… · T-… · result from @worker]` (separators may vary)";
+    if !chief.contains(result) {
+        missing.push("chief: result header".to_owned());
+    }
+    if !as_windows_console(&chief).contains(&as_windows_console(result)) {
+        missing.push("chief: console result header".to_owned());
+    }
+    assert!(missing.is_empty(), "{}", missing.join(", "));
+}
+
+#[test]
+fn text_contract_researcher_may_use_scratch_without_changing_project_files() {
+    let text = instructions("researcher", &[]);
+    let missing: Vec<_> = [
+        "change no project file.",
+        "A research task changes no project file:",
+    ]
+    .into_iter()
+    .filter(|part| !text.contains(part))
+    .collect();
+    assert!(missing.is_empty(), "missing: {missing:?}");
+    assert!(!found(r"changes? no file", &text));
+    assert!(text.contains("A long listing goes in a file outside the project's tracked files"));
+}
+
 fn zeus() -> StaffRow {
     staff_row("zeus", &["worker", "reviewer"], WorkTier::Standard)
 }
@@ -515,7 +613,7 @@ fn tells_every_window_its_messages_arrive_pasted_and_are_its_to_act_on() {
     for role in std::iter::once("chief").chain(cf_ledger::roles::ids()) {
         assert!(
             found(
-                r"A message headed `\[ConsensFlow m-… · T-… · …\]` \(its `·` may be `\|`\) is ConsensFlow's delivery, and acting on it is your role\.",
+                r"A message headed `\[ConsensFlow m-… · T-… · …\]` \(separators may vary\) is ConsensFlow's delivery, and acting on it is your role\.",
                 &instructions(role, &[zeus()])
             ),
             "{role}"
@@ -1350,7 +1448,7 @@ fn every_role_of_the_table_has_its_own_text_under_its_name() {
 
 /// The four roles' texts say what their rules give each (spec new-roles): the frontend
 /// designer decides the look and asks for images through the chief, the architect writes
-/// nothing that runs, the researcher changes no file, and the integrator changes no
+/// nothing that runs, the researcher changes no project file, and the integrator changes no
 /// behaviour and releases only when told so.
 #[test]
 fn the_four_new_roles_texts_say_their_own_territory() {
@@ -1374,7 +1472,7 @@ fn the_four_new_roles_texts_say_their_own_territory() {
         assert!(found(said, &architect), "architect: {said}");
     }
     assert!(found(
-        r"A research task changes no file",
+        r"A research task changes no project file",
         &text("researcher")
     ));
     let integrator = text("integrator");

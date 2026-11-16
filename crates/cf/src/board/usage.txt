@@ -7,7 +7,7 @@ cf inside a ConsensFlow window: the board's commands.
   cf task add --architect "…"       a design for the architect: docs, contracts and the code's
                                     frame, nothing that runs; for work big enough to need one
   cf task add --research "…"        a question for a researcher: what it found, with its
-                                    sources; no file changed
+                                    sources; no project file changed
   cf task add --advice --tier <tier> "…"
                                     a question for an advisor of that tier: findings and
                                     recommendations back, no project file changed

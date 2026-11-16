@@ -246,3 +246,7 @@ role. Their existing posts, output and refusals are unchanged.
 T-1641 also qualifies queued and paused tells and explains the pause-with-words
 exception while resume words have yet to go in. The same lines were updated in the
 six pause-help and four tell-help prints.
+
+On T-1730 the six help outputs in `board.json` were moved by hand from
+"no file changed" to "no project file changed" for research tasks, matching the
+researcher's permission to use a scratch file.

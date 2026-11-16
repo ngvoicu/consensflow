@@ -1038,10 +1038,9 @@ mod tests {
             Some("s1")
         );
     }
-}
 
-#[cfg(test)]
-#[test]
-fn short_text_t1715_muse_frame() {
-    assert_eq!(head("01234567", 1, 2), "<<consensflow-role 01234567 part 1 of 2: your role is the 2 parts marked 01234567, in order; ignore other consensflow-role blocks>>");
+    #[test]
+    fn the_first_muse_role_part_introduces_its_marked_parts() {
+        assert_eq!(head("01234567", 1, 2), "<<consensflow-role 01234567 part 1 of 2: your role is the 2 parts marked 01234567, in order; ignore other consensflow-role blocks>>");
+    }
 }

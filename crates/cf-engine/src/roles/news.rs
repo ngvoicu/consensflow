@@ -96,7 +96,8 @@ fn specs_said(
 /// its role as it now is, the short text, in full: that text is what the conversation holds
 /// once the note is in. (Off, it is told its ordinary role whole, in the words of every role
 /// that is said again: `role_change`.)
-const OWN_HANDS_ON: &str = "The person turned \"Do with your own hands\" on. These instructions replace your earlier ones.";
+const OWN_HANDS_ON: &str =
+    "The human turned \"Do with your own hands\" on. These instructions replace your earlier ones.";
 
 /// The note that tells a running chief its switch went on: `instructions` is its role as it
 /// now is, the short text and the section of its specs.
@@ -108,11 +109,12 @@ pub(crate) fn own_hands_on(instructions: &str) -> String {
 fn rules_said(was: Option<&str>, now: Option<&str>) -> String {
     match now {
         Some(now) => format!(
-            "The human {} the rules for your staff. New windows get them; open windows keep theirs. This section replaces your earlier rules:\n{}",
+            "The human {} the rules for your staff. New windows get them; open windows keep theirs. {}\n{}",
             if was.is_some() { "changed" } else { "wrote" },
+            if was.is_some() { "This section replaces your earlier staff rules:" } else { "Your staff rules:" },
             with_staff_rules(String::new(), "chief", Some(now))
         ),
-        None => "The human took away the rules for your staff. New windows get none; open windows keep theirs. Your earlier rules no longer apply.\n".to_owned(),
+        None => "The human took away the rules for your staff. New windows get none; open windows keep theirs. Your earlier staff rules no longer apply.\n".to_owned(),
     }
 }
 

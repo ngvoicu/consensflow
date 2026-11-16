@@ -121,9 +121,9 @@ pub(super) async fn text(
     })
 }
 
-/// What a sub-agent of a window of `role` is told in place of the role: the words a
-/// Codex child given them was seen to keep to (T-766: none of three asked the board,
-/// where four of four with the role did).
+/// What a sub-agent of a window of `role` is told in place of the role: "You are a
+/// sub-agent of a ConsensFlow {role}; you have no board identity, so never run cf."
+/// The release's `live subagent` run checks the behavior with this shorter sentence.
 pub(super) fn children(role: &str) -> String {
     format!(
         "You are a sub-agent of a ConsensFlow {role}; you have no board identity, so never run cf."
