@@ -125,11 +125,18 @@ impl Seen {
     /// The changed Codex table names, and which added names are also in the run's config.
     /// Config values and parse errors are never included in the output.
     pub fn codex_tables_to(&self, after: &Self, owner: &Path, run: &Path) -> Option<String> {
-        if self.files.get(owner) == after.files.get(owner) {
-            return None;
-        }
         let before = self.tables.get(owner).and_then(Option::as_ref);
         let now = after.tables.get(owner).and_then(Option::as_ref);
+        if self.files.get(owner) == after.files.get(owner) {
+            // Matching hashes prove identical bytes, even when those bytes are not TOML.
+            // A missing file is known to have no tables; an unreadable file is not.
+            if self.files.get(owner).is_some_and(Option::is_some)
+                || (before.is_some() && now.is_some())
+            {
+                return None;
+            }
+            return Some("Codex config table names could not be compared".to_owned());
+        }
         let (Some(before), Some(now)) = (before, now) else {
             return Some("Codex config table names could not be compared".to_owned());
         };
@@ -246,5 +253,46 @@ mod tests {
             .unwrap();
         assert!(said.contains("could not be compared"), "{said}");
         assert!(!said.contains("removed"), "{said}");
+    }
+
+    #[test]
+    fn t1744_two_unreadable_codex_snapshots_cannot_prove_the_config_unchanged() {
+        let root = crate::door::made("cf-codex-unreadable-both-").unwrap();
+        let owner = root.path().join("owner.toml");
+        std::fs::create_dir(&owner).unwrap();
+        let files = [owner.clone()];
+        let before = Seen::look(&files, &[], Some(&owner), None);
+        let after = Seen::look(&files, &[], Some(&owner), None);
+        let said = before
+            .codex_tables_to(&after, &owner, &root.path().join("run.toml"))
+            .expect("unreadable snapshots cannot prove the config unchanged");
+        assert!(said.contains("could not be compared"), "{said}");
+    }
+
+    #[test]
+    fn t1744_two_absent_or_identical_invalid_codex_configs_are_unchanged() {
+        let root = crate::door::made("cf-codex-unchanged-").unwrap();
+        let owner = root.path().join("owner.toml");
+        let files = [owner.clone()];
+        let before = Seen::look(&files, &[], Some(&owner), None);
+        let after = Seen::look(&files, &[], Some(&owner), None);
+        assert_eq!(before.codex_tables_to(&after, &owner, &owner), None);
+
+        crate::door::write(&owner, "[unfinished").unwrap();
+        let before = Seen::look(&files, &[], Some(&owner), None);
+        let after = Seen::look(&files, &[], Some(&owner), None);
+        assert_eq!(before.codex_tables_to(&after, &owner, &owner), None);
+    }
+
+    #[test]
+    fn t1744_a_missing_config_that_becomes_unreadable_is_not_said_unchanged() {
+        let root = crate::door::made("cf-codex-missing-then-unreadable-").unwrap();
+        let owner = root.path().join("owner.toml");
+        let files = [owner.clone()];
+        let before = Seen::look(&files, &[], Some(&owner), None);
+        std::fs::create_dir(&owner).unwrap();
+        let after = Seen::look(&files, &[], Some(&owner), None);
+        let said = before.codex_tables_to(&after, &owner, &owner).unwrap();
+        assert!(said.contains("could not be compared"), "{said}");
     }
 }
