@@ -23,24 +23,46 @@ pub fn names_a_run(name: &str) -> bool {
 pub struct Seen {
     /// The hash of each file watched; none for a file that is not there.
     files: BTreeMap<PathBuf, Option<String>>,
+    /// Names only from the Codex config, from the same bytes as its hash.
+    tables: BTreeMap<PathBuf, Option<BTreeSet<String>>>,
     /// The entries of each folder of records that name a folder of a run.
     records: BTreeMap<PathBuf, BTreeSet<String>>,
 }
 
 impl Seen {
     /// What `files` and `records` are now.
-    pub fn look(files: &[PathBuf], records: &[PathBuf]) -> Self {
-        Self {
-            files: files
-                .iter()
-                .map(|file| {
-                    crate::standin_process::require_home(file, "harness isolation file lookup");
-                    (
+    pub fn look(
+        files: &[PathBuf],
+        records: &[PathBuf],
+        codex_config: Option<&Path>,
+        pi_auth: Option<&Path>,
+    ) -> Self {
+        let mut tables = BTreeMap::new();
+        let files = files
+            .iter()
+            .map(|file| {
+                crate::standin_process::require_home(file, "harness isolation file lookup");
+                let read = if pi_auth == Some(file.as_path()) {
+                    super::copy_pi_login(file).map_err(|_| std::io::ErrorKind::Other)
+                } else {
+                    fs::read(file).map_err(|error| error.kind())
+                };
+                if codex_config == Some(file.as_path()) {
+                    tables.insert(
                         file.clone(),
-                        fs::read(file).ok().map(|bytes| digest(&bytes)),
-                    )
-                })
-                .collect(),
+                        match &read {
+                            Ok(bytes) => table_names(bytes),
+                            Err(std::io::ErrorKind::NotFound) => Some(BTreeSet::new()),
+                            Err(_) => None,
+                        },
+                    );
+                }
+                (file.clone(), read.as_deref().ok().map(digest))
+            })
+            .collect();
+        Self {
+            files,
+            tables,
             records: records
                 .iter()
                 .map(|folder| {
@@ -99,6 +121,65 @@ impl Seen {
         }
         found
     }
+
+    /// The changed Codex table names, and which added names are also in the run's config.
+    /// Config values and parse errors are never included in the output.
+    pub fn codex_tables_to(&self, after: &Self, owner: &Path, run: &Path) -> Option<String> {
+        if self.files.get(owner) == after.files.get(owner) {
+            return None;
+        }
+        let before = self.tables.get(owner).and_then(Option::as_ref);
+        let now = after.tables.get(owner).and_then(Option::as_ref);
+        let (Some(before), Some(now)) = (before, now) else {
+            return Some("Codex config table names could not be compared".to_owned());
+        };
+        let added: BTreeSet<_> = now.difference(before).cloned().collect();
+        let removed: BTreeSet<_> = before.difference(now).cloned().collect();
+        let show = |names: &BTreeSet<String>| {
+            if names.is_empty() {
+                "none".to_owned()
+            } else {
+                names.iter().cloned().collect::<Vec<_>>().join(", ")
+            }
+        };
+        let run_tables = fs::read(run).ok().and_then(|bytes| table_names(&bytes));
+        let in_run = run_tables.map_or_else(
+            || "unavailable".to_owned(),
+            |tables| show(&added.intersection(&tables).cloned().collect()),
+        );
+        Some(format!(
+            "Codex config.toml tables added: {}; removed: {}; added tables also in the run's config.toml: {in_run}",
+            show(&added), show(&removed)
+        ))
+    }
+}
+
+/// Parse the document and retain table paths only, never scalar values or errors.
+fn table_names(bytes: &[u8]) -> Option<BTreeSet<String>> {
+    fn walk(table: &toml::Table, path: &mut Vec<String>, names: &mut BTreeSet<String>) {
+        for (key, value) in table {
+            path.push(format!("{key:?}"));
+            let mut add = |nested: &toml::Table| {
+                names.insert(format!("[{}]", path.join(".")));
+                walk(nested, path, names);
+            };
+            match value {
+                toml::Value::Table(nested) => add(nested),
+                toml::Value::Array(values) => {
+                    for nested in values.iter().filter_map(toml::Value::as_table) {
+                        add(nested);
+                    }
+                }
+                _ => {}
+            }
+            path.pop();
+        }
+    }
+    let text = std::str::from_utf8(bytes).ok()?;
+    let parsed = text.parse::<toml::Table>().ok()?;
+    let mut names = BTreeSet::new();
+    walk(&parsed, &mut Vec::new(), &mut names);
+    Some(names)
 }
 
 /// The entries of `folder` that name a folder of a run.
@@ -125,5 +206,45 @@ pub fn shown(path: &Path, home: &Path) -> String {
             format!("~/{}", parts.join("/"))
         }
         Err(_) => path.display().to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn t1744_codex_table_names_compare_on_either_platform_without_values() {
+        let root = crate::door::made("cf-codex-tables-").unwrap();
+        let owner = root.path().join("owner.toml");
+        let run = root.path().join("run.toml");
+        crate::door::write(&owner, "[old]\nkey = 'synthetic-old-value'\n").unwrap();
+        crate::door::write(&run, "[new]\nkey = 'synthetic-run-value'\n").unwrap();
+        let files = [owner.clone()];
+        let before = Seen::look(&files, &[], Some(&owner), None);
+        crate::door::write(&owner, "[new]\nkey = 'synthetic-new-value'\n").unwrap();
+        let after = Seen::look(&files, &[], Some(&owner), None);
+        let said = before.codex_tables_to(&after, &owner, &run).unwrap();
+        assert!(said.contains("[\"new\"]"));
+        assert!(said.contains("[\"old\"]"));
+        assert!(said.contains("also in the run"));
+        assert!(!said.contains("synthetic-"));
+    }
+
+    #[test]
+    fn t1744_an_unreadable_codex_config_is_not_said_to_have_lost_its_tables() {
+        let root = crate::door::made("cf-codex-unreadable-").unwrap();
+        let owner = root.path().join("owner.toml");
+        crate::door::write(&owner, "[old]\nkey = 'synthetic'\n").unwrap();
+        let files = [owner.clone()];
+        let before = Seen::look(&files, &[], Some(&owner), None);
+        std::fs::remove_file(&owner).unwrap();
+        std::fs::create_dir(&owner).unwrap();
+        let after = Seen::look(&files, &[], Some(&owner), None);
+        let said = before
+            .codex_tables_to(&after, &owner, &root.path().join("run.toml"))
+            .unwrap();
+        assert!(said.contains("could not be compared"), "{said}");
+        assert!(!said.contains("removed"), "{said}");
     }
 }

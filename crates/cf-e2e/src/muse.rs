@@ -33,14 +33,24 @@ pub enum Run {
 /// Gives a live rig's home what its Muse windows read their login by: settings of their
 /// own, and a copy of the person's login (`auth.json`: on a Mac its metadata, the secret
 /// being in the keychain, the one item every Muse of the machine reads; on Windows all of
-/// it, `credential_backend: file`). The person's file is read, never written.
+/// it, `credential_backend: file`). The model catalog, where present, is copied so the
+/// run's `model/list` can identify the account's models. The person's files are never written.
 pub fn seed_live_home(rig_home: &Path, real_home: &Path) -> Result {
     crate::standin_process::require_home(real_home, "Muse login lookup");
     let config = rig_home.join(".config").join("muse");
     crate::door::write(config.join("settings.json"), "{\"schema_version\":1}\n")?;
     let auth = real_home.join(".config").join("muse").join("auth.json");
     let text = files::read_string(&auth)?;
-    crate::door::write(config.join("auth.json"), login_copy(&text)?)
+    crate::door::write(config.join("auth.json"), login_copy(&text)?)?;
+    let catalog = real_home.join(".local/share/muse/model-catalog");
+    if catalog.is_dir() {
+        crate::door::copy_tree(
+            &catalog,
+            rig_home.join(".local/share/muse/model-catalog"),
+            &|_| false,
+        )?;
+    }
+    Ok(())
 }
 
 /// The person's login as a live rig's home is given it: `text` as JSON, with every key whose
@@ -1514,6 +1524,28 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(said.contains("auth.json"), "{said}");
+    }
+
+    #[test]
+    fn t1744_a_live_muse_rig_gets_its_own_copy_of_the_accounts_model_catalog() {
+        let person = crate::door::made("cf-muse-model-person-").unwrap();
+        let rig = crate::door::made("cf-muse-model-rig-").unwrap();
+        let auth = person.path().join(".config/muse/auth.json");
+        std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
+        std::fs::write(auth, "{}").unwrap();
+        let catalog = person.path().join(".local/share/muse/model-catalog");
+        std::fs::create_dir_all(&catalog).unwrap();
+        std::fs::write(catalog.join("models.json"), "synthetic catalog").unwrap();
+        super::seed_live_home(rig.path(), person.path()).unwrap();
+        let copy = rig
+            .path()
+            .join(".local/share/muse/model-catalog/models.json");
+        assert_eq!(std::fs::read_to_string(&copy).unwrap(), "synthetic catalog");
+        std::fs::write(copy, "changed in the run").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(catalog.join("models.json")).unwrap(),
+            "synthetic catalog"
+        );
     }
 
     /// `muse usage --json` on Windows is run on the throwaway config folder that holds the copy of

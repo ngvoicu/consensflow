@@ -103,14 +103,9 @@ fn cheap(harness: Harness) -> (&'static str, Option<&'static str>) {
         Harness::Pi => ("openrouter/meta/muse-spark-1.3", None),
         Harness::Devin => ("swe-2", Some("medium")),
         Harness::Codex => ("gpt-5.6-luna", None),
-        // The contributor model, at its least effort: test code only, never the product, which
-        // never defaults a person to a contributor model (`cf_harness::muse::models`). Meta may
-        // train on what it is sent, and a live run sends ConsensFlow's own test content alone
-        // (the owner's decision of 2026-11-02). Launched as the product launches Muse,
-        // contributor mode off, it drew about half the allowance of `muse-spark-1.3` (T-954:
-        // three 3.5k-character turns with a tool call each, on the same server model: window
-        // +2, +0, +2 against +3, +2, +3; week +1, +0, +0 against +1, +1, +1).
-        Harness::Muse => ("muse-spark-1.3-contributor", Some("minimal")),
+        // A preferred inexpensive non-contributor model. The roster picks it (or the older
+        // Spark) only from Muse's fresh account listing before it opens a window.
+        Harness::Muse => ("muse-spark-1.3", Some("minimal")),
     }
 }
 
@@ -397,19 +392,42 @@ fn model_of(harness: Harness, given: &str, flag: &str) -> std::result::Result<Mo
 /// `--claude-model` set), or why no window could be asked for them, before
 /// anything is spent.
 pub fn asked() -> Result<Models> {
-    let models = asked_of(requested)?;
-    if !super::keychain::live_case() {
+    asked_with(requested, None, super::keychain::live_case(), pi_providers)
+}
+
+/// Resolve Pi's machine-specific model only when a case is seating Pi.
+#[allow(clippy::print_stderr)] // The selected provider and model are part of the run's report.
+pub fn asked_for(harness: Harness) -> Result<Models> {
+    let models = asked_with(
+        requested,
+        Some(harness),
+        super::keychain::live_case(),
+        pi_providers,
+    )?;
+    if harness == Harness::Pi && !models.notes.is_empty() {
+        eprintln!("{}", models.line());
+    }
+    Ok(models)
+}
+
+fn asked_with(
+    read: impl Fn(&str) -> Option<String>,
+    seated: Option<Harness>,
+    live: bool,
+    providers: impl FnOnce() -> Option<Vec<String>>,
+) -> Result<Models> {
+    let models = asked_of(read)?;
+    if !live || seated != Some(Harness::Pi) || models.named.contains(&Harness::Pi) {
         return Ok(models);
     }
     let machine = super::renew::TestMachine::detect();
     Ok(models.on_machine(
         machine.as_ref().map(super::renew::TestMachine::name),
-        pi_providers().as_deref(),
+        providers().as_deref(),
     ))
 }
 
-/// The names of the logins in the owner's Pi `auth.json` (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`),
-/// never what they hold; none where the file cannot be read.
+/// A count of provider lookups by a unit test, never their contents.
 #[cfg(test)]
 static PI_PROVIDER_READS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -428,9 +446,14 @@ fn pi_providers() -> Option<Vec<String>> {
         })?;
     #[cfg(test)]
     PI_PROVIDER_READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    let text = std::fs::read_to_string(folder.join("auth.json")).ok()?;
-    let logins: Value = serde_json::from_str(&text).ok()?;
-    Some(logins.as_object()?.keys().cloned().collect())
+    static NAMES: std::sync::OnceLock<Option<Vec<String>>> = std::sync::OnceLock::new();
+    NAMES
+        .get_or_init(|| {
+            let bytes = super::isolation::copy_pi_login(&folder.join("auth.json")).ok()?;
+            let logins: Value = serde_json::from_slice(&bytes).ok()?;
+            Some(logins.as_object()?.keys().cloned().collect())
+        })
+        .clone()
 }
 
 /// [`asked`], of the variables as `read` has them.
@@ -442,7 +465,7 @@ fn asked_of(read: impl Fn(&str) -> Option<String>) -> Result<Models> {
 /// cheap one. A run reads the flags with [`super::Log::begin`] before anything
 /// else, which refuses them when they are wrong; here they can only be read.
 pub fn model(harness: Harness) -> Model {
-    match asked() {
+    match asked_for(harness) {
         Ok(models) => models.of(harness).clone(),
         Err(refused) => panic!("{refused} (a live run begins with Log::begin, which refuses it)"),
     }
@@ -487,6 +510,14 @@ pub fn row_on(model: &Model, tier: &str) -> Value {
 /// real harness is what the `log`'s report says it was launched on.
 pub fn write_roster(rig: &Rig, rows: &[Value], log: &Log) -> Result {
     let rows = with_efforts(rig, rows, |note| log.say(note));
+    if rows.iter().any(|row| {
+        row["kind"] == "muse" && row["designer"] != true && row["model"].as_str().is_none()
+    }) {
+        return Err(Error::Daemon(
+            "Muse's model list gave the run no usable Spark model; choose one with --models muse=…"
+                .to_owned(),
+        ));
+    }
     let roster = json!({ "agents": rows });
     rig.stand_ins(&roster)?;
     for row in &rows {
@@ -520,6 +551,9 @@ fn listed_by(rig: &Rig, harness: Harness) -> std::result::Result<Vec<Listed>, St
     if answer["ok"] != true {
         let said = answer["error"].as_str().unwrap_or("no reason given");
         return Err(said.to_owned());
+    }
+    if harness == Harness::Muse && answer["listing"]["freshness"]["state"] != "fresh" {
+        return Err("Muse did not return a fresh account model list".to_owned());
     }
     let models = answer["listing"]["models"].as_array();
     let Some(models) = models.filter(|models| !models.is_empty()) else {
@@ -567,6 +601,7 @@ fn with_least_efforts(
     mut say: impl FnMut(String),
 ) -> Vec<Value> {
     let mut lists: Vec<(Harness, Vec<Listed>)> = Vec::new();
+    let named_muse = asked_of(requested).is_ok_and(|models| models.named.contains(&Harness::Muse));
     rows.iter()
         .map(|row| {
             let mut row = row.clone();
@@ -574,7 +609,10 @@ fn with_least_efforts(
             let Some(model) = launched_on(&row).filter(|_| named && row["designer"] != true) else {
                 return row;
             };
-            if model.effort.is_some() {
+            let choose_muse = model.harness == Harness::Muse
+                && model.name == cheap(Harness::Muse).0
+                && !named_muse;
+            if model.effort.is_some() && !choose_muse {
                 return row;
             }
             if !lists.iter().any(|(harness, _)| *harness == model.harness) {
@@ -587,6 +625,32 @@ fn with_least_efforts(
                     Vec::new()
                 });
                 lists.push((model.harness, listed));
+            }
+            if choose_muse {
+                let choice = lists.iter().filter(|(harness, _)| *harness == Harness::Muse)
+                    .flat_map(|(_, listed)| listed)
+                    .filter(|listed| !listed.disabled)
+                    .collect::<Vec<_>>();
+                let chosen = ["muse-spark-1.3", "muse-spark-1.2"].iter()
+                    .find_map(|name| choice.iter().find(|listed| listed.name == *name));
+                if let Some(fields) = row.as_object_mut() {
+                    match chosen {
+                        Some(listed) => {
+                            fields.insert("model".to_owned(), json!(listed.name));
+                            if let Some(effort) = listed.efforts.first() {
+                                fields.insert("effort".to_owned(), json!(effort));
+                            } else {
+                                fields.remove("effort");
+                            }
+                        }
+                        None => {
+                            fields.remove("model");
+                            fields.remove("effort");
+                            say("Muse's account lists no enabled Spark model the kit knows; choose one with --models muse=…".to_owned());
+                        }
+                    }
+                }
+                return row;
             }
             let least = lists
                 .iter()
@@ -617,6 +681,47 @@ pub fn question_tool(harness: Harness) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn t1744_reading_the_models_for_a_non_pi_live_run_never_reads_pi_providers() {
+        let read = std::cell::Cell::new(false);
+        let models = asked_with(
+            |_| None,
+            None,
+            true,
+            || {
+                read.set(true);
+                Some(vec!["openai".to_owned()])
+            },
+        )
+        .unwrap();
+        assert_eq!(models.of(Harness::Codex).name, cheap(Harness::Codex).0);
+        assert!(
+            !read.get(),
+            "asking for the run's models read Pi's providers"
+        );
+    }
+
+    #[test]
+    fn t1744_pi_seating_selects_from_provider_names_and_an_explicit_model_needs_no_lookup() {
+        let read = std::cell::Cell::new(0);
+        let lookup = || {
+            read.set(read.get() + 1);
+            Some(vec!["openai".to_owned()])
+        };
+        let models = asked_with(|_| None, Some(Harness::Pi), true, lookup).unwrap();
+        assert_eq!(read.get(), 1);
+        assert_eq!(models.of(Harness::Codex).name, cheap(Harness::Codex).0);
+        let explicit = asked_with(
+            |key| (key == MODELS).then(|| "pi=openai/example".to_owned()),
+            Some(Harness::Pi),
+            true,
+            lookup,
+        )
+        .unwrap();
+        assert_eq!(explicit.of(Harness::Pi).name, "openai/example");
+        assert_eq!(read.get(), 1);
+    }
 
     #[test]
     fn standin_isolation_log_begin_never_reads_a_decoy_pi_auth() {
@@ -707,7 +812,7 @@ mod tests {
                 "openrouter/meta/muse-spark-1.3",
                 "swe-2",
                 "gpt-5.6-luna",
-                "muse-spark-1.3-contributor"
+                "muse-spark-1.3"
             ]
         );
         assert!(rows.iter().all(|row| row["workTier"] == "standard"));
@@ -795,7 +900,7 @@ mod tests {
                 on("openai/gpt-6-luna", None),
                 on("swe-2", Some("max")),
                 on("gpt-6.1-sol", Some("high")),
-                on("muse-spark-1.3-contributor", Some("minimal")),
+                on("muse-spark-1.3", Some("minimal")),
             ]
         );
         // Spaces around a piece, a harness, a model or an effort are let be, and so is
@@ -931,7 +1036,7 @@ mod tests {
             models.line(),
             "the models --models and the cheap ones give: claude claude-sonnet-5-5; \
              pi openai/gpt-6-luna; devin swe-2, effort medium; codex gpt-6.1-sol, effort high; \
-             muse muse-spark-1.3-contributor, effort minimal"
+             muse muse-spark-1.3, effort minimal"
         );
         // What a window launched on an agent runs on is the agent's: Pi's effort is its
         // thinking, and the stand-in agent's windows run on nothing of a harness.
@@ -998,6 +1103,38 @@ mod tests {
                 disabled: false,
             })
             .collect()
+    }
+
+    #[test]
+    fn t1744_muse_default_comes_from_its_listing_and_refuses_missing_or_disabled_spark() {
+        let rows = [row_on(&Model::cheap(Harness::Muse), "standard")];
+        let chosen = with_least_efforts(
+            &rows,
+            |_| {
+                Ok(listing(&[
+                    ("muse-spark-1.2", &["low", "high"]),
+                    ("muse-wonder-1.0", &["minimal"]),
+                ]))
+            },
+            |_| {},
+        );
+        assert_eq!(chosen[0]["model"], "muse-spark-1.2");
+        assert_eq!(chosen[0]["effort"], "low");
+        let mut notes = Vec::new();
+        let no_choice = with_least_efforts(
+            &rows,
+            |_| {
+                Ok(vec![Listed {
+                    name: "muse-spark-1.3".to_owned(),
+                    efforts: vec!["minimal".to_owned()],
+                    disabled: true,
+                }])
+            },
+            |note| notes.push(note),
+        );
+        assert!(no_choice[0].get("model").is_none());
+        assert!(no_choice[0].get("effort").is_none());
+        assert!(notes.iter().any(|note| note.contains("--models muse=")));
     }
 
     /// T-1369: a row of a real harness that names no effort is given the least one its harness
@@ -1144,9 +1281,9 @@ mod tests {
 
     /// The owner's Mac's Pi holds one login, `cliproxyapi` — the local CLIProxyAPI proxy's — and
     /// none for the cheap model's provider, OpenRouter, so it runs on the model that login serves:
-    /// the contributor model the cheap Muse model is, at `minimal` effort, and the run says why
-    /// (T-1172; the owner, 2026-11-03: "Pi on this Mac can be used with the models pi has now"),
-    /// on the proxy's free pool `swe-2` (the owner, 2026-11-09).
+    /// the proxy's free pool `swe-2` at `medium` effort, and the run says why (T-1172; the
+    /// owner, 2026-11-03: "Pi on this Mac can be used with the models pi has now"; the proxy's
+    /// free pool was named on 2026-11-09).
     #[test]
     fn the_owners_mac_whose_pi_has_a_cliproxyapi_login_runs_pi_on_the_model_it_serves_and_says_so()
     {

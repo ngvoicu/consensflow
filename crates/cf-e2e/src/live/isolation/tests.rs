@@ -1571,6 +1571,75 @@ fn a_run_that_changes_a_file_of_the_owners_fails_naming_it_and_saying_none_of_wh
 }
 
 #[test]
+fn t1744_codex_guard_names_changed_tables_and_compares_the_runs_config_without_values() {
+    let owner = Owner::new();
+    let config = owner.path(".codex/config.toml");
+    write(
+        &config,
+        "[removed]\nkey = 'before-secret'\n[unchanged]\nkey = 'old-secret'\n",
+    );
+    let isolation = owner.codex();
+    let home = isolation.made_at(at(NOW)).unwrap();
+    isolation
+        .write(
+            "CODEX_HOME",
+            "config.toml",
+            "[projects.\"run-folder\"]\ntrust = 'run-secret'\n",
+        )
+        .unwrap();
+    write(
+        &config,
+        "[projects.\"run-folder\"]\ntrust = 'owner-secret'\n[unchanged]\nkey = 'new-secret'\n",
+    );
+    let said = isolation.finish().unwrap_err().to_string();
+    assert!(
+        home.join("codex/config.toml").is_file(),
+        "the run's config was removed before comparison"
+    );
+    assert!(
+        said.contains("removed") && said.contains("projects") && said.contains("run-folder"),
+        "{said}"
+    );
+    assert!(
+        said.contains("run's") && said.contains("config.toml"),
+        "{said}"
+    );
+    for secret in [
+        "before-secret",
+        "old-secret",
+        "run-secret",
+        "owner-secret",
+        "new-secret",
+    ] {
+        assert!(!said.contains(secret), "config value was disclosed");
+    }
+}
+
+#[test]
+fn t1744_pi_login_is_read_from_a_run_owned_copy_and_the_owner_is_unchanged() {
+    let owner = Owner::new();
+    let source = owner.path(".pi/agent/auth.json");
+    let expected = auth(hours(9)).into_bytes();
+    assert!(copy_pi_login(&source).unwrap() == expected);
+    assert!(fs::read(source).unwrap() == expected);
+}
+
+#[test]
+fn t1744_a_read_only_pi_login_can_still_be_copied_and_the_temporary_copy_erased() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let owner = Owner::new();
+    let source = owner.path(".pi/agent/auth.json");
+    let expected = auth(hours(9)).into_bytes();
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o400)).unwrap();
+    assert!(copy_pi_login(&source).unwrap() == expected);
+    assert_eq!(
+        fs::metadata(&source).unwrap().permissions().mode() & 0o777,
+        0o400
+    );
+    assert!(fs::read(source).unwrap() == expected);
+}
+
+#[test]
 fn a_file_the_run_makes_in_the_owners_folder_is_named_too() {
     let owner = Owner::new();
     fs::remove_file(owner.path(".pi/agent/models.json")).unwrap();

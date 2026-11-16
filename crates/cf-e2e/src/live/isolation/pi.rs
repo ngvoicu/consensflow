@@ -210,9 +210,9 @@ pub fn renewal(
             .map(|name| agent.join(name))
             .into();
         let records = [agent.join("sessions")];
-        let before = Seen::look(&files, &records);
+        let before = Seen::look(&files, &records, None, None);
         let ended = renew::one_shot(Harness::Pi, &program, &renew::pi_words(&model))?;
-        let changed = before.changes_to(&Seen::look(&files, &records), &home);
+        let changed = before.changes_to(&Seen::look(&files, &records, None, None), &home);
         if changed.is_empty() {
             return Ok(ended);
         }

@@ -191,6 +191,11 @@ fn a_window_resumed_on_a_conversation_the_quit_cut_is_watched_and_takes_a_second
         live::option("model"),
         live::option("transcripts"),
     )?;
+    let models = if options.harnesses.contains(&Harness::Pi) {
+        agents::asked_for(Harness::Pi)?
+    } else {
+        models
+    };
     let installs: Vec<Installed> = options
         .harnesses
         .iter()

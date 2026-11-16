@@ -99,7 +99,7 @@ use super::machine::Harness;
 use super::renew::{Kept, Renewal, Renewed, TestMachine};
 use crate::process::own_var;
 use crate::rig::HarnessHome;
-use crate::{files, Error, Result};
+use crate::{Error, Result};
 use watch::{shown, Seen};
 
 /// What a login must last beyond the run, which a case plans the length of
@@ -449,7 +449,7 @@ impl Isolation {
         run: Duration,
     ) -> Result<Option<Self>> {
         let pi = if harness == Harness::Pi {
-            vec![agents::asked()?.of(Harness::Pi).name.clone()]
+            vec![agents::asked_for(Harness::Pi)?.of(Harness::Pi).name.clone()]
         } else {
             Vec::new()
         };
@@ -647,7 +647,7 @@ impl Isolation {
         *made = Some(Made {
             folder,
             copied,
-            owner: Seen::look(&self.plan.watched, &self.plan.records),
+            owner: self.look(),
         });
         Ok(path)
     }
@@ -710,13 +710,18 @@ impl Isolation {
                 providers,
                 left,
             } => {
-                let text = files::read_string(from).map_err(|failed| {
-                    Error::Daemon(format!(
-                        "Pi's login is not in {} ({failed}): {}",
-                        from.display(),
-                        self.harness.log_in()
-                    ))
-                })?;
+                let text = copy_pi_login(from)
+                    .and_then(|bytes| {
+                        String::from_utf8(bytes)
+                            .map_err(|_| Error::Daemon("Pi's copied login is not UTF-8".to_owned()))
+                    })
+                    .map_err(|failed| {
+                        Error::Daemon(format!(
+                            "Pi's login is not in {} ({failed}): {}",
+                            from.display(),
+                            self.harness.log_in()
+                        ))
+                    })?;
                 let entries = self.pi_entries(from, providers.as_deref(), &text, now, *left)?;
                 Ok(vec![Placed::File {
                     to: to.clone(),
@@ -906,9 +911,14 @@ impl Isolation {
             file: shown.clone(),
             login: format!("Pi's `{provider}` login"),
             read: &|| {
-                files::read_string(from).map_err(|failed| {
-                    Error::Daemon(format!("Pi's login in {shown} is gone ({failed})"))
-                })
+                copy_pi_login(from)
+                    .and_then(|bytes| {
+                        String::from_utf8(bytes)
+                            .map_err(|_| Error::Daemon("Pi's copied login is not UTF-8".to_owned()))
+                    })
+                    .map_err(|failed| {
+                        Error::Daemon(format!("Pi's login in {shown} is gone ({failed})"))
+                    })
             },
             expiry: &|text| pi::expiry(text, provider),
         };
@@ -956,7 +966,7 @@ impl Isolation {
     fn evidence(&self) -> Option<String> {
         let made = self.made.lock().unwrap_or_else(PoisonError::into_inner);
         made.as_ref()?;
-        let now = Seen::look(&self.plan.watched, &self.plan.records);
+        let now = self.look();
         Some(format!(
             "the owner's {} setup is as it was: {}; the copy of the login in the run's home is as it was copied",
             proper(self.harness),
@@ -970,8 +980,19 @@ impl Isolation {
         let Some(made) = made.as_ref() else {
             return (Vec::new(), Vec::new());
         };
-        let now = Seen::look(&self.plan.watched, &self.plan.records);
-        let touched = made.owner.changes_to(&now, &self.owner_home);
+        let now = self.look();
+        let mut touched = made.owner.changes_to(&now, &self.owner_home);
+        if self.harness == Harness::Codex {
+            if let Some(config) = self.plan.watched.get(1) {
+                if let Some(tables) = made.owner.codex_tables_to(
+                    &now,
+                    config,
+                    &made.folder.path().join("codex/config.toml"),
+                ) {
+                    touched.push(tables);
+                }
+            }
+        }
         let refreshed = made
             .copied
             .iter()
@@ -990,6 +1011,64 @@ impl Isolation {
             .collect();
         (touched, refreshed)
     }
+
+    fn look(&self) -> Seen {
+        let codex_config = (self.harness == Harness::Codex)
+            .then(|| self.plan.watched.get(1).map(PathBuf::as_path))
+            .flatten();
+        let pi_auth = (self.harness == Harness::Pi)
+            .then(|| self.plan.watched.first().map(PathBuf::as_path))
+            .flatten();
+        Seen::look(
+            &self.plan.watched,
+            &self.plan.records,
+            codex_config,
+            pi_auth,
+        )
+    }
+}
+
+/// Copy Pi's owner file into a private folder before inspecting it. Erase the temporary
+/// copy immediately after reading, including in say-only mode; the door keeps its folder.
+pub(super) fn copy_pi_login(from: &Path) -> Result<Vec<u8>> {
+    crate::standin_process::require_home(from, "Pi login copy");
+    let folder = crate::door::made("cf-pi-login-copy-").map_err(|source| Error::File {
+        action: "make a private folder in",
+        path: std::env::temp_dir(),
+        source,
+    })?;
+    let copy = folder.path().join("auth.json");
+    crate::door::copy_keeping_mode(from, &copy)?;
+    // The owner's file may be read-only. The private copy must be writable so it can be
+    // erased even in a say-only run; changing its mode never changes the owner's file.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        crate::door::set_permissions(&copy, fs::Permissions::from_mode(0o600))?;
+    }
+    #[cfg(windows)]
+    {
+        let mut permissions = fs::metadata(&copy)
+            .map_err(|source| Error::File {
+                action: "read the permissions of the run's Pi login copy",
+                path: copy.clone(),
+                source,
+            })?
+            .permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        // Windows clears a file attribute, not Unix mode bits.
+        permissions.set_readonly(false);
+        crate::door::set_permissions(&copy, permissions)?;
+    }
+    let bytes = fs::read(&copy).map_err(|source| Error::File {
+        action: "read the run's Pi login copy",
+        path: copy.clone(),
+        source,
+    });
+    let erased = crate::door::write(&copy, b"{}");
+    let bytes = bytes?;
+    erased?;
+    Ok(bytes)
 }
 
 /// What a seed puts in the home.

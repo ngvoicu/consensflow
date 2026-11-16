@@ -10,6 +10,16 @@ const SENTINEL: &str = "SENTINEL-the-owners-own-0002";
 const NOW: i64 = 1_800_000_000_000;
 
 #[test]
+fn t1744_pi_login_copy_works_on_either_platform_without_changing_the_source() {
+    let root = crate::door::made("cf-pi-login-source-").unwrap();
+    let source = root.path().join("auth.json");
+    let fake = br#"{"example":{"type":"api_key","key":"synthetic"}}"#;
+    crate::door::write(&source, fake).unwrap();
+    assert!(copy_pi_login(&source).unwrap().as_slice() == fake);
+    assert!(fs::read(source).unwrap().as_slice() == fake);
+}
+
+#[test]
 fn kit_round4_windows_devin_gets_generated_git_config() {
     let owner = Owner::new();
     let isolation = owner.devin();
