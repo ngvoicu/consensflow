@@ -9,7 +9,7 @@ use std::time::{Duration, SystemTime};
 
 use cf_e2e::live::ask::{self, Record};
 use cf_e2e::live::members::Members;
-use cf_e2e::Result;
+use cf_e2e::{Error, Result};
 
 use super::super::wire::{self, Wire};
 use crate::watch::settlement_of;
@@ -87,19 +87,34 @@ fn file_line(place: &Path, now: SystemTime) -> String {
     )
 }
 
-/// Where Devin may keep its store (`devin/cli/sessions.db` under the folders the run
-/// gives its windows: `APPDATA` on Windows, where the product reads it, and `LOCALAPPDATA`
-/// beside it, the XDG data folder and `.local/share` in the home elsewhere), each said:
-/// a store in a place the product does not read is a conversation it never sees.
-fn store_files(env: &[(String, String)], now: SystemTime) -> Vec<String> {
+/// Where Devin may keep its store under the run's data folders. The rig's `HOME` can be
+/// the person's, so its fallback is considered only when the home belongs to the run.
+/// Refuse foreign data folders and links before reading a store's metadata.
+fn store_files(env: &[(String, String)], now: SystemTime) -> Result<Vec<String>> {
     let var = |name: &str| {
         env.iter()
             .rev()
-            .find(|(given, value)| given == name && !value.is_empty())
+            .find(|(given, _)| {
+                if cfg!(windows) {
+                    given.eq_ignore_ascii_case(name)
+                } else {
+                    given == name
+                }
+            })
+            .filter(|(_, value)| !value.is_empty())
             .map(|(_, value)| PathBuf::from(value))
     };
+    let required = if cfg!(windows) {
+        "APPDATA"
+    } else {
+        "XDG_DATA_HOME"
+    };
+    if var(required).is_none() {
+        return Err(Error::Daemon(format!("the rig gives Devin no {required}")));
+    }
     let home_data = var("HOME")
         .or_else(|| var("USERPROFILE"))
+        .filter(|home| cf_e2e::door::is_made_or_below(home))
         .map(|home| home.join(".local").join("share"));
     let mut places: Vec<PathBuf> = Vec::new();
     for base in [
@@ -111,19 +126,31 @@ fn store_files(env: &[(String, String)], now: SystemTime) -> Vec<String> {
     .into_iter()
     .flatten()
     {
+        if !cf_e2e::door::is_made_or_below(&base) {
+            return Err(Error::Daemon(
+                "a Devin data folder is outside the run's own roots".to_owned(),
+            ));
+        }
         let place = base.join("devin").join("cli").join("sessions.db");
+        if !cf_e2e::door::is_made_or_below(&place) {
+            return Err(Error::Daemon(
+                "a Devin store is outside the run's own roots".to_owned(),
+            ));
+        }
         if !places.contains(&place) {
             places.push(place);
         }
     }
-    places.iter().map(|place| file_line(place, now)).collect()
+    Ok(places.iter().map(|place| file_line(place, now)).collect())
 }
 
 /// Devin's own files, said, for the member whose window is in `members`.
-pub fn devin_lines(members: &Members) -> Vec<String> {
+pub fn devin_lines(members: &Members) -> Result<Vec<String>> {
     let rig = members.rig();
     let home = rig.home();
     let env = rig.environment();
+    // Check the store's environment before asking the adapter to read it.
+    let stores = store_files(env, SystemTime::from(jiff::Timestamp::now()))?;
     let wire = Wire::open(&home);
     let mut lines = match &wire {
         Some(wire) => wire_lines(wire),
@@ -135,12 +162,8 @@ pub fn devin_lines(members: &Members) -> Vec<String> {
         |session| ask::records("devin", session, env),
     ));
     lines.push("where its store may be:".to_owned());
-    lines.extend(
-        store_files(env, SystemTime::from(jiff::Timestamp::now()))
-            .into_iter()
-            .map(|place| format!("  {place}")),
-    );
-    lines
+    lines.extend(stores.into_iter().map(|place| format!("  {place}")));
+    Ok(lines)
 }
 
 #[cfg(test)]
@@ -148,7 +171,6 @@ mod tests {
     use std::cell::Cell;
 
     use cf_e2e::live::ask::Item;
-    use cf_e2e::Error;
     use serde_json::{json, Value};
 
     use super::*;
@@ -263,8 +285,41 @@ mod tests {
     }
 
     #[test]
+    fn the_store_diagnostic_does_not_look_in_the_persons_home() {
+        let run = cf_e2e::door::made("devin-store-diagnostic-").unwrap();
+        let person = tempfile::tempdir().unwrap();
+        let data = run.path().join("data");
+        let at = |path: &Path| path.to_string_lossy().into_owned();
+        let env = vec![
+            ("XDG_DATA_HOME".to_owned(), at(&data)),
+            ("APPDATA".to_owned(), at(&data)),
+            ("HOME".to_owned(), at(person.path())),
+        ];
+        let now = SystemTime::UNIX_EPOCH;
+        let lines = store_files(&env, now).unwrap();
+        assert_eq!(
+            lines.len(),
+            1,
+            "the person's home must not be inspected: {lines:?}"
+        );
+        assert!(lines[0].starts_with(&at(&data)));
+        let foreign = [("XDG_DATA_HOME".to_owned(), at(person.path()))];
+        assert!(store_files(&foreign, now).is_err());
+        assert!(store_files(&[], now).is_err());
+        #[cfg(unix)]
+        {
+            let other = person.path().join("sessions.db");
+            std::fs::write(&other, b"foreign").unwrap();
+            let link = data.join("devin/cli/sessions.db");
+            std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+            std::os::unix::fs::symlink(other, link).unwrap();
+            assert!(store_files(&env, now).is_err());
+        }
+    }
+
+    #[test]
     fn where_devins_store_may_be_is_each_place_the_run_names_with_what_is_there() {
-        let folder = tempfile::tempdir().unwrap();
+        let folder = cf_e2e::door::made("devin-store-places-").unwrap();
         let roaming = folder.path().join("Roaming");
         let local = folder.path().join("Local");
         let store = roaming.join("devin").join("cli");
@@ -286,7 +341,7 @@ mod tests {
             ("XDG_DATA_HOME".to_owned(), at(&roaming)),
             ("HOME".to_owned(), String::new()),
         ];
-        let lines = store_files(&env, now);
+        let lines = store_files(&env, now).unwrap();
         assert_eq!(lines.len(), 2, "{lines:?}");
         assert!(
             lines[0].ends_with("sessions.db: 5 bytes, written 7 s ago"),

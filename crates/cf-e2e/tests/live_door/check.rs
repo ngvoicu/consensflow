@@ -133,7 +133,11 @@ pub fn run(who: Who, asked: &Asked, stand_in: &Path, log: &Log) -> Result<Accoun
 /// The chief makes its folder again where it writes, or it ends with the first thing it
 /// is told, and the check's `cf answer` is refused (2026-10-12).
 fn tidy(members: &Members, case: &mut Account) {
-    let folder = members.claude_config().join("projects").join("integration");
+    let Ok(config) = members.claude_config() else {
+        case.fail("the rig has no Claude config within its roots");
+        return;
+    };
+    let folder = config.join("projects").join("integration");
     let empty = std::fs::read_dir(&folder).is_ok_and(|mut entries| entries.next().is_none());
     if !empty {
         case.say(format!(
@@ -212,7 +216,7 @@ fn observe(
     // Claude's own status, read as the daemon reads it, over the whole wait of its hook.
     let status = match (who, session.as_deref()) {
         (Who::Harness(Harness::Claude), Some(session)) => {
-            Some(Status::watch(&members.claude_config(), session))
+            Some(Status::watch(&members.claude_config()?, session))
         }
         _ => None,
     };

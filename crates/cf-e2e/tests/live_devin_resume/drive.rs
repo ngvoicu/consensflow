@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use cf_e2e::devin_store;
 use cf_e2e::live::ask::{self, Interrupt};
 use cf_e2e::live::machine::live_folder_in;
 use cf_e2e::live::members::{squash, Account, Identity, ThisMachine};
@@ -88,29 +87,19 @@ impl Run<'_> {
     }
 
     /// Where Devin keeps its store, in the home the windows have.
-    fn store(&self) -> PathBuf {
-        let home = self
-            .rig
-            .var("HOME")
-            .or_else(|| self.rig.var("USERPROFILE"))
-            .unwrap_or_default();
-        devin_store::location(
-            cfg!(windows),
-            home,
-            self.rig.var("APPDATA"),
-            self.rig.var("XDG_DATA_HOME"),
-        )
+    fn store(&self) -> Result<PathBuf> {
+        cf_e2e::live::guard::devin_store_path(cfg!(windows), self.rig.environment())
     }
 
     /// A scene of `window`, watched in Devin's store and the wire log of its launch.
-    pub fn scene<'w>(&'w self, window: &'w Window<'w>) -> Scene<'w> {
-        Scene::new(
+    pub fn scene<'w>(&'w self, window: &'w Window<'w>) -> Result<Scene<'w>> {
+        Ok(Scene::new(
             self.rig,
             window,
-            self.store(),
+            self.store()?,
             wire_of(window.argv()),
             self.life,
-        )
+        ))
     }
 }
 
@@ -239,7 +228,7 @@ fn drive(run: &Run, case: Case, folder: &str, workspace: &Path, done: &mut Done)
     run.log
         .say(format!("{}: its window is open, on its task", case.name()));
     done.account.say(format!("opened: {}", launch_line(&cut)));
-    let mut scene = run.scene(&cut);
+    let mut scene = run.scene(&cut)?;
     if !first_turn(case, &mut scene, &place, &mut done.account)? {
         return Ok(());
     }
@@ -263,7 +252,7 @@ fn drive(run: &Run, case: Case, folder: &str, workspace: &Path, done: &mut Done)
         .say(format!("{}: its window is open again", case.name()));
     done.account
         .say(format!("opened again: {}", launch_line(&again)));
-    let mut scene = run.scene(&again);
+    let mut scene = run.scene(&again)?;
     let came = back::come_back(run, case, &mut scene, &mut done.account);
     let outcome = match came {
         Ok(true) => ask_all(run, case, &mut scene, &place, done),

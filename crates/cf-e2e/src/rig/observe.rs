@@ -180,7 +180,11 @@ impl Rig {
 
     /// The sessions the rig's Muse keeps in the rig's home, oldest first, each with its log.
     pub fn muse_sessions(&self) -> Vec<(String, std::path::PathBuf)> {
-        crate::muse::sessions(std::path::Path::new(self.var("HOME").unwrap_or_default()))
+        let home = std::path::Path::new(self.var("HOME").unwrap_or_default());
+        if !crate::door::is_made_or_below(&home.join(".local/share/muse/sessions")) {
+            return Vec::new();
+        }
+        crate::muse::sessions(home)
     }
 
     /// When the daemon pressed the key `bytes` into the window `id`, in

@@ -1,0 +1,383 @@
+# Offline, fabricated fixtures protect source-tree links and run-owned readers.
+[run]
+round3-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "kit_round3"]
+round3-muse = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_background", "kit_round3"]
+round3-muse-reads = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_muse_reads", "kit_round3"]
+round3-compaction = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_compaction_routes", "kit_round3"]
+round3-subagent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_subagent", "kit_round3"]
+round5-parity = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "t1700_"]
+round5-login-only = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "t1700_login_only_"]
+round5-owner-skills = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_parity", "t1700_run_config_excludes_owner_and_contains_its_own_items"]
+round4-subagent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_subagent", "kit_round4"]
+round3-specs = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_specs", "kit_round3"]
+round3-dialog = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_harness_dialogs", "kit_round3"]
+round3-history = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_history_items", "kit_round3"]
+
+[[plant]]
+name = "kit round3: Devin carries Git credentials"
+meant = "kit_round3_devin_does_not_carry_git_credentials"
+runs = ["round3-lib"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''                Seed::Fixed {
+                    to: "config/git/config".into(),'''
+replace = '''                Seed::Copy {
+                    from: config.join("git").join("credentials"),
+                    to: "config/git/credentials".into(),
+                    login: false,
+                },
+                Seed::Fixed {
+                    to: "config/git/config".into(),'''
+
+[[plant]]
+name = "kit round3: Pi package follows a link out"
+meant = "kit_round3_pi_package_skips_links_out_and_keeps_links_inside"
+runs = ["round3-lib"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''            let real = match fs::canonicalize(&source) {
+                Ok(real) => real,
+                Err(_) => continue,
+            };
+            let Ok(relative) = real.strip_prefix(source_root) else {
+                continue;
+            };
+            let destination = target_root.join(relative);
+            copied_link(&destination, &target, real.is_dir())?;'''
+replace = '''            copy_keeping_mode(&source, &target)?;'''
+
+[[plant]]
+name = "kit round3: Muse catalog follows a link out"
+meant = "kit_round3_muse_catalog_skips_links_out"
+runs = ["round3-lib"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''            let real = match fs::canonicalize(&source) {
+                Ok(real) => real,
+                Err(_) => continue,
+            };
+            let Ok(relative) = real.strip_prefix(source_root) else {
+                continue;
+            };
+            let destination = target_root.join(relative);
+            copied_link(&destination, &target, real.is_dir())?;'''
+replace = '''            copy_keeping_mode(&source, &target)?;'''
+
+[[plant]]
+name = "kit round3: Muse feature config follows a link out"
+meant = "kit_round3_muse_feature_config_skips_links_out"
+runs = ["round3-muse"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''            let real = match fs::canonicalize(&source) {
+                Ok(real) => real,
+                Err(_) => continue,
+            };
+            let Ok(relative) = real.strip_prefix(source_root) else {
+                continue;
+            };
+            let destination = target_root.join(relative);
+            copied_link(&destination, &target, real.is_dir())?;'''
+replace = '''            copy_keeping_mode(&source, &target)?;'''
+
+[[plant]]
+name = "kit round3: an internal package link points back to the owner"
+meant = "kit_round3_pi_package_skips_links_out_and_keeps_links_inside"
+runs = ["round3-lib"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/door/writes.rs"
+find = '''copied_link(&destination, &target, real.is_dir())?;'''
+replace = '''copied_link(&real, &target, real.is_dir())?;'''
+
+[[plant]]
+name = "kit round3: Pi cache follows a link out"
+meant = "kit_round3_pi_model_cache_does_not_follow_a_link_out"
+runs = ["round3-lib"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/isolation.rs"
+find = '''if meta.file_type().is_symlink()
+                || !fs::canonicalize(&path)?.starts_with(fs::canonicalize(from)?)'''
+replace = '''if false && (meta.file_type().is_symlink()
+                || !fs::canonicalize(&path)?.starts_with(fs::canonicalize(from)?))'''
+
+[[plant]]
+name = "kit round3: Muse fingerprint reads a linked file"
+meant = "kit_round3_muse_fingerprint_does_not_follow_links_out"
+runs = ["round3-muse-reads"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_muse_reads.rs"
+find = '''if kind.is_symlink() {
+                continue;
+            } else if kind.is_dir() {'''
+replace = '''if kind.is_dir() {'''
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_muse_reads.rs"
+find = '''} else if kind.is_file() {'''
+replace = '''} else if kind.is_file() || kind.is_symlink() {'''
+
+[[plant]]
+name = "kit round3: Devin compaction lists foreign folders"
+meant = "kit_round3_devin_folders_refuse_a_foreign_home"
+runs = ["round3-compaction"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_compaction_routes.rs"
+find = '''    cf_e2e::live::guard::devin_store_path(cfg!(windows), home)?;'''
+replace = '''    let _ = home;'''
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_compaction_routes.rs"
+find = '''if value.is_empty()
+                || !cf_e2e::door::is_made_or_below(&base)
+                || !cf_e2e::door::is_made_or_below(&folder)'''
+replace = '''if false && (value.is_empty()
+                || !cf_e2e::door::is_made_or_below(&base)
+                || !cf_e2e::door::is_made_or_below(&folder))'''
+
+[[plant]]
+name = "kit round3: Devin compaction opens a foreign store"
+meant = "kit_round3_devin_compaction_store_refuses_a_foreign_database"
+runs = ["round3-compaction"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_compaction_routes.rs"
+find = '''if !cf_e2e::live::guard::run_owned_devin_store(file) {'''
+replace = '''if false && !cf_e2e::live::guard::run_owned_devin_store(file) {'''
+
+[[plant]]
+name = "kit round3: Devin subagent copies a linked-out sidecar"
+meant = "kit_round3_subagent_refuses_linked_out_sqlite_sidecars"
+runs = ["round3-subagent"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_subagent.rs"
+find = '''if !cf_e2e::live::guard::run_owned_devin_store(store) {'''
+replace = '''if false && !cf_e2e::live::guard::run_owned_devin_store(store) {'''
+
+[[plant]]
+name = "kit round3: specs read foreign Codex records"
+meant = "kit_round3_specs_refuses_a_foreign_codex_home"
+runs = ["round3-specs"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_specs/ctx.rs"
+find = '''if !cf_e2e::door::is_made_or_below(home)
+        || !cf_e2e::door::is_made_or_below(&home.join("sessions"))'''
+replace = '''if false && (!cf_e2e::door::is_made_or_below(home)
+        || !cf_e2e::door::is_made_or_below(&home.join("sessions")))'''
+
+[[plant]]
+name = "kit round3: history exports foreign records"
+meant = "kit_round3_history_export_refuses_a_foreign_record_folder"
+runs = ["round3-history"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_history_items.rs"
+find = '''if !cf_e2e::door::is_made_or_below(from) {'''
+replace = '''if false && !cf_e2e::door::is_made_or_below(from) {'''
+
+[[plant]]
+name = "kit round3: raw record questions accept foreign homes"
+meant = "kit_round3_all_record_queries_refuse_foreign_homes"
+runs = ["round3-lib"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/ask.rs"
+find = '''if !super::window::record_homes_safe(harness, &env) {'''
+replace = '''if false && !super::window::record_homes_safe(harness, &env) {'''
+
+[[plant]]
+name = "kit round3: dialog marketplace follows a linked root"
+meant = "kit_round3_dialog_marketplace_root_does_not_follow_a_link_out"
+runs = ["round3-dialog"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_harness_dialogs.rs"
+find = '''if fs::symlink_metadata(from).is_ok_and(|meta| meta.file_type().is_symlink()) {'''
+replace = '''if false && fs::symlink_metadata(from).is_ok_and(|meta| meta.file_type().is_symlink()) {'''
+
+[[plant]]
+name = "kit round3: subagent reads a foreign parent record"
+meant = "kit_round3_subagent_parent_record_refuses_a_foreign_file"
+runs = ["round3-subagent"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_subagent.rs"
+find = '''fn read_run_record(path: &Path) -> String {
+    if !cf_e2e::door::is_made_or_below(path) {'''
+replace = '''fn read_run_record(path: &Path) -> String {
+    if false && !cf_e2e::door::is_made_or_below(path) {'''
+
+[[plant]]
+name = "kit round3: Codex newest session follows a linked-out descendant"
+meant = "kit_round3_window_record_refuses_a_link_inside_codex_sessions"
+runs = ["round3-lib"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/window.rs"
+find = '''crate::door::is_made_or_below(&sessions) && no_record_links(&sessions)'''
+replace = '''crate::door::is_made_or_below(&sessions)'''
+
+[[plant]]
+name = "kit round4: kept WAL copies an outside shm"
+meant = "kit_round4_kept_wal_does_not_copy_linked_shm"
+runs = ["round4-subagent"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_subagent.rs"
+find = '''        if !cf_e2e::door::is_made_or_below(path) {
+            continue;
+        }
+        let name = path'''
+replace = '''        let name = path'''
+
+
+[[plant]]
+name = "kit parity: Claude copies owner skills into its run config"
+meant = "t1700_run_config_excludes_owner_and_contains_its_own_items"
+runs = ["round5-owner-skills"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''    let config = login.folder()?;'''
+replace = '''    let config = login.folder()?;
+    let owner_skills = cf_e2e::live::machine::home()?.join(".claude").join("skills");
+    cf_e2e::door::copy_tree(&owner_skills, &config.join("skills"), &|_| false)?;'''
+
+[[plant]]
+name = "kit parity: Claude plain window accepts a missing run skill"
+meant = "t1700_plain_missing_skill_fails_by_name"
+runs = ["round5-parity"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''    if !plain.skill_names.contains(GLOBAL_SKILL) {'''
+replace = '''    if false && !plain.skill_names.contains(GLOBAL_SKILL) {'''
+
+[[plant]]
+name = "kit parity: Claude plain window accepts a missing run MCP server"
+meant = "t1700_plain_missing_server_fails_by_name"
+runs = ["round5-parity"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''    if !plain.servers.contains(SERVER_NAME) {'''
+replace = '''    if false && !plain.servers.contains(SERVER_NAME) {'''
+
+[[plant]]
+name = "kit parity: Claude syncs account skills into the run"
+meant = "t1700_run_config_disables_account_skill_and_plugin_sync"
+runs = ["round5-parity"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''"syncClaudeAiSkills": false,
+            "syncClaudeAiPlugins": false,
+            "disableClaudeAiConnectors": true'''
+replace = '''"syncClaudeAiSkills": true,
+            "syncClaudeAiPlugins": false,
+            "disableClaudeAiConnectors": true'''
+
+[[plant]]
+name = "kit parity: Claude syncs account plugins into the run"
+meant = "t1700_run_config_disables_account_skill_and_plugin_sync"
+runs = ["round5-parity"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''"syncClaudeAiSkills": false,
+            "syncClaudeAiPlugins": false,
+            "disableClaudeAiConnectors": true'''
+replace = '''"syncClaudeAiSkills": false,
+            "syncClaudeAiPlugins": true,
+            "disableClaudeAiConnectors": true'''
+
+[[plant]]
+name = "kit parity: Claude connects the owner's account connectors"
+meant = "t1700_run_config_disables_account_connectors"
+runs = ["round5-parity"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''"syncClaudeAiSkills": false,
+            "syncClaudeAiPlugins": false,
+            "disableClaudeAiConnectors": true'''
+replace = '''"syncClaudeAiSkills": false,
+            "syncClaudeAiPlugins": false,
+            "disableClaudeAiConnectors": false'''
+
+[[plant]]
+name = "kit parity: Claude keeps a skill missing from the latest list"
+meant = "t1700_debug_user_skill_list_uses_the_latest_complete_snapshot"
+runs = ["round5-parity"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''            found.skill_names = names
+                .split(',')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+                .collect();'''
+replace = '''            found.skill_names.extend(
+                names.split(',')
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned),
+            );'''
+
+[[plant]]
+name = "kit parity: Claude login-only reads owner configuration"
+meant = "t1700_login_only_never_reads_owner_config_before_or_after"
+runs = ["round5-login-only"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''self.watch_owner = false;'''
+replace = '''self.watch_owner = true;'''
+
+[[plant]]
+name = "kit parity: Claude login-only renews on a test machine"
+meant = "t1700_login_only_refuses_to_renew_on_a_test_machine"
+runs = ["round5-login-only"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''        self.renewal = None;
+        self'''
+replace = '''        let _ = &self.renewal;
+        self'''
+
+[[plant]]
+name = "kit parity: Claude setup selects the owner configuration watcher"
+meant = "t1700_actual_kit_login_composes_with_parity_setup"
+runs = ["round5-parity"]
+platforms = ["linux"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''installed_with_owner_check(Harness::Claude, planned, false)'''
+replace = '''installed_with_owner_check(Harness::Claude, planned, true)'''
+
+[[plant]]
+name = "kit parity: Claude version probe uses the owner's config"
+meant = "t1700_version_probe_uses_the_runs_claude_config"
+runs = ["round5-parity"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_parity/claude.rs"
+find = '''    claude.version_in_claude_config(config)'''
+replace = '''    let _ = config;
+    claude.version()'''
+
+[[plant]]
+name = "kit parity: Claude setup checks the owner's configuration mark"
+meant = "t1700_login_only_needs_no_owner_configuration_mark"
+runs = ["round5-login-only"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''    if (harness != Harness::Claude || watch_owner) && !has_login(&places) {'''
+replace = '''    if !has_login(&places) {'''
+
+[[plant]]
+name = "kit parity: Claude trust resolves the owner's Claude folder"
+meant = "t1700_login_only_trust_does_not_resolve_owner_claude"
+runs = ["round5-login-only"]
+platforms = ["linux", "macos"]
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/login.rs"
+find = '''            super::machine::seed_claude_trust_login_only(config, &self.owner.home)'''
+replace = '''            super::machine::seed_claude_trust(config, &self.owner.home)'''

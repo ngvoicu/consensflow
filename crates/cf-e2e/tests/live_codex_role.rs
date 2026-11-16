@@ -355,7 +355,7 @@ fn check(config: &str, words: &Words, log: &Log) -> Result {
         .with_home_file(Harness::Codex, "CODEX_HOME", "config.toml", config)
         .with_rules(rules(&words.role, false));
     let members = Members::open(&plan, Path::new(FAKE_AGENT), log)?;
-    let codex_home = members.codex_home();
+    let codex_home = members.codex_home()?;
     let home = codex_home.as_path();
     let ran = (|| -> Result {
         let all = [words.role.as_str(), words.own.as_str()];

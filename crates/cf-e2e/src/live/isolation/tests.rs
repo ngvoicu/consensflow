@@ -121,6 +121,10 @@ impl Owner {
         }
         write(&h.join(".pi/agent/auth.json"), &auth(hours(9)));
         write(&h.join(".codex/auth.json"), &auth(hours(9)));
+        write(
+            &h.join(".local/share/devin/credentials.toml"),
+            "api_key = 'fake'\n",
+        );
         owner
     }
 
@@ -237,6 +241,261 @@ impl Owner {
 }
 
 // ---------------------------------------------------------------------- Pi's login
+
+#[test]
+fn codex_copy_loads_the_0_169_token_shape_without_a_refresh_token() {
+    // Codex 0.169.0's AuthDotJson and TokenData deserialize these fields:
+    // https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/login/src/auth/storage.rs#L51-L64
+    // https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/login/src/token_data.rs#L10-L33
+    // get_token_data also requires last_refresh to be present:
+    // https://github.com/openai/codex/blob/rust-v0.169.0/codex-rs/login/src/auth/manager.rs#L656-L667
+    #[derive(serde::Deserialize)]
+    struct TokenData {
+        id_token: String,
+        access_token: String,
+        refresh_token: String,
+        account_id: Option<String>,
+    }
+    #[derive(serde::Deserialize)]
+    struct AuthDotJson {
+        tokens: TokenData,
+        last_refresh: String,
+    }
+
+    let owner = Owner::new();
+    write(
+        &owner.path(".codex/auth.json"),
+        &json!({
+            "OPENAI_API_KEY": null,
+            "tokens": {
+                // Three nonempty JWT parts, with a base64url-encoded empty JSON payload.
+                "id_token": "a.e30.a",
+                "access_token": ACCESS,
+                "refresh_token": REFRESH,
+                "account_id": "fabricated-account",
+                "nested": [{"another_Refresh_token": REFRESH}]
+            },
+            "last_refresh": "2020-01-01T00:00:00Z"
+        })
+        .to_string(),
+    );
+    let isolation = owner.codex();
+    let home = isolation.made_at(at(NOW)).unwrap();
+    let text = fs::read_to_string(home.join("codex/auth.json")).unwrap();
+    assert!(
+        !text.contains(REFRESH),
+        "the input refresh token was copied"
+    );
+    let copy: AuthDotJson = serde_json::from_str(&text)
+        .unwrap_or_else(|error| panic!("Codex's required fields did not parse: {error}"));
+    assert_eq!(copy.tokens.id_token, "a.e30.a");
+    assert_eq!(copy.tokens.access_token, ACCESS);
+    assert_eq!(
+        copy.tokens.refresh_token, "",
+        "the placeholder must not be a token"
+    );
+    assert_eq!(
+        copy.tokens.account_id.as_deref(),
+        Some("fabricated-account")
+    );
+    let last_refresh: jiff::Timestamp = copy.last_refresh.parse().unwrap();
+    assert_eq!(last_refresh.as_millisecond(), at(NOW));
+}
+
+#[test]
+fn codex_api_key_copy_adds_no_token_fields_and_invalid_tokens_are_refused() {
+    let copy = super::super::login::codex_copy(
+        &json!({"OPENAI_API_KEY": "fake-api-key", "refresh_key": REFRESH}).to_string(),
+        at(NOW),
+    )
+    .unwrap();
+    let copy: Value = serde_json::from_str(&copy).unwrap();
+    assert_eq!(copy["OPENAI_API_KEY"], "fake-api-key");
+    assert!(copy.get("tokens").is_none());
+    assert!(copy.get("last_refresh").is_none());
+    assert!(!copy.to_string().contains(REFRESH));
+    assert!(super::super::login::codex_copy(r#"{"tokens": 3}"#, at(NOW)).is_err());
+}
+
+#[test]
+fn codex_login_copy_has_no_refresh_keys_at_any_depth() {
+    let owner = Owner::new();
+    let isolation = owner.codex();
+    let home = isolation.made_at(at(NOW)).unwrap();
+    let copied: Value =
+        serde_json::from_slice(&fs::read(home.join("codex/auth.json")).unwrap()).unwrap();
+    assert!(
+        copied["openai"].get("refresh").is_none(),
+        "refresh key was copied"
+    );
+    assert_eq!(copied["openai"]["access"], ACCESS);
+}
+
+#[test]
+fn kit_round3_devin_does_not_carry_git_credentials() {
+    let owner = Owner::new();
+    write(&owner.path(".config/git/config"), "[user]\nname = owner\n");
+    write(
+        &owner.path(".config/git/credentials"),
+        "fabricated credential",
+    );
+    let isolation = owner.devin();
+    let home = isolation.made_at(at(NOW)).unwrap();
+    assert!(
+        !home.join("config/git/credentials").exists(),
+        "the owner's git credentials were copied"
+    );
+}
+
+#[test]
+fn kit_round3_pi_package_skips_links_out_and_keeps_links_inside() {
+    let owner = Owner::new();
+    owner.cliproxyapi(&proxy_answering());
+    let foreign = tempfile::tempdir().unwrap();
+    write(
+        &foreign.path().join("login.json"),
+        "fabricated refresh token",
+    );
+    let package = owner.path(".pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider");
+    std::os::unix::fs::symlink(
+        foreign.path().join("login.json"),
+        package.join("extensions/leak.json"),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink("lib.ts", package.join("extensions/internal.ts")).unwrap();
+    let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
+    let home = isolation.made_at(at(NOW)).unwrap();
+    let copy =
+        home.join("pi/agent/npm/node_modules/@router-for-me/pi-cliproxyapi-provider/extensions");
+    assert!(
+        !copy.join("leak.json").exists(),
+        "a linked-out login was copied"
+    );
+    assert!(
+        fs::symlink_metadata(copy.join("internal.ts"))
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the package's internal link was lost"
+    );
+    assert!(
+        fs::canonicalize(copy.join("internal.ts"))
+            .unwrap()
+            .starts_with(fs::canonicalize(&copy).unwrap()),
+        "the internal link points back to the owner's package"
+    );
+    assert_eq!(
+        fs::read_to_string(copy.join("internal.ts")).unwrap(),
+        "the extension's library"
+    );
+}
+
+#[test]
+fn kit_round3_pi_model_cache_does_not_follow_a_link_out() {
+    let owner = Owner::new();
+    owner.cliproxyapi(&proxy_answering());
+    let foreign = tempfile::tempdir().unwrap();
+    write(
+        &foreign.path().join("login.json"),
+        "fabricated refresh token",
+    );
+    let cache = owner.path(".pi/agent/cliproxyapi-models.json");
+    fs::remove_file(&cache).unwrap();
+    std::os::unix::fs::symlink(foreign.path().join("login.json"), &cache).unwrap();
+    let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
+    if let Ok(home) = isolation.made_at(at(NOW)) {
+        assert!(
+            !home.join("pi/agent/cliproxyapi-models.json").exists(),
+            "a linked-out cache was copied"
+        );
+    }
+}
+
+#[test]
+fn pi_login_copy_has_no_nested_refresh_keys() {
+    let text = json!({"openai":{"type":"oauth","access":"fake","refresh":"fake","expires":ends(hours(9)),"nested":[{"REFRESH_key":"fake"}]}}).to_string();
+    let copy = pi::login(
+        &text,
+        Some(&["openai".to_owned()]),
+        at(NOW),
+        LEFT_2H,
+        "fixture",
+    )
+    .unwrap();
+    assert!(
+        copy["openai"]["nested"][0].get("REFRESH_key").is_none(),
+        "nested refresh key was copied"
+    );
+    assert_eq!(copy["openai"]["access"], "fake");
+}
+
+#[test]
+fn kit_disclosure_pi_refuses_a_refresh_named_provider_key() {
+    let text = json!({"Refresh_provider":{"type":"api_key","key":"fake"}}).to_string();
+    let result = pi::login(
+        &text,
+        Some(&["Refresh_provider".to_owned()]),
+        at(NOW),
+        LEFT_2H,
+        "fixture",
+    );
+    assert!(
+        result.is_err(),
+        "a refresh-named key would be copied as a provider"
+    );
+}
+
+#[test]
+fn kit_disclosure_valid_devin_login_is_not_refused() {
+    let text = "api_key = 'fake'\n";
+    let parsed: std::result::Result<toml::Value, _> = toml::from_str(text);
+    assert!(parsed.is_ok(), "fabricated TOML did not parse: {parsed:?}");
+    assert!(super::super::login::toml_copy(text, "Devin").is_ok());
+    assert!(super::super::login::toml_copy(
+        "api_key = 'fake'\n[nested]\nrefreshToken = 'fake'\n",
+        "Devin"
+    )
+    .is_err());
+}
+
+#[test]
+fn devin_login_with_a_refresh_key_is_never_copied() {
+    let owner = Owner::new();
+    write(
+        &owner.path(".local/share/devin/credentials.toml"),
+        "api_key = 'fake'\nrefresh_token = 'fake'\n",
+    );
+    let isolation = owner.devin();
+    match isolation.made_at(at(NOW)) {
+        Err(_) => (),
+        Ok(home) => {
+            let copy = fs::read_to_string(home.join("data/devin/credentials.toml")).unwrap();
+            assert!(
+                !copy.to_ascii_lowercase().contains("refresh_token"),
+                "refresh key was copied"
+            );
+        }
+    }
+}
+
+#[test]
+fn kit_disclosure_pi_proxy_config_copies_no_refresh_keys() {
+    let owner = Owner::new();
+    owner.cliproxyapi(&proxy_answering());
+    let file = owner.path(".pi/agent/cliproxyapi.json");
+    let mut config: Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+    config["nested"] = json!([{"refreshToken":"fake"}]);
+    write(&file, &config.to_string());
+    let isolation = owner.pi("cliproxyapi/swe-2", hours(1));
+    let home = isolation.made_at(at(NOW)).unwrap();
+    let copy: Value =
+        serde_json::from_slice(&fs::read(home.join("pi/agent/cliproxyapi.json")).unwrap()).unwrap();
+    assert!(
+        copy["nested"][0].get("refreshToken").is_none(),
+        "refresh key was copied"
+    );
+    assert_eq!(copy["apiKey"], PROXY_KEY);
+}
 
 #[test]
 fn a_pi_model_is_on_the_provider_before_its_first_slash() {
@@ -413,6 +672,10 @@ fn a_pi_run_is_given_a_folder_of_its_own_with_the_login_it_needs_and_nothing_els
                 "PI_CODING_AGENT_DIR".to_owned(),
                 home.join("pi/agent").display().to_string()
             ),
+            (
+                "PI_CODING_AGENT_SESSION_DIR".to_owned(),
+                home.join("pi/agent/sessions").display().to_string()
+            ),
             ("PI_OFFLINE".to_owned(), "1".to_owned())
         ]
     );
@@ -524,10 +787,14 @@ fn a_pi_run_on_a_provider_the_agent_folder_gives_pi_carries_its_files_and_its_lo
         !copied.contains(PROXY_META),
         "the refresh was copied: {copied}"
     );
-    // The config and the models come whole; the settings name the provider's package alone.
+    // The config retains its non-refresh fields; the settings name the provider's package alone.
     assert_eq!(
-        fs::read_to_string(home.join("pi/agent/cliproxyapi.json")).unwrap(),
-        fs::read_to_string(owner.path(".pi/agent/cliproxyapi.json")).unwrap()
+        serde_json::from_slice::<Value>(&fs::read(home.join("pi/agent/cliproxyapi.json")).unwrap())
+            .unwrap(),
+        serde_json::from_slice::<Value>(
+            &fs::read(owner.path(".pi/agent/cliproxyapi.json")).unwrap()
+        )
+        .unwrap()
     );
     assert_eq!(
         serde_json::from_str::<Value>(
@@ -986,10 +1253,11 @@ fn a_codex_run_is_given_the_login_alone_and_what_it_configures_goes_in_its_own_h
         )]
     );
     assert_eq!(files_below(&home), ["codex/auth.json"]);
-    assert_eq!(
-        fs::read_to_string(home.join("codex/auth.json")).unwrap(),
-        auth(hours(9))
-    );
+    let copied: Value =
+        serde_json::from_slice(&fs::read(home.join("codex/auth.json")).unwrap()).unwrap();
+    let mut expected: Value = serde_json::from_str(&auth(hours(9))).unwrap();
+    super::super::login::without_refresh(&mut expected);
+    assert_eq!(copied, expected);
     assert_eq!(mode(&home.join("codex/auth.json")), 0o600);
     // A check that configures Codex writes in the run's home; the owner's config is as it was.
     isolation
@@ -1074,6 +1342,10 @@ fn a_home_made_in_a_folder_reached_through_a_link_is_named_through_the_link() {
     assert!(home.starts_with(&linked), "{}", home.display());
     for (name, value) in isolation.vars_in(&home) {
         assert!(Path::new(&value).starts_with(&linked), "{name}: {value}");
+        if name == "GIT_CONFIG_GLOBAL" {
+            assert_eq!(Path::new(&value), home.join("config/git/config"));
+            continue;
+        }
         assert_eq!(
             fs::canonicalize(&value)
                 .unwrap()
@@ -1101,7 +1373,8 @@ fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_none_of_the_othe
             "XDG_CONFIG_HOME",
             "XDG_DATA_HOME",
             "XDG_STATE_HOME",
-            "XDG_CACHE_HOME"
+            "XDG_CACHE_HOME",
+            "GIT_CONFIG_GLOBAL"
         ]
     );
     for (name, value) in &vars {
@@ -1144,10 +1417,10 @@ fn a_devin_run_is_given_the_four_xdg_folders_with_its_login_and_none_of_the_othe
 /// to write there: the owner's `~/.local/share/claude` (Claude Code's versions, which its updater
 /// writes) was the run's `$XDG_DATA_HOME/claude` in a rig that seated Devin and Claude (T-1373).
 /// A Devin home holds no link, and none of the owner's but Devin's own login and config and a
-/// copy of git's config, which a window's git reads below `XDG_CONFIG_HOME`.
+/// generated git config, which a window's git reads by `GIT_CONFIG_GLOBAL`.
 #[cfg(unix)]
 #[test]
-fn a_devin_home_holds_no_link_to_the_owners_folders_and_copies_gits_config_alone() {
+fn a_devin_home_holds_no_link_to_the_owners_folders_and_has_its_own_git_config() {
     let owner = Owner::new();
     write(
         &owner.path(".local/share/claude/versions/2.1.321"),
@@ -1177,7 +1450,7 @@ fn a_devin_home_holds_no_link_to_the_owners_folders_and_copies_gits_config_alone
     assert!(fs::symlink_metadata(&git).unwrap().is_file());
     assert_eq!(
         fs::read_to_string(&git).unwrap(),
-        "[user]\n\tname = the owner\n"
+        "[user]\n\tname = ConsensFlow Live\n\temail = live@consensflow.invalid\n"
     );
 }
 
@@ -1901,14 +2174,25 @@ fn a_pi_run_is_given_the_access_token_and_no_refresh_token_and_the_owners_file_i
 }
 
 #[test]
-fn a_codex_copy_keeps_the_warning_that_it_may_have_used_up_the_machines_refresh_token() {
+fn a_codex_copy_does_not_claim_to_have_used_up_the_machines_refresh_token() {
     let said = said(
         Harness::Codex,
         &[],
         &["the run's Codex wrote a different login".to_owned()],
     );
-    assert!(said.contains("may now be stale"), "{said}");
-    assert!(!said.contains("holds no refresh token"), "{said}");
+    assert!(!said.contains("may now be stale"), "{said}");
+    assert!(said.contains("holds no refresh token"), "{said}");
+}
+
+#[test]
+fn a_devin_copy_does_not_claim_to_have_used_up_the_machines_refresh_token() {
+    let said = said(
+        Harness::Devin,
+        &[],
+        &["the run's Devin wrote a different login".to_owned()],
+    );
+    assert!(!said.contains("may now be stale"), "{said}");
+    assert!(said.contains("holds no refresh token"), "{said}");
 }
 
 #[test]

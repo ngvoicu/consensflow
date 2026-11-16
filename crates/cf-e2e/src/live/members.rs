@@ -290,25 +290,15 @@ impl Members {
     /// The Claude config folder the project's Claude windows keep their sessions
     /// and transcripts in ([`super::claude`] reads them there): the
     /// `CLAUDE_CONFIG_DIR` the rig gives them, and else `.claude` in its home.
-    pub fn claude_config(&self) -> PathBuf {
-        let var = |name: &str| self.rig.var(name).filter(|value| !value.is_empty());
-        match (var("CLAUDE_CONFIG_DIR"), var("HOME")) {
-            (Some(config), _) => PathBuf::from(config),
-            (None, Some(home)) => Path::new(home).join(".claude"),
-            (None, None) => PathBuf::from(".claude"),
-        }
+    pub fn claude_config(&self) -> Result<PathBuf> {
+        super::window::owned_harness_dir(self.rig.environment(), "CLAUDE_CONFIG_DIR", ".claude")
     }
 
     /// The Codex home the project's Codex windows keep their threads in: the
     /// `CODEX_HOME` the rig gives them (the kit's home of the run's own,
     /// [`super::isolation`]), and else `.codex` in its home.
-    pub fn codex_home(&self) -> PathBuf {
-        let var = |name: &str| self.rig.var(name).filter(|value| !value.is_empty());
-        match (var("CODEX_HOME"), var("HOME")) {
-            (Some(home), _) => PathBuf::from(home),
-            (None, Some(home)) => Path::new(home).join(".codex"),
-            (None, None) => PathBuf::from(".codex"),
-        }
+    pub fn codex_home(&self) -> Result<PathBuf> {
+        super::window::owned_harness_dir(self.rig.environment(), "CODEX_HOME", ".codex")
     }
 
     /// The variable `name` of the environment the rig gives its windows, where it gives it

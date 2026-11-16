@@ -2511,7 +2511,7 @@ runs = ["muse-live"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/guard.rs"
 find = '''
-    copy_kept(
+    copy_muse_login(
         &home.join(".config/muse/auth.json"),
         &scratch.join("config/muse/auth.json"),
     )?;
@@ -3462,10 +3462,10 @@ find = '''            match locked_by(&lock) {
 replace = '''            match locked_by(&lock) {
                 Ok(named) => named.or_else(|| held_by(&lock, holders)),'''
 
-# T-985 P3-2 on T-790: the live probes that run Muse's TUI alone copy the person's auth.json,
-# which off a Mac is the whole login: they refuse there, before anything is made or spent.
+# T-985 P3-2 on T-790: the live Muse TUI probes depend on a Mac's Keychain-backed login,
+# so they refuse elsewhere before anything is made or spent.
 [[plant]]
-name = "muse: the live TUI probes run off a Mac on a copy of the whole login"
+name = "muse: the live TUI probes run without a Mac Keychain-backed login"
 meant = "off_a_mac_the_muse_tui_probes_refuse_plainly_before_anything_is_made"
 runs = ["muse-tui-probes"]
 

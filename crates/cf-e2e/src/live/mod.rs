@@ -68,9 +68,11 @@
 //! token (a copy that cannot renew its access token cannot use up the Keychain's refresh token, and
 //! fails loudly where the access token ends), says it loudly if the copy was changed all the same, and fails if the person's
 //! `settings.json` changed, or `~/.claude.json`, `history.jsonl` or `projects` gained
-//! anything of the run's folders. A run with no home to look for the login in has none to
-//! copy, and is as it was. On Windows each Claude window starts through a `.cmd` and a Node
-//! script ([`machine::windows_wrapper`]), where the shell scripts of the other machines are.
+//! anything of the run's folders. Claude parity reads none of those owner files, and therefore
+//! cannot check them for changes; it still checks the login and its copy, and does not renew.
+//! A run with no home to look for the login in has none to copy, and is as it was. On Windows
+//! each Claude window starts through a `.cmd` and a Node script ([`machine::windows_wrapper`]),
+//! where the shell scripts of the other machines are.
 //! `--keep` never keeps the folder, which holds a login: it copies the
 //! conversations and sessions Claude Code kept there into the kept home first
 //! ([`login::Login`], `<kept home>/home/.claude`: the rig's root, where `--keep` says the home stays).
@@ -126,9 +128,10 @@ use crate::rig::{HarnessHome, Rig};
 use crate::{Error, Result};
 
 pub use machine::{
-    claude_project_key, codex, command, installed, installed_for, isolated_claude, lacks, rig,
-    rig_with_claude_config, rig_with_stand_ins, seated, shimmed_claude,
-    shimmed_claude_with_servers, windows_wrapper, working_command, Harness, Installed, ISOLATION,
+    claude_project_key, codex, command, installed, installed_for, installed_for_claude_parity,
+    isolated_claude, lacks, rig, rig_with_claude_config, rig_with_stand_ins, seated,
+    shimmed_claude, shimmed_claude_with_servers, windows_wrapper, working_command, Harness,
+    Installed, ISOLATION,
 };
 pub use who::{between, Who};
 

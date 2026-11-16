@@ -182,7 +182,7 @@ fn keep_transcripts(members: &Members, agent: &str, folder: &Path) -> Result<Vec
         if sessions.contains(&session) {
             continue;
         }
-        if let Some(file) = live::claude::transcript_file(&members.claude_config(), &session) {
+        if let Some(file) = live::claude::transcript_file(&members.claude_config()?, &session) {
             let to = folder.join(format!("{label}-{session}.jsonl"));
             cf_e2e::door::copy(&file, &to)?;
             kept.push(to);

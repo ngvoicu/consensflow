@@ -36,7 +36,6 @@ use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use cf_e2e::devin_store;
 use cf_e2e::live::members::Account;
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Member, Open, Window};
@@ -108,6 +107,9 @@ impl Watched<'_> {
 
     /// The store, read-only, as the daemon reads it; none while it cannot be opened.
     fn db(&self) -> Option<Connection> {
+        if !live::guard::run_owned_devin_store(&self.store) {
+            return None;
+        }
         Connection::open_with_flags(&self.store, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()
     }
 
@@ -407,10 +409,6 @@ fn what_devin_writes_of_a_paste_at_rest_queued_and_cut_by_the_stop_is_what_the_d
             .member(Member::new("worker", ROLE).first_message(&first))
             .open(&log)?;
         let var = |name: &str| rig.var(name).map(str::to_owned);
-        let home = rig
-            .var("HOME")
-            .or_else(|| rig.var("USERPROFILE"))
-            .unwrap_or_default();
         let env: Vec<(String, String)> = ["HOME", "USERPROFILE", "APPDATA", "XDG_DATA_HOME"]
             .iter()
             .filter_map(|name| var(name).map(|value| ((*name).to_owned(), value)))
@@ -424,12 +422,7 @@ fn what_devin_writes_of_a_paste_at_rest_queued_and_cut_by_the_stop_is_what_the_d
             .unwrap_or_default();
         let watched = Watched {
             window: &window,
-            store: devin_store::location(
-                cfg!(windows),
-                home,
-                rig.var("APPDATA"),
-                rig.var("XDG_DATA_HOME"),
-            ),
+            store: live::guard::devin_store_path(cfg!(windows), &env)?,
             wire,
             env,
         };
