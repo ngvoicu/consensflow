@@ -84,16 +84,13 @@ fn an_effort_the_run_names_is_kept_and_so_is_the_daemons_check_of_it() -> Outcom
 #[test]
 fn the_roster_of_the_muse_cases_gives_its_worker_the_least_effort_too() -> Outcome {
     // The Muse cases write their own roster (`muse::members::project`); the worker it is given is
-    // read the same way for any harness, and the stand-in Codex lists efforts for this model. Only
-    // the handle is Muse's to say, so the case's own check of it is what ends the call.
+    // read the same way for any harness, and the stand-in Codex lists efforts for this model. The
+    // subsequent Muse-kind check rejects it only after the daemon has accepted the selected effort.
     let rig = Rig::start(config().codex(FAKE_CODEX))?;
     let worker = agents::agent_on(&astra(None));
     let ended = cf_e2e::muse::members::project(&rig, &worker).err();
     let said = ended.map(|why| why.to_string()).unwrap_or_default();
-    assert!(
-        said.starts_with("the Muse worker is not @"),
-        "the daemon refused the worker: {said}"
-    );
+    assert!(said.starts_with("the Muse worker did not match"), "{said}");
     assert!(said.contains(r#""effort":"low""#), "{said}");
     rig.close()?;
     Ok(())

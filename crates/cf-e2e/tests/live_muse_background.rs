@@ -3,7 +3,7 @@
 //!
 //!     cargo xtask live muse-background [--keep]
 //!
-//! One real turn on `muse-spark-1.3` at `minimal` (contributor mode off), in Muse's own
+//! One real turn on a Spark model and effort from Muse's account list (contributor mode off), in Muse's own
 //! TUI in a pty, as a member's window is: the model is asked to start a command that
 //! sleeps 40 s in the background and end its turn at once. The case reads Muse's own
 //! log of the session as ConsensFlow does (the harness code's own reader, asked through
@@ -42,7 +42,7 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use cf_e2e::live::{ask, Log};
+use cf_e2e::live::{agents, ask, Log};
 use serde_json::json;
 
 use tui::{
@@ -95,11 +95,10 @@ fn look(id: &str, env: &BTreeMap<String, String>, ended: usize) -> Result<Option
 #[ignore = "live: one real Muse turn on the owner's login (cargo xtask live muse-background)"]
 fn a_command_a_muse_turn_leaves_running_holds_the_task_until_it_ends() -> Outcome {
     tui::on_a_mac()?;
-    // Its one window runs the model the owner chose for Muse's live runs, never the
-    // shared models of `--models`, which no Muse window is asked for yet.
+    // Its one window takes its model from Muse's list, not from shared `--models`.
     let log = Log::own_agents(
         "live muse-background",
-        "it runs Muse on muse-spark-1.3 at minimal",
+        "it runs Muse on an enabled Spark from its account list",
     )
     .map_err(|failed| failed.to_string())?;
     let binary = binary()?;
@@ -124,9 +123,11 @@ fn a_command_a_muse_turn_leaves_running_holds_the_task_until_it_ends() -> Outcom
     if spent.iter().any(|spent| *spent >= 100.0) {
         return Err(format!("100 % of a window is spent ({spent:?}): stopped"));
     }
+    let model = agents::muse_in_env(&env).map_err(|failed| failed.to_string())?;
+    log.say(format!("selected {model} from Muse's account list"));
     let owner_before = owner_files();
-    let mut window = Window::open(&binary, &env, &root_path, &["--yolo"])?;
-    let outcome = watch(&mut window, &root_path, &env, &log);
+    let mut window = Window::open(&binary, &env, &root_path, &model, &["--yolo"])?;
+    let outcome = watch(&mut window, &root_path, &env, &model.name, &log);
     let tail = window.tail();
     window.close();
     let after = usage(&binary, &env, &root_path, &log);
@@ -155,7 +156,13 @@ fn a_command_a_muse_turn_leaves_running_holds_the_task_until_it_ends() -> Outcom
 
 /// Pastes the turn's words and reads the record until what holds the task and lets it
 /// go has been seen, or the limit passes, or the record names another model.
-fn watch(window: &mut Window, root: &Path, env: &BTreeMap<String, String>, log: &Log) -> Outcome {
+fn watch(
+    window: &mut Window,
+    root: &Path,
+    env: &BTreeMap<String, String>,
+    launched: &str,
+    log: &Log,
+) -> Outcome {
     let started = Instant::now();
     // The window is up once its session's log says so.
     let id = loop {
@@ -184,7 +191,7 @@ fn watch(window: &mut Window, root: &Path, env: &BTreeMap<String, String>, log: 
             continue;
         };
         let text = fs::read_to_string(&file).unwrap_or_default();
-        if let Some(model) = text.lines().find_map(another_model) {
+        if let Some(model) = text.lines().find_map(|line| another_model(line, launched)) {
             return Err(format!("the record names another model, {model}: stopped"));
         }
         let ended = text.matches("\"kind\":\"terminal\",\"terminal\"").count();

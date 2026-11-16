@@ -22,6 +22,7 @@
 //! on without a daemon ([`agent`], which the test binary `harness-ask` is asked
 //! the window's command line by).
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use serde_json::{json, Value};
@@ -536,6 +537,60 @@ struct Listed {
     disabled: bool,
 }
 
+/// The account's preferred enabled Spark, used for both roster and direct probes.
+fn preferred_muse(listed: &[Listed]) -> Option<Model> {
+    let chosen = ["muse-spark-1.3", "muse-spark-1.2"]
+        .iter()
+        .find_map(|name| {
+            listed
+                .iter()
+                .find(|item| !item.disabled && item.name == *name)
+        })?;
+    Some(Model {
+        harness: Harness::Muse,
+        name: chosen.name.clone(),
+        effort: chosen.efforts.first().cloned(),
+    })
+}
+
+/// The account's model from the direct `harness-ask` answer. A bundled or missing list
+/// is not evidence of the account's models and must not start a paid turn.
+fn muse_from_answer(answer: &Value) -> Result<Model> {
+    if answer["stale"] != false {
+        return Err(Error::Daemon(
+            "Muse did not return a fresh account model list".to_owned(),
+        ));
+    }
+    let models = answer["models"]
+        .as_array()
+        .ok_or_else(|| Error::Daemon("Muse's account model list is missing".to_owned()))?;
+    let models = models
+        .iter()
+        .filter_map(|item| {
+            Some(Listed {
+                name: item["id"].as_str()?.to_owned(),
+                efforts: item["efforts"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|value| value.as_str().map(str::to_owned))
+                    .collect(),
+                disabled: item["contributor"] != false || item["disabled"] == true,
+            })
+        })
+        .collect::<Vec<_>>();
+    preferred_muse(&models).ok_or_else(|| {
+        Error::Daemon("Muse's account lists no enabled Spark model the kit knows".to_owned())
+    })
+}
+
+/// Ask Muse's host for its account list with the caller's already isolated environment.
+/// This opens no window and spends no model turn.
+pub fn muse_in_env(env: &BTreeMap<String, String>) -> Result<Model> {
+    let answer = super::ask::question(&json!({ "op": "muse_models", "env": env }))?;
+    muse_from_answer(&answer)
+}
+
 /// What `models.get` is asked: the harness by its CLI's name (`claude`), which the daemon reads
 /// the list of, and not by its kind (`claude-code`), which a roster row and a member name.
 fn models_asked(harness: Harness) -> Value {
@@ -627,17 +682,13 @@ fn with_least_efforts(
                 lists.push((model.harness, listed));
             }
             if choose_muse {
-                let choice = lists.iter().filter(|(harness, _)| *harness == Harness::Muse)
-                    .flat_map(|(_, listed)| listed)
-                    .filter(|listed| !listed.disabled)
-                    .collect::<Vec<_>>();
-                let chosen = ["muse-spark-1.3", "muse-spark-1.2"].iter()
-                    .find_map(|name| choice.iter().find(|listed| listed.name == *name));
+                let chosen = lists.iter().find(|(harness, _)| *harness == Harness::Muse)
+                    .and_then(|(_, listed)| preferred_muse(listed));
                 if let Some(fields) = row.as_object_mut() {
                     match chosen {
                         Some(listed) => {
                             fields.insert("model".to_owned(), json!(listed.name));
-                            if let Some(effort) = listed.efforts.first() {
+                            if let Some(effort) = listed.effort {
                                 fields.insert("effort".to_owned(), json!(effort));
                             } else {
                                 fields.remove("effort");
@@ -1135,6 +1186,26 @@ mod tests {
         assert!(no_choice[0].get("model").is_none());
         assert!(no_choice[0].get("effort").is_none());
         assert!(notes.iter().any(|note| note.contains("--models muse=")));
+    }
+
+    #[test]
+    fn t1744_direct_muse_probes_choose_a_fresh_account_list_and_refuse_unusable_lists() {
+        let answer = json!({ "stale": false, "models": [
+            { "id": "muse-spark-1.3-contributor", "contributor": true, "efforts": ["minimal"] },
+            { "id": "muse-spark-1.2", "contributor": false, "efforts": ["low", "high"] }
+        ] });
+        let chosen = muse_from_answer(&answer).unwrap();
+        assert_eq!(chosen.name, "muse-spark-1.2");
+        assert_eq!(chosen.effort.as_deref(), Some("low"));
+        let mut stale = answer.clone();
+        stale["stale"] = json!(true);
+        assert!(muse_from_answer(&stale).is_err());
+        let mut missing = answer.clone();
+        missing["models"] = json!([]);
+        assert!(muse_from_answer(&missing).is_err());
+        let mut disabled = answer;
+        disabled["models"][1]["disabled"] = json!(true);
+        assert!(muse_from_answer(&disabled).is_err());
     }
 
     /// T-1369: a row of a real harness that names no effort is given the least one its harness

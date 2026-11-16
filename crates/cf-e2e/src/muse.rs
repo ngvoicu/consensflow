@@ -923,10 +923,6 @@ pub mod members {
     /// The worker's agent, as the roster names it.
     pub const WORKER: &str = "muse-worker";
 
-    /// The handle the Muse worker has on the staff: named by its model and effort as Muse
-    /// runs them (spec harness-models), not by the stand-in's name.
-    pub const WORKER_HANDLE: &str = "muse-spark-1-3-minimal";
-
     /// The worker of the echo rig's cases: the live tests' model and effort.
     pub fn echo_worker() -> Value {
         json!({ "kind": "muse", "model": "muse-spark-1.3", "effort": "minimal" })
@@ -942,27 +938,74 @@ pub mod members {
         }
         let mut agents =
             vec![json!({ "id": "chief", "kind": "claude-code", "model": "fake-chief" })];
-        // A worker on a model that lists efforts and is given none is refused by the daemon.
-        agents.extend(crate::live::agents::with_efforts(rig, &[worker], |_| {}));
+        // A preselected Muse model and effort must stay paired for the session checks. Other
+        // workers, or one without an effort, still need the daemon's least listed effort.
+        if worker["kind"] == "muse" && worker["effort"].as_str().is_some() {
+            agents.push(worker);
+        } else {
+            agents.extend(crate::live::agents::with_efforts(rig, &[worker], |_| {}));
+        }
+        let expected = agents.last().cloned().unwrap_or(Value::Null);
         let roster = json!({ "schemaVersion": 1, "agents": agents });
         rig.stand_ins(&roster)?;
         let project = Project::open(rig, "chief", json!({}))?;
         let added = project.add_member(WORKER)?;
-        if added["member"]["handle"] != WORKER_HANDLE {
+        if !member_matches(&expected, &added) {
             return Err(crate::Error::Daemon(format!(
-                "the Muse worker is not @{WORKER_HANDLE}: {added}"
+                "the Muse worker did not match the selected model and effort: {added}"
             )));
         }
         Ok(project)
     }
 
+    fn member_matches(expected: &Value, added: &Value) -> bool {
+        expected["kind"] == "muse"
+            && added["member"]["model"] == expected["model"]
+            && (expected["effort"].is_null() || added["member"]["effort"] == expected["effort"])
+            && added["member"]["handle"]
+                .as_str()
+                .is_some_and(|handle| !handle.is_empty())
+    }
+
+    #[test]
+    fn the_added_worker_must_match_the_selected_model_and_effort() {
+        let expected = json!({"kind":"muse", "model":"muse-spark-1.2", "effort":"low"});
+        let added = json!({"member": {"model":"muse-spark-1.2", "effort":"low", "handle":"muse-spark-1-2-low"}});
+        assert!(member_matches(&expected, &added));
+        let mut wrong = added.clone();
+        wrong["member"]["model"] = json!("muse-spark-1.3");
+        assert!(!member_matches(&expected, &wrong));
+        wrong = added.clone();
+        wrong["member"]["effort"] = json!("high");
+        assert!(!member_matches(&expected, &wrong));
+        wrong = added;
+        wrong["member"]["handle"] = Value::Null;
+        assert!(!member_matches(&expected, &wrong));
+    }
+
     /// The handle of the Muse worker given T-1: its agent's name and words of its own.
     pub fn worker(project: &Project<'_>) -> Result<String> {
-        Ok(project.task(1)?["assignee"]
+        Ok(assigned_worker(&project.task(1)?).to_owned())
+    }
+
+    fn assigned_worker(task: &Value) -> &str {
+        task["assignee"]
             .as_str()
             .unwrap_or_default()
             .trim_start_matches('@')
-            .to_owned())
+    }
+
+    #[test]
+    fn the_assigned_worker_handle_follows_the_selected_model() {
+        assert_eq!(
+            assigned_worker(&json!({"assignee": "@muse-spark-1-2-low"})),
+            "muse-spark-1-2-low"
+        );
+        assert_eq!(
+            assigned_worker(&json!({"assignee": "@muse-spark-1-3-minimal"})),
+            "muse-spark-1-3-minimal"
+        );
+        assert_eq!(assigned_worker(&Value::Null), "");
     }
 
     /// The one Muse session of the rig, its id and its records now.
@@ -975,7 +1018,7 @@ pub mod members {
 
     /// The worker's window, as the board names its pane.
     pub fn pane_of(project: &Project<'_>) -> Result<Value> {
-        Ok(project.lane(WORKER_HANDLE)?["pane"].clone())
+        Ok(project.lane(&worker(project)?)?["pane"].clone())
     }
 
     /// Waits until the worker's window is in its turn: the board says it works, and its
@@ -989,7 +1032,7 @@ pub mod members {
                     .count()
                     >= runs
             });
-            Ok(begun && project.lane(WORKER_HANDLE)?["activity"]["state"] == "working")
+            Ok(begun && project.lane(&worker(project)?)?["activity"]["state"] == "working")
         })
     }
 

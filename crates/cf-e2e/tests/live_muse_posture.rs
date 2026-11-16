@@ -5,7 +5,7 @@
 //!
 //! ConsensFlow opens each member's window in its harness's full-permission mode, Muse's
 //! in `--yolo`. This asks whether a softer mode of Muse's would do: one real turn on
-//! `muse-spark-1.3` at `minimal` (contributor mode off) in each posture, in Muse's own
+//! an enabled Spark from the account's list (contributor mode off) in each posture, in Muse's own
 //! TUI in a pty as `live_muse_background` runs it (`live_muse/tui.rs`), each in a project
 //! and folders of its own, outside every temporary folder (in the checkout's `target`).
 //! The model runs one script that does what a member must be able to do:
@@ -203,7 +203,13 @@ fn printed(log: &str) -> String {
 }
 
 /// Runs one posture's turn in a home of its own under `under`, and reads what came of it.
-fn run(name: &str, posture: &[&str], under: &Path, log: &Log) -> Result<Done, String> {
+fn run(
+    name: &str,
+    posture: &[&str],
+    under: &Path,
+    log: &Log,
+    selected: &mut Option<cf_e2e::live::agents::Model>,
+) -> Result<Done, String> {
     let binary = binary()?;
     let mut root = cf_e2e::door::made_in(under, &format!("live-muse-posture-{name}-"))
         .map_err(|error| error.to_string())?;
@@ -222,9 +228,17 @@ fn run(name: &str, posture: &[&str], under: &Path, log: &Log) -> Result<Done, St
     if spent.is_empty() || spent.iter().any(|spent| *spent >= 100.0) {
         return Err(format!("the allowance says {spent:?}: stopped"));
     }
+    let model = cf_e2e::live::agents::muse_in_env(&env).map_err(|failed| failed.to_string())?;
+    if selected.as_ref().is_some_and(|previous| previous != &model) {
+        return Err(format!(
+            "Muse's selected model changed between postures: {selected:?} to {model}"
+        ));
+    }
+    *selected = Some(model.clone());
+    log.say(format!("{name}: selected {model} from Muse's account list"));
     let owner_before = owner_files();
-    let mut window = Window::open(&binary, &env, &root_path, posture)?;
-    let turn = watch(&mut window, &root_path);
+    let mut window = Window::open(&binary, &env, &root_path, &model, posture)?;
+    let turn = watch(&mut window, &root_path, &model.name);
     let tail = window.tail();
     window.close();
     // A window that never came up, or moved to another model, proves nothing of its posture.
@@ -262,7 +276,7 @@ fn run(name: &str, posture: &[&str], under: &Path, log: &Log) -> Result<Done, St
 /// Pastes the turn's words once the window is up, and waits for its turn to end: whether it
 /// ended in the limit. A window that wrote no log, or a record naming another model, is
 /// the error.
-fn watch(window: &mut Window, root: &Path) -> Result<bool, String> {
+fn watch(window: &mut Window, root: &Path, launched: &str) -> Result<bool, String> {
     let started = Instant::now();
     loop {
         if started.elapsed() > Duration::from_secs(40) {
@@ -286,7 +300,7 @@ fn watch(window: &mut Window, root: &Path) -> Result<bool, String> {
             continue;
         };
         let text = fs::read_to_string(&file).unwrap_or_default();
-        if let Some(model) = text.lines().find_map(another_model) {
+        if let Some(model) = text.lines().find_map(|line| another_model(line, launched)) {
             return Err(format!("the record names another model, {model}: stopped"));
         }
         if text.contains("\"kind\":\"terminal\",\"terminal\"") {
@@ -303,12 +317,13 @@ fn only_full_permission_lets_a_muse_member_reach_the_daemon_commit_and_write_out
     tui::on_a_mac()?;
     let log = Log::own_agents(
         "live muse-posture",
-        "it runs Muse on muse-spark-1.3 at minimal",
+        "it runs Muse on an enabled Spark from its account list",
     )
     .map_err(|failed| failed.to_string())?;
     ask::prepare().map_err(|failed| failed.to_string())?;
     let under = checkout::path("app/src-tauri/target");
     let mut seen: BTreeMap<&str, Done> = BTreeMap::new();
+    let mut selected = None;
     for (name, posture) in POSTURES {
         let others = other_tests_muse();
         if !others.is_empty() {
@@ -316,7 +331,7 @@ fn only_full_permission_lets_a_muse_member_reach_the_daemon_commit_and_write_out
                 "another test runs Muse now (pids {others:?}): one live session at a time"
             ));
         }
-        let done = run(name, posture, &under, &log)?;
+        let done = run(name, posture, &under, &log, &mut selected)?;
         log.say(format!("{name} ({}): {}", posture.join(" "), done.said()));
         seen.insert(name, done);
     }
