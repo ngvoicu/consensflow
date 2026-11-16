@@ -16,7 +16,7 @@ fn own(cf: &CfWord, specs: Option<&ProjectSpecs<'_>>) -> String {
 
 #[test]
 fn short_text_t1715_own_hands_uses_full_paths() {
-    let path = "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf";
+    let path = "/fixture/ConsensFlow-test.app/Contents/Resources/cli/bin/cf";
     let text = own(&CfWord::of_word(path).unwrap(), None);
     assert!(text.contains(&format!("run `{path} guide`")), "{text}");
     assert!(!text.contains("below stands for this command"), "{text}");
@@ -100,9 +100,9 @@ fn own_hands_gives_a_short_text_that_is_whole_in_itself() {
 #[test]
 fn the_short_text_names_the_window_s_own_cf() {
     let cf =
-        CfWord::of_word("/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf").unwrap();
+        CfWord::of_word("/fixture/ConsensFlow-test.app/Contents/Resources/cli/bin/cf").unwrap();
     let text = own(&cf, None);
-    let path = "/Applications/ConsensFlow.app/Contents/Resources/cli/bin/cf";
+    let path = "/fixture/ConsensFlow-test.app/Contents/Resources/cli/bin/cf";
     if PATH_ONCE {
         // Said once, in the paragraph that opens the text; the command after it is `cf`.
         assert!(text.contains(&format!("type it in full every time:\n`{path}`")));
