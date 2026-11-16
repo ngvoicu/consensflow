@@ -3,10 +3,10 @@
 # restored files they had not). The rule is held by tests:
 #
 # Every member's text (`skill/core/staff.md`) says others work in the same folder, never to throw
-# away a change it did not make (no `git checkout` or `git restore` over a file, with unstaging its own change still allowed;
+# away a change it did not make (no `git checkout` or `git restore` over a file;
 # no `git reset --hard`, `git stash` or
 # `git clean` over work that is not committed), and to say a file is restored only once it has
-# checked it (`crates/cf-engine/tests/text/roles.rs`, and the 27 members' rows of
+# checked it (`crates/cf-engine/tests/text/roles.rs`, and the 23 members' rows of
 # `crates/cf-engine/tests/goldens/text.json`, moved by hand).
 #
 # One plant takes a rule out, or puts it wrong; a test fails. Every name holds

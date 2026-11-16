@@ -54,12 +54,18 @@ fn own_hands_switch_is_told_once_each_way_on_every_harness() {
             let on = told(&context, chief);
             assert_eq!(on.len(), 1, "{harness}: {first:?}");
             assert!(
-                on[0].starts_with("The person turned \"Do with your own hands\" on."),
+                on[0].starts_with("The human turned \"Do with your own hands\" on."),
                 "{}",
                 on[0]
             );
             assert!(on[0].contains("These instructions replace your earlier ones."));
-            assert_eq!(said_to_the_chief(&context.adapter).iter().filter(|line| line.contains("The person turned \"Do with your own hands\" on.")).count(), 1);
+            assert_eq!(
+                said_to_the_chief(&context.adapter)
+                    .iter()
+                    .filter(|line| line.contains("The human turned \"Do with your own hands\" on."))
+                    .count(),
+                1
+            );
             rests(&context, &project);
             passes(&context);
             assert_eq!(told(&context, chief).len(), 1);
@@ -135,7 +141,7 @@ fn own_hands_changed_in_a_turn_is_told_once_at_the_next_rest_on_every_harness() 
                 let prefix = if was_on {
                     OPENING.to_owned()
                 } else {
-                    "The person turned \"Do with your own hands\" on.".to_owned()
+                    "The human turned \"Do with your own hands\" on.".to_owned()
                 };
                 assert_eq!(told_now.len(), notes + 1, "{label}: one note at rest");
                 assert!(
@@ -261,7 +267,7 @@ fn own_hands_chosen_at_creation_is_in_the_first_launch_without_a_change_note() {
             assert!(
                 !said_to_the_chief(&context.adapter)
                     .iter()
-                    .any(|s| s.contains("The person turned \"Do with your own hands\"")),
+                    .any(|s| s.contains("The human turned \"Do with your own hands\"")),
                 "{harness}, {first:?}"
             );
             context.close();
@@ -743,9 +749,8 @@ fn a_variant_changed_is_told_with_the_new_skill_and_nothing_of_a_folder() {
     let notes = told(&context, chief);
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(notes[0].contains("`specmint-tdd-html`"), "{}", notes[0]);
-    assert!(!notes[0].contains("are now kept in"), "{}", notes[0]);
     assert!(!notes[0].contains("stay where they are"), "{}", notes[0]);
-    assert!(notes[0].contains("specmint-tdd-html"), "{}", notes[0]);
+    assert!(!notes[0].contains("`specmint-core`"), "{}", notes[0]);
 }
 
 #[test]

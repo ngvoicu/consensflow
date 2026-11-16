@@ -556,7 +556,7 @@ fn the_sub_agents_instructions_are_one_toml_string_that_reads_back_as_they_were(
 }
 
 #[test]
-fn short_text_t1715_codex_role_assembly() {
+fn codex_assembles_its_own_instructions_and_the_consensflow_role() {
     let stage = Stage::new();
     stage.app_server(&[INITIALIZED, &Stage::configured("native")], Ends::Asked);
     assert_eq!(
@@ -565,7 +565,7 @@ fn short_text_t1715_codex_role_assembly() {
     );
 }
 #[test]
-fn short_text_t1715_codex_child() {
+fn codex_child_is_told_it_has_no_board_identity() {
     assert_eq!(
         children("worker"),
         "You are a sub-agent of a ConsensFlow worker; you have no board identity, so never run cf."

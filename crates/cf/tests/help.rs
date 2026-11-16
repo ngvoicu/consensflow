@@ -76,7 +76,7 @@ const BOARD: [(&[&str], &str); 20] = [
             "  cf task add --architect \"…\"       a design for the architect: docs, contracts and the code's\n",
             "                                    frame, nothing that runs; for work big enough to need one\n",
             "  cf task add --research \"…\"        a question for a researcher: what it found, with its\n",
-            "                                    sources; no file changed\n",
+            "                                    sources; no project file changed\n",
             "  cf task add --advice --tier <tier> \"…\"\n",
             "                                    a question for an advisor of that tier: findings and\n",
             "                                    recommendations back, no project file changed\n",

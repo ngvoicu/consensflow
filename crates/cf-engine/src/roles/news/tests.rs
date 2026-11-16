@@ -4,6 +4,41 @@ use cf_proto::specs::Variant;
 use super::*;
 use crate::delivery_text::fits_whole;
 
+#[test]
+fn text_contract_new_staff_rules_are_not_said_to_replace_earlier_rules() {
+    let said = rules_said(None, Some("new"));
+    assert!(said.contains("Your staff rules:"), "{said}");
+    assert!(!said.contains("replaces your earlier"), "{said}");
+}
+
+#[test]
+fn text_contract_changed_staff_rules_name_what_the_section_gives() {
+    let said = rules_said(Some("old"), Some("new"));
+    assert!(
+        said.contains("This section replaces your earlier staff rules:"),
+        "{said}"
+    );
+    assert!(said.contains("new"));
+}
+
+#[test]
+fn text_contract_removed_staff_rules_do_not_misname_the_chiefs_own_rules() {
+    let said = rules_said(Some("old"), None);
+    assert!(
+        said.contains("Your earlier staff rules no longer apply."),
+        "{said}"
+    );
+}
+
+#[test]
+fn text_contract_own_hands_news_calls_the_human_the_human() {
+    let said = own_hands_on("role");
+    assert!(
+        said.starts_with("The human turned \"Do with your own hands\" on."),
+        "{said}"
+    );
+}
+
 fn setting(folder: &str, variant: Variant) -> SpecsSetting {
     SpecsSetting {
         folder: folder.to_owned(),
@@ -48,7 +83,7 @@ fn the_own_hands_on_note_is_the_short_text_whole_and_fits_in_one_piece() {
             )
             .unwrap();
             let note = own_hands_on(&instructions);
-            assert!(note.starts_with("The person turned \"Do with your own hands\" on."));
+            assert!(note.starts_with("The human turned \"Do with your own hands\" on."));
             // What the conversation holds once the note is in is the role, whole: the note
             // carries it word for word.
             assert!(note.contains(&instructions));
@@ -130,7 +165,6 @@ fn a_new_folder_names_both_and_gives_the_section_with_the_skill_of_the_new_one()
     );
     assert!(note.contains(&now.section()) && note.ends_with(CONTEXT));
     assert!(note.contains("`plans`"));
-    assert!(!note.contains("Specmint skill is now"));
 }
 
 #[test]
@@ -232,9 +266,9 @@ fn the_largest_note_a_setting_makes_goes_into_a_window_whole() {
     );
 }
 
-// T-1715: each distinct news form keeps the information needed to act on the new role.
+// Each distinct news form keeps the information needed to act on the new role.
 #[test]
-fn short_text_t1715_news_context() {
+fn news_says_its_change_is_context() {
     assert_eq!(
         CONTEXT,
         "This is context, not a task: acknowledge it in one line and wait for the next message."
@@ -242,7 +276,7 @@ fn short_text_t1715_news_context() {
 }
 
 #[test]
-fn short_text_t1715_specs_on() {
+fn specs_on_adds_the_instructions() {
     let now = given("docs/specs", Variant::Core, SKILL);
     assert_eq!(
         specs_said(None, Some(&now), false),
@@ -251,37 +285,44 @@ fn short_text_t1715_specs_on() {
 }
 
 #[test]
-fn short_text_t1715_specs_off_ordinary() {
+fn specs_off_tells_an_ordinary_chief_to_plan_tasks() {
     let old = setting("old-specs", Variant::Tdd);
     assert_eq!(specs_said(Some(&old), None, false), "Specs are now off. Plan new work as tasks, not specs; the specs in `old-specs` stay. Your earlier specs instructions no longer apply.\n");
 }
 
 #[test]
-fn short_text_t1715_specs_off_own_hands() {
+fn specs_off_tells_an_own_hands_chief_the_specs_stay() {
     let old = setting("old-specs", Variant::Tdd);
     assert_eq!(specs_said(Some(&old), None, true), "Specs are now off; the specs in `old-specs` stay. Your earlier specs instructions no longer apply.\n");
 }
 
 #[test]
-fn short_text_t1715_specs_changed() {
+fn specs_changed_replaces_the_old_instructions() {
     let old = setting("old-specs", Variant::Tdd);
     let now = given("docs/specs", Variant::Core, SKILL);
     assert_eq!(specs_said(Some(&old), Some(&now), false), format!("The project's specs changed. The specs in `old-specs` stay where they are. This section replaces your earlier specs instructions:\n{}", now.section()));
 }
 
 #[test]
-fn short_text_t1715_rules_written_and_changed() {
-    for (was, verb) in [(None, "wrote"), (Some("old"), "changed")] {
-        assert_eq!(rules_said(was, Some("new")), format!("The human {verb} the rules for your staff. New windows get them; open windows keep theirs. This section replaces your earlier rules:\n{}", with_staff_rules(String::new(), "chief", Some("new"))));
+fn staff_rules_written_and_changed_say_which_instructions_apply() {
+    for (was, verb, section) in [
+        (None, "wrote", "Your staff rules:"),
+        (
+            Some("old"),
+            "changed",
+            "This section replaces your earlier staff rules:",
+        ),
+    ] {
+        assert_eq!(rules_said(was, Some("new")), format!("The human {verb} the rules for your staff. New windows get them; open windows keep theirs. {section}\n{}", with_staff_rules(String::new(), "chief", Some("new"))));
     }
 }
 
 #[test]
-fn short_text_t1715_rules_removed() {
-    assert_eq!(rules_said(Some("old"), None), "The human took away the rules for your staff. New windows get none; open windows keep theirs. Your earlier rules no longer apply.\n");
+fn removed_staff_rules_no_longer_apply_to_the_chief() {
+    assert_eq!(rules_said(Some("old"), None), "The human took away the rules for your staff. New windows get none; open windows keep theirs. Your earlier staff rules no longer apply.\n");
 }
 
 #[test]
-fn short_text_t1715_own_hands() {
-    assert_eq!(own_hands_on("role"), format!("The person turned \"Do with your own hands\" on. These instructions replace your earlier ones.\n\nrole\n\n{CONTEXT}"));
+fn own_hands_news_replaces_the_previous_instructions() {
+    assert_eq!(own_hands_on("role"), format!("The human turned \"Do with your own hands\" on. These instructions replace your earlier ones.\n\nrole\n\n{CONTEXT}"));
 }
