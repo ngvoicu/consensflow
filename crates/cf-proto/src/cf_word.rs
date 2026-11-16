@@ -101,9 +101,10 @@ impl CfWord {
     /// `text`, a text ConsensFlow wrote to be typed into the window, with each command it names
     /// by the word `cf` (`cf task get T-3`, in `` `…` `` or in brackets, at the start of a line
     /// or after a space) started by this word instead. A path already written (`…/cf task get`),
-    /// and any other use of the letters, stay as they are.
+    /// and any other use of the letters, stay as they are, and so does a text that says what `cf`
+    /// stands for ([`CF_STANDS_FOR`]): it has the window type the path in full itself, once told.
     pub fn in_text<'a>(&self, text: &'a str) -> Cow<'a, str> {
-        if self.word == "cf" {
+        if self.word == "cf" || text.contains(CF_STANDS_FOR) {
             return Cow::Borrowed(text);
         }
         let mut out = String::new();
@@ -123,6 +124,11 @@ impl CfWord {
         Cow::Owned(out)
     }
 }
+
+/// How a text that names its window's `cf` once begins the note that does it: `cf` below
+/// stands for this command; type it in full every time. Such a text is typed with `cf` in each
+/// of its commands, and is not given the path again when it is read or delivered.
+pub const CF_STANDS_FOR: &str = "`cf` below stands for this command";
 
 impl fmt::Display for CfWord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -263,6 +269,15 @@ mod tests {
     fn with_no_path_a_text_is_left_as_it_is() {
         let text = "cf task get T-1 and cf ask \"…\"";
         assert!(matches!(CfWord::bare().in_text(text), Cow::Borrowed(same) if same == text));
+    }
+
+    #[test]
+    fn a_text_that_says_what_cf_stands_for_is_not_given_the_path_again() {
+        let word = powershell("C:/Program Files/c/cf.exe");
+        let said =
+            format!("{CF_STANDS_FOR}; type it in full every time:\n`x`\n\nrun cf task get T-1");
+        assert!(matches!(word.in_text(&said), Cow::Borrowed(same) if same == said));
+        assert!(matches!(word.in_text("run cf task get T-1"), Cow::Owned(_)));
     }
 
     #[test]

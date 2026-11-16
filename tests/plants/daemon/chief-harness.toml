@@ -1987,14 +1987,14 @@ find = '''<button class="history-icon" type="submit" tabindex="0" aria-label="Cl
 replace = '''<button class="history-icon" type="submit" aria-label="Close"'''
 
 [[plant]]
-name = "view: the light viewer's quiet words are the shade the review measured short"
+name = "view: the light viewer's quiet words lack contrast"
 meant = "draws every text of the viewer at 4.5:1 or more on its own background, light"
 runs = ["tl-ui"]
 
 [[plant.edit]]
 file = "app/ui/page.css"
-find = "    --history-quiet: #5b5f63;"
-replace = "    --history-quiet: #686c70;"
+find = "    --history-quiet: #52525b;"
+replace = "    --history-quiet: #73737a;"
 
 [[plant]]
 name = "view: the dark viewer's quiet words are too dim on a call's block"
@@ -2003,8 +2003,8 @@ runs = ["tl-ui"]
 
 [[plant.edit]]
 file = "app/ui/page.css"
-find = "  --history-quiet: #b0b5ba;"
-replace = "  --history-quiet: #9aa0a6;"
+find = "  --history-quiet: #a1a1aa;"
+replace = "  --history-quiet: #8a8a91;"
 
 [[plant]]
 name = "view: the search's placeholder is the engine's own grey"

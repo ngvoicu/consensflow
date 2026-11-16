@@ -75,13 +75,8 @@ runs = ["rest-engine-text-goldens-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''<!-- worker: result -->
-Your result is the final message of your turn: ConsensFlow collects it when
-you finish and delivers it to whoever asked.'''
-replace = '''<!-- worker: result -->
-Your result is a one-line summary of your turn: ConsensFlow collects it when
-you finish and delivers it to whoever asked.'''
-
+find = "<!-- worker: result -->\nYour result is the final message of your turn:"
+replace = "<!-- worker: result -->\nYour result is a one-line summary of your turn:"
 [[plant]]
 name = "held-rest: the advisor's card says its answer is a one-line summary of its turn"
 meant = "every_role_is_given_the_text_node_gave_it_or_refused_as_node_refused_it"
@@ -89,11 +84,8 @@ runs = ["rest-engine-text-goldens-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = """<!-- advisor: result -->
-Your answer is the final message of your turn: ConsensFlow collects it when you"""
-replace = """<!-- advisor: result -->
-Your answer is a one-line summary of your turn: ConsensFlow collects it when you"""
-
+find = "<!-- advisor: result -->\nYour answer is the final message of your turn:"
+replace = "<!-- advisor: result -->\nYour answer is a one-line summary of your turn:"
 [[plant]]
 name = "held-rest: the reviewer's card says its findings are a one-line summary of its turn"
 meant = "every_role_is_given_the_text_node_gave_it_or_refused_as_node_refused_it"
@@ -101,9 +93,8 @@ runs = ["rest-engine-text-goldens-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = "Your findings are the final message of your turn: ConsensFlow collects them and"
-replace = "Your findings are a one-line summary of your turn: ConsensFlow collects them and"
-
+find = "Your findings are the final message of your turn:"
+replace = "Your findings are a one-line summary of your turn:"
 [[plant]]
 name = "held-rest: the tester's card says its result is a one-line summary of its turn"
 meant = "teach_the_tester_only_the_board_s_commands"
@@ -111,10 +102,8 @@ runs = ["rest-engine-text-roles-tester"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''Your result is the final message of your turn: ConsensFlow collects
-it and'''
-replace = '''Your result is a one-line summary of your turn: ConsensFlow collects
-it and'''
+find = "<!-- tester: result -->\nYour result is the final message of your turn:"
+replace = "<!-- tester: result -->\nYour result is a one-line summary of your turn:"
 
 # --- the Pi channel's grace (ci-pi-ack-timeout-race) ---
 

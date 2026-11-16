@@ -12,7 +12,7 @@ use super::*;
 use crate::deliveries::Delivering;
 use crate::delivery_text::{delivery_text, goes_whole};
 use crate::roles::{
-    role_instructions, role_instructions_for, with_staff_rules, ProjectSpecs, StaffRow,
+    role_instructions, role_instructions_for, with_staff_rules, ProjectSpecs, StaffRow, PATH_ONCE,
 };
 use crate::testing::Context;
 
@@ -47,7 +47,7 @@ fn a_replacement_says_plainly_that_it_replaces_the_instructions_the_conversation
     let body = body_of("the role\nin full", &CfWord::bare());
     assert!(body.starts_with(OPENING));
     assert!(
-        OPENING.contains("replace the ones you were given then"),
+        OPENING.contains("Follow these instructions in place of the earlier ones"),
         "{OPENING}"
     );
     assert!(body.ends_with("\n\nthe role\nin full"), "{body}");
@@ -254,7 +254,7 @@ fn own_hands_role_is_printed_in_one_piece_when_a_session_resumes() {
             )
             .unwrap();
             assert!(role.len() < ordinary.len(), "{cf}, specs on: {specs_on}");
-            assert!(role.contains("project's own folder"));
+            assert!(role.contains("staff of agents, on a ConsensFlow board"));
             let replacement = note(None, "note", body_of(&role, &cf));
             assert!(read_in_one(&replacement, &cf), "{cf}, specs on: {specs_on}");
         }
@@ -340,56 +340,68 @@ fn told_whole_or_told_and_read(text: &str, cf: &CfWord) {
 /// read whole, which the docs of this module say, and the parts it is printed in past that.
 #[test]
 fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_docs_say() {
-    let cf = a_mac();
-    let rows_while = |specs_on, rules: Option<&str>, holds: &dyn Fn(&MessageView) -> bool| {
-        (1..)
+    let most = the_most_rules();
+    // The rows a chief's role holds, with specs on or off and the rules, as `cf inbox read`
+    // prints it for each window's `cf`. `None` means that even an empty staff does not fit.
+    let rows_while = |cf: &CfWord,
+                      specs_on,
+                      rules: Option<&str>,
+                      holds: &dyn Fn(&MessageView, &CfWord) -> bool| {
+        (0..)
             .take_while(|&rows| {
-                holds(&note(
-                    None,
-                    "note",
-                    body_of(&a_chiefs_role_with(rows, specs_on, rules), &cf),
-                ))
+                holds(
+                    &note(
+                        None,
+                        "note",
+                        body_of(&a_chiefs_role_for(cf, rows, specs_on, rules), cf),
+                    ),
+                    cf,
+                )
             })
             .last()
-            .unwrap_or(0)
     };
-    let whole = |note: &MessageView| goes_whole(note, &[], &cf);
-    let one = |note: &MessageView| read_in_one(note, &cf);
-    let most = the_most_rules();
-    assert!(
-        !one(&note(
+    let whole = |note: &MessageView, cf: &CfWord| goes_whole(note, &[], cf);
+    let one = |note: &MessageView, cf: &CfWord| read_in_one(note, cf);
+    for (cf, pins) in [
+        (a_mac(), [Some(138), Some(163), None, Some(27)]),
+        (a_windows(), [Some(135), Some(159), None, Some(23)]),
+    ] {
+        assert_eq!(
+            one(
+                &note(
+                    None,
+                    "note",
+                    body_of(&a_chiefs_role_for(&cf, 0, true, Some(&most)), &cf),
+                ),
+                &cf
+            ),
+            PATH_ONCE,
+            "{cf}: whether specs and the most rules fit with an empty staff"
+        );
+        assert_eq!(
+            rows_while(&cf, true, None, &whole),
             None,
-            "note",
-            body_of(&a_chiefs_role_with(0, true, Some(&most)), &cf),
-        )),
-        "even an empty staff needs parts with specs and the most rules"
-    );
-    assert_eq!(
-        rows_while(true, None, &whole),
-        0,
-        "docs: never whole with specs on"
-    );
-    assert_eq!(
-        rows_while(false, None, &whole),
-        0,
-        "docs: never whole without specs either"
-    );
-    assert_eq!(rows_while(true, None, &one), 127, "one piece with specs");
-    assert_eq!(
-        rows_while(false, None, &one),
-        152,
-        "one piece without specs"
-    );
-    assert_eq!(
-        rows_while(true, Some(&most), &one),
-        0,
-        "no staff row fits with specs and the most rules"
-    );
-    assert_eq!(
-        rows_while(false, Some(&most), &one),
-        16,
-        "one piece without specs and with the most rules"
-    );
+            "docs: never whole with specs on"
+        );
+        assert_eq!(
+            rows_while(&cf, false, None, &whole),
+            None,
+            "docs: never whole without specs"
+        );
+        let measured = [
+            rows_while(&cf, true, None, &one),
+            rows_while(&cf, false, None, &one),
+            rows_while(&cf, true, Some(&most), &one),
+            rows_while(&cf, false, Some(&most), &one),
+        ];
+        if PATH_ONCE {
+            assert!(measured[2].is_some_and(|rows| rows >= 10));
+        } else {
+            assert_eq!(measured, pins,
+                "{cf}: rows in one piece: specs, none; no specs, none; specs, the most rules; no specs, the most rules");
+        }
+    }
+    let cf = a_mac();
     let parts = |rows| {
         printed_by_cf(
             &note(
@@ -402,11 +414,13 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
         )
         .1
     };
-    assert_eq!(
-        [parts(3), parts(143), parts(300)],
-        [2, 2, 3],
-        "docs: past one piece, 2 parts to 143 rows, 3 at 300"
-    );
+    if !PATH_ONCE {
+        assert_eq!(
+            [parts(0), parts(295), parts(296), parts(300)],
+            [2, 2, 3, 3],
+            "docs: 2 parts through 295 rows, 3 at 296"
+        );
+    }
 }
 
 /// The real text of every member with the most rules for the staff the ledger
@@ -1108,9 +1122,8 @@ fn kept_by_muse(blocks: &[String]) -> String {
 /// T-1246: Muse takes at most 16,384 bytes of a hook's output, and a Muse window has its role
 /// by hooks alone, so a role is given in parts, a hook each (`cf_harness::muse`), each part's
 /// hook under that limit, and what Muse keeps of the parts, put together, the role to the
-/// byte. A chief's role is longer than one hook says since each command of it named the
-/// window's `cf` in full (T-1049: 17,455 bytes with no staff at all), so no chief's is one
-/// part; a member's is one with the most rules in the most bytes, and two with the most in
+/// byte. A chief's role is longer than one hook says (about 18,000 bytes with no staff
+/// at all), so no chief's is one part; a member's is one with the most rules in the most bytes, and two with the most in
 /// JSON: the rules the ledger takes can make 16,000 bytes of answer of 8,000. The most of
 /// parts is the hooks Muse was measured to take at one start, and the case keeps a role at
 /// half of it. These are the numbers: the spare bytes are in the message of each case that
@@ -1165,14 +1178,14 @@ fn the_largest_roles_are_given_to_a_muse_window_in_the_parts_its_hooks_say_and_e
         on(
             &format!("the largest chief in bytes (25 staff, specs, the most rules) on {shape}"),
             &chief(25, true, Some(&utf8)),
-            if shape == "Windows" { 3 } else { 2 },
+            2,
         );
         on(
             &format!(
                 "the largest chief in a hook (25 staff, specs, the most escaped rules) on {shape}"
             ),
             &chief(25, true, Some(&escaped)),
-            if shape == "Windows" { 4 } else { 3 },
+            3,
         );
         for role in cf_ledger::roles::ids() {
             on(
@@ -1227,17 +1240,21 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
     // A case: its name, the window's `cf`, the staff's rows, specs on or off, the rules, and the
     // lines the part after the first begins with.
     type Case<'a> = (&'a str, CfWord, usize, bool, Option<&'a str>, &'a [&'a str]);
-    // The frontend designer's paragraph in the chief's section on roles.
-    const FRONTEND: &str = "How a screen looks, feels and moves is the frontend designer";
+    // These first lines are measured for the active path mode and each shell.
+    const REVIEW: &str = "A finding blocks the work only when it would make it fail (a";
+    const INTEGRATOR: &str = "Where the staff has an integrator, it lands accepted work; a";
+    const DESIGN: &str = "Work big enough to need a design (a new module, a new API, a";
+    let mac = if PATH_ONCE { REVIEW } else { INTEGRATOR };
+    let windows = if PATH_ONCE { REVIEW } else { DESIGN };
     let cases: [Case; 4] = [
-        ("a Mac, no staff", a_mac(), 0, false, None, &[FRONTEND]),
+        ("a Mac, no staff", a_mac(), 0, false, None, &[mac]),
         (
             "a Mac, the largest chief",
             a_mac(),
             25,
             true,
             Some(&utf8),
-            &[FRONTEND],
+            &[mac],
         ),
         (
             "Windows, the largest chief",
@@ -1245,7 +1262,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&utf8),
-            &["## Choose the role, not the member"],
+            &[windows],
         ),
         (
             "a Mac, the most escaped rules",
@@ -1253,7 +1270,7 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
             25,
             true,
             Some(&escaped),
-            &[FRONTEND],
+            &[mac],
         ),
     ];
     for (name, cf, rows, specs, rules, expected) in cases {
@@ -1292,4 +1309,29 @@ fn role_change_places_each_concern_in_its_own_module() {
             path.display()
         );
     }
+}
+
+#[test]
+fn short_text_t1715_replacement_whole() {
+    assert_eq!(OPENING, "Your ConsensFlow role has changed. Follow these instructions in place of the earlier ones. This is context, not a task: acknowledge it in one line and wait for the next message.");
+}
+#[test]
+fn short_text_t1715_replacement_cut() {
+    assert_eq!(OPENING_IN_PART, "Your ConsensFlow role has changed. Follow these instructions in place of the earlier ones. Run the command at the end now and read all it prints. This is context, not a task: then acknowledge it in one line and wait for the next message.");
+}
+#[test]
+fn short_text_t1715_greeting_whole() {
+    assert_eq!(BEGAN_WITHOUT, "This conversation began without your ConsensFlow role. Follow these instructions. This is context, not a task: acknowledge it in one line and wait for the next message.");
+}
+#[test]
+fn short_text_t1715_greeting_cut() {
+    assert_eq!(BEGAN_WITHOUT_IN_PART, "This conversation began without your ConsensFlow role. Follow these instructions. Run the command at the end now and read all it prints. This is context, not a task: then acknowledge it in one line and wait for the next message.");
+}
+#[test]
+fn short_text_t1715_replacement_parts() {
+    assert_eq!(Telling::Replaces.in_parts(2), "Your ConsensFlow role has changed. Follow these instructions in place of the earlier ones. Run the command at the end now. It prints the role in 2 parts; run the command at the end of each part until the last, and read every part. This is context, not a task: then acknowledge it in one line and wait for the next message.");
+}
+#[test]
+fn short_text_t1715_greeting_parts() {
+    assert_eq!(Telling::BeganWithout.in_parts(2), "This conversation began without your ConsensFlow role. Follow these instructions. Run the command at the end now. It prints the role in 2 parts; run the command at the end of each part until the last, and read every part. This is context, not a task: then acknowledge it in one line and wait for the next message.");
 }

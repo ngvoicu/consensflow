@@ -33,7 +33,7 @@ const OPENS: Duration = Duration::from_secs(120);
 const TOLD: Duration = Duration::from_secs(120);
 
 /// What the note that tells a running chief its specs are on begins with.
-const NOW: &str = "Specs are now on in this project: ";
+const NOW: &str = "Your instructions now include:";
 
 fn chief_rollout(home: &Path, thread: &str) -> std::result::Result<String, String> {
     if !cf_e2e::door::is_made_or_below(home)

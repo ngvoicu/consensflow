@@ -27,11 +27,11 @@ runs = ["engine-release-contract"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles.rs"
-find = '''    // The `cf` goes in last, so nothing in a path is read as a slot.'''
+find = '''    let chief = filled(chief::text(false)?, staff, cf)?;'''
 replace = '''    if let Some(card) = _env.path("CONSENSFLOW_EVAL_CHIEF_CARD") {
         return Ok(std::fs::read_to_string(card).unwrap_or_default());
     }
-    // The `cf` goes in last, so nothing in a path is read as a slot.'''
+    let chief = filled(chief::text(false)?, staff, cf)?;'''
 
 # --- the ledger ---
 
@@ -199,7 +199,7 @@ replace = ""
 
 [[plant]]
 name = "staff rules: a bound in bytes that leaves the chief's text read in part"
-meant = "the_staff_a_replacement_holds_whole_and_read_is_as_large_as_the_docs_say"
+meant = "the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_docs_say"
 runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
@@ -209,7 +209,7 @@ replace = '''pub const STAFF_RULES_MAX_BYTES: usize = 12_000;'''
 
 [[plant]]
 name = "staff rules: a bound in lines that leaves a chief of 25 rows read in part"
-meant = "the_real_text_of_a_chief_with_specs_and_a_large_staff_is_told_whole_or_told_and_read"
+meant = "the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_docs_say"
 runs = ["engine-role-change-lib"]
 
 [[plant.edit]]
@@ -293,8 +293,8 @@ runs = ["engine-dispatcher-rules"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/specs.rs"
-find = '''            project.staff_rules.as_deref(),'''
-replace = '''            None,'''
+find = '''with_staff_rules(instructions, &participant.role, rules)'''
+replace = '''with_staff_rules(instructions, &participant.role, None)'''
 
 [[plant]]
 name = "staff rules: only the chief's window is given the rules"
@@ -303,8 +303,8 @@ runs = ["engine-dispatcher-rules"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/specs.rs"
-find = '''            project.staff_rules.as_deref(),'''
-replace = '''            project.staff_rules.as_deref().filter(|_| participant.role == "chief"),'''
+find = '''with_staff_rules(instructions, &participant.role, rules)'''
+replace = '''with_staff_rules(instructions, &participant.role, rules.filter(|_| participant.role == "chief"))'''
 
 [[plant]]
 name = "staff rules: a Codex chief resumed is not told them"
@@ -313,8 +313,8 @@ runs = ["engine-dispatcher-rules"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/specs.rs"
-find = '''            project.staff_rules.as_deref(),'''
-replace = '''            project.staff_rules.as_deref().filter(|_| participant.role != "chief"),'''
+find = '''with_staff_rules(instructions, &participant.role, rules)'''
+replace = '''with_staff_rules(instructions, &participant.role, rules.filter(|_| participant.role != "chief"))'''
 
 [[plant]]
 name = "staff rules: a member's session is not given the rules"
@@ -323,8 +323,8 @@ runs = ["engine-dispatcher-rules"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/specs.rs"
-find = '''            project.staff_rules.as_deref(),'''
-replace = '''            project.staff_rules.as_deref().filter(|_| participant.member_id.is_none()),'''
+find = '''with_staff_rules(instructions, &participant.role, rules)'''
+replace = '''with_staff_rules(instructions, &participant.role, rules.filter(|_| participant.member_id.is_none()))'''
 
 # --- the page's operation ---
 

@@ -157,7 +157,7 @@ runs = ["rn-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_news.rs"
-find = "            specs: self.specs_setting(project, participant),\n            rules: project.staff_rules.clone(),"
+find = "            specs: self.specs_setting(project, participant),\n            rules: rules_told(project),"
 replace = "            specs: self.specs_setting(project, participant),\n            rules: None,"
 
 [[plant]]
@@ -167,8 +167,8 @@ runs = ["rn-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_news.rs"
-find = "            specs: self.specs_setting(project, participant),\n            rules: project.staff_rules.clone(),"
-replace = "            specs: None,\n            rules: project.staff_rules.clone(),"
+find = "            specs: self.specs_setting(project, participant),\n            rules: rules_told(project),"
+replace = "            specs: None,\n            rules: rules_told(project),"
 
 [[plant]]
 name = "role news: a member is launched as a chief is, to be told"
@@ -187,8 +187,8 @@ runs = ["rn-news-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles/news.rs"
-find = "Plan new work as tasks, not specs; the specs already in `{}` stay."
-replace = "Plan new work as specs; the specs already in `{}` stay."
+find = "Plan new work as tasks, not specs; the specs in `{}` stay."
+replace = "Plan new work as specs; the specs in `{}` stay."
 
 [[plant]]
 name = "role news: a new folder is not said"
@@ -197,8 +197,8 @@ runs = ["rn-news-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles/news.rs"
-find = "            if was.folder != now.folder {"
-replace = "            if false {"
+find = "                section(now)\n            )\n        }"
+replace = "                section(&ProjectSpecs { folder: &was.folder, ..*now })\n            )\n        }"
 
 [[plant]]
 name = "role news: a new variant is not said"
@@ -207,8 +207,8 @@ runs = ["rn-news-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles/news.rs"
-find = "            if was.variant != now.variant {"
-replace = "            if false {"
+find = "                section(now)\n            )\n        }"
+replace = "                section(&ProjectSpecs { variant: was.variant, ..*now })\n            )\n        }"
 
 [[plant]]
 name = "role news: the specs left in the old folder are not said to stay"
@@ -222,13 +222,13 @@ replace = "            let stay = if true {"
 
 [[plant]]
 name = "role news: the note is a task"
-meant = "specs_turned_on_give_the_section_and_say_it_is_context"
+meant = "short_text_t1715_news_context"
 runs = ["rn-news-lib"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/roles/news.rs"
-find = "const CONTEXT: &str = \"This is context, not a task: say in one short line that you have it, and wait for the next message.\";"
-replace = "const CONTEXT: &str = \"This is a task: do it.\";"
+find = "const CONTEXT: &str =\n    \"This is context, not a task: acknowledge it in one line and wait for the next message.\";"
+replace = "const CONTEXT: &str =\n    \"This is a task: do it.\";"
 
 [[plant]]
 name = "role news: rules written are said changed"

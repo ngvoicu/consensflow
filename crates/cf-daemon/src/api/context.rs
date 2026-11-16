@@ -17,7 +17,7 @@ use cf_engine::Finished;
 use cf_harness::contract::Work;
 use cf_ledger::Ledger;
 use cf_proto::cf_word::CfWord;
-use cf_proto::ledger::ParticipantView;
+use cf_proto::ledger::{ParticipantView, ProjectView};
 use tokio::sync::watch;
 
 use super::credentials::Credentials;
@@ -69,6 +69,14 @@ impl Default for Closing {
 /// counted ([`Finished`]), or with why it is refused.
 pub type Finishing = dyn Fn(i64, i64, String) -> Work<'static, Result<Finished, Refusal>>;
 
+/// Where the project's specs are kept for its chief now (`specs_folder(project, chief)`), none
+/// where the project has them off or before the engine exists: the board's guide tells a
+/// chief with its own hands what the ordinary chief is told of specs and the board.
+pub type Specing = dyn Fn(&ProjectView, &ParticipantView) -> Option<String>;
+
+/// The ordinary chief's complete specs section, or why it could not be made.
+pub type OrdinarySpecs = dyn Fn(&ProjectView, &ParticipantView) -> Result<Option<String>, Refusal>;
+
 /// What the API asks of the engine of a participant's window: the task it holds in the
 /// background, and the jobs and agents its turn left running (`held(participant)`), while
 /// it holds one; none for any other, and before the engine exists.
@@ -96,6 +104,10 @@ pub struct Context {
     /// (`seams::cf_word_of`): the words of a role are counted in parts as that window's
     /// `cf` prints them (T-1513).
     pub cf: Rc<dyn Fn(&ParticipantView) -> CfWord>,
+    /// Where the specs of a project are kept for its chief now ([`Specing`]).
+    pub specs_folder: Rc<Specing>,
+    /// What the ordinary chief is told of its specs now, including the skill path.
+    pub ordinary_specs: Rc<OrdinarySpecs>,
     /// Whether each request a window's token answered is written to the trace for the
     /// tooling ([`super::calls`]): only a test's daemon, started with
     /// [`super::calls::TOOLING_API_CALLS`], has it.

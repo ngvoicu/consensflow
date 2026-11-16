@@ -39,7 +39,7 @@ fn every_role_enters_codex_with_its_whole_text_already_loaded() {
             "the whole role text is loaded: {name}"
         );
         assert!(
-            loaded.contains(&format!("Your ConsensFlow role is {name}.")),
+            loaded.contains("Your ConsensFlow role follows; it is already loaded, not a task."),
             "{name}"
         );
     }

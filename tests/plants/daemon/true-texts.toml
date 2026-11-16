@@ -21,5 +21,5 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = "Your answer ends your turn: wait for what your result needs. Your result\nis delivered once your turn has ended and nothing you started is still running,\nso before your last answer end what you left in the background (a wait loop, a\nwatcher)."
-replace = "Your answer ends your turn's work: anything you left running is stopped then, so wait for what your result needs."
+find = "your answer ends your turn, and your result is delivered once nothing you started is still running, so before your last answer end what you left in the background (a wait loop, a watcher)."
+replace = "your answer ends your turn's work: anything you left running is stopped then."

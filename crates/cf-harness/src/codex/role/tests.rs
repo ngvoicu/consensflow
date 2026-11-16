@@ -81,7 +81,7 @@ fn the_role_follows_what_codex_has_of_its_own_in_one_text() {
     );
     assert_eq!(
         stage.text("# The role\n\nIts text."),
-        Ok("User instructions.\n\nYour ConsensFlow role is worker. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\n# The role\n\nIts text.".to_owned())
+        Ok("User instructions.\n\nYour ConsensFlow role follows; it is already loaded, not a task.\n\n# The role\n\nIts text.".to_owned())
     );
 }
 
@@ -96,14 +96,14 @@ fn a_sub_agent_starts_from_what_codex_has_of_its_own_and_that_it_is_not_the_wind
     let texts = stage.texts("# The role\n\nIts text.").unwrap();
     assert_eq!(
         texts.children,
-        "User instructions.\n\nYou are a sub-agent that a ConsensFlow worker started. You are not the worker: you have no board identity, so never run cf; answer your parent in your final message."
+        "User instructions.\n\nYou are a sub-agent of a ConsensFlow worker; you have no board identity, so never run cf."
     );
     assert!(!texts.children.contains("Its text."), "{}", texts.children);
-    assert!(!texts.children.contains("Your ConsensFlow role is"));
+    assert!(!texts.children.contains("Your ConsensFlow role follows"));
     // A chief's sub-agent is told the same of the chief.
     assert_eq!(
         children("chief"),
-        "You are a sub-agent that a ConsensFlow chief started. You are not the chief: you have no board identity, so never run cf; answer your parent in your final message."
+        "You are a sub-agent of a ConsensFlow chief; you have no board identity, so never run cf."
     );
 }
 
@@ -115,7 +115,9 @@ fn a_text_with_what_json_escapes_is_carried_as_it_is() {
     let role = "Role \u{2029} \"text\" \\ with\ttab\u{0} and \u{e9}";
     assert_eq!(
         stage.text(role).unwrap(),
-        format!("{had}\n\nYour ConsensFlow role is worker. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\n{role}")
+        format!(
+            "{had}\n\nYour ConsensFlow role follows; it is already loaded, not a task.\n\n{role}"
+        )
     );
 }
 
@@ -392,7 +394,7 @@ fn an_error_is_one_by_javascript_s_truth_and_so_is_a_configuration() {
         stage.app_server(&[initialized, read], Ends::Asked);
         let given = stage.text("T").ok();
         let expected = instructions.map(|instructions| {
-            format!("{instructions}\n\nYour ConsensFlow role is worker. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\nT")
+            format!("{instructions}\n\nYour ConsensFlow role follows; it is already loaded, not a task.\n\nT")
         });
         assert_eq!(given, expected, "{initialized} {read}");
     }
@@ -551,4 +553,21 @@ fn the_sub_agents_instructions_are_one_toml_string_that_reads_back_as_they_were(
             "{written}"
         );
     }
+}
+
+#[test]
+fn short_text_t1715_codex_role_assembly() {
+    let stage = Stage::new();
+    stage.app_server(&[INITIALIZED, &Stage::configured("native")], Ends::Asked);
+    assert_eq!(
+        stage.text("role").unwrap(),
+        "native\n\nYour ConsensFlow role follows; it is already loaded, not a task.\n\nrole"
+    );
+}
+#[test]
+fn short_text_t1715_codex_child() {
+    assert_eq!(
+        children("worker"),
+        "You are a sub-agent of a ConsensFlow worker; you have no board identity, so never run cf."
+    );
 }

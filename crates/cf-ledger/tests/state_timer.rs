@@ -63,6 +63,7 @@ fn board_state_time_is_the_last_move_not_the_last_edit_and_survives_restart() {
             compaction: None,
             advisor_tool: false,
             prompt_suggestion: false,
+            own_hands: false,
         })
         .expect("project");
     let worker = project
@@ -197,6 +198,7 @@ fn board_state_time_follows_named_creation_and_later_state_moves() {
             compaction: None,
             advisor_tool: false,
             prompt_suggestion: false,
+            own_hands: false,
         })
         .expect("project");
     let created = ledger
@@ -384,6 +386,7 @@ fn board_state_time_uses_the_initial_event_even_when_the_row_was_written_earlier
         compaction: None,
         advisor_tool: false,
         prompt_suggestion: false,
+        own_hands: false,
     };
     let project = ledger.create_project(&request).expect("project");
     let open = ledger

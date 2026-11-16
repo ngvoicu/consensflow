@@ -32,7 +32,9 @@
 //! it into the background) and that the result comes when they end; then the one other
 //! choice, to take what the worker said last now ([`Dispatcher::finish_task`]); then the
 //! worker's words. The hold is shown to the chief, with a typed reminder after an hour in
-//! one stretch and every three hours thereafter; a worker's own re-holds do not restart it
+//! one stretch and further reminders three hours after the last reminder was delivered (or
+//! created, if its delivered timestamp is absent); a queued or delivering reminder is not stacked;
+//! a worker's own re-holds do not restart it
 //! (CLN-76, T-1598). A hold that turns into one nothing but Finish ends (every job left is a
 //! monitor that said it ended and has no command of the window to look for, or the host
 //! cannot see the window's commands) is told once more, in the words of that
@@ -1056,8 +1058,9 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// Remind of the stretch after an hour and every three hours after that. The receipt
-    /// keeps the start, re-holds and last reminder; another look can never send it twice.
+    /// Remind of the stretch after an hour, then three hours after the prior reminder's delivery
+    /// (or its creation if its delivered timestamp is absent); never stack a waiting reminder.
+    /// The receipt keeps the start, re-holds and last reminder; another look cannot send it twice.
     fn remind_held(
         &self,
         project: &ProjectView,

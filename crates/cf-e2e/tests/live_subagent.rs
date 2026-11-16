@@ -87,10 +87,10 @@ const MARKER: &str = "Keep this worker role for the whole session";
 
 /// The role's sentence for a sub-agent that has it (`skill/core/staff.md`), up to the
 /// window's own `cf`, which it names by its whole path (T-1049).
-const SENTENCE: &str = "you are not the member: you have no\nboard identity, so never run `";
+const SENTENCE: &str = "you are not the member and have no board identity: never run `";
 
 /// The words a Codex sub-agent starts with in place of the role (`codex::role::children`).
-const CODEX_CHILDREN: &str = "You are a sub-agent that a ConsensFlow worker started.";
+const CODEX_CHILDREN: &str = "You are a sub-agent of a ConsensFlow worker";
 
 /// The skill a Claude Code window's role is, by name.
 const ROLE_SKILL: &str = "consensflow-worker";
@@ -975,6 +975,11 @@ mod tests {
         assert_eq!(
             MARKER.replace(ROLE, "{{role}}"),
             "Keep this {{role}} role for the whole session"
+        );
+        let codex_role = include_str!("../../cf-harness/src/codex/role.rs");
+        assert!(
+            codex_role.contains(&CODEX_CHILDREN.replace(ROLE, "{role}")),
+            "Codex's adapter says {CODEX_CHILDREN:?}"
         );
         assert!(staff.contains(SENTENCE), "staff.md says {SENTENCE:?}");
     }

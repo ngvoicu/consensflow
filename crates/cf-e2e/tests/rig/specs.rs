@@ -325,7 +325,7 @@ fn a_chief_whose_window_is_open_is_told_when_its_specs_are_turned_on_moved_and_o
     // Turned on while its window is open: told at its next rest, in the conversation it
     // has, and not by a new window.
     page(json!({ "on": true, "folder": "plans", "variant": "tdd" }))?;
-    let on = until_told(&rig, &session, "Specs are now on in this project: ", 1)?;
+    let on = until_told(&rig, &session, "Your instructions now include:", 1)?;
     assert_eq!(on.len(), 1, "{on:?}");
     assert!(
         on[0].contains("Your specs and their registry are in `plans`"),
@@ -349,22 +349,22 @@ fn a_chief_whose_window_is_open_is_told_when_its_specs_are_turned_on_moved_and_o
 
     // The folder moves: told with the section anew and the copy for the new folder.
     page(json!({ "on": true, "folder": "docs/specs", "variant": "tdd" }))?;
-    let moved = until_told(
-        &rig,
-        &session,
-        "the specs are now kept in `docs/specs`, not `plans`",
-        1,
-    )?;
+    let moved = until_told(&rig, &session, "The project's specs changed.", 1)?;
+    assert!(
+        moved[0].contains("The specs in `plans` stay where they are.")
+            && moved[0].contains("Your specs and their registry are in `docs/specs`"),
+        "{}",
+        moved[0]
+    );
     let moved_skill = skill_named_in(&moved[0]).expect("the note names the skill's file");
     assert!(Path::new(&moved_skill).is_file(), "{moved_skill}");
     assert_ne!(moved_skill, skill.to_string_lossy(), "a copy of its own");
 
     // Turned off: told to plan as tasks, and that the specs there stay.
     page(json!({ "on": false }))?;
-    let off = until_told(&rig, &session, "Specs are now off in this project: ", 1)?;
+    let off = until_told(&rig, &session, "Specs are now off.", 1)?;
     assert!(
-        off[0]
-            .contains("Plan new work as tasks, not specs; the specs already in `docs/specs` stay."),
+        off[0].contains("Plan new work as tasks, not specs; the specs in `docs/specs` stay."),
         "{}",
         off[0]
     );
@@ -375,9 +375,9 @@ fn a_chief_whose_window_is_open_is_told_when_its_specs_are_turned_on_moved_and_o
     })?;
     std::thread::sleep(secs(3));
     for words in [
-        "Specs are now on in this project: ",
-        "the specs are now kept in `docs/specs`, not `plans`",
-        "Specs are now off in this project: ",
+        "Your instructions now include:",
+        "The project's specs changed.",
+        "Specs are now off.",
     ] {
         assert_eq!(given_saying(&rig, &session, words).len(), 1, "{words}");
     }

@@ -44,9 +44,16 @@ fn with_specs_off_a_chief_s_text_holds_no_word_of_them_and_is_the_text_it_was() 
             "{word:?} in a chief's text with specs off"
         );
     }
-    // The text is chief.md with the staff, each command starting with this window's cf.
+    // The text is chief.md with the staff, its window's cf said once and each command starting
+    // with the word `cf` (the path itself, where the path is written in every command).
     assert!(!chief.contains("This window's cf"));
-    assert!(chief.contains(&format!("\n    {CF} task get T-3 ")));
+    let word = if crate::roles::PATH_ONCE { "cf" } else { CF };
+    assert!(chief.contains(&format!("\n    {word} task get T-3 ")));
+    assert_eq!(
+        chief.matches(CF).count() == 1,
+        crate::roles::PATH_ONCE,
+        "the path, said once"
+    );
     assert!(chief.contains("| zeus (Opus · max) | worker | "));
 }
 
@@ -124,13 +131,12 @@ fn the_section_says_when_to_use_a_spec_what_goes_to_the_board_and_how_a_spec_bec
         "when the human asks for one, or when an ask is big enough that its work comes in phases",
         "A small ask is no spec: it goes straight on the board as a task",
         // Writing the spec is the chief's own work, the second exception to changing nothing
-        // itself, and comes before its tasks; research, subagents and implementation are the board's.
+        // itself, and comes before its tasks; research and implementation are the board's.
         "The spec is a second exception to changing nothing yourself",
         "you write the spec and its registry in `docs/specs` with your own tools, and never give that writing to the staff",
         "Write the spec before any of its tasks go on the board",
-        // Searching and reading may go to the chief's subagent, as its role says (What you never
-        // do); what Specmint calls research beyond that, and every implementation, is the board's.
-        "Everything Specmint calls research beyond searching and reading, or implementation, goes on the board as tasks for the staff, and you do none of it yourself or in a subagent",
+        // What Specmint calls research beyond searching and reading, and every implementation, is the board's.
+        "Everything Specmint calls research beyond searching and reading, or implementation, goes on the board as tasks for the staff, and you do none of it yourself",
         // From a spec: phase order, `--needs`, the spec item in each brief, progress marked after an acceptance.
         "in phase order",
         "`--needs`",
@@ -142,9 +148,9 @@ fn the_section_says_when_to_use_a_spec_what_goes_to_the_board_and_how_a_spec_bec
     ] {
         assert!(section.contains(said), "{said:?} in {section}");
     }
-    // A subagent is not something Specmint "calls", and the chief's role lets its subagent
-    // search and read: the section does not put "a subagent" among what goes to the board.
+    // No text of ours speaks of the harness's subagents, in either mode.
     for gone in [
+        "subagent",
         "research, a subagent or implementation",
         "big enough for phases as a spec",
     ] {

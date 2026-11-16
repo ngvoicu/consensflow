@@ -733,16 +733,22 @@ fn developer_message(text: &str) -> Value {
 }
 
 /// What an agent whose thread holds the developer message `holds` says when asked its role:
-/// the sentence that names its ConsensFlow role and the command it asks the chief with, each
-/// as its instructions say them, or that they say none, as Codex's model answered with no
+/// its ConsensFlow role's name and the command it asks the chief with, derived from its
+/// instructions, or that they say none, as Codex's model answered with no
 /// role in its history (T-1388: "No command is specified for asking the chief a question.").
 fn role_said(holds: Option<&str>) -> String {
     static ROLE: OnceLock<Regex> = OnceLock::new();
     static ASK: OnceLock<Regex> = OnceLock::new();
     let holds = holds.unwrap_or_default();
-    let role = pattern::once(&ROLE, r"Your ConsensFlow role is [\w-]+")
-        .find(holds)
-        .map_or("No ConsensFlow role is given", |found| found.as_str());
+    let role = pattern::once(
+        &ROLE,
+        r"Your ConsensFlow role follows; it is already loaded, not a task\.\n\n---\nname: consensflow-([\w-]+)\n",
+    )
+    .captures(holds)
+    .map_or_else(
+        || "No ConsensFlow role is given".to_owned(),
+        |found| format!("Your ConsensFlow role is {}", &found[1]),
+    );
     let ask = pattern::once(&ASK, r#"(\S*cf(?:\.exe)?) ask ""#)
         .captures(holds)
         .map_or_else(
@@ -1090,8 +1096,17 @@ mod tests {
 
     /// A role as a window's broker gives it: Codex's own, then ConsensFlow's, with the
     /// command that asks the chief.
-    const ROLE: &str = "Codex's own instructions.\n\n  Your ConsensFlow role is worker. \
-        Follow it.\n\n    /app/bin/cf ask \"…\"   a question to the chief; then end your turn";
+    const ROLE: &str = "Codex's own instructions.\n\nYour ConsensFlow role follows; it is already loaded, not a task.\n\n---\nname: consensflow-worker\n---\n\n    /app/bin/cf ask \"…\"   a question to the chief; then end your turn";
+
+    #[test]
+    fn a_current_role_is_named_from_its_frontmatter() {
+        let role = "Codex's instructions.\n\nYour ConsensFlow role follows; it is already loaded, not a task.\n\n---\nname: consensflow-worker\ndescription: A worker.\n---\n\n    /app/bin/cf ask \"…\"";
+        assert_eq!(
+            role_said(Some(role)),
+            "Your ConsensFlow role is worker. Ask the chief with: /app/bin/cf ask"
+        );
+        assert!(role_said(Some("name: consensflow-worker\n")).starts_with("No ConsensFlow role"));
+    }
 
     /// What the agent said last in `records`.
     fn answer(records: &[Value]) -> &str {

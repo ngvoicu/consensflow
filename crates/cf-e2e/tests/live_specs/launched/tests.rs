@@ -198,7 +198,7 @@ fn a_window_of_no_specs_names_no_skill_on_its_command_line_or_in_its_environment
 #[test]
 fn what_codex_says_of_the_human_s_own_skills_is_no_skill_of_the_window_and_no_text_of_ours() {
     let codex = format!(
-        "Codex's own words, and the human's: a skill called specmint-core is installed.\n\nYour ConsensFlow role is chief. The following role instructions are already loaded.{SECTION_TEXT}"
+        "Codex's own words, and the human's: a skill called specmint-core is installed.\n\nYour ConsensFlow role follows; it is already loaded, not a task.\n\n---\nname: consensflow-chief\n---{SECTION_TEXT}"
     );
     carries_no_skill(&frame(
         &json!(["cf", "codex-session", "/bin/codex"]),
@@ -209,7 +209,7 @@ fn what_codex_says_of_the_human_s_own_skills_is_no_skill_of_the_window_and_no_te
     assert!(codex.contains("Specmint") && codex.contains("specmint-core"));
     let mine = ours(&codex);
     assert!(
-        mine.starts_with("\n\nYour ConsensFlow role is chief."),
+        mine.starts_with("\n\nYour ConsensFlow role follows; it is already loaded, not a task."),
         "{mine}"
     );
     assert!(!mine.contains("specmint-core is installed"));
@@ -217,7 +217,7 @@ fn what_codex_says_of_the_human_s_own_skills_is_no_skill_of_the_window_and_no_te
     // Another harness's text is all ours.
     assert_eq!(ours(SECTION_TEXT), SECTION_TEXT);
     // A Codex window of no specs says nothing of them in the part that is ours.
-    let off = "Codex's own: the human has Specmint installed.\n\nYour ConsensFlow role is chief. Nothing else.";
+    let off = "Codex's own: the human has Specmint installed.\n\nYour ConsensFlow role follows; it is already loaded, not a task.\n\n---\nname: consensflow-chief\n---";
     assert!(told_nothing_of_specs(ours(off)).is_ok());
     assert!(told_nothing_of_specs(off).is_err());
 }
@@ -281,7 +281,7 @@ fn a_chief_whose_record_has_the_section_in_what_its_thread_began_with_or_in_a_me
     );
     // One that began with specs off keeps them, and is told by a message that says so.
     let message = format!(
-        "[ConsensFlow m-9 · note from ConsensFlow]\nYour ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on.\n\nThe role.{SECTION_TEXT}"
+        "[ConsensFlow m-9 · note from ConsensFlow]\nYour ConsensFlow role has changed. Follow these instructions in place of the earlier ones.\n\nThe role.{SECTION_TEXT}"
     );
     let told = rollout_of("Codex's.\n\nYour role.", &["Hello", &message]);
     assert_eq!(

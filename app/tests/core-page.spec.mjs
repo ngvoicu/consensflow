@@ -316,8 +316,28 @@ function model() {
   }
 }
 
+/**
+ * Every role's group open on each project of the model, as a human who opened them all has
+ * them: the board's tests read the members' rows. A test of the groups themselves starts as a
+ * human does, with none kept and every group folded (`openGroups: false`).
+ */
+function groupsOpen(data) {
+  if (data.openGroups === false) return
+  try {
+    for (const project of data.projects ?? []) {
+      const key = `cf.board.groups.${project.id}`
+      if (localStorage.getItem(key) === null) {
+        localStorage.setItem(key, JSON.stringify(data.roles.map((role) => role.id)))
+      }
+    }
+  } catch {
+    // A frame with no storage of its own draws no board.
+  }
+}
+
 async function open(page, given = model()) {
   const data = { roles: ROLES, ...given }
+  await page.addInitScript(groupsOpen, data)
   await page.addInitScript((data) => {
     window.__calls = []
     window.__model = data
@@ -824,6 +844,7 @@ async function open(page, given = model()) {
           if (typeof body.compaction === 'number') project.compaction = body.compaction
           if (body.advisorTool === true) project.advisorTool = true
           if (body.promptSuggestion === true) project.promptSuggestion = true
+          if (body.ownHands === true) project.ownHands = true
           data.projects.push(project)
           data.boards[3] = {
             project,
@@ -1223,7 +1244,8 @@ test('draws the kanban: a row per participant, a column per state, and cards tha
     'Done',
     /^Finished/,
   ])
-  const rows = table.locator('tbody tr')
+  // The participants' rows, under their groups' heads.
+  const rows = table.locator('tbody tr[data-handle]')
   // Nothing assigns the human a task: what is for them is in For you, not a row.
   await expect(rows).toHaveCount(3)
   await expect(rows.locator('.row-name')).toHaveText(['Chief of Staff', '@zeus', '@diana'])
@@ -1368,6 +1390,292 @@ test("gives a session's lane the human's hand on its window: show (opening a clo
   await expect(page.getByRole('button', { name: "Delete @zeus's session" })).toHaveCount(0)
 })
 
+/** The role groups' heads on the board, by name, in their order: open or folded, and what each says. */
+const groupHeads = (page) =>
+  page.locator('.kanban tbody.role-group').evaluateAll((groups) =>
+    groups.map((group) => ({
+      group: group.querySelector('.group-name').textContent,
+      count: group.querySelector('.group-count').textContent,
+      open: group.querySelector('.fold-group').getAttribute('aria-expanded') === 'true',
+      marks: [...group.querySelectorAll('.group-mark')].map((mark) => mark.textContent),
+    })),
+  )
+
+/** The board's model with a reviewer at work and a tester whose task waits on a question. */
+function staffedModel() {
+  const data = model()
+  data.openGroups = false
+  data.boards[1].lanes.push(
+    {
+      participant: participant(5, 'hera', 'reviewer', { harness: 'codex' }),
+      tasks: [task(7, 'Review the parser', 'working', 'chief', 'hera', 2)],
+      activity: { state: 'working' },
+      pane: { id: 'p1-hera', generation: 3 },
+    },
+    {
+      participant: participant(6, 'athena', 'tester', { harness: 'pi' }),
+      tasks: [task(8, 'Test the parser', 'waiting', 'chief', 'athena', 4)],
+      activity: { state: 'idle' },
+      pane: { id: 'p1-athena', generation: 2 },
+    },
+  )
+  return data
+}
+
+test('groups the staff by role, the chief alone first, each group folded until opened, and says folded what needs the human', async ({
+  page,
+}) => {
+  await open(page, staffedModel())
+  const kanban = page.getByRole('table', { name: 'Tasks' })
+  // The chief's row first, in no group; then a group a role, in the roles' order.
+  await expect(kanban.locator('tbody').first().locator('tr')).toHaveCount(1)
+  await expect(kanban.locator('tbody').first().locator('tr')).toHaveAttribute('data-role', 'chief')
+  // Folded until the human opens one: no member's row, and what of each needs them, said.
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([
+      {
+        group: 'Workers',
+        count: '2 members',
+        open: false,
+        marks: ['1 waiting for you', '1 done, to decide', '1 failed', '1 out of quota'],
+      },
+      { group: 'Reviewers', count: '1 member', open: false, marks: ['1 working'] },
+      { group: 'Testers', count: '1 member', open: false, marks: ['1 question waiting'] },
+    ])
+  for (const handle of ['zeus', 'diana', 'hera', 'athena']) {
+    await expect(kanban.locator(`tr[data-handle="${handle}"]`)).toHaveCount(0)
+  }
+  // Opened, a group shows its members' rows and their cards, and says no marks of its own.
+  await page.getByRole('button', { name: 'Workers 2 members' }).click()
+  await expect(page.getByRole('button', { name: 'Workers 2 members' })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  )
+  // The keyboard stays on the button it pressed.
+  await expect(page.getByRole('button', { name: 'Workers 2 members' })).toBeFocused()
+  const workers = kanban.locator('tbody[data-group="worker"]')
+  await expect(workers.locator('tr[data-handle]')).toHaveCount(2)
+  await expect(workers.locator('tr[data-handle="zeus"] .card')).toHaveCount(3)
+  await expect(workers.locator('.group-mark')).toHaveCount(0)
+  await expect(kanban.locator('tr[data-handle="hera"]')).toHaveCount(0)
+  expect(await page.evaluate(() => localStorage.getItem('cf.board.groups.1'))).toBe('["worker"]')
+  // Kept in this browser for the project: a reload finds Workers open, the others folded.
+  await page.reload()
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([
+      { group: 'Workers', count: '2 members', open: true, marks: [] },
+      { group: 'Reviewers', count: '1 member', open: false, marks: ['1 working'] },
+      { group: 'Testers', count: '1 member', open: false, marks: ['1 question waiting'] },
+    ])
+  await expect(kanban.locator('tbody[data-group="worker"] tr[data-handle="zeus"]')).toHaveCount(1)
+  // Folded again: its rows go, its marks come back, and that is kept too.
+  await page.getByRole('button', { name: 'Workers 2 members' }).click()
+  await expect(kanban.locator('tr[data-handle="zeus"]')).toHaveCount(0)
+  await expect(kanban.locator('tbody[data-group="worker"] .group-mark')).toHaveText([
+    '1 waiting for you',
+    '1 done, to decide',
+    '1 failed',
+    '1 out of quota',
+  ])
+  expect(await page.evaluate(() => localStorage.getItem('cf.board.groups.1'))).toBe('[]')
+})
+
+test("keeps each project's open groups apart, and a member with two roles in each role's group", async ({
+  page,
+}) => {
+  const data = staffedModel()
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  zeusLane.participant.roles = ['worker', 'reviewer']
+  zeusLane.tasks.push(
+    task(9, 'Review the docs', 'working', 'chief', 'zeus', 1, { pool: 'reviewer' }),
+  )
+  data.boards[2].lanes.push({
+    participant: participant(10, 'ares', 'worker', { projectId: 2 }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  await page.getByRole('button', { name: 'Reviewers 2 members' }).click()
+  const reviewers = page.locator('.kanban tbody[data-group="reviewer"]')
+  await expect(reviewers.locator('tr[data-handle]')).toHaveCount(2)
+  // Zeus is in both groups: as a reviewer here, with its review, the other row folded away.
+  await expect(reviewers.locator('tr[data-handle="zeus"] .card')).toHaveText([/T-9/])
+  await page.getByRole('button', { name: 'Workers 2 members' }).click()
+  const workers = page.locator('.kanban tbody[data-group="worker"]')
+  await expect(workers.locator('tr[data-handle="zeus"] .card')).toHaveCount(3)
+  await expect(workers.locator('tr[data-handle="zeus"] .card', { hasText: 'T-9' })).toHaveCount(0)
+  // Another project's groups are its own: folded there, whatever is open here.
+  await chooseProject(page, 'foundry')
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([{ group: 'Workers', count: '1 member', open: false, marks: [] }])
+  await chooseProject(page, 'harbour')
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([
+      { group: 'Workers', count: '2 members', open: true, marks: [] },
+      { group: 'Reviewers', count: '2 members', open: true, marks: [] },
+      { group: 'Testers', count: '1 member', open: false, marks: ['1 question waiting'] },
+    ])
+})
+
+test("opens a session's terminal from its lane in an open group, and keeps it shown when the group folds", async ({
+  page,
+}) => {
+  const data = model()
+  data.openGroups = false
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  Object.assign(zeusLane, { activity: { state: 'idle' } })
+  data.boards[1].lanes.push({
+    participant: session(20, zeusLane.participant, 'amber-pine'),
+    tasks: [task(21, 'Write the lexer', 'working', 'chief', 'zeus-amber-pine', 3)],
+    activity: { state: 'working' },
+    pane: { id: 'p1-zeus-amber-pine', generation: 9 },
+  })
+  await open(page, data)
+  // Folded, the group counts the session's window at work, and its task's member is one.
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([
+      {
+        group: 'Workers',
+        count: '2 members',
+        open: false,
+        marks: ['1 working', '1 done, to decide', '1 failed', '1 out of quota'],
+      },
+    ])
+  await page.getByRole('button', { name: 'Workers 2 members' }).click()
+  await unfold(page)
+  const lane = page.locator('tr[data-handle="zeus-amber-pine"]')
+  await lane.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  const card = page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
+  await expect(card).toHaveCount(1)
+  await page.getByRole('button', { name: 'Workers 2 members' }).click()
+  await expect(lane).toHaveCount(0)
+  // Its terminal stays in the dock, and nothing was asked of the daemon to hide it.
+  await expect(card).toHaveCount(1)
+  await expect(card).toBeVisible()
+  expect(await calls(page, 'session.hide')).toEqual([])
+})
+
+test("says folded the work that goes on in the background, a session's too, and each task paused for someone to resume", async ({
+  page,
+}) => {
+  // A worker whose turn ended with a server that never ends (T-12, `heldModel`), and a session of
+  // it whose agent runs on (T-21): both windows rest, both tasks are Working.
+  const data = heldModel()
+  data.openGroups = false
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  data.boards[1].lanes.push({
+    participant: session(20, zeusLane.participant, 'amber-pine'),
+    tasks: [task(21, 'Watch the build', 'working', 'chief', 'zeus-amber-pine', 3)],
+    activity: { state: 'idle' },
+    held: { task: 21, jobs: 0, agents: 1 },
+    pane: { id: 'p1-zeus-amber-pine', generation: 9 },
+  })
+  // Paused when its window closed, a task waits for the chief or the human to resume it; one
+  // held for its member's quota is paused too, beside the member's "out of quota".
+  zeusLane.tasks.push(task(13, 'Index the docs', 'paused', 'chief', 'zeus', 6))
+  const diana = data.boards[1].lanes.find((l) => l.participant.handle === 'diana')
+  diana.tasks.push(task(14, 'Lint the docs', 'paused', 'chief', 'diana', 7, { heldUntil: at(-90) }))
+  await open(page, data)
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([
+      {
+        group: 'Workers',
+        count: '2 members',
+        open: false,
+        marks: [
+          '2 waiting on background work',
+          '2 paused, to resume',
+          '1 done, to decide',
+          '1 failed',
+          '1 out of quota',
+        ],
+      },
+    ])
+  // Opened, it is what the rows and cards say.
+  await page.getByRole('button', { name: 'Workers 2 members' }).click()
+  await expect(page.locator('tr[data-handle="zeus"] .row-status')).toHaveText(
+    'Waiting on a background job',
+  )
+  await expect(page.locator('button.card[data-task="12"]')).toHaveAttribute(
+    'data-pending',
+    'background',
+  )
+  await expect(page.locator('button.card[data-task="13"]')).toHaveAttribute('data-state', 'paused')
+})
+
+test('names a group that holds only sessions of a role their member no longer has by its sessions', async ({
+  page,
+}) => {
+  const data = model()
+  data.openGroups = false
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  data.boards[1].lanes.push({
+    participant: session(20, zeusLane.participant, 'amber-pine', 'reviewer'),
+    tasks: [task(21, 'Review the lexer', 'done', 'chief', 'zeus-amber-pine', 3)],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([
+      {
+        group: 'Workers',
+        count: '2 members',
+        open: false,
+        marks: ['1 waiting for you', '1 done, to decide', '1 failed', '1 out of quota'],
+      },
+      { group: 'Reviewers', count: '1 session', open: false, marks: ['1 done, to decide'] },
+    ])
+})
+
+test("says folded a task held for the human's word in a session of a role its member no longer has", async ({
+  page,
+}) => {
+  // Zeus's harness moved its model (T-1718's case): the member is out until the human says it
+  // may go on, and the task in its former reviewer session is held for that word. The session
+  // keeps no time of its own, so its group has no "out of quota": its paused mark is all it says.
+  const data = model()
+  data.openGroups = false
+  const zeusLane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  zeusLane.participant.outUntil = '9999-12-31T23:59:59.999Z'
+  data.boards[1].lanes.push({
+    participant: session(20, zeusLane.participant, 'amber-pine', 'reviewer'),
+    tasks: [
+      task(21, 'Review the lexer', 'paused', 'chief', 'zeus-amber-pine', 3, {
+        heldUntil: '9999-12-31T23:59:59.999Z',
+      }),
+    ],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await open(page, data)
+  await expect
+    .poll(() => groupHeads(page))
+    .toEqual([
+      {
+        group: 'Workers',
+        count: '2 members',
+        open: false,
+        marks: ['1 done, to decide', '1 failed', '2 out of quota'],
+      },
+      { group: 'Reviewers', count: '1 session', open: false, marks: ['1 paused, to resume'] },
+    ])
+  // Opened, its card says what it waits for.
+  await page.getByRole('button', { name: 'Reviewers 1 session' }).click()
+  await expect(page.locator('button.card[data-task="21"] .card-route')).toHaveText(
+    /^held until you say its model may go on · from /,
+  )
+})
+
 test('gives a member with two roles a row per role, each with its own sessions and cards', async ({
   page,
 }) => {
@@ -1476,7 +1784,7 @@ test("draws a member's sessions as lanes under it, named, and counts its open wi
   )
   await open(page, data)
   await unfold(page)
-  const rows = page.locator('table[aria-label="Tasks"] tbody tr')
+  const rows = page.locator('table[aria-label="Tasks"] tbody tr[data-handle]')
   await expect(rows.evaluateAll((nodes) => nodes.map((n) => n.dataset.handle))).resolves.toEqual([
     'chief',
     'zeus',
@@ -2554,6 +2862,72 @@ test('says on the card of a task that goes on in the background what it waits on
   await expect(page.locator('button.card[data-task="2"]')).not.toHaveAttribute('data-pending')
 })
 
+test("keeps a program's words readable in every ANSI colour and the window's own, on every ANSI background and the window's own", async ({
+  page,
+}) => {
+  await page.route(`${ui.origin}/terminal-colours`, (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/page.css"><link rel="stylesheet" href="/vendor/xterm.css"><body><div id="host" style="width:1400px;height:500px"></div></body>',
+    }),
+  )
+  await page.goto(`${ui.origin}/terminal-colours`)
+  const pairs = await page.evaluate(async () => {
+    const { XtermEmulator } = await import('/term.js')
+    const terminal = new XtermEmulator(document.getElementById('host'), { onLink: () => {} })
+    terminal.resizeObserver.disconnect()
+    clearTimeout(terminal.settling)
+    terminal.terminal.resize(140, 20)
+    // The window's own background (49) and each one a program may ask for (ESC[40m to 47m,
+    // 100m to 107m), a row each, with the window's own words (39) and each of the sixteen colours
+    // as words on it.
+    const eight = (first) => Array.from({ length: 8 }, (_, colour) => `${first}${colour}`)
+    const words = ['39', ...eight(3), ...eight(9)]
+    const grounds = ['49', ...eight(4), ...eight(10)]
+    const printed = grounds
+      .map((ground) => words.map((word) => `\x1b[${word};${ground}mAb\x1b[0m `).join(''))
+      .join('\r\n')
+    await new Promise((done) => terminal.terminal.write(printed, done))
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+    const rgb = (css) =>
+      css
+        .match(/[\d.]+/g)
+        .slice(0, 3)
+        .map(Number)
+    const light = (colour) => {
+      const [r, g, b] = colour.map((value) => {
+        const share = value / 255
+        return share <= 0.03928 ? share / 12.92 : ((share + 0.055) / 1.055) ** 2.4
+      })
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+    const ratio = (a, b) => {
+      const [high, low] = [light(a), light(b)].sort((x, y) => y - x)
+      return (high + 0.05) / (low + 0.05)
+    }
+    // A cell xterm gives no background shows what is under it: the nearest element painted.
+    const ground = (element) => {
+      for (let at = element; at; at = at.parentElement) {
+        const colour = getComputedStyle(at).backgroundColor
+        if (!/^rgba\(.*,\s*0\)$/.test(colour) && colour !== 'transparent') return rgb(colour)
+      }
+      return [255, 255, 255]
+    }
+    // The window's words on its own ground share a span with the space after them.
+    const cells = [...document.querySelectorAll('#host .xterm-rows span')].filter(
+      (span) => span.textContent.trim() === 'Ab',
+    )
+    return cells.map((span, at) => ({
+      word: words[at % words.length],
+      ground: grounds[Math.floor(at / words.length)],
+      ratio: ratio(rgb(getComputedStyle(span).color), ground(span)),
+    }))
+  })
+  expect(pairs).toHaveLength(17 * 17)
+  // WCAG AA for small words, 4.5 to 1, on every one of them.
+  expect(pairs.filter((pair) => pair.ratio < 4.5)).toEqual([])
+})
+
 for (const [held, words] of [
   [{ task: 12, jobs: 3, agents: 0 }, 'waiting on 3 background jobs'],
   [{ task: 12, jobs: 0, agents: 1 }, 'waiting on a background agent'],
@@ -3211,7 +3585,7 @@ test("names a compaction's summary in what a window wrote as one, never as what 
   ])
   await expect(items.nth(1)).toHaveAttribute('data-compaction', 'true')
   // Drawn as one: its border and its label in the theme's amber, the other's not.
-  const amber = 'rgb(231, 185, 104)'
+  const amber = 'rgb(252, 211, 77)'
   await expect(items.nth(1)).toHaveCSS('border-left-color', amber)
   await expect(items.nth(1).locator('.transcript-head')).toHaveCSS('color', amber)
   await expect(items.nth(0)).not.toHaveCSS('border-left-color', amber)
@@ -4725,16 +5099,36 @@ async function replayPage(page) {
  * Clicks, with Cmd held, the cell at `column` of `row` (both from 0) of the replay `place` came
  * from, and answers what the page asked the app to open and what the pointer's title said.
  */
-async function clickingCell(page, place, row, column) {
+async function clickingCell(page, place, row, column, wanted, saw) {
   const at = {
     x: place.left + (column + 0.5) * place.cell,
     y: place.top + (row + 0.5) * place.row,
   }
+  const titleOf = () => page.evaluate(() => window.replay.terminal.element.title)
   await page.mouse.move(1390, 790)
+  // Do not mistake the previous cell's title for this one's hover.
+  await expect.poll(titleOf, { message: `${saw}: leave the previous link` }).toBe('')
   await page.mouse.move(at.x, at.y)
-  await page.waitForTimeout(40)
-  const title = await page.evaluate(() => window.replay.terminal.element.title)
+  if (wanted) {
+    // A hang bound, not a wait for the link layer to finish by a certain time.
+    await expect
+      .poll(titleOf, { message: `${saw}: hover`, timeout: 10_000 })
+      .toBe(`Cmd+click to open ${wanted[0]}`)
+  } else {
+    await afterFrames(page)
+  }
+  const title = await titleOf()
   await clickWith(page, at, ['Meta'])
+  if (wanted) {
+    await expect
+      .poll(() => page.evaluate(() => window.replayOpened.length), {
+        message: `${saw}: open`,
+        timeout: 10_000,
+      })
+      .toBeGreaterThan(0)
+  } else {
+    await afterFrames(page)
+  }
   const opened = await page.evaluate(() => window.replayOpened.splice(0))
   return { opened, title }
 }
@@ -4762,9 +5156,9 @@ for (const [group, harness, mode] of [
         const rows = c.printed.split('\r\n')
         for (const [index, raw] of rows.entries()) {
           for (const [column, kind] of pointsOf(raw, c.destination)) {
-            const { opened, title } = await clickingCell(page, place, index, column)
             const saw = `${c.id} row ${index} ${kind}`
             const wanted = c.expect === 'exact' && kind !== 'word' ? [c.destination] : null
+            const { opened, title } = await clickingCell(page, place, index, column, wanted, saw)
             if (opened.some((url) => url !== c.destination)) {
               wrong.push(`${saw}: opened ${JSON.stringify(opened)}, not ${c.destination}`)
             } else if (title !== '' && title !== `Cmd+click to open ${c.destination}`) {
@@ -6168,6 +6562,7 @@ test('New project has Staff, the rules for the staff, compaction, the advisor to
     'Compaction',
     'Advisor tool',
     'Prompt suggestion',
+    'Do with your own hands',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -6244,7 +6639,7 @@ test('New project has Staff, the rules for the staff, compaction, the advisor to
     await markup('new-project-dialog'),
     await markup('project-settings-dialog'),
   ]
-  expect(here).toHaveLength(8)
+  expect(here).toHaveLength(9)
   expect(here).toEqual(there)
   // Left as it opened, the start says nothing of what a project has anyway: the request is the one it was.
   await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
@@ -6788,7 +7183,7 @@ test('New project holds every section Project settings holds, in its order, but 
     expect(reason.length, `${legend} has no reason`).toBeGreaterThan(20)
   }
   expect(made).toEqual(settings.filter((legend) => !(legend in NEW_PROJECT_LACKS)))
-  expect(made).toHaveLength(9)
+  expect(made).toHaveLength(10)
 })
 
 test('New project: the rules for the staff and the compaction are written as they are in Project settings, counted and checked as typed, and start with the project', async ({
@@ -7176,6 +7571,7 @@ test("names the board's button and its dialog Project settings, with Staff, Rule
     'Compaction',
     'Advisor tool',
     'Prompt suggestion',
+    'Do with your own hands',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -7187,6 +7583,7 @@ test("names the board's button and its dialog Project settings, with Staff, Rule
     'Compaction',
     'Advisor tool',
     'Prompt suggestion',
+    'Do with your own hands',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -9235,7 +9632,7 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
   const next = await nextControlKey(page)
   await banner.getByRole('button', { name: 'Resume project' }).focus()
   const reached = []
-  for (let press = 0; press < 4; press += 1) {
+  for (let press = 0; press < 5; press += 1) {
     await page.keyboard.press(next)
     reached.push(
       await page.evaluate(
@@ -9244,10 +9641,11 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
       ),
     )
   }
-  // Folding a member's sessions only reads: it stays, as the cards do.
+  // Folding a role's group or a member's sessions only reads: they stay, as the cards do.
   expect(reached).toEqual([
     'Open task',
     'Open task',
+    'Workers 1 member',
     "Hide @zeus's 1 session",
     'T-3, Write the lexer, Done, from @chief',
   ])
@@ -9959,6 +10357,7 @@ test('project menu: Project settings… opens the dialog of the board’s Projec
     'Compaction',
     'Advisor tool',
     'Prompt suggestion',
+    'Do with your own hands',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -10834,6 +11233,7 @@ test('Project settings: the sections are the same distance apart and spaced alik
     'Compaction',
     'Advisor tool',
     'Prompt suggestion',
+    'Do with your own hands',
     'Human approval',
     'Wake-up calls',
     'Specs',
@@ -10852,6 +11252,10 @@ test('Project settings: the sections are the same distance apart and spaced alik
     [
       'Prompt suggestion',
       { text: 'Save prompt suggestion', primary: true, inActions: true, fromEdge: 0 },
+    ],
+    [
+      'Do with your own hands',
+      { text: 'Save own hands', primary: true, inActions: true, fromEdge: 0 },
     ],
     ['Wake-up calls', { text: 'Save wake-up calls', primary: true, inActions: true, fromEdge: 0 }],
     ['Specs', { text: 'Save specs', primary: true, inActions: true, fromEdge: 0 }],
@@ -14281,14 +14685,15 @@ test.describe('file drop on a Mac', () => {
     const cards = ['chief', 'zeus'].map((name) =>
       page.locator(`#stage .terminal-card[data-handle="${name}"]`),
     )
-    const ring = /rgb\(99, 199, 178\)/
+    // The window typed into has its own violet glow; the drop's ring is the lavender one.
+    const ring = /rgb\(165, 180, 252\)/
     expect(await marked(page)).toEqual([])
-    await expect(cards[0]).toHaveCSS('box-shadow', 'none')
-    // Entered over the chief's window: it shows, and its ring is the app's own seafoam.
+    await expect(cards[0]).not.toHaveCSS('box-shadow', ring)
+    // Entered over the chief's window: it shows, and its ring is the app's own lavender.
     await dragged.enter(page, ['/a/b.png'], told(chief))
     expect(await marked(page)).toEqual(['chief'])
     await expect(cards[0]).toHaveCSS('box-shadow', ring)
-    await expect(cards[1]).toHaveCSS('box-shadow', 'none')
+    await expect(cards[1]).not.toHaveCSS('box-shadow', ring)
     // Its tint covers the whole card, and lets the pointer through.
     const tint = await cards[0].evaluate((card) => {
       const style = getComputedStyle(card, '::after')
@@ -14304,7 +14709,7 @@ test.describe('file drop on a Mac', () => {
     // Moved over zeus's: the mark moves with it, and is on one window at a time.
     await dragged.over(page, told(zeus))
     expect(await marked(page)).toEqual(['zeus'])
-    await expect(cards[0]).toHaveCSS('box-shadow', 'none')
+    await expect(cards[0]).not.toHaveCSS('box-shadow', ring)
     await expect(cards[1]).toHaveCSS('box-shadow', ring)
     // Over the dock's head, which is no window: no mark.
     await dragged.over(page, told(await centreOf(page.locator('.dock-head'))))
@@ -14322,7 +14727,7 @@ test.describe('file drop on a Mac', () => {
     expect(await marked(page)).toEqual(['zeus'])
     await dragged.drop(page, ['/a/b.png'], told(zeus))
     expect(await marked(page)).toEqual([])
-    await expect(cards[1]).toHaveCSS('box-shadow', 'none')
+    await expect(cards[1]).not.toHaveCSS('box-shadow', ring)
     // So does one that follows the drop.
     await dragged.over(page, told(zeus))
     expect(await marked(page)).toEqual([])
@@ -15065,6 +15470,176 @@ for (const scheme of ['dark', 'light']) {
     testInfo.annotations.push({ type: 'shots', description: SHOTS })
   })
 }
+
+const ownHandsSection = (dialog) => {
+  const group = dialog.getByRole('group', { name: 'Do with your own hands', exact: true })
+  return {
+    group,
+    control: group.getByRole('checkbox', { name: 'Do with your own hands' }),
+    save: group.getByRole('button', { name: 'Save own hands' }),
+    hint: group.locator('.own-hands-hint'),
+  }
+}
+
+test('own hands: New project starts off and sends an on choice with project.open', async ({
+  page,
+}) => {
+  if (process.env.CF_SWITCH_SCREENSHOTS) await page.setViewportSize({ width: 1440, height: 1800 })
+  await open(page)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  const section = ownHandsSection(made.dialog)
+  await expect(section.control).not.toBeChecked()
+  await expect(section.group.locator('.dialog-help')).toHaveText(
+    'The chief does the work itself and uses the board only when you ask.',
+  )
+  await expect(section.save).toBeHidden()
+  await section.control.check()
+  if (process.env.CF_SWITCH_SCREENSHOTS) {
+    await section.group.scrollIntoViewIfNeeded()
+    await made.dialog.screenshot({ path: `${process.env.CF_SWITCH_SCREENSHOTS}/new-project.png` })
+  }
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+        compaction: 300000,
+        ownHands: true,
+      },
+    ])
+  expect(await calls(page, 'project.own_hands')).toEqual([])
+})
+
+test('own hands: settings saves and survives reopening, and pane follows', async ({ page }) => {
+  if (process.env.CF_SWITCH_SCREENSHOTS) await page.setViewportSize({ width: 1440, height: 1800 })
+  await open(page)
+  const pane = page.locator('#stage').getByRole('switch', { name: 'Do with your own hands' })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const section = ownHandsSection(dialog)
+  await expect(section.control).not.toBeChecked()
+  await section.control.check()
+  expect(await calls(page, 'project.own_hands')).toEqual([])
+  await section.save.click()
+  await expect
+    .poll(() => calls(page, 'project.own_hands'))
+    .toEqual([{ project: 1, ownHands: true }])
+  if (process.env.CF_SWITCH_SCREENSHOTS) {
+    await section.group.scrollIntoViewIfNeeded()
+    await dialog.screenshot({ path: `${process.env.CF_SWITCH_SCREENSHOTS}/project-settings.png` })
+  }
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(pane).toHaveAttribute('aria-checked', 'true')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect(section.control).toBeChecked()
+  await section.control.uncheck()
+  await section.save.click()
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(pane).toHaveAttribute('aria-checked', 'false')
+  await pane.click()
+  await expect(pane).toHaveAttribute('aria-checked', 'true')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect(section.control).toBeChecked()
+  // An external page event updates an already-open dialog, without a page reload.
+  await changed(page, () => {
+    delete window.__model.boards[1].project.ownHands
+    delete window.__model.projects.find((project) => project.id === 1).ownHands
+  })
+  await expect(section.control).not.toBeChecked()
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(pane).toHaveAttribute('aria-checked', 'false')
+})
+
+test('own hands: a project without a chief window offers both controls', async ({ page }) => {
+  const data = model()
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  chief.pane = null
+  chief.activity = { state: 'closed' }
+  await open(page, data)
+  const pane = page.locator('#stage').getByRole('switch', { name: 'Do with your own hands' })
+  await expect(pane).toBeVisible()
+  await pane.click()
+  await expect(pane).toHaveAttribute('aria-checked', 'true')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const section = ownHandsSection(page.getByRole('dialog', { name: 'Project settings' }))
+  await expect(section.control).toBeChecked()
+})
+
+test('own hands: a project made on, its pane, and its settings share the choice', async ({
+  page,
+}) => {
+  const data = model()
+  data.openMakesBoard = true
+  await open(page, data)
+  const made = await newProject(page)
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await ownHandsSection(made.dialog).control.check()
+  await made.start.click()
+  const pane = page.locator('#stage').getByRole('switch', { name: 'Do with your own hands' })
+  await expect(pane).toHaveAttribute('aria-checked', 'true')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const section = ownHandsSection(dialog)
+  await expect(section.control).toBeChecked()
+  await section.control.uncheck()
+  await section.save.click()
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(pane).toHaveAttribute('aria-checked', 'false')
+})
+
+test('own hands: an unrelated update keeps an unsaved edit and a refusal is shown', async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const section = ownHandsSection(dialog)
+  await section.control.check()
+  await changed(page)
+  await expect(section.control).toBeChecked()
+  await page.evaluate(() => {
+    window.__ownHandsFailure = 'the change failed'
+  })
+  await section.save.click()
+  await expect(section.hint).toHaveText('the change failed')
+  await expect(section.control).toBeChecked()
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(
+    page.locator('#stage').getByRole('switch', { name: 'Do with your own hands' }),
+  ).toHaveAttribute('aria-checked', 'false')
+})
+
+test('own hands: canceling New project clears the choice and the default is omitted', async ({
+  page,
+}) => {
+  await open(page)
+  let made = await newProject(page)
+  await ownHandsSection(made.dialog).control.check()
+  await made.dialog.getByRole('button', { name: 'Cancel' }).click()
+  made = await newProject(page)
+  await expect(ownHandsSection(made.dialog).control).not.toBeChecked()
+  await pickChief(made.dialog, 'Claude Code', 'claude-sonnet-5')
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'claude-code',
+        model: 'claude-sonnet-5',
+        gate: false,
+        staff: [],
+        compaction: 300000,
+      },
+    ])
+  expect(await calls(page, 'project.own_hands')).toEqual([])
+})
 
 test('BKV settings offers no backup for an image designer', async ({ page }) => {
   await open(page, shotData('after'))

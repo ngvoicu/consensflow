@@ -48,7 +48,7 @@ use crate::{config_with_codex, secs, Outcome};
 const SECTION: &str = "## This project's specs";
 
 /// What a message that gives a role again says, which no other note does.
-const REPLACES: &str = "replace the ones you were given then";
+const REPLACES: &str = "Follow these instructions in place of the earlier ones.";
 
 /// The folder the project keeps its specs in, below its own.
 const FOLDER: &str = "docs/specs";

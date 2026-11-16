@@ -186,6 +186,8 @@ pub struct NewProject {
     /// Whether Claude Code's prompt suggestion is left on in its windows, the chief's and the
     /// members'; false (off) is what every project starts with.
     pub prompt_suggestion: bool,
+    /// Whether the chief works itself from the project's first launch.
+    pub own_hands: bool,
 }
 
 impl NewProject {
@@ -243,6 +245,10 @@ impl NewProject {
             prompt_suggestion: match value.get("promptSuggestion") {
                 None => false,
                 said => parse_prompt_suggestion(said)?,
+            },
+            own_hands: match value.get("ownHands") {
+                None => false,
+                said => parse_own_hands(said)?,
             },
         })
     }
@@ -348,8 +354,8 @@ fn designer_refused() -> LedgerError {
 }
 
 /// A project with its chief, on the harness and model it runs on, and its staff, and
-/// the calls, specs, rules for the staff and compaction the human said for it, kept in
-/// the same write: the chief's first launch reads the specs and the rules, and the
+/// the calls, specs, rules for the staff, compaction and own-hands choice the human said for it,
+/// kept in the same write: the chief's first launch reads these settings, and the
 /// project is never seen without them. Everything the ledger refuses is refused
 /// before the write begins.
 pub(crate) fn create_project(
@@ -423,6 +429,9 @@ pub(crate) fn create_project(
             "project.created",
             json!({ "name": request.name, "directory": request.directory }),
         )?;
+        if request.own_hands {
+            set_own_hands(store, id, true)?;
+        }
         // Said as the project opens, kept and logged as if the human had said
         // them the moment after: a setting that is the default changes nothing.
         if let Some(wake_up) = wake_up {

@@ -20,14 +20,26 @@ const STAFF: &str = include_str!("../../../../skill/core/staff.md");
 /// `role`'s window instructions, from the shared text of `staff.md`, its
 /// commands starting with `cf`, and the paragraphs that depend on the shell of
 /// the window's `cf` as `shells.md` has them.
-pub(super) fn text(role: &str, cf: &CfWord) -> Result<String, RoleError> {
+pub(super) fn text(role: &str, cf: &CfWord, mac: bool) -> Result<String, RoleError> {
     let input = shells::paragraph(cf.shell(), "member_input")?;
     let removal = shells::paragraph(cf.shell(), "removal")?;
+    // The paragraph for a window on a Mac is none for any other.
+    let home = if mac {
+        shells::mac_paragraph("home")?
+    } else {
+        ""
+    };
+    let note = super::cf_note(cf);
     filled(
         STAFF,
         role,
-        cf.as_str(),
-        &[("member_input", input), ("removal", removal)],
+        super::cf_in_text(cf),
+        &[
+            ("member_input", input),
+            ("removal", removal),
+            ("mac_only", home),
+            ("cf_note", &note),
+        ],
     )
 }
 
@@ -124,8 +136,16 @@ fn fill<'a>(
             .take_while(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
             .count();
         if word > 0 && inside[word..].starts_with("}}") {
-            filled.push_str(slot(&inside[..word])?);
+            let text = slot(&inside[..word])?;
+            filled.push_str(text);
             rest = &inside[word + 2..];
+            // A slot left empty takes its paragraph break with it.
+            if text.is_empty()
+                && rest.starts_with("\n\n")
+                && (filled.is_empty() || filled.ends_with("\n\n"))
+            {
+                rest = &rest[2..];
+            }
         } else {
             // Not a slot: the match is tried again from the next character.
             filled.push('{');
@@ -153,6 +173,19 @@ more
 <!-- advisor: title -->
 the advisor
 ";
+
+    #[test]
+    fn a_slot_left_empty_takes_its_paragraph_break_with_it() {
+        let text = "one\n\n{{a}}\n\ntwo\n\n{{b}}\n\nthree {{a}}\n\nfour";
+        let none = |_: &str| Ok("");
+        assert_eq!(fill(text, none).unwrap(), "one\n\ntwo\n\nthree \n\nfour");
+        // A slot with something in it, or in the middle of a line, keeps what follows it.
+        let some = |_: &str| Ok("x");
+        assert_eq!(
+            fill(text, some).unwrap(),
+            "one\n\nx\n\ntwo\n\nx\n\nthree x\n\nfour"
+        );
+    }
 
     #[test]
     fn a_marker_is_a_whole_line_of_two_words() {

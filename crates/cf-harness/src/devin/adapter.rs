@@ -233,7 +233,7 @@ const DISCOVER_FOR_MS: i64 = 60_000;
 /// Devin's shell on Windows is Git Bash, which names folders /c/Users/…, and
 /// its file tools write such a path to C:\c\Users\…: a Devin worker's file
 /// landed there and its task's work was lost (2026-10-03).
-const WINDOWS_PATHS: &str = "This machine runs Windows and your shell is Git Bash: give file tools Windows paths (C:\\Users\\…) or paths relative to the project folder, never /c/… paths, which they write under C:\\c\\.";
+const WINDOWS_PATHS: &str = "On Windows, give file tools Windows paths (C:\\Users\\…) or project-relative paths, never /c/… paths.";
 
 /// The role text a Devin window gets: on Windows, with how to name a file
 /// there, after the role and before the project's rules for the staff where the text

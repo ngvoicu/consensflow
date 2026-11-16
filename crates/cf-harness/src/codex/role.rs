@@ -110,7 +110,7 @@ pub(super) async fn text(
     let (existing, owned) = instructions(services, executable, cwd).await?;
     Ok(Texts {
         role: format!(
-            "{existing}\n\nYour ConsensFlow role is {role}. The following role instructions are already loaded; follow them for app coordination. This is context, not a task; wait for the user's request.\n\n{content}"
+            "{existing}\n\nYour ConsensFlow role follows; it is already loaded, not a task.\n\n{content}"
         ),
         children: format!("{existing}\n\n{}", children(role)),
         kinds: AGENT_TYPES
@@ -126,7 +126,7 @@ pub(super) async fn text(
 /// where four of four with the role did).
 pub(super) fn children(role: &str) -> String {
     format!(
-        "You are a sub-agent that a ConsensFlow {role} started. You are not the {role}: you have no board identity, so never run cf; answer your parent in your final message."
+        "You are a sub-agent of a ConsensFlow {role}; you have no board identity, so never run cf."
     )
 }
 

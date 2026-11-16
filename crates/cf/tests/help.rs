@@ -65,7 +65,7 @@ fn board_usage() -> String {
 
 /// Each board command's words (the ones that name it), and the lines of the
 /// usage it answers with.
-const BOARD: [(&[&str], &str); 19] = [
+const BOARD: [(&[&str], &str); 20] = [
     (
         &["task", "add"],
         concat!(
@@ -218,6 +218,14 @@ const BOARD: [(&[&str], &str); 19] = [
             "  cf history [--page 2] [--find \"…\"] [--tools]\n",
             "                                    the chief's: what the human and the chiefs before you\n",
             "                                    said, newest page first (after the chief was switched)\n",
+        ),
+    ),
+    (
+        &["guide"],
+        concat!(
+            "  cf guide [--part 2]               the chief's: the board's guide, in parts; each ends with the\n",
+            "                                    command for the next (read before the first board command\n",
+            "                                    of a chief that does the work with its own hands)\n",
         ),
     ),
 ];

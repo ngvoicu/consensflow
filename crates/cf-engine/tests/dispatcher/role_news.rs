@@ -28,6 +28,10 @@ const DOCS_SKILL: &str =
 const PLANS_SKILL: &str =
     "/consensflow/integrations/specmint/fake/core-plans/.claude/skills/specmint-core/SKILL.md";
 
+/// What a note that gives a chief its ordinary role again begins with, as every note that says
+/// a role anew does.
+const OPENING: &str = "Your ConsensFlow role has changed.";
+
 /// Rules a human writes.
 const RULES: &str = "- Push to origin only, never to upstream.";
 
@@ -50,12 +54,12 @@ fn own_hands_switch_is_told_once_each_way_on_every_harness() {
             let on = told(&context, chief);
             assert_eq!(on.len(), 1, "{harness}: {first:?}");
             assert!(
-                on[0].starts_with("The person turned \"Do with your own hands\" on:"),
+                on[0].starts_with("The person turned \"Do with your own hands\" on."),
                 "{}",
                 on[0]
             );
-            assert!(on[0].contains("only when"));
-            assert_eq!(said_to_the_chief(&context.adapter).iter().filter(|line| line.contains("The person turned \"Do with your own hands\" on:")).count(), 1);
+            assert!(on[0].contains("These instructions replace your earlier ones."));
+            assert_eq!(said_to_the_chief(&context.adapter).iter().filter(|line| line.contains("The person turned \"Do with your own hands\" on.")).count(), 1);
             rests(&context, &project);
             passes(&context);
             assert_eq!(told(&context, chief).len(), 1);
@@ -67,17 +71,11 @@ fn own_hands_switch_is_told_once_each_way_on_every_harness() {
             passes(&context);
             let off = told(&context, chief);
             assert_eq!(off.len(), 2, "{harness}: {first:?}");
-            assert!(
-                off[1].starts_with("The person turned \"Do with your own hands\" off:"),
-                "{}",
-                off[1]
-            );
+            assert!(off[1].starts_with(OPENING), "{}", off[1]);
             assert_eq!(
                 said_to_the_chief(&context.adapter)
                     .iter()
-                    .filter(
-                        |line| line.contains("The person turned \"Do with your own hands\" off:")
-                    )
+                    .filter(|line| line.contains(OPENING))
                     .count(),
                 1
             );
@@ -134,8 +132,11 @@ fn own_hands_changed_in_a_turn_is_told_once_at_the_next_rest_on_every_harness() 
 
                 answers(&context, &project);
                 let told_now = told(&context, chief);
-                let direction = if was_on { "off" } else { "on" };
-                let prefix = format!("The person turned \"Do with your own hands\" {direction}:");
+                let prefix = if was_on {
+                    OPENING.to_owned()
+                } else {
+                    "The person turned \"Do with your own hands\" on.".to_owned()
+                };
                 assert_eq!(told_now.len(), notes + 1, "{label}: one note at rest");
                 assert!(
                     told_now.last().unwrap().starts_with(&prefix),
@@ -232,6 +233,43 @@ fn own_hands_changed_back_in_a_turn_tells_the_chief_nothing_on_every_harness() {
 }
 
 #[test]
+fn own_hands_chosen_at_creation_is_in_the_first_launch_without_a_change_note() {
+    for first in [FirstMessage::Delivered, FirstMessage::Opened] {
+        for harness in HARNESSES {
+            let context = made(first);
+            let project = context
+                .open_project(json!({
+                    "directory": "/work/app", "name": "app", "ownHands": true,
+                    "chief": { "harness": harness, "model": "diana" }, "staff": [],
+                }))
+                .unwrap()
+                .expect("the project");
+            let chief = at_rest(&context, &project);
+            let launches = chief_launches(&context.adapter);
+            assert_eq!(launches.len(), 1, "{harness}, {first:?}");
+            assert!(
+                launches[0]["instructions"]
+                    .as_str()
+                    .unwrap()
+                    .contains("own hands"),
+                "{harness}, {first:?}: first launch must have the chosen mode"
+            );
+            assert!(
+                role_notes(&context, chief).is_empty(),
+                "{harness}, {first:?}"
+            );
+            assert!(
+                !said_to_the_chief(&context.adapter)
+                    .iter()
+                    .any(|s| s.contains("The person turned \"Do with your own hands\"")),
+                "{harness}, {first:?}"
+            );
+            context.close();
+        }
+    }
+}
+
+#[test]
 fn own_hands_is_in_the_chiefs_next_launch_on_every_harness() {
     for harness in HARNESSES {
         let context = made(FirstMessage::Delivered);
@@ -252,6 +290,149 @@ fn own_hands_is_in_the_chiefs_next_launch_on_every_harness() {
                 .contains("own hands"),
             "{harness}"
         );
+    }
+}
+
+#[test]
+fn own_hands_going_off_gives_the_ordinary_role_whole_cut_for_cf_inbox_read_on_every_harness() {
+    // The ordinary chief's text is longer than a window is given in one message at any staff
+    // (16,000 units): the fake texts carry a real-sized role as words a release added.
+    let role: String = (0..900)
+        .map(|at| format!("Line {at} of the ordinary chief's role, which the board gave it.\n\n"))
+        .collect();
+    for harness in HARNESSES {
+        let context = made(FirstMessage::Delivered);
+        let project = project_on(&context, harness);
+        let chief = at_rest(&context, &project);
+        context
+            .ledger
+            .borrow_mut()
+            .set_own_hands(project.id, true)
+            .unwrap();
+        passes(&context);
+        rests(&context, &project);
+        let short = told(&context, chief);
+        assert_eq!(short.len(), 1, "{harness}");
+        // On, the note carries the short text word for word: the conversation holds it.
+        assert!(
+            short[0].contains("instructions for chief own hands"),
+            "{}",
+            short[0]
+        );
+        context.roles.rewritten.replace(format!("\n\n{role}"));
+        context
+            .ledger
+            .borrow_mut()
+            .set_own_hands(project.id, false)
+            .unwrap();
+        passes(&context);
+        let notes = role_notes(&context, chief);
+        assert_eq!(notes.len(), 2, "{harness}");
+        let off = &notes[1].body;
+        assert!(
+            off.starts_with(OPENING) && off.contains("Run the command at the end now"),
+            "{harness}: {}",
+            &off[..300.min(off.len())]
+        );
+        // The ledger holds the whole role, not the opening: `cf inbox read` prints all of it.
+        assert!(
+            off.contains(&role),
+            "{harness}: the whole ordinary role is the note"
+        );
+        assert!(
+            !off.contains("own hands"),
+            "{harness}: the ordinary role says no own hands"
+        );
+        assert!(cf_base::role_read::role_parts(off).len() > 1, "{harness}");
+        // What the window was typed is cut to its opening, with the way to read the rest.
+        let typed = said_to_the_chief(&context.adapter).pop().unwrap();
+        assert!(
+            typed.contains(OPENING),
+            "{harness}: {}",
+            &typed[..200.min(typed.len())]
+        );
+        assert!(typed.len() < off.len(), "{harness}: cut");
+        context.close();
+    }
+}
+
+#[test]
+fn rules_changed_while_own_hands_is_on_tell_the_chief_nothing_and_the_guide_has_them() {
+    for harness in HARNESSES {
+        let context = made(FirstMessage::Delivered);
+        let project = project_on(&context, harness);
+        let chief = at_rest(&context, &project);
+        context
+            .ledger
+            .borrow_mut()
+            .set_own_hands(project.id, true)
+            .unwrap();
+        passes(&context);
+        rests(&context, &project);
+        let notes = role_notes(&context, chief).len();
+        context
+            .ledger
+            .borrow_mut()
+            .set_staff_rules(project.id, Some(RULES))
+            .unwrap();
+        passes(&context);
+        rests(&context, &project);
+        passes(&context);
+        assert_eq!(
+            role_notes(&context, chief).len(),
+            notes,
+            "{harness}: its role has no rules"
+        );
+        context.close();
+    }
+}
+
+#[test]
+fn the_rules_for_the_staff_are_in_a_chiefs_launch_only_while_own_hands_is_off() {
+    for harness in HARNESSES {
+        let context = made(FirstMessage::Delivered);
+        let project = project_on(&context, harness);
+        let chief = at_rest(&context, &project);
+        context
+            .ledger
+            .borrow_mut()
+            .set_staff_rules(project.id, Some(RULES))
+            .unwrap();
+        relaunch(&context, project.id);
+        passes(&context);
+        let instructions = |context: &Context| {
+            chief_launches(&context.adapter).last().unwrap()["instructions"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        };
+        assert!(instructions(&context).contains(RULES), "{harness}: off");
+        context
+            .ledger
+            .borrow_mut()
+            .set_own_hands(project.id, true)
+            .unwrap();
+        relaunch(&context, project.id);
+        passes(&context);
+        let own = instructions(&context);
+        assert!(
+            own.contains("own hands") && !own.contains(RULES),
+            "{harness}: on: {own}"
+        );
+        // A member's text has them either way: they bind its work.
+        let _ = chief;
+        context
+            .ledger
+            .borrow_mut()
+            .set_own_hands(project.id, false)
+            .unwrap();
+        relaunch(&context, project.id);
+        passes(&context);
+        assert!(
+            instructions(&context).contains(RULES),
+            "{harness}: off again"
+        );
+        context.close();
     }
 }
 
@@ -439,7 +620,7 @@ fn specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_res
             let on = told(&context, chief);
             assert_eq!(on.len(), 1, "{label}: {on:?}");
             assert!(
-                on[0].starts_with("Specs are now on in this project: "),
+                on[0].starts_with("Your instructions now include:"),
                 "{label}: {}",
                 on[0]
             );
@@ -449,10 +630,7 @@ fn specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_res
                 on[0].contains("Your specs and their registry are in `docs/specs`"),
                 "{label}"
             );
-            assert!(
-                on[0].contains("say in one short line that you have it"),
-                "{label}"
-            );
+            assert!(on[0].contains("acknowledge it in one line"), "{label}");
             assert!(
                 !on[0].contains("You are the chief"),
                 "{label}: only the section, not the whole role"
@@ -469,7 +647,7 @@ fn specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_res
             assert!(
                 said_to_the_chief(&context.adapter)
                     .last()
-                    .is_some_and(|last| last.contains("Specs are now on in this project: ")),
+                    .is_some_and(|last| last.contains("Your instructions now include:")),
                 "{label}: it went into the window"
             );
             rests(&context, &project);
@@ -482,14 +660,13 @@ fn specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_res
             let off = told(&context, chief);
             assert_eq!(off.len(), 2, "{label}: {off:?}");
             assert!(
-                off[1].starts_with("Specs are now off in this project: "),
+                off[1].starts_with("Specs are now off."),
                 "{label}: {}",
                 off[1]
             );
             assert!(
-                off[1].contains(
-                    "Plan new work as tasks, not specs; the specs already in `docs/specs` stay."
-                ),
+                off[1]
+                    .contains("Plan new work as tasks, not specs; the specs in `docs/specs` stay."),
                 "{label}: {}",
                 off[1]
             );
@@ -519,12 +696,12 @@ fn specs_turned_on_then_off_then_moved_while_the_chief_runs_are_told_at_each_res
             let moved = told(&context, chief);
             assert_eq!(moved.len(), 4, "{label}: {moved:?}");
             assert!(
-                moved[3].contains("the specs are now kept in `plans`, not `docs/specs`"),
+                moved[3].contains("Your specs and their registry are in `plans`"),
                 "{label}: {}",
                 moved[3]
             );
             assert!(
-                moved[3].contains("The specs already in `docs/specs` stay where they are."),
+                moved[3].contains("The specs in `docs/specs` stay where they are."),
                 "{label}: {}",
                 moved[3]
             );
@@ -565,11 +742,7 @@ fn a_variant_changed_is_told_with_the_new_skill_and_nothing_of_a_folder() {
     passes(&context);
     let notes = told(&context, chief);
     assert_eq!(notes.len(), 1, "{notes:?}");
-    assert!(
-        notes[0].contains("the Specmint skill is now `specmint-tdd-html`, not `specmint-core`"),
-        "{}",
-        notes[0]
-    );
+    assert!(notes[0].contains("`specmint-tdd-html`"), "{}", notes[0]);
     assert!(!notes[0].contains("are now kept in"), "{}", notes[0]);
     assert!(!notes[0].contains("stay where they are"), "{}", notes[0]);
     assert!(notes[0].contains("specmint-tdd-html"), "{}", notes[0]);
@@ -591,7 +764,7 @@ fn what_the_app_says_for_every_project_reaches_a_chief_whose_project_follows_it_
     let notes = told(&context, chief);
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(
-        notes[0].starts_with("Specs are now on in this project: "),
+        notes[0].starts_with("Your instructions now include:"),
         "{}",
         notes[0]
     );
@@ -695,7 +868,7 @@ fn a_note_that_waits_for_its_turn_is_withdrawn_when_the_setting_changes_again_an
     let notes = told(&context, chief);
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(
-        notes[0].starts_with("Specs are now on in this project: "),
+        notes[0].starts_with("Your instructions now include:"),
         "the chief was told nothing before, so these are the specs turning on: {}",
         notes[0]
     );
@@ -719,7 +892,7 @@ fn the_rules_for_the_staff_written_changed_and_taken_away_are_told_to_the_chief_
     let first = told(&context, chief);
     assert_eq!(first.len(), 1, "{first:?}");
     assert!(
-        first[0].starts_with("The human wrote the rules for your staff while you work."),
+        first[0].starts_with("The human wrote the rules for your staff."),
         "{}",
         first[0]
     );
@@ -727,9 +900,7 @@ fn the_rules_for_the_staff_written_changed_and_taken_away_are_told_to_the_chief_
     // One true thing about the windows: those that open from now on have the rules, one already
     // open keeps its own; the section that follows does not say every member already has them.
     assert!(
-        first[0].contains(
-            "Windows that open from now on are given them; one already open keeps its rules."
-        ),
+        first[0].contains("New windows get them; open windows keep theirs."),
         "{}",
         first[0]
     );
@@ -744,7 +915,7 @@ fn the_rules_for_the_staff_written_changed_and_taken_away_are_told_to_the_chief_
     let second = told(&context, chief);
     assert_eq!(second.len(), 2);
     assert!(
-        second[1].starts_with("The human changed the rules for your staff while you work."),
+        second[1].starts_with("The human changed the rules for your staff."),
         "{}",
         second[1]
     );
@@ -755,14 +926,12 @@ fn the_rules_for_the_staff_written_changed_and_taken_away_are_told_to_the_chief_
     let third = told(&context, chief);
     assert_eq!(third.len(), 3);
     assert!(
-        third[2].starts_with("The human took away the rules for your staff while you work."),
+        third[2].starts_with("The human took away the rules for your staff."),
         "{}",
         third[2]
     );
     assert!(
-        third[2].contains(
-            "Windows that open from now on are given none; one already open keeps its rules."
-        ),
+        third[2].contains("New windows get none; open windows keep theirs."),
         "{}",
         third[2]
     );
@@ -946,7 +1115,7 @@ fn a_codex_chief_told_of_a_setting_now_is_not_told_the_same_again_when_it_is_res
     passes(&context);
     let notes = told(&context, chief);
     assert_eq!(notes.len(), 1, "{notes:?}");
-    assert!(notes[0].starts_with("Specs are now on in this project: "));
+    assert!(notes[0].starts_with("Your instructions now include:"));
     let with_specs = "instructions for chief with specs: core in .specs at /home/me/.agents/skills/specmint-core/SKILL.md";
     let recorded = {
         let ledger = context.ledger.borrow();
@@ -989,7 +1158,10 @@ fn a_codex_chief_told_of_a_setting_now_is_not_told_the_same_again_when_it_is_res
     let notes = role_notes(&context, chief);
     let replacements: Vec<&MessageView> = notes
         .iter()
-        .filter(|note| note.body.contains("replace the ones you were given then"))
+        .filter(|note| {
+            note.body
+                .contains("Follow these instructions in place of the earlier ones")
+        })
         .collect();
     assert_eq!(replacements.len(), 1, "{notes:?}");
 }
@@ -1109,7 +1281,10 @@ fn a_staff_that_changed_while_the_chief_ran_is_still_the_resumes_to_say_whole_th
     let notes = role_notes(&context, chief);
     let replacements: Vec<&MessageView> = notes
         .iter()
-        .filter(|note| note.body.contains("replace the ones you were given then"))
+        .filter(|note| {
+            note.body
+                .contains("Follow these instructions in place of the earlier ones")
+        })
         .collect();
     assert_eq!(replacements.len(), 1, "{notes:?}");
     assert!(
@@ -1150,7 +1325,7 @@ fn a_skill_that_could_not_be_put_in_place_is_tried_again_when_the_setting_comes_
     passes(&context);
     let notes = told(&context, chief);
     assert_eq!(notes.len(), 1, "{notes:?}");
-    assert!(notes[0].starts_with("Specs are now on in this project: "));
+    assert!(notes[0].starts_with("Your instructions now include:"));
 }
 
 #[test]
@@ -1177,7 +1352,7 @@ fn a_chief_told_of_specs_now_and_then_cleared_is_given_the_role_with_them_and_no
     assert!(
         notes[1]
             .body
-            .contains("began without your ConsensFlow role instructions"),
+            .contains("began without your ConsensFlow role"),
         "{}",
         notes[1].body
     );
@@ -1220,7 +1395,7 @@ fn a_clear_that_comes_with_a_change_one_look_has_found_is_given_the_role_with_it
     assert!(
         notes[0]
             .body
-            .contains("began without your ConsensFlow role instructions")
+            .contains("began without your ConsensFlow role")
             && notes[0].body.contains("with specs: core in .specs"),
         "{}",
         notes[0].body

@@ -175,14 +175,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = '''
-You change no product code: a
-test or script you write is part of your result, and only where the task asks
-for one.'''
-replace = '''
-A test changes no file: suggested fixes
-belong in your results.'''
-
+find = "You change no product code: a test or script you write is part of your result, and only where the task asks for one."
+replace = "A test changes no file: suggested fixes belong in your results."
 [[plant]]
 name = "tester: the tester's result does not say whether the work is ready"
 meant = "tells_the_tester_to_run_the_work_report_with_evidence_and_change_no_product_code"
@@ -190,9 +184,8 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/staff.md"
-find = "where any test or script you wrote is; and whether the work is ready. If you"
-replace = "where any test or script you wrote is. If you"
-
+find = "where any test or script you wrote is; and whether the work is ready. A long log"
+replace = "where any test or script you wrote is. A long log"
 [[plant]]
 name = "tester: the tester's description does not say it changes no product code"
 meant = "tells_the_tester_to_run_the_work_report_with_evidence_and_change_no_product_code"

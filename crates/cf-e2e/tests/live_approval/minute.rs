@@ -55,12 +55,12 @@ mod tests {
     use super::*;
 
     /// The words the role text of a member says not to run in its shell: what is
-    /// in backticks in the parenthesis after "Never wait for an answer in your shell".
+    /// in backticks in the parenthesis after "never wait for one in your shell".
     fn forbidden(role_text: &str) -> Vec<String> {
         // A role text is wrapped: its lines are one.
         let role_text = role_text.split_whitespace().collect::<Vec<_>>().join(" ");
         let after = role_text
-            .split("Never wait for an answer in your shell")
+            .split("never wait for one in your shell")
             .nth(1)
             .unwrap_or_default();
         let parenthesis = after
@@ -77,20 +77,25 @@ mod tests {
 
     #[test]
     fn the_role_text_of_a_member_names_what_it_may_not_run_in_its_shell() {
-        let text = "Questions go to the chief. Never wait for an answer\n\
+        let text = "Questions go to the chief, so never wait for one\n\
                     in your shell (no `sleep`, no loop over `cf inbox`): it arrives later.";
         assert_eq!(forbidden(text), ["sleep", "cf inbox"]);
         assert!(forbidden("no such sentence (`sleep`)").is_empty());
         // The real one says `sleep`, which an advisor on Pi took at its word.
         let staff = std::fs::read_to_string(cf_e2e::checkout::path("skill/core/staff.md")).unwrap();
-        assert!(forbidden(&staff).contains(&"sleep".to_owned()), "{staff}");
+        assert_eq!(forbidden(&staff), ["sleep", "{{cf}} inbox"]);
     }
 
     #[test]
     fn what_the_advisor_is_asked_to_do_is_nothing_a_role_text_forbids() {
         let staff = std::fs::read_to_string(cf_e2e::checkout::path("skill/core/staff.md")).unwrap();
         let asked = brief("ADVISOR_OK_P1");
-        for word in forbidden(&staff) {
+        let forbidden_words = forbidden(&staff);
+        assert!(
+            !forbidden_words.is_empty(),
+            "no forbidden words found in the staff role"
+        );
+        for word in forbidden_words {
             for text in [asked.as_str(), PROGRAM] {
                 assert!(
                     !text.to_lowercase().contains(&word),

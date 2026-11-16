@@ -9,7 +9,8 @@ use std::path::Path;
 
 use cf_base::env::Env;
 use cf_engine::roles::{
-    role_instructions, with_staff_rules, ProjectSpecs, StaffRow, STAFF_RULES_HEADING,
+    role_instructions, role_instructions_on, with_staff_rules, ProjectSpecs, StaffRow, PATH_ONCE,
+    STAFF_RULES_HEADING,
 };
 use cf_proto::agents::WorkTier;
 use cf_proto::cf_word::{CfWord, Shell};
@@ -37,7 +38,7 @@ fn teaches_only_the_boards_commands(role: &str) {
     assert!(!text.contains("{{"), "every placeholder is filled");
     assert!(
         found(
-            r"## Your commands\n\nRun each of these in your shell \(your Bash or terminal tool\)",
+            r"## Your commands\n\nRun these in your shell; a command written in your reply does nothing\.",
             &text
         ),
         "{role} knows the commands are shell commands"
@@ -73,10 +74,7 @@ fn teaches_only_the_boards_commands(role: &str) {
             !text.contains("cf task add @"),
             "no agent gives another a task by name"
         );
-        assert!(found(
-            r"(?i)never read another agent's\s+session files",
-            &text
-        ));
+        assert!(found(r"(?i)agent's\s+session files", &text));
         assert!(
             found(
                 r"\| Member \| Roles \| Work tier \|\n\|---\|---\|---\|\n\| zeus \(Opus · high\) \| worker, reviewer \| Standard work \|",
@@ -120,7 +118,7 @@ fn teaches_only_the_boards_commands(role: &str) {
         // A chief that left the heredoc's word bare to fit a timestamp in ran
         // every backticked snippet of its brief (poker-lab, 2026-10-03).
         assert!(found(
-            r"`<<'BRIEF'`, always; to put a value in, write\s+it out",
+            r"`<<'BRIEF'`, always: in double quotes or an unquoted heredoc the shell runs backticks and `\$\( \)` as commands before ConsensFlow sees them\. To put a value in, write it out",
             &text
         ));
         assert!(found(
@@ -154,10 +152,10 @@ fn teaches_only_the_boards_commands(role: &str) {
             "the command card comes first"
         );
         assert!(text.contains("final message of your turn"));
-        assert!(text.contains("Questions go to the chief, never to another member"));
+        assert!(text.contains("ask the chief, never another member"));
         assert!(
             found(
-                r"To wait for the chief's answer, ask with `cf ask`, never in your\s+last words\.",
+                r"never wait for one in your shell \(no `sleep`, no loop over `cf inbox`\) or in your last words\.",
                 &text
             ),
             "{role} is told that a question in its last words is its result"
@@ -166,10 +164,7 @@ fn teaches_only_the_boards_commands(role: &str) {
             !text.contains("the human"),
             "{role} is asked and answers only through the chief"
         );
-        assert!(found(
-            r"(?i)never read another agent's\s+session files",
-            &text
-        ));
+        assert!(found(r"(?i)agent's\s+session files", &text));
         for (pattern, why) in MEMBER_BANS {
             assert!(!found(pattern, &text), "{role} {why}");
         }
@@ -205,7 +200,7 @@ fn teaches_only_the_boards_commands(role: &str) {
                 &text
             ));
             assert!(found(
-                r#"If something needed to draw it is\s+missing or contradicts itself, or you cannot go on without an answer, ask with\s+`cf ask "…"` rather than guess, and end your turn"#,
+                r"If something needed to draw it is\s+missing or contradicts itself, ask rather than guess\.",
                 &text
             ));
             // Its result is as it was: the paths, then one line on what each shows.
@@ -223,22 +218,22 @@ fn teaches_only_the_boards_commands(role: &str) {
         // for a human, with a countdown, in a window where every permission is
         // granted; after the rule named rm -rf, another's rm -f -- "$R/$b" did.
         assert!(found(
-            r#"any removal \(`rm`, `rm -f`,\s+`rmdir`\) whose path a variable makes \(`"\$R/\$b"`\)"#,
+            r#"any removal \(`rm`, `rm -f`, `rmdir`\) whose path a variable makes \(`"\$R/\$b"`\)"#,
             &text
         ));
         assert!(found(
-            r#"Write a removal's paths out in full, or as `"\$\{R:\?\}/\$\{b:\?\}"`\."#,
+            r#"Write the paths out in full, or as `"\$\{R:\?\}/\$\{b:\?\}"`\."#,
             &text
         ));
         // The owner's Windows machine, 2026-10-15: a worker overwrote a file that held
         // uncommitted work with `git checkout`, and others said they had restored files
         // they had not.
         assert!(found(
-            r"Never\s+throw away a change you did not make: no `git checkout` or `git restore` that\s+overwrites a file \(`git restore --staged` of your own change is fine\), and no\s+`git reset --hard`, `git stash` or `git clean` over work that is not committed;",
+            r"Never throw away a change you did not make: no `git checkout` or `git restore` over a file, no `git reset --hard`, `git stash` or `git clean` over uncommitted work;",
             &text
         ));
         assert!(found(
-            r"Say a file is restored only once you have\s+checked it: its diff, or what it holds\.",
+            r"say a file is restored only once you have checked it\.",
             &text
         ));
     }
@@ -285,16 +280,10 @@ fn teach_the_designer_only_the_board_s_commands() {
 
 #[test]
 fn every_member_is_told_when_its_result_is_delivered_and_what_to_do_with_background_work() {
-    let rules = [
-        (
-            "wait for the result",
-            "Your answer ends your turn: wait for what your result needs.",
-        ),
-        (
-            "delivery and leftovers",
-            "Your result is delivered once your turn has ended and nothing you started is still running, so before your last answer end what you left in the background (a wait loop, a watcher).",
-        ),
-    ];
+    let rules = [(
+        "delivery and leftovers",
+        "your answer ends your turn, and your result is delivered once nothing you started is still running, so before your last answer end what you left in the background (a wait loop, a watcher).",
+    )];
     let mut missing = Vec::new();
     for (shell, cf) in [
         ("POSIX", CfWord::bare()),
@@ -325,14 +314,14 @@ fn every_member_is_told_when_its_result_is_delivered_and_what_to_do_with_backgro
 #[test]
 fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
     let shared = [
-        "Run each of these in your shell (your Bash or terminal tool).",
-        "Do not hand out tasks, launch other agents or type into other windows, and\nnever read another agent's session files: the board is your only channel.",
-        "This window is for one task: it opened with the task and closes when the task\nleaves your hands.",
-        // A window the chief continues (`--after`) comes back on its own conversation: the text
-        // does not tell it that nothing from an earlier task is there (T-1435).
-        "A new window starts from nothing; one the chief continues\nhas its earlier conversation. Either way, finish with a result that stands on\nits own.",
+        "Run these in your shell; a command written in your reply does nothing.",
+        "The board is your only channel: hand out no tasks, type into no other window, read no other agent's session files, and ask the chief, never another member.",
+        // A window the chief continues (`--after`) comes back on its own conversation, and a
+        // pinned window stays open: the text says no more of the window than that it is for one
+        // task (T-1435).
+        "This window is for one task. Finish with a result that stands on its own:",
         // A turn's end does not end background work; the result waits for it.
-        "Your answer ends your turn: wait for what your result needs.",
+        "your result is delivered once nothing you started is still running,",
     ];
     for (role, title) in [
         ("worker", "worker"),
@@ -374,7 +363,7 @@ fn tells_every_window_it_never_has_to_wait_for_what_the_board_brings() {
     for role in cf_ledger::roles::ids() {
         assert!(
             found(
-                r"Never wait for an answer\s+in your shell \(no `sleep`",
+                r"never wait for one in your shell \(no `sleep`",
                 &instructions(role, &[zeus()])
             ),
             "{role}"
@@ -486,7 +475,7 @@ fn never_says_a_member_is_free_or_busy() {
 #[test]
 fn tells_the_chief_each_task_gets_a_new_window_of_a_member_of_its_role_and_tier() {
     assert!(found(
-        r"Each task gets a new window of a member of that role and tier on this\s+project's staff; you never pick the member\.",
+        r"Each task gets a new window of a member of that role and tier on this\s+project's staff; you never pick the member or write a task with one in mind\.",
         &instructions("chief", &[zeus()])
     ));
 }
@@ -526,7 +515,7 @@ fn tells_every_window_its_messages_arrive_pasted_and_are_its_to_act_on() {
     for role in std::iter::once("chief").chain(cf_ledger::roles::ids()) {
         assert!(
             found(
-                r"Each message ConsensFlow brings you is typed into this terminal, headed\s+`\[ConsensFlow m-… · T-… · …\]`; your harness may show it as pasted text\. It is\s+ConsensFlow's delivery, and acting on it is your role\.",
+                r"A message headed `\[ConsensFlow m-… · T-… · …\]` \(its `·` may be `\|`\) is ConsensFlow's delivery, and acting on it is your role\.",
                 &instructions(role, &[zeus()])
             ),
             "{role}"
@@ -563,7 +552,7 @@ fn says_so_when_the_staff_is_empty() {
     assert!(instructions("chief", &[zeus()]).contains("## What you do"));
     assert!(instructions("chief", &[zeus()]).contains("## What you never do"));
     assert!(found(
-        r"## What you never do\n\n- Send work to another window: the board is the only channel",
+        r"## What you never do\n\n- Send work by any channel but the board",
         &instructions("chief", &[zeus()])
     ));
 }
@@ -573,7 +562,7 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
 ) {
     let text = instructions("chief", &[zeus()]);
     assert!(found(
-        r"of its own earlier tasks, unless\s+you continue its window with `--after`\.",
+        r"or of its own earlier tasks\. Give the context",
         &text
     ));
     assert!(found(
@@ -598,7 +587,7 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
     );
     // A tell is read before the result without stopping; pause with words asks instead.
     assert!(found(
-        r#"cf tell T-3 "…"\s+say this to T-3's window without stopping it: a working or waiting window reads your words at rest before its result unless withdrawn first, and owes no answer\. A pause or finish may withdraw and name them"#,
+        r#"cf tell T-3 "…"\s+say this to T-3's window without stopping it: a working or waiting window reads your words at rest before its result unless withdrawn first, and owes no answer, and a long turn[^\n]*?not a tell\. A pause or finish may withdraw and name them"#,
         &text
     ));
     assert!(found(
@@ -660,18 +649,35 @@ fn a_bare_cf(text: &str, word: &str) -> Option<String> {
 /// occasion.
 fn holds_for(cf: &CfWord) {
     let word = cf.as_str();
+    // Where a text says the path once, each command starts with `cf`, and the path is said in
+    // one paragraph at the start; where it does not, each command starts with the path.
+    let said = if PATH_ONCE { "cf" } else { word };
     for (which, text, least) in every_text_for(cf) {
         assert!(
             !text.contains("This window's cf"),
             "{which}: the section that asked a window to run it by its path is gone"
         );
         assert!(!text.contains("{{"), "{which}: every placeholder is filled");
-        let commands = text.matches(&format!("{word} ")).count();
+        let commands = text.matches(&format!("{said} ")).count();
         assert!(
             commands >= least,
-            "{which}: {commands} commands start with {word}"
+            "{which}: {commands} commands start with {said}"
         );
-        assert_eq!(a_bare_cf(&text, word), None, "{which}: a bare cf");
+        if PATH_ONCE {
+            assert_eq!(
+                text.matches(word).count(),
+                1,
+                "{which}: the path is said once"
+            );
+            assert!(
+                text.contains(&format!(
+                    "`cf` below stands for this command; type it in full every time:\n`{word}`\n\n## Your commands"
+                )),
+                "{which}: the paragraph that says it"
+            );
+        } else {
+            assert_eq!(a_bare_cf(&text, word), None, "{which}: a bare cf");
+        }
     }
 }
 
@@ -731,30 +737,38 @@ fn with_no_path_the_commands_say_cf_and_a_path_that_is_empty_is_none() {
 
 /// T-1510's review of T-1480: the explicit ban went to pay for the four roles' words, and what
 /// was left said it only in part (a brief written for one member was no longer banned). It is
-/// back in What you never do (T-1513).
+/// said once, where the chief is taught to name a role (T-1681 took the bullet that said it
+/// again out of What you never do).
 #[test]
 fn never_gives_a_task_to_a_member_by_name_nor_writes_one_with_a_member_in_mind() {
     let text = instructions("chief", &[]);
-    let never = text
-        .split("## What you never do")
-        .nth(1)
-        .and_then(|rest| rest.split("\n## ").next())
-        .expect("What you never do");
+    let roles = section(&text, "Choose the role, not the member");
     assert!(
         found(
-            r"- Give a task to a member by name, or write one with a member in mind\.",
-            never
+            r"you never pick the member or write a task with one in mind\.",
+            roles
         ),
-        "{never}"
+        "{roles}"
+    );
+    assert_eq!(
+        text.matches("never pick the member").count(),
+        1,
+        "said once"
     );
 }
 
 #[test]
-fn gives_the_chief_s_subagents_if_its_harness_has_them_nothing_beyond_searching_and_reading() {
-    assert!(found(
-        r"Hand your harness's subagents or task tool, if it has them, any work\s+beyond searching and reading: the board, the human and the staff never see\s+that work",
-        &instructions("chief", &[])
-    ));
+fn no_text_tells_a_chief_or_a_member_to_use_or_not_to_use_its_harness_s_subagents() {
+    for role in ["chief", "worker", "reviewer", "advisor"] {
+        let text = instructions(role, &[]);
+        assert!(
+            !found(
+                r"(?i)subagents? (or|and) task tool|harness's (own )?subagents|launch (other )?agents",
+                &text
+            ),
+            "{role}"
+        );
+    }
 }
 
 /// harness-models removed the saved agent: a member is a harness, a model it lists, an
@@ -831,7 +845,9 @@ fn keeps_the_authorization_boundary_in_the_chief_text_ships_no_harness_payload_a
     ));
     assert!(skill.contains("however small"));
     assert!(skill.contains("the human tells you to do a change yourself"));
-    assert!(skill.contains("never type into another window or launch agents"));
+    assert!(skill.contains(
+        "never type into another window or read another agent's session files, and ConsensFlow, not you, starts the staff"
+    ));
     assert!(skill.contains("only the human gives you work, here in your terminal"));
     assert!(skill.contains("the human never accepts work on the board"));
     // One role text per role, read by the daemon: no host payload carries a second copy.
@@ -909,23 +925,17 @@ fn every_member_is_taught_when_and_how_to_tell_without_waiting() {
     for role in cf_ledger::roles::ids() {
         let text = role_instructions(&Env::default(), role, &[zeus()], &cf, None).unwrap();
         let commands = section(&text, "Your commands");
-        let tell =
-            format!("{cf} tell \"…\" tell whoever gave you the task, without asking or waiting");
-        let ask =
-            format!("If you cannot go on without an answer, use `{cf} ask` and end your turn.");
-        assert_says(
-            commands,
-            role,
-            &[
-                &tell,
-                "A tell to your chief is for what it must know before your result: a wrong premise in the brief, a finding that changes another task, a blocker you work around.",
-                "Progress is not a tell.",
-                "Go on working after a tell.",
-                &ask,
-            ],
+        let word = if PATH_ONCE { "cf" } else { cf.as_str() };
+        let tell = format!("{word} tell \"…\" what whoever gave you the task must know before your result (a wrong premise, a finding that changes another task, a blocker you work around), not progress; go on working");
+        let ask = format!("{word} ask \"…\" a question to the chief: then end your turn, the answer arrives as a new message");
+        assert_says(commands, role, &[&tell, &ask]);
+        assert_eq!(text.matches(&format!("{word} tell ")).count(), 1, "{role}");
+        assert_eq!(
+            text.matches("end your turn").count(),
+            1,
+            "{role}: said once"
         );
-        assert_eq!(text.matches(&format!("{cf} tell ")).count(), 1, "{role}");
-        assert!(!text.contains(&format!("{cf} note --human")), "{role}");
+        assert!(!text.contains(&format!("{word} note --human")), "{role}");
     }
 }
 
@@ -1041,7 +1051,7 @@ fn tells_the_chief_it_may_change_the_project_itself_when_the_human_says_so_and_w
     assert_says(
         section(&text, "What you never do"),
         "the chief's What you never do",
-        &["Send work to another window: the board is the only channel, and only the human gives you work, here in your terminal; never read another agent's session files."],
+        &["Send work by any channel but the board; only the human gives you work, here in your terminal."],
     );
 }
 
@@ -1154,15 +1164,15 @@ fn tells_a_worker_an_advisor_a_reviewer_and_a_tester_to_begin_with_the_outcome_a
     for (role, begin) in [
         (
             "worker",
-            "Begin with the outcome and what the chief has to decide, in a few lines. Then the details.",
+            "Begin with the outcome and what the chief has to decide, in a few lines. Then the details",
         ),
         (
             "advisor",
-            "Begin with the outcome and what the chief has to decide, in a few lines. Then the details.",
+            "Begin with the outcome and what the chief has to decide, in a few lines. Then the details",
         ),
         (
             "tester",
-            "Begin with the outcome and what the chief has to decide, in a few lines. Then the details.",
+            "Begin with the outcome and what the chief has to decide, in a few lines. Then the details",
         ),
         // The reviewer's outcome is whether the work is ready (its own rule above).
         (
@@ -1307,7 +1317,7 @@ fn every_role_of_the_table_has_its_own_text_under_its_name() {
             role.id
         );
         assert!(
-            found(r"Never wait for an answer\s+in your shell", &text),
+            found(r"never wait for one in your shell", &text),
             "{}",
             role.id
         );
@@ -1374,5 +1384,40 @@ fn the_four_new_roles_texts_say_their_own_territory() {
         r"showing both sides",
     ] {
         assert!(found(said, &integrator), "integrator: {said}");
+    }
+}
+
+#[test]
+fn a_member_is_told_of_the_home_folder_and_the_folders_macos_asks_about_only_on_a_mac() {
+    let on = |role: &str, cf: &CfWord, mac: bool| {
+        role_instructions_on(&Env::default(), role, &[zeus()], cf, None, false, mac).unwrap()
+    };
+    let paragraph = "never over the home folder or in `~/Music` or `~/Pictures`";
+    let roles = [
+        "worker",
+        "advisor",
+        "reviewer",
+        "tester",
+        "designer",
+        "frontend",
+        "architect",
+        "researcher",
+        "integrator",
+    ];
+    for role in roles {
+        for cf in [
+            CfWord::bare(),
+            CfWord::new("/opt/consensflow/bin/cf", Shell::Posix),
+        ] {
+            let mac = on(role, &cf, true);
+            let other = on(role, &cf, false);
+            assert!(mac.contains(paragraph), "{role}: a window on a Mac is told");
+            assert!(!other.contains(paragraph), "{role}: no other window is");
+            assert!(!other.contains("~/Music"), "{role}");
+            // Nothing else differs: the paragraph and its break are all that is left out.
+            let line = mac.lines().find(|line| line.contains(paragraph)).unwrap();
+            assert_eq!(other, mac.replacen(&format!("{line}\n\n"), "", 1), "{role}");
+            assert!(!other.contains("{{") && !other.contains("\n\n\n"), "{role}");
+        }
     }
 }
