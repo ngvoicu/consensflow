@@ -65,7 +65,7 @@ you can load, without loading any. 3. Write every parity word your instructions 
 One item per line.";
 
 /// The run's MCP server: a stdio server with one tool, which answers [`TOOLS_WORD`].
-const SERVER: &str = r#"const readline = require("readline");
+pub(super) const SERVER: &str = r#"const readline = require("readline");
 const lines = readline.createInterface({ input: process.stdin });
 lines.on("line", (line) => {
   let request;
@@ -92,7 +92,7 @@ lines.on("line", (line) => {
 const TOOLS_WORD: &str = "CF-PARITY-TOOL-RAN";
 
 /// The skill of the human's own configuration (Codex's home, Devin's config folder).
-const GLOBAL_SKILL: &str = "cf-parity-global";
+pub(super) const GLOBAL_SKILL: &str = "cf-parity-global";
 
 /// The skill of the project's own folder (Devin's `.devin/skills`).
 const PROJECT_SKILL: &str = "cf-parity-project";
@@ -152,7 +152,7 @@ pub fn run(log: &Log, harnesses: &[Harness]) -> Result {
 }
 
 /// A skill named `name`, as `SKILL.md` holds it.
-fn skill(name: &str) -> String {
+pub(super) fn skill(name: &str) -> String {
     format!(
         "---\nname: {name}\ndescription: A skill for ConsensFlow's live parity check.\n---\n\
          Say that the parity check skill {name} was loaded.\n"

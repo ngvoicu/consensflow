@@ -31,7 +31,7 @@
 //! **The refresh hazard.** A refresh token is used once: if the copy refreshes the
 //! access token, the person's Keychain item holds a refresh token that no longer
 //! works, and they are logged out the next time theirs needs it. So the folder's
-//! `.credentials.json` holds the access token and **no refresh token** ([`RENEWING`]): a
+//! `.credentials.json` holds the access token and **no refresh token** ([`without_refresh`]): a
 //! Claude Code that cannot renew cannot use up the person's (measured on zeewin2, 2.1.316: it
 //! runs on such a copy, does not look at the copy's expiry, and where the server refuses the
 //! token it fails loudly with a 401, the person's login untouched). A run starts only on a login
@@ -51,7 +51,9 @@
 //! whole of `~/.claude.json`: the person's own Claude Code sessions write the rest
 //! of it all day.) A run that fails any of them fails, with the Claude Code of the
 //! person's windows named as the other possible writer. The run's folders are the
-//! live suites' (`~/.consensflow-candidate/live/…`) and the rigs' homes.
+//! live suites' (`~/.consensflow-candidate/live/…`) and the rigs' homes. Claude parity
+//! deliberately reads none of that other configuration: it checks the login and its copy,
+//! but cannot report changes to the other owner files; it also never renews the login.
 //!
 //! **What a kept home keeps.** The folder goes with the run, because it holds a login.
 //! A rig whose home is kept (`--keep`, or a case that reads the home after it ended)
@@ -232,7 +234,7 @@ fn oauth_with(text: &str, now: i64, left: Duration, required: &[&str]) -> Result
              that this machine keeps unusable (the owner is logged out the next time theirs needs it). \
              Claude Code renews a token itself, but only when five minutes of it are left, so using it \
              now does not help: run again once it has ended (Claude Code then renews it, as it does \
-             when the owner opens it, and on a test machine the kit asks it to), or make the run \
+             when the owner opens it, and an eligible test run may ask it to), or make the run \
              shorter",
             span(left)
         )));
@@ -476,13 +478,13 @@ fn changes(before: &Seen, after: &Seen, typed: &str) -> Vec<String> {
 
 /// The folder a run's Claude windows run on, once it is made.
 struct Made {
-    /// The login as it was copied: the machine's, without what renews it ([`RENEWING`]).
+    /// The login as it was copied: the machine's, without what renews it ([`without_refresh`]).
     oauth: Value,
     /// The machine's login as it was read, refresh token and all: what the machine's file is
     /// compared with when the run ends.
     login: Value,
     /// The person's setup when it was made.
-    owner: Seen,
+    owner: Option<Seen>,
     /// The Keychain items of Claude Code then; none where they cannot be listed.
     services: Option<BTreeSet<String>>,
     /// What the renewal of the login came to, where the login had run short on a test machine.
@@ -495,17 +497,86 @@ struct Made {
 /// ends. A copy that holds only the access token cannot renew it, so it cannot use up the refresh
 /// token the machine keeps (T-1067, measured on zeewin2: Claude Code 2.1.316 runs on such a copy,
 /// does not look at its expiry, and fails with a 401 where the server refuses the token).
-const RENEWING: [&str; 2] = ["refreshToken", "refreshTokenExpiresAt"];
-
 /// The part of `oauth`, the machine's login, that a run's folder is given: all but what renews it.
 fn without_renewal(oauth: &Value) -> Value {
     let mut copy = oauth.clone();
-    if let Some(fields) = copy.as_object_mut() {
-        for field in RENEWING {
-            fields.remove(field);
+    without_refresh(&mut copy);
+    copy
+}
+
+/// Remove refresh-named keys at every depth of a JSON login, including inside arrays.
+pub fn without_refresh(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            fields.retain(|name, _| !name.to_ascii_lowercase().contains("refresh"));
+            fields.values_mut().for_each(without_refresh);
+        }
+        Value::Array(items) => items.iter_mut().for_each(without_refresh),
+        _ => {}
+    }
+}
+
+/// Copy a JSON login only when it is an object whose refresh-named keys can be removed.
+/// Errors never include its contents.
+pub fn json_copy(text: &str, harness: &str) -> Result<String> {
+    let refused = || {
+        Error::Daemon(format!(
+            "{harness}'s login cannot be shown free of refresh keys, so it is not copied"
+        ))
+    };
+    let mut value: Value = serde_json::from_str(text).map_err(|_| refused())?;
+    if !value.is_object() {
+        return Err(refused());
+    }
+    without_refresh(&mut value);
+    let mut copy = serde_json::to_string_pretty(&value).map_err(|_| refused())?;
+    copy.push('\n');
+    Ok(copy)
+}
+
+/// Codex's token-backed login needs both fields even though a run must not get the refresh token.
+/// An empty string is a non-token that still deserializes as Codex's required `String`. The copy's
+/// timestamp delays an age-based refresh; a near-expiry access token can still trigger one.
+pub fn codex_copy(text: &str, now: i64) -> Result<String> {
+    let refused = || Error::Daemon("Codex's login cannot be safely copied".to_owned());
+    let clean = json_copy(text, "Codex")?;
+    let mut value: Value = serde_json::from_str(&clean).map_err(|_| refused())?;
+    match value.get_mut("tokens") {
+        Some(Value::Object(tokens)) => {
+            tokens.insert("refresh_token".to_owned(), Value::String(String::new()));
+            let time = jiff::Timestamp::from_millisecond(now).map_err(|_| refused())?;
+            value["last_refresh"] = Value::String(time.to_string());
+        }
+        None | Some(Value::Null) => {} // API-key and other non-token-backed logins.
+        Some(_) => return Err(refused()),
+    }
+    let mut copy = serde_json::to_string_pretty(&value).map_err(|_| refused())?;
+    copy.push('\n');
+    Ok(copy)
+}
+
+/// A TOML login is copied whole only if it can be parsed and has no refresh-named key.
+/// Refusing an unknown format is safer than copying a token that cannot be removed.
+pub fn toml_copy(text: &str, harness: &str) -> Result<String> {
+    fn has_refresh(value: &toml::Value) -> bool {
+        match value {
+            toml::Value::Table(fields) => fields.iter().any(|(name, value)| {
+                name.to_ascii_lowercase().contains("refresh") || has_refresh(value)
+            }),
+            toml::Value::Array(items) => items.iter().any(has_refresh),
+            _ => false,
         }
     }
-    copy
+    let refused = || {
+        Error::Daemon(format!(
+            "{harness}'s login cannot be shown free of refresh keys, so it is not copied"
+        ))
+    };
+    let value: toml::Value = toml::from_str(text).map_err(|_| refused())?;
+    if has_refresh(&value) {
+        return Err(refused());
+    }
+    Ok(text.to_owned())
 }
 
 /// The fields of a login that a refresh changes: the tokens, and when the access token ends. A
@@ -613,6 +684,8 @@ impl Made {
 pub struct Login {
     source: Source,
     owner: Owner,
+    /// Whether this case reads the owner's non-login Claude configuration to watch it.
+    watch_owner: bool,
     /// Where the folder is made.
     parent: PathBuf,
     /// How long the access token must last more for the folder to be made.
@@ -628,6 +701,28 @@ pub struct Login {
 }
 
 impl Login {
+    /// Use the same login copy without consulting the owner's other Claude configuration.
+    /// It cannot check those files for changes, and it cannot renew on a test machine:
+    /// the renewal itself reads and runs on that configuration.
+    #[must_use]
+    pub fn without_owner_config_reads(mut self) -> Self {
+        self.watch_owner = false;
+        // Test-machine renewal opens the owner's Claude and reads its configuration.
+        // A login that does not last the case must instead be refused.
+        self.renewal = None;
+        self
+    }
+
+    fn owner_before(&self) -> Option<Seen> {
+        self.watch_owner.then(|| self.owner.look())
+    }
+
+    fn owner_after(&self, before: &Option<Seen>) -> Vec<String> {
+        before
+            .as_ref()
+            .map_or_else(Vec::new, |before| self.owner.changes_since(before))
+    }
+
     /// The login of this machine's Claude Code, for a run that takes `left` at the most, margin
     /// included: the folder is made only if the access token lasts that much more (a live case
     /// states its planned length and the margin, [`super::Log::lasting`]). Claude Code refreshes a
@@ -654,6 +749,7 @@ impl Login {
         Self {
             source,
             owner: Owner { home: owner_home },
+            watch_owner: true,
             parent,
             left,
             renewal: None,
@@ -719,6 +815,11 @@ impl Login {
             .as_ref()
             .filter(|_| renewable(&text, now, self.left))
         else {
+            if !self.watch_owner {
+                return Err(Error::Daemon(format!(
+                    "{refused}. Claude parity does not renew the owner's login; renew it outside this case"
+                )));
+            }
             return Err(refused);
         };
         let kept = Kept {
@@ -738,6 +839,14 @@ impl Login {
                 "{still}. {}",
                 renewal.ended(&renewed, now)
             ))),
+        }
+    }
+
+    fn seed_trust(&self, config: &Path) -> Result {
+        if self.watch_owner {
+            super::machine::seed_claude_trust(config, &self.owner.home)
+        } else {
+            super::machine::seed_claude_trust_login_only(config, &self.owner.home)
         }
     }
 
@@ -762,13 +871,13 @@ impl Login {
         write_private(&folder.path().join(".credentials.json"), &credentials)?;
         write_private(&folder.path().join(".claude.json"), CLAUDE_JSON)?;
         // The live folders trusted as the owner's own config trusts them (T-629).
-        super::machine::seed_claude_trust(folder.path(), &self.owner.home)?;
+        self.seed_trust(folder.path())?;
         let path = folder.path().to_path_buf();
         *made = Some(Made {
             folder,
             oauth: copy,
             login: oauth,
-            owner: self.owner.look(),
+            owner: self.owner_before(),
             services: if keychain::watching() {
                 keychain_services()
             } else {
@@ -934,7 +1043,7 @@ impl ClaudeConfig for Login {
         if let Some((renewed, renewal)) = made.renewed.as_ref().zip(self.renewal.as_ref()) {
             let _ = writeln!(io::stderr(), "{}", renewed.said(renewal.machine()));
         }
-        let mut touched = self.owner.changes_since(&made.owner);
+        let mut touched = self.owner_after(&made.owner);
         touched.extend(self.owner_login_changed(&made.login));
         if let Some(note) = made.rewritten() {
             let _ = writeln!(io::stderr(), "note: {note}");
@@ -959,13 +1068,22 @@ impl ClaudeConfig for Login {
         if touched.is_empty() && refreshed.is_empty() && kept.is_empty() {
             // What was checked, with a hash that says nothing of what the files hold.
             let hash = |text: &str| digest(text.as_bytes())[..12].to_owned();
-            let _ = writeln!(
-                io::stderr(),
-                "the owner's Claude setup is as it was: login in {} {}, ~/.claude/settings.json {}; the copy of the login in the run's folder is as it was copied",
-                self.source.described(),
-                hash(&made.login.to_string()),
-                made.owner.settings.as_deref().map_or("none".to_owned(), |hash| hash[..12].to_owned())
-            );
+            if let Some(owner) = &made.owner {
+                let _ = writeln!(
+                    io::stderr(),
+                    "the owner's Claude setup is as it was: login in {} {}, ~/.claude/settings.json {}; the copy of the login in the run's folder is as it was copied",
+                    self.source.described(),
+                    hash(&made.login.to_string()),
+                    owner.settings.as_deref().map_or("none".to_owned(), |hash| hash[..12].to_owned())
+                );
+            } else {
+                let _ = writeln!(
+                    io::stderr(),
+                    "the owner's Claude login in {} {} and the run's login copy are as they were; the owner's other Claude configuration was not read or checked",
+                    self.source.described(),
+                    hash(&made.login.to_string())
+                );
+            }
             return Ok(());
         }
         let said = said(&touched, &refreshed, &kept);

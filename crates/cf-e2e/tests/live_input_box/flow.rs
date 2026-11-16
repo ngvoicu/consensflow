@@ -78,7 +78,7 @@ fn press(window: &Window, steps: &[Step]) -> Result {
 /// Pastes the message `n`, which asks for `word`, as the daemon pastes, and says
 /// what arrived in Claude's record and whether the window answered.
 fn paste_and_read(window: &Window, make: Message, n: u32, word: &str) -> Result<Read> {
-    let (config, session) = (window.claude_config(), session_of(window)?);
+    let (config, session) = (window.claude_config()?, session_of(window)?);
     window.paste(&window.given(&make(n, word))?)?;
     let arrived = live::until(ARRIVES, ARRIVES_LOOK, || {
         let record = claude::record(&config, &session);
@@ -107,7 +107,7 @@ pub fn flow(window: &Window, strategy: &Strategy, make: Message) -> Result<Outco
         lines.push(format!("FAIL it did not open: {screen}"));
         return Ok(Outcome { ok: false, lines });
     }
-    let (config, session) = (window.claude_config(), session_of(window)?);
+    let (config, session) = (window.claude_config()?, session_of(window)?);
     let status = Status::watch(&config, &session);
     window.paste(&window.given(&make(1, "FIRST"))?)?;
     let pressed = jiff::Timestamp::now().as_millisecond();

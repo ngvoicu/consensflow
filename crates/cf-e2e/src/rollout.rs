@@ -30,16 +30,23 @@ pub fn of_thread(home: &Path, thread: &str) -> Option<PathBuf> {
 }
 
 fn collect(folder: &Path, found: &mut Vec<PathBuf>) {
+    if fs::symlink_metadata(folder).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return;
+    }
     let Ok(entries) = fs::read_dir(folder) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_dir() {
             collect(&path, found);
-        } else if path
-            .extension()
-            .is_some_and(|extension| extension == "jsonl")
+        } else if kind.is_file()
+            && path
+                .extension()
+                .is_some_and(|extension| extension == "jsonl")
             && path
                 .file_name()
                 .is_some_and(|name| name.to_string_lossy().starts_with("rollout-"))

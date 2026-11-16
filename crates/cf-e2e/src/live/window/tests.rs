@@ -10,6 +10,113 @@ use super::open::{
 };
 use super::*;
 
+#[test]
+fn kit_round3_window_record_refuses_missing_and_foreign_homes_before_asking() {
+    let foreign = tempfile::tempdir().unwrap();
+    for (harness, name) in [
+        (Harness::Claude, "CLAUDE_CONFIG_DIR"),
+        (Harness::Codex, "CODEX_HOME"),
+        (Harness::Pi, "PI_CODING_AGENT_DIR"),
+        (
+            Harness::Devin,
+            if cfg!(windows) {
+                "APPDATA"
+            } else {
+                "XDG_DATA_HOME"
+            },
+        ),
+        (Harness::Muse, "XDG_DATA_HOME"),
+    ] {
+        for env in [
+            Vec::new(),
+            vec![(name.to_owned(), foreign.path().display().to_string())],
+        ] {
+            let asked = Cell::new(false);
+            let record = with_record_homes(harness, &env, || {
+                asked.set(true);
+                Some(ask::Record::default())
+            });
+            assert!(
+                record.is_none() && !asked.get(),
+                "harness-ask reached a missing or foreign home"
+            );
+        }
+    }
+    let run = crate::door::made("cf-window-record-").unwrap();
+    let value = run.path().display().to_string();
+    for (harness, env) in [
+        (
+            Harness::Claude,
+            vec![("CLAUDE_CONFIG_DIR".to_owned(), value.clone())],
+        ),
+        (
+            Harness::Codex,
+            vec![("CODEX_HOME".to_owned(), value.clone())],
+        ),
+        (
+            Harness::Pi,
+            vec![
+                ("PI_CODING_AGENT_DIR".to_owned(), value.clone()),
+                ("PI_CODING_AGENT_SESSION_DIR".to_owned(), value.clone()),
+            ],
+        ),
+        (
+            Harness::Devin,
+            vec![(
+                if cfg!(windows) {
+                    "APPDATA"
+                } else {
+                    "XDG_DATA_HOME"
+                }
+                .to_owned(),
+                value.clone(),
+            )],
+        ),
+        (
+            Harness::Muse,
+            vec![("XDG_DATA_HOME".to_owned(), value.clone())],
+        ),
+    ] {
+        let asked = Cell::new(false);
+        let _ = with_record_homes(harness, &env, || {
+            asked.set(true);
+            None
+        });
+        assert!(asked.get(), "a run-owned {harness:?} home was refused");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn kit_round3_window_record_refuses_linked_out_record_roots() {
+    let run = crate::door::made("cf-window-linked-").unwrap();
+    let foreign = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(foreign.path(), run.path().join("sessions")).unwrap();
+    let env = vec![("CODEX_HOME".to_owned(), run.path().display().to_string())];
+    let asked = Cell::new(false);
+    let _ = with_record_homes(Harness::Codex, &env, || {
+        asked.set(true);
+        None
+    });
+    assert!(!asked.get());
+}
+
+#[cfg(unix)]
+#[test]
+fn kit_round3_window_record_refuses_a_link_inside_codex_sessions() {
+    let run = crate::door::made("cf-window-nested-").unwrap();
+    let foreign = tempfile::tempdir().unwrap();
+    std::fs::create_dir(run.path().join("sessions")).unwrap();
+    std::os::unix::fs::symlink(foreign.path(), run.path().join("sessions/2026")).unwrap();
+    let env = vec![("CODEX_HOME".to_owned(), run.path().display().to_string())];
+    let asked = Cell::new(false);
+    let _ = with_record_homes(Harness::Codex, &env, || {
+        asked.set(true);
+        None
+    });
+    assert!(!asked.get(), "a linked-out Codex session was accepted");
+}
+
 fn item(role: &str, text: &str) -> Item {
     Item {
         id: String::new(),
@@ -178,31 +285,73 @@ fn what_a_screen_printed_after_a_mark_is_counted_in_characters_not_bytes() {
 
 #[test]
 fn claude_keeps_its_sessions_where_the_window_says_and_else_in_the_dot_claude_of_its_home() {
+    let run = crate::door::made("cf-harness-home-").unwrap();
+    let home_text = run.path().to_string_lossy().into_owned();
+    let other = run.path().join("other").to_string_lossy().into_owned();
     let env = |pairs: &[(&str, &str)]| -> Vec<(String, String)> {
         pairs
             .iter()
             .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
             .collect()
     };
-    let home = Path::new("/machine").join(".claude");
-    assert_eq!(claude_config_of(&env(&[("HOME", "/machine")])), home);
+    let home = run.path().join(".claude");
     assert_eq!(
-        claude_config_of(&env(&[
-            ("HOME", "/machine"),
-            ("CLAUDE_CONFIG_DIR", "/elsewhere")
-        ])),
-        Path::new("/elsewhere")
+        owned_harness_dir(
+            &env(&[("HOME", &home_text)]),
+            "CLAUDE_CONFIG_DIR",
+            ".claude"
+        )
+        .unwrap(),
+        home
+    );
+    assert_eq!(
+        owned_harness_dir(
+            &env(&[("HOME", &home_text), ("CLAUDE_CONFIG_DIR", &other)]),
+            "CLAUDE_CONFIG_DIR",
+            ".claude"
+        )
+        .unwrap(),
+        Path::new(&other)
     );
     // A variable set to nothing is not set, and the last of a name is the one.
     assert_eq!(
-        claude_config_of(&env(&[
-            ("HOME", "/other"),
-            ("HOME", "/machine"),
-            ("CLAUDE_CONFIG_DIR", "")
-        ])),
+        owned_harness_dir(
+            &env(&[
+                ("HOME", &other),
+                ("HOME", &home_text),
+                ("CLAUDE_CONFIG_DIR", "")
+            ]),
+            "CLAUDE_CONFIG_DIR",
+            ".claude"
+        )
+        .unwrap(),
         home
     );
-    assert_eq!(claude_config_of(&[]), Path::new(".claude"));
+    assert!(owned_harness_dir(&[], "CLAUDE_CONFIG_DIR", ".claude").is_err());
+    assert_eq!(
+        owned_harness_dir(&env(&[("HOME", &home_text)]), "CODEX_HOME", ".codex").unwrap(),
+        run.path().join(".codex")
+    );
+}
+
+#[test]
+fn claude_config_fallback_must_refuse_a_home_outside_the_run() {
+    let owner = tempfile::tempdir().unwrap();
+    let env = vec![("HOME".to_owned(), owner.path().display().to_string())];
+    let result = owned_harness_dir(&env, "CLAUDE_CONFIG_DIR", ".claude");
+    assert!(result.is_err(), "a foreign HOME was returned by the helper");
+    assert!(owned_harness_dir(&env, "CODEX_HOME", ".codex").is_err());
+    let explicit = vec![("CODEX_HOME".to_owned(), owner.path().display().to_string())];
+    assert!(owned_harness_dir(&explicit, "CODEX_HOME", ".codex").is_err());
+    #[cfg(unix)]
+    {
+        let run = crate::door::made("cf-harness-link-").unwrap();
+        std::os::unix::fs::symlink(owner.path(), run.path().join(".claude")).unwrap();
+        std::os::unix::fs::symlink(owner.path(), run.path().join(".codex")).unwrap();
+        let env = vec![("HOME".to_owned(), run.path().display().to_string())];
+        assert!(owned_harness_dir(&env, "CLAUDE_CONFIG_DIR", ".claude").is_err());
+        assert!(owned_harness_dir(&env, "CODEX_HOME", ".codex").is_err());
+    }
 }
 
 #[test]

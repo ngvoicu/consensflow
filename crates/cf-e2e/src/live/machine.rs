@@ -283,24 +283,31 @@ impl Installed {
     /// The version it says it is, as its first line says it; `unknown` when it
     /// says none.
     pub fn version(&self) -> String {
+        self.version_with_config(None)
+    }
+
+    /// Probe Claude using the config of the run's own, including for the version command.
+    pub fn version_in_claude_config(&self, config: &Path) -> String {
+        self.version_with_config(Some(config))
+    }
+
+    fn version_with_config(&self, config: Option<&Path>) -> String {
         let word = if self.harness == Harness::Devin {
             "version"
         } else {
             "--version"
         };
-        // The probe runs the owner's own program with the owner's environment, and a launcher
-        // that updates itself when it is run (Muse's, hourly) would do it here: it is told not to.
-        let ran = Run::new(&self.command)
-            .arg(word)
-            .inheriting_env()
-            .vars(
-                super::launcher::updates_off_of(self.harness)
-                    .iter()
-                    .copied(),
-            )
-            .run()
-            .ok()
-            .filter(|ran| ran.code == Some(0));
+        // Keep the ordinary probe's environment, but give Claude parity its own config.
+        // Launchers that update themselves (Muse's, hourly) are told not to.
+        let mut probe = Run::new(&self.command).arg(word).inheriting_env().vars(
+            super::launcher::updates_off_of(self.harness)
+                .iter()
+                .copied(),
+        );
+        if let Some(config) = config {
+            probe = probe.var("CLAUDE_CONFIG_DIR", config);
+        }
+        let ran = probe.run().ok().filter(|ran| ran.code == Some(0));
         let line = ran
             .as_ref()
             .and_then(|ran| ran.stdout.lines().next().map(|line| line.trim().to_owned()))
@@ -455,13 +462,25 @@ pub fn live_root(home: &Path) -> PathBuf {
 /// own config, a folder another run made and one a person made are refused, and so is a
 /// `.claude.json` that is a link.
 pub fn seed_claude_trust(config: &Path, home: &Path) -> Result {
+    seed_claude_trust_checked(config, home, true)
+}
+
+/// Seed a login-only parity config without looking up the owner's Claude folder.
+pub(super) fn seed_claude_trust_login_only(config: &Path, home: &Path) -> Result {
+    seed_claude_trust_checked(config, home, false)
+}
+
+fn seed_claude_trust_checked(config: &Path, home: &Path, check_owner: bool) -> Result {
     let real = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let (config, owners) = (real(config), real(&home.join(".claude")));
-    if config == real(home) || config.starts_with(&owners) {
-        return Err(Error::Daemon(format!(
-            "{} is the owner's own Claude config, which a run never writes",
-            config.display()
-        )));
+    let config = real(config);
+    if check_owner {
+        let owners = real(&home.join(".claude"));
+        if config == real(home) || config.starts_with(&owners) {
+            return Err(Error::Daemon(format!(
+                "{} is the owner's own Claude config, which a run never writes",
+                config.display()
+            )));
+        }
     }
     if !crate::door::is_made_or_below(&config) {
         return Err(Error::Daemon(format!(
@@ -672,6 +691,20 @@ pub fn installed(harness: Harness) -> Result<Installed> {
 /// [`installed`], for a case planned to take `planned`: the logins its windows run on must
 /// last that much and [`super::isolation::MARGIN`] when the home is made, or the run is refused.
 pub fn installed_for(harness: Harness, planned: Duration) -> Result<Installed> {
+    installed_with_owner_check(harness, planned, true)
+}
+
+/// Claude parity reads only the login; it cannot inspect the owner's Claude configuration
+/// to watch that configuration before and after the case.
+pub fn installed_for_claude_parity(planned: Duration) -> Result<Installed> {
+    installed_with_owner_check(Harness::Claude, planned, false)
+}
+
+fn installed_with_owner_check(
+    harness: Harness,
+    planned: Duration,
+    watch_owner: bool,
+) -> Result<Installed> {
     let name = harness.name();
     let command = command(name)?;
     let home = home_of(
@@ -688,10 +721,12 @@ pub fn installed_for(harness: Harness, planned: Duration) -> Result<Installed> {
         ),
     })?;
     let places = login_places(harness, &home, own_var("APPDATA").as_deref(), cfg!(windows));
-    if !has_login(&places) {
+    // Claude parity will check the login itself when it creates the run's config.
+    // Do not even probe the owner's other Claude configuration for a login mark.
+    if (harness != Harness::Claude || watch_owner) && !has_login(&places) {
         return Err(no_login(harness, &places));
     }
-    let installed = with_homes(Installed::at(harness, command, home), planned)?;
+    let installed = with_homes(Installed::at(harness, command, home), planned, watch_owner)?;
     // A machine with no Node has a harness that needs none (a native one).
     Ok(match command_folder("node") {
         Some(node) => installed.with_node(node),
@@ -702,9 +737,10 @@ pub fn installed_for(harness: Harness, planned: Duration) -> Result<Installed> {
 /// `installed`, whose windows run on a home of the run's own: Claude Code's on a config
 /// folder with a login copied from the machine's, the others' (Codex, Pi, Devin) on a home
 /// with a copy of the login and none of the person's other files, and the person's setup
-/// checked when the run is over. Every harness found goes through here, so that no live
-/// case has to make one, or can forget to.
-fn with_homes(mut installed: Installed, planned: Duration) -> Result<Installed> {
+/// checked when the run is over. Claude parity asks for no owner-configuration reads,
+/// so it checks its login but cannot check the owner's other Claude files. Every harness
+/// found goes through here, so that no live case has to make its login copy.
+fn with_homes(mut installed: Installed, planned: Duration, watch_owner: bool) -> Result<Installed> {
     let harness = installed.harness;
     if harness == Harness::Claude {
         // The one place the flag is read: a folder the run's caller copied a login into is the
@@ -714,6 +750,11 @@ fn with_homes(mut installed: Installed, planned: Duration) -> Result<Installed> 
             None => Login::of_machine_lasting(lasting(planned)),
         };
         if let Some(login) = login {
+            let login = if watch_owner {
+                login
+            } else {
+                login.without_owner_config_reads()
+            };
             installed = installed.with_claude_config(Arc::new(login));
         }
     }

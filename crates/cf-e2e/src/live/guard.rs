@@ -8,6 +8,48 @@ use std::path::Path;
 
 use serde_json::Value;
 
+/// Devin's store as named by the rig, refused unless its real path is run-owned.
+pub fn devin_store_path(
+    windows: bool,
+    env: &[(String, String)],
+) -> crate::Result<std::path::PathBuf> {
+    let name = if windows { "APPDATA" } else { "XDG_DATA_HOME" };
+    let data = env
+        .iter()
+        .rev()
+        .find(|(key, _)| {
+            if windows {
+                key.eq_ignore_ascii_case(name)
+            } else {
+                key == name
+            }
+        })
+        .map(|(_, value)| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| crate::Error::Daemon(format!("the rig gives Devin no {name}")))?;
+    let path = crate::devin_store::location(
+        windows,
+        "",
+        windows.then_some(data),
+        (!windows).then_some(data),
+    );
+    if !crate::door::is_made_or_below(Path::new(data)) || !run_owned_devin_store(&path) {
+        return Err(crate::Error::Daemon(
+            "Devin's store is outside the run's own roots".to_owned(),
+        ));
+    }
+    Ok(path)
+}
+
+/// SQLite may open a journal, WAL and shared-memory file beside the database as well.
+pub fn run_owned_devin_store(path: &Path) -> bool {
+    ["", "-journal", "-wal", "-shm"].into_iter().all(|suffix| {
+        let mut name = path.as_os_str().to_os_string();
+        name.push(suffix);
+        crate::door::is_made_or_below(Path::new(&name))
+    })
+}
+
 /// Whether every login Muse's `auth.json` names is kept in the keychain (`providers.<name>.storage`
 /// is `keychain`). Only that key is read, and never printed. A login held in a file is a
 /// secret the copy of the config would carry, and Muse refreshes an expiring token it finds,
@@ -68,15 +110,23 @@ pub fn copy_kept(from: &Path, to: &Path) -> io::Result<()> {
 
 /// The folder `from` copied to `to` the same way, the files under it too.
 pub fn copy_folder_kept(from: &Path, to: &Path) -> io::Result<()> {
-    for entry in std::fs::read_dir(from)?.flatten() {
-        let (source, target) = (entry.path(), to.join(entry.file_name()));
-        if source.is_dir() {
-            copy_folder_kept(&source, &target)?;
-        } else {
-            copy_kept(&source, &target)?;
-        }
+    crate::door::copy_tree(from, to, &|_| false)
+        .map_err(|error| io::Error::other(error.to_string()))
+}
+
+/// Copy a Muse login only after removing refresh-named keys, in a private file.
+pub fn copy_muse_login(from: &Path, to: &Path) -> io::Result<()> {
+    use std::io::Write as _;
+    let text = std::fs::read_to_string(from)?;
+    let copy =
+        crate::muse::login_copy(&text).map_err(|error| io::Error::other(error.to_string()))?;
+    if let Some(folder) = to.parent() {
+        crate::door::make_dir_private(folder)
+            .map_err(|error| io::Error::other(error.to_string()))?;
     }
-    Ok(())
+    crate::door::create_new_private(to)
+        .map_err(|error| io::Error::other(error.to_string()))?
+        .write_all(copy.as_bytes())
 }
 
 /// What a run of Muse's reads copies of the human's folders into `scratch`: the login file
@@ -84,7 +134,7 @@ pub fn copy_folder_kept(from: &Path, to: &Path) -> io::Result<()> {
 /// and nothing else of the config (the settings and their backup, what it trusts) or of the data
 /// (its sessions): Muse lists the account's models from the cache and the login alone.
 pub fn copy_muse_into(home: &Path, scratch: &Path) -> io::Result<()> {
-    copy_kept(
+    copy_muse_login(
         &home.join(".config/muse/auth.json"),
         &scratch.join("config/muse/auth.json"),
     )?;
@@ -96,7 +146,99 @@ pub fn copy_muse_into(home: &Path, scratch: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[test]
+    fn kit_round3_muse_catalog_skips_links_out() {
+        let root = crate::door::made("cf-muse-catalog-").unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        std::fs::write(foreign.path().join("login"), "fabricated refresh token").unwrap();
+        let catalog = root.path().join("catalog");
+        std::fs::create_dir(&catalog).unwrap();
+        std::os::unix::fs::symlink(foreign.path().join("login"), catalog.join("leak")).unwrap();
+        let target = root.path().join("copy");
+        super::copy_folder_kept(&catalog, &target).unwrap();
+        assert!(
+            !target.join("leak").exists(),
+            "a linked-out login was copied"
+        );
+    }
+
     use super::*;
+
+    #[test]
+    fn kit_disclosure_devin_store_refuses_foreign_home_fallback() {
+        let owner = tempfile::tempdir().unwrap();
+        let env = vec![("HOME".to_owned(), owner.path().display().to_string())];
+        assert!(
+            devin_store_path(false, &env).is_err(),
+            "a foreign HOME was returned"
+        );
+        assert!(devin_store_path(true, &env).is_err());
+        let run = crate::door::made("cf-devin-store-").unwrap();
+        for (windows, key) in [(false, "XDG_DATA_HOME"), (true, "APPDATA")] {
+            let env = vec![(key.to_owned(), run.path().display().to_string())];
+            assert!(devin_store_path(windows, &env)
+                .unwrap()
+                .starts_with(run.path()));
+            let foreign = vec![(key.to_owned(), owner.path().display().to_string())];
+            assert!(devin_store_path(windows, &foreign).is_err());
+        }
+        #[cfg(unix)]
+        {
+            let store = run.path().join("devin/cli/sessions.db");
+            std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+            let foreign = owner.path().join("sessions.db");
+            std::fs::write(&foreign, "fabricated").unwrap();
+            std::os::unix::fs::symlink(&foreign, &store).unwrap();
+            for (windows, key) in [(false, "XDG_DATA_HOME"), (true, "APPDATA")] {
+                let env = vec![(key.to_owned(), run.path().display().to_string())];
+                assert!(devin_store_path(windows, &env).is_err());
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kit_disclosure_devin_store_refuses_foreign_sqlite_sidecars() {
+        let run = crate::door::made("cf-devin-sidecar-").unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        let store = run.path().join("devin/cli/sessions.db");
+        std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+        std::fs::write(&store, "fabricated").unwrap();
+        let target = foreign.path().join("foreign-wal");
+        std::fs::write(&target, "fabricated").unwrap();
+        std::os::unix::fs::symlink(&target, store.with_file_name("sessions.db-wal")).unwrap();
+        let env = vec![("XDG_DATA_HOME".to_owned(), run.path().display().to_string())];
+        assert!(
+            devin_store_path(false, &env).is_err(),
+            "a foreign SQLite sidecar was accepted"
+        );
+    }
+
+    #[test]
+    fn muse_reads_and_compaction_copy_no_refresh_keys() {
+        let root = crate::door::made("cf-test-muse-login-").unwrap();
+        let home = root.path().join("owner");
+        let scratch = root.path().join("run");
+        std::fs::create_dir_all(home.join(".config/muse")).unwrap();
+        std::fs::create_dir_all(home.join(".local/share/muse/model-catalog")).unwrap();
+        std::fs::write(
+            home.join(".config/muse/auth.json"),
+            r#"{"providers":{"meta":{"storage":"keychain","refreshToken":"fake","nested":[{"ReFrEsH_secret":"fake"}],"access":"kept"}}}"#,
+        ).unwrap();
+        copy_muse_into(&home, &scratch).unwrap();
+        let copied: Value =
+            serde_json::from_slice(&std::fs::read(scratch.join("config/muse/auth.json")).unwrap())
+                .unwrap();
+        assert!(
+            copied["providers"]["meta"].get("refreshToken").is_none(),
+            "refresh key was copied"
+        );
+        assert!(copied["providers"]["meta"]["nested"][0]
+            .get("ReFrEsH_secret")
+            .is_none());
+        assert_eq!(copied["providers"]["meta"]["access"], "kept");
+    }
 
     #[test]
     fn a_login_held_anywhere_but_the_keychain_is_not_copied() {

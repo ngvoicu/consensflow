@@ -471,7 +471,10 @@ fn open_codex<'r>(rig: &'r Rig, install: &Installed, log: &Log) -> Result<Pane<'
     let workspace = live::machine::live_folder_in(&home, &format!("{FOLDER}/codex"))?;
     let agent = agents::agent(Harness::Codex);
     let mut argv = vec![install.command().to_string_lossy().into_owned()];
-    argv.extend(codex::isolation(&codex::mcp_servers(install.command())?)?);
+    argv.extend(codex::isolation(&codex::mcp_servers(
+        install.command(),
+        rig.environment(),
+    )?)?);
     argv.extend(["-m".to_owned(), live::text(&agent["model"])]);
     if let Some(effort) = agent["effort"].as_str() {
         argv.extend([

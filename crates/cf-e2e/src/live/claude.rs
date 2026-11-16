@@ -65,13 +65,20 @@ pub fn running_status_of(config: &Path, session: &str) -> Option<Value> {
 /// The first status file that names `session`, and, where `running` is asked
 /// for, whose process is there.
 fn status_where(config: &Path, session: &str, running: bool) -> Option<Value> {
-    let mut files: Vec<PathBuf> = fs::read_dir(config.join("sessions"))
+    let sessions = config.join("sessions");
+    if !crate::door::is_made_or_below(&sessions) {
+        return None;
+    }
+    let mut files: Vec<PathBuf> = fs::read_dir(sessions)
         .ok()?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
         .filter(|file| names_a_process(file))
         .collect();
     files.sort();
     files.into_iter().find_map(|file| {
+        if !crate::door::is_made_or_below(&file) {
+            return None;
+        }
         if running && !process_of(&file).is_some_and(crate::process::is_alive) {
             return None;
         }
@@ -239,7 +246,11 @@ pub fn runs(samples: &[Sample], from_ms: i64) -> Vec<String> {
 /// Where Claude keeps the transcript of `session` under the config folder
 /// `config` (`projects/<folder>/<session>.jsonl`), or none.
 pub fn transcript_file(config: &Path, session: &str) -> Option<PathBuf> {
-    let mut folders: Vec<PathBuf> = fs::read_dir(config.join("projects"))
+    let projects = config.join("projects");
+    if !crate::door::is_made_or_below(&projects) {
+        return None;
+    }
+    let mut folders: Vec<PathBuf> = fs::read_dir(projects)
         .ok()?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
         .collect();
@@ -247,7 +258,7 @@ pub fn transcript_file(config: &Path, session: &str) -> Option<PathBuf> {
     folders
         .into_iter()
         .map(|folder| folder.join(format!("{session}.jsonl")))
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| crate::door::is_made_or_below(candidate) && candidate.is_file())
 }
 
 /// One record of a conversation, as Claude kept it.

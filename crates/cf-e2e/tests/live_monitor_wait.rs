@@ -300,7 +300,7 @@ fn look(window: &Window, starts: &mut Starts) -> Option<Look> {
         .map(|item| item.text.trim().to_owned())
         .unwrap_or_default();
     let session = window.session().unwrap_or_default();
-    let status = claude::status_of(&window.claude_config(), &session)
+    let status = claude::status_of(&window.claude_config().ok()?, &session)
         .and_then(|status| status["status"].as_str().map(str::to_owned))
         .unwrap_or_else(|| "unsaid".to_owned());
     let (commands, plain) = commands_now(window, starts);
@@ -566,7 +566,10 @@ fn has(text: &str, tag: &str) -> bool {
 /// The records of the window's conversation, as Claude wrote them.
 fn raw_records(window: &Window) -> Vec<Value> {
     let session = window.session().unwrap_or_default();
-    claude::transcript_file(&window.claude_config(), &session)
+    window
+        .claude_config()
+        .ok()
+        .and_then(|config| claude::transcript_file(&config, &session))
         .and_then(|file| fs::read_to_string(file).ok())
         .map(|text| {
             text.lines()
@@ -766,7 +769,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
         .map_err(|screen| Error::Daemon(format!("the window did not open: {screen}")))?;
     let raw = raw_records(&window);
     let told = notifications(&raw);
-    let config = window.claude_config();
+    let config = window.claude_config()?;
     let session = window.session().unwrap_or_default();
     log.block(
         "the first message",

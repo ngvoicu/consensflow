@@ -83,7 +83,7 @@ fn keep(run: &Run, window: &Window, (case, when): (Case, &str), session: &str) -
     let Some(folder) = run.transcripts else {
         return Ok(());
     };
-    if let Some(file) = transcript_file(&window.claude_config(), session) {
+    if let Some(file) = transcript_file(&window.claude_config()?, session) {
         cf_e2e::door::copy(&file, folder.join(kept_name(case, when, session)))?;
     }
     Ok(())
@@ -112,10 +112,13 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
     }
     // Which process the window's program is, read as the pane host answered its open.
     let own = cut.process();
-    let watching = cut
-        .session()
-        .filter(|_| claude)
-        .map(|session| Status::watch(&cut.claude_config(), &session));
+    let watching = if claude {
+        let config = cut.claude_config()?;
+        cut.session()
+            .map(|session| Status::watch(&config, &session))
+    } else {
+        None
+    };
     cut.paste(&cut.given(&case.message())?)?;
     // `early`: the message is in the record and nothing of the answer is: Claude says so by
     // its status, the others by what their record holds.
@@ -193,7 +196,11 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
     let before = cut.recorded().len();
     let again = run.window(&format!("{id}-again"), Some(&session))?;
     let opened_ms = jiff::Timestamp::now().as_millisecond();
-    let watching = claude.then(|| Status::watch_running(&again.claude_config(), &session));
+    let watching = if claude {
+        Some(Status::watch_running(&again.claude_config()?, &session))
+    } else {
+        None
+    };
     let opened = Instant::now();
     let drew = again.still(READY);
     said.say(format!(
@@ -291,7 +298,7 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
     sleep(Duration::from_secs(3));
     said.say(reading(run.read(&session).as_ref()));
     if claude {
-        let closed = record(&again.claude_config(), &session)
+        let closed = record(&again.claude_config()?, &session)
             .into_iter()
             .find(|entry| {
                 entry.kind == "assistant" && entry.raw.contains("\"model\":\"<synthetic>\"")

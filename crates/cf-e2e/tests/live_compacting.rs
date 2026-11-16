@@ -127,7 +127,7 @@ fn check(log: &Log) -> Result<Check> {
         .with_home_file(Harness::Codex, "CODEX_HOME", "config.toml", CONFIG)
         .with_daemon_var("CONSENSFLOW_LAUNCH_TIMEOUT_MS", LAUNCH_MS);
     let mut members = Members::open(&plan, Path::new(FAKE_AGENT), log)?;
-    let home = members.codex_home();
+    let home = members.codex_home()?;
     log.say(format!(
         "Codex runs on the kit's home of the run's own, {}, a copy of the machine's login and the config.toml that compacts early",
         home.display()

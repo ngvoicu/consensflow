@@ -13,11 +13,11 @@
 //!
 //! | Harness | Variables | Copied from the owner's | Watched in the owner's |
 //! |---|---|---|---|
-//! | Claude Code | `CLAUDE_CONFIG_DIR` ([`super::login`]) | the Keychain's login, without its refresh token, that lasts the case's planned length and the margin | `settings.json`, `.claude.json`'s projects, `history.jsonl`, `projects/`, the Keychain's items |
-//! | Codex | `CODEX_HOME` | `auth.json` | `auth.json`, `config.toml` |
+//! | Claude Code | `CLAUDE_CONFIG_DIR` ([`super::login`]) | the Keychain's login, without its refresh token, that lasts the case's planned length and the margin | `settings.json`, `.claude.json`'s projects, `history.jsonl`, `projects/`, the Keychain's items; parity watches only the login and Keychain items, never the other Claude configuration |
+//! | Codex | `CODEX_HOME` | `auth.json`, without refresh-named keys except an empty `tokens.refresh_token` and a copy-time `last_refresh` for token-backed logins | `auth.json`, `config.toml` |
 //! | Pi | `PI_CODING_AGENT_DIR` | the entries of `auth.json` the run's model needs and that last the run and a margin, without their refresh tokens; and, where the model's provider is one the folder gives Pi by a package (`cliproxyapi`, [`pi::provider`]), the provider's files, its package and a `settings.json` that names it | `auth.json`, `settings.json`, `models.json`, `mcp-auth.json`, `sessions/`, and the provider's files, npm's manifests and the package |
-//! | Devin | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME` | `credentials.toml`, `config.json` | those two and `trusted_workspaces.json` |
-//! | Devin, on Windows | `USERPROFILE`, `APPDATA`, `LOCALAPPDATA` ([`Plan::devin_on_windows`]) | `credentials.toml`, `config.json` | those two and `trusted_workspaces.json`, in the owner's `%APPDATA%\devin` |
+//! | Devin | `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME`, `XDG_CACHE_HOME`, `GIT_CONFIG_GLOBAL` | `credentials.toml` if it has no refresh-named key, `config.json` | those two and `trusted_workspaces.json` |
+//! | Devin, on Windows | `USERPROFILE`, `APPDATA`, `LOCALAPPDATA`, `GIT_CONFIG_GLOBAL` ([`Plan::devin_on_windows`]) | `credentials.toml` if it has no refresh-named key, `config.json` | those two and `trusted_workspaces.json`, in the owner's `%APPDATA%\devin` |
 //!
 //! **Muse Code** sets none of these: its windows run through the rig's own launcher
 //! ([`crate::muse::write_live_stand_in`], given by [`super::machine::rig`] to every rig that
@@ -37,8 +37,8 @@
 //! call, which ignores `APPDATA` (T-727) and expands `%USERPROFILE%` from the window's
 //! environment. The run's home holds a profile of its own with both folders made, `USERPROFILE`
 //! names it, and `APPDATA` and `LOCALAPPDATA` follow it so that the daemon, which reads Devin's
-//! sessions by `APPDATA`, looks where Devin writes. `HOME` stays the person's (Git and Git Bash
-//! read it); `~/.agents/skills` is read where the system's profile folder is, never written.
+//! sessions by `APPDATA`, looks where Devin writes. `HOME` stays the person's; Git gets a
+//! generated global config. `~/.agents/skills` is read where the system's profile folder is.
 //!
 //! Every harness says its row, or why it has none, in [`Isolation::of_machine_lasting`], with
 //! no arm for "any other": one added later is a decision, not a silence.
@@ -50,8 +50,9 @@
 //! fails loudly. The run is given an entry only if it lasts the run's length and [`MARGIN`]; one
 //! that does not is a refusal, in words, before anything is spent, except on a test machine, where
 //! Pi is first run once as the owner to renew an entry that has run short ([`super::renew`],
-//! T-1067). Codex and Devin keep a login that a run does not outlast (Devin's is a key); what
-//! Codex rewrote is said when the run ends. At the end the copies are compared with what was
+//! T-1067). Codex's copied JSON keeps the empty token field and copy-time timestamp it needs to
+//! load, but no refresh token; Devin's TOML is copied only when
+//! it parses and has no such key. What Codex rewrote is said when the run ends. At the end the copies are compared with what was
 //! copied, and the owner's files with their hashes: a difference fails the run, naming the file, and
 //! nothing a login holds is said anywhere.
 //!
@@ -122,6 +123,9 @@ pub const fn lasting(planned: Duration) -> Duration {
 /// that made it follows, so that one a killed run left behind is known to be nobody's.
 pub(crate) const PREFIX: &str = "consensflow-live-home-";
 
+const DEVIN_GIT_CONFIG: &str =
+    "[user]\n\tname = ConsensFlow Live\n\temail = live@consensflow.invalid\n";
+
 /// What the run's home is given.
 #[derive(Debug, Clone)]
 enum Seed {
@@ -149,26 +153,9 @@ enum Seed {
         to: PathBuf,
         provider: &'static pi::Provider,
     },
-    /// A copy in `to` of each of the folders `only` of the owner's folder `from` that is there:
-    /// what another program of the rig reads in a folder the variables move. A copy, never a
-    /// link: a link was a way for every program of the rig to write in the owner's folder (the
-    /// owner's `~/.local/share/claude`, where Claude Code's updater writes its versions, was a
-    /// Devin run's `$XDG_DATA_HOME/claude`, T-1373), and before that the owner's Muse was the
-    /// rig's (T-1081). Devin's, on Unix.
-    #[cfg(unix)]
-    Carry {
-        from: PathBuf,
-        to: PathBuf,
-        only: &'static [&'static str],
-    },
+    /// A file made from the kit's own fixed contents, not the owner's configuration.
+    Fixed { to: PathBuf, text: &'static str },
 }
-
-/// The folders of the owner's XDG config folder a Devin run carries: git's, whose `config` a
-/// window's git reads there besides `~/.gitconfig`. Devin's own login and config are copied by
-/// name; nothing else of the owner's config or data folders is any harness's of the rig's
-/// (Claude Code, Codex and Pi keep theirs below `HOME`, Muse has a home of the run's).
-#[cfg(unix)]
-const XDG_CARRIED: [&str; 1] = ["git"];
 
 /// What a harness's home is made of, and what is watched of the owner's.
 #[derive(Debug, Clone)]
@@ -238,7 +225,10 @@ impl Plan {
         }
         Self {
             folders: Vec::new(),
-            vars: vec![("PI_CODING_AGENT_DIR", "pi/agent".into())],
+            vars: vec![
+                ("PI_CODING_AGENT_DIR", "pi/agent".into()),
+                ("PI_CODING_AGENT_SESSION_DIR", "pi/agent/sessions".into()),
+            ],
             // Pi installs a package its settings name and it has not got, and updates and
             // downloads, at its start unless told not to (Pi 1.5.0, `dist/core/package-manager.js`:
             // `installMissing` returns before installing when `PI_OFFLINE` is set; `--offline` is
@@ -263,7 +253,7 @@ impl Plan {
     /// it would look in the owner's Roaming for what Devin wrote in the run's (T-1081's class).
     /// The profile holds a copy of `credentials.toml` (an API key: there is no refresh token to
     /// strip) and `config.json` from the owner's Roaming folder `owner_roaming`, and nothing else
-    /// of the owner's. `HOME` is not set here: Git and Git Bash read it, and it stays the person's.
+    /// of the owner's. `HOME` stays the person's, and Git gets the generated global config.
     /// (Devin reads `~/.agents/skills` by the system's profile folder, not the variable, so the
     /// owner's skills are read there, never written.)
     fn devin_on_windows(owner_roaming: &Path) -> Self {
@@ -277,6 +267,7 @@ impl Plan {
                 ("USERPROFILE", profile),
                 ("APPDATA", roaming.clone()),
                 ("LOCALAPPDATA", local),
+                ("GIT_CONFIG_GLOBAL", "profile/git/config".into()),
             ],
             set: Vec::new(),
             seeds: vec![
@@ -289,6 +280,10 @@ impl Plan {
                     from: owner.join("config.json"),
                     to: roaming.join("devin").join("config.json"),
                     login: false,
+                },
+                Seed::Fixed {
+                    to: "profile/git/config".into(),
+                    text: DEVIN_GIT_CONFIG,
                 },
             ],
             watched: vec![
@@ -324,7 +319,7 @@ impl Plan {
 
     /// Devin: the four folders of the XDG layout, where it keeps its login and config (and its
     /// sessions, logs and cache); the login (`credentials.toml`, an API key) and `config.json`
-    /// are copied, and git's config ([`XDG_CARRIED`]). Nothing of the owner's is linked.
+    /// are copied. Git gets a run-owned config; no owner Git folder or credentials are carried.
     #[cfg(unix)]
     fn devin(config: &Path, data: &Path) -> Self {
         Self {
@@ -336,6 +331,7 @@ impl Plan {
                 ("XDG_DATA_HOME", "data".into()),
                 ("XDG_STATE_HOME", "state".into()),
                 ("XDG_CACHE_HOME", "cache".into()),
+                ("GIT_CONFIG_GLOBAL", "config/git/config".into()),
             ],
             set: Vec::new(),
             seeds: vec![
@@ -349,10 +345,9 @@ impl Plan {
                     to: "config/devin/config.json".into(),
                     login: false,
                 },
-                Seed::Carry {
-                    from: config.to_path_buf(),
-                    to: "config".into(),
-                    only: &XDG_CARRIED,
+                Seed::Fixed {
+                    to: "config/git/config".into(),
+                    text: DEVIN_GIT_CONFIG,
                 },
             ],
             watched: vec![
@@ -673,11 +668,33 @@ impl Isolation {
         );
         match seed {
             Seed::Copy { from, to, login } => match fs::read(from) {
-                Ok(bytes) => Ok(vec![Placed::File {
-                    to: to.clone(),
-                    bytes,
-                    login: *login,
-                }]),
+                Ok(bytes) => {
+                    let bytes = if *login {
+                        let text = std::str::from_utf8(&bytes).map_err(|_| {
+                            Error::Daemon(format!(
+                                "{}'s login is not text, so it is not copied",
+                                self.harness.name()
+                            ))
+                        })?;
+                        match self.harness {
+                            Harness::Codex => super::login::codex_copy(text, now)?,
+                            Harness::Devin => super::login::toml_copy(text, "Devin")?,
+                            _ => {
+                                return Err(Error::Daemon(
+                                    "the login format is not known, so it is not copied".to_owned(),
+                                ))
+                            }
+                        }
+                        .into_bytes()
+                    } else {
+                        bytes
+                    };
+                    Ok(vec![Placed::File {
+                        to: to.clone(),
+                        bytes,
+                        login: *login,
+                    }])
+                }
                 Err(_) if !login => Ok(Vec::new()),
                 Err(failed) => Err(Error::Daemon(format!(
                     "{}'s login is not in {} ({failed}): {}",
@@ -707,15 +724,11 @@ impl Isolation {
                 }])
             }
             Seed::PiProvider { from, to, provider } => self.pi_provider(from, to, provider),
-            #[cfg(unix)]
-            Seed::Carry { from, to, only } => Ok(only
-                .iter()
-                .filter(|name| from.join(name).is_dir())
-                .map(|name| Placed::Tree {
-                    from: from.join(name),
-                    to: to.join(name),
-                })
-                .collect()),
+            Seed::Fixed { to, text } => Ok(vec![Placed::File {
+                to: to.clone(),
+                bytes: text.as_bytes().to_vec(),
+                login: false,
+            }]),
         }
     }
 
@@ -731,6 +744,9 @@ impl Isolation {
         to: &Path,
         provider: &'static pi::Provider,
     ) -> Result<Vec<Placed>> {
+        if fs::symlink_metadata(from).is_ok_and(|meta| meta.file_type().is_symlink()) {
+            return Err(Error::Daemon("Pi's provider tree is a link".to_owned()));
+        }
         let folder = shown(from, &self.owner_home);
         let missing = |what: &str| {
             Error::Daemon(format!(
@@ -738,14 +754,31 @@ impl Isolation {
                 provider.name, provider.package, provider.package, provider.repository,
             ))
         };
+        let read_file = |name: &str| {
+            let path = from.join(name);
+            let meta = fs::symlink_metadata(&path)?;
+            if meta.file_type().is_symlink()
+                || !fs::canonicalize(&path)?.starts_with(fs::canonicalize(from)?)
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "a provider file leaves its tree",
+                ));
+            }
+            fs::read(path)
+        };
+        let config = read_file(provider.config)
+            .ok()
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .ok_or_else(|| missing(&format!("{} is missing or is a link", provider.config)))?;
+        let config = super::login::json_copy(&config, "Pi provider")?;
         let mut placed = vec![Placed::File {
             to: to.join(provider.config),
-            bytes: fs::read(from.join(provider.config))
-                .map_err(|_| missing(&format!("{} is missing", provider.config)))?,
+            bytes: config.into_bytes(),
             login: false,
         }];
         for file in provider.required.iter().chain(provider.optional.iter()) {
-            match fs::read(from.join(file)) {
+            match read_file(file) {
                 Ok(bytes) => placed.push(Placed::File {
                     to: to.join(file),
                     bytes,
@@ -761,13 +794,24 @@ impl Isolation {
                 provider.package
             )));
         };
-        if !from.join(&source.folder).join("package.json").is_file() {
+        let package = from.join(&source.folder);
+        let inside = fs::symlink_metadata(&package)
+            .is_ok_and(|meta| !meta.file_type().is_symlink())
+            && fs::canonicalize(&package)
+                .ok()
+                .zip(fs::canonicalize(from).ok())
+                .is_some_and(|(package, agent)| package.starts_with(agent));
+        let manifest_inside = inside
+            && fs::canonicalize(package.join("package.json"))
+                .ok()
+                .zip(fs::canonicalize(&package).ok())
+                .is_some_and(|(manifest, package)| manifest.starts_with(package));
+        if !inside || !manifest_inside {
             return Err(missing(&format!(
-                "{}/package.json is missing",
+                "{}/package.json is missing, or the package or manifest links outside its tree",
                 source.folder.display()
             )));
         }
-        let package = from.join(&source.folder);
         let copied = if source.npm {
             pi::npm_copy(provider, &source, &package)
         } else {
@@ -1087,8 +1131,8 @@ fn said(harness: Harness, touched: &[String], refreshed: &[String]) -> String {
         }
     }
     if !refreshed.is_empty() {
-        // Pi is given its login without the refresh token: it cannot have used up the owner's.
-        let hazard = if harness == Harness::Pi {
+        // These copies hold no refresh-token value, so they cannot use the owner's token.
+        let hazard = if matches!(harness, Harness::Pi | Harness::Codex | Harness::Devin) {
             "The copy holds no refresh token, so it cannot have used up the one the owner's file keeps \
              (that file is checked above), but it was given a login and wrote another"
                 .to_owned()

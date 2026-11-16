@@ -275,8 +275,14 @@ fn files_below(folder: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut next = vec![folder.to_path_buf()];
     while let Some(folder) = next.pop() {
+        if !cf_e2e::door::is_made_or_below(&folder) {
+            continue;
+        }
         for entry in fs::read_dir(&folder).into_iter().flatten().flatten() {
             let path = entry.path();
+            if !cf_e2e::door::is_made_or_below(&path) {
+                continue;
+            }
             match entry.file_type() {
                 Ok(kind) if kind.is_dir() => next.push(path),
                 Ok(kind) if kind.is_file() => found.push(path),
@@ -298,10 +304,21 @@ struct Record {
 }
 
 /// The records of sub-agents `harness` keeps for the run's windows, now.
+fn read_run_record(path: &Path) -> String {
+    if !cf_e2e::door::is_made_or_below(path) {
+        return String::new();
+    }
+    fs::read_to_string(path).unwrap_or_default()
+}
+
 fn child_records(harness: Harness, members: &Members) -> Vec<Record> {
-    let read = |path: &Path| fs::read_to_string(path).unwrap_or_default();
+    let read = read_run_record;
     match harness {
-        Harness::Claude => files_below(&members.claude_config().join("projects"))
+        Harness::Claude => members
+            .claude_config()
+            .ok()
+            .map(|config| files_below(&config.join("projects")))
+            .unwrap_or_default()
             .into_iter()
             .filter(|path| {
                 path.parent()
@@ -325,7 +342,11 @@ fn child_records(harness: Harness, members: &Members) -> Vec<Record> {
                 }
             })
             .collect(),
-        Harness::Codex => rollout::rollouts(&members.codex_home())
+        Harness::Codex => members
+            .codex_home()
+            .ok()
+            .map(|home| rollout::rollouts(&home))
+            .unwrap_or_default()
             .into_iter()
             .filter_map(|path| {
                 let text = rollout::read(&path).ok()?;
@@ -383,7 +404,7 @@ fn holding(members: &Members, word: &str) -> Vec<String> {
     ] {
         folders.extend(members.var(name).map(PathBuf::from));
     }
-    folders.push(members.claude_config());
+    folders.extend(members.claude_config().ok());
     let mut found: Vec<String> = folders
         .iter()
         .flat_map(|folder| files_below(folder))
@@ -420,15 +441,7 @@ fn devin_children(members: &Members) -> Vec<(String, String)> {
         let Ok(copy) = cf_e2e::door::made("live-subagent-") else {
             continue;
         };
-        for suffix in ["", "-wal", "-shm"] {
-            let from = PathBuf::from(format!("{}{suffix}", store.display()));
-            if from.is_file() {
-                let _ = cf_e2e::door::copy_keeping_mode(
-                    &from,
-                    copy.path().join(format!("sessions.db{suffix}")),
-                );
-            }
-        }
+        copy_devin_store(&store, copy.path());
         let Ok(db) = rusqlite::Connection::open(copy.path().join("sessions.db")) else {
             continue;
         };
@@ -480,6 +493,44 @@ fn devin_children(members: &Members) -> Vec<(String, String)> {
         }
     }
     children
+}
+
+fn copy_devin_store(store: &Path, into: &Path) {
+    if !cf_e2e::live::guard::run_owned_devin_store(store) {
+        return;
+    }
+    for suffix in ["", "-wal", "-shm"] {
+        let from = PathBuf::from(format!("{}{suffix}", store.display()));
+        if from.is_file() {
+            let _ =
+                cf_e2e::door::copy_keeping_mode(&from, into.join(format!("sessions.db{suffix}")));
+        }
+    }
+}
+
+/// Keeps matching records and SQLite sidecars for a failed case.
+fn keep_holding(holding: &[String], kept: &Path) {
+    let with_stores = holding
+        .iter()
+        .flat_map(|file| match file.strip_suffix("-wal") {
+            Some(store) => vec![store.to_owned(), file.clone(), format!("{store}-shm")],
+            None => vec![file.clone()],
+        });
+    for (number, file) in with_stores.enumerate() {
+        let path = Path::new(&file);
+        if !cf_e2e::door::is_made_or_below(path) {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned());
+        if cf_e2e::door::make_dir(kept).is_ok() {
+            let _ = cf_e2e::door::copy_keeping_mode(
+                path,
+                kept.join(format!("{number}-{}", name.unwrap_or_default())),
+            );
+        }
+    }
 }
 
 /// The rows `query` reads from `db`, each as `row` makes it.
@@ -623,24 +674,7 @@ fn child(
         if live::keep_requested() {
             let kept = members.home().join(format!("holding-{}", case.name));
             // A write-ahead log is read with its store: both are kept beside it.
-            let with_stores = holding
-                .iter()
-                .flat_map(|file| match file.strip_suffix("-wal") {
-                    Some(store) => vec![store.to_owned(), file.clone(), format!("{store}-shm")],
-                    None => vec![file.clone()],
-                });
-            for (number, file) in with_stores.enumerate() {
-                let path = Path::new(&file);
-                let name = path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned());
-                if cf_e2e::door::make_dir(&kept).is_ok() {
-                    let _ = cf_e2e::door::copy_keeping_mode(
-                        path,
-                        kept.join(format!("{number}-{}", name.unwrap_or_default())),
-                    );
-                }
-            }
+            keep_holding(&holding, &kept);
             account.say(format!("{step}: kept in {}", kept.display()));
         }
     }
@@ -865,6 +899,63 @@ fn a_members_sub_agents_keep_no_role_and_ask_the_board_nothing_as_the_member() -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kit_round4_kept_wal_does_not_copy_linked_shm() {
+        let run = cf_e2e::door::made("cf-subagent-kept-").unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        let secret = foreign.path().join("secret");
+        fs::write(&secret, "fabricated foreign record").unwrap();
+        let store = run.path().join("sessions.db");
+        let wal = run.path().join("sessions.db-wal");
+        fs::write(&store, "fabricated store").unwrap();
+        fs::write(&wal, "fabricated wal").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&secret, run.path().join("sessions.db-shm")).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&secret, run.path().join("sessions.db-shm")).unwrap();
+        let kept = run.path().join("kept");
+        keep_holding(&[wal.to_string_lossy().into_owned()], &kept);
+        assert!(kept.join("0-sessions.db").is_file());
+        assert!(kept.join("1-sessions.db-wal").is_file());
+        assert!(
+            !kept.join("2-sessions.db-shm").exists(),
+            "linked-out shm was copied"
+        );
+    }
+
+    #[test]
+    fn kit_round3_subagent_parent_record_refuses_a_foreign_file() {
+        let foreign = tempfile::tempdir().unwrap();
+        let file = foreign.path().join("record.jsonl");
+        fs::write(&file, "fabricated parent record").unwrap();
+        assert!(
+            read_run_record(&file).is_empty(),
+            "a foreign parent record was read"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kit_round3_subagent_refuses_linked_out_sqlite_sidecars() {
+        for suffix in ["-shm", "-wal"] {
+            let run = cf_e2e::door::made("cf-subagent-guard-").unwrap();
+            let foreign = tempfile::tempdir().unwrap();
+            std::fs::write(foreign.path().join("secret"), "fabricated record").unwrap();
+            let store = run.path().join("sessions.db");
+            std::fs::write(&store, "fabricated store").unwrap();
+            let name = format!("sessions.db{suffix}");
+            std::os::unix::fs::symlink(foreign.path().join("secret"), run.path().join(&name))
+                .unwrap();
+            let copy = run.path().join("copy");
+            cf_e2e::door::make_dir(&copy).unwrap();
+            copy_devin_store(&store, &copy);
+            assert!(
+                !copy.join(&name).exists(),
+                "a linked-out {suffix} sidecar was copied"
+            );
+        }
+    }
 
     #[test]
     fn every_harness_with_sub_agents_runs_and_pi_is_refused_by_name() {

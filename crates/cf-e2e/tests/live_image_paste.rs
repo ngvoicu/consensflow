@@ -268,7 +268,11 @@ fn user_records(window: &Window, from: usize) -> (usize, Vec<String>) {
     let Some(session) = window.session() else {
         return (from, Vec::new());
     };
-    let Some(file) = claude::transcript_file(&window.claude_config(), &session) else {
+    let Some(file) = window
+        .claude_config()
+        .ok()
+        .and_then(|config| claude::transcript_file(&config, &session))
+    else {
         return (from, Vec::new());
     };
     let text = files::read_finished_lines(&file).unwrap_or_default();

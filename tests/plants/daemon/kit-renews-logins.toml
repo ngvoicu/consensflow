@@ -365,8 +365,8 @@ runs = ["planned-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/login.rs"
-find = '''const RENEWING: [&str; 2] = ["refreshToken", "refreshTokenExpiresAt"];'''
-replace = '''const RENEWING: [&str; 2] = ["refreshToken", "refreshToken"];'''
+find = '''fields.retain(|name, _| !name.to_ascii_lowercase().contains("refresh"));'''
+replace = '''fields.retain(|name, _| !name.to_ascii_lowercase().contains("refresh") || name == "refreshTokenExpiresAt");'''
 
 [[plant]]
 name = "kit renews logins: the machine's Claude login is held to the copy and not to what was read"
@@ -395,8 +395,8 @@ runs = ["planned-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation.rs"
-find = '''        let hazard = if harness == Harness::Pi {'''
-replace = '''        let hazard = if harness == Harness::Pi && false {'''
+find = '''        let hazard = if matches!(harness, Harness::Pi | Harness::Codex | Harness::Devin) {'''
+replace = '''        let hazard = if matches!(harness, Harness::Codex | Harness::Devin) {'''
 
 [[plant]]
 name = "kit renews logins: a login must last the case and thirty minutes"

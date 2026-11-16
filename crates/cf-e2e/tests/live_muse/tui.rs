@@ -24,10 +24,9 @@ pub const EFFORT: &str = "minimal";
 
 pub type Outcome = Result<(), String>;
 
-/// These probes run Muse on a Mac alone, saying so plainly elsewhere before anything is made
-/// or spent: they copy the person's Muse login (`auth.json`) into the run's folder, which on
-/// a Mac is the login's metadata (its secret stays in the keychain), and on Windows the
-/// whole login, which a copy would refresh apart from the person's (T-792; T-985 P3-2).
+/// These probes run Muse on a Mac alone, saying so before anything is made or spent: they
+/// are written for Muse's Keychain-backed login. The run copies its metadata without
+/// refresh-named keys; its secret stays in the Keychain.
 pub fn on_a_mac() -> Outcome {
     refused_off_a_mac(cfg!(target_os = "macos"))
 }
@@ -37,7 +36,10 @@ fn refused_off_a_mac(mac: bool) -> Outcome {
     if mac {
         return Ok(());
     }
-    Err("this live probe runs Muse on a Mac only: it copies the person's Muse login (auth.json) into its own folder, and off a Mac that file is the whole login, which a copy would refresh apart from theirs".to_owned())
+    Err(
+        "this live probe runs Muse on a Mac only: it is written for a Keychain-backed login"
+            .to_owned(),
+    )
 }
 
 #[test]
@@ -45,6 +47,8 @@ fn off_a_mac_the_muse_tui_probes_refuse_plainly_before_anything_is_made() {
     assert_eq!(refused_off_a_mac(true), Ok(()));
     let refused = refused_off_a_mac(false).unwrap_err();
     assert!(refused.contains("on a Mac only"), "{refused}");
+    assert!(refused.contains("Keychain-backed"), "{refused}");
+    assert!(!refused.contains("which a copy would refresh"), "{refused}");
 }
 
 pub fn home() -> PathBuf {
@@ -175,6 +179,38 @@ pub fn write(file: &Path, text: &str) -> Outcome {
     cf_e2e::door::write(file, text).map_err(|error| format!("{}: {error}", file.display()))
 }
 
+fn copy_login(owner: &Path, root: &Path) -> Outcome {
+    cf_e2e::live::guard::copy_muse_login(
+        &owner.join(".config/muse/auth.json"),
+        &root.join("config/muse/auth.json"),
+    )
+    .map_err(|error| format!("auth.json: {error}"))
+}
+
+#[cfg(test)]
+#[test]
+fn tui_setup_copies_no_refresh_keys() {
+    let root = cf_e2e::door::made("cf-muse-tui-login-").unwrap();
+    let owner = root.path().join("owner");
+    let run = root.path().join("run");
+    std::fs::create_dir_all(owner.join(".config/muse")).unwrap();
+    std::fs::create_dir_all(run.join("config/muse")).unwrap();
+    std::fs::write(
+        owner.join(".config/muse/auth.json"),
+        r#"{"access":"fake","refreshToken":"fake","nested":[{"REFRESH_key":"fake"}]}"#,
+    )
+    .unwrap();
+    copy_login(&owner, &run).unwrap();
+    let copied: Value =
+        serde_json::from_slice(&std::fs::read(run.join("config/muse/auth.json")).unwrap()).unwrap();
+    assert!(
+        copied.get("refreshToken").is_none(),
+        "refresh key was copied"
+    );
+    assert!(copied["nested"][0].get("REFRESH_key").is_none());
+    assert_eq!(copied["access"], "fake");
+}
+
 /// The run's home: its folders, the login's metadata and the feature gates, and a
 /// throwaway git project.
 pub fn set_up(root: &Path) -> Outcome {
@@ -189,25 +225,13 @@ pub fn set_up(root: &Path) -> Outcome {
         cf_e2e::door::make_dir(root.join(folder)).map_err(|error| error.to_string())?;
     }
     let owner = home();
-    cf_e2e::door::copy_keeping_mode(
-        owner.join(".config/muse/auth.json"),
-        root.join("config/muse/auth.json"),
-    )
-    .map_err(|error| format!("auth.json: {error}"))?;
+    copy_login(&owner, root)?;
     write(
         &root.join("config/muse/settings.json"),
         r#"{"schema_version":1,"context":{"foreign_personal_rules":false,"foreign_personal_skills":false}}"#,
     )?;
     let gates = owner.join(".local/share/muse/feature-config");
-    if gates.is_dir() {
-        let into = root.join("data/muse/feature-config");
-        cf_e2e::door::make_dir(&into).map_err(|error| error.to_string())?;
-        for entry in fs::read_dir(&gates).map_err(|error| error.to_string())? {
-            let entry = entry.map_err(|error| error.to_string())?;
-            cf_e2e::door::copy_keeping_mode(entry.path(), into.join(entry.file_name()))
-                .map_err(|error| error.to_string())?;
-        }
-    }
+    copy_feature_config(&gates, &root.join("data/muse/feature-config"))?;
     write(&root.join("work/README.md"), "A throwaway project.\n")?;
     let git = ["/opt/homebrew/bin/git", "/usr/bin/git"]
         .into_iter()
@@ -220,6 +244,34 @@ pub fn set_up(root: &Path) -> Outcome {
         &root.join("work"),
     )
     .map(|_| ())
+}
+
+fn copy_feature_config(gates: &Path, into: &Path) -> Outcome {
+    if fs::symlink_metadata(gates).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Ok(());
+    }
+    if gates.is_dir() {
+        cf_e2e::door::copy_tree(gates, into, &|_| false).map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[cfg(unix)]
+#[test]
+fn kit_round3_muse_feature_config_skips_links_out() {
+    let root = cf_e2e::door::made("cf-muse-feature-").unwrap();
+    let foreign = tempfile::tempdir().unwrap();
+    fs::write(foreign.path().join("login"), "fabricated refresh token").unwrap();
+    let source = root.path().join("features");
+    fs::create_dir(&source).unwrap();
+    std::os::unix::fs::symlink(foreign.path().join("login"), source.join("leak")).unwrap();
+    let target = root.path().join("copy");
+    copy_feature_config(&source, &target).unwrap();
+    assert!(
+        !target.join("leak").exists(),
+        "a linked-out feature file was copied"
+    );
 }
 
 /// What `muse usage --json` says is spent of each window, in percent, and the answer,

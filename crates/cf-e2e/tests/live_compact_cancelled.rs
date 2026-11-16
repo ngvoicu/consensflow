@@ -112,8 +112,8 @@ fn chief_session(members: &Members) -> Option<String> {
 }
 
 /// The records of the chief's conversation from the `mark`th on.
-fn written_since(members: &Members, session: &str, mark: usize) -> Vec<Entry> {
-    claude::record(&members.claude_config(), session)
+fn written_since(config: &std::path::Path, session: &str, mark: usize) -> Vec<Entry> {
+    claude::record(config, session)
         .into_iter()
         .skip(mark)
         .collect()
@@ -190,6 +190,7 @@ fn drive(case_of: Case, mut members: Members, log: &Log) -> Result<Account> {
     members.add(STAND_IN_WORKER, &[])?;
     let pane = members.lane("chief")?["pane"].clone();
     let session = chief_session(&members).unwrap_or_default();
+    let config = members.claude_config()?;
 
     // An exchange to compact.
     members.paste(
@@ -198,7 +199,7 @@ fn drive(case_of: Case, mut members: Members, log: &Log) -> Result<Account> {
     )?;
     let answered = find(log, "the chief to answer", ANSWER, LOOK, || {
         let read = members.project().lane("chief")?["activity"]["state"] == "idle";
-        let said = claude::record(&members.claude_config(), &session)
+        let said = claude::record(&config, &session)
             .iter()
             .any(|entry| entry.kind == "assistant" && entry.text.contains("READY"));
         Ok((read && said).then_some(()))
@@ -210,13 +211,13 @@ fn drive(case_of: Case, mut members: Members, log: &Log) -> Result<Account> {
     }
 
     // The human types /compact, and Escape a moment after it began.
-    let mark = claude::record(&members.claude_config(), &session).len();
+    let mark = claude::record(&config, &session).len();
     for keys in [COMPACT, ENTER] {
         members.rig().types(&pane, keys)?;
         sleep(KEYED);
     }
     let began = find(log, "the bare /compact", CANCELLED, LOOK, || {
-        Ok(written_since(&members, &session, mark)
+        Ok(written_since(&config, &session, mark)
             .iter()
             .any(|entry| bare_compact(entry, ""))
             .then_some(()))
@@ -224,7 +225,7 @@ fn drive(case_of: Case, mut members: Members, log: &Log) -> Result<Account> {
     sleep(CANCEL_AFTER);
     members.rig().types(&pane, ESCAPE)?;
     let came = find(log, "the cancel's records", CANCELLED, LOOK, || {
-        let written = written_since(&members, &session, mark);
+        let written = written_since(&config, &session, mark);
         Ok((cancelled(&written) || written.iter().any(boundary)).then_some(written))
     })?;
     let written = came.unwrap_or_default();
@@ -265,7 +266,7 @@ fn drive(case_of: Case, mut members: Members, log: &Log) -> Result<Account> {
 
     // A result for the chief: the member's task, given as the chief would give it.
     let number = members.give(STAND_IN_WORKER, "Reply with exactly: DONE")?;
-    let before_sent = written_since(&members, &session, mark).len();
+    let before_sent = written_since(&config, &session, mark).len();
     if case_of == Case::Typed {
         // The box holds the human's words: nothing is pasted into it while it does.
         let pasted = find(
@@ -274,7 +275,7 @@ fn drive(case_of: Case, mut members: Members, log: &Log) -> Result<Account> {
             HELD,
             LOOK,
             || {
-                let now = written_since(&members, &session, mark);
+                let now = written_since(&config, &session, mark);
                 Ok((now.len() > before_sent).then_some(now))
             },
         )?;
@@ -303,7 +304,7 @@ fn drive(case_of: Case, mut members: Members, log: &Log) -> Result<Account> {
             DELIVERED,
             LOOK,
             || {
-                let now = written_since(&members, &session, mark);
+                let now = written_since(&config, &session, mark);
                 Ok((now.iter().any(|entry| bare_compact(entry, THEIR_WORDS))
                     && now.iter().any(boundary))
                 .then_some(()))
@@ -327,7 +328,7 @@ fn drive(case_of: Case, mut members: Members, log: &Log) -> Result<Account> {
         LOOK,
         || Ok(result_for(&members, number)?.filter(|result| result["state"] == "delivered")),
     )?;
-    let after = written_since(&members, &session, mark);
+    let after = written_since(&config, &session, mark);
     let went = delivered
         .as_ref()
         .and_then(|result| result["id"].as_i64())

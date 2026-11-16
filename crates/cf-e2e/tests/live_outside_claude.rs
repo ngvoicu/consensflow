@@ -234,7 +234,7 @@ fn drive(members: &mut Members, log: &Log) -> Result<Account> {
     let mut case = Account::new();
     let claude_install = log.found(Harness::Claude)?;
     let agent = agents::id(Harness::Claude);
-    let config = members.claude_config();
+    let config = members.claude_config()?;
     members.add(&agent, &[])?;
     let number = members.give(&agent, &brief(cfg!(windows)))?;
     let session = find(
