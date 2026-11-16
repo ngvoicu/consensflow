@@ -5099,16 +5099,36 @@ async function replayPage(page) {
  * Clicks, with Cmd held, the cell at `column` of `row` (both from 0) of the replay `place` came
  * from, and answers what the page asked the app to open and what the pointer's title said.
  */
-async function clickingCell(page, place, row, column) {
+async function clickingCell(page, place, row, column, wanted, saw) {
   const at = {
     x: place.left + (column + 0.5) * place.cell,
     y: place.top + (row + 0.5) * place.row,
   }
+  const titleOf = () => page.evaluate(() => window.replay.terminal.element.title)
   await page.mouse.move(1390, 790)
+  // Do not mistake the previous cell's title for this one's hover.
+  await expect.poll(titleOf, { message: `${saw}: leave the previous link` }).toBe('')
   await page.mouse.move(at.x, at.y)
-  await page.waitForTimeout(40)
-  const title = await page.evaluate(() => window.replay.terminal.element.title)
+  if (wanted) {
+    // A hang bound, not a wait for the link layer to finish by a certain time.
+    await expect
+      .poll(titleOf, { message: `${saw}: hover`, timeout: 10_000 })
+      .toBe(`Cmd+click to open ${wanted[0]}`)
+  } else {
+    await afterFrames(page)
+  }
+  const title = await titleOf()
   await clickWith(page, at, ['Meta'])
+  if (wanted) {
+    await expect
+      .poll(() => page.evaluate(() => window.replayOpened.length), {
+        message: `${saw}: open`,
+        timeout: 10_000,
+      })
+      .toBeGreaterThan(0)
+  } else {
+    await afterFrames(page)
+  }
   const opened = await page.evaluate(() => window.replayOpened.splice(0))
   return { opened, title }
 }
@@ -5136,9 +5156,9 @@ for (const [group, harness, mode] of [
         const rows = c.printed.split('\r\n')
         for (const [index, raw] of rows.entries()) {
           for (const [column, kind] of pointsOf(raw, c.destination)) {
-            const { opened, title } = await clickingCell(page, place, index, column)
             const saw = `${c.id} row ${index} ${kind}`
             const wanted = c.expect === 'exact' && kind !== 'word' ? [c.destination] : null
+            const { opened, title } = await clickingCell(page, place, index, column, wanted, saw)
             if (opened.some((url) => url !== c.destination)) {
               wrong.push(`${saw}: opened ${JSON.stringify(opened)}, not ${c.destination}`)
             } else if (title !== '' && title !== `Cmd+click to open ${c.destination}`) {
