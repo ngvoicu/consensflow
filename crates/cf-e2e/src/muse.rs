@@ -40,7 +40,8 @@ pub fn seed_live_home(rig_home: &Path, real_home: &Path) -> Result {
     let config = rig_home.join(".config").join("muse");
     crate::door::write(config.join("settings.json"), "{\"schema_version\":1}\n")?;
     let auth = real_home.join(".config").join("muse").join("auth.json");
-    let text = files::read_string(&auth)?;
+    let text = String::from_utf8(crate::live::isolation::copy_owner_login(&auth)?)
+        .map_err(|_| Error::Daemon("Muse's copied login is not UTF-8".to_owned()))?;
     crate::door::write(config.join("auth.json"), login_copy(&text)?)?;
     let catalog = real_home.join(".local/share/muse/model-catalog");
     if catalog.is_dir() {
@@ -1589,6 +1590,27 @@ mod tests {
             std::fs::read_to_string(catalog.join("models.json")).unwrap(),
             "synthetic catalog"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn t1744_a_read_only_muse_login_can_seed_a_run_without_changing_the_source() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let person = crate::door::made("cf-muse-login-person-").unwrap();
+        let rig = crate::door::made("cf-muse-login-rig-").unwrap();
+        let auth = person.path().join(".config/muse/auth.json");
+        std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
+        let login = json!({"access": "synthetic", "refreshToken": "synthetic"}).to_string();
+        std::fs::write(&auth, &login).unwrap();
+        std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o400)).unwrap();
+        super::seed_live_home(rig.path(), person.path()).unwrap();
+        assert_eq!(std::fs::read_to_string(&auth).unwrap(), login);
+        assert_eq!(
+            std::fs::metadata(&auth).unwrap().permissions().mode() & 0o777,
+            0o400
+        );
+        let copy = std::fs::read_to_string(rig.path().join(".config/muse/auth.json")).unwrap();
+        assert!(!copy.contains("refreshToken"));
     }
 
     /// `muse usage --json` on Windows is run on the throwaway config folder that holds the copy of

@@ -1031,8 +1031,14 @@ impl Isolation {
 /// Copy Pi's owner file into a private folder before inspecting it. Erase the temporary
 /// copy immediately after reading, including in say-only mode; the door keeps its folder.
 pub(super) fn copy_pi_login(from: &Path) -> Result<Vec<u8>> {
-    crate::standin_process::require_home(from, "Pi login copy");
-    let folder = crate::door::made("cf-pi-login-copy-").map_err(|source| Error::File {
+    copy_owner_login(from)
+}
+
+/// Inspect an owner login only after the door has copied it to a private run-owned file.
+/// The temporary copy is overwritten even in a say-only run, but can survive an interruption.
+pub(crate) fn copy_owner_login(from: &Path) -> Result<Vec<u8>> {
+    crate::standin_process::require_home(from, "owner login copy");
+    let folder = crate::door::made("cf-login-copy-").map_err(|source| Error::File {
         action: "make a private folder in",
         path: std::env::temp_dir(),
         source,
@@ -1050,7 +1056,7 @@ pub(super) fn copy_pi_login(from: &Path) -> Result<Vec<u8>> {
     {
         let mut permissions = fs::metadata(&copy)
             .map_err(|source| Error::File {
-                action: "read the permissions of the run's Pi login copy",
+                action: "read the permissions of the run's login copy",
                 path: copy.clone(),
                 source,
             })?
@@ -1061,7 +1067,7 @@ pub(super) fn copy_pi_login(from: &Path) -> Result<Vec<u8>> {
         crate::door::set_permissions(&copy, permissions)?;
     }
     let bytes = fs::read(&copy).map_err(|source| Error::File {
-        action: "read the run's Pi login copy",
+        action: "read the run's login copy",
         path: copy.clone(),
         source,
     });
