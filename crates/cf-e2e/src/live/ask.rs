@@ -477,7 +477,7 @@ mod tests {
 
     #[test]
     fn kit_round3_all_record_queries_refuse_foreign_homes() {
-        let foreign = tempfile::tempdir().unwrap();
+        let foreign = crate::standin_process::unowned_tempdir();
         for op in ["records", "newest_session"] {
             let name = if cfg!(windows) {
                 "APPDATA"

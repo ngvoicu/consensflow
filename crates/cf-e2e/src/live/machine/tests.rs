@@ -159,16 +159,24 @@ fn an_installed_harness_is_its_command_and_the_home_it_logs_in_at() {
 fn t1700_login_only_needs_no_owner_configuration_mark() {
     const CHILD: &str = "CF_T1700_NO_CONFIG_MARK";
     if crate::process::own_var(CHILD).is_some() {
+        let root = crate::door::made("cf-parity-fake-claude-").unwrap();
+        let program = root.path().join("claude");
+        crate::door::write_executable(&program, "#!/bin/sh\nexit 0\n").unwrap();
+        let _fake = path::fake::Claude::new(program.clone());
+        let home = super::home().unwrap();
+        assert!(Harness::Claude
+            .login_marks()
+            .iter()
+            .all(|mark| !home.join(mark).exists()));
+        assert!(installed_for(Harness::Claude, Duration::from_secs(60)).is_err());
         let installed = installed_for_claude_parity(Duration::from_secs(60)).unwrap();
+        assert_eq!(installed.command(), program);
         assert!(installed.claude_config().is_some());
         return;
     }
     let root = crate::door::made("cf-parity-no-mark-").unwrap();
     let home = root.path().join("owner");
-    let bin = root.path().join("bin");
     fs::create_dir(&home).unwrap();
-    fs::create_dir(&bin).unwrap();
-    crate::door::write_executable(bin.join("claude"), "#!/bin/sh\nexit 0\n").unwrap();
     let output = crate::process::case_of(
         std::env::current_exe().unwrap(),
         "live::machine::tests::t1700_login_only_needs_no_owner_configuration_mark",
@@ -178,7 +186,7 @@ fn t1700_login_only_needs_no_owner_configuration_mark() {
     .var(CHILD, "1")
     .var("HOME", &home)
     .var("USERPROFILE", &home)
-    .var("PATH", &bin)
+    .var("PATH", "")
     .var("CONSENSFLOW_LIVE_CLAUDE_CONFIG", "")
     .var("CONSENSFLOW_TEST_MACHINE", "")
     .run()

@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn kit_disclosure_devin_store_refuses_foreign_home_fallback() {
-        let owner = tempfile::tempdir().unwrap();
+        let owner = crate::standin_process::unowned_tempdir();
         let env = vec![("HOME".to_owned(), owner.path().display().to_string())];
         assert!(
             devin_store_path(false, &env).is_err(),
@@ -201,7 +201,7 @@ mod tests {
     #[test]
     fn kit_disclosure_devin_store_refuses_foreign_sqlite_sidecars() {
         let run = crate::door::made("cf-devin-sidecar-").unwrap();
-        let foreign = tempfile::tempdir().unwrap();
+        let foreign = crate::standin_process::unowned_tempdir();
         let store = run.path().join("devin/cli/sessions.db");
         std::fs::create_dir_all(store.parent().unwrap()).unwrap();
         std::fs::write(&store, "fabricated").unwrap();

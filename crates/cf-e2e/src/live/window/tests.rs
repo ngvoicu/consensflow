@@ -12,7 +12,7 @@ use super::*;
 
 #[test]
 fn kit_round3_window_record_refuses_missing_and_foreign_homes_before_asking() {
-    let foreign = tempfile::tempdir().unwrap();
+    let foreign = crate::standin_process::unowned_tempdir();
     for (harness, name) in [
         (Harness::Claude, "CLAUDE_CONFIG_DIR"),
         (Harness::Codex, "CODEX_HOME"),
@@ -90,7 +90,7 @@ fn kit_round3_window_record_refuses_missing_and_foreign_homes_before_asking() {
 #[test]
 fn kit_round3_window_record_refuses_linked_out_record_roots() {
     let run = crate::door::made("cf-window-linked-").unwrap();
-    let foreign = tempfile::tempdir().unwrap();
+    let foreign = crate::standin_process::unowned_tempdir();
     std::os::unix::fs::symlink(foreign.path(), run.path().join("sessions")).unwrap();
     let env = vec![("CODEX_HOME".to_owned(), run.path().display().to_string())];
     let asked = Cell::new(false);
@@ -105,7 +105,7 @@ fn kit_round3_window_record_refuses_linked_out_record_roots() {
 #[test]
 fn kit_round3_window_record_refuses_a_link_inside_codex_sessions() {
     let run = crate::door::made("cf-window-nested-").unwrap();
-    let foreign = tempfile::tempdir().unwrap();
+    let foreign = crate::standin_process::unowned_tempdir();
     std::fs::create_dir(run.path().join("sessions")).unwrap();
     std::os::unix::fs::symlink(foreign.path(), run.path().join("sessions/2026")).unwrap();
     let env = vec![("CODEX_HOME".to_owned(), run.path().display().to_string())];
@@ -336,7 +336,7 @@ fn claude_keeps_its_sessions_where_the_window_says_and_else_in_the_dot_claude_of
 
 #[test]
 fn claude_config_fallback_must_refuse_a_home_outside_the_run() {
-    let owner = tempfile::tempdir().unwrap();
+    let owner = crate::standin_process::unowned_tempdir();
     let env = vec![("HOME".to_owned(), owner.path().display().to_string())];
     let result = owned_harness_dir(&env, "CLAUDE_CONFIG_DIR", ".claude");
     assert!(result.is_err(), "a foreign HOME was returned by the helper");

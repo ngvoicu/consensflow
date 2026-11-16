@@ -335,7 +335,7 @@ mod tests {
     #[test]
     fn kit_disclosure_codex_mcp_environment_has_only_the_run_home() {
         let run = crate::door::made("cf-codex-env-").unwrap();
-        let foreign = tempfile::tempdir().unwrap();
+        let foreign = crate::standin_process::unowned_tempdir();
         let home = run.path().join("codex");
         let env = vec![
             ("HOME".to_owned(), foreign.path().display().to_string()),
@@ -395,7 +395,7 @@ mod tests {
             "the listing did not use the run's Codex home"
         );
         assert!(mcp_servers(&program, &[]).is_err());
-        let foreign = tempfile::tempdir().unwrap();
+        let foreign = crate::standin_process::unowned_tempdir();
         assert!(mcp_servers(
             &program,
             &[(

@@ -35,7 +35,7 @@ fn t1700_login_only_trust_does_not_resolve_owner_claude() {
     assert_eq!(held["projects"][&root]["hasTrustDialogAccepted"], true);
 
     // The parity route must still refuse a destination that the run did not make.
-    let stranger = tempfile::tempdir().unwrap();
+    let stranger = crate::standin_process::unowned_tempdir();
     assert!(login.seed_trust(stranger.path()).is_err());
     assert!(!stranger.path().join(".claude.json").exists());
 

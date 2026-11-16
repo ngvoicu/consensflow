@@ -8,7 +8,7 @@ use super::*;
 fn kit_disclosure_claude_record_helpers_refuse_links_outside_the_run() {
     use std::os::unix::fs::symlink;
     let run = crate::door::made("cf-claude-records-").unwrap();
-    let foreign = tempfile::tempdir().unwrap();
+    let foreign = crate::standin_process::unowned_tempdir();
     std::fs::write(
         foreign.path().join("123.json"),
         r#"{"sessionId":"s","status":"idle"}"#,
