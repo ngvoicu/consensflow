@@ -72,6 +72,52 @@ fn error(words: &str) -> Value {
     json!({ "error": words })
 }
 
+#[tokio::test]
+async fn the_public_font_stylesheet_and_every_font_it_names_are_bundled_read_only_assets() {
+    let screens = inert();
+    let Some((
+        200,
+        Content::Asset {
+            content_type,
+            bytes,
+        },
+    )) = ask(&screens, Method::GET, "/vendor/fonts/fonts.css", None, "").await
+    else {
+        panic!("the bundled stylesheet");
+    };
+    assert_eq!(content_type, "text/css; charset=utf-8");
+    let css = std::str::from_utf8(bytes).unwrap();
+    assert!(css.contains("font-family: 'Geist';"));
+    let names: Vec<_> = css
+        .split("url('./")
+        .skip(1)
+        .map(|rest| rest.split_once("')").expect("a relative font URL").0)
+        .collect();
+    assert!(!names.is_empty());
+    for name in names {
+        let target = format!("/vendor/fonts/{name}");
+        let Some((
+            200,
+            Content::Asset {
+                content_type,
+                bytes,
+            },
+        )) = ask(&screens, Method::GET, &target, None, "").await
+        else {
+            panic!("missing bundled font {name}");
+        };
+        assert_eq!(content_type, "font/woff2", "{name}");
+        assert!(bytes.starts_with(b"wOF2"), "{name}");
+    }
+    for target in ["/vendor/fonts/OFL.txt", "/vendor/fonts/unknown.woff2"] {
+        assert_eq!(ask(&screens, Method::GET, target, None, "").await, None);
+    }
+    assert_eq!(
+        ask(&screens, Method::POST, "/vendor/fonts/fonts.css", None, "").await,
+        None
+    );
+}
+
 #[test]
 fn the_screens_paths_are_the_harnesses_page_and_its_two_routes() {
     for (path, screen) in [
