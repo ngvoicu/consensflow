@@ -518,6 +518,7 @@ fn agents_url(roster: &RosterHandle, page: &str) -> Result<tauri::Url, String> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     /// A page call as the page makes it: the numbers in one header, the bytes
     /// as the body.
     fn ipc_request(command: &str, mut args: Value) -> tauri::webview::InvokeRequest {
@@ -533,6 +534,7 @@ mod tests {
         ipc_request_bytes(command, args, bytes)
     }
 
+    #[cfg(unix)]
     fn ipc_request_bytes(
         command: &str,
         mut args: Value,
@@ -564,6 +566,7 @@ mod tests {
 
     /// A call made straight to the admission, as the page's call is once its
     /// header is read.
+    #[cfg(unix)]
     fn page_input<R: Runtime>(
         app: &AppHandle<R>,
         page: &str,
@@ -611,7 +614,8 @@ mod tests {
     #[cfg(unix)]
     use cf_panes::pty::{PaneEnvironment, PaneKey, PaneTable};
     #[cfg(unix)]
-    use cf_panes::validation::{MAX_INPUT_BYTES, MAX_PAGE_INPUT_BYTES};
+    use cf_panes::validation::MAX_INPUT_BYTES;
+    use cf_panes::validation::MAX_PAGE_INPUT_BYTES;
     #[cfg(unix)]
     use cf_proto::bridge::Role;
 
