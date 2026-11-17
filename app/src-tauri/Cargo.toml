@@ -67,6 +67,8 @@ cf-panes = { workspace = true, features = ["test-support"] }
 # Detection as the daemon the app starts runs it, in the tests of the daemon's PATH.
 cf-harness.workspace = true
 portable-pty.workspace = true
+# A test page call carries its bytes as base64 text, as the page sends them.
+base64.workspace = true
 tauri = { version = "2.12.5", features = ["test"] }
 
 [lints]

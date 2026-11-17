@@ -11,9 +11,11 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::daemon::RosterHandle;
 use crate::runtime::{AppRuntime, PAGE_STATE_EVENT};
 use cf_bridge::Bridge;
-use cf_panes::input_queue::{InputWork, PageInputCompletion};
+use cf_panes::input_queue::{InputError, InputWork, PageInputCompletion};
 use cf_panes::output_hub::PaneOutputMessage;
-use cf_panes::validation::{pane_key, validate_seq, validate_size, validate_text};
+use cf_panes::validation::{
+    decode_page_bytes, pane_key, validate_seq, validate_size, validate_text,
+};
 
 pub(crate) fn window_command_allowed(window: &str, _command: &str) -> bool {
     window == "main"
@@ -58,7 +60,11 @@ async fn input_result(result: Result<PageInputCompletion, String>) -> Value {
     };
     match completion.receiver.await {
         Ok(()) => json!({"ok":true}),
-        Err(error) => json!({"ok":false,"error":error.to_string()}),
+        Err(error) => json!({
+            "ok":false,
+            "error":error.to_string(),
+            "uncertain":matches!(error, InputError::Uncertain(_)),
+        }),
     }
 }
 
@@ -98,14 +104,7 @@ pub fn pane_page_activate<R: Runtime>(app: AppHandle<R>, page_id: String) -> Val
     }
 }
 
-/// What a page call says of itself, in one header (`x-cf-pane-input`, a JSON
-/// object, percent-encoded): its page, pane and number. Its bytes are the
-/// request's body as they are, so a large paste does not travel as a JSON list
-/// of numbers.
-const PAGE_CALL_HEADER: &str = "x-cf-pane-input";
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// What a page call says of itself: its page, pane and number.
 struct PageCall {
     page_id: String,
     id: String,
@@ -113,48 +112,18 @@ struct PageCall {
     sequence: u64,
 }
 
-fn percent_decoded(text: &str) -> Result<Vec<u8>, String> {
-    let bytes = text.as_bytes();
-    let mut decoded = Vec::with_capacity(bytes.len());
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'%' {
-            let hex = bytes
-                .get(index + 1..index + 3)
-                .and_then(|pair| std::str::from_utf8(pair).ok())
-                .and_then(|pair| u8::from_str_radix(pair, 16).ok())
-                .ok_or_else(|| "pane input header is not encoded text".to_string())?;
-            decoded.push(hex);
-            index += 3;
-        } else {
-            decoded.push(bytes[index]);
-            index += 1;
-        }
-    }
-    Ok(decoded)
-}
-
-fn page_call(request: &tauri::ipc::Request<'_>) -> Result<(PageCall, Vec<u8>), String> {
-    let header = request
-        .headers()
-        .get(PAGE_CALL_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .ok_or_else(|| "pane input needs its header".to_string())?;
-    let call: PageCall = serde_json::from_slice(&percent_decoded(header)?)
-        .map_err(|_| "pane input header is not a page call".to_string())?;
-    match request.body() {
-        tauri::ipc::InvokeBody::Raw(bytes) => Ok((call, bytes.clone())),
-        tauri::ipc::InvokeBody::Json(_) => Err("pane input bytes must be a raw body".to_string()),
-    }
-}
-
-fn enqueue_page_input<R: Runtime>(
+/// A call's bytes arrive as base64 text in the command's arguments, which both
+/// of Tauri's transports carry, with the length the page counted: a body that
+/// came short or changed is refused, and nothing of it is written.
+fn enqueue_page_text<R: Runtime>(
     app: &AppHandle<R>,
-    request: &tauri::ipc::Request<'_>,
+    call: &PageCall,
+    length: u64,
+    text: &str,
     reply: bool,
 ) -> Value {
-    match page_call(request) {
-        Ok((call, bytes)) => enqueue_page_call(app, &call, bytes, reply),
+    match decode_page_bytes(length, text) {
+        Ok(bytes) => enqueue_page_call(app, call, bytes, reply),
         Err(error) => json!({"ok":false,"error":error}),
     }
 }
@@ -189,17 +158,39 @@ fn enqueue_page_call<R: Runtime>(
 #[tauri::command]
 pub fn pane_input_enqueue<R: Runtime>(
     app: AppHandle<R>,
-    request: tauri::ipc::Request<'_>,
+    page_id: String,
+    id: String,
+    generation: u64,
+    sequence: u64,
+    length: u64,
+    bytes: String,
 ) -> Value {
-    enqueue_page_input(&app, &request, false)
+    let call = PageCall {
+        page_id,
+        id,
+        generation,
+        sequence,
+    };
+    enqueue_page_text(&app, &call, length, &bytes, false)
 }
 
 #[tauri::command]
 pub fn pane_reply_enqueue<R: Runtime>(
     app: AppHandle<R>,
-    request: tauri::ipc::Request<'_>,
+    page_id: String,
+    id: String,
+    generation: u64,
+    sequence: u64,
+    length: u64,
+    bytes: String,
 ) -> Value {
-    enqueue_page_input(&app, &request, true)
+    let call = PageCall {
+        page_id,
+        id,
+        generation,
+        sequence,
+    };
+    enqueue_page_text(&app, &call, length, &bytes, true)
 }
 
 /// A call's fate is unknown to the page, which will not send it again: the
@@ -518,54 +509,35 @@ fn agents_url(roster: &RosterHandle, page: &str) -> Result<tauri::Url, String> {
 mod tests {
     use super::*;
 
+    /// A page call as the page makes it: the command's JSON arguments, with the
+    /// bytes as base64 text and their length. A test may give a list of bytes
+    /// and have both made, or give its own `length` and `bytes` text.
     #[cfg(unix)]
-    /// A page call as the page makes it: the numbers in one header, the bytes
-    /// as the body.
     fn ipc_request(command: &str, mut args: Value) -> tauri::webview::InvokeRequest {
-        let bytes = args["bytes"].as_array().map(|bytes| {
-            bytes
+        use base64::Engine as _;
+        args["pageId"] = "test-page".into();
+        if let Some(list) = args["bytes"].as_array() {
+            let bytes = list
                 .iter()
                 .map(|byte| byte.as_u64().expect("a byte") as u8)
-                .collect::<Vec<u8>>()
-        });
-        if bytes.is_some() {
-            args.as_object_mut().expect("args").remove("bytes");
+                .collect::<Vec<u8>>();
+            args["length"] = bytes.len().into();
+            args["bytes"] = base64::engine::general_purpose::STANDARD
+                .encode(&bytes)
+                .into();
         }
-        ipc_request_bytes(command, args, bytes)
-    }
-
-    #[cfg(unix)]
-    fn ipc_request_bytes(
-        command: &str,
-        mut args: Value,
-        bytes: Option<Vec<u8>>,
-    ) -> tauri::webview::InvokeRequest {
-        args["pageId"] = "test-page".into();
-        let mut headers = tauri::http::HeaderMap::new();
-        let body = if let Some(bytes) = bytes {
-            let encoded = args
-                .to_string()
-                .bytes()
-                .map(|byte| format!("%{byte:02X}"))
-                .collect::<String>();
-            headers.insert(PAGE_CALL_HEADER, encoded.parse().expect("a header value"));
-            tauri::ipc::InvokeBody::Raw(bytes)
-        } else {
-            tauri::ipc::InvokeBody::Json(args)
-        };
         tauri::webview::InvokeRequest {
             cmd: command.into(),
             callback: tauri::ipc::CallbackFn(0),
             error: tauri::ipc::CallbackFn(1),
             url: "tauri://localhost".parse().expect("invoke URL"),
-            body,
-            headers,
+            body: tauri::ipc::InvokeBody::Json(args),
+            headers: tauri::http::HeaderMap::new(),
             invoke_key: tauri::test::INVOKE_KEY.to_string(),
         }
     }
 
-    /// A call made straight to the admission, as the page's call is once its
-    /// header is read.
+    /// A call made straight to the admission, once its bytes are decoded.
     #[cfg(unix)]
     fn page_input<R: Runtime>(
         app: &AppHandle<R>,
@@ -933,43 +905,32 @@ mod tests {
                 .expect("command response JSON")
         };
 
-        let oversized = tauri::test::get_ipc_response(
-            &webview,
-            ipc_request_bytes(
-                "pane_input_enqueue",
-                json!({"id":key.id,"generation":1,"sequence":1}),
-                Some(vec![b'P'; MAX_PAGE_INPUT_BYTES + 1]),
-            ),
-        )
-        .expect("command succeeds")
-        .deserialize::<Value>()
-        .expect("command response JSON");
         assert_eq!(
-            oversized,
+            invoke(
+                "pane_input_enqueue",
+                json!({"id":key.id,"generation":1,"sequence":1,"length":MAX_PAGE_INPUT_BYTES + 1,"bytes":""}),
+            ),
             json!({
                 "ok":false,
                 "error":format!("pane input exceeds {MAX_PAGE_INPUT_BYTES} bytes"),
             })
         );
-        // The call's bytes are its raw body: a body that is not raw is refused.
-        let listed = tauri::test::get_ipc_response(
-            &webview,
-            tauri::webview::InvokeRequest {
-                body: tauri::ipc::InvokeBody::Json(json!({"bytes":[75]})),
-                ..ipc_request_bytes(
+        // A body that came short or changed, or is not base64, is refused whole,
+        // and none of them takes the number.
+        for (length, bytes, error) in [
+            (2, "Sw==", "pane input bytes do not match their length"),
+            (1, "Sw", "pane input bytes do not match their length"),
+            (4, "Sw==", "pane input bytes do not match their length"),
+            (1, "S!==", "pane input bytes are not base64"),
+        ] {
+            assert_eq!(
+                invoke(
                     "pane_input_enqueue",
-                    json!({"id":key.id,"generation":1,"sequence":1}),
-                    Some(vec![]),
-                )
-            },
-        )
-        .expect("command succeeds")
-        .deserialize::<Value>()
-        .expect("command response JSON");
-        assert_eq!(
-            listed,
-            json!({"ok":false,"error":"pane input bytes must be a raw body"})
-        );
+                    json!({"id":key.id,"generation":1,"sequence":1,"length":length,"bytes":bytes}),
+                ),
+                json!({"ok":false,"error":error})
+            );
+        }
         let first = invoke(
             "pane_input_enqueue",
             json!({"id":key.id,"generation":1,"sequence":1,"bytes":[75]}),
@@ -1013,17 +974,10 @@ mod tests {
             json!({"ok":false,"error":"pane-input-ticket-not-found"})
         );
         // A rejected page input does not consume its sequence.
-        let rejected = tauri::test::get_ipc_response(
-            &webview,
-            ipc_request_bytes(
-                "pane_input_enqueue",
-                json!({"id":key.id,"generation":1,"sequence":3}),
-                Some(vec![b'P'; MAX_PAGE_INPUT_BYTES + 1]),
-            ),
-        )
-        .expect("command succeeds")
-        .deserialize::<Value>()
-        .expect("command response JSON");
+        let rejected = invoke(
+            "pane_input_enqueue",
+            json!({"id":key.id,"generation":1,"sequence":3,"length":MAX_PAGE_INPUT_BYTES + 1,"bytes":""}),
+        );
         assert_eq!(rejected["ok"], false);
         let second = invoke(
             "pane_reply_enqueue",

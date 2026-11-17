@@ -12,6 +12,14 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // Find escape sequences before choosing byte cuts, including OSC/DCS strings.
 // A cut may be at either end of a sequence, never inside it.
+/** A call's bytes as the base64 text both of Tauri's transports carry in its arguments. */
+function base64Of(bytes) {
+  let binary = ''
+  for (let start = 0; start < bytes.length; start += 0x8000)
+    binary += String.fromCharCode.apply(null, bytes.subarray(start, start + 0x8000))
+  return btoa(binary)
+}
+
 function controlSpans(bytes) {
   const spans = []
   for (let i = 0; i < bytes.length; i += 1) {
@@ -288,7 +296,7 @@ export class TerminalLink {
    * the caller may retry the same number. A call that ends unknown (a timeout,
    * a lost answer) is skipped and its keys may be lost.
    */
-  async #admit(command, pane, bytes) {
+  async #admit(command, pane, length, text) {
     const key = paneKey(pane)
     if (this.#retired.has(key)) return null
     const sequence = (this.#sequences.get(key) ?? 0) + 1
@@ -301,7 +309,8 @@ export class TerminalLink {
           id: pane.id,
           generation: pane.generation,
           sequence,
-          bytes,
+          length,
+          bytes: text,
         },
         ADMISSION_TIMEOUT_MS,
       )
@@ -322,36 +331,27 @@ export class TerminalLink {
   async #chunk(command, pane, bytes) {
     const key = paneKey(pane)
     let admitted
-    let full = 0
+    const text = base64Of(bytes)
     do {
-      admitted = await this.#admit(command, pane, bytes)
+      admitted = await this.#admit(command, pane, bytes.length, text)
       if (admitted === null) return false
       if (
         admitted.error !== "the pane's input queue is full" &&
         admitted.error !== 'pane-input-ticket-capacity'
       )
         break
-      full += 1
-      if (full === 20)
-        this.#report(
-          new Error(
-            'If typing stays stuck, check what appeared, restart the project, and retype what is missing.',
-          ),
-        )
+      // A full queue is a paste still being written at the terminal's pace:
+      // it says nothing until the host reports an uncertain write.
       await pause(INPUT_RETRY_MS)
     } while (!this.#retired.has(key))
     if (this.#retired.has(key)) return false
-    if (admitted.error === 'pane-input-lost' || admitted.error === 'pane-input-sequence-stale') {
+    if (admitted.ok !== true || typeof admitted.ticket !== 'string') {
+      // Refused or lost before anything was written: this call's typing is
+      // missing, and what follows goes on.
       this.#report(
         new Error('Some of your typing may not have reached this window. Check what appeared.'),
       )
-      return true
-    }
-    if (admitted.ok !== true || typeof admitted.ticket !== 'string') {
-      this.#report(
-        new Error('Typing did not reach this window. Restart the project and type it again.'),
-      )
-      return false
+      return admitted.error !== 'pane-input-stale-page'
     }
     // Completion and its acknowledgement are independent of the next
     // admission: a lost wait answer cannot hold later typing.
@@ -385,9 +385,12 @@ export class TerminalLink {
       return
     }
     if (settled?.ok !== true) {
+      // Only a write the host could not finish is told as a reason to restart.
       this.#report(
         new Error(
-          'Check whether your last typing appeared, then restart the project before typing again.',
+          settled?.uncertain === true
+            ? 'Check whether your last typing appeared, then restart the project before typing again.'
+            : 'Some of your typing may not have reached this window. Check what appeared.',
         ),
       )
     }

@@ -65,6 +65,27 @@ pub fn validate_seq(seq: u64) -> Result<(), String> {
     }
 }
 
+/// The bytes of a page call, from the base64 text they travel as and the length
+/// the page counted. A length over the cap, text that is not the base64 of that
+/// many bytes, or bytes that come out another length are refused.
+pub fn decode_page_bytes(length: u64, text: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine as _;
+    if length > MAX_PAGE_INPUT_BYTES as u64 {
+        return Err(format!("pane input exceeds {MAX_PAGE_INPUT_BYTES} bytes"));
+    }
+    let mismatch = || "pane input bytes do not match their length".to_string();
+    if text.len() as u64 != length.div_ceil(3) * 4 {
+        return Err(mismatch());
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(text)
+        .map_err(|_| "pane input bytes are not base64".to_string())?;
+    if bytes.len() as u64 != length {
+        return Err(mismatch());
+    }
+    Ok(bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,5 +99,50 @@ mod tests {
         assert!(validate_size(MAX_TERMINAL_DIMENSION + 1, 24).is_err());
         assert!(pane_key("", 1).is_err());
         assert!(pane_key("pane", 0).is_err());
+    }
+
+    fn base64_of(bytes: &[u8]) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    /// The text a page sends is the bytes it counted, whole: a cut, a changed
+    /// or a mistaken one is refused, whatever its length claims.
+    #[test]
+    fn a_page_calls_bytes_are_the_length_it_stated_or_refused() {
+        let bytes: Vec<u8> = (0..=255u8).cycle().take(1000).collect();
+        let text = base64_of(&bytes);
+        assert_eq!(decode_page_bytes(1000, &text), Ok(bytes.clone()));
+        assert_eq!(decode_page_bytes(0, ""), Ok(Vec::new()));
+        // Cut at the end, cut at the start, a length that claims more or less.
+        for (length, text) in [
+            (1000, text[..text.len() - 4].to_string()),
+            (1000, text[4..].to_string()),
+            (1001, text.clone()),
+            (999, text.clone()),
+            (1000, format!("{text}AAAA")),
+        ] {
+            assert_eq!(
+                decode_page_bytes(length, &text),
+                Err("pane input bytes do not match their length".to_string()),
+                "length {length}, text of {}",
+                text.len()
+            );
+        }
+        // The same count of characters, not base64.
+        assert_eq!(
+            decode_page_bytes(3, "!!!!"),
+            Err("pane input bytes are not base64".to_string())
+        );
+        // Over the cap is refused before the text is read.
+        assert_eq!(
+            decode_page_bytes(MAX_PAGE_INPUT_BYTES as u64 + 1, ""),
+            Err(format!("pane input exceeds {MAX_PAGE_INPUT_BYTES} bytes"))
+        );
+        let largest = vec![7u8; MAX_PAGE_INPUT_BYTES];
+        assert_eq!(
+            decode_page_bytes(MAX_PAGE_INPUT_BYTES as u64, &base64_of(&largest)),
+            Ok(largest)
+        );
     }
 }
