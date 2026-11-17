@@ -103,8 +103,10 @@ fn a_delayed_old_page_retry_cannot_write_into_the_new_page() {
 
 #[test]
 fn a_new_pages_equal_first_key_is_not_confused_with_a_stale_call() {
-    let (panes, inputs, key, received) = recorder(2);
+    let (panes, inputs, key, received) = recorder(3);
     inputs.begin_page("old").unwrap();
+    let original = admitted(&inputs, "old", &key, 1, b"A", None);
+    finished(&inputs, "old", &original);
     inputs.begin_page("new").unwrap();
     let late = inputs.enqueue_page(
         "old",
@@ -122,7 +124,7 @@ fn a_new_pages_equal_first_key_is_not_confused_with_a_stale_call() {
     inputs.close_and_drain();
     panes.kill(&key).unwrap();
     assert_eq!(late.unwrap_err(), "pane-input-stale-page");
-    assert_eq!(bytes, b"AB");
+    assert_eq!(bytes, b"AAB");
 }
 
 #[test]
