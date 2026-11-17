@@ -8,6 +8,8 @@ const MAX_CONTROL_BYTES = 64 * 1024
 const ADMISSION_TIMEOUT_MS = 1500
 const WAIT_TIMEOUT_MS = 30_000
 const INPUT_RETRY_MS = 100
+const RESTART_INPUT_ADVICE =
+  'Check whether your last typing appeared, then restart the project before typing again.'
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // Find escape sequences before choosing byte cuts, including OSC/DCS strings.
@@ -125,6 +127,7 @@ export class TerminalLink {
   #sequences = new Map()
   #sizes = new Map()
   #retired = new Set()
+  #failedInputs = new Set()
   #pageId
 
   constructor({ invoke, registry, report, pageId = crypto.randomUUID() }) {
@@ -177,12 +180,16 @@ export class TerminalLink {
 
   /** What the human types into a pane. */
   input(pane, data) {
-    return this.#stream('pane_input_enqueue', pane, data).catch((cause) => this.#report(cause))
+    return this.#stream('pane_input_enqueue', pane, data).catch((cause) =>
+      this.#reportInput(paneKey(pane), cause),
+    )
   }
 
   /** What the emulator answers the program on its own (cursor reports and the like). */
   reply(pane, data) {
-    return this.#stream('pane_reply_enqueue', pane, data).catch((cause) => this.#report(cause))
+    return this.#stream('pane_reply_enqueue', pane, data).catch((cause) =>
+      this.#reportInput(paneKey(pane), cause),
+    )
   }
 
   /** The emulator's size, sent until the live pane accepts it. */
@@ -202,12 +209,20 @@ export class TerminalLink {
     this.#inputs.delete(key)
     this.#sequences.delete(key)
     this.#sizes.delete(key)
+    this.#failedInputs.delete(key)
     this.#registry.retire(key)
   }
 
   /** Whether a pane is gone for good: it gets no emulator again. */
   retired(key) {
     return this.#retired.has(key)
+  }
+
+  // The status line is shared by panes. Once any pane needs a restart,
+  // later input notices must keep that advice until the pane is retired.
+  #reportInput(key, cause, failed = false) {
+    if (failed) this.#failedInputs.add(key)
+    this.#report(this.#failedInputs.size > 0 ? new Error(RESTART_INPUT_ADVICE) : cause)
   }
 
   async #syncSize(key) {
@@ -286,7 +301,7 @@ export class TerminalLink {
       } catch {}
       failures += 1
       if (failures === 5)
-        this.#report(new Error('Keep this window open while your typing reconnects.'))
+        this.#reportInput(key, new Error('Keep this window open while your typing reconnects.'))
       await pause(INPUT_RETRY_MS)
     }
   }
@@ -348,7 +363,8 @@ export class TerminalLink {
     if (admitted.ok !== true || typeof admitted.ticket !== 'string') {
       // Refused or lost before anything was written: this call's typing is
       // missing, and what follows goes on.
-      this.#report(
+      this.#reportInput(
+        key,
         new Error('Some of your typing may not have reached this window. Check what appeared.'),
       )
       return admitted.error !== 'pane-input-stale-page'
@@ -373,7 +389,7 @@ export class TerminalLink {
       } catch {
         failures += 1
         if (failures === 5)
-          this.#report(new Error('Keep this window open while your typing is checked.'))
+          this.#reportInput(key, new Error('Keep this window open while your typing is checked.'))
         await pause(INPUT_RETRY_MS)
       }
     }
@@ -381,17 +397,22 @@ export class TerminalLink {
     if (settled?.error === 'pane-input-stale-page') return
     void this.#forget(key, ticket)
     if (failures > 0 && settled?.error === 'pane-input-ticket-not-found') {
-      this.#report(new Error('Check the window to see whether your last typing appeared.'))
+      this.#reportInput(
+        key,
+        new Error('Check the window to see whether your last typing appeared.'),
+      )
       return
     }
     if (settled?.ok !== true) {
-      // Only a write the host could not finish is told as a reason to restart.
-      this.#report(
+      // A failed pane refuses later typing, even when this call wrote nothing.
+      this.#reportInput(
+        key,
         new Error(
           settled?.uncertain === true
-            ? 'Check whether your last typing appeared, then restart the project before typing again.'
+            ? RESTART_INPUT_ADVICE
             : 'Some of your typing may not have reached this window. Check what appeared.',
         ),
+        settled?.failedUntilRestart === true,
       )
     }
   }

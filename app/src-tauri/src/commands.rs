@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::daemon::RosterHandle;
 use crate::runtime::{AppRuntime, PAGE_STATE_EVENT};
 use cf_bridge::Bridge;
-use cf_panes::input_queue::{InputError, InputWork, PageInputCompletion};
+use cf_panes::input_queue::{InputWork, PageInputCompletion};
 use cf_panes::output_hub::PaneOutputMessage;
 use cf_panes::validation::{
     decode_page_bytes, pane_key, validate_seq, validate_size, validate_text,
@@ -63,7 +63,8 @@ async fn input_result(result: Result<PageInputCompletion, String>) -> Value {
         Err(error) => json!({
             "ok":false,
             "error":error.to_string(),
-            "uncertain":matches!(error, InputError::Uncertain(_)),
+            "uncertain":error.is_uncertain(),
+            "failedUntilRestart":error.failed_until_restart(),
         }),
     }
 }
@@ -113,8 +114,8 @@ struct PageCall {
 }
 
 /// A call's bytes arrive as base64 text in the command's arguments, which both
-/// of Tauri's transports carry, with the length the page counted: a body that
-/// came short or changed is refused, and nothing of it is written.
+/// of Tauri's transports carry, with the length the page counted: invalid
+/// base64 or bytes of a different length are refused before writing.
 fn enqueue_page_text<R: Runtime>(
     app: &AppHandle<R>,
     call: &PageCall,
@@ -591,6 +592,81 @@ mod tests {
     #[cfg(unix)]
     use cf_proto::bridge::Role;
 
+    /// A real macOS PTY EIO fails the generation. The two later keys are
+    /// refused without writing, but still say the pane needs a restart.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_pty_write_failure_and_later_keys_report_the_failed_pane() {
+        let _pty_guard = cf_panes::pty::serial_pty_test();
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        inputs.begin_page("test-page").unwrap();
+        let key = PaneKey::new("failed-command", 1);
+        let mut reader = panes
+            .open_at(
+                key.clone(),
+                Path::new("/tmp"),
+                &[
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    "/bin/stty raw -echo; printf ready; /usr/bin/head -c 1 >/dev/null".to_string(),
+                ],
+                &HashMap::new(),
+                PtySize {
+                    rows: 24,
+                    cols: 80,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                },
+            )
+            .expect("open the test pane");
+        arbiter.register(&key).expect("register the pane");
+        inputs.open(&key).expect("open the pane's input");
+        let mut ready = [0; 5];
+        reader
+            .read_exact(&mut ready)
+            .expect("read readiness marker");
+        assert_eq!(&ready, b"ready");
+        let runtime = test_runtime(Arc::clone(&panes), Arc::clone(&inputs), None, None);
+        let app = tauri::test::mock_builder()
+            .manage(runtime)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("build mock app");
+        let handle = app.handle().clone();
+        let mut answers = Vec::new();
+        for (sequence, bytes) in [
+            (1, vec![b'A'; 256 * 1024]),
+            (2, vec![b'B']),
+            (3, vec![b'C']),
+        ] {
+            let admitted = page_input(&handle, "test-page", &key, sequence, &bytes);
+            assert_eq!(admitted["ok"], true, "{admitted}");
+            answers.push(tauri::async_runtime::block_on(pane_input_wait(
+                handle.clone(),
+                "test-page".to_string(),
+                admitted["ticket"].as_str().expect("ticket").to_string(),
+            )));
+        }
+        inputs.close_and_drain();
+        panes.kill(&key).expect("close the test pane");
+        drop(app);
+        println!("REAL_PTY_ANSWERS={}", json!(answers));
+        assert_eq!(answers[0]["ok"], false, "{:?}", answers);
+        assert!(
+            answers[0]["error"].as_str().unwrap().contains("os error 5"),
+            "{:?}",
+            answers
+        );
+        assert_eq!(answers[0]["uncertain"], true, "{:?}", answers);
+        assert_eq!(answers[0]["failedUntilRestart"], true, "{:?}", answers);
+        for answer in &answers[1..] {
+            assert_eq!(answer["error"], "pane input is failed until restart");
+            assert_eq!(answer["uncertain"], false);
+            assert_eq!(answer["failedUntilRestart"], true);
+        }
+    }
+
     #[test]
     fn notification_failure_reports_that_human_input_was_already_taken() {
         let said = std::cell::RefCell::new(Vec::new());
@@ -915,7 +991,7 @@ mod tests {
                 "error":format!("pane input exceeds {MAX_PAGE_INPUT_BYTES} bytes"),
             })
         );
-        // A body that came short or changed, or is not base64, is refused whole,
+        // A body of a different length, or one not in base64, is refused whole,
         // and none of them takes the number.
         for (length, bytes, error) in [
             (2, "Sw==", "pane input bytes do not match their length"),

@@ -4641,24 +4641,29 @@ test('a write the host refuses says some typing may be missing, not to restart',
   )
 })
 
-for (const [error, written] of [
-  ['PTY I/O error: the terminal write failed', 'A'],
-  ['pane input is failed until restart', ''],
+for (const [error, written, uncertain] of [
+  ['PTY I/O error: the terminal write failed', 'A', true],
+  ['pane input is failed until restart', '', false],
 ]) {
-  test(`an uncertain pane input says how to resume typing: ${error}`, async ({ page }) => {
+  test(`a failed pane input says how to resume typing: ${error}`, async ({ page }) => {
     await open(page)
     await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
     await page.evaluate(
-      ({ error, written }) => {
+      ({ error, written, uncertain }) => {
         window.__paneReceived = ''
         window.__paneInputHook = async (_command, args) => {
           if (written) window.__paneReceived += String.fromCharCode(...args.bytes)
           return { ok: true, ticket: `ticket-${args.sequence}` }
         }
-        window.__paneWaitHook = async () => ({ ok: false, error, uncertain: true })
+        window.__paneWaitHook = async () => ({
+          ok: false,
+          error,
+          uncertain,
+          failedUntilRestart: true,
+        })
         window.__emulators[0].type('A')
       },
-      { error, written },
+      { error, written, uncertain },
     )
     await expect.poll(() => page.evaluate(() => window.__paneReceived)).toBe(written)
     await expect(page.locator('#status')).toHaveText(
@@ -4666,6 +4671,116 @@ for (const [error, written] of [
     )
   })
 }
+
+test('a late pane refusal cannot replace restart advice with a generic notice', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__paneInputHook = async (_command, args) => ({ ok: true, ticket: `t-${args.sequence}` })
+    window.__paneWaitHook = ({ ticket }) =>
+      ticket === 't-1'
+        ? new Promise((resolve) => {
+            window.__releaseFirstInput = resolve
+          })
+        : {
+            ok: false,
+            error: 'pane input is failed until restart',
+            uncertain: false,
+            failedUntilRestart: true,
+          }
+    window.__emulators[0].type('A')
+    window.__emulators[0].type('B')
+  })
+  const restart =
+    'Check whether your last typing appeared, then restart the project before typing again.'
+  await expect(page.locator('#status')).toHaveText(restart)
+  await expect.poll(() => page.evaluate(() => typeof window.__releaseFirstInput)).toBe('function')
+  await page.evaluate(() =>
+    window.__releaseFirstInput({
+      ok: false,
+      error: 'earlier refusal',
+      uncertain: false,
+      failedUntilRestart: false,
+    }),
+  )
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__calls.filter(([name]) => name === 'pane_input_forget').length),
+    )
+    .toBe(2)
+  await expect(page.locator('#status')).toHaveText(restart)
+})
+
+test('a lost pane admission answer is followed by restart advice from the failed pane', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__paneInputHook = async (_command, args) => {
+      if (args.sequence === 1) throw new Error('the admission answer was lost')
+      return { ok: true, ticket: `t-${args.sequence}` }
+    }
+    window.__paneWaitHook = async () => ({
+      ok: false,
+      error: 'pane input is failed until restart',
+      uncertain: false,
+      failedUntilRestart: true,
+    })
+    window.__emulators[0].type('A')
+    window.__emulators[0].type('B')
+  })
+  await expect(page.locator('#status')).toHaveText(
+    'Check whether your last typing appeared, then restart the project before typing again.',
+  )
+})
+
+test('another pane cannot replace failed pane restart advice with a generic notice', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(1)
+  await page.evaluate(() => {
+    window.__paneInputHook = async (_command, args) => ({ ok: true, ticket: args.id })
+    window.__paneWaitHook = async ({ ticket }) => {
+      const first = window.__calls.find(([name]) => name === 'pane_input_enqueue')[1].id
+      return ticket === first
+        ? {
+            ok: false,
+            error: 'pane input is failed until restart',
+            uncertain: false,
+            failedUntilRestart: true,
+          }
+        : { ok: false, error: 'ordinary refusal', uncertain: false, failedUntilRestart: false }
+    }
+    window.__emulators[0].type('A')
+  })
+  const restart =
+    'Check whether your last typing appeared, then restart the project before typing again.'
+  await expect(page.locator('#status')).toHaveText(restart)
+  await page.evaluate(() => window.__emulators[1].type('B'))
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__calls.filter(([name]) => name === 'pane_input_forget').length),
+    )
+    .toBe(2)
+  await expect(page.locator('#status')).toHaveText(restart)
+
+  // Once the failed generation leaves, a different pane's refusal is no
+  // longer described as needing a project restart.
+  await page.evaluate(() => {
+    const failedId = window.__calls.find(([name]) => name === 'pane_input_enqueue')[1].id
+    window.__model.boards[1].lanes.find((lane) => lane.pane?.id === failedId).pane = null
+    window.__listeners.get('state-changed')()
+  })
+  await expect.poll(() => page.evaluate(() => window.__emulators[0].disposed)).toBe(true)
+  await page.evaluate(() => window.__emulators[1].type('C'))
+  await expect(page.locator('#status')).toHaveText(
+    'Some of your typing may not have reached this window. Check what appeared.',
+  )
+})
 
 for (const boundary of ['UTF-8 character', 'closing paste marker']) {
   test(`a terminal reply cannot split a ${boundary}`, async ({ page }) => {

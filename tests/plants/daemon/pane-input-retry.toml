@@ -11,6 +11,8 @@ pane-input-whole = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "p
 pane-input-length = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "validation::tests::a_page_calls_bytes_are_the_length_it_stated_or_refused"]
 pane-input-cut = ["cargo", "test", "--offline", "-p", "app", "commands::tests::production_ipc_refusal_does_not_consume_its_sequence"]
 pane-input-completion = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_lost_completion_answer_can_be_waited_for_again"]
+failed-pane-answer = ["cargo", "test", "--offline", "-p", "app", "commands::tests::a_pty_write_failure_and_later_keys_report_the_failed_pane"]
+failed-pane-notice = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "--workers=4", "-g", "a failed pane input|a late pane refusal|another pane cannot replace failed pane"]
 
 [[plant]]
 name = "pane input retry: let a departed page admit input"
@@ -179,3 +181,69 @@ replace = '''    pub fn page_completion(
         ticket: &str,
     ) -> Result<PageInputCompletion, String> {
         let mut page = self'''
+
+[[plant]]
+name = "failed pane notice: a failed write does not say the pane is failed"
+meant = "a_pty_write_failure_and_later_keys_report_the_failed_pane"
+runs = ["failed-pane-answer"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''            Self::FailedWrite(_)
+                | Self::Refused {
+                    code: INPUT_FAILED,
+                    ..
+                }'''
+replace = '''            Self::Refused {
+                code: INPUT_FAILED,
+                ..
+            }'''
+
+[[plant]]
+name = "failed pane notice: a later refusal does not say the pane is failed"
+meant = "a_pty_write_failure_and_later_keys_report_the_failed_pane"
+runs = ["failed-pane-answer"]
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''            Self::FailedWrite(_)
+                | Self::Refused {
+                    code: INPUT_FAILED,
+                    ..
+                }'''
+replace = '''            Self::FailedWrite(_)'''
+
+[[plant]]
+name = "failed pane notice: the page ignores the failed field"
+meant = "a failed pane input says how to resume typing: pane input is failed until restart"
+runs = ["failed-pane-notice"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = '''        settled?.failedUntilRestart === true,'''
+replace = '''        false,'''
+
+[[plant]]
+name = "failed pane notice: a late refusal replaces restart advice"
+meant = "a late pane refusal cannot replace restart advice with a generic notice"
+runs = ["failed-pane-notice"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = '''    this.#report(this.#failedInputs.size > 0 ? new Error(RESTART_INPUT_ADVICE) : cause)'''
+replace = '''    this.#report(failed ? new Error(RESTART_INPUT_ADVICE) : cause)'''
+
+[[plant]]
+name = "failed pane notice: a retired generation keeps its restart advice"
+meant = "another pane cannot replace failed pane restart advice with a generic notice"
+runs = ["failed-pane-notice"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/terminal-link.js"
+find = '''    this.#failedInputs.delete(key)'''
+replace = '''    // The retired generation stays in the failed set.'''

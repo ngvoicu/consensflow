@@ -27,6 +27,7 @@ const LOCK_POISONED: &str = "lock-poisoned";
 /// original after its skip, or a repeat. Nothing of it is written.
 const INPUT_SEQUENCE_STALE: &str = "pane-input-sequence-stale";
 const INPUT_STALE_PAGE: &str = "pane-input-stale-page";
+const INPUT_FAILED: &str = "input-failed";
 
 /// What a pane's worker does, in order: the human's own keys (counted for
 /// what they leave unsent), the daemon's keys, a delivery's paste (and the
@@ -61,15 +62,33 @@ impl InputWork {
 }
 
 /// Why a pane's input did not go in. Refused: nothing of it was written, so
-/// it may be sent again. Uncertain: the write itself failed partway, and some
-/// of it may have reached the window.
+/// it may be sent again. Uncertain: some of it may have reached the window.
+/// A failed write is uncertain and also holds this generation until restart.
 #[derive(Clone, Debug)]
 pub enum InputError {
     Refused { code: &'static str, cause: String },
     Uncertain(String),
+    FailedWrite(String),
 }
 
 impl InputError {
+    /// Whether some of this input may already have reached the pane.
+    pub fn is_uncertain(&self) -> bool {
+        matches!(self, Self::Uncertain(_) | Self::FailedWrite(_))
+    }
+
+    /// Whether the pane's generation refuses later input until replaced.
+    pub fn failed_until_restart(&self) -> bool {
+        matches!(
+            self,
+            Self::FailedWrite(_)
+                | Self::Refused {
+                    code: INPUT_FAILED,
+                    ..
+                }
+        )
+    }
+
     pub(crate) fn refused(code: &'static str, cause: impl Into<String>) -> Self {
         Self::Refused {
             code,
@@ -92,7 +111,7 @@ impl InputError {
                 "error":code,
                 "cause":cause,
             }),
-            Self::Uncertain(cause) => json!({
+            Self::Uncertain(cause) | Self::FailedWrite(cause) => json!({
                 "ok":false,
                 "admitted":null,
                 "error":"uncertain",
@@ -106,7 +125,9 @@ impl InputError {
 impl fmt::Display for InputError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Refused { cause, .. } | Self::Uncertain(cause) => formatter.write_str(cause),
+            Self::Refused { cause, .. } | Self::Uncertain(cause) | Self::FailedWrite(cause) => {
+                formatter.write_str(cause)
+            }
         }
     }
 }
@@ -114,10 +135,10 @@ impl fmt::Display for InputError {
 impl From<ArbiterError> for InputError {
     fn from(error: ArbiterError) -> Self {
         let code = match &error {
-            ArbiterError::Pane(_) => return Self::Uncertain(error.to_string()),
+            ArbiterError::Pane(_) => return Self::FailedWrite(error.to_string()),
             ArbiterError::Stale => "stale-pane",
             ArbiterError::Busy => "paste-in-flight",
-            ArbiterError::InputFailed => "input-failed",
+            ArbiterError::InputFailed => INPUT_FAILED,
             ArbiterError::Unsent => "unsent-text",
             ArbiterError::InvalidBody(_) => INVALID_BODY,
             ArbiterError::LockPoisoned => LOCK_POISONED,
@@ -987,6 +1008,27 @@ mod tests {
             InputError::from(ArbiterError::Pane(PaneError::LockPoisoned)).paste_answer(),
             json!({"ok":false,"admitted":null,"error":"uncertain","cause":"pane table lock is poisoned"})
         );
+    }
+
+    #[test]
+    fn uncertainty_and_a_failed_pane_are_distinct() {
+        let (sender, receiver) = oneshot::channel();
+        drop(sender);
+        let unanswered = futures_executor::block_on(wait_for_input(receiver)).unwrap_err();
+        assert!(unanswered.is_uncertain());
+        assert!(!unanswered.failed_until_restart());
+
+        let failed_write = InputError::from(ArbiterError::Pane(PaneError::Io(
+            std::io::Error::other("test write failure"),
+        )));
+        assert!(failed_write.is_uncertain());
+        assert!(failed_write.failed_until_restart());
+        let refused = InputError::from(ArbiterError::InputFailed);
+        assert!(!refused.is_uncertain());
+        assert!(refused.failed_until_restart());
+        let ordinary = InputError::from(ArbiterError::Stale);
+        assert!(!ordinary.is_uncertain());
+        assert!(!ordinary.failed_until_restart());
     }
 
     /// A call whose fate is unknown is skipped, never sent again: the count
