@@ -11,6 +11,9 @@ const SETTLE_MS = 200
 /** A Mac, where Cmd+C copies and Ctrl+C is always the program's. */
 const MAC = /Macintosh|Mac OS X/.test(globalThis.navigator?.userAgent ?? '')
 
+/** Windows' Ctrl+V is a paste shortcut, not a control character for the program. */
+const WINDOWS = /Windows/.test(globalThis.navigator?.userAgent ?? '')
+
 /** The key a click must hold to open a link, as VS Code's terminal asks: Cmd on a Mac, Ctrl elsewhere. */
 const LINK_KEY = MAC ? 'Cmd' : 'Ctrl'
 
@@ -105,7 +108,13 @@ const isShiftEnter = (event) =>
  * the C key).
  */
 const shortcutLetter = (event) =>
-  /^[a-z]$/i.test(event.key) ? event.key.toLowerCase() : event.code === 'KeyC' ? 'c' : null
+  /^[a-z]$/i.test(event.key)
+    ? event.key.toLowerCase()
+    : event.code === 'KeyC'
+      ? 'c'
+      : event.code === 'KeyV'
+        ? 'v'
+        : null
 
 /**
  * The page-side terminal contract. Pane ownership stays in Rust; this object
@@ -161,6 +170,33 @@ export class XtermEmulator {
     this.terminal.loadAddon(this.fitAddon)
     this.terminal.open(host)
     this.terminal.attachCustomKeyEventHandler((event) => this.#programKey(event))
+    this.awaitingPaste = false
+    this.clearPaste = () => {
+      this.awaitingPaste = false
+    }
+    this.imagePaste = (event) => {
+      const fromShortcut = this.awaitingPaste
+      this.awaitingPaste = false
+      const data = event.clipboardData
+      if (
+        !fromShortcut ||
+        !data ||
+        data.getData('text/plain') ||
+        !Array.from(data.items).some(
+          (item) => item.kind === 'file' && item.type.startsWith('image/'),
+        )
+      )
+        return
+      // Before the Windows shortcut was passed to the browser, the harness received Ctrl+V
+      // itself. Keep that image-only path for harnesses that read the clipboard for images.
+      event.preventDefault()
+      event.stopImmediatePropagation()
+      this.terminal.input('\x16')
+    }
+    if (WINDOWS) {
+      this.terminal.element?.addEventListener('paste', this.imagePaste, true)
+      this.terminal.textarea?.addEventListener('blur', this.clearPaste)
+    }
     this.humanDataPending = 0
     this.humanListeners = new Set()
     // xterm's public onData event erases the internal `wasUserInput` bit. In
@@ -202,6 +238,7 @@ export class XtermEmulator {
    * does for Cmd+C on a Mac.
    */
   #programKey(event) {
+    if (WINDOWS && event.type === 'keyup') this.awaitingPaste = false
     if (isShiftEnter(event)) {
       // Typed as a key press the window hears (the human's), once, on the key going down; the
       // press xterm would make of the rest of it (the keypress after the keydown) is none.
@@ -212,6 +249,12 @@ export class XtermEmulator {
       return false
     }
     if (event.type !== 'keydown' || !event.ctrlKey || event.altKey || event.metaKey) return true
+    if (WINDOWS && !event.shiftKey && shortcutLetter(event) === 'v') {
+      // Let the browser fire its paste event: xterm will paste its text, with the program's
+      // bracketed-paste mode. Returning false stops xterm's raw Ctrl+V without cancelling the key.
+      this.awaitingPaste = true
+      return false
+    }
     if (shortcutLetter(event) !== 'c') return true
     if (!event.shiftKey && (MAC || !this.terminal.hasSelection())) return true
     event.preventDefault()
@@ -280,6 +323,8 @@ export class XtermEmulator {
 
   dispose() {
     clearTimeout(this.settling)
+    this.terminal.element?.removeEventListener('paste', this.imagePaste, true)
+    this.terminal.textarea?.removeEventListener('blur', this.clearPaste)
     this.resizeObserver.disconnect()
     this.userInputSubscription.dispose()
     this.dataSubscription.dispose()
