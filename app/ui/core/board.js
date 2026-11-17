@@ -1445,10 +1445,18 @@ export class TaskDrawer {
   #fold = null
   /** The session whose window works on the task, if it has one: the terminal it shows. */
   #terminal = null
+  /**
+   * What the task is, how it stands and what the human may do with it, at the drawer's
+   * top however long its story: acting on a task never takes reading down it.
+   */
+  #top = element('div', 'drawer-top')
+  /** Its story and what its window wrote, scrolled under the top. */
+  #body = element('div', 'drawer-body')
 
   constructor(root, actions) {
     this.#root = root
     this.#actions = actions
+    root.replaceChildren(this.#top, this.#body)
   }
 
   /** Whether `task` is the one drawn, unchanged since. */
@@ -1490,27 +1498,31 @@ export class TaskDrawer {
       'drawer-meta',
       `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)} · ${stateLabel({ ...task, held })}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
-    const sections = [head, meta, this.#story(task, same, now)]
+    this.#terminal = terminal
+    const top = [head, meta]
+    const actions = element('div', 'drawer-actions')
+    if (!closed) actions.append(...this.#taskActions(task))
+    if (actions.childElementCount > 0) top.push(actions)
+    const sections = [this.#story(task, same, now)]
     // What its window wrote is read only when asked for, folded until then.
     this.#fold = total > 0 ? ((same ? this.#fold : null) ?? this.#newFold()) : null
     if (this.#fold !== null) {
       redraw(this.#fold, [transcriptHead(total), ...[...this.#fold.children].slice(1)])
       sections.push(this.#fold)
     }
-    this.#terminal = terminal
-    const actions = element('div', 'drawer-actions')
-    if (!closed) actions.append(...this.#taskActions(task))
-    if (actions.childElementCount > 0) sections.push(actions)
     this.#task = task
     this.#root.setAttribute('aria-label', `Task T-${task.number}`)
     this.#root.dataset.state = task.state
-    if (same) {
-      redraw(this.#root, sections)
-    } else {
-      this.#root.replaceChildren(...sections)
-      this.#root.scrollTop = 0
-    }
+    // Shown first: a hidden drawer takes no scroll, and keeps where the last task was read to.
     this.#root.hidden = false
+    if (same) {
+      redraw(this.#top, top)
+      redraw(this.#body, sections)
+    } else {
+      this.#top.replaceChildren(...top)
+      this.#body.replaceChildren(...sections)
+      this.#body.scrollTop = 0
+    }
     if (same && changed && this.#fold?.open) this.#actions.onTranscript(task)
   }
 
@@ -1665,7 +1677,8 @@ export class TaskDrawer {
     this.#fold = null
     this.#terminal = null
     this.#root.hidden = true
-    this.#root.replaceChildren()
+    this.#top.replaceChildren()
+    this.#body.replaceChildren()
   }
 }
 

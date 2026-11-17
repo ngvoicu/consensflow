@@ -760,13 +760,19 @@ tr[data-session] .row-name { font-weight: 500; }
   background: var(--panel);
   border-left: 1px solid var(--line);
   box-shadow: -18px 0 40px var(--shadow);
-  overflow: auto;
-  padding: 16px 18px 28px;
+  display: flex;
+  flex-direction: column;
   z-index: 5;
 }
+/* The task's head (its title, how it stands, its buttons) stays at the drawer's top, as the
+   board's column heads do on the board: the story scrolls on its own under its hairline. */
+.drawer-top { flex: none; padding: 16px 18px 12px; border-bottom: 1px solid var(--line-soft); }
+.drawer-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 18px 28px; }
 .drawer-head { display: flex; align-items: center; gap: 10px; }
 .drawer-title { margin: 0; flex: 1; display: flex; align-items: center; gap: 10px; font-size: 15px; }
 .drawer-title .card-number {
+  flex: none;
+  white-space: nowrap;
   padding: 3px 8px;
   border-radius: 4px;
   background: var(--state, var(--slate));
@@ -777,7 +783,10 @@ tr[data-session] .row-name { font-weight: 500; }
 .drawer[data-state="done"] { --state: var(--ok); --state-ink: var(--ink); }
 .drawer[data-state="failed"] { --state: var(--danger); --state-ink: var(--ink); }
 .drawer[data-state="accepted"] { --state: var(--ok-dim); }
-.drawer-meta { margin: 8px 0 14px; font: 11px var(--mono); color: var(--muted); }
+.drawer-meta { margin: 8px 0 0; font: 11px var(--mono); color: var(--muted); }
+/* Its buttons under the line that says how it stands; Cancel and Delete apart at the row's end. */
+.drawer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.drawer-actions > .danger-button { margin-left: auto; }
 .dialog-help { margin: 0 0 12px; font-size: 12px; color: var(--muted); }
 .staff { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 13px; }
 .staff th { text-align: left; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); padding: 4px 8px 6px; }
@@ -955,7 +964,6 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--accent
 .transcript-more { margin: 0 0 8px; }
 .transcript-item[data-compaction="true"] { border-color: var(--amber); }
 .transcript-item[data-compaction="true"] > .transcript-head { color: var(--amber); }
-.drawer-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 
 /* The live windows. */
 /* One row of cards, each as tall as the dock: the chief's first, the others
