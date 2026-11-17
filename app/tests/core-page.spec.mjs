@@ -869,16 +869,16 @@ async function open(page, given = model()) {
         return answer({ project })
       },
     }
-    const invoke = async (command, rawArgs = {}, options = {}) => {
-      // What is typed goes as raw bytes with its numbers in a header (the page's call);
-      // the tests read it as one object, `bytes` a list.
-      const args =
-        rawArgs instanceof Uint8Array
-          ? {
-              ...JSON.parse(decodeURIComponent(options.headers['x-cf-pane-input'])),
-              bytes: Array.from(rawArgs),
-            }
-          : rawArgs
+    const invoke = async (command, rawArgs = {}) => {
+      // What is typed goes as base64 text with the length the page counted;
+      // the tests read it as `bytes`, a list, after the length is checked.
+      let args = rawArgs
+      if (typeof rawArgs.bytes === 'string' && 'length' in rawArgs) {
+        const list = Array.from(atob(rawArgs.bytes), (character) => character.charCodeAt(0))
+        if (list.length !== rawArgs.length)
+          throw new Error('a call stated another length than its bytes')
+        args = { ...rawArgs, bytes: list }
+      }
       window.__calls.push([
         command,
         JSON.parse(JSON.stringify(args, (key, value) => (key === 'onOutput' ? 'channel' : value))),
@@ -4414,12 +4414,14 @@ test('a paste goes in as one call, whole with both markers, however long', async
     return {
       keys: Object.keys(args),
       sequence: args.sequence,
+      length: args.length,
       text: new TextDecoder().decode(new Uint8Array(args.bytes)),
     }
   })
-  expect(call.keys).toEqual(['pageId', 'id', 'generation', 'sequence', 'bytes'])
+  expect(call.keys).toEqual(['pageId', 'id', 'generation', 'sequence', 'length', 'bytes'])
   expect(call.sequence).toBe(1)
   expect(call.text).toBe(paste)
+  expect(call.length).toBe(new TextEncoder().encode(paste).length)
 })
 
 for (const lost of ['before it arrives', 'with its answer lost']) {
@@ -4594,11 +4596,56 @@ test('a full input queue retries the refused key before later typing', async ({ 
   await expect.poll(() => page.evaluate(() => window.__paneReceived), { timeout: 3000 }).toBe('ABC')
 })
 
+test('a paste still being written at the terminal pace never says to restart', async ({ page }) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    let refusals = 0
+    window.__paneReceived = ''
+    window.__paneInputHook = async (_command, args) => {
+      // The queue holds the whole paste until it is written: every try is refused
+      // for far longer than the page once waited before it spoke.
+      refusals += 1
+      if (refusals <= 40) return { ok: false, error: "the pane's input queue is full" }
+      window.__paneReceived += String.fromCharCode(...args.bytes)
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    window.__emulators[0].type('A')
+  })
+  await expect.poll(() => page.evaluate(() => window.__paneReceived), { timeout: 8000 }).toBe('A')
+  await expect(page.locator('#status')).toHaveText('')
+})
+
+test('a write the host refuses says some typing may be missing, not to restart', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__paneReceived = ''
+    let first = true
+    window.__paneInputHook = async (_command, args) => {
+      if (first) {
+        first = false
+        return { ok: false, error: 'pane input bytes do not match their length' }
+      }
+      window.__paneReceived += String.fromCharCode(...args.bytes)
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    window.__emulators[0].type('A')
+    window.__emulators[0].type('B')
+  })
+  await expect.poll(() => page.evaluate(() => window.__paneReceived)).toBe('B')
+  await expect(page.locator('#status')).toHaveText(
+    'Some of your typing may not have reached this window. Check what appeared.',
+  )
+})
+
 for (const [error, written] of [
   ['PTY I/O error: the terminal write failed', 'A'],
   ['pane input is failed until restart', ''],
 ]) {
-  test(`a failed pane input says how to resume typing: ${error}`, async ({ page }) => {
+  test(`an uncertain pane input says how to resume typing: ${error}`, async ({ page }) => {
     await open(page)
     await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
     await page.evaluate(
@@ -4608,7 +4655,7 @@ for (const [error, written] of [
           if (written) window.__paneReceived += String.fromCharCode(...args.bytes)
           return { ok: true, ticket: `ticket-${args.sequence}` }
         }
-        window.__paneWaitHook = async () => ({ ok: false, error })
+        window.__paneWaitHook = async () => ({ ok: false, error, uncertain: true })
         window.__emulators[0].type('A')
       },
       { error, written },
@@ -4775,7 +4822,7 @@ test('every key the human types reaches the pane in order, flagged as nothing', 
     .toEqual(
       ['h', '\r', '\x1b[A', '\x1b[<', '\x1b', '\x1b[2'].map((start) => [
         start,
-        ['pageId', 'id', 'generation', 'sequence', 'bytes'],
+        ['pageId', 'id', 'generation', 'sequence', 'length', 'bytes'],
       ]),
     )
 })

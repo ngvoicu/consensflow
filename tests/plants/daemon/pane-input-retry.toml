@@ -8,7 +8,8 @@ pane-input-lost-paste = ["cargo", "test", "--offline", "-p", "cf-panes", "--test
 pane-input-capacity = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::unanswered_page_input_is_bounded_until_a_new_page"]
 pane-input-cap = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_paste_over_the_cap_is_refused_whole_and_keeps_its_number"]
 pane-input-whole = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_reply_that_comes_during_a_paste_goes_after_all_of_it"]
-pane-input-raw-body = ["cargo", "test", "--offline", "-p", "app", "commands::tests::production_ipc_refusal_does_not_consume_its_sequence"]
+pane-input-length = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "validation::tests::a_page_calls_bytes_are_the_length_it_stated_or_refused"]
+pane-input-cut = ["cargo", "test", "--offline", "-p", "app", "commands::tests::production_ipc_refusal_does_not_consume_its_sequence"]
 pane-input-completion = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_lost_completion_answer_can_be_waited_for_again"]
 
 [[plant]]
@@ -124,14 +125,34 @@ replace = '''            InputWork::Typed(bytes) => {
             }'''
 
 [[plant]]
-name = "pane input retry: take a paste's bytes from a JSON body"
-meant = "production_ipc_refusal_does_not_consume_its_sequence"
-runs = ["pane-input-raw-body"]
+name = "pane input retry: take text of another size than the length stated"
+meant = "a_page_calls_bytes_are_the_length_it_stated_or_refused"
+runs = ["pane-input-length", "pane-input-cut"]
 
 [[plant.edit]]
-file = "app/src-tauri/src/commands.rs"
-find = '''        tauri::ipc::InvokeBody::Json(_) => Err("pane input bytes must be a raw body".to_string()),'''
-replace = '''        tauri::ipc::InvokeBody::Json(_) => Ok((call, Vec::new())),'''
+file = "crates/cf-panes/src/validation.rs"
+find = '    if text.len() as u64 != length.div_ceil(3) * 4 {'
+replace = '    if false && text.len() as u64 != length.div_ceil(3) * 4 {'
+
+[[plant]]
+name = "pane input retry: take decoded bytes of another length than stated"
+meant = "a_page_calls_bytes_are_the_length_it_stated_or_refused"
+runs = ["pane-input-length", "pane-input-cut"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/validation.rs"
+find = '    if bytes.len() as u64 != length {'
+replace = '    if false && bytes.len() as u64 != length {'
+
+[[plant]]
+name = "pane input retry: read a length over the cap"
+meant = "a_page_calls_bytes_are_the_length_it_stated_or_refused"
+runs = ["pane-input-length"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/validation.rs"
+find = '    if length > MAX_PAGE_INPUT_BYTES as u64 {'
+replace = '    if false && length > MAX_PAGE_INPUT_BYTES as u64 {'
 
 [[plant]]
 name = "pane input retry: lose the completion after the first wait"
