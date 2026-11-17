@@ -33,14 +33,32 @@ pub enum Run {
 /// Gives a live rig's home what its Muse windows read their login by: settings of their
 /// own, and a copy of the person's login (`auth.json`: on a Mac its metadata, the secret
 /// being in the keychain, the one item every Muse of the machine reads; on Windows all of
-/// it, `credential_backend: file`). The person's file is read, never written.
+/// it, `credential_backend: file`). The model catalog, where present, is copied so the
+/// run's `model/list` can identify the account's models. The person's files are never written.
 pub fn seed_live_home(rig_home: &Path, real_home: &Path) -> Result {
     crate::standin_process::require_home(real_home, "Muse login lookup");
     let config = rig_home.join(".config").join("muse");
     crate::door::write(config.join("settings.json"), "{\"schema_version\":1}\n")?;
     let auth = real_home.join(".config").join("muse").join("auth.json");
     let text = files::read_string(&auth)?;
-    crate::door::write(config.join("auth.json"), login_copy(&text)?)
+    let sanitized = login_copy(&text)?;
+    let copy = config.join("auth.json");
+    // A resumed rig already has this copy. Make its replacement private from its first byte,
+    // then replace the old run-owned file through the door.
+    let staged = config.join(crate::door::own_name("muse-auth", "tmp"));
+    crate::door::create_new_private(&staged)?
+        .write_all(sanitized.as_bytes())
+        .map_err(Error::file("write", &staged))?;
+    crate::door::rename(&staged, &copy)?;
+    let catalog = real_home.join(".local/share/muse/model-catalog");
+    if catalog.is_dir() {
+        crate::door::copy_tree(
+            &catalog,
+            rig_home.join(".local/share/muse/model-catalog"),
+            &|_| false,
+        )?;
+    }
+    Ok(())
 }
 
 /// The person's login as a live rig's home is given it: `text` as JSON, with every key whose
@@ -913,10 +931,6 @@ pub mod members {
     /// The worker's agent, as the roster names it.
     pub const WORKER: &str = "muse-worker";
 
-    /// The handle the Muse worker has on the staff: named by its model and effort as Muse
-    /// runs them (spec harness-models), not by the stand-in's name.
-    pub const WORKER_HANDLE: &str = "muse-spark-1-3-minimal";
-
     /// The worker of the echo rig's cases: the live tests' model and effort.
     pub fn echo_worker() -> Value {
         json!({ "kind": "muse", "model": "muse-spark-1.3", "effort": "minimal" })
@@ -932,27 +946,74 @@ pub mod members {
         }
         let mut agents =
             vec![json!({ "id": "chief", "kind": "claude-code", "model": "fake-chief" })];
-        // A worker on a model that lists efforts and is given none is refused by the daemon.
-        agents.extend(crate::live::agents::with_efforts(rig, &[worker], |_| {}));
+        // A preselected Muse model and effort must stay paired for the session checks. Other
+        // workers, or one without an effort, still need the daemon's least listed effort.
+        if worker["kind"] == "muse" && worker["effort"].as_str().is_some() {
+            agents.push(worker);
+        } else {
+            agents.extend(crate::live::agents::with_efforts(rig, &[worker], |_| {}));
+        }
+        let expected = agents.last().cloned().unwrap_or(Value::Null);
         let roster = json!({ "schemaVersion": 1, "agents": agents });
         rig.stand_ins(&roster)?;
         let project = Project::open(rig, "chief", json!({}))?;
         let added = project.add_member(WORKER)?;
-        if added["member"]["handle"] != WORKER_HANDLE {
+        if !member_matches(&expected, &added) {
             return Err(crate::Error::Daemon(format!(
-                "the Muse worker is not @{WORKER_HANDLE}: {added}"
+                "the Muse worker did not match the selected model and effort: {added}"
             )));
         }
         Ok(project)
     }
 
+    fn member_matches(expected: &Value, added: &Value) -> bool {
+        expected["kind"] == "muse"
+            && added["member"]["model"] == expected["model"]
+            && (expected["effort"].is_null() || added["member"]["effort"] == expected["effort"])
+            && added["member"]["handle"]
+                .as_str()
+                .is_some_and(|handle| !handle.is_empty())
+    }
+
+    #[test]
+    fn the_added_worker_must_match_the_selected_model_and_effort() {
+        let expected = json!({"kind":"muse", "model":"muse-spark-1.2", "effort":"low"});
+        let added = json!({"member": {"model":"muse-spark-1.2", "effort":"low", "handle":"muse-spark-1-2-low"}});
+        assert!(member_matches(&expected, &added));
+        let mut wrong = added.clone();
+        wrong["member"]["model"] = json!("muse-spark-1.3");
+        assert!(!member_matches(&expected, &wrong));
+        wrong = added.clone();
+        wrong["member"]["effort"] = json!("high");
+        assert!(!member_matches(&expected, &wrong));
+        wrong = added;
+        wrong["member"]["handle"] = Value::Null;
+        assert!(!member_matches(&expected, &wrong));
+    }
+
     /// The handle of the Muse worker given T-1: its agent's name and words of its own.
     pub fn worker(project: &Project<'_>) -> Result<String> {
-        Ok(project.task(1)?["assignee"]
+        Ok(assigned_worker(&project.task(1)?).to_owned())
+    }
+
+    fn assigned_worker(task: &Value) -> &str {
+        task["assignee"]
             .as_str()
             .unwrap_or_default()
             .trim_start_matches('@')
-            .to_owned())
+    }
+
+    #[test]
+    fn the_assigned_worker_handle_follows_the_selected_model() {
+        assert_eq!(
+            assigned_worker(&json!({"assignee": "@muse-spark-1-2-low"})),
+            "muse-spark-1-2-low"
+        );
+        assert_eq!(
+            assigned_worker(&json!({"assignee": "@muse-spark-1-3-minimal"})),
+            "muse-spark-1-3-minimal"
+        );
+        assert_eq!(assigned_worker(&Value::Null), "");
     }
 
     /// The one Muse session of the rig, its id and its records now.
@@ -965,7 +1026,7 @@ pub mod members {
 
     /// The worker's window, as the board names its pane.
     pub fn pane_of(project: &Project<'_>) -> Result<Value> {
-        Ok(project.lane(WORKER_HANDLE)?["pane"].clone())
+        Ok(project.lane(&worker(project)?)?["pane"].clone())
     }
 
     /// Waits until the worker's window is in its turn: the board says it works, and its
@@ -979,7 +1040,7 @@ pub mod members {
                     .count()
                     >= runs
             });
-            Ok(begun && project.lane(WORKER_HANDLE)?["activity"]["state"] == "working")
+            Ok(begun && project.lane(&worker(project)?)?["activity"]["state"] == "working")
         })
     }
 
@@ -1514,6 +1575,88 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(said.contains("auth.json"), "{said}");
+    }
+
+    #[test]
+    fn t1744_a_live_muse_rig_gets_its_own_copy_of_the_accounts_model_catalog() {
+        let person = crate::door::made("cf-muse-model-person-").unwrap();
+        let rig = crate::door::made("cf-muse-model-rig-").unwrap();
+        let auth = person.path().join(".config/muse/auth.json");
+        std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
+        std::fs::write(auth, "{}").unwrap();
+        let catalog = person.path().join(".local/share/muse/model-catalog");
+        std::fs::create_dir_all(&catalog).unwrap();
+        std::fs::write(catalog.join("models.json"), "synthetic catalog").unwrap();
+        super::seed_live_home(rig.path(), person.path()).unwrap();
+        let copy = rig
+            .path()
+            .join(".local/share/muse/model-catalog/models.json");
+        assert_eq!(std::fs::read_to_string(&copy).unwrap(), "synthetic catalog");
+        std::fs::write(copy, "changed in the run").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(catalog.join("models.json")).unwrap(),
+            "synthetic catalog"
+        );
+    }
+
+    #[test]
+    fn t1744_review_restarting_a_muse_rig_replaces_its_private_login_copy() {
+        let person = crate::door::made("cf-muse-person-").unwrap();
+        let rig = crate::door::made("cf-muse-rig-").unwrap();
+        let auth = person.path().join(".config/muse/auth.json");
+        std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
+        std::fs::write(&auth, r#"{"access":"first"}"#).unwrap();
+        super::seed_live_home(rig.path(), person.path()).unwrap();
+        std::fs::write(&auth, r#"{"access":"second","refreshToken":"synthetic"}"#).unwrap();
+        super::seed_live_home(rig.path(), person.path()).unwrap();
+        let copy = rig.path().join(".config/muse/auth.json");
+        let copied: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&copy).unwrap()).unwrap();
+        assert_eq!(copied["access"], "second");
+        assert!(copied.get("refreshToken").is_none());
+        let mut names: Vec<_> = std::fs::read_dir(copy.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["auth.json", "settings.json"]);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(
+                std::fs::metadata(copy).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn t1744_a_read_only_muse_login_can_seed_a_run_without_changing_the_source() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let person = crate::door::made("cf-muse-login-person-").unwrap();
+        let rig = crate::door::made("cf-muse-login-rig-").unwrap();
+        let auth = person.path().join(".config/muse/auth.json");
+        std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
+        let login = json!({"access": "synthetic", "refreshToken": "synthetic"}).to_string();
+        std::fs::write(&auth, &login).unwrap();
+        std::fs::set_permissions(&auth, std::fs::Permissions::from_mode(0o400)).unwrap();
+        super::seed_live_home(rig.path(), person.path()).unwrap();
+        assert_eq!(std::fs::read_to_string(&auth).unwrap(), login);
+        assert_eq!(
+            std::fs::metadata(&auth).unwrap().permissions().mode() & 0o777,
+            0o400
+        );
+        let copy = std::fs::read_to_string(rig.path().join(".config/muse/auth.json")).unwrap();
+        assert!(!copy.contains("refreshToken"));
+        assert_eq!(
+            std::fs::metadata(rig.path().join(".config/muse/auth.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
     }
 
     /// `muse usage --json` on Windows is run on the throwaway config folder that holds the copy of

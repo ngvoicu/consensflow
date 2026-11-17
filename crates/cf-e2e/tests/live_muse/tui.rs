@@ -12,15 +12,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use cf_e2e::live::{machine, Log};
+use cf_e2e::live::{agents, machine, Log};
 use cf_e2e::process::Run;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde_json::Value;
-
-/// The model and effort of the case: the live kit's cheap Muse model
-/// (`cf_e2e::live::agents`), the contributor one (T-954).
-pub const MODEL: &str = "muse-spark-1.3-contributor";
-pub const EFFORT: &str = "minimal";
 
 pub type Outcome = Result<(), String>;
 
@@ -232,6 +227,8 @@ pub fn set_up(root: &Path) -> Outcome {
     )?;
     let gates = owner.join(".local/share/muse/feature-config");
     copy_feature_config(&gates, &root.join("data/muse/feature-config"))?;
+    let catalog = owner.join(".local/share/muse/model-catalog");
+    copy_feature_config(&catalog, &root.join("data/muse/model-catalog"))?;
     write(&root.join("work/README.md"), "A throwaway project.\n")?;
     let git = ["/opt/homebrew/bin/git", "/usr/bin/git"]
         .into_iter()
@@ -336,7 +333,7 @@ pub fn session_log(root: &Path) -> Option<(String, PathBuf)> {
 /// The model the record names, where it names one other than the launched model: the
 /// switch Muse makes by itself (`runtime.model_reconfigure.completed`), or a run or the
 /// session configured on another.
-pub fn another_model(line: &str) -> Option<String> {
+pub fn another_model(line: &str, launched: &str) -> Option<String> {
     let record: Value = serde_json::from_str(line).ok()?;
     let found = match record["payload_type"].as_str()? {
         "runtime.model_reconfigure.completed" => {
@@ -347,7 +344,17 @@ pub fn another_model(line: &str) -> Option<String> {
         }
         _ => None,
     }?;
-    (found != MODEL).then(|| found.to_owned())
+    (found != launched).then(|| found.to_owned())
+}
+
+#[test]
+fn the_model_switch_check_compares_with_the_selected_model() {
+    let line = r#"{"payload_type":"run.model.configured","payload":{"record":{"model_id":"muse-spark-1.2"}}}"#;
+    assert_eq!(another_model(line, "muse-spark-1.2"), None);
+    assert_eq!(
+        another_model(line, "muse-spark-1.3").as_deref(),
+        Some("muse-spark-1.2")
+    );
 }
 
 /// A window of Muse in a pty: its screen's bytes kept, its keys written.
@@ -364,6 +371,7 @@ impl Window {
         binary: &Path,
         env: &BTreeMap<String, String>,
         root: &Path,
+        model: &agents::Model,
         posture: &[&str],
     ) -> Result<Self, String> {
         let pair = native_pty_system()
@@ -375,15 +383,11 @@ impl Window {
             })
             .map_err(|error| error.to_string())?;
         let mut command = CommandBuilder::new(binary);
-        command.args([
-            "--trust-workspace",
-            "--model",
-            MODEL,
-            "--reasoning-effort",
-            EFFORT,
-            "--contributor-mode",
-            "off",
-        ]);
+        command.args(["--trust-workspace", "--model", &model.name]);
+        if let Some(effort) = &model.effort {
+            command.args(["--reasoning-effort", effort]);
+        }
+        command.args(["--contributor-mode", "off"]);
         command.args(posture);
         command.args([
             "-c",

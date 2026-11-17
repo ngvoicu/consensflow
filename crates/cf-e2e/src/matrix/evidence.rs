@@ -17,27 +17,58 @@ use crate::{files, Error, Result};
 /// The folder of the reports, from the checkout's root.
 pub const REPORTS: &str = "app/src-tauri/target/live-matrix";
 
-/// What the owner's files were at a moment: each path with what it was (a link's target, a
-/// file's hash, or that it was not there).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What the owner's files were at a moment: links, content hashes and login metadata.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Owner {
     links: Vec<PathBuf>,
     files: Vec<PathBuf>,
-    seen: BTreeMap<PathBuf, String>,
+    login_files: Vec<PathBuf>,
+    seen: BTreeMap<PathBuf, OwnerFile>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum OwnerFile {
+    Text(String),
+    Login(Option<cf_base::file::Stat>),
+    LoginUnreadable,
+}
+
+impl OwnerFile {
+    fn said(&self) -> String {
+        match self {
+            Self::Text(text) => text.clone(),
+            Self::Login(Some(stat)) => format!(
+                "metadata only: size {}, modification time {}, file identity {:?}",
+                stat.size, stat.mtime_ms, stat.identity
+            ),
+            Self::Login(None) => {
+                "absent (compared by size, modification time and file identity only)".to_owned()
+            }
+            Self::LoginUnreadable => {
+                "could not compare login metadata (size, modification time and file identity only)"
+                    .to_owned()
+            }
+        }
+    }
 }
 
 impl Owner {
     /// The links `links` and the files `files`, as they are now.
     pub fn look(links: &[PathBuf], files: &[PathBuf]) -> Self {
+        Self::look_with_logins(links, files, &[])
+    }
+
+    /// Login files are stated by metadata alone, never read or hashed.
+    fn look_with_logins(links: &[PathBuf], files: &[PathBuf], login_files: &[PathBuf]) -> Self {
         let mut seen = BTreeMap::new();
         for link in links {
             let target = std::fs::read_link(link).map_or_else(
                 |_| "no link".to_owned(),
                 |to| format!("-> {}", to.display()),
             );
-            seen.insert(link.clone(), target);
+            seen.insert(link.clone(), OwnerFile::Text(target));
         }
-        for file in files {
+        for file in files.iter().filter(|file| !login_files.contains(file)) {
             let hash = std::fs::read(file).map_or_else(
                 |_| "absent".to_owned(),
                 |bytes| {
@@ -49,11 +80,22 @@ impl Owner {
                         .collect()
                 },
             );
-            seen.insert(file.clone(), hash);
+            seen.insert(file.clone(), OwnerFile::Text(hash));
+        }
+        for file in login_files {
+            let observed = match cf_base::file::stat(file) {
+                Ok(stat) => OwnerFile::Login(Some(stat)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    OwnerFile::Login(None)
+                }
+                Err(_) => OwnerFile::LoginUnreadable,
+            };
+            seen.insert(file.clone(), observed);
         }
         Self {
             links: links.to_vec(),
             files: files.to_vec(),
+            login_files: login_files.to_vec(),
             seen,
         }
     }
@@ -66,17 +108,17 @@ impl Owner {
         let links = [home.join(".local/bin/claude")];
         let files = [
             home.join(".claude/settings.json"),
-            home.join(".config/muse/auth.json"),
             home.join(".config/muse/settings.json"),
             home.join(".config/muse/trust.json"),
             home.join(".local/share/muse/session-index.db"),
         ];
-        Ok(Self::look(&links, &files))
+        let login_files = [home.join(".config/muse/auth.json")];
+        Ok(Self::look_with_logins(&links, &files, &login_files))
     }
 
     /// The same paths, looked at again now.
     pub fn again(&self) -> Self {
-        Self::look(&self.links, &self.files)
+        Self::look_with_logins(&self.links, &self.files, &self.login_files)
     }
 
     /// The check that nothing of them changed between `self` and `now`.
@@ -84,28 +126,41 @@ impl Owner {
         let changed: Vec<String> = self
             .seen
             .iter()
-            .filter(|(path, was)| now.seen.get(*path) != Some(*was))
+            .filter(|(path, was)| {
+                **was == OwnerFile::LoginUnreadable
+                    || matches!(now.seen.get(*path), Some(OwnerFile::LoginUnreadable))
+                    || now.seen.get(*path) != Some(*was)
+            })
             .map(|(path, was)| {
                 format!(
-                    "{}: {was} became {}",
+                    "{}: {} became {}",
                     path.display(),
-                    now.seen.get(path).map_or("unread", String::as_str)
+                    was.said(),
+                    now.seen
+                        .get(path)
+                        .map_or_else(|| "unread".to_owned(), OwnerFile::said)
                 )
             })
             .collect();
+        let mut detail = if changed.is_empty() {
+            self.seen
+                .iter()
+                .map(|(path, was)| format!("{} {}", path.display(), was.said()))
+                .collect::<Vec<_>>()
+                .join("; ")
+        } else {
+            changed.join("; ")
+        };
+        if !self.login_files.is_empty() {
+            detail.push_str(
+                "; login files compared by size, modification time and file identity only",
+            );
+        }
         Check::new(
             "owner",
             "no file of the owner's changed",
             changed.is_empty(),
-            if changed.is_empty() {
-                self.seen
-                    .iter()
-                    .map(|(path, was)| format!("{} {was}", path.display()))
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            } else {
-                changed.join("; ")
-            },
+            detail,
         )
     }
 
@@ -114,7 +169,7 @@ impl Owner {
         json!(self
             .seen
             .iter()
-            .map(|(path, was)| (path.display().to_string(), was.clone()))
+            .map(|(path, was)| (path.display().to_string(), was.said()))
             .collect::<BTreeMap<_, _>>())
     }
 }
@@ -315,6 +370,61 @@ mod tests {
     #[test]
     fn t1655_the_matrix_keeps_evidence_with_the_live_test_reports() {
         assert_eq!(REPORTS, "app/src-tauri/target/live-matrix");
+    }
+
+    #[test]
+    fn t1744_review_matrix_login_changes_are_reported_by_metadata_only() {
+        let folder = crate::door::made("cf-matrix-owner-").unwrap();
+        let login = folder.path().join("auth.json");
+        let before = Owner::look_with_logins(&[], &[], std::slice::from_ref(&login));
+        assert!(before.unchanged(&before.again()).ok);
+        std::fs::write(&login, "synthetic login").unwrap();
+        let after = before.again();
+        let changed = before.unchanged(&after);
+        assert!(!changed.ok);
+        assert!(
+            changed.detail.contains("size")
+                && changed.detail.contains("modification time")
+                && changed.detail.contains("file identity")
+        );
+        assert!(!changed.detail.contains("synthetic login"));
+        assert!(after.unchanged(&after.again()).ok);
+    }
+
+    #[test]
+    fn t1744_review_matrix_detects_a_login_replaced_at_the_same_size_and_time() {
+        let folder = crate::door::made("cf-matrix-owner-").unwrap();
+        let login = folder.path().join("auth.json");
+        let replacement = folder.path().join("replacement");
+        std::fs::write(&login, "one").unwrap();
+        std::fs::write(&replacement, "two").unwrap();
+        let modified = std::fs::metadata(&login).unwrap().modified().unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&replacement)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        let before = Owner::look_with_logins(&[], &[], std::slice::from_ref(&login));
+        let old = cf_base::file::stat(&login).unwrap();
+        std::fs::rename(&login, folder.path().join("old")).unwrap();
+        std::fs::rename(&replacement, &login).unwrap();
+        let new = cf_base::file::stat(&login).unwrap();
+        assert_eq!((old.size, old.mtime_ms), (new.size, new.mtime_ms));
+        assert_ne!(old.identity, new.identity);
+        assert!(!before.unchanged(&before.again()).ok);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn t1744_review_matrix_cannot_pass_an_unstatable_login() {
+        let folder = crate::door::made("cf-matrix-owner-").unwrap();
+        let login = folder.path().join("auth.json");
+        std::os::unix::fs::symlink("auth.json", &login).unwrap();
+        let before = Owner::look_with_logins(&[], &[], std::slice::from_ref(&login));
+        let check = before.unchanged(&before.again());
+        assert!(!check.ok);
+        assert!(check.detail.contains("could not compare"));
     }
 
     #[test]

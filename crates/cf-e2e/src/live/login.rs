@@ -44,8 +44,9 @@
 //! the owner, before the copy is made; see [`super::renew`], T-1067.)
 //!
 //! **What the run is held to** ([`ClaudeConfig::finish`], when its rig ends): the
-//! person's login (the Keychain item's `claudeAiOauth`, never its other tokens) is as it
-//! was; `~/.claude/settings.json` is as it was; `~/.claude.json` has no project
+//! person's login is as it was: a file's identity, size and modification time are compared,
+//! or the Keychain item's `claudeAiOauth` fields (never its other tokens); `~/.claude/settings.json`
+//! is as it was; `~/.claude.json` has no project
 //! of the run's folders that it did not have; `~/.claude/history.jsonl` has no
 //! prompt typed in one; `~/.claude/projects` has no conversation of one. (Not the
 //! whole of `~/.claude.json`: the person's own Claude Code sessions write the rest
@@ -476,13 +477,19 @@ fn changes(before: &Seen, after: &Seen, typed: &str) -> Vec<String> {
     found
 }
 
+/// A file-backed owner login is compared only by its filesystem metadata.
+/// A Keychain item has no corresponding file metadata and keeps its existing check.
+enum OwnerLogin {
+    File(std::result::Result<cf_base::file::Stat, std::io::ErrorKind>),
+    Keychain(Value),
+}
+
 /// The folder a run's Claude windows run on, once it is made.
 struct Made {
     /// The login as it was copied: the machine's, without what renews it ([`without_refresh`]).
     oauth: Value,
-    /// The machine's login as it was read, refresh token and all: what the machine's file is
-    /// compared with when the run ends.
-    login: Value,
+    /// The owner login's file metadata, or its Keychain fields when it is not a file.
+    login: OwnerLogin,
     /// The person's setup when it was made.
     owner: Option<Seen>,
     /// The Keychain items of Claude Code then; none where they cannot be listed.
@@ -857,6 +864,10 @@ impl Login {
             return Ok(made.folder.path().to_path_buf());
         }
         let (oauth, renewed) = self.usable(self.source.read()?, now)?;
+        let owner_login = match &self.source {
+            Source::File(file) => OwnerLogin::File(cf_base::file::stat(file).map_err(|e| e.kind())),
+            Source::Keychain => OwnerLogin::Keychain(oauth.clone()),
+        };
         crate::rig::sweep::say_copies(&self.parent);
         let folder =
             crate::door::made_in(&self.parent, &format!("{PREFIX}{}-", std::process::id()))
@@ -876,7 +887,7 @@ impl Login {
         *made = Some(Made {
             folder,
             oauth: copy,
-            login: oauth,
+            login: owner_login,
             owner: self.owner_before(),
             services: if keychain::watching() {
                 keychain_services()
@@ -992,28 +1003,38 @@ impl fmt::Debug for Login {
 }
 
 impl Login {
-    /// Whether the login this machine keeps is no longer the one that was copied (the same item
-    /// holds the person's MCP servers' tokens, which their own servers refresh all day: only
-    /// the login is held to it, and of the login its [`TOKENS`], as the copy is: Claude Code
-    /// writes what it learns of the account beside them): the run's, or their own Claude
-    /// Code's refresh in between.
-    fn owner_login_changed(&self, copied: &Value) -> Option<String> {
-        let now = self
-            .source
-            .read()
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-            .and_then(|login| login.get("claudeAiOauth").cloned());
-        let kept = now.is_some_and(|now| {
-            TOKENS
-                .iter()
-                .all(|field| now.get(field) == copied.get(field))
-        });
+    /// Whether the owner's login file metadata changed, or its Keychain login fields changed.
+    /// The latter item also holds the owner's MCP tokens, which are not compared there.
+    fn owner_login_changed(&self, copied: &OwnerLogin) -> Option<String> {
+        let kept = match (&self.source, copied) {
+            (Source::File(file), OwnerLogin::File(Ok(was))) => {
+                cf_base::file::stat(file).is_ok_and(|now| now == *was)
+            }
+            (Source::Keychain, OwnerLogin::Keychain(copied)) => self
+                .source
+                .read()
+                .ok()
+                .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+                .and_then(|login| login.get("claudeAiOauth").cloned())
+                .is_some_and(|now| {
+                    TOKENS
+                        .iter()
+                        .all(|field| now.get(field) == copied.get(field))
+                }),
+            _ => false,
+        };
         (!kept).then(|| {
-            format!(
+            let mut said = format!(
                 "the owner's Claude login in {} is not as it was",
                 self.source.described()
-            )
+            );
+            if matches!(&self.source, Source::File(_)) {
+                said.push_str(
+                    " (only the file's size, modification time and identity were compared; the owner's \
+                     own Claude Code changes them too, for example when it refreshes its login or an MCP login)",
+                );
+            }
+            said
         })
     }
 }
@@ -1066,14 +1087,19 @@ impl ClaudeConfig for Login {
             kept = found.own;
         }
         if touched.is_empty() && refreshed.is_empty() && kept.is_empty() {
-            // What was checked, with a hash that says nothing of what the files hold.
-            let hash = |text: &str| digest(text.as_bytes())[..12].to_owned();
+            // What was checked, without saying what the login holds.
+            let login_check = match &made.login {
+                OwnerLogin::File(_) => "metadata".to_owned(),
+                OwnerLogin::Keychain(value) => {
+                    digest(value.to_string().as_bytes())[..12].to_owned()
+                }
+            };
             if let Some(owner) = &made.owner {
                 let _ = writeln!(
                     io::stderr(),
                     "the owner's Claude setup is as it was: login in {} {}, ~/.claude/settings.json {}; the copy of the login in the run's folder is as it was copied",
                     self.source.described(),
-                    hash(&made.login.to_string()),
+                    login_check,
                     owner.settings.as_deref().map_or("none".to_owned(), |hash| hash[..12].to_owned())
                 );
             } else {
@@ -1081,7 +1107,7 @@ impl ClaudeConfig for Login {
                     io::stderr(),
                     "the owner's Claude login in {} {} and the run's login copy are as they were; the owner's other Claude configuration was not read or checked",
                     self.source.described(),
-                    hash(&made.login.to_string())
+                    login_check
                 );
             }
             return Ok(());

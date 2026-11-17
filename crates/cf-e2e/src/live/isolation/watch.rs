@@ -1,5 +1,5 @@
 //! What the owner's own setup of a harness is at a moment, as far as a run could have
-//! changed it: the hash of each file that holds a login or a config, and the entries of
+//! changed it: the metadata of each login file, the hash of each config, and the entries of
 //! each folder of records that name a folder of a run. Taken when a run's home is made
 //! and again when the run is over; a difference is the run's (or the owner's own harness,
 //! which could have written it as well), said with the file named and never its contents.
@@ -19,28 +19,74 @@ pub fn names_a_run(name: &str) -> bool {
 }
 
 /// What the owner's setup is.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
+enum Observed {
+    Content(Option<String>),
+    Metadata(Option<cf_base::file::Stat>),
+    Unreadable,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Seen {
-    /// The hash of each file watched; none for a file that is not there.
-    files: BTreeMap<PathBuf, Option<String>>,
+    /// Login files are never read: their size, modification time and identity suffice.
+    /// The other files are compared by their content hashes.
+    files: BTreeMap<PathBuf, Observed>,
+    /// Names only from the Codex config, from the same bytes as its hash.
+    tables: BTreeMap<PathBuf, Option<BTreeSet<String>>>,
     /// The entries of each folder of records that name a folder of a run.
     records: BTreeMap<PathBuf, BTreeSet<String>>,
 }
 
 impl Seen {
     /// What `files` and `records` are now.
-    pub fn look(files: &[PathBuf], records: &[PathBuf]) -> Self {
-        Self {
-            files: files
-                .iter()
-                .map(|file| {
-                    crate::standin_process::require_home(file, "harness isolation file lookup");
-                    (
+    pub fn look(
+        files: &[PathBuf],
+        records: &[PathBuf],
+        codex_config: Option<&Path>,
+        login_files: &[PathBuf],
+    ) -> Self {
+        let mut tables = BTreeMap::new();
+        let files = files
+            .iter()
+            .map(|file| {
+                crate::standin_process::require_home(file, "harness isolation file lookup");
+                if login_files.contains(file) {
+                    // On Windows stat opens a handle for FILE_READ_ATTRIBUTES only, never bytes.
+                    let seen = match cf_base::file::stat(file) {
+                        Ok(stat) => Observed::Metadata(Some(stat)),
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                            Observed::Metadata(None)
+                        }
+                        Err(_) => Observed::Unreadable,
+                    };
+                    return (file.clone(), seen);
+                }
+                let read = fs::read(file);
+                if codex_config == Some(file.as_path()) {
+                    tables.insert(
                         file.clone(),
-                        fs::read(file).ok().map(|bytes| digest(&bytes)),
-                    )
-                })
-                .collect(),
+                        match &read {
+                            Ok(bytes) => table_names(bytes),
+                            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                                Some(BTreeSet::new())
+                            }
+                            Err(_) => None,
+                        },
+                    );
+                }
+                let seen = match read {
+                    Ok(bytes) => Observed::Content(Some(digest(&bytes))),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        Observed::Content(None)
+                    }
+                    Err(_) => Observed::Unreadable,
+                };
+                (file.clone(), seen)
+            })
+            .collect();
+        Self {
+            files,
+            tables,
             records: records
                 .iter()
                 .map(|folder| {
@@ -54,36 +100,43 @@ impl Seen {
         }
     }
 
-    /// The files watched, each with the first twelve digits of its hash (`none` for one that is not
-    /// there), below `~` where it is below `home`: what a run that left the setup as it was says it
-    /// checked. A hash says nothing of what the file holds.
+    /// What was compared: a hash of config bytes or a login file's metadata only.
     pub fn summary(&self, home: &Path) -> String {
         self.files
             .iter()
-            .map(|(file, hash)| {
-                format!(
-                    "{} {}",
-                    shown(file, home),
-                    hash.as_deref()
-                        .map_or("none", |hash| &hash[..12.min(hash.len())])
-                )
+            .map(|(file, seen)| {
+                let what = match seen {
+                    Observed::Content(Some(hash)) => &hash[..12.min(hash.len())],
+                    Observed::Metadata(Some(_)) => "metadata",
+                    Observed::Content(None) | Observed::Metadata(None) => "none",
+                    Observed::Unreadable => "unreadable",
+                };
+                format!("{} {}", shown(file, home), what)
             })
             .collect::<Vec<_>>()
             .join(", ")
     }
 
-    /// What differs between `self` (before the run) and `after`, in words that name the file
-    /// or the folder (below `~` where it is below `home`); nothing where nothing does.
+    /// What differs, in words that name paths and never a file's contents.
     pub fn changes_to(&self, after: &Self, home: &Path) -> Vec<String> {
         let mut found = Vec::new();
         for (file, was) in &self.files {
-            let now = after.files.get(file).cloned().flatten();
-            match (was, &now) {
-                (Some(was), Some(now)) if was == now => {}
-                (Some(_), Some(_)) => found.push(format!("{} is not as it was", shown(file, home))),
-                (Some(_), None) => found.push(format!("{} is gone", shown(file, home))),
-                (None, Some(_)) => found.push(format!("{} was made", shown(file, home))),
-                (None, None) => {}
+            let now = after.files.get(file);
+            let shown = shown(file, home);
+            match (was, now) {
+                (Observed::Unreadable, _) | (_, None | Some(Observed::Unreadable)) => {
+                    found.push(format!("{shown} could not be compared"));
+                }
+                (was, Some(now)) if was == now => {}
+                (Observed::Content(Some(_)), Some(Observed::Content(None)))
+                | (Observed::Metadata(Some(_)), Some(Observed::Metadata(None))) => {
+                    found.push(format!("{shown} is gone"));
+                }
+                (Observed::Content(None), Some(Observed::Content(Some(_))))
+                | (Observed::Metadata(None), Some(Observed::Metadata(Some(_)))) => {
+                    found.push(format!("{shown} was made"));
+                }
+                _ => found.push(format!("{shown} is not as it was")),
             }
         }
         for (folder, before) in &self.records {
@@ -99,6 +152,72 @@ impl Seen {
         }
         found
     }
+
+    /// The changed Codex table names, and which added names are also in the run's config.
+    /// Config values and parse errors are never included in the output.
+    pub fn codex_tables_to(&self, after: &Self, owner: &Path, run: &Path) -> Option<String> {
+        let before = self.tables.get(owner).and_then(Option::as_ref);
+        let now = after.tables.get(owner).and_then(Option::as_ref);
+        if self.files.get(owner) == after.files.get(owner) {
+            // Matching hashes prove identical bytes, even when those bytes are not TOML.
+            // A missing file is known to have no tables; an unreadable file is not.
+            if matches!(self.files.get(owner), Some(Observed::Content(Some(_))))
+                || (before.is_some() && now.is_some())
+            {
+                return None;
+            }
+            return Some("Codex config table names could not be compared".to_owned());
+        }
+        let (Some(before), Some(now)) = (before, now) else {
+            return Some("Codex config table names could not be compared".to_owned());
+        };
+        let added: BTreeSet<_> = now.difference(before).cloned().collect();
+        let removed: BTreeSet<_> = before.difference(now).cloned().collect();
+        let show = |names: &BTreeSet<String>| {
+            if names.is_empty() {
+                "none".to_owned()
+            } else {
+                names.iter().cloned().collect::<Vec<_>>().join(", ")
+            }
+        };
+        let run_tables = fs::read(run).ok().and_then(|bytes| table_names(&bytes));
+        let in_run = run_tables.map_or_else(
+            || "unavailable".to_owned(),
+            |tables| show(&added.intersection(&tables).cloned().collect()),
+        );
+        Some(format!(
+            "Codex config.toml tables added: {}; removed: {}; added tables also in the run's config.toml: {in_run}",
+            show(&added), show(&removed)
+        ))
+    }
+}
+
+/// Parse the document and retain table paths only, never scalar values or errors.
+fn table_names(bytes: &[u8]) -> Option<BTreeSet<String>> {
+    fn walk(table: &toml::Table, path: &mut Vec<String>, names: &mut BTreeSet<String>) {
+        for (key, value) in table {
+            path.push(format!("{key:?}"));
+            let mut add = |nested: &toml::Table| {
+                names.insert(format!("[{}]", path.join(".")));
+                walk(nested, path, names);
+            };
+            match value {
+                toml::Value::Table(nested) => add(nested),
+                toml::Value::Array(values) => {
+                    for nested in values.iter().filter_map(toml::Value::as_table) {
+                        add(nested);
+                    }
+                }
+                _ => {}
+            }
+            path.pop();
+        }
+    }
+    let text = std::str::from_utf8(bytes).ok()?;
+    let parsed = text.parse::<toml::Table>().ok()?;
+    let mut names = BTreeSet::new();
+    walk(&parsed, &mut Vec::new(), &mut names);
+    Some(names)
 }
 
 /// The entries of `folder` that name a folder of a run.
@@ -125,5 +244,127 @@ pub fn shown(path: &Path, home: &Path) -> String {
             format!("~/{}", parts.join("/"))
         }
         Err(_) => path.display().to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn t1744_a_login_replaced_at_the_same_size_and_time_is_detected_by_identity() {
+        let root = crate::door::made("cf-login-metadata-").unwrap();
+        let path = root.path().join("auth.json");
+        let replacement = root.path().join("replacement.json");
+        crate::door::write(&path, b"one").unwrap();
+        crate::door::write(&replacement, b"two").unwrap();
+        let modified = fs::metadata(&path).unwrap().modified().unwrap();
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&replacement)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        let files = [path.clone()];
+        let before = Seen::look(&files, &[], None, &files);
+        let original = cf_base::file::stat(&path).unwrap();
+        fs::rename(&path, root.path().join("old.json")).unwrap();
+        fs::rename(&replacement, &path).unwrap();
+        let replaced = cf_base::file::stat(&path).unwrap();
+        assert_eq!(original.size, replaced.size);
+        assert_eq!(original.mtime_ms, replaced.mtime_ms);
+        assert_ne!(original.identity, replaced.identity);
+        let after = Seen::look(&files, &[], None, &files);
+        let changed = before.changes_to(&after, root.path());
+        assert_eq!(changed.len(), 1);
+        assert!(changed[0].contains("auth.json"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn t1744_an_unstatable_login_cannot_be_said_unchanged() {
+        let root = crate::door::made("cf-login-unstatable-").unwrap();
+        let path = root.path().join("auth.json");
+        std::os::unix::fs::symlink("auth.json", &path).unwrap();
+        let files = [path];
+        let before = Seen::look(&files, &[], None, &files);
+        let after = Seen::look(&files, &[], None, &files);
+        assert!(before.changes_to(&after, root.path())[0].contains("could not be compared"));
+    }
+
+    #[test]
+    fn t1744_codex_table_names_compare_on_either_platform_without_values() {
+        let root = crate::door::made("cf-codex-tables-").unwrap();
+        let owner = root.path().join("owner.toml");
+        let run = root.path().join("run.toml");
+        crate::door::write(&owner, "[old]\nkey = 'synthetic-old-value'\n").unwrap();
+        crate::door::write(&run, "[new]\nkey = 'synthetic-run-value'\n").unwrap();
+        let files = [owner.clone()];
+        let before = Seen::look(&files, &[], Some(&owner), &[]);
+        crate::door::write(&owner, "[new]\nkey = 'synthetic-new-value'\n").unwrap();
+        let after = Seen::look(&files, &[], Some(&owner), &[]);
+        let said = before.codex_tables_to(&after, &owner, &run).unwrap();
+        assert!(said.contains("[\"new\"]"));
+        assert!(said.contains("[\"old\"]"));
+        assert!(said.contains("also in the run"));
+        assert!(!said.contains("synthetic-"));
+    }
+
+    #[test]
+    fn t1744_an_unreadable_codex_config_is_not_said_to_have_lost_its_tables() {
+        let root = crate::door::made("cf-codex-unreadable-").unwrap();
+        let owner = root.path().join("owner.toml");
+        crate::door::write(&owner, "[old]\nkey = 'synthetic'\n").unwrap();
+        let files = [owner.clone()];
+        let before = Seen::look(&files, &[], Some(&owner), &[]);
+        std::fs::remove_file(&owner).unwrap();
+        std::fs::create_dir(&owner).unwrap();
+        let after = Seen::look(&files, &[], Some(&owner), &[]);
+        let said = before
+            .codex_tables_to(&after, &owner, &root.path().join("run.toml"))
+            .unwrap();
+        assert!(said.contains("could not be compared"), "{said}");
+        assert!(!said.contains("removed"), "{said}");
+    }
+
+    #[test]
+    fn t1744_two_unreadable_codex_snapshots_cannot_prove_the_config_unchanged() {
+        let root = crate::door::made("cf-codex-unreadable-both-").unwrap();
+        let owner = root.path().join("owner.toml");
+        std::fs::create_dir(&owner).unwrap();
+        let files = [owner.clone()];
+        let before = Seen::look(&files, &[], Some(&owner), &[]);
+        let after = Seen::look(&files, &[], Some(&owner), &[]);
+        let said = before
+            .codex_tables_to(&after, &owner, &root.path().join("run.toml"))
+            .expect("unreadable snapshots cannot prove the config unchanged");
+        assert!(said.contains("could not be compared"), "{said}");
+    }
+
+    #[test]
+    fn t1744_two_absent_or_identical_invalid_codex_configs_are_unchanged() {
+        let root = crate::door::made("cf-codex-unchanged-").unwrap();
+        let owner = root.path().join("owner.toml");
+        let files = [owner.clone()];
+        let before = Seen::look(&files, &[], Some(&owner), &[]);
+        let after = Seen::look(&files, &[], Some(&owner), &[]);
+        assert_eq!(before.codex_tables_to(&after, &owner, &owner), None);
+
+        crate::door::write(&owner, "[unfinished").unwrap();
+        let before = Seen::look(&files, &[], Some(&owner), &[]);
+        let after = Seen::look(&files, &[], Some(&owner), &[]);
+        assert_eq!(before.codex_tables_to(&after, &owner, &owner), None);
+    }
+
+    #[test]
+    fn t1744_a_missing_config_that_becomes_unreadable_is_not_said_unchanged() {
+        let root = crate::door::made("cf-codex-missing-then-unreadable-").unwrap();
+        let owner = root.path().join("owner.toml");
+        let files = [owner.clone()];
+        let before = Seen::look(&files, &[], Some(&owner), &[]);
+        std::fs::create_dir(&owner).unwrap();
+        let after = Seen::look(&files, &[], Some(&owner), &[]);
+        let said = before.codex_tables_to(&after, &owner, &owner).unwrap();
+        assert!(said.contains("could not be compared"), "{said}");
     }
 }

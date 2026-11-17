@@ -1531,13 +1531,13 @@ fn isolation_of(owner: &Owner, which: &str) -> Isolation {
 fn a_run_that_changes_a_file_of_the_owners_fails_naming_it_and_saying_none_of_what_it_holds() {
     for which in ["pi", "codex", "devin", "muse"] {
         let owner = Owner::new();
-        let isolation = isolation_of(&owner, which);
-        isolation.made_at(at(NOW)).unwrap();
-        assert!(
-            isolation.finish().is_ok(),
-            "{which}: nothing happened to the owner's"
-        );
         for file in watched(&owner, which) {
+            let isolation = isolation_of(&owner, which);
+            isolation.made_at(at(NOW)).unwrap();
+            assert!(
+                isolation.finish().is_ok(),
+                "{which}: nothing happened to the owner's"
+            );
             let before = fs::read(&file).unwrap();
             let shown = format!(
                 "~/{}",
@@ -1552,6 +1552,12 @@ fn a_run_that_changes_a_file_of_the_owners_fails_naming_it_and_saying_none_of_wh
             );
             assert!(said.contains("THE RUN CHANGED THE OWNER'S"), "{said}");
             assert!(
+                said.contains(
+                    "Login files were compared by size, modification time and file identity only"
+                ),
+                "{said}"
+            );
+            assert!(
                 said.contains("(or the owner's own"),
                 "the owner's own harness could have: {said}"
             );
@@ -1563,11 +1569,148 @@ fn a_run_that_changes_a_file_of_the_owners_fails_naming_it_and_saying_none_of_wh
                 said.contains(&format!("{shown} is gone")),
                 "{which}: {said}"
             );
-            // Put back as it was, the owner's setup is as it was.
+            // Restoring bytes restores a content comparison, but a replaced login has
+            // a different identity and must still be reported as changed.
             fs::write(&file, &before).unwrap();
-            assert!(isolation.finish().is_ok(), "{which}: {shown} is as it was");
+            if isolation.plan.login_watched.contains(&file) {
+                assert!(isolation.finish().is_err(), "{which}: {shown} was replaced");
+            } else {
+                assert!(isolation.finish().is_ok(), "{which}: {shown} is as it was");
+            }
         }
     }
+}
+
+#[test]
+fn t1744_codex_guard_names_changed_tables_and_compares_the_runs_config_without_values() {
+    let owner = Owner::new();
+    let config = owner.path(".codex/config.toml");
+    write(
+        &config,
+        "[removed]\nkey = 'before-secret'\n[unchanged]\nkey = 'old-secret'\n",
+    );
+    let isolation = owner.codex();
+    let home = isolation.made_at(at(NOW)).unwrap();
+    isolation
+        .write(
+            "CODEX_HOME",
+            "config.toml",
+            "[projects.\"run-folder\"]\ntrust = 'run-secret'\n",
+        )
+        .unwrap();
+    write(
+        &config,
+        "[projects.\"run-folder\"]\ntrust = 'owner-secret'\n[unchanged]\nkey = 'new-secret'\n",
+    );
+    let said = isolation.finish().unwrap_err().to_string();
+    assert!(
+        home.join("codex/config.toml").is_file(),
+        "the run's config was removed before comparison"
+    );
+    assert!(
+        said.contains("removed") && said.contains("projects") && said.contains("run-folder"),
+        "{said}"
+    );
+    assert!(
+        said.contains("run's") && said.contains("config.toml"),
+        "{said}"
+    );
+    for secret in [
+        "before-secret",
+        "old-secret",
+        "run-secret",
+        "owner-secret",
+        "new-secret",
+    ] {
+        assert!(!said.contains(secret), "config value was disclosed");
+    }
+}
+
+#[test]
+fn t1744_pi_discovery_copy_never_holds_a_refresh_token() {
+    let owner = Owner::new();
+    let source = owner.path(".pi/agent/auth.json");
+    let expected = auth(hours(9)).into_bytes();
+    let copied = pi_discovery_copy(&source).unwrap();
+    let text = fs::read_to_string(copied.folder.path().join("auth.json")).unwrap();
+    let parsed: Value = serde_json::from_str(&text).unwrap();
+    assert!(parsed.get("openai").is_some());
+    assert!(!text.to_ascii_lowercase().contains("refresh"));
+    assert!(fs::read(source).unwrap() == expected);
+}
+
+#[test]
+fn t1744_a_read_only_pi_login_can_still_be_copied_without_refresh() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let owner = Owner::new();
+    let source = owner.path(".pi/agent/auth.json");
+    let expected = auth(hours(9)).into_bytes();
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o400)).unwrap();
+    let copied = pi_discovery_copy(&source).unwrap();
+    let text = fs::read_to_string(copied.folder.path().join("auth.json")).unwrap();
+    assert!(!text.to_ascii_lowercase().contains("refresh"));
+    assert_eq!(
+        fs::metadata(&source).unwrap().permissions().mode() & 0o777,
+        0o400
+    );
+    assert!(fs::read(source).unwrap() == expected);
+}
+
+#[test]
+fn t1744_pi_discovery_reuses_the_seed_and_refuses_a_changed_source() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let owner = Owner::new();
+    let source = owner.path(".pi/agent/auth.json");
+    let expected = fs::read(&source).unwrap();
+    let names = pi_provider_names(&source).unwrap();
+    assert!(names.iter().any(|name| name == "openai"));
+    // The file can be stated but not opened. Seeding must reuse the by-design read.
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o000)).unwrap();
+    let seeded = pi_seed_text(&source);
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(seeded.unwrap().as_bytes() == expected);
+
+    pi_provider_names(&source).unwrap();
+    fs::write(&source, "{} ").unwrap();
+    let refused = pi_seed_text(&source).unwrap_err().to_string();
+    assert!(refused.contains("changed between model selection"));
+}
+
+#[test]
+fn t1744_unused_pi_discovery_copy_is_removed_when_the_process_exits() {
+    const CHILD: &str = "CF_T1744_PI_DISCOVERY_HOME";
+    if let Some(home) = crate::process::own_var(CHILD) {
+        let source = PathBuf::from(home).join("auth.json");
+        assert_eq!(pi_provider_names(&source).unwrap(), ["openai"]);
+        return;
+    }
+    let root = crate::door::made("cf-pi-discovery-exit-").unwrap();
+    let home = root.path().join("home");
+    let temp = root.path().join("temp");
+    crate::door::make_dir(&home).unwrap();
+    crate::door::make_dir(&temp).unwrap();
+    crate::door::write(
+        home.join("auth.json"),
+        r#"{"openai":{"type":"oauth","refresh":"synthetic"}}"#,
+    )
+    .unwrap();
+    let ran = crate::process::case_of(
+        std::env::current_exe().unwrap(),
+        "live::isolation::tests::t1744_unused_pi_discovery_copy_is_removed_when_the_process_exits",
+        Duration::from_secs(15),
+    )
+    .var(CHILD, &home)
+    .var(crate::standin_process::FIXTURE_HOME, &home)
+    .var("TMPDIR", &temp)
+    .var("TMP", &temp)
+    .var("TEMP", &temp)
+    .run()
+    .unwrap();
+    assert_eq!(ran.code, Some(0), "{}", ran.output());
+    assert!(fs::read_dir(&temp).unwrap().flatten().all(|entry| !entry
+        .file_name()
+        .to_string_lossy()
+        .starts_with("cf-pi-discovery-")));
 }
 
 #[test]
@@ -2223,5 +2366,76 @@ fn a_pi_harness_that_ended_badly_after_it_renewed_its_entry_has_renewed_it_and_t
     assert_eq!(
         renewed[0].ended.as_deref(),
         Some("it ended 1 (Error: model refused)")
+    );
+}
+
+#[test]
+fn t1744_review_guard_does_not_open_any_owner_login_file() {
+    const CHILD: &str = "CF_T1744_GUARD_OWNER";
+    if let Some(root) = crate::process::own_var(CHILD) {
+        let root = PathBuf::from(root);
+        let pi = root.join("pi");
+        let codex = root.join("codex");
+        let config = root.join("config");
+        let data = root.join("data");
+        let roaming = root.join("roaming");
+        for guard in [
+            Isolation::new(Harness::Codex, &root, Plan::codex(&codex)),
+            Isolation::new(
+                Harness::Pi,
+                &root,
+                Plan::pi(&pi, Some(vec!["cliproxyapi".to_owned()]), Duration::ZERO),
+            ),
+            Isolation::new(Harness::Muse, &root, Plan::muse(&config, &data)),
+            Isolation::new(Harness::Devin, &root, Plan::devin(&config, &data)),
+            Isolation::new(Harness::Devin, &root, Plan::devin_on_windows(&roaming)),
+        ] {
+            let before = guard.look();
+            let after = guard.look();
+            assert!(before.changes_to(&after, &root).is_empty());
+        }
+        let matrix = crate::matrix::evidence::Owner::of_machine().unwrap();
+        assert!(matrix.unchanged(&matrix.again()).ok);
+        return;
+    }
+    let root = crate::door::made("cf-guard-no-login-open-").unwrap();
+    let home = root.path().join("home");
+    let temp = root.path().join("temp");
+    crate::door::make_dir(&home).unwrap();
+    crate::door::make_dir(&temp).unwrap();
+    for file in [
+        "codex/auth.json",
+        "pi/auth.json",
+        "pi/mcp-auth.json",
+        "pi/models.json",
+        "pi/cliproxyapi.json",
+        "config/muse/auth.json",
+        ".config/muse/auth.json",
+        "data/devin/credentials.toml",
+        "roaming/devin/credentials.toml",
+    ] {
+        let path = home.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        nix::unistd::mkfifo(&path, nix::sys::stat::Mode::S_IRUSR).unwrap();
+    }
+    let ran = crate::process::case_of(
+        std::env::current_exe().unwrap(),
+        "live::isolation::tests::t1744_review_guard_does_not_open_any_owner_login_file",
+        Duration::from_secs(5),
+    )
+    .var(CHILD, &home)
+    .var("HOME", &home)
+    .var("USERPROFILE", &home)
+    .var(crate::standin_process::FIXTURE_HOME, &home)
+    .var("TMPDIR", &temp)
+    .var("TMP", &temp)
+    .var("TEMP", &temp)
+    .run()
+    .unwrap();
+    assert_eq!(
+        ran.code,
+        Some(0),
+        "guard opened a login file or failed: {}",
+        ran.output()
     );
 }

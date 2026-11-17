@@ -26,6 +26,7 @@ use std::time::Duration;
 #[path = "live_parity/claude.rs"]
 mod claude;
 #[path = "live_parity/terminal_env.rs"]
+#[cfg(target_os = "macos")]
 mod terminal_env;
 
 use cf_e2e::live::members::Members;
@@ -110,6 +111,7 @@ fn a_claude_member_window_loads_what_the_same_claude_loads_in_a_terminal() -> Re
     log.passing(claude::run(&log))
 }
 
+#[cfg(target_os = "macos")]
 #[test]
 #[ignore = "opt-in: spends the machine's Claude quota on one one-word task; cargo xtask live parity -- a_real_claude_member"]
 fn a_real_claude_member_window_has_the_terminals_lang_and_its_rcs_export() -> Result {

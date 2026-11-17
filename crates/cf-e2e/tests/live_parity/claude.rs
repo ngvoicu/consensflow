@@ -419,16 +419,7 @@ fn parity_version(claude: &live::machine::Installed, config: &Path) -> String {
 pub fn run(log: &Log) -> Result {
     let claude = live::installed_for_claude_parity(Duration::from_secs(2 * 60 * 60))?;
     let folder = live_folder("parity-claude")?;
-    cf_e2e::door::make_dir(Path::new(env!("CARGO_TARGET_TMPDIR")))?;
-    let made_here = cf_e2e::door::made_in(
-        Path::new(env!("CARGO_TARGET_TMPDIR")),
-        "live-parity-claude-",
-    )
-    .map_err(|source| Error::File {
-        action: "make a folder in",
-        path: Path::new(env!("CARGO_TARGET_TMPDIR")).to_path_buf(),
-        source,
-    })?;
+    let made_here = work_folder()?;
     let made = made_here.path();
     let login = claude
         .claude_config()
@@ -479,11 +470,26 @@ pub fn run(log: &Log) -> Result {
     Ok(())
 }
 
+fn work_folder() -> Result<cf_e2e::door::Made> {
+    cf_e2e::door::made("live-parity-claude-").map_err(|source| Error::File {
+        action: "make a folder in",
+        path: std::env::temp_dir(),
+        source,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn t1744_parity_work_folder_is_owned_by_the_run() {
+        let folder = work_folder().unwrap();
+        assert!(cf_e2e::door::is_made_or_below(folder.path()));
+        cf_e2e::door::write(folder.path().join("debug.txt"), "own debug").unwrap();
+    }
 
     #[cfg(unix)]
     #[test]

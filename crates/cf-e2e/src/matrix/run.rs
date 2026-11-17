@@ -126,6 +126,10 @@ struct RigRecords<'a> {
 }
 
 impl Records for RigRecords<'_> {
+    fn member_for(&self, agent: &str) -> Option<String> {
+        self.members.added_handle(agent).map(str::to_owned)
+    }
+
     fn items(&self, kind: &str, handle: &str) -> Result<Vec<Item>> {
         observe::record(self.members, &self.events, kind, handle)
     }

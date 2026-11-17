@@ -210,14 +210,15 @@ pub fn renewal(
             .map(|name| agent.join(name))
             .into();
         let records = [agent.join("sessions")];
-        let before = Seen::look(&files, &records);
+        let logins = [agent.join("models.json"), agent.join("mcp-auth.json")];
+        let before = Seen::look(&files, &records, None, &logins);
         let ended = renew::one_shot(Harness::Pi, &program, &renew::pi_words(&model))?;
-        let changed = before.changes_to(&Seen::look(&files, &records), &home);
+        let changed = before.changes_to(&Seen::look(&files, &records, None, &logins), &home);
         if changed.is_empty() {
             return Ok(ended);
         }
         Err(Error::Daemon(format!(
-            "it changed the owner's Pi files beside its login: {}",
+            "it changed the owner's Pi files beside its login: {}; login-bearing files were compared by size, modification time and file identity only",
             changed.join("; ")
         )))
     })
