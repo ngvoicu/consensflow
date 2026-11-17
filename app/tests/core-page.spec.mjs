@@ -4404,6 +4404,32 @@ test('a host sequence refusal resynchronizes and later typing still reaches the 
   await expect.poll(() => page.evaluate(() => window.__paneReceived), { timeout: 3000 }).toBe('ABC')
 })
 
+for (const [error, written] of [
+  ['PTY I/O error: the terminal write failed', 'A'],
+  ['pane input is failed until restart', ''],
+]) {
+  test(`a failed pane input says how to resume typing: ${error}`, async ({ page }) => {
+    await open(page)
+    await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+    await page.evaluate(
+      ({ error, written }) => {
+        window.__paneReceived = ''
+        window.__paneInputHook = async (_command, args) => {
+          if (written) window.__paneReceived += String.fromCharCode(...args.bytes)
+          return { ok: true, ticket: `ticket-${args.sequence}` }
+        }
+        window.__paneWaitHook = async () => ({ ok: false, error })
+        window.__emulators[0].type('A')
+      },
+      { error, written },
+    )
+    await expect.poll(() => page.evaluate(() => window.__paneReceived)).toBe(written)
+    await expect(page.locator('#status')).toHaveText(
+      'Check whether your last typing appeared, then restart the project before typing again.',
+    )
+  })
+}
+
 test('a terminal reply passes a human paste while later typing stays behind it', async ({
   page,
 }) => {

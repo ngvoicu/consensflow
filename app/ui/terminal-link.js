@@ -277,7 +277,11 @@ export class TerminalLink {
       return true
     }
     if (settled?.ok !== true) {
-      this.#report(new Error('Check the window, then reopen it if your typing did not appear.'))
+      this.#report(
+        new Error(
+          'Check whether your last typing appeared, then restart the project before typing again.',
+        ),
+      )
       return false
     }
     return true
