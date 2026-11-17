@@ -5412,6 +5412,46 @@ test('Pi rows keep the stored provider, efforts, disabled choices and stale word
     ])
 })
 
+test('every harness shows a distinct model name and any listed provider', async ({ page }) => {
+  const data = model()
+  for (const [kind, provider] of [
+    ['claude', null],
+    ['codex', 'test-provider'],
+    ['pi', 'anthropic'],
+    ['devin', null],
+    ['muse', null],
+  ]) {
+    data.models[kind].listing = listed([
+      { id: 'mistral-small-2603', label: 'Mistral Small 6', provider, efforts: [] },
+    ])
+  }
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const harness = dialog.locator('[name="chiefHarness"]')
+  const models = dialog.locator('[name="chiefModel"]')
+  for (const [kind, text, value] of [
+    ['Claude Code', 'mistral-small-2603 (Mistral Small 6)', 'mistral-small-2603'],
+    [
+      'Codex',
+      'mistral-small-2603 (Mistral Small 6) [test-provider]',
+      'test-provider/mistral-small-2603',
+    ],
+    ['Pi', 'mistral-small-2603 (Mistral Small 6) [anthropic]', 'anthropic/mistral-small-2603'],
+    ['Devin', 'mistral-small-2603 (Mistral Small 6)', 'mistral-small-2603'],
+    ['Muse Code', 'mistral-small-2603 (Mistral Small 6)', 'mistral-small-2603'],
+  ]) {
+    await harness.selectOption({ label: kind })
+    await expect(models).toBeEnabled()
+    expect(await offered(models), kind).toEqual([
+      ['Pick a model', true],
+      [text, false],
+    ])
+    await models.selectOption({ label: text })
+    await expect(models).toHaveValue(value)
+  }
+})
+
 /**
  * What a harness lists of its models, as `models.get` answers it from the harness's recorded
  * answer (CHF-03's fixtures, read by its adapter: `crates/cf-harness/src/page_listings.rs`
