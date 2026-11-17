@@ -1,10 +1,97 @@
-//! A question's task waits while it is outstanding, and only a received
-//! answer ends that, by whatever way it was received: all of a window's
-//! questions, held to one rule.
+//! A question's task waits until an answer is on its way or received, with
+//! every question, the human's gate and receipt held to their own rules.
 
 use cf_ledger::{Claim, Read};
 
 use crate::fixture::{gated_world, ids, world, World};
+
+#[test]
+fn an_answer_queued_for_a_busy_window_ends_the_wait_before_delivery() {
+    let mut w = world();
+    let created = w.give("zeus", "Parser");
+    let (task, brief) = (created.task.number, created.message.unwrap().id);
+    w.deliver(brief);
+    let question = w.ask("zeus", task, "Which format?");
+    assert_eq!(w.state(task), "waiting");
+
+    let answer = w.answer(question.id, "JSON");
+    assert_eq!(w.states(&[answer.id]), ["queued"]);
+    assert_eq!(w.state(task), "working", "the chief has given an answer");
+    assert_eq!(
+        w.next("zeus"),
+        Some(answer.id),
+        "it is still to be delivered"
+    );
+    w.deliver(answer.id);
+    assert_eq!(w.state(task), "working");
+}
+
+#[test]
+fn an_answer_held_for_human_approval_keeps_the_task_waiting_until_passed_on() {
+    let mut w = gated_world();
+    let (task, _question, answer) = answered_at_the_gate(&mut w);
+    assert_eq!(w.states(&[answer]), ["gated"]);
+    assert_eq!(
+        w.state(task),
+        "waiting",
+        "the human must approve the answer"
+    );
+
+    w.ledger
+        .approve_message(answer, "human")
+        .expect("passed on");
+    assert_eq!(w.states(&[answer]), ["queued"]);
+    assert_eq!(w.state(task), "working", "approval ends the wait");
+}
+
+#[test]
+fn an_older_ledger_with_a_queued_answer_reconciles_its_wait_on_open() {
+    let mut w = world();
+    let created = w.give("zeus", "Parser");
+    let (task, brief) = (created.task.number, created.message.unwrap().id);
+    w.deliver(brief);
+    let question = w.ask("zeus", task, "Which format?");
+    let answer = w.answer(question.id, "JSON");
+    // An earlier build left the task waiting although its answer was queued.
+    w.edit(|db| {
+        db.execute("UPDATE task SET state = 'waiting' WHERE number = ?", [task])
+            .unwrap();
+    });
+    assert_eq!(w.states(&[answer.id]), ["queued"]);
+    assert_eq!(
+        w.state(task),
+        "working",
+        "the next start repairs the stale wait"
+    );
+}
+
+#[test]
+fn opening_keeps_waits_for_other_questions_and_the_humans_approval_and_keeps_pauses() {
+    let mut w = world();
+    let (task, first, _) = with_two_questions(&mut w, false);
+    w.answer(first, "JSON");
+    w.edit(|_| {});
+    assert_eq!(
+        w.state(task),
+        "waiting",
+        "the second question has no answer"
+    );
+
+    let mut w = gated_world();
+    let (task, _, _) = answered_at_the_gate(&mut w);
+    w.edit(|_| {});
+    assert_eq!(w.state(task), "waiting", "the answer is held for the human");
+
+    let mut w = world();
+    let created = w.give("zeus", "Parser");
+    let (task, brief) = (created.task.number, created.message.unwrap().id);
+    w.deliver(brief);
+    let question = w.ask("zeus", task, "Which format?");
+    w.pause(task);
+    w.answer(question.id, "JSON");
+    w.edit(|_| {});
+    assert_eq!(w.state(task), "paused", "an answer does not resume a pause");
+}
 
 /// A task given to zeus, its brief received, with two questions asked.
 fn with_two_questions(w: &mut World, options: bool) -> (i64, i64, i64) {
@@ -31,16 +118,12 @@ fn one_answer_received_leaves_the_task_waiting_for_the_other_question_and_the_se
     let (task, first, second) = with_two_questions(&mut w, false);
     let one = w.answer(first, "JSON");
     w.deliver(one.id);
-    assert_eq!(
-        w.state(task),
-        "waiting",
-        "one question still has no answer received"
-    );
+    assert_eq!(w.state(task), "waiting", "one question still has no answer");
     let two = w.answer(second, "v2");
     assert_eq!(
         w.state(task),
-        "waiting",
-        "an answer on its way is not one received"
+        "working",
+        "both answers are on their way or received"
     );
     w.deliver(two.id);
     assert_eq!(w.state(task), "working");
@@ -63,8 +146,8 @@ fn the_same_through_a_doors_acknowledgement() {
     w.ledger.settle_claim(one.id, zeus, true).expect("received");
     assert_eq!(
         w.state(task),
-        "waiting",
-        "the second answer is claimed, not received"
+        "working",
+        "the second answer is claimed, not received, but was given"
     );
     assert_eq!(w.receipt(one.id), serde_json::json!({ "door": true }));
     w.ledger.settle_claim(two.id, zeus, true).expect("received");
@@ -86,7 +169,7 @@ fn the_same_through_what_cf_served_whole() {
             &cf_proto::cf_word::CfWord::bare(),
         )
         .expect("read");
-    assert_eq!(w.state(task), "waiting");
+    assert_eq!(w.state(task), "working");
     assert_eq!(
         w.receipt(one.id),
         serde_json::json!({ "read": "inbox" }),
@@ -227,6 +310,7 @@ fn an_answer_whose_delivery_failed_leaves_a_question_withdrawn_at_the_gate_oblig
         .fail_delivery(answer, "the window closed")
         .expect("given up");
     assert_eq!(w.states(&[question, answer]), ["cancelled", "failed"]);
+    assert_eq!(w.state(task), "waiting", "the answer failed immediately");
 
     an_unrelated_receipt(&mut w, task);
     assert_eq!(
@@ -281,6 +365,11 @@ fn an_answer_an_agent_cancelled_leaves_the_question_obliging_as_a_failed_one_doe
     w.ledger
         .cancel_message(answer, "withdrawn by the chief")
         .expect("cancelled");
+    assert_eq!(
+        w.state(task),
+        "waiting",
+        "the answer was cancelled immediately"
+    );
     an_unrelated_receipt(&mut w, task);
     assert_eq!(w.state(task), "waiting");
 

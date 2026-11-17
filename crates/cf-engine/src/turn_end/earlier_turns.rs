@@ -9,7 +9,7 @@
 //!
 //! - **T-837** (the field board, 2026-10-28; T-1204). The worker asked the chief a question
 //!   that needed no answer (`cf ask`) and went on in the same turn. Its task reads `waiting`
-//!   from the question until the answer is *delivered*, and an answer is typed in only when
+//!   then read `waiting` until the answer was *delivered*, and an answer is typed in only when
 //!   the window is at rest: the turn ended at 01:01 with a 5.8 KB write-up on a task that
 //!   takes no result ([`Dispatcher::collect`]), the answer went in after it, and the turn it
 //!   began ended with five lines, which became the result.
@@ -67,8 +67,8 @@
 //!   repeat another turn's.
 //!
 //! **What each side sees.** The worker's window is told nothing new. The requester (the chief,
-//! or the human in the task's drawer) sees the task as it was (`waiting` until an answer is
-//! delivered, `working` while a notice's turn goes on) and then a result that begins with each
+//! or the human in the task's drawer) sees the task as it is (`waiting` until an answer is
+//! on its way, `working` after that or while a notice's turn goes on) and then a result that begins with each
 //! such turn's words, labelled, and ends with "What it said last:" and the last words. A result
 //! with no such turn before it is what it was, byte for byte.
 //!

@@ -125,8 +125,8 @@ find = "    release_stranded(&mut store)?;"
 replace = "    let _ = release_stranded;"
 
 [[plant]]
-name = "pause: this ledger opens leaving a task working that Node moved on for a queued answer"
-meant = "a_row_left_under_a_carrier_node_delivered_cancelled_or_failed_is_a_queued_message_of_its_own"
+name = "pause: a released answer hides another unanswered question at start"
+meant = "a_start_reconciles_a_released_answer_but_keeps_a_second_question_waiting"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]

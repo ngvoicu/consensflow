@@ -544,7 +544,7 @@ fn an_answer_read_in_a_thread_while_its_paste_is_on_its_way_is_read_when_the_pas
     w.begin(answer.id);
     assert_eq!(reads(&mut w, "zeus", &[answer.id], Read::Task), 0);
     assert_eq!(w.states(&[answer.id]), ["delivering"]);
-    assert_eq!(w.state(task), "waiting", "nothing is received yet");
+    assert_eq!(w.state(task), "working", "the answer is on its way");
     w.ledger
         .retry_delivery(answer.id, "the marker was not seen", true)
         .expect("given back");

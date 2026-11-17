@@ -1,6 +1,6 @@
 //! A wake-up is given only when the chief has nothing on its way: no task
-//! working or queued for its window, none waiting for an answer that is on its
-//! way (one the gate holds for the human among them), none held for its
+//! working or queued for its window, none waiting for an answer held at the
+//! gate for the human, none held for its
 //! member's quota, none open behind one of those (down a chain of open tasks).
 //! A task done and waiting for the chief's decision, a question the chief has
 //! not answered, a task the chief paused, a task the chief holds itself, and a
@@ -68,7 +68,7 @@ fn a_question_answered_and_the_answer_not_yet_received_holds_the_wake_up_back() 
     w.start(&given);
     let question = w.ask(given.task.number);
     w.answer(&question);
-    assert_eq!(w.state(given.task.number), "waiting");
+    assert_eq!(w.state(given.task.number), "working");
     w.advance(DAY);
     assert!(w.due().is_none(), "the answer is on its way to the window");
     assert_eq!(w.held_by(), [given.task.number]);

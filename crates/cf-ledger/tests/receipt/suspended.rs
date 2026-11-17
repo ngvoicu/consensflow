@@ -157,6 +157,26 @@ fn a_task_the_suspension_paused_while_its_window_waited_for_an_answer_waits_agai
 }
 
 #[test]
+fn a_queued_answer_given_during_close_ends_the_wait_when_the_project_resumes() {
+    let mut w = world();
+    let task = at_work(&mut w, "zeus");
+    let session = session_of(&w, task);
+    let question = w.ask(&session, task, "Which dialect?");
+    closed_with(&mut w, &[task], CLOSED);
+    let answer = w.answer(question.id, "JSON");
+    assert_eq!(w.state(task), "paused");
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+    assert_eq!(w.state(task), "working");
+    assert_eq!(
+        w.states(&[answer.id]),
+        ["queued"],
+        "the answer still waits for delivery"
+    );
+}
+
+#[test]
 fn a_task_the_suspension_paused_that_moved_since_is_no_longer_its_to_resume() {
     let mut w = world();
     let number = at_work(&mut w, "zeus");

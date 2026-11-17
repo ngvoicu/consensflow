@@ -106,8 +106,8 @@ fn a_write_up_that_ended_the_turn_with_the_workers_question_out_is_in_the_result
     context.pass().unwrap();
     assert_eq!(
         tiers.task(1).task.state,
-        "waiting",
-        "the answer waits for the window's rest"
+        "working",
+        "the answer is on its way, though it waits for the window's rest"
     );
 
     context.adapter.answer("zeus", WRITE_UP);

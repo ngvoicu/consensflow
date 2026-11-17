@@ -132,10 +132,33 @@ fn a_question_answered_and_the_answer_not_yet_received_holds_the_wake_up_back() 
     // The chief answers, and zeus is in its turn: the answer waits for the window.
     context.answer(project.id, question.id, "The new one");
     passes(&context);
-    assert_eq!(state(&context, &project, 1), "waiting");
+    assert_eq!(state(&context, &project, 1), "working");
     context.advance(HOUR);
     passes(&context);
     assert_eq!(given(&context), 1, "the answer is on its way");
+    assert_eq!(queued(&context, &project), 1);
+}
+
+#[test]
+fn an_answer_the_gate_holds_for_the_human_holds_the_wake_up_back() {
+    let (context, project) = woken_once();
+    context.give(project.id, "zeus", "Write the parser");
+    working(&context, &project, 1);
+    let question = context.ask(project.id, "zeus", "chief", 1, "Which parser?");
+    passes(&context);
+    context.adapter.answer("chief", "Looking.");
+    passes(&context);
+    context
+        .ledger
+        .borrow_mut()
+        .set_gate(project.id, true)
+        .unwrap();
+    let answer = context.answer(project.id, question.id, "The new one");
+    assert_eq!(answer.state, "gated");
+    assert_eq!(state(&context, &project, 1), "waiting");
+    context.advance(HOUR);
+    passes(&context);
+    assert_eq!(given(&context), 1, "the human still has the answer");
     assert_eq!(queued(&context, &project), 1);
 }
 

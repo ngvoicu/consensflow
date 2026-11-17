@@ -71,6 +71,7 @@ pub(crate) fn approve_message(
             message_task(store, message_id)?,
         ) {
             super::paused_answers::show_answered(store, &task, tell, false)?;
+            super::reconcile(store, task.id)?;
         }
         known_message(store, message_id)
     })

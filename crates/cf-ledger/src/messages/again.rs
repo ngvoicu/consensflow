@@ -1,5 +1,5 @@
 //! An answer that did not stand, and the one asked told to answer again. A
-//! question's task waits until an answer to it is received, and an answer
+//! question's task waits until an answer is on its way, and an answer
 //! that was declined, did not arrive or was withdrawn is none: the task waits
 //! for another, which only `cf answer m-q` gives, and nobody else knows it is
 //! owed. So whoever was asked is told, in the words the decline of an answer

@@ -260,6 +260,19 @@ fn a_question_the_window_asks_while_its_resume_words_wait_is_born_with_its_door_
         .claim_answer(question.id, zeus)
         .unwrap();
     assert!(matches!(claim, Claim::Closed), "{claim:?}");
+    let answer = context.answer(project, question.id, "v2");
+    assert_eq!(state(&context, project), "working");
+    assert_eq!(context.message(answer.id).state, "queued");
+    let another = context.ask(project, "zeus", "chief", 1, "Which version?");
+    let claim = context
+        .ledger
+        .borrow_mut()
+        .claim_answer(another.id, zeus)
+        .unwrap();
+    assert!(
+        matches!(claim, Claim::Closed),
+        "the resume words still have not arrived"
+    );
 }
 
 #[test]
