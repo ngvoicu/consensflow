@@ -5,6 +5,11 @@
 use crate::pty::PaneKey;
 
 pub const MAX_INPUT_BYTES: usize = 64 * 1024;
+/// The most one call from the page may carry: a paste goes in as one call,
+/// whole or not at all, so this is the largest paste a window takes. The
+/// page checks the same number (`MAX_PASTE_BYTES` in `terminal-link.js`) and
+/// refuses a larger one before it sends anything.
+pub const MAX_PAGE_INPUT_BYTES: usize = 4 * 1024 * 1024;
 /// A request, or a body, no window can take.
 pub(crate) const INVALID_BODY: &str = "invalid-body";
 const MAX_TERMINAL_DIMENSION: u16 = 4096;
@@ -28,6 +33,15 @@ pub fn validate_text(value: &str, label: &str) -> Result<(), String> {
 pub(crate) fn validate_input(bytes: &[u8]) -> Result<(), String> {
     if bytes.len() > MAX_INPUT_BYTES {
         Err(format!("pane input exceeds {MAX_INPUT_BYTES} bytes"))
+    } else {
+        Ok(())
+    }
+}
+
+/// What the page's own calls carry: [`MAX_PAGE_INPUT_BYTES`].
+pub(crate) fn validate_page_input(bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() > MAX_PAGE_INPUT_BYTES {
+        Err(format!("pane input exceeds {MAX_PAGE_INPUT_BYTES} bytes"))
     } else {
         Ok(())
     }

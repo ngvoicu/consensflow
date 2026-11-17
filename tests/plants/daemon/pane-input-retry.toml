@@ -1,15 +1,14 @@
 # Page identities fence late calls, and a call whose fate is unknown is skipped:
 # the pane's count moves past it, so a late original writes nothing and no key
-# is ever typed twice.
+# is ever typed twice. A paste is one call, whole or not at all, up to a cap.
 [run]
 pane-input-reconcile = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_skipped_call_is_never_written_when_its_original_comes_late"]
 pane-input-late = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_late_original_after_its_skip_writes_nothing_and_the_reply_arrives"]
-pane-input-skipped-paste = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_paste_whose_last_chunk_is_skipped_is_closed_and_holds_nothing"]
+pane-input-lost-paste = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_lost_paste_writes_none_of_itself_even_when_it_comes_late"]
 pane-input-capacity = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::unanswered_page_input_is_bounded_until_a_new_page"]
-pane-input-paste = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_reply_cannot_cross_an_active_paste_on_the_real_pty"]
-pane-input-interrupted = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "an_interrupted_bracketed_paste_closes_before_fresh_page_typing"]
-pane-input-drained = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::an_interrupted_paste_closes_after_its_already_admitted_chunks"]
-pane-input-finished = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_completed_paste_is_not_closed_again_after_page_replacement"]
+pane-input-cap = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_paste_over_the_cap_is_refused_whole_and_keeps_its_number"]
+pane-input-whole = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_reply_that_comes_during_a_paste_goes_after_all_of_it"]
+pane-input-raw-body = ["cargo", "test", "--offline", "-p", "app", "commands::tests::production_ipc_refusal_does_not_consume_its_sequence"]
 pane-input-completion = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_lost_completion_answer_can_be_waited_for_again"]
 
 [[plant]]
@@ -30,8 +29,8 @@ replace = '''        if false {
 
 [[plant]]
 name = "pane input retry: a skip leaves the count where it was"
-meant = "input_queue::tests::a_skipped_call_is_never_written_when_its_original_comes_late"
-runs = ["pane-input-reconcile", "pane-input-late"]
+meant = "a_skipped_call_is_never_written_when_its_original_comes_late"
+runs = ["pane-input-reconcile", "pane-input-late", "pane-input-lost-paste"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
@@ -41,7 +40,7 @@ replace = 'let _ = (passed, sequence);'
 [[plant]]
 name = "pane input retry: admit a number the count has passed"
 meant = "a_late_original_after_its_skip_writes_nothing_and_the_reply_arrives"
-runs = ["pane-input-late", "pane-input-reconcile"]
+runs = ["pane-input-late", "pane-input-reconcile", "pane-input-lost-paste"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
@@ -49,18 +48,14 @@ find = '        if sequence <= passed {'
 replace = '        if false && sequence <= passed {'
 
 [[plant]]
-name = "pane input retry: a skipped last chunk leaves its paste open"
-meant = "a_paste_whose_last_chunk_is_skipped_is_closed_and_holds_nothing"
-runs = ["pane-input-skipped-paste"]
+name = "pane input retry: a lost paste written when it comes late"
+meant = "a_lost_paste_writes_none_of_itself_even_when_it_comes_late"
+runs = ["pane-input-lost-paste"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''                    if state.bracketed.remove(&id) {
-                        state.needs_close = true;
-                    }'''
-replace = '''                    if state.bracketed.remove(&id) {
-                        state.needs_close = false;
-                    }'''
+find = '        if sequence <= passed {'
+replace = '        if sequence <= passed && sequence != 1 {'
 
 [[plant]]
 name = "pane input retry: forget to advance the admitted count"
@@ -86,52 +81,57 @@ replace = '''        if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
             return Err("pane-input-ticket-capacity".to_string());'''
 
 [[plant]]
-name = "pane input retry: allow a reply inside a paste"
-meant = "a_reply_cannot_cross_an_active_paste_on_the_real_pty"
-runs = ["pane-input-paste"]
+name = "pane input retry: a paste over the cap goes in"
+meant = "a_paste_over_the_cap_is_refused_whole_and_keeps_its_number"
+runs = ["pane-input-cap"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/input_queue.rs"
-find = 'state.active = Some(id);'
-replace = 'state.active = None;'
+file = "crates/cf-panes/src/validation.rs"
+find = '    if bytes.len() > MAX_PAGE_INPUT_BYTES {'
+replace = '    if false && bytes.len() > MAX_PAGE_INPUT_BYTES {'
 
 [[plant]]
-name = "pane input retry: leave a replaced page's paste open"
-meant = "an_interrupted_bracketed_paste_closes_before_fresh_page_typing"
-runs = ["pane-input-interrupted"]
+name = "pane input retry: a refused paste takes its number"
+meant = "a_paste_over_the_cap_is_refused_whole_and_keeps_its_number"
+runs = ["pane-input-cap"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''                if state.bracketed.remove(&id) {
-                    state.needs_close = true;
-                }'''
-replace = '''                if state.bracketed.remove(&id) {
-                    state.needs_close = false;
-                }'''
+find = '''            | InputWork::Paste { body: bytes, .. } => validate_page_input(bytes)?,'''
+replace = '''            | InputWork::Paste { body: bytes, .. } => {
+                if let Err(error) = validate_page_input(bytes) {
+                    page.last_sequences.insert(key.clone(), sequence);
+                    return Err(error);
+                }
+            }'''
 
 [[plant]]
-name = "pane input retry: leave an abandoned queued paste open"
-meant = "an_interrupted_paste_closes_after_its_already_admitted_chunks"
-runs = ["pane-input-drained"]
+name = "pane input retry: a paste written in two parts"
+meant = "a_reply_that_comes_during_a_paste_goes_after_all_of_it"
+runs = ["pane-input-whole"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = '''                if abandoned_and_drained && !group.group.end && result.is_ok() && bracketed {
-                    state.needs_close = true;
-                }'''
-replace = '''                if abandoned_and_drained && !group.group.end && result.is_ok() && bracketed {
-                    state.needs_close = false;
-                }'''
+find = '''            InputWork::Typed(bytes) => arbiter.write_typed(&panes, &key, &bytes),'''
+replace = '''            InputWork::Typed(bytes) => {
+                let cut = bytes.len().min(32 * 1024);
+                arbiter
+                    .write_typed(&panes, &key, &bytes[..cut])
+                    .and_then(|()| {
+                        thread::sleep(std::time::Duration::from_millis(50));
+                        arbiter.write(&panes, &key, &bytes[cut..])
+                    })
+            }'''
 
 [[plant]]
-name = "pane input retry: close a completed paste twice"
-meant = "a_completed_paste_is_not_closed_again_after_page_replacement"
-runs = ["pane-input-finished"]
+name = "pane input retry: take a paste's bytes from a JSON body"
+meant = "production_ipc_refusal_does_not_consume_its_sequence"
+runs = ["pane-input-raw-body"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/input_queue.rs"
-find = 'if abandoned_and_drained && !group.group.end && result.is_ok() && bracketed {'
-replace = 'if bracketed {'
+file = "app/src-tauri/src/commands.rs"
+find = '''        tauri::ipc::InvokeBody::Json(_) => Err("pane input bytes must be a raw body".to_string()),'''
+replace = '''        tauri::ipc::InvokeBody::Json(_) => Ok((call, Vec::new())),'''
 
 [[plant]]
 name = "pane input retry: lose the completion after the first wait"

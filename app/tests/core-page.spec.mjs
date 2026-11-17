@@ -869,7 +869,16 @@ async function open(page, given = model()) {
         return answer({ project })
       },
     }
-    const invoke = async (command, args = {}) => {
+    const invoke = async (command, rawArgs = {}, options = {}) => {
+      // What is typed goes as raw bytes with its numbers in a header (the page's call);
+      // the tests read it as one object, `bytes` a list.
+      const args =
+        rawArgs instanceof Uint8Array
+          ? {
+              ...JSON.parse(decodeURIComponent(options.headers['x-cf-pane-input'])),
+              bytes: Array.from(rawArgs),
+            }
+          : rawArgs
       window.__calls.push([
         command,
         JSON.parse(JSON.stringify(args, (key, value) => (key === 'onOutput' ? 'channel' : value))),
@@ -4386,33 +4395,91 @@ test('keys and a terminal reply go in one order, one admission at a time', async
   expect(await page.evaluate(() => window.__overlap)).toBe(false)
 })
 
-for (const lostChunk of ['middle', 'last']) {
-  test(`a lost ${lostChunk} chunk of a paste is skipped and the rest goes on`, async ({ page }) => {
+// A paste is one call with both of its markers: whole, or not at all.
+const PASTE_OPEN = '\x1b[200~'
+const PASTE_CLOSE = '\x1b[201~'
+
+test('a paste goes in as one call, whole with both markers, however long', async ({ page }) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  const paste = `${PASTE_OPEN}echo one\rtwo${'p'.repeat(200 * 1024)}é${PASTE_CLOSE}`
+  await page.evaluate((paste) => window.__emulators[0].type(paste), paste)
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__calls.filter(([name]) => name === 'pane_input_enqueue').length),
+    )
+    .toBe(1)
+  const call = await page.evaluate(() => {
+    const [, args] = window.__calls.find(([name]) => name === 'pane_input_enqueue')
+    return {
+      keys: Object.keys(args),
+      sequence: args.sequence,
+      text: new TextDecoder().decode(new Uint8Array(args.bytes)),
+    }
+  })
+  expect(call.keys).toEqual(['pageId', 'id', 'generation', 'sequence', 'bytes'])
+  expect(call.sequence).toBe(1)
+  expect(call.text).toBe(paste)
+})
+
+for (const lost of ['before it arrives', 'with its answer lost']) {
+  test(`a paste lost ${lost} is whole or not there at all, never in part`, async ({ page }) => {
     await open(page)
     await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
-    await page.evaluate((lostChunk) => {
-      window.__paneSkips = []
-      window.__paneSkipHook = (args) => {
-        window.__paneSkips.push(args)
-        return { ok: true }
-      }
-      window.__sent = []
-      window.__paneInputHook = async (_command, args) => {
-        window.__sent.push(args.sequence)
-        if (args.sequence === (lostChunk === 'middle' ? 2 : 3)) throw new Error('test: call lost')
-        return { ok: true, ticket: `ticket-${args.sequence}` }
-      }
-      window.__emulators[0].type(`\x1b[200~${'p'.repeat(70 * 1024)}\x1b[201~`)
-    }, lostChunk)
+    const paste = `\x1b[200~echo PASTE_ONLY\r${'p'.repeat(70 * 1024)}\x1b[201~`
+    await page.evaluate(
+      ({ lost, hostSource, paste }) => {
+        const admit = new Function(`return (${hostSource})()`)()
+        window.__sent = []
+        window.__paneInputHook = async (_command, args) => {
+          window.__sent.push(args.sequence)
+          if (args.sequence !== 1) return admit(args)
+          // Before it arrives, the host never has it. With its answer lost, the host has it
+          // whole and the page cannot tell.
+          if (lost === 'with its answer lost') admit(args)
+          throw new Error('test: call lost')
+        }
+        window.__emulators[0].type(paste)
+        window.__emulators[0].type('Z')
+      },
+      { lost, hostSource: hostWithCount.toString(), paste },
+    )
+    const expected = lost === 'before it arrives' ? 'Z' : `${paste}Z`
     await expect
-      .poll(() => page.evaluate(() => window.__paneSkips.length), { timeout: 4000 })
-      .toBe(1)
-    const result = await page.evaluate(() => ({ sent: window.__sent, skip: window.__paneSkips[0] }))
-    expect(result.sent, 'every chunk is sent once').toEqual([1, 2, 3])
-    expect(result.skip.sequence).toBe(lostChunk === 'middle' ? 2 : 3)
-    expect(result.skip.group?.end ?? false).toBe(lostChunk === 'last')
+      .poll(() => page.evaluate(() => window.__paneReceived), { timeout: 4000 })
+      .toBe(expected)
+    const result = await page.evaluate(() => ({
+      sent: window.__sent,
+      skips: window.__paneSkips.map((args) => args.sequence),
+    }))
+    expect(result.sent, 'one call for the paste, never sent again').toEqual([1, 2])
+    expect(result.skips).toEqual([1])
+    await expect(page.locator('#status')).toHaveText(
+      'Some of your typing may not have reached this window. Check what appeared.',
+    )
   })
 }
+
+test('a paste over the cap is refused before anything is sent, and typing goes on', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__sent = []
+    window.__paneInputHook = async (_command, args) => {
+      window.__sent.push([args.sequence, args.bytes.length])
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    window.__emulators[0].type(`\x1b[200~${'p'.repeat(4 * 1024 * 1024)}\x1b[201~`)
+  })
+  await expect(page.locator('#status')).toHaveText(
+    'This paste is too large to send (over 4 MiB). Paste less of it.',
+  )
+  expect(await page.evaluate(() => window.__sent)).toEqual([])
+  await page.evaluate(() => window.__emulators[0].type('Z'))
+  await expect.poll(() => page.evaluate(() => window.__sent)).toEqual([[1, 1]])
+})
 
 test('each page uses a new identity on all its pane input calls', async ({ page }) => {
   await open(page)
@@ -4681,10 +4748,7 @@ test('a terminal reply follows the paste admissions without waiting for completi
     'pane_input_enqueue',
     'pane_reply_enqueue',
   ])
-  expect(admissions.slice(0, 2).map(([, args]) => args.group)).toEqual([
-    { id: 1, start: true, end: false },
-    { id: 1, start: false, end: true },
-  ])
+  expect(admissions.every(([, args]) => !('group' in args))).toBe(true)
   await page.evaluate(() => window.__releasePaneWait({ ok: true }))
 })
 
@@ -4711,7 +4775,7 @@ test('every key the human types reaches the pane in order, flagged as nothing', 
     .toEqual(
       ['h', '\r', '\x1b[A', '\x1b[<', '\x1b', '\x1b[2'].map((start) => [
         start,
-        ['pageId', 'id', 'generation', 'sequence', 'bytes', 'group'],
+        ['pageId', 'id', 'generation', 'sequence', 'bytes'],
       ]),
     )
 })

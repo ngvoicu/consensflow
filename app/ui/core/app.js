@@ -382,6 +382,14 @@ const terminals = new TerminalsView(stage, {
   pageId,
   invoke: (command, args) => {
     if (command === 'pane_ack') ackObserver?.(args)
+    // What is typed or answered goes as the call's raw bytes, with its numbers
+    // in a header: a large paste does not travel as a list of numbers.
+    if (command === 'pane_input_enqueue' || command === 'pane_reply_enqueue') {
+      const { bytes, ...call } = args
+      return invoke(command, bytes, {
+        headers: { 'x-cf-pane-input': encodeURIComponent(JSON.stringify(call)) },
+      })
+    }
     return invoke(command, args)
   },
   report,

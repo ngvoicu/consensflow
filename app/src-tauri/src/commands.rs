@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::daemon::RosterHandle;
 use crate::runtime::{AppRuntime, PAGE_STATE_EVENT};
 use cf_bridge::Bridge;
-use cf_panes::input_queue::{InputWork, PageInputCompletion, PageInputGroup};
+use cf_panes::input_queue::{InputWork, PageInputCompletion};
 use cf_panes::output_hub::PaneOutputMessage;
 use cf_panes::validation::{pane_key, validate_seq, validate_size, validate_text};
 
@@ -98,16 +98,74 @@ pub fn pane_page_activate<R: Runtime>(app: AppHandle<R>, page_id: String) -> Val
     }
 }
 
-fn enqueue_page_input<R: Runtime>(
-    app: AppHandle<R>,
+/// What a page call says of itself, in one header (`x-cf-pane-input`, a JSON
+/// object, percent-encoded): its page, pane and number. Its bytes are the
+/// request's body as they are, so a large paste does not travel as a JSON list
+/// of numbers.
+const PAGE_CALL_HEADER: &str = "x-cf-pane-input";
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PageCall {
     page_id: String,
     id: String,
     generation: u64,
     sequence: u64,
-    work: InputWork,
-    group: Option<PageInputGroup>,
+}
+
+fn percent_decoded(text: &str) -> Result<Vec<u8>, String> {
+    let bytes = text.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hex = bytes
+                .get(index + 1..index + 3)
+                .and_then(|pair| std::str::from_utf8(pair).ok())
+                .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+                .ok_or_else(|| "pane input header is not encoded text".to_string())?;
+            decoded.push(hex);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    Ok(decoded)
+}
+
+fn page_call(request: &tauri::ipc::Request<'_>) -> Result<(PageCall, Vec<u8>), String> {
+    let header = request
+        .headers()
+        .get(PAGE_CALL_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| "pane input needs its header".to_string())?;
+    let call: PageCall = serde_json::from_slice(&percent_decoded(header)?)
+        .map_err(|_| "pane input header is not a page call".to_string())?;
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => Ok((call, bytes.clone())),
+        tauri::ipc::InvokeBody::Json(_) => Err("pane input bytes must be a raw body".to_string()),
+    }
+}
+
+fn enqueue_page_input<R: Runtime>(
+    app: &AppHandle<R>,
+    request: &tauri::ipc::Request<'_>,
+    reply: bool,
 ) -> Value {
-    let key = match pane_key(&id, generation) {
+    match page_call(request) {
+        Ok((call, bytes)) => enqueue_page_call(app, &call, bytes, reply),
+        Err(error) => json!({"ok":false,"error":error}),
+    }
+}
+
+fn enqueue_page_call<R: Runtime>(
+    app: &AppHandle<R>,
+    call: &PageCall,
+    bytes: Vec<u8>,
+    reply: bool,
+) -> Value {
+    let key = match pane_key(&call.id, call.generation) {
         Ok(key) => key,
         Err(error) => return json!({"ok":false,"error":error}),
     };
@@ -115,52 +173,33 @@ fn enqueue_page_input<R: Runtime>(
         let state = app.state::<AppRuntime>();
         Arc::clone(&state.inputs)
     };
-    let human = matches!(&work, InputWork::Typed(_));
-    match inputs.enqueue_page(&page_id, key, sequence, work, human, group) {
+    let work = if reply {
+        InputWork::Reply(bytes)
+    } else {
+        InputWork::Typed(bytes)
+    };
+    match inputs.enqueue_page(&call.page_id, key, call.sequence, work, !reply) {
         Ok(ticket) => json!({"ok":true,"ticket":ticket}),
         Err(error) => json!({"ok":false,"error":error}),
     }
 }
 
+/// What the human types or pastes, in one call: the bytes of a key, or of a
+/// paste whole with its markers.
 #[tauri::command]
 pub fn pane_input_enqueue<R: Runtime>(
     app: AppHandle<R>,
-    page_id: String,
-    id: String,
-    generation: u64,
-    sequence: u64,
-    bytes: Vec<u8>,
-    group: Option<PageInputGroup>,
+    request: tauri::ipc::Request<'_>,
 ) -> Value {
-    enqueue_page_input(
-        app,
-        page_id,
-        id,
-        generation,
-        sequence,
-        InputWork::Typed(bytes),
-        group,
-    )
+    enqueue_page_input(&app, &request, false)
 }
 
 #[tauri::command]
 pub fn pane_reply_enqueue<R: Runtime>(
     app: AppHandle<R>,
-    page_id: String,
-    id: String,
-    generation: u64,
-    sequence: u64,
-    bytes: Vec<u8>,
+    request: tauri::ipc::Request<'_>,
 ) -> Value {
-    enqueue_page_input(
-        app,
-        page_id,
-        id,
-        generation,
-        sequence,
-        InputWork::Reply(bytes),
-        None,
-    )
+    enqueue_page_input(&app, &request, true)
 }
 
 /// A call's fate is unknown to the page, which will not send it again: the
@@ -172,17 +211,13 @@ pub fn pane_input_skip<R: Runtime>(
     id: String,
     generation: u64,
     sequence: u64,
-    group: Option<PageInputGroup>,
 ) -> Value {
     let key = match pane_key(&id, generation) {
         Ok(key) => key,
         Err(error) => return json!({"ok":false,"error":error}),
     };
     let state = app.state::<AppRuntime>();
-    match state
-        .inputs
-        .skip_page_sequence(&page_id, &key, sequence, group)
-    {
+    match state.inputs.skip_page_sequence(&page_id, &key, sequence) {
         Ok(()) => json!({"ok":true}),
         Err(error) => json!({"ok":false,"error":error}),
     }
@@ -482,6 +517,73 @@ fn agents_url(roster: &RosterHandle, page: &str) -> Result<tauri::Url, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A page call as the page makes it: the numbers in one header, the bytes
+    /// as the body.
+    fn ipc_request(command: &str, mut args: Value) -> tauri::webview::InvokeRequest {
+        let bytes = args["bytes"].as_array().map(|bytes| {
+            bytes
+                .iter()
+                .map(|byte| byte.as_u64().expect("a byte") as u8)
+                .collect::<Vec<u8>>()
+        });
+        if bytes.is_some() {
+            args.as_object_mut().expect("args").remove("bytes");
+        }
+        ipc_request_bytes(command, args, bytes)
+    }
+
+    fn ipc_request_bytes(
+        command: &str,
+        mut args: Value,
+        bytes: Option<Vec<u8>>,
+    ) -> tauri::webview::InvokeRequest {
+        args["pageId"] = "test-page".into();
+        let mut headers = tauri::http::HeaderMap::new();
+        let body = if let Some(bytes) = bytes {
+            let encoded = args
+                .to_string()
+                .bytes()
+                .map(|byte| format!("%{byte:02X}"))
+                .collect::<String>();
+            headers.insert(PAGE_CALL_HEADER, encoded.parse().expect("a header value"));
+            tauri::ipc::InvokeBody::Raw(bytes)
+        } else {
+            tauri::ipc::InvokeBody::Json(args)
+        };
+        tauri::webview::InvokeRequest {
+            cmd: command.into(),
+            callback: tauri::ipc::CallbackFn(0),
+            error: tauri::ipc::CallbackFn(1),
+            url: "tauri://localhost".parse().expect("invoke URL"),
+            body,
+            headers,
+            invoke_key: tauri::test::INVOKE_KEY.to_string(),
+        }
+    }
+
+    /// A call made straight to the admission, as the page's call is once its
+    /// header is read.
+    fn page_input<R: Runtime>(
+        app: &AppHandle<R>,
+        page: &str,
+        key: &PaneKey,
+        sequence: u64,
+        bytes: &[u8],
+    ) -> Value {
+        enqueue_page_call(
+            app,
+            &PageCall {
+                page_id: page.into(),
+                id: key.id.clone(),
+                generation: key.generation,
+                sequence,
+            },
+            bytes.to_vec(),
+            false,
+        )
+    }
+
     #[cfg(unix)]
     use std::collections::HashMap;
     #[cfg(unix)]
@@ -509,7 +611,7 @@ mod tests {
     #[cfg(unix)]
     use cf_panes::pty::{PaneEnvironment, PaneKey, PaneTable};
     #[cfg(unix)]
-    use cf_panes::validation::MAX_INPUT_BYTES;
+    use cf_panes::validation::{MAX_INPUT_BYTES, MAX_PAGE_INPUT_BYTES};
     #[cfg(unix)]
     use cf_proto::bridge::Role;
 
@@ -606,6 +708,22 @@ mod tests {
         assert!(agents_url(&roster, "../etc").is_err());
     }
 
+    /// The page refuses a paste over its cap before it sends anything: its
+    /// number is the host's.
+    #[test]
+    fn the_pages_paste_cap_is_the_hosts() {
+        let page = include_str!("../../ui/terminal-link.js");
+        let declared = format!("const MAX_PASTE_BYTES = {MAX_PAGE_INPUT_BYTES}\n");
+        let source_form = format!(
+            "const MAX_PASTE_BYTES = {} * 1024 * 1024\n",
+            MAX_PAGE_INPUT_BYTES / (1024 * 1024)
+        );
+        assert!(
+            page.contains(&declared) || page.contains(&source_form),
+            "terminal-link.js must declare MAX_PASTE_BYTES as the host's cap"
+        );
+    }
+
     #[test]
     fn every_tauri_command_that_waits_on_the_daemon_or_a_pty_is_async() {
         let source = include_str!("commands.rs");
@@ -686,22 +804,15 @@ mod tests {
         for index in 0..1000 {
             let response_sender = responses.clone();
             webview.clone().on_message(
-                tauri::webview::InvokeRequest {
-                    cmd: "pane_input_enqueue".into(),
-                    callback: tauri::ipc::CallbackFn(0),
-                    error: tauri::ipc::CallbackFn(1),
-                    url: "tauri://localhost".parse().expect("invoke URL"),
-                    body: tauri::ipc::InvokeBody::Json(json!({
-                        "pageId":"test-page",
-                        "group":null,
+                ipc_request(
+                    "pane_input_enqueue",
+                    json!({
                         "id":key.id,
                         "generation":key.generation,
                         "sequence":index + 1,
                         "bytes":format!("{index:04}|").into_bytes(),
-                    })),
-                    headers: Default::default(),
-                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
-                },
+                    }),
+                ),
                 Box::new(move |_webview, _command, response, _callback, _error| {
                     response_sender
                         .send(response)
@@ -811,43 +922,49 @@ mod tests {
                 .expect("page events")
                 .push(serde_json::from_str::<Value>(event.payload()).expect("page event JSON"));
         });
-        let invoke = |command: &str, mut args: Value| {
-            args["pageId"] = "test-page".into();
-            if command == "pane_input_enqueue" {
-                args["group"] = Value::Null;
-            }
-            tauri::test::get_ipc_response(
-                &webview,
-                tauri::webview::InvokeRequest {
-                    cmd: command.into(),
-                    callback: tauri::ipc::CallbackFn(0),
-                    error: tauri::ipc::CallbackFn(1),
-                    url: "tauri://localhost".parse().expect("invoke URL"),
-                    body: tauri::ipc::InvokeBody::Json(args),
-                    headers: Default::default(),
-                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
-                },
-            )
-            .expect("command succeeds")
-            .deserialize::<Value>()
-            .expect("command response JSON")
+        let invoke = |command: &str, args: Value| {
+            tauri::test::get_ipc_response(&webview, ipc_request(command, args))
+                .expect("command succeeds")
+                .deserialize::<Value>()
+                .expect("command response JSON")
         };
 
-        let oversized = invoke(
-            "pane_input_enqueue",
-            json!({
-                "id":key.id,
-                "generation":1,
-                "sequence":1,
-                "bytes":vec![b'P'; MAX_INPUT_BYTES + 1],
-            }),
-        );
+        let oversized = tauri::test::get_ipc_response(
+            &webview,
+            ipc_request_bytes(
+                "pane_input_enqueue",
+                json!({"id":key.id,"generation":1,"sequence":1}),
+                Some(vec![b'P'; MAX_PAGE_INPUT_BYTES + 1]),
+            ),
+        )
+        .expect("command succeeds")
+        .deserialize::<Value>()
+        .expect("command response JSON");
         assert_eq!(
             oversized,
             json!({
                 "ok":false,
-                "error":format!("pane input exceeds {MAX_INPUT_BYTES} bytes"),
+                "error":format!("pane input exceeds {MAX_PAGE_INPUT_BYTES} bytes"),
             })
+        );
+        // The call's bytes are its raw body: a body that is not raw is refused.
+        let listed = tauri::test::get_ipc_response(
+            &webview,
+            tauri::webview::InvokeRequest {
+                body: tauri::ipc::InvokeBody::Json(json!({"bytes":[75]})),
+                ..ipc_request_bytes(
+                    "pane_input_enqueue",
+                    json!({"id":key.id,"generation":1,"sequence":1}),
+                    Some(vec![]),
+                )
+            },
+        )
+        .expect("command succeeds")
+        .deserialize::<Value>()
+        .expect("command response JSON");
+        assert_eq!(
+            listed,
+            json!({"ok":false,"error":"pane input bytes must be a raw body"})
         );
         let first = invoke(
             "pane_input_enqueue",
@@ -892,12 +1009,17 @@ mod tests {
             json!({"ok":false,"error":"pane-input-ticket-not-found"})
         );
         // A rejected page input does not consume its sequence.
-        let rejected = invoke(
-            "pane_input_enqueue",
-            json!({
-                "id":key.id,"generation":1,"sequence":3,"bytes":vec![b'P'; MAX_INPUT_BYTES + 1],
-            }),
-        );
+        let rejected = tauri::test::get_ipc_response(
+            &webview,
+            ipc_request_bytes(
+                "pane_input_enqueue",
+                json!({"id":key.id,"generation":1,"sequence":3}),
+                Some(vec![b'P'; MAX_PAGE_INPUT_BYTES + 1]),
+            ),
+        )
+        .expect("command succeeds")
+        .deserialize::<Value>()
+        .expect("command response JSON");
         assert_eq!(rejected["ok"], false);
         let second = invoke(
             "pane_reply_enqueue",
@@ -1020,26 +1142,11 @@ mod tests {
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .expect("build mock webview");
-        let invoke = |command: &str, mut args: Value| {
-            args["pageId"] = "test-page".into();
-            if command == "pane_input_enqueue" {
-                args["group"] = Value::Null;
-            }
-            tauri::test::get_ipc_response(
-                &webview,
-                tauri::webview::InvokeRequest {
-                    cmd: command.into(),
-                    callback: tauri::ipc::CallbackFn(0),
-                    error: tauri::ipc::CallbackFn(1),
-                    url: "tauri://localhost".parse().expect("invoke URL"),
-                    body: tauri::ipc::InvokeBody::Json(args),
-                    headers: Default::default(),
-                    invoke_key: tauri::test::INVOKE_KEY.to_string(),
-                },
-            )
-            .expect("command succeeds")
-            .deserialize::<Value>()
-            .expect("command response JSON")
+        let invoke = |command: &str, args: Value| {
+            tauri::test::get_ipc_response(&webview, ipc_request(command, args))
+                .expect("command succeeds")
+                .deserialize::<Value>()
+                .expect("command response JSON")
         };
 
         let pasted = [paste, b"\r"].concat();
@@ -1168,38 +1275,14 @@ mod tests {
         };
 
         subscribe("old");
-        let first = pane_input_enqueue(
-            handle.clone(),
-            "old".into(),
-            key.id.clone(),
-            1,
-            1,
-            b"A".to_vec(),
-            None,
-        );
+        let first = page_input(&handle, "old", &key, 1, b"A");
         assert_eq!(wait("old", &first["ticket"]), json!({"ok":true}));
         // The page goes away with this one admitted and never waited for.
-        let orphaned = pane_input_enqueue(
-            handle.clone(),
-            "old".into(),
-            key.id.clone(),
-            1,
-            2,
-            b"B".to_vec(),
-            None,
-        );
+        let orphaned = page_input(&handle, "old", &key, 2, b"B");
         assert_eq!(orphaned["ok"], true);
 
         subscribe("new");
-        let typed = pane_input_enqueue(
-            handle.clone(),
-            "new".into(),
-            key.id.clone(),
-            1,
-            1,
-            b"C".to_vec(),
-            None,
-        );
+        let typed = page_input(&handle, "new", &key, 1, b"C");
         assert_eq!(typed["ok"], true, "the new page's first keystroke: {typed}");
         assert_eq!(wait("new", &typed["ticket"]), json!({"ok":true}));
         assert_eq!(
@@ -1372,14 +1455,12 @@ mod tests {
 
         let blocked_outcomes = (0..512)
             .map(|index| {
-                pane_input_enqueue(
-                    handle.clone(),
-                    "test-page".into(),
-                    blocked_key.id.clone(),
-                    blocked_key.generation,
+                page_input(
+                    &handle,
+                    "test-page",
+                    &blocked_key,
                     index + 1,
-                    vec![b'x'; MAX_INPUT_BYTES],
-                    None,
+                    &vec![b'x'; MAX_INPUT_BYTES],
                 )
             })
             .collect::<Vec<_>>();
@@ -1387,15 +1468,7 @@ mod tests {
 
         let (responsive_sender, responsive_receiver) = mpsc::channel();
         let responsive_handle = handle.clone();
-        let responsive_admission = pane_input_enqueue(
-            handle.clone(),
-            "test-page".into(),
-            responsive_key.id.clone(),
-            responsive_key.generation,
-            1,
-            b"R".to_vec(),
-            None,
-        );
+        let responsive_admission = page_input(&handle, "test-page", &responsive_key, 1, b"R");
         assert_eq!(responsive_admission["ok"], true);
         let responsive_ticket = responsive_admission["ticket"]
             .as_str()

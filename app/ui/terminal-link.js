@@ -1,6 +1,9 @@
 import { paneKey } from './term.js'
 
 const INPUT_CHUNK_BYTES = 32 * 1024
+// The largest paste: the host's own cap (`MAX_PAGE_INPUT_BYTES`), checked here
+// too so that a larger one is refused before any of it is sent.
+const MAX_PASTE_BYTES = 4 * 1024 * 1024
 const MAX_CONTROL_BYTES = 64 * 1024
 const ADMISSION_TIMEOUT_MS = 1500
 const WAIT_TIMEOUT_MS = 30_000
@@ -58,7 +61,18 @@ function inputChunks(data) {
   else if (previous < bytes.length)
     regions.push({ start: previous, end: bytes.length, paste: false })
 
-  return regions.map((region) => {
+  // A paste goes in as one call, whole with its markers, or not at all: a call
+  // that is lost then loses the paste and never splits it. What is typed is cut
+  // into calls at whole units (a character, an escape sequence).
+  return regions.flatMap((region) => {
+    if (region.paste) {
+      if (region.end - region.start > MAX_PASTE_BYTES) {
+        throw new Error(
+          `This paste is too large to send (over ${MAX_PASTE_BYTES / (1024 * 1024)} MiB). Paste less of it.`,
+        )
+      }
+      return [bytes.subarray(region.start, region.end)]
+    }
     const chunks = []
     let start = region.start
     while (start < region.end) {
@@ -74,16 +88,16 @@ function inputChunks(data) {
       chunks.push(bytes.subarray(start, end))
       start = end
     }
-    return { chunks, grouped: region.paste || chunks.length > 1 }
+    return chunks
   })
 }
 
 /**
  * The page's side of the terminals: bytes from the Rust pane host into each
  * pane's emulator (in order, acknowledged only after the emulator committed
- * them), keystrokes and emulator replies back (in chunks, each admitted with a
- * ticket and waited for, so a large paste keeps later typing behind it), and
- * the emulator's size into the pane. Pane ownership stays in Rust.
+ * them), keystrokes and emulator replies back (one call each, a paste whole,
+ * each admitted with a number and a ticket, in one order), and the emulator's
+ * size into the pane. Pane ownership stays in Rust.
  *
  * The host stops reading a pane once a window of its output is owed an
  * acknowledgement, and its program then waits on its terminal. So each message
@@ -100,12 +114,10 @@ export class TerminalLink {
   /** By pane: the last message drawn, the last acknowledged, and whether an acknowledgement is on its way. */
   #acks = new Map()
   #inputs = new Map()
-  #admissions = new Map()
   #sequences = new Map()
   #sizes = new Map()
   #retired = new Set()
   #pageId
-  #nextGroup = 1
 
   constructor({ invoke, registry, report, pageId = crypto.randomUUID() }) {
     this.#invoke = invoke
@@ -180,7 +192,6 @@ export class TerminalLink {
   retire(key) {
     this.#retired.add(key)
     this.#inputs.delete(key)
-    this.#admissions.delete(key)
     this.#sequences.delete(key)
     this.#sizes.delete(key)
     this.#registry.retire(key)
@@ -209,33 +220,15 @@ export class TerminalLink {
 
   async #stream(command, pane, data) {
     const key = paneKey(pane)
-    const regions = inputChunks(data)
-    // Keys and replies go in one order, one admission at a time: a whole
-    // paste takes the admission turn together.
+    const calls = inputChunks(data)
+    // Keys and replies go in one order, one admission at a time: each call
+    // finishes its admission before the next one starts.
     const streams = this.#inputs
     const previous = streams.get(key)
     const submit = async () => {
-      for (const region of regions) {
-        const groupId = region.grouped ? this.#nextGroup++ : null
-        const send = async (held) => {
-          for (let index = 0; index < region.chunks.length; index += 1) {
-            if (this.#retired.has(key)) return false
-            const group =
-              groupId === null
-                ? null
-                : {
-                    id: groupId,
-                    start: index === 0,
-                    end: index === region.chunks.length - 1,
-                  }
-            if (!(await this.#chunk(command, pane, region.chunks[index], group, held))) return false
-          }
-          return true
-        }
-        const sent = region.grouped
-          ? await this.#exclusive(key, () => send(true))
-          : await send(false)
-        if (!sent) return
+      for (const bytes of calls) {
+        if (this.#retired.has(key)) return
+        if (!(await this.#chunk(command, pane, bytes))) return
       }
     }
     const stream = previous ? previous.then(submit, submit) : submit()
@@ -244,17 +237,6 @@ export class TerminalLink {
       await stream
     } finally {
       if (streams.get(key) === stream) streams.delete(key)
-    }
-  }
-
-  async #exclusive(key, send) {
-    const previous = this.#admissions.get(key)
-    const admission = previous ? previous.then(send, send) : send()
-    this.#admissions.set(key, admission)
-    try {
-      return await admission
-    } finally {
-      if (this.#admissions.get(key) === admission) this.#admissions.delete(key)
     }
   }
 
@@ -277,7 +259,7 @@ export class TerminalLink {
    * count past its number, so the original either went in before this or is
    * refused when it comes late. The skip itself may be repeated.
    */
-  async #skip(pane, sequence, group) {
+  async #skip(pane, sequence) {
     let failures = 0
     const key = paneKey(pane)
     while (!this.#retired.has(key)) {
@@ -289,7 +271,6 @@ export class TerminalLink {
             id: pane.id,
             generation: pane.generation,
             sequence,
-            ...(group?.end ? { group } : {}),
           },
           ADMISSION_TIMEOUT_MS,
         )
@@ -307,7 +288,7 @@ export class TerminalLink {
    * the caller may retry the same number. A call that ends unknown (a timeout,
    * a lost answer) is skipped and its keys may be lost.
    */
-  async #admit(command, pane, bytes, group) {
+  async #admit(command, pane, bytes) {
     const key = paneKey(pane)
     if (this.#retired.has(key)) return null
     const sequence = (this.#sequences.get(key) ?? 0) + 1
@@ -320,8 +301,7 @@ export class TerminalLink {
           id: pane.id,
           generation: pane.generation,
           sequence,
-          bytes: Array.from(bytes),
-          ...(command === 'pane_input_enqueue' ? { group } : {}),
+          bytes,
         },
         ADMISSION_TIMEOUT_MS,
       )
@@ -335,18 +315,16 @@ export class TerminalLink {
       return answer
     }
     this.#sequences.set(key, sequence)
-    await this.#skip(pane, sequence, group)
+    await this.#skip(pane, sequence)
     return this.#retired.has(key) ? null : { ok: false, error: 'pane-input-lost' }
   }
 
-  async #chunk(command, pane, bytes, group, held) {
+  async #chunk(command, pane, bytes) {
     const key = paneKey(pane)
     let admitted
     let full = 0
     do {
-      admitted = held
-        ? await this.#admit(command, pane, bytes, group)
-        : await this.#exclusive(key, () => this.#admit(command, pane, bytes, group))
+      admitted = await this.#admit(command, pane, bytes)
       if (admitted === null) return false
       if (
         admitted.error !== "the pane's input queue is full" &&
