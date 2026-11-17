@@ -10,6 +10,21 @@ use crate::record::Record;
 use crate::seams::EngineError;
 
 impl Dispatcher {
+    /// An added-directory question the watch could not answer.
+    pub(super) fn tell_added_held(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+    ) -> Result<(), EngineError> {
+        self.note_to_human(
+            project,
+            format!(
+                "@{}'s window asks about a directory ConsensFlow added, but ConsensFlow could not answer it. Answer it in that window; its work will go on afterwards.",
+                participant.handle
+            ),
+        )
+    }
+
     /// The note for a question ConsensFlow answered yes to in the project's folder: the
     /// first time the project's windows ask of `folder`, in the words of the question
     /// asked (the grants of the folder's settings, or the folder's trust alone).

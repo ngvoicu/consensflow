@@ -15,6 +15,12 @@
 
 use crate::contract::Dialog;
 
+// The release head's Claude prompt reader. Its complete production portion is
+// kept as it was, including helpers the dialog comparison does not itself call.
+#[allow(dead_code)]
+#[path = "base_claude_trust.rs"]
+mod base_claude_trust;
+
 /// `shared/input_box.rs`'s `is_rule` at `5b7acff7f`: a rule drawn across the screen.
 fn is_rule(line: &str) -> bool {
     let line = line.trim();
@@ -280,12 +286,9 @@ const OFFER_CLOSES_AFTER_S: u32 = 30;
 /// and for Claude Code's window the seconds its offers close after (the default `Window::dialog` is the
 /// first two; Claude's override adds the last).
 ///
-/// **What is borrowed from the code as it is now**: the window's `shows_prompt`, which is
-/// `claude::trust::shows_prompt` for Claude Code, `muse::screen::shows_prompt` for Muse Code and the
-/// default (false) for Codex, Devin and Pi. **Why that is safe**: this branch changes none of the files that
-/// hold them, and a test below pins that: the files are byte for byte what `5b7acff7f` has (a hash of each),
-/// and the adapters of Codex, Devin and Pi define no `shows_prompt`. A change to one of those files fails
-/// the test, which says to freeze a copy of the old code here before the new code is judged by it.
+/// Claude's prompt reader is a frozen copy of the release head's. Muse's current
+/// reader is borrowed and pinned below; Codex, Devin and Pi use the pinned default
+/// (false). The shared helpers used by the frozen Claude reader are pinned too.
 pub fn base_window_dialog(
     harness: cf_proto::agents::Harness,
     window: &dyn crate::contract::Window,
@@ -296,7 +299,11 @@ pub fn base_window_dialog(
             && OFFERS_CLOSING.contains(&shown.dialog.question.as_str()))
         .then_some(OFFER_CLOSES_AFTER_S);
         Dialog {
-            prompt_below: window.shows_prompt(&shown.below),
+            prompt_below: if harness == cf_proto::agents::Harness::Claude {
+                base_claude_trust::shows_prompt(&shown.below)
+            } else {
+                window.shows_prompt(&shown.below)
+            },
             closes_after_s,
             ..shown.dialog
         }
@@ -390,16 +397,11 @@ mod tests {
     /// The code [`super::base_window_dialog`] borrows is the release head's.
     #[test]
     fn the_prompt_readers_the_release_heads_windows_are_borrowed_for_are_the_release_heads() {
-        let pinned: [(&str, &str, u64); 5] = [
+        let pinned: [(&str, &str, u64); 4] = [
             (
-                "claude/adapter.rs",
-                include_str!("../claude/adapter.rs"),
-                0x60cfc152347ba0cb,
-            ),
-            (
-                "claude/trust.rs",
-                include_str!("../claude/trust.rs"),
-                0xffd85053667df919,
+                "testing/base_claude_trust.rs",
+                include_str!("base_claude_trust.rs"),
+                0x3c03499160ef72e1,
             ),
             (
                 "shared/trust.rs",
@@ -441,5 +443,16 @@ mod tests {
             ),
             "the default shows_prompt is not false"
         );
+    }
+
+    #[test]
+    fn the_frozen_claude_prompt_reader_keeps_the_release_heads_choices() {
+        let screen = [
+            "⏵⏵ bypass permissions on".to_owned(),
+            "❯ No, exit".to_owned(),
+            "  Yes, add it".to_owned(),
+        ];
+        assert!(super::base_claude_trust::shows_prompt(&screen));
+        assert!(!crate::claude::trust::shows_prompt(&screen));
     }
 }

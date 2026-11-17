@@ -254,6 +254,18 @@ impl Adapter for ClaudeAdapter {
                 Some(launch.directory),
             )?;
             let role = install::role(&self.env, launch)?;
+            // Only the directories made by this launch's role writer and Specmint
+            // writer can be approved in Claude's added-directory dialog.
+            let mut added: Vec<String> = role
+                .windows(2)
+                .filter(|pair| pair[0] == "--add-dir")
+                .map(|pair| pair[1].clone())
+                .collect();
+            let real: Vec<String> = added
+                .iter()
+                .filter_map(|folder| crate::shared::directory::real_path(folder).ok())
+                .collect();
+            added.extend(real);
             // Claude keeps a conversation only once something was said in
             // it, and what it kept can be gone since: the engine asks
             // `resumable` first, but a transcript that is not there has
@@ -363,6 +375,7 @@ impl Adapter for ClaudeAdapter {
                         .filter(|model| !model.is_empty())
                         .map(str::to_owned),
                     trusts: trust::trusts(launch.directory),
+                    added,
                     directory: launch.directory.to_owned(),
                     hook_ask_ms: self
                         .env
@@ -499,6 +512,8 @@ struct ClaudeWindow {
     model: Option<String>,
     /// What a yes to Claude Code's question about the window's folder trusts.
     trusts: Trusts,
+    /// The exact directories this launch gave Claude, including their real names.
+    added: Vec<String>,
     /// The window's folder, whose local settings keep what Claude Code was told of the
     /// project's servers.
     directory: String,
@@ -647,7 +662,14 @@ impl Window for ClaudeWindow {
     }
 
     fn toward_trust(&self, screen: &[String]) -> Option<Question> {
+        if super::trust::names_added_choices(screen) {
+            return super::trust::added(screen, &self.added);
+        }
         super::trust::toward_trust(screen)
+    }
+
+    fn needs_trust_context(&self, screen: &[String]) -> bool {
+        super::trust::names_added_choices(screen)
     }
 
     fn shows_prompt(&self, screen: &[String]) -> bool {
