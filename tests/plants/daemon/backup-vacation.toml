@@ -714,10 +714,8 @@ meant = "a_working_task_of_a_member_out_of_quota_starts_over_on_its_backup_in_a_
 runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/giving.rs"
-find = '''    release_inside(store, project_id, number, because, false)
-}'''
-replace = '''    release_inside(store, project_id, number, because, true)
-}'''
+find = '''release_told(store, project_id, number, because, false, false)'''
+replace = '''release_told(store, project_id, number, because, true, false)'''
 
 [[plant]]
 name = "bkv engine: rule: a busy model moves every task of the member"
@@ -726,7 +724,7 @@ runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher"
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''.is_none_or(|tries| *tries <= BUSY_BACKOFF_MS.len())'''
-replace = '''.is_none_or(|_| false)'''
+replace = '''.is_some_and(|tries| *tries < 0)'''
 
 [[plant]]
 name = "bkv engine: rule: the old window is left open"
@@ -736,6 +734,10 @@ runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher"
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''if open && !queued && !this.retire(&held).await? {'''
 replace = '''if false {'''
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''let pinned = std::mem::replace(&mut held.window.borrow_mut().pinned, false);'''
+replace = '''let pinned = false;'''
 
 [[plant]]
 name = "bkv engine: rule: the move tells its giver twice"

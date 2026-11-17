@@ -449,7 +449,14 @@ fn the_old_window_is_retired_even_one_the_human_reopened() {
     let session = tiers.assignee(1);
     let window = context.host.last(&session).expect("its window").pane;
     context.open_window(tiers.project.id, &session).unwrap();
-    out(&context, &tiers, "zeus", &soon(&context, 3));
+    // A member that needs an edit is no one whose window closes of itself: only the move does.
+    let zeus = tiers.id("zeus");
+    context
+        .ledger
+        .borrow()
+        .sqlite()
+        .execute("UPDATE participant SET needs_edit = 1 WHERE id = ?", [zeus])
+        .unwrap();
     passes(&context, 4);
     assert_eq!(with(&tiers, 1), backup.handle);
     assert!(
