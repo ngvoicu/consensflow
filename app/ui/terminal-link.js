@@ -68,7 +68,7 @@ function inputChunks(data) {
       if (crossed) end = crossed.start === start ? crossed.end : crossed.start
       if (end - start > MAX_CONTROL_BYTES || end <= start) {
         throw new Error(
-          'This input contains a control sequence too long to send. Paste it in smaller pieces.',
+          'This input contains a control sequence too long to send. Remove that sequence and paste again.',
         )
       }
       chunks.push(bytes.subarray(start, end))

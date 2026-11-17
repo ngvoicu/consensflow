@@ -16562,7 +16562,7 @@ test('an oversized control sequence is refused before any pane input is sent', a
     window.__emulators[0].type(`\x1b]0;${'q'.repeat(65536)}\x07`)
   })
   await expect(page.locator('#status')).toHaveText(
-    'This input contains a control sequence too long to send. Paste it in smaller pieces.',
+    'This input contains a control sequence too long to send. Remove that sequence and paste again.',
   )
   expect(await page.evaluate(() => window.__paneChunks.length)).toBe(0)
 })
