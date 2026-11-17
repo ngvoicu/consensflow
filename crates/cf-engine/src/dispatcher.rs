@@ -880,13 +880,8 @@ impl Dispatcher {
         let listed = self.seams.ledger.borrow().projects()?;
         let mut projects = Vec::with_capacity(listed.len());
         for project in listed {
-            if project.state == "open" {
-                let moved = self.hand_work_to_backups(&project).await?;
-                if self.assign_open_tasks(&project)? || moved {
-                    projects.push(self.known_project(project.id)?);
-                } else {
-                    projects.push(project);
-                }
+            if project.state == "open" && self.assign_open_tasks(&project)? {
+                projects.push(self.known_project(project.id)?);
             } else {
                 projects.push(project);
             }

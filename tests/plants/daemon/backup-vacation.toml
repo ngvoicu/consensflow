@@ -592,9 +592,9 @@ name = "bkv engine: rule: the sweep never hands work on"
 meant = "a_queued_task_of_a_member_refused_for_its_quota_goes_to_its_free_backup"
 runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
 [[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '''let moved = self.hand_work_to_backups(&project).await?;'''
-replace = '''let moved = false;'''
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''let mut assigned = self.hand_work_to_backups(project)?;'''
+replace = '''let mut assigned = false;'''
 
 [[plant]]
 name = "bkv engine: rule: a task the human paused is handed on too"
@@ -725,19 +725,6 @@ runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher"
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''.is_none_or(|tries| *tries <= BUSY_BACKOFF_MS.len())'''
 replace = '''.is_some_and(|tries| *tries < 0)'''
-
-[[plant]]
-name = "bkv engine: rule: the old window is left open"
-meant = "the_old_window_is_retired_even_one_the_human_reopened"
-runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
-[[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = '''if open && !queued && !this.retire(&held).await? {'''
-replace = '''if false {'''
-[[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = '''let pinned = std::mem::replace(&mut held.window.borrow_mut().pinned, false);'''
-replace = '''let pinned = false;'''
 
 [[plant]]
 name = "bkv engine: rule: the move tells its giver twice"

@@ -439,17 +439,59 @@ fn a_busy_model_moves_only_the_task_whose_own_tries_are_spent_not_the_one_at_wor
     assert_eq!(tiers.assignee(2), second);
 }
 
+/// A pending read of one session's window does not hold the pass: a sweep that waited on it
+/// kept every other step, and an unrelated note to the chief, queued.
 #[test]
-fn the_old_window_is_retired_even_one_the_human_reopened() {
+fn a_pending_read_of_one_session_does_not_hold_the_pass_when_another_session_goes_out() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    backed(&context, &tiers, "zeus");
+    tiers.open();
+    tiers.open_body("Lexer");
+    passes(&context, 3);
+    let (first, second) = (tiers.assignee(1), tiers.assignee(2));
+    assert_ne!(first, second);
+    let launch = context.adapter.agent(&first).launch;
+    let gate = context
+        .adapter
+        .observe_holds
+        .hold(move |args| args[0]["launch"]["launchId"] == launch);
+    context.adapter.refuse(
+        &second,
+        exhausted(Some(&now(&context)), Some(&soon(&context, 3))),
+    );
+    context.pass().unwrap();
+    let note = context.note(tiers.project.id, "zeus", "chief", "hello");
+    let pass = context.begin_pass();
+    context.settle();
+    context.advance(60_000);
+    context.settle();
+    let ended = pass.ended();
+    let state = context.message(note.id).state;
+    gate.open();
+    context.settle();
+    assert!(
+        ended,
+        "the pass waited on one session's read; the note is {state}"
+    );
+}
+
+/// A task the human pauses is never moved to the backup. The sweep awaits nothing, so no pause
+/// can come between its look at the task and its move (a sweep that stopped the window first
+/// moved a task the human paused meanwhile).
+#[test]
+fn a_task_the_human_pauses_is_never_moved_to_the_backup() {
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);
     let backup = backed(&context, &tiers, "zeus");
     tiers.open();
     passes(&context, 2);
     let session = tiers.assignee(1);
-    let window = context.host.last(&session).expect("its window").pane;
-    context.open_window(tiers.project.id, &session).unwrap();
-    // A member that needs an edit is no one whose window closes of itself: only the move does.
+    context
+        .ledger
+        .borrow_mut()
+        .pause_task(tiers.project.id, 1, Some("human"), None)
+        .unwrap();
     let zeus = tiers.id("zeus");
     context
         .ledger
@@ -458,11 +500,9 @@ fn the_old_window_is_retired_even_one_the_human_reopened() {
         .execute("UPDATE participant SET needs_edit = 1 WHERE id = ?", [zeus])
         .unwrap();
     passes(&context, 4);
-    assert_eq!(with(&tiers, 1), backup.handle);
-    assert!(
-        context.host.killed().contains(&window),
-        "its window was stopped"
-    );
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert_ne!(with(&tiers, 1), backup.handle);
+    assert_eq!(tiers.assignee(1), session);
 }
 
 #[test]
