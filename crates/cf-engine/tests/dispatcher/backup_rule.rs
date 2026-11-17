@@ -406,3 +406,75 @@ fn a_member_on_vacation_that_needs_an_edit_leaves_a_new_task_waiting_and_its_bac
     assert_eq!(tiers.task(1).task.assignee, None);
     assert_eq!(went(&tiers).len(), 0);
 }
+
+fn busy_refusal(context: &Context) -> Quota {
+    Quota::Busy {
+        at: Some(now(context)),
+        because: "Selected model is at capacity.".to_owned(),
+    }
+}
+
+#[test]
+fn a_busy_model_moves_only_the_task_whose_own_tries_are_spent_not_the_one_at_work() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let backup = backed(&context, &tiers, "zeus");
+    tiers.open();
+    tiers.open_body("Lexer");
+    passes(&context, 3);
+    let (first, second) = (tiers.assignee(1), tiers.assignee(2));
+    assert_ne!(first, second, "two sessions of zeus");
+    assert_eq!(with(&tiers, 1), "zeus");
+    assert_eq!(with(&tiers, 2), "zeus");
+    for wait in [60_000, 120_000, 240_000] {
+        context.adapter.refuse(&first, busy_refusal(&context));
+        passes(&context, 2);
+        context.advance(wait + 1_000);
+        passes(&context, 2);
+    }
+    context.adapter.refuse(&first, busy_refusal(&context));
+    passes(&context, 4);
+    assert_eq!(with(&tiers, 1), backup.handle, "its tries are spent");
+    assert_eq!(with(&tiers, 2), "zeus", "the window at work keeps its task");
+    assert_eq!(tiers.assignee(2), second);
+}
+
+#[test]
+fn the_old_window_is_retired_even_one_the_human_reopened() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let backup = backed(&context, &tiers, "zeus");
+    tiers.open();
+    passes(&context, 2);
+    let session = tiers.assignee(1);
+    let window = context.host.last(&session).expect("its window").pane;
+    context.open_window(tiers.project.id, &session).unwrap();
+    out(&context, &tiers, "zeus", &soon(&context, 3));
+    passes(&context, 4);
+    assert_eq!(with(&tiers, 1), backup.handle);
+    assert!(
+        context.host.killed().contains(&window),
+        "its window was stopped"
+    );
+}
+
+#[test]
+fn the_giver_is_told_once_in_one_line_when_a_task_moves_to_the_backup() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let backup = backed(&context, &tiers, "zeus");
+    tiers.open();
+    passes(&context, 2);
+    out(&context, &tiers, "zeus", &soon(&context, 3));
+    passes(&context, 4);
+    assert_eq!(with(&tiers, 1), backup.handle);
+    let about: Vec<String> = tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|note| {
+            note.contains("T-1 ") && (note.contains("went to") || note.contains("taken back"))
+        })
+        .collect();
+    assert_eq!(about.len(), 1, "{about:?}");
+    assert!(about[0].contains("the backup of @zeus"), "{about:?}");
+}

@@ -8,6 +8,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_base::refusal::Refusal;
@@ -496,7 +497,7 @@ impl Dispatcher {
     /// for them to be accepted, in silence: its card says what it waits for.
     /// Says whether it gave any task out.
     pub(crate) fn assign_open_tasks(&self, project: &ProjectView) -> Result<bool, EngineError> {
-        let mut assigned = self.hand_work_to_backups(project)?;
+        let mut assigned = false;
         let open = self.seams.ledger.borrow().open_tasks(project.id)?;
         for task in open {
             if !task.blocked_by.is_empty() {
@@ -617,7 +618,10 @@ impl Dispatcher {
     /// name, a follow-up (both given by name), the chief's own and a task the human paused stay.
     /// With the backup unable too, the task stays held and goes to whichever of the two is free
     /// first. A member on Vacation rests with its backup. Says whether it moved any task.
-    fn hand_work_to_backups(&self, project: &ProjectView) -> Result<bool, EngineError> {
+    pub(crate) async fn hand_work_to_backups(
+        self: &Rc<Self>,
+        project: &ProjectView,
+    ) -> Result<bool, EngineError> {
         let mut moved = false;
         let mut seen = HashSet::new();
         for owner in project.participants.iter().filter(|owner| {
@@ -673,12 +677,55 @@ impl Dispatcher {
                     {
                         continue;
                     }
+                    // A busy model is refused per request: a window at work on its own task
+                    // runs it, and only a task whose own tries are spent moves.
+                    if matches!(
+                        &why,
+                        NotFree::Out {
+                            held: Held::Busy,
+                            ..
+                        }
+                    ) && self
+                        .scheduler
+                        .busy
+                        .borrow()
+                        .get(&task.id)
+                        .is_none_or(|tries| *tries <= BUSY_BACKOFF_MS.len())
+                    {
+                        continue;
+                    }
+                    // The window on the task is stopped first, even one the human opened, as a
+                    // Reassign does; one that will not stop keeps the task for the next pass.
+                    let holder = self
+                        .known_project(project.id)?
+                        .participants
+                        .into_iter()
+                        .find(|p| Some(&p.handle) == task.assignee.as_ref());
+                    let Some(holder) = holder else { continue };
+                    let record = self.record_of(holder.id);
+                    let (this, held) = (Rc::clone(self), Rc::clone(&record));
+                    let (number, project_id) = (task.number, project.id);
+                    // A task still queued has no turn of its own to stop: its window's open or
+                    // delivery ends with the task's release, as before (a kill would fail it).
+                    let queued = task.state == "queued";
+                    let because = format!("{}; it starts over on its backup", why.words());
+                    let work = async move {
+                        let pinned = std::mem::replace(&mut held.window.borrow_mut().pinned, false);
+                        let open = held.window.borrow().pane.is_some();
+                        if open && !queued && !this.retire(&held).await? {
+                            held.window.borrow_mut().pinned = pinned;
+                            return Ok::<bool, EngineError>(false);
+                        }
+                        this.seams
+                            .ledger
+                            .borrow_mut()
+                            .hand_task_on(project_id, number, &because)?;
+                        Ok(true)
+                    };
+                    if !self.exclusive(&record, work).await.await? {
+                        continue;
+                    }
                     self.scheduler.busy.borrow_mut().remove(&task.id);
-                    self.seams.ledger.borrow_mut().release_task(
-                        project.id,
-                        task.number,
-                        &format!("{}; it starts over on its backup", why.words()),
-                    )?;
                     self.seams.ledger.borrow_mut().assign_task(
                         project.id,
                         task.number,

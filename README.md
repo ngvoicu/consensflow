@@ -77,7 +77,8 @@ passwords and needs no API keys.
   back on their conversations. A member cut mid-turn is told to go on. If a
   member's window cannot come back, its task is paused with the reason.
 - **Quota-aware.** A member works up to 100% of its quota and waits when its
-  harness says it is out, keeping its work in its window until the reset. If
+  harness says it is out, keeping its work in its window until the reset (a
+  member with a free backup does not wait: the backup starts its work over). If
   the account's quota is renewed early, **Try again now** brings it back; for
   harnesses with a shared login, it also brings back chiefs and members across
   projects.

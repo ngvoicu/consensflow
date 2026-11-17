@@ -66,12 +66,12 @@ const BUSY: &str = ": its model is busy, a refusal of its provider for a moment 
 
 /// The words of a hold note of a window whose model was busy, `because` (the harness's own
 /// words): T-`number` is held with `handle` and tried again after a backoff, a few times;
-/// one given by tier (`tiered`) then goes to another free member of its tier, if there is
-/// one. The requester is told once: neither a try nor the task going on is told again, and
+/// one given by tier (`tiered`) then goes to its member's backup if that is free, else to another
+/// free member of its tier, if there is one. The requester is told once: neither a try nor the task going on is told again, and
 /// it is no hold note `tell_goes_on` corrects (`is_hold_note`).
 fn render_busy(number: i64, handle: &str, because: &str, tiered: bool) -> String {
     let then = if tiered {
-        "then gives it to another free member of its tier, or tries every 5 minutes while none is free"
+        "then gives it to its member's backup if that is free, else to another free member of its tier, or tries every 5 minutes while none is free"
     } else {
         "then every 5 minutes"
     };

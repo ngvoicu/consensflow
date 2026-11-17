@@ -22,7 +22,7 @@ use crate::fixtures::{after, assert_match, now, Tiers};
 const AT_CAPACITY: &str = "Selected model is at capacity. Please try a different model.";
 
 /// What the requester is told, once, of T-1's busy model, given by tier.
-const TOLD: &str = r"^T-1 waits with @zeus-amber-pine: its model is busy, a refusal of its provider for a moment and no failure \(Selected model is at capacity\. Please try a different model\.\)\. ConsensFlow tries it again in 1, 2 and 4 minutes, then gives it to another free member of its tier, or tries every 5 minutes while none is free; you are not told of each try\.$";
+const TOLD: &str = r"^T-1 waits with @zeus-amber-pine: its model is busy, a refusal of its provider for a moment and no failure \(Selected model is at capacity\. Please try a different model\.\)\. ConsensFlow tries it again in 1, 2 and 4 minutes, then gives it to its member's backup if that is free, else to another free member of its tier, or tries every 5 minutes while none is free; you are not told of each try\.$";
 
 /// A refusal of the provider for a moment, now, in `words`.
 fn busy(context: &Context, words: &str) -> Quota {
