@@ -116,10 +116,15 @@ pub fn copy_folder_kept(from: &Path, to: &Path) -> io::Result<()> {
 
 /// Copy a Muse login only after removing refresh-named keys, in a private file.
 pub fn copy_muse_login(from: &Path, to: &Path) -> io::Result<()> {
-    use std::io::Write as _;
     let text = std::fs::read_to_string(from)?;
+    copy_muse_login_text(&text, to)
+}
+
+/// Copy the same in-memory login that was checked by the caller.
+fn copy_muse_login_text(text: &str, to: &Path) -> io::Result<()> {
+    use std::io::Write as _;
     let copy =
-        crate::muse::login_copy(&text).map_err(|error| io::Error::other(error.to_string()))?;
+        crate::muse::login_copy(text).map_err(|error| io::Error::other(error.to_string()))?;
     if let Some(folder) = to.parent() {
         crate::door::make_dir_private(folder)
             .map_err(|error| io::Error::other(error.to_string()))?;
@@ -133,11 +138,8 @@ pub fn copy_muse_login(from: &Path, to: &Path) -> io::Result<()> {
 /// (its secret is in the keychain, which the copy does not carry) and the model catalog cache,
 /// and nothing else of the config (the settings and their backup, what it trusts) or of the data
 /// (its sessions): Muse lists the account's models from the cache and the login alone.
-pub fn copy_muse_into(home: &Path, scratch: &Path) -> io::Result<()> {
-    copy_muse_login(
-        &home.join(".config/muse/auth.json"),
-        &scratch.join("config/muse/auth.json"),
-    )?;
+pub fn copy_muse_into(home: &Path, scratch: &Path, auth: &str) -> io::Result<()> {
+    copy_muse_login_text(auth, &scratch.join("config/muse/auth.json"))?;
     copy_folder_kept(
         &home.join(".local/share/muse/model-catalog"),
         &scratch.join("data/muse/model-catalog"),
@@ -226,7 +228,15 @@ mod tests {
             home.join(".config/muse/auth.json"),
             r#"{"providers":{"meta":{"storage":"keychain","refreshToken":"fake","nested":[{"ReFrEsH_secret":"fake"}],"access":"kept"}}}"#,
         ).unwrap();
-        copy_muse_into(&home, &scratch).unwrap();
+        let auth = std::fs::read_to_string(home.join(".config/muse/auth.json")).unwrap();
+        login_in_keychain(&auth).unwrap();
+        // A later owner change must not replace the login the caller checked in memory.
+        std::fs::write(
+            home.join(".config/muse/auth.json"),
+            "changed after the read",
+        )
+        .unwrap();
+        copy_muse_into(&home, &scratch, &auth).unwrap();
         let copied: Value =
             serde_json::from_slice(&std::fs::read(scratch.join("config/muse/auth.json")).unwrap())
                 .unwrap();
@@ -340,7 +350,8 @@ mod tests {
         // Something else of the data folder, a session, which is the human's.
         std::fs::create_dir_all(home.join(".local/share/muse/sessions")).unwrap();
         std::fs::write(home.join(".local/share/muse/sessions/one.jsonl"), "{}").unwrap();
-        copy_muse_into(&home, &scratch).unwrap();
+        let auth = std::fs::read_to_string(config.join("auth.json")).unwrap();
+        copy_muse_into(&home, &scratch, &auth).unwrap();
         let mut found: Vec<String> = Vec::new();
         let mut folders = vec![scratch.clone()];
         while let Some(folder) = folders.pop() {

@@ -1276,6 +1276,11 @@ const fn proper(harness: Harness) -> &'static str {
 fn said(harness: Harness, touched: &[String], refreshed: &[String]) -> String {
     let (name, bar) = (proper(harness), "!".repeat(78));
     let mut said = format!("\n{bar}\n");
+    if !touched.is_empty() || !refreshed.is_empty() {
+        said.push_str(
+            "Login files were compared by size, modification time and file identity only.\n",
+        );
+    }
     if !touched.is_empty() {
         said.push_str(&format!(
             "THE RUN CHANGED THE OWNER'S {} SETUP, which a live run on its own login is never to touch \

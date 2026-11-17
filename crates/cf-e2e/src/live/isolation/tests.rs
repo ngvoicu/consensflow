@@ -1552,6 +1552,12 @@ fn a_run_that_changes_a_file_of_the_owners_fails_naming_it_and_saying_none_of_wh
             );
             assert!(said.contains("THE RUN CHANGED THE OWNER'S"), "{said}");
             assert!(
+                said.contains(
+                    "Login files were compared by size, modification time and file identity only"
+                ),
+                "{said}"
+            );
+            assert!(
                 said.contains("(or the owner's own"),
                 "the owner's own harness could have: {said}"
             );
@@ -2364,7 +2370,7 @@ fn a_pi_harness_that_ended_badly_after_it_renewed_its_entry_has_renewed_it_and_t
 }
 
 #[test]
-fn t1744_guard_does_not_open_any_owner_login_file() {
+fn t1744_review_guard_does_not_open_any_owner_login_file() {
     const CHILD: &str = "CF_T1744_GUARD_OWNER";
     if let Some(root) = crate::process::own_var(CHILD) {
         let root = PathBuf::from(root);
@@ -2388,6 +2394,8 @@ fn t1744_guard_does_not_open_any_owner_login_file() {
             let after = guard.look();
             assert!(before.changes_to(&after, &root).is_empty());
         }
+        let matrix = crate::matrix::evidence::Owner::of_machine().unwrap();
+        assert!(matrix.unchanged(&matrix.again()).ok);
         return;
     }
     let root = crate::door::made("cf-guard-no-login-open-").unwrap();
@@ -2402,6 +2410,7 @@ fn t1744_guard_does_not_open_any_owner_login_file() {
         "pi/models.json",
         "pi/cliproxyapi.json",
         "config/muse/auth.json",
+        ".config/muse/auth.json",
         "data/devin/credentials.toml",
         "roaming/devin/credentials.toml",
     ] {
@@ -2411,10 +2420,12 @@ fn t1744_guard_does_not_open_any_owner_login_file() {
     }
     let ran = crate::process::case_of(
         std::env::current_exe().unwrap(),
-        "live::isolation::tests::t1744_guard_does_not_open_any_owner_login_file",
+        "live::isolation::tests::t1744_review_guard_does_not_open_any_owner_login_file",
         Duration::from_secs(5),
     )
     .var(CHILD, &home)
+    .var("HOME", &home)
+    .var("USERPROFILE", &home)
     .var(crate::standin_process::FIXTURE_HOME, &home)
     .var("TMPDIR", &temp)
     .var("TMP", &temp)

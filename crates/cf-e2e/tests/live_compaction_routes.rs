@@ -543,7 +543,7 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
             path: std::env::temp_dir(),
             source,
         })?;
-        copy_muse_into(&home, scratch.path()).map_err(|source| Error::File {
+        copy_muse_into(&home, scratch.path(), &auth).map_err(|source| Error::File {
             action: "copy the login and the model catalog of",
             path: home.join(".config/muse"),
             source,

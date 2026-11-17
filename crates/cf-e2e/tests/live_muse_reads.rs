@@ -21,8 +21,8 @@
 //! here), so the reads run on a throwaway copy of the config and of the model catalog cache
 //! (`XDG_CONFIG_HOME`, `XDG_DATA_HOME`), the login being the keychain's, which is global, and
 //! the human's own folder is proved untouched. The copy is of `auth.json` and the model
-//! catalog cache alone (T-841; not the settings, their backup or the trust file), each with the
-//! mode it had, and made only where every login in `auth.json` is kept in the keychain (its
+//! catalog cache alone (T-841; not the settings, their backup or the trust file), the login
+//! in a private file, and made only where every login in `auth.json` is kept in the keychain (its
 //! `storage` key, read and never printed): a login held in a file would be carried by the copy,
 //! and a refresh from it could rotate a token the human's own login depends on. The run says
 //! where the copy is, and removes it when it ends or fails (T-816).
@@ -31,9 +31,7 @@
 //!
 //! The run says counts and kinds, never an account's name, a file's words or a model's price.
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeMap;
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use cf_e2e::live::guard::{copy_muse_into, login_in_keychain, Scratch};
@@ -42,21 +40,8 @@ use cf_e2e::process::own_var;
 use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
 
-#[derive(Debug, PartialEq)]
-enum Fingerprint {
-    Content(u64),
-    Login(cf_base::file::Stat),
-}
-
-/// Compare login files by metadata and other files by content, reporting paths only.
-fn tree(root: &Path) -> Result<BTreeMap<PathBuf, Fingerprint>> {
-    tree_with(root, |path| std::fs::read(path))
-}
-
-fn tree_with(
-    root: &Path,
-    mut read: impl FnMut(&Path) -> std::io::Result<Vec<u8>>,
-) -> Result<BTreeMap<PathBuf, Fingerprint>> {
+/// Compare every ordinary file by metadata only, reporting paths without contents.
+fn tree(root: &Path) -> Result<BTreeMap<PathBuf, cf_base::file::Stat>> {
     let mut found = BTreeMap::new();
     let mut folders = vec![root.to_owned()];
     while let Some(folder) = folders.pop() {
@@ -78,29 +63,12 @@ fn tree_with(
             } else if kind.is_dir() {
                 folders.push(path);
             } else if kind.is_file() {
-                let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
-                if name == "auth.json"
-                    || name.starts_with("auth.json.")
-                    || name == "credentials.json"
-                    || name == ".credentials.json"
-                {
-                    let stat = cf_base::file::stat(&path).map_err(|source| Error::File {
-                        action: "stat",
-                        path: path.clone(),
-                        source,
-                    })?;
-                    found.insert(path, Fingerprint::Login(stat));
-                    continue;
-                }
-                let mut hasher = DefaultHasher::new();
-                read(&path)
-                    .map_err(|source| Error::File {
-                        action: "read",
-                        path: path.clone(),
-                        source,
-                    })?
-                    .hash(&mut hasher);
-                found.insert(path, Fingerprint::Content(hasher.finish()));
+                let stat = cf_base::file::stat(&path).map_err(|source| Error::File {
+                    action: "stat",
+                    path: path.clone(),
+                    source,
+                })?;
+                found.insert(path, stat);
             }
         }
     }
@@ -145,13 +113,13 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
         source,
     })?;
     // What the run copies, and nothing else of Muse's folders: the login file (its keychain
-    // entry is the secret, which the copy does not carry) and the model catalog cache, each with
-    // its mode, into a folder only its owner enters. It is removed when the run ends or fails.
+    // entry is the secret, which the copy does not carry) and the model catalog cache. The login
+    // is private; the cache keeps its mode. Both are in a folder only its owner enters. It is removed when the run ends or fails.
     eprintln!(
         "muse-reads: copying ~/.config/muse/auth.json and ~/.local/share/muse/model-catalog, and nothing else, into {} (removed when the run ends)",
         scratch.path().display()
     );
-    copy_muse_into(&home, scratch.path()).map_err(|source| Error::File {
+    copy_muse_into(&home, scratch.path(), &auth).map_err(|source| Error::File {
         action: "copy the login and the model catalog of",
         path: home.join(".config/muse"),
         source,
@@ -218,7 +186,7 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
         .collect();
     assert!(
         changed.is_empty(),
-        "a read changed ~/.config/muse: {changed:?}"
+        "a read changed ~/.config/muse (compared by size, modification time and file identity only): {changed:?}"
     );
     log.passed();
     Ok(())
@@ -228,27 +196,38 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn t1744_review_muse_tree_does_not_open_other_files() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let root = tempfile::tempdir().unwrap();
+        let unknown = root.path().join("other-name.json");
+        let nested = root.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        let nested_unknown = nested.join("another-name");
+        for file in [&unknown, &nested_unknown] {
+            std::fs::write(file, "synthetic").unwrap();
+            std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o000)).unwrap();
+        }
+        let seen = tree(root.path()).expect("metadata does not need to open an unknown file");
+        assert!(seen.contains_key(&unknown));
+        assert!(seen.contains_key(&nested_unknown));
+    }
+
     #[test]
     fn t1744_muse_owner_tree_does_not_read_login_files() {
         let root = tempfile::tempdir().unwrap();
         for name in ["auth.json", "auth.json.bak", "settings.json"] {
             std::fs::write(root.path().join(name), "synthetic").unwrap();
         }
-        let mut read_paths = Vec::new();
-        let observed = tree_with(root.path(), |path| {
-            read_paths.push(path.to_path_buf());
-            std::fs::read(path)
-        })
-        .unwrap();
-        assert_eq!(read_paths, [root.path().join("settings.json")]);
-        assert!(matches!(
-            observed.get(&root.path().join("auth.json")),
-            Some(Fingerprint::Login(_))
-        ));
-        assert!(matches!(
-            observed.get(&root.path().join("auth.json.bak")),
-            Some(Fingerprint::Login(_))
-        ));
+        let observed = tree(root.path()).unwrap();
+        for name in ["auth.json", "auth.json.bak", "settings.json"] {
+            assert_eq!(
+                observed.get(&root.path().join(name)),
+                Some(&cf_base::file::stat(&root.path().join(name)).unwrap())
+            );
+        }
     }
 
     #[cfg(unix)]

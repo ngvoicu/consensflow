@@ -218,7 +218,7 @@ pub fn renewal(
             return Ok(ended);
         }
         Err(Error::Daemon(format!(
-            "it changed the owner's Pi files beside its login: {}",
+            "it changed the owner's Pi files beside its login: {}; login-bearing files were compared by size, modification time and file identity only",
             changed.join("; ")
         )))
     })

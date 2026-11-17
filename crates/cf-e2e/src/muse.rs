@@ -41,7 +41,15 @@ pub fn seed_live_home(rig_home: &Path, real_home: &Path) -> Result {
     crate::door::write(config.join("settings.json"), "{\"schema_version\":1}\n")?;
     let auth = real_home.join(".config").join("muse").join("auth.json");
     let text = files::read_string(&auth)?;
-    crate::door::write(config.join("auth.json"), login_copy(&text)?)?;
+    let sanitized = login_copy(&text)?;
+    let copy = config.join("auth.json");
+    // A resumed rig already has this copy. Make its replacement private from its first byte,
+    // then replace the old run-owned file through the door.
+    let staged = config.join(crate::door::own_name("muse-auth", "tmp"));
+    crate::door::create_new_private(&staged)?
+        .write_all(sanitized.as_bytes())
+        .map_err(Error::file("write", &staged))?;
+    crate::door::rename(&staged, &copy)?;
     let catalog = real_home.join(".local/share/muse/model-catalog");
     if catalog.is_dir() {
         crate::door::copy_tree(
@@ -1591,6 +1599,37 @@ mod tests {
         );
     }
 
+    #[test]
+    fn t1744_review_restarting_a_muse_rig_replaces_its_private_login_copy() {
+        let person = crate::door::made("cf-muse-person-").unwrap();
+        let rig = crate::door::made("cf-muse-rig-").unwrap();
+        let auth = person.path().join(".config/muse/auth.json");
+        std::fs::create_dir_all(auth.parent().unwrap()).unwrap();
+        std::fs::write(&auth, r#"{"access":"first"}"#).unwrap();
+        super::seed_live_home(rig.path(), person.path()).unwrap();
+        std::fs::write(&auth, r#"{"access":"second","refreshToken":"synthetic"}"#).unwrap();
+        super::seed_live_home(rig.path(), person.path()).unwrap();
+        let copy = rig.path().join(".config/muse/auth.json");
+        let copied: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&copy).unwrap()).unwrap();
+        assert_eq!(copied["access"], "second");
+        assert!(copied.get("refreshToken").is_none());
+        let mut names: Vec<_> = std::fs::read_dir(copy.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["auth.json", "settings.json"]);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            assert_eq!(
+                std::fs::metadata(copy).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn t1744_a_read_only_muse_login_can_seed_a_run_without_changing_the_source() {
@@ -1610,6 +1649,14 @@ mod tests {
         );
         let copy = std::fs::read_to_string(rig.path().join(".config/muse/auth.json")).unwrap();
         assert!(!copy.contains("refreshToken"));
+        assert_eq!(
+            std::fs::metadata(rig.path().join(".config/muse/auth.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
     }
 
     /// `muse usage --json` on Windows is run on the throwaway config folder that holds the copy of
