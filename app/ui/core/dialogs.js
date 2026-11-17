@@ -10,6 +10,7 @@ import {
   vacationButton,
 } from './board.js'
 import { harnessesOf } from './computer-use.js'
+import { modelOptionText } from './model-option.js'
 import { holdEnter, ProjectSections } from './project-sections.js'
 import { isImageAgentRole, readRoles, roleIds, roleLabel, takesNoTier, untiered } from './roles.js'
 
@@ -431,9 +432,8 @@ class ModelPicker {
     ask.disabled = true
     const options = answer.listing.models.map((model) => {
       const id = modelOf(model)
-      // The id, exactly as the harness takes it: a contributor model's says so itself
-      // (`-contributor`), and the warning stands under the select once it is picked.
-      const option = new Option(id, id)
+      // The text describes the model; the value stays the id the harness takes.
+      const option = new Option(modelOptionText(model), id)
       // A model its harness lists and will not run is no pick, nor one taken off.
       option.disabled = model.disabled || this.#takenOff(kind, id)
       return option
