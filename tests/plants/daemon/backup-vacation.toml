@@ -382,6 +382,10 @@ runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher"
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''        if seat.vacation_since.is_some() {'''
 replace = '''        if seat.vacation_since.is_some() && !self.out(member.out_until.as_deref()) {'''
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''of.vacation_since.is_none().then_some(())?;'''
+replace = '''let _ = of.vacation_since;'''
 
 [[plant]]
 name = "bkv engine: the giver is told again at every pick"

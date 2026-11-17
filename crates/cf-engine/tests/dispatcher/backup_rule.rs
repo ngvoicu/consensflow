@@ -284,6 +284,14 @@ fn a_member_on_vacation_keeps_its_task_and_its_backup_takes_nothing_for_it() {
     passes(&context, 2);
     context.send_on_vacation(tiers.project.id, "zeus").unwrap();
     out(&context, &tiers, "zeus", &soon(&context, 3));
+    // An edit it needs does not make it a failure its backup covers while it rests.
+    let zeus = tiers.id("zeus");
+    context
+        .ledger
+        .borrow()
+        .sqlite()
+        .execute("UPDATE participant SET needs_edit = 1 WHERE id = ?", [zeus])
+        .unwrap();
     tiers.open_body("Lexer");
     passes(&context, 4);
     assert_eq!(with(&tiers, 1), "zeus");
