@@ -90,9 +90,11 @@ pub struct Context {
     /// The tokens of the windows that are open, which a caller is told apart
     /// by ([`Credentials::resolve`]).
     pub credentials: Rc<Credentials>,
-    /// Wakes the dispatcher (`changed`): every write calls it once it is
-    /// done. It only schedules a pass; none runs inside it.
+    /// A committed API write tells the page and wakes the dispatcher. The
+    /// notification is throttled with the engine's; a pass is only scheduled.
     pub kick: Rc<dyn Fn()>,
+    /// A committed write that needs no pass still tells the page.
+    pub changed: Rc<dyn Fn()>,
     /// What the engine makes of a task the chief asks to finish ([`Finishing`]).
     pub finish: Rc<Finishing>,
     /// What the engine holds a window's task in the background for ([`Holding`]).

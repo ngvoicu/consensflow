@@ -689,6 +689,12 @@ async fn an_open_task_is_told_with_no_pause_and_its_words_wait_in_its_brief_for_
         "no message: no window has the words yet"
     );
     assert_eq!(said["task"]["state"], "open", "nothing is paused or queued");
+    assert_eq!(
+        scene.changes.get(),
+        1,
+        "the page is told of the added words"
+    );
+    assert_eq!(scene.kicks.get(), 0, "no new engine pass is needed");
     assert_eq!(state_of(&scene, open), "open");
     let (_, thread) = get(&scene, &scene.chief, &format!("{open}")).await;
     assert_eq!(
@@ -711,6 +717,7 @@ async fn an_open_task_is_told_with_no_pause_and_its_words_wait_in_its_brief_for_
     let open = open_task(&scene);
     let said = post(&scene, &scene.chief, &format!("{open}/tell"), "{}").await;
     assert_eq!(said.1["error"], "invalid-text");
+    assert_eq!(scene.changes.get(), 1, "a refused tell changes nothing");
     let (_, thread) = get(&scene, &scene.chief, &format!("{open}")).await;
     assert_eq!(thread["task"]["body"], "Lexer");
 }

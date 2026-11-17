@@ -767,6 +767,65 @@ async fn the_page_is_told_the_board_moved_a_hundred_milliseconds_after_the_first
         .await;
 }
 
+#[tokio::test(start_paused = true)]
+async fn api_and_engine_changes_share_the_one_core_event_throttle_in_either_order() {
+    LocalSet::new()
+        .run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let project = open_project_before_the_start(root.path());
+            let database = root.path().join("consensflow").join("consensflow.db");
+            let mut ledger = open_ledger(&database, LedgerOptions::default()).unwrap();
+            ledger.set_project_state(project, "suspended").unwrap();
+            ledger.close().unwrap();
+            let (said, exited, handles) = (Said::default(), Rc::default(), Rc::default());
+            let (options, app) = options(root.path(), &said, &exited, &handles);
+            let told: Rc<RefCell<Vec<tokio::time::Instant>>> = Rc::default();
+            let noted = Rc::clone(&told);
+            let _heard = app.on_event("state.changed", move |body| {
+                if body["reason"] == "core" {
+                    noted.borrow_mut().push(tokio::time::Instant::now());
+                }
+            });
+            let daemon = start(environment(root.path()), options).await.unwrap();
+            ask(&app, "ping", json!({})).await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            assert!(told.borrow().is_empty());
+
+            // The engine moves, then an API write wakes a pass. Both use the
+            // first change's wait, not two independent 100 ms timers.
+            let first = tokio::time::Instant::now();
+            daemon.parts.engine.close_project(project).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            (daemon.parts.api_kick)();
+            tokio::time::sleep(Duration::from_millis(69)).await;
+            turns().await;
+            assert!(told.borrow().is_empty());
+            tokio::time::sleep(Duration::from_millis(1)).await;
+            turns().await;
+            assert_eq!(told.borrow().as_slice(), &[first + STATE_EVENT]);
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            assert_eq!(told.borrow().len(), 1);
+            let first_event = told.borrow()[0];
+
+            // A write followed by an engine change has the same bound.
+            let first = tokio::time::Instant::now();
+            (daemon.parts.api_kick)();
+            tokio::time::sleep(Duration::from_millis(30)).await;
+            daemon.parts.engine.close_project(project).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(70)).await;
+            turns().await;
+            assert_eq!(
+                told.borrow().as_slice(),
+                &[first_event, first + STATE_EVENT]
+            );
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            assert_eq!(told.borrow().len(), 2);
+            daemon.stop("SIGTERM");
+            daemon.finished().await;
+        })
+        .await;
+}
+
 /// A macOS privacy dialog the host names over the bridge (`pane.tcc`) reaches the engine as the
 /// real daemon wires it, and the human is told in the project (T-1194): a process of the app's
 /// that no window holds, here, which is told to the human alone. And the host's word that it

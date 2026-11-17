@@ -298,6 +298,7 @@ fn tell(
             &caller.participant.handle,
             words.unwrap_or_default(),
         )?;
+        (context.changed)();
         let mut answer = Map::new();
         answer.insert("task".to_owned(), value(&TaskSummary::from(&told))?);
         return Ok(Answer::ok(Value::Object(answer)));
