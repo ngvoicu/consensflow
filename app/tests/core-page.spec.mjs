@@ -14608,6 +14608,281 @@ const humanPaste = (page, handle, text) =>
     [handle, text],
   )
 
+/**
+ * Model the browser's clipboard default without reading the machine's clipboard. A real keydown
+ * reaches xterm first; the browser fires paste only when that keydown was not cancelled. The
+ * Windows desktop probe separately exercises the page seam in the real WebView2 app.
+ */
+async function shortcutPaste(
+  page,
+  handle,
+  { key, code, keyCode, ctrlKey, shiftKey, metaKey },
+  text,
+  image = false,
+) {
+  return page.evaluate(
+    ({ handle, key, code, keyCode, ctrlKey, shiftKey, metaKey, text, image }) => {
+      const input = document.querySelector(
+        `#stage .terminal-card[data-handle="${handle}"] .xterm-helper-textarea`,
+      )
+      if (document.activeElement !== input) throw new Error('the terminal does not have focus')
+      const event = new KeyboardEvent('keydown', {
+        key,
+        code,
+        keyCode,
+        which: keyCode,
+        ctrlKey,
+        shiftKey,
+        metaKey,
+        bubbles: true,
+        cancelable: true,
+      })
+      const allowed = input.dispatchEvent(event)
+      if (allowed) {
+        const clipboardData = new DataTransfer()
+        if (text !== null) clipboardData.setData('text/plain', text)
+        if (image) {
+          clipboardData.items.add(
+            new File([new Uint8Array([137, 80, 78, 71])], 'test.png', { type: 'image/png' }),
+          )
+        }
+        input.dispatchEvent(
+          new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
+        )
+      }
+      return allowed
+    },
+    { handle, key, code, keyCode, ctrlKey, shiftKey, metaKey, text, image },
+  )
+}
+
+test.describe('Windows paste shortcuts in a pane', () => {
+  test.use({ userAgent: WINDOWS_AGENT })
+
+  for (const state of [
+    'terminal',
+    'board and back',
+    'other window and back',
+    'after a mouse paste',
+  ]) {
+    test(`Ctrl+V pastes text, not raw Ctrl+V, ${state}`, async ({ page }) => {
+      await sideBySide(page)
+      await bracketedPaste(page, CHIEF_PANE, true)
+      const chief = page.locator(
+        '#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea',
+      )
+      if (state === 'board and back') {
+        await page.getByRole('button', { name: 'Show board' }).click()
+        await page.getByRole('button', { name: 'Settings', exact: true }).click()
+        await page.keyboard.press('Escape')
+      }
+      if (state === 'other window and back') {
+        await page
+          .locator('#stage .terminal-card[data-handle="zeus"] .xterm-helper-textarea')
+          .focus()
+      }
+      if (state === 'after a mouse paste') {
+        await humanPaste(page, 'chief', 'mouse')
+        await expect.poll(() => typedInto(page, CHIEF_PANE.id)).toEqual(['\x1b[200~mouse\x1b[201~'])
+        await page.evaluate(() => {
+          window.__calls = []
+        })
+      }
+      await chief.focus()
+      await shortcutPaste(
+        page,
+        'chief',
+        { key: 'v', code: 'KeyV', keyCode: 86, ctrlKey: true },
+        'test text',
+      )
+      await expect
+        .poll(() => typedInto(page, CHIEF_PANE.id))
+        .toEqual(['\x1b[200~test text\x1b[201~'])
+      expect(await typedInto(page, 'p1-zeus')).toEqual([])
+    })
+  }
+
+  for (const [name, key] of [
+    ['Ctrl+Shift+V', { key: 'V', code: 'KeyV', keyCode: 86, ctrlKey: true, shiftKey: true }],
+    ['Shift+Insert', { key: 'Insert', code: 'Insert', keyCode: 45, shiftKey: true }],
+  ]) {
+    test(`${name} uses the same paste path in another window`, async ({ page }) => {
+      await sideBySide(page)
+      await bracketedPaste(page, { id: 'p1-zeus', generation: 7 }, true)
+      await page.locator('#stage .terminal-card[data-handle="zeus"] .xterm-helper-textarea').focus()
+      await shortcutPaste(page, 'zeus', key, 'test text')
+      await expect.poll(() => typedInto(page, 'p1-zeus')).toEqual(['\x1b[200~test text\x1b[201~'])
+      expect(await typedInto(page, CHIEF_PANE.id)).toEqual([])
+    })
+  }
+
+  for (const harness of ['claude-code', 'codex', 'pi', 'devin', 'muse']) {
+    test(`Ctrl+V sends the text as a paste to a ${harness} window`, async ({ page }) => {
+      const data = model()
+      data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').participant.harness =
+        harness
+      await sideBySide(page, data)
+      await bracketedPaste(page, CHIEF_PANE, true)
+      await page
+        .locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea')
+        .focus()
+      await shortcutPaste(
+        page,
+        'chief',
+        { key: 'v', code: 'KeyV', keyCode: 86, ctrlKey: true },
+        'a — b',
+      )
+      await expect.poll(() => typedInto(page, CHIEF_PANE.id)).toEqual(['\x1b[200~a — b\x1b[201~'])
+    })
+  }
+
+  test('an image-only Ctrl+V still reaches the harness as its image key', async ({ page }) => {
+    await sideBySide(page)
+    await bracketedPaste(page, CHIEF_PANE, true)
+    await page.locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea').focus()
+    const allowed = await shortcutPaste(
+      page,
+      'chief',
+      { key: 'v', code: 'KeyV', keyCode: 86, ctrlKey: true },
+      null,
+      true,
+    )
+    expect(allowed).toBe(true)
+    await expect.poll(() => typedInto(page, CHIEF_PANE.id)).toEqual(['\x16'])
+  })
+
+  test('an image paste without Ctrl+V keeps its existing behavior', async ({ page }) => {
+    await sideBySide(page)
+    await bracketedPaste(page, CHIEF_PANE, true)
+    await page
+      .locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea')
+      .evaluate((input) => {
+        const clipboardData = new DataTransfer()
+        clipboardData.items.add(
+          new File([new Uint8Array([137, 80, 78, 71])], 'test.png', { type: 'image/png' }),
+        )
+        input.dispatchEvent(
+          new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
+        )
+      })
+    await expect.poll(() => typedInto(page, CHIEF_PANE.id)).toEqual(['\x1b[200~\x1b[201~'])
+  })
+
+  test('a released Ctrl+V does not turn a later image paste into a harness key', async ({
+    page,
+  }) => {
+    await sideBySide(page)
+    await bracketedPaste(page, CHIEF_PANE, true)
+    const input = page.locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea')
+    await input.focus()
+    await input.evaluate((field) => {
+      const key = {
+        key: 'v',
+        code: 'KeyV',
+        keyCode: 86,
+        which: 86,
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }
+      field.dispatchEvent(new KeyboardEvent('keydown', key))
+      field.dispatchEvent(new KeyboardEvent('keyup', key))
+      const clipboardData = new DataTransfer()
+      clipboardData.items.add(
+        new File([new Uint8Array([137, 80, 78, 71])], 'test.png', { type: 'image/png' }),
+      )
+      field.dispatchEvent(
+        new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
+      )
+    })
+    await expect.poll(() => typedInto(page, CHIEF_PANE.id)).toEqual(['\x1b[200~\x1b[201~'])
+  })
+
+  test('Ctrl+V on a non-Latin keyboard still goes to paste', async ({ page }) => {
+    await sideBySide(page)
+    await bracketedPaste(page, CHIEF_PANE, true)
+    await page.locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea').focus()
+    await shortcutPaste(
+      page,
+      'chief',
+      { key: 'м', code: 'KeyV', keyCode: 86, ctrlKey: true },
+      'test text',
+    )
+    await expect.poll(() => typedInto(page, CHIEF_PANE.id)).toEqual(['\x1b[200~test text\x1b[201~'])
+  })
+
+  test('Ctrl+X remains the harness key', async ({ page }) => {
+    await sideBySide(page)
+    const input = page.locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea')
+    await input.focus()
+    await input.evaluate((field) =>
+      field.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'x',
+          code: 'KeyX',
+          keyCode: 88,
+          which: 88,
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      ),
+    )
+    await expect.poll(() => typedInto(page, CHIEF_PANE.id)).toEqual(['\x18'])
+  })
+
+  test('Ctrl+V with text and an image pastes the text once', async ({ page }) => {
+    await sideBySide(page)
+    await bracketedPaste(page, CHIEF_PANE, true)
+    await page.locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea').focus()
+    await shortcutPaste(
+      page,
+      'chief',
+      { key: 'v', code: 'KeyV', keyCode: 86, ctrlKey: true },
+      'test text',
+      true,
+    )
+    await expect.poll(() => typedInto(page, CHIEF_PANE.id)).toEqual(['\x1b[200~test text\x1b[201~'])
+  })
+
+  test('an empty text clipboard sends no raw Ctrl+V', async ({ page }) => {
+    await sideBySide(page)
+    await bracketedPaste(page, CHIEF_PANE, true)
+    await page.locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea').focus()
+    await shortcutPaste(page, 'chief', { key: 'v', code: 'KeyV', keyCode: 86, ctrlKey: true }, '')
+    await expect.poll(() => typedInto(page, CHIEF_PANE.id)).toEqual(['\x1b[200~\x1b[201~'])
+  })
+})
+
+test.describe('Mac paste in a pane', () => {
+  test.use({ userAgent: MAC_AGENT })
+
+  test('Cmd+V still reaches the browser paste path', async ({ page }) => {
+    await sideBySide(page)
+    await bracketedPaste(page, CHIEF_PANE, true)
+    await page.locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea').focus()
+    await shortcutPaste(
+      page,
+      'chief',
+      { key: 'v', code: 'KeyV', keyCode: 86, metaKey: true },
+      'test text',
+    )
+    await expect.poll(() => typedInto(page, CHIEF_PANE.id)).toEqual(['\x1b[200~test text\x1b[201~'])
+  })
+
+  test('Ctrl+V on a Mac remains the harness key', async ({ page }) => {
+    await sideBySide(page)
+    await page.locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea').focus()
+    await shortcutPaste(
+      page,
+      'chief',
+      { key: 'v', code: 'KeyV', keyCode: 86, ctrlKey: true },
+      'test text',
+    )
+    await expect.poll(() => typedInto(page, CHIEF_PANE.id)).toEqual(['\x16'])
+  })
+})
+
 /** The handles of the dock's cards that show a drop goes to them. */
 const marked = (page) =>
   page
