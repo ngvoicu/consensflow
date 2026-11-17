@@ -510,11 +510,8 @@ impl InputQueue {
                 .map_err(|_| "pane paste lock is poisoned".to_string())?;
             let old_groups: Vec<_> = state.pending.keys().copied().collect();
             state.abandoned.extend(old_groups);
-            if state
-                .active
-                .is_some_and(|id| !state.pending.contains_key(&id))
-            {
-                let id = state.active.take().expect("active paste");
+            if let Some(id) = state.active.filter(|id| !state.pending.contains_key(id)) {
+                state.active = None;
                 if state.bracketed.remove(&id) {
                     state.needs_close = true;
                 }

@@ -16527,3 +16527,42 @@ test('BKV05 a task held in an out member window keeps its quota hold with a back
   await expect(card).toContainText('out of quota until')
   await expect(page.locator('tr[data-handle="hera"] button.card[data-task="19"]')).toHaveCount(0)
 })
+
+test('pane input keeps a long control sequence whole across chunks', async ({ page }) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__paneChunks = []
+    window.__paneInputHook = async (_command, args) => {
+      window.__paneChunks.push(args.bytes)
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    window.__controlInput = `${'p'.repeat(32760)}\x1b]0;${'q'.repeat(40000)}\x07z`
+    window.__emulators[0].type(window.__controlInput)
+  })
+  await expect.poll(() => page.evaluate(() => window.__paneChunks.length)).toBe(3)
+  const result = await page.evaluate(() => ({
+    lengths: window.__paneChunks.map((bytes) => bytes.length),
+    text: new TextDecoder().decode(new Uint8Array(window.__paneChunks.flat())),
+    expected: window.__controlInput,
+  }))
+  expect(result.lengths).toEqual([32760, 40005, 1])
+  expect(result.text).toBe(result.expected)
+})
+
+test('an oversized control sequence is refused before any pane input is sent', async ({ page }) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__paneChunks = []
+    window.__paneInputHook = async (_command, args) => {
+      window.__paneChunks.push(args.bytes)
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    window.__emulators[0].type(`\x1b]0;${'q'.repeat(65536)}\x07`)
+  })
+  await expect(page.locator('#status')).toHaveText(
+    'This input contains a control sequence too long to send. Paste it in smaller pieces.',
+  )
+  expect(await page.evaluate(() => window.__paneChunks.length)).toBe(0)
+})
