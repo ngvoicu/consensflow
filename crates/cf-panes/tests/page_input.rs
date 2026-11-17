@@ -13,6 +13,10 @@ use cf_panes::pty::{PaneKey, PaneTable};
 use futures_executor::block_on;
 use portable_pty::PtySize;
 
+#[allow(
+    clippy::unwrap_used,
+    reason = "a test fixture failure must fail the test"
+)]
 fn recorder(count: usize) -> (Arc<PaneTable>, InputQueue, PaneKey, mpsc::Receiver<Vec<u8>>) {
     let panes = Arc::new(PaneTable::new());
     let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
@@ -53,6 +57,7 @@ fn recorder(count: usize) -> (Arc<PaneTable>, InputQueue, PaneKey, mpsc::Receive
     (panes, inputs, key, receive)
 }
 
+#[allow(clippy::unwrap_used, reason = "a test admission must succeed")]
 fn admitted(
     inputs: &InputQueue,
     page: &str,
@@ -73,6 +78,7 @@ fn admitted(
         .unwrap()
 }
 
+#[allow(clippy::unwrap_used, reason = "a test completion must succeed")]
 fn finished(inputs: &InputQueue, page: &str, ticket: &str) {
     block_on(inputs.page_completion(page, ticket).unwrap().receiver).unwrap();
 }
