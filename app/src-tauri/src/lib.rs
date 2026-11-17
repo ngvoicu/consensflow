@@ -287,8 +287,11 @@ pub(crate) fn page_commands<R: Runtime>(
 ) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
     let handler: fn(tauri::ipc::Invoke<R>) -> bool = tauri::generate_handler![
         commands::daemon_request,
+        commands::pane_page_prepare,
+        commands::pane_page_activate,
         commands::pane_input_enqueue,
         commands::pane_reply_enqueue,
+        commands::pane_input_position,
         commands::pane_input_wait,
         commands::pane_input_forget,
         commands::pane_resize,
@@ -474,6 +477,15 @@ fn open_main_window(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> 
     // Only macOS has the setting; elsewhere it does nothing.
     let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
         .title(title)
+        .on_page_load(|window, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
+                if let Some(runtime) = window.try_state::<AppRuntime>() {
+                    if let Err(error) = runtime.inputs.end_page() {
+                        diag::say(format!("could not fence the departing page: {error}"));
+                    }
+                }
+            }
+        })
         .inner_size(1280.0, 820.0)
         .min_inner_size(720.0, 520.0)
         .maximized(true)

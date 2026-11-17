@@ -1,29 +1,110 @@
-# A page can lose an admission's answer after the pane host queued the bytes.
-# Retrying that exact request returns its ticket; a different request cannot
-# take the ticket and no bytes are queued twice (T-1764).
+# Page identities fence late calls, and the admitted count and ticket let the
+# page resolve a lost answer without keeping a copy of the person's input.
 [run]
-pane-input-retry = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_lost_page_admission_answer_can_be_retried_without_repeating_input"]
+pane-input-reconcile = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_lost_page_admission_answer_is_reconciled_by_count_and_ticket"]
+pane-input-capacity = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::unanswered_page_input_is_bounded_until_a_new_page"]
+pane-input-paste = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_reply_cannot_cross_an_active_paste_on_the_real_pty"]
+pane-input-interrupted = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "an_interrupted_bracketed_paste_closes_before_fresh_page_typing"]
+pane-input-drained = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::an_interrupted_paste_closes_after_its_already_admitted_chunks"]
+pane-input-finished = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "page_input", "a_completed_paste_is_not_closed_again_after_page_replacement"]
 pane-input-completion = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_lost_completion_answer_can_be_waited_for_again"]
 
 [[plant]]
-name = "pane input retry: forget the accepted answer"
-meant = "a_lost_page_admission_answer_can_be_retried_without_repeating_input"
-runs = ["pane-input-retry"]
+name = "pane input retry: let a departed page admit input"
+meant = "a_lost_page_admission_answer_is_reconciled_by_count_and_ticket"
+runs = ["pane-input-reconcile"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = "                        return admission.answer.clone();"
-replace = "                        return Err(INPUT_SEQUENCE_REGRESSION.to_string());"
+find = '''        if page.current.as_deref() != Some(page_id) {
+            return Err(INPUT_STALE_PAGE.to_string());
+        }
+        let expected = page'''
+replace = '''        if false {
+            return Err(INPUT_STALE_PAGE.to_string());
+        }
+        let expected = page'''
 
 [[plant]]
-name = "pane input retry: reuse a ticket for different bytes"
-meant = "a_lost_page_admission_answer_can_be_retried_without_repeating_input"
-runs = ["pane-input-retry"]
+name = "pane input retry: forget the last admitted ticket"
+meant = "a_lost_page_admission_answer_is_reconciled_by_count_and_ticket"
+runs = ["pane-input-reconcile"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/input_queue.rs"
-find = "admission.work.as_ref() == Some(&work)"
-replace = "true"
+find = 'Ok((next, page.last_tickets.get(key).cloned()))'
+replace = 'Ok((next, None))'
+
+[[plant]]
+name = "pane input retry: forget to advance the admitted count"
+meant = "a_lost_page_admission_answer_is_reconciled_by_count_and_ticket"
+runs = ["pane-input-reconcile"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = 'page.last_sequences.insert(key.clone(), sequence);'
+replace = 'let _ = sequence;'
+
+[[plant]]
+name = "pane input retry: count a refused admission"
+meant = "unanswered_page_input_is_bounded_until_a_new_page"
+runs = ["pane-input-capacity"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''        if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
+            return Err("pane-input-ticket-capacity".to_string());'''
+replace = '''        if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
+            page.last_sequences.insert(key.clone(), sequence);
+            return Err("pane-input-ticket-capacity".to_string());'''
+
+[[plant]]
+name = "pane input retry: allow a reply inside a paste"
+meant = "a_reply_cannot_cross_an_active_paste_on_the_real_pty"
+runs = ["pane-input-paste"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = 'state.active = Some(id);'
+replace = 'state.active = None;'
+
+[[plant]]
+name = "pane input retry: leave a replaced page's paste open"
+meant = "an_interrupted_bracketed_paste_closes_before_fresh_page_typing"
+runs = ["pane-input-interrupted"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''                if state.bracketed.remove(&id) {
+                    state.needs_close = true;
+                }'''
+replace = '''                if state.bracketed.remove(&id) {
+                    state.needs_close = false;
+                }'''
+
+[[plant]]
+name = "pane input retry: leave an abandoned queued paste open"
+meant = "an_interrupted_paste_closes_after_its_already_admitted_chunks"
+runs = ["pane-input-drained"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''                if abandoned_and_drained && !group.group.end && result.is_ok() && bracketed {
+                    state.needs_close = true;
+                }'''
+replace = '''                if abandoned_and_drained && !group.group.end && result.is_ok() && bracketed {
+                    state.needs_close = false;
+                }'''
+
+[[plant]]
+name = "pane input retry: close a completed paste twice"
+meant = "a_completed_paste_is_not_closed_again_after_page_replacement"
+runs = ["pane-input-finished"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = 'if abandoned_and_drained && !group.group.end && result.is_ok() && bracketed {'
+replace = 'if bracketed {'
 
 [[plant]]
 name = "pane input retry: lose the completion after the first wait"
@@ -35,3 +116,18 @@ file = "crates/cf-panes/src/input_queue.rs"
 find = '''            .get(ticket)
             .cloned()'''
 replace = '''            .remove(ticket)'''
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''    pub fn page_completion(
+        &self,
+        page_id: &str,
+        ticket: &str,
+    ) -> Result<PageInputCompletion, String> {
+        let page = self'''
+replace = '''    pub fn page_completion(
+        &self,
+        page_id: &str,
+        ticket: &str,
+    ) -> Result<PageInputCompletion, String> {
+        let mut page = self'''

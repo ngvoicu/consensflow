@@ -1494,8 +1494,17 @@ mod tests {
             let _ = told.send(event.payload().to_string());
         });
 
+        assert_eq!(
+            crate::commands::pane_page_prepare(app.handle().clone(), "test-page".into()),
+            json!({"ok":true})
+        );
+        assert_eq!(
+            crate::commands::pane_page_activate(app.handle().clone(), "test-page".into()),
+            json!({"ok":true})
+        );
         let subscribed = tauri::async_runtime::block_on(subscribe_output(
             app.handle().clone(),
+            "test-page".to_string(),
             Channel::new(|_| Ok(())),
         ));
         assert_eq!(subscribed["ok"], true);

@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::daemon::RosterHandle;
 use crate::runtime::{AppRuntime, PAGE_STATE_EVENT};
 use cf_bridge::Bridge;
-use cf_panes::input_queue::{InputWork, PageInputCompletion};
+use cf_panes::input_queue::{InputWork, PageInputCompletion, PageInputGroup};
 use cf_panes::output_hub::PaneOutputMessage;
 use cf_panes::validation::{pane_key, validate_seq, validate_size, validate_text};
 
@@ -80,13 +80,32 @@ fn page_input_finished(
     result
 }
 
+#[tauri::command]
+pub fn pane_page_prepare<R: Runtime>(app: AppHandle<R>, page_id: String) -> Value {
+    let state = app.state::<AppRuntime>();
+    match state.inputs.prepare_page(&page_id) {
+        Ok(()) => json!({"ok":true}),
+        Err(error) => json!({"ok":false,"error":error}),
+    }
+}
+
+#[tauri::command]
+pub fn pane_page_activate<R: Runtime>(app: AppHandle<R>, page_id: String) -> Value {
+    let state = app.state::<AppRuntime>();
+    match state.inputs.activate_page(&page_id) {
+        Ok(()) => json!({"ok":true}),
+        Err(error) => json!({"ok":false,"error":error}),
+    }
+}
+
 fn enqueue_page_input<R: Runtime>(
     app: AppHandle<R>,
+    page_id: String,
     id: String,
     generation: u64,
     sequence: u64,
     work: InputWork,
-    human: bool,
+    group: Option<PageInputGroup>,
 ) -> Value {
     let key = match pane_key(&id, generation) {
         Ok(key) => key,
@@ -96,13 +115,9 @@ fn enqueue_page_input<R: Runtime>(
         let state = app.state::<AppRuntime>();
         Arc::clone(&state.inputs)
     };
-    match inputs.enqueue_page(key.clone(), sequence, work, human) {
+    let human = matches!(&work, InputWork::Typed(_));
+    match inputs.enqueue_page(&page_id, key, sequence, work, human, group) {
         Ok(ticket) => json!({"ok":true,"ticket":ticket}),
-        Err(error)
-            if error == "pane-input-sequence-gap" || error == "pane-input-sequence-regression" =>
-        {
-            json!({"ok":false,"error":error,"expectedSequence":inputs.expected_page_sequence(&key)})
-        }
         Err(error) => json!({"ok":false,"error":error}),
     }
 }
@@ -110,17 +125,28 @@ fn enqueue_page_input<R: Runtime>(
 #[tauri::command]
 pub fn pane_input_enqueue<R: Runtime>(
     app: AppHandle<R>,
+    page_id: String,
     id: String,
     generation: u64,
     sequence: u64,
     bytes: Vec<u8>,
+    group: Option<PageInputGroup>,
 ) -> Value {
-    enqueue_page_input(app, id, generation, sequence, InputWork::Typed(bytes), true)
+    enqueue_page_input(
+        app,
+        page_id,
+        id,
+        generation,
+        sequence,
+        InputWork::Typed(bytes),
+        group,
+    )
 }
 
 #[tauri::command]
 pub fn pane_reply_enqueue<R: Runtime>(
     app: AppHandle<R>,
+    page_id: String,
     id: String,
     generation: u64,
     sequence: u64,
@@ -128,16 +154,39 @@ pub fn pane_reply_enqueue<R: Runtime>(
 ) -> Value {
     enqueue_page_input(
         app,
+        page_id,
         id,
         generation,
         sequence,
         InputWork::Reply(bytes),
-        false,
+        None,
     )
 }
 
 #[tauri::command]
-pub async fn pane_input_wait<R: Runtime>(app: AppHandle<R>, ticket: String) -> Value {
+pub fn pane_input_position<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    id: String,
+    generation: u64,
+) -> Value {
+    let key = match pane_key(&id, generation) {
+        Ok(key) => key,
+        Err(error) => return json!({"ok":false,"error":error}),
+    };
+    let state = app.state::<AppRuntime>();
+    match state.inputs.expected_page_sequence(&page_id, &key) {
+        Ok((next, ticket)) => json!({"ok":true,"nextSequence":next,"lastTicket":ticket}),
+        Err(error) => json!({"ok":false,"error":error}),
+    }
+}
+
+#[tauri::command]
+pub async fn pane_input_wait<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    ticket: String,
+) -> Value {
     crate::panics::settled("pane_input_wait", async move {
         if let Err(error) = validate_text(&ticket, "pane input ticket") {
             return json!({"ok":false,"error":error});
@@ -146,7 +195,7 @@ pub async fn pane_input_wait<R: Runtime>(app: AppHandle<R>, ticket: String) -> V
             let state = app.state::<AppRuntime>();
             Arc::clone(&state.inputs)
         };
-        let completion = inputs.page_completion(&ticket);
+        let completion = inputs.page_completion(&page_id, &ticket);
         let result = input_result(completion.clone()).await;
         let human = result["ok"] == true
             && completion
@@ -164,7 +213,7 @@ pub async fn pane_input_wait<R: Runtime>(app: AppHandle<R>, ticket: String) -> V
 
 /// The page has received a wait's answer. Repeating this is harmless.
 #[tauri::command]
-pub fn pane_input_forget<R: Runtime>(app: AppHandle<R>, ticket: String) -> Value {
+pub fn pane_input_forget<R: Runtime>(app: AppHandle<R>, page_id: String, ticket: String) -> Value {
     if let Err(error) = validate_text(&ticket, "pane input ticket") {
         return json!({"ok":false,"error":error});
     }
@@ -172,7 +221,7 @@ pub fn pane_input_forget<R: Runtime>(app: AppHandle<R>, ticket: String) -> Value
         let state = app.state::<AppRuntime>();
         Arc::clone(&state.inputs)
     };
-    match inputs.forget_page_completion(&ticket) {
+    match inputs.forget_page_completion(&page_id, &ticket) {
         Ok(()) => json!({"ok":true}),
         Err(error) => json!({"ok":false,"error":error}),
     }
@@ -343,10 +392,8 @@ pub async fn daemon_request<R: Runtime>(
 /// nothing was listening to. Only the packaged app could show it: a shimmed
 /// page test has no real channel to end.
 ///
-/// Once per page is also what makes it the start of the page's input count.
-/// The page numbers its input in its own memory, so a reload (WebKit's content
-/// process replaced, or the human's Reload) starts again from 1; every pane's
-/// next keystrokes were refused as a regression until the app restarted.
+/// Page activation starts each pane's input count. The subscription is fenced
+/// by that identity so a late subscription cannot replace the new page's sink.
 ///
 /// It is also where the page before is let off what it never drew. A pane
 /// stops reading once a window of its output is unacknowledged, and only the
@@ -361,6 +408,7 @@ pub async fn daemon_request<R: Runtime>(
 #[tauri::command]
 pub async fn subscribe_output<R: Runtime>(
     app: AppHandle<R>,
+    page_id: String,
     on_output: Channel<PaneOutputMessage>,
 ) -> Value {
     crate::panics::settled("subscribe_output", async move {
@@ -373,10 +421,13 @@ pub async fn subscribe_output<R: Runtime>(
                 Arc::clone(&state.daemon),
             )
         };
-        inputs.begin_page();
-        output.register_sink(Arc::new(move |message| on_output.send(message).is_ok()));
-        // Once the new page listens: everything sent before it went to the old.
-        panes.ack_all();
+        if let Err(error) = inputs.with_current_page(&page_id, || {
+            output.register_sink(Arc::new(move |message| on_output.send(message).is_ok()));
+            // Once the new page listens: everything sent before it went to the old.
+            panes.ack_all();
+        }) {
+            return json!({"ok":false,"error":error});
+        }
         daemon.tell_again();
         json!({"ok":true})
     })
@@ -582,6 +633,7 @@ mod tests {
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        inputs.begin_page("test-page").unwrap();
         let key = PaneKey::new("ordered-command", 1);
         let mut reader = panes
             .open_at(
@@ -633,6 +685,8 @@ mod tests {
                     error: tauri::ipc::CallbackFn(1),
                     url: "tauri://localhost".parse().expect("invoke URL"),
                     body: tauri::ipc::InvokeBody::Json(json!({
+                        "pageId":"test-page",
+                        "group":null,
                         "id":key.id,
                         "generation":key.generation,
                         "sequence":index + 1,
@@ -692,13 +746,14 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn production_ipc_consumes_sequence_before_size_refusal() {
+    fn production_ipc_refusal_does_not_consume_its_sequence() {
         use tauri::Listener;
 
         let _pty_guard = cf_panes::pty::serial_pty_test();
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        inputs.begin_page("test-page").unwrap();
         let key = PaneKey::new("sequenced-command", 1);
         let mut reader = panes
             .open_at(
@@ -732,6 +787,7 @@ mod tests {
             .invoke_handler(tauri::generate_handler![
                 pane_input_enqueue,
                 pane_reply_enqueue,
+                pane_input_position,
                 pane_input_wait,
                 pane_input_forget
             ])
@@ -748,7 +804,11 @@ mod tests {
                 .expect("page events")
                 .push(serde_json::from_str::<Value>(event.payload()).expect("page event JSON"));
         });
-        let invoke = |command: &str, args: Value| {
+        let invoke = |command: &str, mut args: Value| {
+            args["pageId"] = "test-page".into();
+            if command == "pane_input_enqueue" {
+                args["group"] = Value::Null;
+            }
             tauri::test::get_ipc_response(
                 &webview,
                 tauri::webview::InvokeRequest {
@@ -784,24 +844,25 @@ mod tests {
         );
         let first = invoke(
             "pane_input_enqueue",
-            json!({"id":key.id,"generation":1,"sequence":2,"bytes":[75]}),
+            json!({"id":key.id,"generation":1,"sequence":1,"bytes":[75]}),
         );
         assert_eq!(first["ok"], true);
         let gap = invoke(
             "pane_input_enqueue",
-            json!({"id":key.id,"generation":1,"sequence":4,"bytes":[66]}),
+            json!({"id":key.id,"generation":1,"sequence":3,"bytes":[66]}),
         );
-        assert_eq!(
-            gap,
-            json!({"ok":false,"error":"pane-input-sequence-gap","expectedSequence":3})
-        );
+        assert_eq!(gap, json!({"ok":false,"error":"pane-input-sequence-gap"}));
         let regression = invoke(
             "pane_input_enqueue",
-            json!({"id":key.id,"generation":1,"sequence":2,"bytes":[82]}),
+            json!({"id":key.id,"generation":1,"sequence":1,"bytes":[82]}),
         );
         assert_eq!(
             regression,
-            json!({"ok":false,"error":"pane-input-sequence-regression","expectedSequence":3})
+            json!({"ok":false,"error":"pane-input-sequence-regression"})
+        );
+        assert_eq!(
+            invoke("pane_input_position", json!({"id":key.id,"generation":1})),
+            json!({"ok":true,"nextSequence":2,"lastTicket":first["ticket"]})
         );
         let first_completed = invoke("pane_input_wait", json!({"ticket":first["ticket"]}));
         assert_eq!(first_completed["ok"], true);
@@ -822,18 +883,17 @@ mod tests {
             invoke("pane_input_wait", json!({"ticket":first["ticket"]})),
             json!({"ok":false,"error":"pane-input-ticket-not-found"})
         );
-        // A rejected page input still consumes its sequence, so the next
-        // sequence remains valid.
+        // A rejected page input does not consume its sequence.
         let rejected = invoke(
             "pane_input_enqueue",
             json!({
-                "id":key.id,"generation":1,"sequence":3,"bytes":vec![b'P'; MAX_INPUT_BYTES + 1],
+                "id":key.id,"generation":1,"sequence":2,"bytes":vec![b'P'; MAX_INPUT_BYTES + 1],
             }),
         );
         assert_eq!(rejected["ok"], false);
         let second = invoke(
             "pane_reply_enqueue",
-            json!({"id":key.id,"generation":1,"sequence":4,"bytes":[67]}),
+            json!({"id":key.id,"generation":1,"sequence":2,"bytes":[67]}),
         );
         assert_eq!(second["ok"], true);
 
@@ -871,6 +931,7 @@ mod tests {
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        inputs.begin_page("test-page").unwrap();
         let key = PaneKey::new("replied-command", 1);
         let paste: &[u8] = b"\x1b[200~ab\x1b[201~";
         let marker_folder = tempfile::tempdir().expect("a folder for the program's marker");
@@ -951,7 +1012,11 @@ mod tests {
         let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
             .build()
             .expect("build mock webview");
-        let invoke = |command: &str, args: Value| {
+        let invoke = |command: &str, mut args: Value| {
+            args["pageId"] = "test-page".into();
+            if command == "pane_input_enqueue" {
+                args["group"] = Value::Null;
+            }
             tauri::test::get_ipc_response(
                 &webview,
                 tauri::webview::InvokeRequest {
@@ -1070,33 +1135,67 @@ mod tests {
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("build mock app");
         let handle = app.handle().clone();
-        let subscribe = || {
+        let subscribe = |page: &str| {
+            assert_eq!(
+                pane_page_prepare(handle.clone(), page.to_string()),
+                json!({"ok":true})
+            );
+            assert_eq!(
+                pane_page_activate(handle.clone(), page.to_string()),
+                json!({"ok":true})
+            );
             let subscribed = tauri::async_runtime::block_on(subscribe_output(
                 handle.clone(),
+                page.to_string(),
                 Channel::new(|_| Ok(())),
             ));
             assert_eq!(subscribed["ok"], true);
         };
-        let wait = |ticket: &Value| {
+        let wait = |page: &str, ticket: &Value| {
             tauri::async_runtime::block_on(pane_input_wait(
                 handle.clone(),
+                page.to_string(),
                 ticket.as_str().expect("a ticket").to_string(),
             ))
         };
 
-        subscribe();
-        let first = pane_input_enqueue(handle.clone(), key.id.clone(), 1, 1, b"A".to_vec());
-        assert_eq!(wait(&first["ticket"]), json!({"ok":true}));
+        subscribe("old");
+        let first = pane_input_enqueue(
+            handle.clone(),
+            "old".into(),
+            key.id.clone(),
+            1,
+            1,
+            b"A".to_vec(),
+            None,
+        );
+        assert_eq!(wait("old", &first["ticket"]), json!({"ok":true}));
         // The page goes away with this one admitted and never waited for.
-        let orphaned = pane_input_enqueue(handle.clone(), key.id.clone(), 1, 2, b"B".to_vec());
+        let orphaned = pane_input_enqueue(
+            handle.clone(),
+            "old".into(),
+            key.id.clone(),
+            1,
+            2,
+            b"B".to_vec(),
+            None,
+        );
         assert_eq!(orphaned["ok"], true);
 
-        subscribe();
-        let typed = pane_input_enqueue(handle.clone(), key.id.clone(), 1, 1, b"C".to_vec());
+        subscribe("new");
+        let typed = pane_input_enqueue(
+            handle.clone(),
+            "new".into(),
+            key.id.clone(),
+            1,
+            1,
+            b"C".to_vec(),
+            None,
+        );
         assert_eq!(typed["ok"], true, "the new page's first keystroke: {typed}");
-        assert_eq!(wait(&typed["ticket"]), json!({"ok":true}));
+        assert_eq!(wait("new", &typed["ticket"]), json!({"ok":true}));
         assert_eq!(
-            wait(&orphaned["ticket"]),
+            wait("new", &orphaned["ticket"]),
             json!({"ok":false,"error":"pane-input-ticket-not-found"}),
             "the old page's tickets went with it"
         );
@@ -1167,8 +1266,17 @@ mod tests {
             .manage(runtime)
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("build mock app");
+        assert_eq!(
+            pane_page_prepare(app.handle().clone(), "new-page".into()),
+            json!({"ok":true})
+        );
+        assert_eq!(
+            pane_page_activate(app.handle().clone(), "new-page".into()),
+            json!({"ok":true})
+        );
         let subscribed = tauri::async_runtime::block_on(subscribe_output(
             app.handle().clone(),
+            "new-page".to_string(),
             Channel::new(|_| Ok(())),
         ));
         assert_eq!(subscribed["ok"], true);
@@ -1188,6 +1296,7 @@ mod tests {
         let panes = Arc::new(PaneTable::new());
         let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
         let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
+        inputs.begin_page("test-page").unwrap();
         let size = PtySize {
             rows: 24,
             cols: 80,
@@ -1257,10 +1366,12 @@ mod tests {
             .map(|index| {
                 pane_input_enqueue(
                     handle.clone(),
+                    "test-page".into(),
                     blocked_key.id.clone(),
                     blocked_key.generation,
                     index + 1,
                     vec![b'x'; MAX_INPUT_BYTES],
+                    None,
                 )
             })
             .collect::<Vec<_>>();
@@ -1270,10 +1381,12 @@ mod tests {
         let responsive_handle = handle.clone();
         let responsive_admission = pane_input_enqueue(
             handle.clone(),
+            "test-page".into(),
             responsive_key.id.clone(),
             responsive_key.generation,
             1,
             b"R".to_vec(),
+            None,
         );
         assert_eq!(responsive_admission["ok"], true);
         let responsive_ticket = responsive_admission["ticket"]
@@ -1283,6 +1396,7 @@ mod tests {
         let responsive_thread = thread::spawn(move || {
             let value = tauri::async_runtime::block_on(pane_input_wait(
                 responsive_handle,
+                "test-page".into(),
                 responsive_ticket,
             ));
             responsive_sender
