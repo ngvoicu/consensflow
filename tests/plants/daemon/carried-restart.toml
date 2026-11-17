@@ -128,7 +128,7 @@ replace = "json_object('carrier', carrier, 'released', json_group_array(carrier)
 
 [[plant]]
 name = "carried restart: no start reconciles the tasks of what migration 0019 let go of"
-meant = "a_row_that_joined_a_carrier_an_earlier_build_pasted_again_is_not_taken_for_received_by_its_first_paste"
+meant = "a_start_reconciles_a_released_answer_but_keeps_a_second_question_waiting"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]

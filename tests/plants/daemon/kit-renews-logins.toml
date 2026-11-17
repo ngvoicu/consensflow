@@ -218,7 +218,7 @@ runs = ["renew-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/isolation/pi.rs"
-find = '''        let changed = before.changes_to(&Seen::look(&files, &records), &home);'''
+find = '''        let changed = before.changes_to(&Seen::look(&files, &records, None, &logins), &home);'''
 replace = '''        let changed = before.changes_to(&before, &home);'''
 
 [[plant]]

@@ -55,8 +55,8 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/muse.rs"
-find = '''    crate::door::write(config.join("auth.json"), login_copy(&text)?)'''
-replace = '''    crate::door::write(config.join("auth.json"), text)'''
+find = '''    let sanitized = login_copy(&text)?;'''
+replace = '''    let sanitized = text.clone();'''
 
 [[plant]]
 name = "kit windows muse: a rig's home is given no settings"

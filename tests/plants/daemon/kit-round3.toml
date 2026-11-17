@@ -117,10 +117,6 @@ find = '''if kind.is_symlink() {
                 continue;
             } else if kind.is_dir() {'''
 replace = '''if kind.is_dir() {'''
-[[plant.edit]]
-file = "crates/cf-e2e/tests/live_muse_reads.rs"
-find = '''} else if kind.is_file() {'''
-replace = '''} else if kind.is_file() || kind.is_symlink() {'''
 
 [[plant]]
 name = "kit round3: Devin compaction lists foreign folders"

@@ -99,8 +99,8 @@ meant = "muse_reads_and_compaction_copy_no_refresh_keys"
 runs = ["disclosure-muse-guard"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/guard.rs"
-find = '''crate::muse::login_copy(&text).map_err(|error| io::Error::other(error.to_string()))?'''
-replace = '''text'''
+find = '''crate::muse::login_copy(text).map_err(|error| io::Error::other(error.to_string()))?'''
+replace = '''text.to_owned()'''
 
 [[plant]]
 name = "kit disclosure: Muse TUI copies refresh keys"

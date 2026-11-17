@@ -4,6 +4,94 @@ import { expect, test } from '@playwright/test'
 import { tempEnv } from '../../tests/helpers.mjs'
 import { agentsServer } from './agents-server.mjs'
 
+test('Harnesses loads the bundled Geist in standalone and framed views', async ({
+  page,
+  browserName,
+}) => {
+  const t = tempEnv()
+  const server = await agentsServer(t.env, { installed: [] })
+  const outside = []
+  await page.route('**/*', (route) => {
+    const url = new URL(route.request().url())
+    if (url.origin !== server.url) {
+      outside.push(url.href)
+      return route.abort()
+    }
+    if (url.pathname === '/api/harnesses/check') {
+      return route.fulfill({ json: { harnesses: [] } })
+    }
+    return route.continue()
+  })
+
+  const headingUsesGeist = async (heading) => {
+    const result = await heading.evaluate(async (element) => {
+      await document.fonts.ready
+      const style = getComputedStyle(element)
+      const faces = []
+      // The five subsets in the board's Geist stylesheet, including the heading's Latin.
+      for (const text of ['Harnesses', 'Ā', 'Ж', 'Ѡ', 'ắ']) {
+        const loaded = await document.fonts.load(
+          `${style.fontWeight} ${style.fontSize} Geist`,
+          text,
+        )
+        faces.push({ text, loaded: loaded.map(({ family, status }) => ({ family, status })) })
+      }
+      return { family: style.fontFamily, faces }
+    })
+    expect(result.family.split(',')[0].replaceAll('"', '')).toBe('Geist')
+    for (const { text, loaded } of result.faces) {
+      expect(loaded, `loaded Geist for ${text}`).not.toEqual([])
+      expect(loaded.every((face) => face.family === 'Geist' && face.status === 'loaded')).toBe(true)
+    }
+  }
+
+  try {
+    for (const scheme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme: scheme })
+      await page.goto(`${server.url}/harnesses?token=${server.token}`)
+      await headingUsesGeist(page.getByRole('heading', { name: 'Harnesses' }))
+      await expect(page.locator('body')).toHaveCSS(
+        'background-color',
+        scheme === 'light' ? 'rgb(255, 255, 255)' : 'rgb(9, 9, 11)',
+      )
+      if (browserName === 'chromium') {
+        // A declared family alone can still draw in a fallback: ask Chromium what drew the heading.
+        const cdp = await page.context().newCDPSession(page)
+        await cdp.send('DOM.enable')
+        await cdp.send('CSS.enable')
+        const { root } = await cdp.send('DOM.getDocument')
+        const { nodeId } = await cdp.send('DOM.querySelector', {
+          nodeId: root.nodeId,
+          selector: 'h1',
+        })
+        const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId })
+        expect(fonts).toContainEqual(
+          expect.objectContaining({ familyName: 'Geist', isCustomFont: true }),
+        )
+        await cdp.detach()
+      }
+      await page.evaluate((url) => {
+        const frame = document.createElement('iframe')
+        frame.title = 'Harnesses'
+        frame.sandbox = 'allow-forms allow-same-origin allow-scripts'
+        frame.src = url
+        document.body.append(frame)
+      }, `${server.url}/harnesses?token=${server.token}`)
+      await headingUsesGeist(
+        page.frameLocator('iframe[title="Harnesses"]').getByRole('heading', { name: 'Harnesses' }),
+      )
+      await expect(page.frameLocator('iframe[title="Harnesses"]').locator('body')).toHaveCSS(
+        'background-color',
+        'rgb(9, 9, 11)',
+      )
+    }
+    expect(outside).toEqual([])
+  } finally {
+    await server.close()
+    t.cleanup()
+  }
+})
+
 for (const [harness, label] of [['pi', 'Pi']]) {
   test(`real administration page checks ${label} setup and retries without global configuration`, async ({
     page,

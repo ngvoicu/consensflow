@@ -11,13 +11,15 @@
 // nothing goes to GitHub.
 
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
+import { once } from 'node:events'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { after, before, describe, test } from 'node:test'
 
 import { ROOT } from '../install/kit.mjs'
+import { endListedProcesses } from '../install/real-install-processes.mjs'
 
 const SCRIPT = path.join(ROOT, 'install/real-install.mjs')
 const FOLDER = 'C:\\Users\\dev\\AppData\\Local\\ConsensFlow'
@@ -167,4 +169,56 @@ describe('on a Mac, outside GitHub Actions', {
     assert.match(ci.out, /name the folder to install into with --dir/)
     assert.deepEqual(ci.asked, [])
   })
+})
+
+test('Mac cleanup continues after a listed process has already ended', () => {
+  const signalled = []
+  const kill = (pid, signal) => {
+    signalled.push([pid, signal])
+    if (pid === 102) throw Object.assign(new Error('gone'), { code: 'ESRCH' })
+  }
+  assert.doesNotThrow(() =>
+    endListedProcesses(['  101 /owned/app', '  102 /owned/app', '  103 /owned/app'], kill),
+  )
+  assert.deepEqual(signalled, [
+    [101, 'SIGTERM'],
+    [102, 'SIGTERM'],
+    [103, 'SIGTERM'],
+  ])
+})
+
+test('Mac cleanup still fails on another signal error', () => {
+  const denied = Object.assign(new Error('denied'), { code: 'EPERM' })
+  assert.throws(
+    () =>
+      endListedProcesses(['  101 /owned/app'], () => {
+        throw denied
+      }),
+    (error) => error === denied,
+  )
+})
+
+test('Mac cleanup still ends a run-owned process after one disappeared', async () => {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
+  const exited = once(child, 'exit')
+  let signalled = false
+  try {
+    await once(child, 'spawn')
+    endListedProcesses(['  -1 /gone', `  ${child.pid} /owned/app`], (pid, signal) => {
+      if (pid === -1) throw Object.assign(new Error('gone'), { code: 'ESRCH' })
+      assert.equal(process.kill(pid, signal), true)
+      signalled = true
+    })
+    assert.equal(signalled, true, 'the run-owned process was signalled')
+    const [code, signal] = await exited
+    if (process.platform === 'win32') {
+      assert.equal(code, 1)
+      assert.equal(signal, null)
+    } else {
+      assert.equal(code, null)
+      assert.equal(signal, 'SIGTERM')
+    }
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+  }
 })

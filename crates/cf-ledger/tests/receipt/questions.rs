@@ -1,10 +1,314 @@
-//! A question's task waits while it is outstanding, and only a received
-//! answer ends that, by whatever way it was received: all of a window's
-//! questions, held to one rule.
+//! A question's task waits until an answer is on its way or received, with
+//! every question, the human's gate and receipt held to their own rules.
 
 use cf_ledger::{Claim, Read};
 
 use crate::fixture::{gated_world, ids, world, World};
+
+#[test]
+fn an_answer_queued_for_a_busy_window_ends_the_wait_before_delivery() {
+    let mut w = world();
+    let created = w.give("zeus", "Parser");
+    let (task, brief) = (created.task.number, created.message.unwrap().id);
+    w.deliver(brief);
+    let question = w.ask("zeus", task, "Which format?");
+    assert_eq!(w.state(task), "waiting");
+
+    let answer = w.answer(question.id, "JSON");
+    assert_eq!(w.states(&[answer.id]), ["queued"]);
+    assert_eq!(w.state(task), "working", "the chief has given an answer");
+    assert_eq!(
+        w.next("zeus"),
+        Some(answer.id),
+        "it is still to be delivered"
+    );
+    w.deliver(answer.id);
+    assert_eq!(w.state(task), "working");
+}
+
+#[test]
+fn an_answer_held_for_human_approval_keeps_the_task_waiting_until_passed_on() {
+    let mut w = gated_world();
+    let (task, _question, answer) = answered_at_the_gate(&mut w);
+    assert_eq!(w.states(&[answer]), ["gated"]);
+    assert_eq!(
+        w.state(task),
+        "waiting",
+        "the human must approve the answer"
+    );
+
+    w.ledger
+        .approve_message(answer, "human")
+        .expect("passed on");
+    assert_eq!(w.states(&[answer]), ["queued"]);
+    assert_eq!(w.state(task), "working", "approval ends the wait");
+}
+
+#[test]
+fn an_older_ledger_with_a_queued_answer_reconciles_its_wait_on_open() {
+    let mut w = world();
+    let created = w.give("zeus", "Parser");
+    let (task, brief) = (created.task.number, created.message.unwrap().id);
+    w.deliver(brief);
+    let question = w.ask("zeus", task, "Which format?");
+    let answer = w.answer(question.id, "JSON");
+    // An earlier build left the task waiting although its answer was queued.
+    w.edit(|db| {
+        db.execute("UPDATE task SET state = 'waiting' WHERE number = ?", [task])
+            .unwrap();
+    });
+    assert_eq!(w.states(&[answer.id]), ["queued"]);
+    assert_eq!(
+        w.state(task),
+        "working",
+        "the next start repairs the stale wait"
+    );
+}
+
+#[test]
+fn opening_keeps_waits_for_other_questions_and_the_humans_approval_and_keeps_pauses() {
+    let mut w = world();
+    let (task, first, _) = with_two_questions(&mut w, false);
+    w.answer(first, "JSON");
+    let mut before = None;
+    w.edit(|db| before = Some(rows_of_each_table(db)));
+    assert_eq!(
+        w.state(task),
+        "waiting",
+        "the second question has no answer"
+    );
+    assert_eq!(rows_of_each_table(w.ledger.sqlite()), before.unwrap());
+
+    let mut w = gated_world();
+    let (task, _, _) = answered_at_the_gate(&mut w);
+    let mut before = None;
+    w.edit(|db| before = Some(rows_of_each_table(db)));
+    assert_eq!(w.state(task), "waiting", "the answer is held for the human");
+    assert_eq!(rows_of_each_table(w.ledger.sqlite()), before.unwrap());
+
+    let mut w = world();
+    let created = w.give("zeus", "Parser");
+    let (task, brief) = (created.task.number, created.message.unwrap().id);
+    w.deliver(brief);
+    let question = w.ask("zeus", task, "Which format?");
+    w.pause(task);
+    w.answer(question.id, "JSON");
+    let mut before = None;
+    w.edit(|db| before = Some(rows_of_each_table(db)));
+    assert_eq!(w.state(task), "paused", "an answer does not resume a pause");
+    assert_eq!(rows_of_each_table(w.ledger.sqlite()), before.unwrap());
+}
+
+#[test]
+fn an_unrelated_receipt_reconciles_every_answer_state_without_receiving_the_answer() {
+    for (answer_state, expected) in [
+        ("queued", "working"),
+        ("delivering", "working"),
+        ("delivered", "working"),
+        ("read", "working"),
+        ("gated", "waiting"),
+        ("failed", "waiting"),
+        ("cancelled", "waiting"),
+    ] {
+        let mut w = world();
+        let created = w.give("zeus", "Parser");
+        let task = created.task.number;
+        w.deliver(created.message.unwrap().id);
+        let question = w.ask("zeus", task, "Which format?");
+        let answer = w.answer(question.id, "JSON");
+        let note = w.note("chief", "zeus", task, "An unrelated note");
+
+        // Give the task the opposite stale state so a receipt must reconcile it.
+        let db = w.ledger.sqlite();
+        db.execute(
+            "UPDATE message SET state = ? WHERE id = ?",
+            rusqlite::params![answer_state, answer.id],
+        )
+        .unwrap();
+        let stale = if expected == "working" {
+            "waiting"
+        } else {
+            "working"
+        };
+        db.execute(
+            "UPDATE task SET state = ? WHERE number = ?",
+            rusqlite::params![stale, task],
+        )
+        .unwrap();
+        let answer_before = serde_json::to_value(w.message(answer.id)).unwrap();
+        let zeus = w.id("zeus");
+        w.ledger
+            .receive_read(
+                zeus,
+                &[note.id],
+                Read::Inbox,
+                &cf_proto::cf_word::CfWord::bare(),
+            )
+            .unwrap();
+        assert_eq!(w.state(task), expected, "answer {answer_state}");
+        assert_eq!(
+            serde_json::to_value(w.message(answer.id)).unwrap(),
+            answer_before,
+            "the answer was not received: {answer_state}"
+        );
+    }
+}
+
+/// The rows left by an older build, including all message fields. The stable
+/// ordering lets the tests compare a second open with the first, without
+/// overlooking a receipt, claim, or other field that was changed on repair.
+fn rows_of_each_table(
+    db: &rusqlite::Connection,
+) -> std::collections::BTreeMap<String, Vec<Vec<String>>> {
+    let tables: Vec<String> = db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    tables
+        .into_iter()
+        .map(|table| {
+            let columns: Vec<String> = db
+                .prepare(&format!("PRAGMA table_info(\"{table}\")"))
+                .unwrap()
+                .query_map([], |row| row.get(1))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            let quoted = columns
+                .iter()
+                .map(|column| format!("quote(\"{column}\")"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let rows = db
+                .prepare(&format!("SELECT {quoted} FROM \"{table}\" ORDER BY rowid"))
+                .unwrap()
+                .query_map([], |row| (0..columns.len()).map(|i| row.get(i)).collect())
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            (table, rows)
+        })
+        .collect()
+}
+
+#[test]
+fn opening_repairs_an_answer_in_transit_once_without_changing_its_rows() {
+    for answer_state in ["queued", "delivering"] {
+        let mut w = world();
+        let created = w.give("zeus", "Parser");
+        let task = created.task.number;
+        w.deliver(created.message.unwrap().id);
+        let question = w.ask("zeus", task, "Which format?");
+        let answer = w.answer(question.id, "JSON");
+        let mut before = None;
+        w.edit(|db| {
+            db.execute(
+                "UPDATE message SET state = ? WHERE id = ?",
+                rusqlite::params![answer_state, answer.id],
+            )
+            .unwrap();
+            db.execute("UPDATE task SET state = 'waiting' WHERE number = ?", [task])
+                .unwrap();
+            before = Some(rows_of_each_table(db));
+        });
+        let before = before.unwrap();
+        assert_eq!(w.state(task), "working", "answer {answer_state}");
+        assert_eq!(w.states(&[answer.id]), [answer_state]);
+        let after = rows_of_each_table(w.ledger.sqlite());
+        for (table, rows) in &before {
+            if !["task", "event", "sqlite_sequence"].contains(&table.as_str()) {
+                assert_eq!(
+                    after.get(table),
+                    Some(rows),
+                    "table {table}, answer {answer_state}"
+                );
+            }
+        }
+        assert_eq!(after["event"].len(), before["event"].len() + 1);
+        assert_eq!(
+            &after["event"][..before["event"].len()],
+            before["event"].as_slice()
+        );
+        let data: String = w
+            .ledger
+            .sqlite()
+            .query_row(
+                "SELECT data FROM event ORDER BY id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let event: serde_json::Value = serde_json::from_str(&data).unwrap();
+        assert_eq!(event["from"], "waiting");
+        assert_eq!(event["to"], "working");
+        w.edit(|_| {});
+        assert_eq!(
+            rows_of_each_table(w.ledger.sqlite()),
+            after,
+            "second open, answer {answer_state}"
+        );
+    }
+}
+
+#[test]
+fn opening_leaves_other_task_states_and_failed_or_cancelled_answers_untouched() {
+    for task_state in [
+        "queued",
+        "working",
+        "done",
+        "accepted",
+        "cancelled",
+        "failed",
+    ] {
+        let mut w = world();
+        let created = w.give("zeus", "Parser");
+        let task = created.task.number;
+        w.deliver(created.message.unwrap().id);
+        let question = w.ask("zeus", task, "Which format?");
+        w.answer(question.id, "JSON");
+        let mut before = None;
+        w.edit(|db| {
+            db.execute(
+                "UPDATE task SET state = ? WHERE number = ?",
+                rusqlite::params![task_state, task],
+            )
+            .unwrap();
+            before = Some(rows_of_each_table(db));
+        });
+        assert_eq!(
+            rows_of_each_table(w.ledger.sqlite()),
+            before.unwrap(),
+            "task {task_state}"
+        );
+    }
+    for answer_state in ["failed", "cancelled"] {
+        let mut w = world();
+        let created = w.give("zeus", "Parser");
+        let task = created.task.number;
+        w.deliver(created.message.unwrap().id);
+        let question = w.ask("zeus", task, "Which format?");
+        let answer = w.answer(question.id, "JSON");
+        let mut before = None;
+        w.edit(|db| {
+            db.execute(
+                "UPDATE message SET state = ? WHERE id = ?",
+                rusqlite::params![answer_state, answer.id],
+            )
+            .unwrap();
+            db.execute("UPDATE task SET state = 'waiting' WHERE number = ?", [task])
+                .unwrap();
+            before = Some(rows_of_each_table(db));
+        });
+        assert_eq!(
+            rows_of_each_table(w.ledger.sqlite()),
+            before.unwrap(),
+            "answer {answer_state}"
+        );
+    }
+}
 
 /// A task given to zeus, its brief received, with two questions asked.
 fn with_two_questions(w: &mut World, options: bool) -> (i64, i64, i64) {
@@ -31,16 +335,12 @@ fn one_answer_received_leaves_the_task_waiting_for_the_other_question_and_the_se
     let (task, first, second) = with_two_questions(&mut w, false);
     let one = w.answer(first, "JSON");
     w.deliver(one.id);
-    assert_eq!(
-        w.state(task),
-        "waiting",
-        "one question still has no answer received"
-    );
+    assert_eq!(w.state(task), "waiting", "one question still has no answer");
     let two = w.answer(second, "v2");
     assert_eq!(
         w.state(task),
-        "waiting",
-        "an answer on its way is not one received"
+        "working",
+        "both answers are on their way or received"
     );
     w.deliver(two.id);
     assert_eq!(w.state(task), "working");
@@ -63,8 +363,8 @@ fn the_same_through_a_doors_acknowledgement() {
     w.ledger.settle_claim(one.id, zeus, true).expect("received");
     assert_eq!(
         w.state(task),
-        "waiting",
-        "the second answer is claimed, not received"
+        "working",
+        "the second answer is claimed, not received, but was given"
     );
     assert_eq!(w.receipt(one.id), serde_json::json!({ "door": true }));
     w.ledger.settle_claim(two.id, zeus, true).expect("received");
@@ -86,7 +386,7 @@ fn the_same_through_what_cf_served_whole() {
             &cf_proto::cf_word::CfWord::bare(),
         )
         .expect("read");
-    assert_eq!(w.state(task), "waiting");
+    assert_eq!(w.state(task), "working");
     assert_eq!(
         w.receipt(one.id),
         serde_json::json!({ "read": "inbox" }),
@@ -227,6 +527,7 @@ fn an_answer_whose_delivery_failed_leaves_a_question_withdrawn_at_the_gate_oblig
         .fail_delivery(answer, "the window closed")
         .expect("given up");
     assert_eq!(w.states(&[question, answer]), ["cancelled", "failed"]);
+    assert_eq!(w.state(task), "waiting", "the answer failed immediately");
 
     an_unrelated_receipt(&mut w, task);
     assert_eq!(
@@ -281,6 +582,11 @@ fn an_answer_an_agent_cancelled_leaves_the_question_obliging_as_a_failed_one_doe
     w.ledger
         .cancel_message(answer, "withdrawn by the chief")
         .expect("cancelled");
+    assert_eq!(
+        w.state(task),
+        "waiting",
+        "the answer was cancelled immediately"
+    );
     an_unrelated_receipt(&mut w, task);
     assert_eq!(w.state(task), "waiting");
 

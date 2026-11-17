@@ -335,12 +335,22 @@ impl Dispatcher {
             .ledger
             .borrow()
             .active_task(participant.id, false)?;
-        // A task that reads working while the words that resumed it wait for the window's
-        // rest (`resumed_at_work`) takes no result: the turn at work is the one before them,
-        // and the answer to them is the result. It is handled as the queued task it was.
+        // A task may read working while its resume words or an answer to its window's
+        // question still wait for that window. The turn before those words is no result:
+        // the window must get them at rest first, just as when its task read waiting.
         let waiting = match &task {
             Some(thread) if thread.task.state == "working" => {
                 self.resume_words_wait(project.id, thread.task.number)?
+                    || thread.messages.iter().any(|message| {
+                        message.kind == "answer"
+                            && message.recipient_id == participant.id
+                            && matches!(message.state.as_str(), "queued" | "delivering")
+                            && thread.messages.iter().any(|question| {
+                                Some(question.id) == message.reply_to
+                                    && question.kind == "question"
+                                    && !question.urgent
+                            })
+                    })
             }
             _ => false,
         };

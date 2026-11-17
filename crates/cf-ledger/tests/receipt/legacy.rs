@@ -274,8 +274,8 @@ fn a_row_left_under_a_carrier_node_delivered_cancelled_or_failed_is_a_queued_mes
         );
         assert_eq!(
             w.state(1),
-            "waiting",
-            "and the question it answers has no answer received yet"
+            "working",
+            "the answer is on its way, though it is not received yet"
         );
         let begun = w.deliver(answer);
         assert!(begun.carried.is_empty(), "it rides in nothing");
@@ -283,6 +283,35 @@ fn a_row_left_under_a_carrier_node_delivered_cancelled_or_failed_is_a_queued_mes
         assert_eq!(w.state(1), "working");
         assert_eq!(w.next("zeus"), None, "and nothing is left queued");
     }
+}
+
+#[test]
+fn a_start_reconciles_a_released_answer_but_keeps_a_second_question_waiting() {
+    let mut w = world();
+    let created = w.give("zeus", "Parser");
+    let (task, brief) = (created.task.number, created.message.unwrap().id);
+    w.deliver(brief);
+    let first = w.ask("zeus", task, "Which format?");
+    w.ask("zeus", task, "Which version?");
+    let answer = w.answer(first.id, "JSON");
+    assert_eq!(w.state(task), "waiting");
+    let project = w.project;
+    w.edit(|db| {
+        // An older build left the task working and had released the answer,
+        // but stopped before reconciling that release.
+        db.execute("UPDATE task SET state = 'working' WHERE number = ?", [task]).unwrap();
+        let data = serde_json::json!({ "carrier": 0, "released": [answer.id] }).to_string();
+        db.execute(
+            "INSERT INTO event (project_id, at, kind, data) VALUES (?, '2026-11-16T00:00:00.000Z', 'message.uncarried', ?)",
+            rusqlite::params![project, data],
+        ).unwrap();
+    });
+    assert_eq!(w.states(&[answer.id]), ["queued"]);
+    assert_eq!(
+        w.state(task),
+        "waiting",
+        "the other question is still unanswered"
+    );
 }
 
 /// A home at schema `written_at`, its file open as a build left it. Its member names no
@@ -350,8 +379,8 @@ fn lets_go_of_the_answer(w: &mut World, carrier: i64, answer: i64) {
     );
     assert_eq!(
         w.state(1),
-        "waiting",
-        "and the question it answers has no answer received yet"
+        "working",
+        "the answer is on its way, though it is not received yet"
     );
     let in_flight = w.ledger.in_flight().unwrap();
     assert_eq!(ids(&in_flight), [carrier]);
@@ -475,7 +504,7 @@ fn joined_a_carrier_waiting_again(attempts: i64, reason: &str) {
         ["delivered", "queued"],
         "the answer no paste held is not received"
     );
-    assert_eq!(w.state(1), "waiting", "and its question has no answer yet");
+    assert_eq!(w.state(1), "working", "the answer is on its way");
     assert_eq!(w.next("zeus"), Some(answer));
     let begun = w.deliver(answer);
     assert!(begun.carried.is_empty(), "it rides in nothing");
@@ -484,9 +513,9 @@ fn joined_a_carrier_waiting_again(attempts: i64, reason: &str) {
 
 /// Astra's review of 2026-10-17: the start that took a home alpha.82 left past
 /// migration 0019 stopped after its commit and before the tasks of what it let go of
-/// were reconciled; the next start read schema 19 and reconciled nothing, and Node's
-/// `working` stood for a task whose answer was never received. Each start reconciles
-/// what the log says was let go of and not yet reconciled, and says so, once.
+/// were reconciled; the next start read schema 19 and reconciled nothing. Each start
+/// reconciles what the log says was let go of and not yet reconciled, and says so,
+/// once; other questions can still require the task to wait.
 #[test]
 fn a_start_after_one_that_stopped_between_migration_19_and_its_reconcile_reconciles_what_was_let_go_of_once(
 ) {

@@ -20,6 +20,10 @@ use super::seating::{Seating, TIER};
 pub trait Records {
     fn items(&self, kind: &str, handle: &str) -> Result<Vec<crate::live::ask::Item>>;
 
+    fn member_for(&self, agent: &str) -> Option<String> {
+        Some(agent.to_owned())
+    }
+
     /// The last `last` items of the transcript of task `number`, as the page's drawer and
     /// `cf task get --transcript --last` read it: ConsensFlow's copy of its window's record.
     fn transcript(&self, number: i64, last: usize) -> Result<Vec<serde_json::Value>> {
@@ -81,13 +85,14 @@ pub fn tasks(
         ));
         let assignee = task["assignee"].as_str().unwrap_or_default();
         let agent = snapshot.agent_of(assignee);
+        let expected = records.member_for(&seat.agent());
         checks.push(Check::new(
             &who,
             "it was assigned to the member seated for it",
-            agent.as_deref() == Some(seat.agent().as_str()),
+            agent.is_some() && agent == expected,
             format!(
-                "T-{number}'s assignee @{assignee} is a session of {agent:?}, and {} sits there",
-                seat.agent()
+                "T-{number}'s assignee @{assignee} is a session of {agent:?}; {} joined as {expected:?}",
+                seat.agent(),
             ),
         ));
         let header = observe::brief_header(number);
@@ -594,6 +599,42 @@ mod tests {
                     .to_owned()
             ),
             "{failed:?}"
+        );
+    }
+
+    #[test]
+    fn t1744_real_model_named_members_are_checked_against_the_handle_actually_added() {
+        struct ModelBriefs(Briefs);
+        impl Records for ModelBriefs {
+            fn items(&self, kind: &str, handle: &str) -> Result<Vec<Item>> {
+                self.0.items(kind, handle)
+            }
+            fn member_for(&self, agent: &str) -> Option<String> {
+                Some(format!("model-{agent}"))
+            }
+        }
+        let (mut snapshot, briefs) = board();
+        for (index, (_, role)) in LOGICAL.iter().enumerate() {
+            snapshot.lanes[index]["participant"]["member"] =
+                json!(format!("model-{}", role.agent()));
+        }
+        let checks = tasks(
+            &Seating::stand_ins(),
+            &snapshot,
+            &Bindings::of(&snapshot),
+            &ModelBriefs(briefs),
+        );
+        assert_eq!(failed(&checks), Vec::<String>::new());
+        snapshot.lanes[1]["participant"]["member"] = json!("model-matrix-tester");
+        let checks = tasks(
+            &Seating::stand_ins(),
+            &snapshot,
+            &Bindings::of(&snapshot),
+            &ModelBriefs(board().1),
+        );
+        assert_eq!(
+            failed(&checks),
+            ["change (worker stand-in): it was assigned to the member seated for it"]
         );
     }
 

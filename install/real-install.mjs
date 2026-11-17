@@ -43,7 +43,6 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
-
 import {
   feedOf,
   INSTALL_PS1,
@@ -53,6 +52,7 @@ import {
   serve,
   testCopy,
 } from './kit.mjs'
+import { endListedProcesses } from './real-install-processes.mjs'
 
 const GITHUB = 'https://github.com/ngvoicu/consensflow/releases'
 const API = 'https://api.github.com/repos/ngvoicu/consensflow/releases?per_page=30'
@@ -270,7 +270,7 @@ function closeApp(dir) {
   const where = installed(dir)?.where
   if (!where) return
   if (mac) {
-    for (const line of running(dir)) process.kill(Number(line.trim().split(/\s+/)[0]), 'SIGTERM')
+    endListedProcesses(running(dir))
   } else {
     spawnSync(
       'powershell',

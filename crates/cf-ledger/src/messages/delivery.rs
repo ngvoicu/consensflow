@@ -797,6 +797,7 @@ pub(crate) fn cancel_message(
             release_carried(store, task.id)?;
             if let ("answer", Some(tell)) = (message.kind.as_str(), message.reply_to) {
                 super::paused_answers::recover_after_lost_answer(store, &task, Some(tell), false)?;
+                reconcile(store, task.id)?;
             }
         }
         known_message(store, message_id)
@@ -998,6 +999,7 @@ pub(crate) fn give_up_delivery(
                         false,
                     )?;
                 }
+                reconcile(store, task.id)?;
             }
         }
         Ok((known_message(store, message_id)?, GivenUp::Failed))

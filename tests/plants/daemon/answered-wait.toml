@@ -1,0 +1,110 @@
+# An answer on its way ends the board's wait without changing its delivery.
+[run]
+answered-wait-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "questions::"]
+answered-wait-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "an_answer_to_a_busy_window_moves_its_card_to_working_but_waits_for_rest"]
+answered-wait-urgent = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "an_answer_to_an_urgent_question_does_not_hold_the_workers_result"]
+
+[[plant]]
+name = "answered wait: an answer on its way does not end the wait"
+meant = "an_answer_queued_for_a_busy_window_ends_the_wait_before_delivery"
+runs = ["answered-wait-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "a.state IN ('queued', 'delivering', 'delivered', 'read')"
+replace = "a.state IN ('delivered', 'read')"
+
+[[plant]]
+name = "answered wait: an answer at the gate ends the wait"
+meant = "an_answer_held_for_human_approval_keeps_the_task_waiting_until_passed_on"
+runs = ["answered-wait-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "a.state IN ('queued', 'delivering', 'delivered', 'read')"
+replace = "a.state IN ('gated', 'queued', 'delivering', 'delivered', 'read')"
+
+[[plant]]
+name = "answered wait: queuing an answer does not reconcile its task"
+meant = "an_answer_queued_for_a_busy_window_ends_the_wait_before_delivery"
+runs = ["answered-wait-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = '''        if let Some(task_id) = task_id {
+            reconcile(store, task_id)?;
+        }
+        Ok(answer)'''
+replace = '''        Ok(answer)'''
+
+[[plant]]
+name = "answered wait: approval does not reconcile its task"
+meant = "an_answer_held_for_human_approval_keeps_the_task_waiting_until_passed_on"
+runs = ["answered-wait-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/gate.rs"
+find = '''            super::paused_answers::show_answered(store, &task, tell, false)?;
+            super::reconcile(store, task.id)?;'''
+replace = '''            super::paused_answers::show_answered(store, &task, tell, false)?;'''
+
+[[plant]]
+name = "answered wait: cancellation leaves the task working"
+meant = "an_answer_an_agent_cancelled_leaves_the_question_obliging_as_a_failed_one_does"
+runs = ["answered-wait-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''                super::paused_answers::recover_after_lost_answer(store, &task, Some(tell), false)?;
+                reconcile(store, task.id)?;'''
+replace = '''                super::paused_answers::recover_after_lost_answer(store, &task, Some(tell), false)?;'''
+
+[[plant]]
+name = "answered wait: failed delivery leaves the task working"
+meant = "an_answer_whose_delivery_failed_leaves_a_question_withdrawn_at_the_gate_obliging"
+runs = ["answered-wait-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''                    )?;
+                }
+                reconcile(store, task.id)?;
+            }
+        }
+        Ok((known_message(store, message_id)?, GivenUp::Failed))'''
+replace = '''                    )?;
+                }
+            }
+        }
+        Ok((known_message(store, message_id)?, GivenUp::Failed))'''
+
+[[plant]]
+name = "answered wait: an older ledger keeps its stale wait at start"
+meant = "an_older_ledger_with_a_queued_answer_reconciles_its_wait_on_open"
+runs = ["answered-wait-ledger"]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = "    reconcile_answered_on_open(&mut store)?;"
+replace = "    // The older wait is left as it was."
+
+[[plant]]
+name = "answered wait: the turn before the answer is taken as a result"
+meant = "an_answer_to_a_busy_window_moves_its_card_to_working_but_waits_for_rest"
+runs = ["answered-wait-engine"]
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''                    || thread.messages.iter().any(|message| {
+                        message.kind == "answer"
+                            && message.recipient_id == participant.id
+                            && matches!(message.state.as_str(), "queued" | "delivering")
+                            && thread.messages.iter().any(|question| {
+                                Some(question.id) == message.reply_to
+                                    && question.kind == "question"
+                                    && !question.urgent
+                            })
+                    })'''
+replace = ""
+
+
+[[plant]]
+name = "answered wait: an urgent answer holds back the result"
+meant = "an_answer_to_an_urgent_question_does_not_hold_the_workers_result"
+runs = ["answered-wait-urgent"]
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = "                                    && !question.urgent"
+replace = "                                    && question.urgent"

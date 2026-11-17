@@ -8,9 +8,9 @@
 //! `readEarly`) and told when the delivery ends ([`settle_when_given_back`],
 //! [`settle_when_given_up`]). A role is none of these: each part of it `cf inbox read`
 //! prints is logged, whatever state its note is in, and it is read once every part was
-//! printed ([`told_if_read`]). Withdrawing a message never resolves what it obliged:
-//! only receipt does. A task moves between `queued`, `working` and `waiting`
-//! in one place, [`reconcile`], after each receipt.
+//! printed ([`told_if_read`]). A task stops waiting for an answer when it is on its way;
+//! that does not make the answer received. A task moves between `queued`, `working` and
+//! `waiting` in one place, [`reconcile`].
 //!
 //! A door is the hook or broker that asked a question for a harness's
 //! question tool and waits for its answer. It claims an answer, hands it to
@@ -219,12 +219,10 @@ fn arrived(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
         .exists(params![task, window])?)
 }
 
-/// Whether the window asked a question on the task that no received answer
-/// resolves. A question the ledger withdrew still obliges once it has an
-/// answer, whatever became of that answer: only its transport was taken back,
-/// and an answer that failed, was cancelled or declined was not received. One
-/// withdrawn with no answer at all (its asker's window ended first, its task
-/// was failed) obliges no more: nobody has anything to answer.
+/// Whether the window asked a question that has no answer on its way or received.
+/// An answer gated for the human still obliges, as does one that failed, was
+/// cancelled or declined. A withdrawn question with an answer still obliges if
+/// that answer did not stand; one withdrawn without an answer obliges no more.
 fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
     Ok(store
         .db
@@ -232,7 +230,7 @@ fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerErro
             "SELECT 1 FROM message q
              WHERE q.task_id = ?1 AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0
                AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id
-                               AND a.kind = 'answer' AND a.state IN ('delivered', 'read'))
+                               AND a.kind = 'answer' AND a.state IN ('queued', 'delivering', 'delivered', 'read'))
                AND (q.state != 'cancelled'
                     OR EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id
                                AND a.kind = 'answer'))
@@ -244,7 +242,7 @@ fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerErro
 /// The one place a task moves between `queued`, `working` and `waiting`:
 /// - a `queued` task goes on once no task message for its window is still on
 ///   its way and one was received: to `waiting` if the window has a question
-///   nobody received an answer to, else to `working`;
+///   with no answer on its way or received, else to `working`;
 /// - a `working` task waits for such a question;
 /// - a `waiting` task works again once none is left;
 /// - any other state stays as it is.
@@ -271,6 +269,26 @@ pub(crate) fn reconcile(store: &mut Store, task_id: i64) -> Result<(), LedgerErr
         _ => return Ok(()),
     };
     store.move_task(&task, to, json!({}))
+}
+
+/// An older ledger may have left a task waiting for an answer still in transit.
+/// Reconcile those tasks on open, including their other unanswered questions.
+pub(crate) fn reconcile_answered_on_open(store: &mut Store) -> Result<(), LedgerError> {
+    store.write(|store| {
+        let tasks = store
+            .db
+            .prepare(
+                "SELECT DISTINCT t.id FROM task t JOIN message a ON a.task_id = t.id
+             WHERE t.state = 'waiting' AND a.kind = 'answer'
+               AND a.state IN ('queued', 'delivering')",
+            )?
+            .query_map([], |row| row.get::<_, i64>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        for task in tasks {
+            reconcile(store, task)?;
+        }
+        Ok(())
+    })
 }
 
 /// Whether a question its window asks about `task` comes from a turn that

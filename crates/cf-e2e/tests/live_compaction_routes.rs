@@ -508,7 +508,11 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
     let auth = files::read_string(&home.join(".config/muse/auth.json"))?;
     login_in_keychain(&auth).map_err(Error::Daemon)?;
     let muse = machine::command("muse")?;
-    let model = agents::model(Harness::Muse);
+    let asked = agents::asked_for(Harness::Muse)?;
+    let mut selected = asked
+        .named()
+        .contains(&Harness::Muse)
+        .then(|| asked.of(Harness::Muse).clone());
     let mut said = Vec::new();
     let mut failed = Vec::new();
     // Each case, its knobs, and whether its short turn must compact: the low limits must; the
@@ -539,11 +543,29 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
             path: std::env::temp_dir(),
             source,
         })?;
-        copy_muse_into(&home, scratch.path()).map_err(|source| Error::File {
+        copy_muse_into(&home, scratch.path(), &auth).map_err(|source| Error::File {
             action: "copy the login and the model catalog of",
             path: home.join(".config/muse"),
             source,
         })?;
+        if selected.is_none() {
+            let mut env: std::collections::BTreeMap<String, String> =
+                machine_vars().into_iter().collect();
+            for (name, folder) in [
+                ("XDG_CONFIG_HOME", "config"),
+                ("XDG_DATA_HOME", "data"),
+                ("XDG_CACHE_HOME", "cache"),
+                ("XDG_STATE_HOME", "state"),
+            ] {
+                env.insert(
+                    name.to_owned(),
+                    scratch.path().join(folder).to_string_lossy().into_owned(),
+                );
+            }
+            env.insert("MUSE_NO_AUTO_UPDATE".to_owned(), "1".to_owned());
+            selected = Some(agents::muse_in_env(&env)?);
+        }
+        let model = selected.as_ref().expect("a model was named or selected");
         let (_folder_scratch, folder) = scratch_folder()?;
         let mut args = vec![
             muse.to_string_lossy().into_owned(),
@@ -598,7 +620,9 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
             }
         ));
     }
-    log.block(&format!("muse on {}", model.name), &said.join("\n"));
+    if let Some(model) = selected {
+        log.block(&format!("muse on {}", model.name), &said.join("\n"));
+    }
     owner_watch.finish()?;
     assert!(failed.is_empty(), "{}", failed.join("; "));
     log.passed();

@@ -343,6 +343,11 @@ impl Members {
         self.handles.get(agent).map_or(agent, String::as_str)
     }
 
+    /// The actual handle returned when this plan's agent joined, if it did.
+    pub fn added_handle(&self, agent: &str) -> Option<&str> {
+        self.handles.get(agent).map(String::as_str)
+    }
+
     /// The task `number`, as the board reads it, with its whole thread: each
     /// message's state and receipt.
     pub fn task(&self, number: i64) -> Result<Value> {

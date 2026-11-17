@@ -57,8 +57,8 @@ pub async fn serve(
 
 /// One request, in Node's order:
 ///
-/// 1. the human's screens, under the UI token, before any window's: one that
-///    is theirs is answered here, and the rest fall through;
+/// 1. the human's screens, under the UI token, and their public bundled font
+///    files before any window's: one that is theirs is answered here, and the rest fall through;
 /// 2. the window's token: so a path that is no route at all, from a caller
 ///    with no valid token, is 401, not 404;
 /// 3. the route the method and the path name ([`routes::recognize`]);

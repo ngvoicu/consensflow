@@ -255,7 +255,7 @@ replace = "OR t.state = 'waiting' OR (t.state = 'waiting'"
 
 [[plant]]
 name = "wake-up: an answer on its way to the window is the chief's still"
-meant = "a_question_answered_and_the_answer_not_yet_received_holds_the_wake_up_back"
+meant = "an_answer_the_gate_holds_for_the_human_is_on_its_way_and_holds_the_wake_up_back"
 runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
@@ -275,7 +275,7 @@ replace = "OR t.state = 'waiting' OR (t.state = 'waiting'"
 
 [[plant]]
 name = "wake-up engine: an answer on its way to the window is the chief's still"
-meant = "a_question_answered_and_the_answer_not_yet_received_holds_the_wake_up_back"
+meant = "an_answer_the_gate_holds_for_the_human_holds_the_wake_up_back"
 runs = ["engine-wake-ups"]
 
 [[plant.edit]]

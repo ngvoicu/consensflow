@@ -242,8 +242,8 @@ pub(crate) fn release_carried(store: &mut Store, task_id: i64) -> Result<(), Led
 /// carried, such a row would never be delivered here: when the ledger is opened,
 /// the start of this daemon, each is an ordinary queued message again, delivered
 /// in the order of its id, and the tasks they are about are reconciled after
-/// (`reconcile_released`): Node moved one on when it counted a queued answer as
-/// received, and that answer is still to be. A row Node was pasting on its own
+/// (`reconcile_released`), including any other question still unanswered. An
+/// answer on its way ends the wait but is still to be received. A row Node was pasting on its own
 /// when it stopped is `delivering`, not `queued`: it is left to the delivery that
 /// settles it, and `retry_delivery` lets it go of its carrier then.
 ///

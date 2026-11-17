@@ -48,7 +48,7 @@ fn a_poll_claims_the_answer_and_the_same_answer_comes_again_to_a_second_poll() {
         "no answer yet"
     );
     let answer = w.choose(question.id, "blue");
-    assert_eq!(w.state(task), "waiting");
+    assert_eq!(w.state(task), "working");
 
     let claimed = w.ledger.claim_answer(question.id, zeus).unwrap();
     assert!(matches!(&claimed, Claim::Answered(found) if found.id == answer.id));
@@ -57,7 +57,7 @@ fn a_poll_claims_the_answer_and_the_same_answer_comes_again_to_a_second_poll() {
         ["queued"],
         "claimed is not received"
     );
-    assert_eq!(w.state(task), "waiting");
+    assert_eq!(w.state(task), "working");
     assert_eq!(w.next("zeus"), None, "a claimed answer is not pasted");
     // A reply that was lost: the door asks again, and is given the same one.
     let again = w.ledger.claim_answer(question.id, zeus).unwrap();
@@ -113,7 +113,7 @@ fn a_door_that_did_not_hand_it_over_gives_the_claim_back() {
         Some(answer),
         "it is the ledger's again, as text"
     );
-    assert_eq!(w.state(task), "waiting");
+    assert_eq!(w.state(task), "working");
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn a_door_of_a_closed_project_claims_nothing_and_its_answer_waits_for_the_resume
     w.ledger
         .set_project_state(w.project, "suspended")
         .expect("closed");
-    assert_eq!(w.state(task), "waiting", "its window was never closed");
+    assert_eq!(w.state(task), "working", "its window was never closed");
 
     assert_eq!(
         w.ledger.claim_answer(question, zeus).unwrap(),

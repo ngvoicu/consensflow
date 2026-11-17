@@ -467,8 +467,8 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "            if let (\"answer\", Some(tell)) = (message.kind.as_str(), message.reply_to) {\n                super::paused_answers::recover_after_lost_answer(store, &task, Some(tell), false)?;\n            }\n"
-replace = ""
+find = "            if let (\"answer\", Some(tell)) = (message.kind.as_str(), message.reply_to) {\n                super::paused_answers::recover_after_lost_answer(store, &task, Some(tell), false)?;\n                reconcile(store, task.id)?;\n            }\n"
+replace = "            if message.kind == \"answer\" {\n                reconcile(store, task.id)?;\n            }\n"
 
 [[plant]]
 name = "answered tell: a failed task loses its shown answer"

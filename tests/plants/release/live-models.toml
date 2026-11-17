@@ -462,8 +462,8 @@ runs = ["e2e-live"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
-find = "            if model.effort.is_some() {"
-replace = "            if false && model.effort.is_some() {"
+find = "            if model.effort.is_some() && !choose_muse {"
+replace = "            if false && model.effort.is_some() && !choose_muse {"
 
 [[plant]]
 name = "live models: effort rows, an image designer's row is given an effort"

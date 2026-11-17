@@ -78,8 +78,8 @@ pub(crate) use pauses::{
 pub use pauses::{MAY_STILL_RUN, NOT_PROVEN_GONE};
 pub use receipt::Read;
 pub(crate) use receipt::{
-    claim_answer, door_born_closed, receive_read, receive_read_part, reconcile, release_all_claims,
-    release_claims, settle_claim,
+    claim_answer, door_born_closed, receive_read, receive_read_part, reconcile,
+    reconcile_answered_on_open, release_all_claims, release_claims, settle_claim,
 };
 pub(crate) use roles::{note_role, role_notes_to, role_of_note};
 pub(crate) use taken_back::take_back;
@@ -260,10 +260,9 @@ pub(crate) fn ask_naming(
 /// The answer goes back to whoever asked; the one asked answers. A plain
 /// question's answer is delivered into the asker's window. A question with
 /// options is answered by choice (or by text: one line per question of an ask
-/// of several, any text for an ask of one, `require_choices`): that
-/// answer is read at once and never delivered, because the harness door
-/// that asked collects it and the tool call completes with it; the asker's
-/// task resumes here. A question on a task that is over (accepted, cancelled
+/// of several, any text for an ask of one, `require_choices`): its harness
+/// door can claim and receive the answer. An answer on its way ends the task's
+/// wait, but still reaches the window as before. A question on a task that is over (accepted, cancelled
 /// or failed) takes no answer, from either side: nobody waits for it. A
 /// question answered is never typed in after (`settle_answered`). `from` is the answerer's participant
 /// id: handles repeat across projects (every chief is `chief`), ids never do.
@@ -381,11 +380,9 @@ pub(crate) fn answer(
         }
         settle_answered(store, question_id)?;
         let answer = known_message(store, id)?;
-        // The asker's own window gave this one: it has it, and its task goes on.
-        if answer.state == "read" {
-            if let Some(task_id) = task_id {
-                reconcile(store, task_id)?;
-            }
+        // An answer on its way ends the wait; a gated one still waits for the human.
+        if let Some(task_id) = task_id {
+            reconcile(store, task_id)?;
         }
         Ok(answer)
     })

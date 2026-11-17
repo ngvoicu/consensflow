@@ -1,6 +1,6 @@
 //! Live: a Muse member's window as the daemon opens one, on the real model. It is opt-in
 //! (`cargo xtask live muse-window`): it spends the Muse account's allowance on a worker of
-//! Muse's cheap model, `muse-spark-1.3-contributor` at `minimal` (contributor mode off; `--models
+//! an enabled Spark selected from Muse's account list (contributor mode off; `--models
 //! muse=<model>:<effort>` names another), and needs Muse Code installed and
 //! logged in, so it is ignored unless asked for and is no part of `check` or of CI. On a
 //! Mac and on Windows (MUS-20, T-792: Muse runs there as the rig's stand-in's child).
@@ -650,15 +650,35 @@ fn each_case_of_a_muse_members_window_holds_on_the_real_model() -> Result {
         .map_err(Error::Daemon)?
         .through(MUSE_STAND_IN);
     let home = muse::real_home().map_err(Error::Daemon)?;
-    let agent = agents::agent(Harness::Muse);
-    log.launched(&agents::row(Harness::Muse, "standard"));
-    let model = agents::model(Harness::Muse).name;
-    let live = Live {
+    let mut live = Live {
         install,
         home,
-        agent,
-        model,
+        agent: Value::Null,
+        model: String::new(),
     };
+    // Resolve the same row through the isolated daemon listing that a members-kit run uses.
+    // No model turn is opened by this discovery rig.
+    let discovery = Rig::start(live.config())?;
+    let row = agents::with_efforts(
+        &discovery,
+        &[agents::row(Harness::Muse, "standard")],
+        |note| log.say(note),
+    )
+    .into_iter()
+    .next()
+    .ok_or_else(|| Error::Daemon("Muse's model row is missing".to_owned()))?;
+    if row["model"].as_str().is_none() {
+        return Err(Error::Daemon(
+            "Muse's account list has no usable Spark model; choose one with --models muse=…"
+                .to_owned(),
+        ));
+    }
+    let model = agents::launched_on(&row)
+        .ok_or_else(|| Error::Daemon("Muse's model row is invalid".to_owned()))?;
+    log.launched(&row);
+    live.agent = agents::agent_on(&model);
+    live.model = model.name;
+    discovery.close()?;
     let asked = live::list("case");
     let mut checks = Vec::new();
     for case in CASES

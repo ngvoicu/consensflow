@@ -10,6 +10,31 @@ const SENTINEL: &str = "SENTINEL-the-owners-own-0002";
 const NOW: i64 = 1_800_000_000_000;
 
 #[test]
+fn t1744_pi_seed_matches_relative_and_absolute_home_spellings() {
+    let relative = Path::new("synthetic/agent/auth.json");
+    let absolute = std::path::absolute(relative).unwrap();
+    assert!(same_pi_source(relative, &absolute));
+    assert!(!same_pi_source(relative, Path::new("elsewhere/auth.json")));
+}
+
+#[test]
+fn t1744_pi_login_copy_works_on_either_platform_without_changing_the_source() {
+    let root = crate::door::made("cf-pi-login-source-").unwrap();
+    let source = root.path().join("auth.json");
+    let fake =
+        br#"{"example":{"type":"oauth","access":"synthetic","refresh":"synthetic-refresh"}}"#;
+    crate::door::write(&source, fake).unwrap();
+    let copied = pi_discovery_copy(&source).unwrap();
+    let text = fs::read_to_string(copied.folder.path().join("auth.json")).unwrap();
+    assert!(!text.to_ascii_lowercase().contains("refresh"));
+    assert!(serde_json::from_str::<Value>(&text)
+        .unwrap()
+        .get("example")
+        .is_some());
+    assert!(fs::read(source).unwrap().as_slice() == fake);
+}
+
+#[test]
 fn kit_round4_windows_devin_gets_generated_git_config() {
     let owner = Owner::new();
     let isolation = owner.devin();

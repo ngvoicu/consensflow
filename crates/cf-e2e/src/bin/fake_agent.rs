@@ -573,7 +573,7 @@ fn recorded_late(text: &str, said: Option<&str>, participant: &str) -> Duration 
 }
 
 /// How often a window that holds a message back draws its spinner.
-const SPINNER_EVERY: Duration = Duration::from_secs(3);
+const SPINNER_EVERY: Duration = Duration::from_secs(1);
 
 /// The window holds `text` back for `late`, its record showing nothing of it and its status at
 /// rest, while its screen shows the message it took and a spinner, as a loaded Claude Code

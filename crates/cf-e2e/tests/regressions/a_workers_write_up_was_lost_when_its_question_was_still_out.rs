@@ -12,8 +12,9 @@
 //!
 //! What the owner should have seen: a result that begins with the write-up, labelled as written
 //! before the answer to the question went in, and ends with what the worker said last. While
-//! the question is out the task waits and nothing is recorded; a worker that asks and stops
-//! (the common case) has the reply alone for its result, as it always had.
+//! the question has no answer the task waits and nothing is recorded; an answer makes the task
+//! work while the answer waits for the window's rest. A worker that asks and stops (the common case)
+//! has the reply alone for its result, as it always had.
 //!
 //! The worker is the stand-in, whose `ASKING <question> THEN <line>` runs the real `cf ask`,
 //! writes the call and the output `cf ask` printed as Claude Code records them, and goes on
@@ -84,10 +85,19 @@ fn a_write_up_the_turn_ended_with_while_the_question_was_out_is_in_the_result_be
             .iter()
             .any(|message| message["kind"] == "answer"))
     })?;
+    let answer = project
+        .inbox(&worker)?
+        .into_iter()
+        .find(|message| message["kind"] == "answer")
+        .ok_or("the worker's answer is not in the inbox")?;
+    assert_eq!(
+        answer["state"], "queued",
+        "the answer waits for the window's rest: the order of T-837"
+    );
     assert_eq!(
         project.task(1)?["state"],
-        "waiting",
-        "the answer waits for the window's rest: the order of T-837"
+        "working",
+        "the question has an answer on its way"
     );
 
     rig.wait_for("T-1 to be done", secs(120), || {

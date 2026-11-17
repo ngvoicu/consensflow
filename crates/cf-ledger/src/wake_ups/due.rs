@@ -142,9 +142,10 @@ fn origin_ms(
 const WITH_ITS_WINDOW: [&str; 2] = ["queued", "working"];
 
 /// The numbers of the tasks the chief has on their way, oldest first: those with
-/// their window (queued or working); those waiting for an answer that is on its
-/// way to the window, since a task reads `waiting` until the answer is received
-/// and, with no answer given, the question is the chief's to answer; those held
+/// their window (queued or working); those waiting with an answer held for the
+/// human's approval or in transit while another question remains unanswered.
+/// A task reads `working` when all its ordinary questions have answers on their
+/// way; with no answer given, the question is the chief's to answer. Also, those held
 /// for their member's quota (`paused` with a time it goes on by itself, which
 /// the daemon clears when it cannot; not one held until a time in the year 9999,
 /// which an account unavailable or a model moved is held until: it waits for the
