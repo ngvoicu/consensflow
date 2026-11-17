@@ -342,3 +342,105 @@ fn a_completed_paste_is_not_closed_again_after_page_replacement() {
     panes.kill(&key).unwrap();
     assert_eq!(bytes.unwrap(), expected);
 }
+
+fn reply(inputs: &InputQueue, key: &PaneKey, seq: u64, bytes: &[u8]) -> Result<String, String> {
+    inputs.enqueue_page(
+        "page",
+        key.clone(),
+        seq,
+        InputWork::Reply(bytes.to_vec()),
+        false,
+        None,
+    )
+}
+
+/// T-1769's schedule, on the at-most-once rule: A's call is slow and ends
+/// unknown at the page, which skips it and goes on with B and a terminal
+/// reply in the same order. The original comes late and writes nothing.
+#[test]
+#[allow(clippy::unwrap_used, reason = "a test step must succeed")]
+fn a_late_original_after_its_skip_writes_nothing_and_the_reply_arrives() {
+    let (_panes, inputs, key, received) = recorder(4);
+    inputs.begin_page("page").unwrap();
+    inputs.skip_page_sequence("page", &key, 1, None).unwrap();
+    let b = admitted(&inputs, "page", &key, 2, b"B", None);
+    // A reply has its own writer behind the keys it may pass; B is written
+    // before it is admitted so the bytes' order is the admission order.
+    finished(&inputs, "page", &b);
+    let r = reply(&inputs, &key, 3, b"\x1b[R").unwrap();
+    assert_eq!(
+        inputs
+            .enqueue_page(
+                "page",
+                key.clone(),
+                1,
+                InputWork::Typed(b"A".to_vec()),
+                true,
+                None
+            )
+            .unwrap_err(),
+        "pane-input-sequence-stale"
+    );
+    finished(&inputs, "page", &r);
+    assert_eq!(
+        received.recv_timeout(Duration::from_secs(5)).unwrap(),
+        b"B\x1b[R"
+    );
+    inputs.close_and_drain();
+}
+
+/// The same schedule with the original arriving before the skip: it is
+/// written once, the skip moves nothing, and the next number goes on.
+#[test]
+#[allow(clippy::unwrap_used, reason = "a test step must succeed")]
+fn an_original_that_beat_its_skip_is_written_once() {
+    let (_panes, inputs, key, received) = recorder(5);
+    inputs.begin_page("page").unwrap();
+    let a = admitted(&inputs, "page", &key, 1, b"A", None);
+    inputs.skip_page_sequence("page", &key, 1, None).unwrap();
+    let b = admitted(&inputs, "page", &key, 2, b"B", None);
+    finished(&inputs, "page", &b);
+    let r = reply(&inputs, &key, 3, b"\x1b[R").unwrap();
+    // The page never learned A's ticket; the others finish as usual.
+    assert!(inputs.page_completion("page", &a).is_err());
+    finished(&inputs, "page", &r);
+    assert_eq!(
+        received.recv_timeout(Duration::from_secs(5)).unwrap(),
+        b"AB\x1b[R"
+    );
+    inputs.close_and_drain();
+}
+
+/// The last chunk of a paste is the call that is lost: it is skipped with its
+/// group, the paste's open bracket is closed before the next key, and a reply
+/// is not held behind a paste that will never end.
+#[test]
+#[allow(clippy::unwrap_used, reason = "a test step must succeed")]
+fn a_paste_whose_last_chunk_is_skipped_is_closed_and_holds_nothing() {
+    let (_panes, inputs, key, received) = recorder(16);
+    inputs.begin_page("page").unwrap();
+    let group = |start, end| Some(PageInputGroup { id: 1, start, end });
+    let first = admitted(&inputs, "page", &key, 1, b"\x1b[200~xy", group(true, false));
+    finished(&inputs, "page", &first);
+    inputs
+        .skip_page_sequence("page", &key, 2, group(false, true))
+        .unwrap();
+    let late = inputs.enqueue_page(
+        "page",
+        key.clone(),
+        2,
+        InputWork::Typed(b"\x1b[201~".to_vec()),
+        true,
+        group(false, true),
+    );
+    assert_eq!(late.unwrap_err(), "pane-input-sequence-stale");
+    let answer = reply(&inputs, &key, 3, b"R").unwrap();
+    finished(&inputs, "page", &answer);
+    let next = admitted(&inputs, "page", &key, 4, b"Z", None);
+    finished(&inputs, "page", &next);
+    assert_eq!(
+        received.recv_timeout(Duration::from_secs(5)).unwrap(),
+        b"\x1b[200~xy\x1b[201~RZ"
+    );
+    inputs.close_and_drain();
+}

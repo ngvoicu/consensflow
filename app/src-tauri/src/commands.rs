@@ -163,20 +163,27 @@ pub fn pane_reply_enqueue<R: Runtime>(
     )
 }
 
+/// A call's fate is unknown to the page, which will not send it again: the
+/// pane's count moves past its number, so a late original is refused.
 #[tauri::command]
-pub fn pane_input_position<R: Runtime>(
+pub fn pane_input_skip<R: Runtime>(
     app: AppHandle<R>,
     page_id: String,
     id: String,
     generation: u64,
+    sequence: u64,
+    group: Option<PageInputGroup>,
 ) -> Value {
     let key = match pane_key(&id, generation) {
         Ok(key) => key,
         Err(error) => return json!({"ok":false,"error":error}),
     };
     let state = app.state::<AppRuntime>();
-    match state.inputs.expected_page_sequence(&page_id, &key) {
-        Ok((next, ticket)) => json!({"ok":true,"nextSequence":next,"lastTicket":ticket}),
+    match state
+        .inputs
+        .skip_page_sequence(&page_id, &key, sequence, group)
+    {
+        Ok(()) => json!({"ok":true}),
         Err(error) => json!({"ok":false,"error":error}),
     }
 }
@@ -787,7 +794,7 @@ mod tests {
             .invoke_handler(tauri::generate_handler![
                 pane_input_enqueue,
                 pane_reply_enqueue,
-                pane_input_position,
+                pane_input_skip,
                 pane_input_wait,
                 pane_input_forget
             ])
@@ -847,22 +854,23 @@ mod tests {
             json!({"id":key.id,"generation":1,"sequence":1,"bytes":[75]}),
         );
         assert_eq!(first["ok"], true);
-        let gap = invoke(
-            "pane_input_enqueue",
-            json!({"id":key.id,"generation":1,"sequence":3,"bytes":[66]}),
-        );
-        assert_eq!(gap, json!({"ok":false,"error":"pane-input-sequence-gap"}));
-        let regression = invoke(
+        // A number above the count is admitted: a call skipped or never seen
+        // must not leave every later key refused. A number at or below it is
+        // stale and writes nothing.
+        let repeat = invoke(
             "pane_input_enqueue",
             json!({"id":key.id,"generation":1,"sequence":1,"bytes":[82]}),
         );
         assert_eq!(
-            regression,
-            json!({"ok":false,"error":"pane-input-sequence-regression"})
+            repeat,
+            json!({"ok":false,"error":"pane-input-sequence-stale"})
         );
         assert_eq!(
-            invoke("pane_input_position", json!({"id":key.id,"generation":1})),
-            json!({"ok":true,"nextSequence":2,"lastTicket":first["ticket"]})
+            invoke(
+                "pane_input_skip",
+                json!({"id":key.id,"generation":1,"sequence":2})
+            ),
+            json!({"ok":true})
         );
         let first_completed = invoke("pane_input_wait", json!({"ticket":first["ticket"]}));
         assert_eq!(first_completed["ok"], true);
@@ -887,13 +895,13 @@ mod tests {
         let rejected = invoke(
             "pane_input_enqueue",
             json!({
-                "id":key.id,"generation":1,"sequence":2,"bytes":vec![b'P'; MAX_INPUT_BYTES + 1],
+                "id":key.id,"generation":1,"sequence":3,"bytes":vec![b'P'; MAX_INPUT_BYTES + 1],
             }),
         );
         assert_eq!(rejected["ok"], false);
         let second = invoke(
             "pane_reply_enqueue",
-            json!({"id":key.id,"generation":1,"sequence":2,"bytes":[67]}),
+            json!({"id":key.id,"generation":1,"sequence":3,"bytes":[67]}),
         );
         assert_eq!(second["ok"], true);
 

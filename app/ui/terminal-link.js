@@ -100,7 +100,6 @@ export class TerminalLink {
   /** By pane: the last message drawn, the last acknowledged, and whether an acknowledgement is on its way. */
   #acks = new Map()
   #inputs = new Map()
-  #replies = new Map()
   #admissions = new Map()
   #sequences = new Map()
   #sizes = new Map()
@@ -181,7 +180,6 @@ export class TerminalLink {
   retire(key) {
     this.#retired.add(key)
     this.#inputs.delete(key)
-    this.#replies.delete(key)
     this.#admissions.delete(key)
     this.#sequences.delete(key)
     this.#sizes.delete(key)
@@ -212,9 +210,9 @@ export class TerminalLink {
   async #stream(command, pane, data) {
     const key = paneKey(pane)
     const regions = inputChunks(data)
-    // Human inputs and replies keep their own order. A whole paste takes
-    // the admission turn together; a reply can pass later waiting keys.
-    const streams = command === 'pane_reply_enqueue' ? this.#replies : this.#inputs
+    // Keys and replies go in one order, one admission at a time: a whole
+    // paste takes the admission turn together.
+    const streams = this.#inputs
     const previous = streams.get(key)
     const submit = async () => {
       for (const region of regions) {
@@ -274,82 +272,71 @@ export class TerminalLink {
     }
   }
 
-  /** Find whether an uncertain request reached the host before trying it again. */
-  async #position(pane) {
+  /**
+   * A call whose fate is unknown is never sent again: the host moves the pane's
+   * count past its number, so the original either went in before this or is
+   * refused when it comes late. The skip itself may be repeated.
+   */
+  async #skip(pane, sequence, group) {
     let failures = 0
     const key = paneKey(pane)
     while (!this.#retired.has(key)) {
       try {
         const answer = await this.#call(
-          'pane_input_position',
+          'pane_input_skip',
           {
             pageId: this.#pageId,
             id: pane.id,
             generation: pane.generation,
+            sequence,
+            ...(group?.end ? { group } : {}),
           },
           ADMISSION_TIMEOUT_MS,
         )
-        if (answer?.ok === true && Number.isSafeInteger(answer.nextSequence)) return answer
-        if (answer?.ok === false) return answer
+        if (typeof answer?.ok === 'boolean') return
       } catch {}
       failures += 1
       if (failures === 5)
         this.#report(new Error('Keep this window open while your typing reconnects.'))
       await pause(INPUT_RETRY_MS)
     }
-    return null
   }
 
+  /**
+   * One call per number, at most once. A refusal means nothing was written, so
+   * the caller may retry the same number. A call that ends unknown (a timeout,
+   * a lost answer) is skipped and its keys may be lost.
+   */
   async #admit(command, pane, bytes, group) {
     const key = paneKey(pane)
+    if (this.#retired.has(key)) return null
     const sequence = (this.#sequences.get(key) ?? 0) + 1
-    let failures = 0
-    while (!this.#retired.has(key)) {
-      let answer
-      try {
-        answer = await this.#call(
-          command,
-          {
-            pageId: this.#pageId,
-            id: pane.id,
-            generation: pane.generation,
-            sequence,
-            bytes: Array.from(bytes),
-            ...(command === 'pane_input_enqueue' ? { group } : {}),
-          },
-          ADMISSION_TIMEOUT_MS,
-        )
-      } catch {
-        // The request may have arrived. Query before any resend.
-      }
-      if (answer?.ok === true && typeof answer.ticket === 'string') {
-        this.#sequences.set(key, sequence)
-        return answer
-      }
-      if (
-        answer?.ok === false &&
-        answer.error !== 'pane-input-sequence-gap' &&
-        answer.error !== 'pane-input-sequence-regression'
+    let answer
+    try {
+      answer = await this.#call(
+        command,
+        {
+          pageId: this.#pageId,
+          id: pane.id,
+          generation: pane.generation,
+          sequence,
+          bytes: Array.from(bytes),
+          ...(command === 'pane_input_enqueue' ? { group } : {}),
+        },
+        ADMISSION_TIMEOUT_MS,
       )
-        return answer
-      const position = await this.#position(pane)
-      if (position === null) return null
-      if (position.ok !== true) return { ok: false, error: 'pane-input-uncertain' }
-      if (position.nextSequence === sequence + 1 && typeof position.lastTicket === 'string') {
-        this.#sequences.set(key, sequence)
-        return { ok: true, ticket: position.lastTicket }
-      }
-      if (position.nextSequence !== sequence) {
-        return { ok: false, error: 'pane-input-uncertain' }
-      }
-      // This number is not admitted. Submit it once, then ask again if its
-      // answer is lost or it races the original request.
-      failures += 1
-      if (failures === 5)
-        this.#report(new Error('Keep this window open while your typing reconnects.'))
-      await pause(INPUT_RETRY_MS)
+    } catch {}
+    if (answer?.ok === true && typeof answer.ticket === 'string') {
+      this.#sequences.set(key, sequence)
+      return answer
     }
-    return null
+    if (answer?.ok === false) {
+      if (answer.error === 'pane-input-sequence-stale') this.#sequences.set(key, sequence)
+      return answer
+    }
+    this.#sequences.set(key, sequence)
+    await this.#skip(pane, sequence, group)
+    return this.#retired.has(key) ? null : { ok: false, error: 'pane-input-lost' }
   }
 
   async #chunk(command, pane, bytes, group, held) {
@@ -376,12 +363,16 @@ export class TerminalLink {
       await pause(INPUT_RETRY_MS)
     } while (!this.#retired.has(key))
     if (this.#retired.has(key)) return false
+    if (admitted.error === 'pane-input-lost' || admitted.error === 'pane-input-sequence-stale') {
+      this.#report(
+        new Error('Some of your typing may not have reached this window. Check what appeared.'),
+      )
+      return true
+    }
     if (admitted.ok !== true || typeof admitted.ticket !== 'string') {
-      const message =
-        admitted.error === 'pane-input-uncertain'
-          ? 'Check whether your last typing appeared, then restart the project before typing again.'
-          : 'Typing did not reach this window. Restart the project and type it again.'
-      this.#report(new Error(message))
+      this.#report(
+        new Error('Typing did not reach this window. Restart the project and type it again.'),
+      )
       return false
     }
     // Completion and its acknowledgement are independent of the next

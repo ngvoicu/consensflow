@@ -24,8 +24,9 @@ const INPUT_QUEUE_FULL: &str = "pane-input-queue-full";
 /// The host is stopping, and takes no more input.
 const INPUT_CLOSED: &str = "input-closed";
 const LOCK_POISONED: &str = "lock-poisoned";
-const INPUT_SEQUENCE_GAP: &str = "pane-input-sequence-gap";
-const INPUT_SEQUENCE_REGRESSION: &str = "pane-input-sequence-regression";
+/// A call numbered at or below what the pane's count has passed: a late
+/// original after its skip, or a repeat. Nothing of it is written.
+const INPUT_SEQUENCE_STALE: &str = "pane-input-sequence-stale";
 const INPUT_STALE_PAGE: &str = "pane-input-stale-page";
 
 /// What a pane's worker does, in order: the human's own keys (counted for
@@ -141,6 +142,7 @@ pub struct PageInputCompletion {
     pub receiver: Shared<BoxFuture<'static, InputResponse>>,
     pub human: bool,
     key: PaneKey,
+    sequence: u64,
     notified: Arc<AtomicBool>,
 }
 
@@ -158,7 +160,6 @@ struct PageInputState {
     pending_pages: HashSet<String>,
     page_ordinals: HashMap<String, u64>,
     last_sequences: HashMap<PaneKey, u64>,
-    last_tickets: HashMap<PaneKey, String>,
     completions: HashMap<String, PageInputCompletion>,
     next_ticket: u64,
 }
@@ -263,7 +264,6 @@ impl InputQueue {
                 pending_pages: HashSet::new(),
                 page_ordinals: HashMap::new(),
                 last_sequences: HashMap::new(),
-                last_tickets: HashMap::new(),
                 completions: HashMap::new(),
                 next_ticket: 1,
             }),
@@ -290,18 +290,14 @@ impl InputQueue {
         if page.current.as_deref() != Some(page_id) {
             return Err(INPUT_STALE_PAGE.to_string());
         }
-        let expected = page
-            .last_sequences
-            .get(&key)
-            .copied()
-            .unwrap_or(0)
-            .checked_add(1)
-            .ok_or_else(|| "pane-input-sequence-overflow".to_string())?;
-        if sequence < expected {
-            return Err(INPUT_SEQUENCE_REGRESSION.to_string());
-        }
-        if sequence > expected {
-            return Err(INPUT_SEQUENCE_GAP.to_string());
+        // The count only goes up. A call at or below it is one the host has
+        // passed, by admitting it or by a skip: it writes nothing, so a late
+        // original can never type a key the page has already given up on.
+        // Anything above it is admitted (a skip that never came would
+        // otherwise leave every later key refused).
+        let passed = page.last_sequences.get(&key).copied().unwrap_or(0);
+        if sequence <= passed {
+            return Err(INPUT_SEQUENCE_STALE.to_string());
         }
         match &work {
             InputWork::Typed(bytes)
@@ -330,7 +326,6 @@ impl InputQueue {
         let ticket = format!("pane-input-{}", page.next_ticket);
         page.next_ticket = next_ticket;
         page.last_sequences.insert(key.clone(), sequence);
-        page.last_tickets.insert(key.clone(), ticket.clone());
         page.completions.insert(
             ticket.clone(),
             PageInputCompletion {
@@ -339,34 +334,68 @@ impl InputQueue {
                     .shared(),
                 human,
                 key,
+                sequence,
                 notified: Arc::new(AtomicBool::new(false)),
             },
         );
         Ok(ticket)
     }
 
-    /// The active page's next count and the last admitted ticket. The ticket
-    /// holds a completion, never the bytes: it recovers an answer lost in transit.
-    pub fn expected_page_sequence(
+    /// A call of the active page ended with its fate unknown (a timeout, a
+    /// lost answer), and the page will not send it again. Move the pane's
+    /// count past it: the host keeps the higher of its count and `sequence`,
+    /// so the original either went in before this or is refused as stale when
+    /// it comes late. A completion the page never learned of is dropped.
+    pub fn skip_page_sequence(
         &self,
         page_id: &str,
         key: &PaneKey,
-    ) -> Result<(u64, Option<String>), String> {
-        let page = self
+        sequence: u64,
+        group: Option<PageInputGroup>,
+    ) -> Result<(), String> {
+        let mut page = self
             .page
             .lock()
             .map_err(|_| "pane input admission lock is poisoned".to_string())?;
         if page.current.as_deref() != Some(page_id) {
             return Err(INPUT_STALE_PAGE.to_string());
         }
-        let next = page
-            .last_sequences
-            .get(key)
-            .copied()
-            .unwrap_or(0)
-            .checked_add(1)
-            .ok_or_else(|| "pane-input-sequence-overflow".to_string())?;
-        Ok((next, page.last_tickets.get(key).cloned()))
+        if sequence == u64::MAX {
+            return Err("pane-input-sequence-overflow".to_string());
+        }
+        let passed = page.last_sequences.entry(key.clone()).or_insert(0);
+        *passed = (*passed).max(sequence);
+        page.completions
+            .retain(|_, completion| !(&completion.key == key && completion.sequence == sequence));
+        // The last chunk of a paste was the one lost: no more of it will come,
+        // so the paste ends as it does when its page is gone (what is still
+        // queued of it goes in, then an open bracket is closed).
+        if let Some(group) = group.filter(|group| group.end) {
+            let id = (self.page_epoch.load(Ordering::Acquire), group.id);
+            let senders = self
+                .senders
+                .lock()
+                .map_err(|_| "pane input queue lock is poisoned".to_string())?;
+            if let Some(route) = senders.get(key) {
+                let mut state = route
+                    .paste_gate
+                    .state
+                    .lock()
+                    .map_err(|_| "pane paste lock is poisoned".to_string())?;
+                if state.pending.contains_key(&id) {
+                    state.abandoned.insert(id);
+                } else {
+                    if state.active == Some(id) {
+                        state.active = None;
+                    }
+                    if state.bracketed.remove(&id) {
+                        state.needs_close = true;
+                    }
+                }
+                route.paste_gate.changed.notify_all();
+            }
+        }
+        Ok(())
     }
 
     fn check_page(page: &PageInputState, page_id: &str) -> Result<Option<(String, u64)>, String> {
@@ -490,7 +519,6 @@ impl InputQueue {
         }
         page.retired.extend(std::mem::take(&mut page.pending_pages));
         page.last_sequences.clear();
-        page.last_tickets.clear();
         page.completions.clear();
         let epoch = self
             .page_epoch
@@ -657,7 +685,6 @@ impl InputQueue {
             .remove(key);
         let mut page = self.page.lock().unwrap_or_else(|error| error.into_inner());
         page.last_sequences.remove(key);
-        page.last_tickets.remove(key);
         page.completions
             .retain(|_, completion| &completion.key != key);
         drop(page);
@@ -906,6 +933,18 @@ pub(crate) fn wait_for_input_blocking(receiver: oneshot::Receiver<InputResponse>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The pane's count: the last number the host has passed.
+    fn passed(inputs: &InputQueue, key: &PaneKey) -> u64 {
+        inputs
+            .page
+            .lock()
+            .unwrap()
+            .last_sequences
+            .get(key)
+            .copied()
+            .unwrap_or(0)
+    }
     use crate::arbiter::EnterTiming;
     #[cfg(unix)]
     use std::time::{Duration, Instant};
@@ -1552,9 +1591,11 @@ mod tests {
         );
     }
 
-    /// A count query recovers a lost answer without storing or resending the bytes.
+    /// A call whose fate is unknown is skipped, never sent again: the count
+    /// moves past it, a late original is refused and writes nothing, and the
+    /// next number goes on.
     #[test]
-    fn a_lost_page_admission_answer_is_reconciled_by_count_and_ticket() {
+    fn a_skipped_call_is_never_written_when_its_original_comes_late() {
         let panes = Arc::new(PaneTable::new());
         let inputs = InputQueue::new(panes, Arc::new(InputArbiter::new(EnterTiming::fixed(0))));
         inputs.begin_page("page-one").unwrap();
@@ -1570,81 +1611,61 @@ mod tests {
                 paste_gate: Arc::new(PasteGate::default()),
             },
         );
-        let first = inputs
-            .enqueue_page(
-                "page-one",
-                key.clone(),
-                1,
-                InputWork::Typed(b"A".to_vec()),
-                true,
-                None,
-            )
+        let typed = |text: &[u8]| InputWork::Typed(text.to_vec());
+        inputs
+            .enqueue_page("page-one", key.clone(), 1, typed(b"A"), true, None)
             .unwrap();
+        // An admitted number is passed at once: a repeat of it is stale.
         assert_eq!(
-            inputs.expected_page_sequence("page-one", &key),
-            Ok((2, Some(first.clone())))
+            inputs.enqueue_page("page-one", key.clone(), 1, typed(b"A"), true, None),
+            Err(INPUT_SEQUENCE_STALE.to_owned())
         );
+        // Call 2 timed out at the page: skipped. Its original comes late.
+        inputs.skip_page_sequence("page-one", &key, 2, None).unwrap();
+        assert_eq!(passed(&inputs, &key), 2);
         assert_eq!(
-            inputs.enqueue_page(
-                "page-one",
-                key.clone(),
-                1,
-                InputWork::Typed(b"A".to_vec()),
-                true,
-                None
-            ),
-            Err(INPUT_SEQUENCE_REGRESSION.to_owned())
+            inputs.enqueue_page("page-one", key.clone(), 2, typed(b"B"), true, None),
+            Err(INPUT_SEQUENCE_STALE.to_owned())
         );
+        // A repeat of an admitted number is refused the same way.
         assert_eq!(
-            inputs.enqueue_page(
-                "page-one",
-                key.clone(),
-                1,
-                InputWork::Typed(b"B".to_vec()),
-                true,
-                None
-            ),
-            Err(INPUT_SEQUENCE_REGRESSION.to_owned())
+            inputs.enqueue_page("page-one", key.clone(), 1, typed(b"A"), true, None),
+            Err(INPUT_SEQUENCE_STALE.to_owned())
         );
-        let second = inputs
-            .enqueue_page(
-                "page-one",
-                key.clone(),
-                2,
-                InputWork::Typed(b"B".to_vec()),
-                true,
-                None,
-            )
+        // A skip below the count moves nothing: the host keeps the higher.
+        inputs.skip_page_sequence("page-one", &key, 2, None).unwrap();
+        inputs.skip_page_sequence("page-one", &key, 0, None).unwrap();
+        assert_eq!(passed(&inputs, &key), 2);
+        // A skip for an original that was admitted: no completion is left for
+        // the answer the page never read.
+        inputs
+            .enqueue_page("page-one", key.clone(), 3, typed(b"C"), true, None)
             .unwrap();
-        assert_ne!(second, first);
-        assert!(
-            matches!(received.try_recv().unwrap().work, InputWork::Typed(bytes) if bytes == b"A")
+        assert_eq!(inputs.page.lock().unwrap().completions.len(), 2);
+        inputs.skip_page_sequence("page-one", &key, 3, None).unwrap();
+        assert_eq!(inputs.page.lock().unwrap().completions.len(), 1);
+        inputs
+            .enqueue_page("page-one", key.clone(), 4, typed(b"D"), true, None)
+            .unwrap();
+        let written: Vec<_> = std::iter::from_fn(|| received.try_recv().ok())
+            .map(|job| match job.work {
+                InputWork::Typed(bytes) => bytes,
+                _ => unreachable!(),
+            })
+            .collect();
+        assert_eq!(
+            written,
+            vec![b"A".to_vec(), b"C".to_vec(), b"D".to_vec()],
+            "B, skipped before it came, writes nothing"
         );
-        assert!(
-            matches!(received.try_recv().unwrap().work, InputWork::Typed(bytes) if bytes == b"B")
-        );
-        assert!(matches!(
-            received.try_recv(),
-            Err(mpsc::TryRecvError::Empty)
-        ));
         inputs.begin_page("page-two").unwrap();
         assert_eq!(
-            inputs.expected_page_sequence("page-two", &key),
-            Ok((1, None))
-        );
-        assert_eq!(
-            inputs.enqueue_page(
-                "page-one",
-                key.clone(),
-                1,
-                InputWork::Typed(b"A".to_vec()),
-                true,
-                None,
-            ),
+            inputs.skip_page_sequence("page-one", &key, 9, None),
             Err(INPUT_STALE_PAGE.to_owned())
         );
+        assert_eq!(passed(&inputs, &key), 0);
         assert_eq!(
-            inputs.expected_page_sequence("page-one", &key),
+            inputs.enqueue_page("page-one", key.clone(), 1, typed(b"A"), true, None),
             Err(INPUT_STALE_PAGE.to_owned())
         );
         assert_eq!(
@@ -1652,17 +1673,10 @@ mod tests {
             Err(INPUT_STALE_PAGE.to_owned())
         );
         inputs
-            .enqueue_page(
-                "page-two",
-                key,
-                1,
-                InputWork::Typed(b"C".to_vec()),
-                true,
-                None,
-            )
+            .enqueue_page("page-two", key, 1, typed(b"E"), true, None)
             .unwrap();
         assert!(
-            matches!(received.try_recv().unwrap().work, InputWork::Typed(bytes) if bytes == b"C")
+            matches!(received.try_recv().unwrap().work, InputWork::Typed(bytes) if bytes == b"E")
         );
         inputs.close_and_drain();
     }
@@ -1696,10 +1710,7 @@ mod tests {
             Err(INPUT_STALE_PAGE.to_owned())
         );
         inputs.begin_page("session:3").unwrap();
-        assert_eq!(
-            inputs.expected_page_sequence("session:3", &key),
-            Ok((1, None))
-        );
+        assert_eq!(passed(&inputs, &key), 0);
         inputs.close_and_drain();
     }
 
@@ -1802,7 +1813,7 @@ mod tests {
             inputs.enqueue_page("page", key.clone(), 1, typed(), true, None),
             Err("the pane's input queue is full".to_string())
         );
-        assert_eq!(inputs.expected_page_sequence("page", &key), Ok((1, None)));
+        assert_eq!(passed(&inputs, &key), 0);
         assert_eq!(
             inputs.enqueue_page("page", key.clone(), 1, typed(), true, None),
             Err("the pane's input queue is full".to_string())
@@ -1888,10 +1899,7 @@ mod tests {
             ),
             Err("pane-input-ticket-capacity".to_string())
         );
-        assert_eq!(
-            inputs.expected_page_sequence("page-one", &key).unwrap().0,
-            MAX_PENDING_INPUT_TICKETS as u64 + 1
-        );
+        assert_eq!(passed(&inputs, &key), MAX_PENDING_INPUT_TICKETS as u64);
         inputs.begin_page("page-two").unwrap();
         assert!(inputs
             .enqueue_page(
