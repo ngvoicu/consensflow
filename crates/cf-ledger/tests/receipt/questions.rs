@@ -93,6 +93,162 @@ fn opening_keeps_waits_for_other_questions_and_the_humans_approval_and_keeps_pau
     assert_eq!(w.state(task), "paused", "an answer does not resume a pause");
 }
 
+/// The rows left by an older build, including all message fields. The stable
+/// ordering lets the tests compare a second open with the first, without
+/// overlooking a receipt, claim, or other field that was changed on repair.
+fn rows_of_each_table(
+    db: &rusqlite::Connection,
+) -> std::collections::BTreeMap<String, Vec<Vec<String>>> {
+    let tables: Vec<String> = db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    tables
+        .into_iter()
+        .map(|table| {
+            let columns: Vec<String> = db
+                .prepare(&format!("PRAGMA table_info(\"{table}\")"))
+                .unwrap()
+                .query_map([], |row| row.get(1))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            let quoted = columns
+                .iter()
+                .map(|column| format!("quote(\"{column}\")"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let rows = db
+                .prepare(&format!("SELECT {quoted} FROM \"{table}\" ORDER BY rowid"))
+                .unwrap()
+                .query_map([], |row| (0..columns.len()).map(|i| row.get(i)).collect())
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            (table, rows)
+        })
+        .collect()
+}
+
+#[test]
+fn opening_repairs_an_answer_in_transit_once_without_changing_its_rows() {
+    for answer_state in ["queued", "delivering"] {
+        let mut w = world();
+        let created = w.give("zeus", "Parser");
+        let task = created.task.number;
+        w.deliver(created.message.unwrap().id);
+        let question = w.ask("zeus", task, "Which format?");
+        let answer = w.answer(question.id, "JSON");
+        let mut before = None;
+        w.edit(|db| {
+            db.execute(
+                "UPDATE message SET state = ? WHERE id = ?",
+                rusqlite::params![answer_state, answer.id],
+            )
+            .unwrap();
+            db.execute("UPDATE task SET state = 'waiting' WHERE number = ?", [task])
+                .unwrap();
+            before = Some(rows_of_each_table(db));
+        });
+        let before = before.unwrap();
+        assert_eq!(w.state(task), "working", "answer {answer_state}");
+        assert_eq!(w.states(&[answer.id]), [answer_state]);
+        let after = rows_of_each_table(w.ledger.sqlite());
+        for (table, rows) in &before {
+            if !["task", "event", "sqlite_sequence"].contains(&table.as_str()) {
+                assert_eq!(
+                    after.get(table),
+                    Some(rows),
+                    "table {table}, answer {answer_state}"
+                );
+            }
+        }
+        assert_eq!(after["event"].len(), before["event"].len() + 1);
+        assert_eq!(
+            &after["event"][..before["event"].len()],
+            before["event"].as_slice()
+        );
+        let data: String = w
+            .ledger
+            .sqlite()
+            .query_row(
+                "SELECT data FROM event ORDER BY id DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let event: serde_json::Value = serde_json::from_str(&data).unwrap();
+        assert_eq!(event["from"], "waiting");
+        assert_eq!(event["to"], "working");
+        w.edit(|_| {});
+        assert_eq!(
+            rows_of_each_table(w.ledger.sqlite()),
+            after,
+            "second open, answer {answer_state}"
+        );
+    }
+}
+
+#[test]
+fn opening_leaves_other_task_states_and_failed_or_cancelled_answers_untouched() {
+    for task_state in [
+        "queued",
+        "working",
+        "done",
+        "accepted",
+        "cancelled",
+        "failed",
+    ] {
+        let mut w = world();
+        let created = w.give("zeus", "Parser");
+        let task = created.task.number;
+        w.deliver(created.message.unwrap().id);
+        let question = w.ask("zeus", task, "Which format?");
+        w.answer(question.id, "JSON");
+        let mut before = None;
+        w.edit(|db| {
+            db.execute(
+                "UPDATE task SET state = ? WHERE number = ?",
+                rusqlite::params![task_state, task],
+            )
+            .unwrap();
+            before = Some(rows_of_each_table(db));
+        });
+        assert_eq!(
+            rows_of_each_table(w.ledger.sqlite()),
+            before.unwrap(),
+            "task {task_state}"
+        );
+    }
+    for answer_state in ["failed", "cancelled"] {
+        let mut w = world();
+        let created = w.give("zeus", "Parser");
+        let task = created.task.number;
+        w.deliver(created.message.unwrap().id);
+        let question = w.ask("zeus", task, "Which format?");
+        let answer = w.answer(question.id, "JSON");
+        let mut before = None;
+        w.edit(|db| {
+            db.execute(
+                "UPDATE message SET state = ? WHERE id = ?",
+                rusqlite::params![answer_state, answer.id],
+            )
+            .unwrap();
+            db.execute("UPDATE task SET state = 'waiting' WHERE number = ?", [task])
+                .unwrap();
+            before = Some(rows_of_each_table(db));
+        });
+        assert_eq!(
+            rows_of_each_table(w.ledger.sqlite()),
+            before.unwrap(),
+            "answer {answer_state}"
+        );
+    }
+}
+
 /// A task given to zeus, its brief received, with two questions asked.
 fn with_two_questions(w: &mut World, options: bool) -> (i64, i64, i64) {
     let created = w.give("zeus", "Parser");
