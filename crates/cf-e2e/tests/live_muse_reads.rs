@@ -40,18 +40,37 @@ use cf_e2e::process::own_var;
 use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
 
-/// Compare every ordinary file by metadata only, reporting paths without contents.
+/// Compare every non-directory entry by metadata only, without following links.
 fn tree(root: &Path) -> Result<BTreeMap<PathBuf, cf_base::file::Stat>> {
     let mut found = BTreeMap::new();
     let mut folders = vec![root.to_owned()];
     while let Some(folder) = folders.pop() {
-        if std::fs::symlink_metadata(&folder).is_ok_and(|meta| meta.file_type().is_symlink()) {
-            continue;
+        let meta = std::fs::symlink_metadata(&folder).map_err(|source| Error::File {
+            action: "stat",
+            path: folder.clone(),
+            source,
+        })?;
+        if meta.file_type().is_symlink() {
+            return Err(Error::File {
+                action: "list",
+                path: folder,
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "folder is a symbolic link",
+                ),
+            });
         }
-        let Ok(entries) = std::fs::read_dir(&folder) else {
-            continue;
-        };
-        for entry in entries.flatten() {
+        let entries = std::fs::read_dir(&folder).map_err(|source| Error::File {
+            action: "list",
+            path: folder.clone(),
+            source,
+        })?;
+        for entry in entries {
+            let entry = entry.map_err(|source| Error::File {
+                action: "list",
+                path: folder.clone(),
+                source,
+            })?;
             let path = entry.path();
             let kind = entry.file_type().map_err(|source| Error::File {
                 action: "read",
@@ -62,7 +81,7 @@ fn tree(root: &Path) -> Result<BTreeMap<PathBuf, cf_base::file::Stat>> {
                 continue;
             } else if kind.is_dir() {
                 folders.push(path);
-            } else if kind.is_file() {
+            } else {
                 let stat = cf_base::file::stat(&path).map_err(|source| Error::File {
                     action: "stat",
                     path: path.clone(),
@@ -195,6 +214,46 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn t1744_review_muse_tree_sees_a_fifo_without_opening_it() {
+        let root = tempfile::tempdir().unwrap();
+        let fifo = root.path().join("unrecognized-login");
+        nix::unistd::mkfifo(&fifo, nix::sys::stat::Mode::S_IRUSR).unwrap();
+        let seen = tree(root.path()).expect("a FIFO can be stated without being opened");
+        assert!(seen.contains_key(&fifo), "the FIFO was not compared");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn t1744_review_muse_tree_refuses_an_unreadable_folder() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let root = tempfile::tempdir().unwrap();
+        let nested = root.path().join("nested");
+        std::fs::create_dir(&nested).unwrap();
+        std::fs::write(nested.join("unknown"), "synthetic").unwrap();
+        std::fs::set_permissions(&nested, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let seen = tree(root.path());
+        std::fs::set_permissions(&nested, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(seen.is_err(), "an unreadable folder was silently skipped");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn t1744_review_muse_tree_refuses_a_linked_root() {
+        let root = tempfile::tempdir().unwrap();
+        let actual = root.path().join("actual");
+        let linked = root.path().join("linked");
+        std::fs::create_dir(&actual).unwrap();
+        std::fs::write(actual.join("unknown"), "synthetic").unwrap();
+        std::os::unix::fs::symlink(&actual, &linked).unwrap();
+        assert!(
+            tree(&linked).is_err(),
+            "a linked root looked like an empty tree"
+        );
+    }
 
     #[cfg(unix)]
     #[test]
