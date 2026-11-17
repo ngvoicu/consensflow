@@ -70,17 +70,21 @@ fn opening_keeps_waits_for_other_questions_and_the_humans_approval_and_keeps_pau
     let mut w = world();
     let (task, first, _) = with_two_questions(&mut w, false);
     w.answer(first, "JSON");
-    w.edit(|_| {});
+    let mut before = None;
+    w.edit(|db| before = Some(rows_of_each_table(db)));
     assert_eq!(
         w.state(task),
         "waiting",
         "the second question has no answer"
     );
+    assert_eq!(rows_of_each_table(w.ledger.sqlite()), before.unwrap());
 
     let mut w = gated_world();
     let (task, _, _) = answered_at_the_gate(&mut w);
-    w.edit(|_| {});
+    let mut before = None;
+    w.edit(|db| before = Some(rows_of_each_table(db)));
     assert_eq!(w.state(task), "waiting", "the answer is held for the human");
+    assert_eq!(rows_of_each_table(w.ledger.sqlite()), before.unwrap());
 
     let mut w = world();
     let created = w.give("zeus", "Parser");
@@ -89,8 +93,65 @@ fn opening_keeps_waits_for_other_questions_and_the_humans_approval_and_keeps_pau
     let question = w.ask("zeus", task, "Which format?");
     w.pause(task);
     w.answer(question.id, "JSON");
-    w.edit(|_| {});
+    let mut before = None;
+    w.edit(|db| before = Some(rows_of_each_table(db)));
     assert_eq!(w.state(task), "paused", "an answer does not resume a pause");
+    assert_eq!(rows_of_each_table(w.ledger.sqlite()), before.unwrap());
+}
+
+#[test]
+fn an_unrelated_receipt_reconciles_every_answer_state_without_receiving_the_answer() {
+    for (answer_state, expected) in [
+        ("queued", "working"),
+        ("delivering", "working"),
+        ("delivered", "working"),
+        ("read", "working"),
+        ("gated", "waiting"),
+        ("failed", "waiting"),
+        ("cancelled", "waiting"),
+    ] {
+        let mut w = world();
+        let created = w.give("zeus", "Parser");
+        let task = created.task.number;
+        w.deliver(created.message.unwrap().id);
+        let question = w.ask("zeus", task, "Which format?");
+        let answer = w.answer(question.id, "JSON");
+        let note = w.note("chief", "zeus", task, "An unrelated note");
+
+        // Give the task the opposite stale state so a receipt must reconcile it.
+        let db = w.ledger.sqlite();
+        db.execute(
+            "UPDATE message SET state = ? WHERE id = ?",
+            rusqlite::params![answer_state, answer.id],
+        )
+        .unwrap();
+        let stale = if expected == "working" {
+            "waiting"
+        } else {
+            "working"
+        };
+        db.execute(
+            "UPDATE task SET state = ? WHERE number = ?",
+            rusqlite::params![stale, task],
+        )
+        .unwrap();
+        let answer_before = serde_json::to_value(w.message(answer.id)).unwrap();
+        let zeus = w.id("zeus");
+        w.ledger
+            .receive_read(
+                zeus,
+                &[note.id],
+                Read::Inbox,
+                &cf_proto::cf_word::CfWord::bare(),
+            )
+            .unwrap();
+        assert_eq!(w.state(task), expected, "answer {answer_state}");
+        assert_eq!(
+            serde_json::to_value(w.message(answer.id)).unwrap(),
+            answer_before,
+            "the answer was not received: {answer_state}"
+        );
+    }
 }
 
 /// The rows left by an older build, including all message fields. The stable
