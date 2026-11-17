@@ -1,17 +1,17 @@
-//! A member's backup takes a task when no member of its role and tier is free, and only when
-//! its member is out for its quota or its login (BKV-03, Gabriel on 2026-11-13: "one backup per
-//! member and multiple members can be added per tier and role"). A free member is always
-//! picked first; a member that is busy, moved, needs an edit or is on Vacation has a backup
-//! that takes nothing; a task already in a window of a member that goes out stays held there.
+//! A member's backup takes a new task when no member of its role and tier is free and its member
+//! cannot run it: out of quota, refused for its login, moved, needing an edit, its harness not
+//! opening, or busy past its tries (BKV-03, Gabriel on 2026-11-13: "one backup per member and
+//! multiple members can be added per tier and role"; the rule of 2026-11-17 is in
+//! `backup_rule.rs`). A free member is always picked first; a member on Vacation, or whose model
+//! is busy within its tries, has a backup that takes nothing.
 
 use cf_engine::testing::{Context, Made};
 use cf_ledger::{HoldKind, NewMember, ParticipantView};
 
 use crate::fixtures::{after, exhausted, now, soon, Tiers};
 
-/// The time a member out for its account is marked until, and the one for a moved model.
+/// The time a member out for its account is marked until.
 const NEVER: &str = "9999-12-31T23:59:59.998Z";
-const MOVED: &str = "9999-12-31T23:59:59.999Z";
 
 /// What the giver is told once a task goes to a backup whose member is out for its quota.
 fn went_to(task: i64, backup: &str, member: &str, until: &str) -> String {
@@ -153,36 +153,18 @@ fn with_two_members_out_the_backup_of_the_one_whose_reset_is_latest_takes_the_ta
 }
 
 #[test]
-fn only_a_hold_that_is_a_quota_or_an_account_gives_the_task_to_the_backup() {
-    // Busy, moved, needing an edit: its backup takes nothing, and the task waits.
-    for what in ["busy", "moved", "needs an edit"] {
+fn a_busy_model_within_its_tries_gives_nothing_to_the_backup() {
+    // A busy model is tried again in a minute: its backup takes nothing, and the task waits.
+    {
         let context = Context::new();
         let tiers = Tiers::new(&context, &["zeus"]);
         backed(&context, tiers.project.id, "zeus", "claude-code", "gaia");
-        let zeus = tiers.id("zeus");
-        match what {
-            "busy" => context.mark_out_busy(zeus, &soon(&context, 1)),
-            "moved" => {
-                context
-                    .ledger
-                    .borrow_mut()
-                    .mark_out_with_kind(zeus, MOVED, "model moved", HoldKind::Moved)
-                    .unwrap();
-            }
-            _ => {
-                context
-                    .ledger
-                    .borrow()
-                    .sqlite()
-                    .execute("UPDATE participant SET needs_edit = 1 WHERE id = ?", [zeus])
-                    .unwrap();
-            }
-        }
+        context.mark_out_busy(tiers.id("zeus"), &soon(&context, 1));
         tiers.open();
         context.pass().unwrap();
         context.pass().unwrap();
-        assert_eq!(tiers.task(1).task.state, "open", "{what}");
-        assert_eq!(tiers.task(1).task.assignee, None, "{what}");
+        assert_eq!(tiers.task(1).task.state, "open");
+        assert_eq!(tiers.task(1).task.assignee, None);
     }
 }
 
@@ -372,9 +354,9 @@ fn the_member_back_takes_the_next_task_and_the_backup_finishes_what_it_has() {
 }
 
 #[test]
-fn a_busy_task_in_a_window_is_not_released_onto_a_backup() {
-    // A member out for its quota whose own task is held with its window: the backup, free, is
-    // not "someone else" for the release (T-1356 keeps the work where it is).
+fn a_task_held_with_its_window_for_the_quota_starts_over_on_the_free_backup() {
+    // A member out for its quota whose own task is held with its window: the free backup takes
+    // it (the rule of 2026-11-17: "start over if it has a backup").
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);
     let backup = backed(&context, tiers.project.id, "zeus", "claude-code", "gaia");
@@ -387,8 +369,11 @@ fn a_busy_task_in_a_window_is_not_released_onto_a_backup() {
     );
     context.pass().unwrap();
     context.pass().unwrap();
-    assert_eq!(taker(&tiers, 1), "zeus", "held with its window");
-    assert_ne!(taker(&tiers, 1), backup.handle);
+    assert_eq!(
+        taker(&tiers, 1),
+        backup.handle,
+        "started over on the backup"
+    );
 }
 
 #[test]

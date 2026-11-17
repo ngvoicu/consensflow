@@ -44,6 +44,7 @@ mod advisor_off;
 mod approval;
 mod assigning;
 mod background;
+mod backup_rule;
 mod backups;
 mod brief_never_began;
 mod busy_models;
