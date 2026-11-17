@@ -106,7 +106,7 @@ async fn a_list_receives_nothing_whatever_it_shows_and_the_answers_are_still_to_
         assert_eq!(scene.message(id).state, "queued", "m-{id} was not received");
     }
     assert_eq!(scene.message(held.id).receipt, Value::Null);
-    assert_eq!(state_of(&scene, number), "waiting");
+    assert_eq!(state_of(&scene, number), "working");
     assert_eq!(scene.logged("message.read"), 0);
     assert_eq!(scene.kicks.get(), 0, "nothing was written");
     assert_eq!(scene.next_for_zeus(), Some("JSON".to_owned()));
@@ -116,14 +116,14 @@ async fn a_list_receives_nothing_whatever_it_shows_and_the_answers_are_still_to_
 async fn an_answer_a_list_showed_is_still_there_to_be_pasted_when_the_next_one_is_read() {
     let scene = scene();
     let answer = answered_question(&scene, "JSON");
-    assert_eq!(state_of(&scene, 1), "waiting");
+    assert_eq!(state_of(&scene, 1), "working");
     for _ in 0..2 {
         let (status, said) = api(&scene, Method::GET, "/api/inbox", &scene.zeus, "").await;
         assert_eq!(status, 200);
         assert_eq!(listed(&said)[0], (answer.id, "queued"));
     }
     assert_eq!(scene.next_for_zeus(), Some("H: JSON".to_owned()));
-    assert_eq!(state_of(&scene, 1), "waiting");
+    assert_eq!(state_of(&scene, 1), "working");
 }
 
 #[tokio::test]

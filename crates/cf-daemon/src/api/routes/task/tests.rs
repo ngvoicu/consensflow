@@ -332,7 +332,7 @@ async fn a_worker_that_reads_its_task_and_is_refused_its_transcript_still_has_it
 ) {
     let scene = scene();
     let answer = answered_question(&scene, "JSON");
-    assert_eq!(state_of(&scene, 1), "waiting");
+    assert_eq!(state_of(&scene, 1), "working");
     let (status, said) = get(&scene, &scene.zeus, "1").await;
     assert_eq!(status, 200);
     assert!(said["task"]["messages"]
@@ -345,7 +345,7 @@ async fn a_worker_that_reads_its_task_and_is_refused_its_transcript_still_has_it
     let still = scene.message(answer.id);
     assert_eq!(still.state, "queued");
     assert_eq!(still.receipt, Value::Null);
-    assert_eq!(state_of(&scene, 1), "waiting");
+    assert_eq!(state_of(&scene, 1), "working");
     assert_eq!(scene.logged("message.read"), 0);
     assert_eq!(scene.kicks.get(), 0);
     assert_eq!(scene.next_for_zeus(), Some("H: JSON".to_owned()));
@@ -363,7 +363,7 @@ async fn a_thread_read_by_anyone_changes_nothing() {
     let (status, said) = get(&scene, &scene.chief, "1/transcript").await;
     assert_eq!(status, 200, "{said}");
     assert_eq!(scene.message(answer.id).state, "queued");
-    assert_eq!(state_of(&scene, 1), "waiting");
+    assert_eq!(state_of(&scene, 1), "working");
     assert_eq!(scene.kicks.get(), 0);
 }
 
@@ -452,7 +452,12 @@ async fn while_the_project_is_closed_a_message_no_window_was_handed_is_left_out_
     project_is(&scene, "open");
     let (_, said) = get(&scene, &scene.zeus, "1").await;
     assert!(thread(&said).contains(&answer.id));
-    assert_eq!(state_of(&scene, 1), "waiting", "nothing was received");
+    assert_eq!(
+        scene.message(answer.id).state,
+        "queued",
+        "nothing was received"
+    );
+    assert_eq!(state_of(&scene, 1), "working");
 }
 
 /// T-942: a message left out of a thread said nothing to a reader who could still read

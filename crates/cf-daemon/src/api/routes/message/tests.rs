@@ -176,7 +176,7 @@ async fn an_answer_read_whole_by_the_one_it_is_for_is_served_and_nothing_is_rece
 {
     let scene = scene();
     let answer = answered_question(&scene, "JSON");
-    assert_eq!(state_of(&scene, 1), "waiting");
+    assert_eq!(state_of(&scene, 1), "working");
     let target = format!("/api/inbox/{}", answer.id);
     // Read twice, as zeus, whose answer it is: the whole of it, as it was.
     for _ in 0..2 {
@@ -189,7 +189,7 @@ async fn an_answer_read_whole_by_the_one_it_is_for_is_served_and_nothing_is_rece
     let still = scene.message(answer.id);
     assert_eq!(still.state, "queued");
     assert_eq!(still.receipt, serde_json::Value::Null);
-    assert_eq!(state_of(&scene, 1), "waiting");
+    assert_eq!(state_of(&scene, 1), "working");
     assert_eq!(scene.logged("message.read"), 0);
     assert_eq!(scene.kicks.get(), 0, "nothing was written");
     assert_eq!(scene.next_for_zeus(), Some("H: JSON".to_owned()));
@@ -205,7 +205,7 @@ async fn what_the_list_cuts_this_route_serves_whole_and_still_receives_nothing()
     let (_, said) = api(&scene, Method::GET, &target, &scene.zeus, "").await;
     assert_eq!(said["message"]["body"], "JSON\nand then YAML");
     assert_eq!(scene.message(answer.id).state, "queued");
-    assert_eq!(state_of(&scene, number), "waiting");
+    assert_eq!(state_of(&scene, number), "working");
 }
 
 #[tokio::test]
@@ -235,7 +235,7 @@ async fn a_read_by_the_sender_or_of_a_note_changes_nothing_either() {
     .await;
     assert_eq!(status, 200);
     assert_eq!(scene.message(note.id).state, "queued");
-    assert_eq!(state_of(&scene, 1), "waiting");
+    assert_eq!(state_of(&scene, 1), "working");
     assert_eq!(scene.kicks.get(), 0, "nothing was written");
 }
 

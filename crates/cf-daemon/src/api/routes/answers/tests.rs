@@ -298,11 +298,10 @@ fn claimed(scene: &Scene) -> (i64, MessageView) {
 }
 
 #[tokio::test]
-async fn a_door_that_handed_its_answer_over_makes_it_read_and_its_task_work_and_wakes_the_dispatcher(
-) {
+async fn a_door_that_handed_its_answer_over_makes_it_read_and_wakes_the_dispatcher() {
     let scene = scene();
     let (_, answer) = claimed(&scene);
-    assert_eq!(state_of(&scene, 1), "waiting");
+    assert_eq!(state_of(&scene, 1), "working", "the answer is on its way");
     assert_eq!(scene.kicks.get(), 0);
     let (status, said) =
         receipt_from(&scene, &scene.zeus, &answer.id.to_string(), HANDED_OVER).await;
@@ -444,7 +443,7 @@ async fn a_door_that_did_not_hand_its_answer_over_gives_the_claim_back_and_wakes
         "the ledger's to deliver again"
     );
     assert_eq!(scene.logged("message.read"), 0);
-    assert_eq!(state_of(&scene, 1), "waiting", "nobody received it");
+    assert_eq!(state_of(&scene, 1), "working", "the answer is on its way");
     assert_eq!(scene.kicks.get(), 1);
 }
 
@@ -541,9 +540,8 @@ async fn answers_cf_wrote_whole_are_received_by_the_one_they_are_for_and_the_dis
     let question = working_question(&scene);
     let first = scene.choose(question.id, "red");
     let other = question_on(&scene, 1);
-    let second = scene.choose(other.id, "blue");
     assert_eq!(state_of(&scene, 1), "waiting");
-    // One of the two, said to have been read with `cf task get`: the other still obliges.
+    // The first, said to have been read with `cf task get`: the other is unanswered.
     let (status, said) = read_from(&scene, &scene.zeus, &said_read(&[first.id], "task")).await;
     assert_eq!((status, said), (200, json!({})));
     let read = scene.message(first.id);
@@ -557,7 +555,9 @@ async fn answers_cf_wrote_whole_are_received_by_the_one_they_are_for_and_the_dis
     );
     assert_eq!(scene.logged("message.read"), 1);
     assert_eq!(scene.kicks.get(), 1, "the dispatcher is woken");
-    // The other, by `cf inbox read`: the task goes on.
+    // The other answer ends the wait, before `cf inbox read` receives it.
+    let second = scene.choose(other.id, "blue");
+    assert_eq!(state_of(&scene, 1), "working");
     let (status, _) = read_from(&scene, &scene.zeus, &said_read(&[second.id], "inbox")).await;
     assert_eq!(status, 200);
     assert_eq!(scene.message(second.id).receipt, json!({ "read": "inbox" }));
