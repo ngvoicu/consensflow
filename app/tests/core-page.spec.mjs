@@ -1040,12 +1040,12 @@ const calls = (page, operation, { reads = false } = {}) =>
     [operation, reads],
   )
 
-/** Picks a chief's harness, then one of its models, by what each says, as the human does (CHF-07). */
+/** Picks a chief's harness and a model by its launch value (CHF-07). */
 async function pickChief(dialog, harness, model) {
   await dialog.locator('[name="chiefHarness"]').selectOption({ label: harness })
   const models = dialog.locator('[name="chiefModel"]')
   await expect(models).toBeEnabled()
-  await models.selectOption({ label: model })
+  await models.selectOption(model)
 }
 
 /** What a select offers: each option's words, and whether it is disabled. */
@@ -1056,14 +1056,14 @@ const offered = (select) =>
 
 /**
  * Add member's form (T-1143): a role, a harness by its name, one of the models it lists by
- * its label, an effort and a tier, each where given.
+ * its launch value, an effort and a tier, each where given.
  */
 async function pickMember(dialog, { role, harness, model, effort, tier }) {
   const add = dialog.locator('.staff-add')
   if (role !== undefined) await add.locator('[name="role"]').selectOption(role)
   await add.locator('[name="memberHarness"]').selectOption({ label: harness })
   await expect(add.locator('[name="memberModel"]')).toBeEnabled()
-  await add.locator('[name="memberModel"]').selectOption({ label: model })
+  await add.locator('[name="memberModel"]').selectOption(model)
   if (effort !== undefined) await add.locator('[name="memberEffort"]').selectOption(effort)
   if (tier !== undefined) await add.locator('[name="memberTier"]').selectOption(tier)
 }
@@ -5208,13 +5208,13 @@ test('the chief is picked as a harness, then a model it lists, then an effort it
     await expect(models).toHaveValue('')
     expect(await offered(models)).toEqual([
       ['Pick a model', true],
-      ['meta/muse-spark', false],
-      ['meta/muse-spark-1.3-contributor', false],
+      ['muse-spark [meta]', false],
+      ['muse-spark-1.3-contributor [meta]', false],
     ])
     const help = dialog.locator('.chief-help')
     await expect(help).toHaveText('Pi switches with /model and Enter.')
     // A contributor model says what it is beside it.
-    await models.selectOption({ label: 'meta/muse-spark-1.3-contributor' })
+    await models.selectOption('meta/muse-spark-1.3-contributor')
     await expect(help).toHaveText(
       'Contributor model: Meta may train on what it sees, including your code. Pi switches with /model and Enter.',
     )
@@ -5241,6 +5241,175 @@ test('the chief is picked as a harness, then a model it lists, then an effort it
     await dialog.getByRole('button', { name: 'Cancel' }).click()
     await expect(dialog).toBeHidden()
   }
+})
+
+test('Pi rows show distinct names and provider tags while their values stay launch ids', async ({
+  page,
+}) => {
+  const data = model()
+  data.models.pi.listing = listed([
+    {
+      id: 'claude-opus-5-5',
+      label: 'Claude Opus 5.5',
+      provider: 'cliproxyapi',
+      efforts: ['low', 'high'],
+    },
+    {
+      id: 'claude-haiku-4-5',
+      label: 'Claude Haiku 4.5 (latest)',
+      provider: 'anthropic',
+      efforts: ['low', 'high'],
+    },
+    {
+      id: 'claude-opus-5-5',
+      label: 'Claude Opus 5.5',
+      provider: 'anthropic',
+      efforts: ['low', 'high'],
+      disabled: true,
+    },
+  ])
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  await dialog.locator('[name="chiefHarness"]').selectOption({ label: 'Pi' })
+  const models = dialog.locator('[name="chiefModel"]')
+  await expect(models).toBeEnabled()
+  if (process.env.CF_PI_PICKER_SHOT) {
+    // Native popups are outside a headless browser's screenshot; expand the real select instead.
+    await models.evaluate((select) => {
+      select.size = 4
+      select.style.height = 'auto'
+    })
+    await page.screenshot({ path: process.env.CF_PI_PICKER_SHOT })
+    await models.evaluate((select) => {
+      select.removeAttribute('size')
+      select.style.removeProperty('height')
+    })
+  }
+  expect(await offered(models)).toEqual([
+    ['Pick a model', true],
+    ['claude-opus-5-5 [cliproxyapi]', false],
+    ['claude-haiku-4-5 (Claude Haiku 4.5 (latest)) [anthropic]', false],
+    ['claude-opus-5-5 [anthropic]', true],
+  ])
+  expect(
+    await models.locator('option').evaluateAll((options) => options.map((o) => o.value)),
+  ).toEqual([
+    '',
+    'cliproxyapi/claude-opus-5-5',
+    'anthropic/claude-haiku-4-5',
+    'anthropic/claude-opus-5-5',
+  ])
+  await models.selectOption({ label: 'claude-haiku-4-5 (Claude Haiku 4.5 (latest)) [anthropic]' })
+  await expect(models).toHaveValue('anthropic/claude-haiku-4-5')
+  expect(await offered(dialog.locator('[name="chiefEffort"]'))).toEqual([
+    ['Pick an effort', true],
+    ['low', false],
+    ['high', false],
+  ])
+  await dialog.locator('[name="chiefEffort"]').selectOption('high')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        harness: 'pi',
+        model: 'anthropic/claude-haiku-4-5',
+        effort: 'high',
+        gate: false,
+        compaction: 300000,
+        staff: [],
+      },
+    ])
+})
+
+test('Pi rows keep the stored provider, efforts, disabled choices and stale words in staff and chief dialogs', async ({
+  page,
+}) => {
+  const data = model()
+  data.models.pi.listing = {
+    ...listed([
+      {
+        id: 'claude-opus-5-5',
+        label: 'Claude Opus 5.5',
+        provider: 'cliproxyapi',
+        efforts: ['high'],
+      },
+      { id: 'claude-opus-5-5', label: 'Claude Opus 5.5', provider: 'anthropic', efforts: ['high'] },
+      {
+        id: 'retired',
+        label: 'Retired Model',
+        provider: 'anthropic',
+        efforts: [],
+        disabled: true,
+      },
+    ]),
+    freshness: { state: 'stale', why: 'Pi is still loading' },
+  }
+  const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+  Object.assign(chief.participant, { harness: 'pi', model: 'cliproxyapi/claude-opus-5-5' })
+  const member = data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus')
+  Object.assign(member.participant, {
+    harness: 'pi',
+    model: 'anthropic/claude-opus-5-5',
+    effort: 'high',
+  })
+  await open(page, data)
+
+  await page.getByRole('button', { name: 'Switch the chief to another harness or model' }).click()
+  const switching = page.getByRole('dialog', { name: 'Switch the chief' })
+  await switching.locator('[name="chiefHarness"]').selectOption('pi')
+  const chiefModels = switching.locator('[name="chiefModel"]')
+  await expect(chiefModels).toBeEnabled()
+  expect(await offered(chiefModels)).toEqual([
+    ['Pick a model', true],
+    ['claude-opus-5-5 [cliproxyapi]', true],
+    ['claude-opus-5-5 [anthropic]', false],
+    ['retired (Retired Model) [anthropic]', true],
+  ])
+  await expect(switching.locator('.chief-help')).toContainText('Pi is still loading')
+  await switching.getByRole('button', { name: 'Cancel' }).click()
+
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await settings.getByRole('button', { name: 'Edit @zeus' }).click()
+  const memberModels = settings.locator('[name="memberModel"]')
+  await expect(memberModels).toHaveValue('anthropic/claude-opus-5-5')
+  await expect(settings.locator('[name="memberEffort"]')).toHaveValue('high')
+  await expect(settings.locator('.member-help')).toContainText('Pi is still loading')
+  await settings.getByRole('button', { name: 'Save member' }).click()
+  await expect
+    .poll(() => calls(page, 'member.edit'))
+    .toEqual([
+      {
+        project: 1,
+        member: 'zeus',
+        harness: 'pi',
+        model: 'anthropic/claude-opus-5-5',
+        effort: 'high',
+        tier: 'standard',
+        unchanged: true,
+      },
+    ])
+  await settings.getByRole('button', { name: 'Add backup for @zeus' }).click()
+  await settings.locator('[name="memberHarness"]').selectOption('pi')
+  await expect(memberModels).toBeEnabled()
+  await memberModels.selectOption({ label: 'claude-opus-5-5 [cliproxyapi]' })
+  await expect(memberModels).toHaveValue('cliproxyapi/claude-opus-5-5')
+  await settings.locator('[name="memberEffort"]').selectOption('high')
+  await settings.getByRole('button', { name: 'Add backup', exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'backup.add'))
+    .toEqual([
+      {
+        project: 1,
+        member: 'zeus',
+        harness: 'pi',
+        model: 'cliproxyapi/claude-opus-5-5',
+        effort: 'high',
+      },
+    ])
 })
 
 /**
@@ -5285,7 +5454,7 @@ test("adds a member on a model its harness lists, the harness's own listing, nev
   // Claude Code's models as its `initialize` answered, by its own labels and ids.
   expect(await offered(models)).toEqual([
     ['Pick a model', true],
-    ['claude-opus-5-5', false],
+    ['claude-opus-5-5 · default', false],
     ['claude-fable-5-1', false],
     ['claude-sonnet-5-5', false],
     ['claude-haiku-5-5', false],
@@ -5820,8 +5989,8 @@ test("New project reads every installed harness's models as it opens, all at onc
   await expect(models).toBeEnabled()
   expect(await offered(models)).toEqual([
     ['Pick a model', true],
-    ['meta/muse-spark', false],
-    ['meta/muse-spark-1.3-contributor', false],
+    ['muse-spark [meta]', false],
+    ['muse-spark-1.3-contributor [meta]', false],
   ])
   // The pick used the read made as the dialog opened: nothing was asked twice.
   expect(await harnessesAsked(page)).toEqual(HARNESSES)
@@ -15062,61 +15231,66 @@ test('hears each event of the app with one listener, as the app keeps every one 
   })
 })
 
-/**
- * Models are shown by their id (spec harness-models, HMD-12): every model select offers each
- * model as its harness takes it, never the name its harness's list gives it (`Opus`); Pi's
- * with its provider, Devin's by the id its list holds with the effort picked beside it.
- */
-const IDS = {
-  'Claude Code': ['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5-5', 'claude-haiku-5-5'],
-  Codex: ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6.1-terra', 'gpt-6-sol'],
-  Devin: ['adaptive', 'swe-2', 'swe-2-lightning', 'claude-opus-5-5', 'claude-opus-5-5-fast'],
-  'Muse Code': ['muse-wonder-1.0', 'muse-spark-1.3', 'muse-spark-1.3-contributor'],
+/** Recorded listings: option text and the separate launch value. */
+const MODEL_OPTIONS = {
+  'Claude Code': [
+    ['claude-opus-5-5 · default', 'claude-opus-5-5'],
+    ['claude-fable-5-1', 'claude-fable-5-1'],
+    ['claude-sonnet-5-5', 'claude-sonnet-5-5'],
+    ['claude-haiku-5-5', 'claude-haiku-5-5'],
+  ],
+  Codex: [
+    ['gpt-6.1-sol · default', 'gpt-6.1-sol'],
+    ['gpt-6-astra', 'gpt-6-astra'],
+    ['gpt-6.1-terra', 'gpt-6.1-terra'],
+    ['gpt-6-sol', 'gpt-6-sol'],
+  ],
+  Devin: [
+    ['adaptive', 'adaptive'],
+    ['swe-2', 'swe-2'],
+    ['swe-2-lightning', 'swe-2-lightning'],
+    ['claude-opus-5-5', 'claude-opus-5-5'],
+    ['claude-opus-5-5-fast', 'claude-opus-5-5-fast'],
+    ['gpt-6-sol', 'gpt-6-sol'],
+    ['gpt-6-sol-priority (GPT-6 Sol Fast)', 'gpt-6-sol-priority'],
+  ],
+  'Muse Code': [
+    ['muse-wonder-1.0', 'muse-wonder-1.0'],
+    ['muse-spark-1.3', 'muse-spark-1.3'],
+    ['muse-spark-1.3-contributor · default', 'muse-spark-1.3-contributor'],
+  ],
   Pi: [
-    'anthropic/claude-fable-5',
-    'anthropic/claude-fable-5-1',
-    'anthropic/claude-haiku-4-5',
-    'kimi-coding/k3',
+    ['claude-fable-5 [anthropic]', 'anthropic/claude-fable-5'],
+    ['claude-fable-5-1 [anthropic]', 'anthropic/claude-fable-5-1'],
+    ['claude-haiku-4-5 (Claude Haiku 4.5 (latest)) [anthropic]', 'anthropic/claude-haiku-4-5'],
+    ['k3 (Kimi K3) [kimi-coding]', 'kimi-coding/k3'],
   ],
 }
 
-test("the model selects of New project, Switch chief, Add member and Edit member show each model's id, as its harness takes it", async ({
+test('the model selects show each harness listing as rows while retaining launch values', async ({
   page,
 }) => {
   const data = shotData('after')
   await open(page, data)
-  const ids = async (select) =>
-    (await offered(select)).map(([text]) => text).filter((text) => text !== 'Pick a model')
-  // A listed id is there, in each harness's list, and no display name is.
-  const known = (harness) =>
-    JSON.parse(
-      readFileSync(join(import.meta.dirname, 'fixtures', 'models', `${harness}.json`), 'utf8'),
-    ).models
-  const listedModels = ['claude', 'codex', 'devin', 'muse', 'pi'].flatMap(known)
-  const idsOf = new Set(
-    listedModels.flatMap((model) => [
-      model.id,
-      model.provider ? `${model.provider}/${model.id}` : model.id,
-    ]),
-  )
-  // The names the lists give their models, which are no ids (`Opus`, `GPT-6.1-Sol`).
-  const labels = new Set(
-    listedModels.map((model) => model.label).filter((label) => !idsOf.has(label)),
-  )
+  const rows = (select) =>
+    select
+      .locator('option')
+      .evaluateAll((options) =>
+        options
+          .filter((option) => option.value)
+          .map((option) => [option.textContent, option.value]),
+      )
   for (const [button, name] of [
     ['New project', 'New project'],
     ['Switch the chief to another harness or model', 'Switch the chief'],
   ]) {
     await page.getByRole('button', { name: button }).click()
     const dialog = page.getByRole('dialog', { name })
-    for (const [harness, wanted] of Object.entries(IDS)) {
+    for (const [harness, wanted] of Object.entries(MODEL_OPTIONS)) {
       await dialog.locator('[name="chiefHarness"]').selectOption({ label: harness })
       const models = dialog.locator('[name="chiefModel"]')
       await expect(models).toBeEnabled()
-      const offeredIds = await ids(models)
-      expect(offeredIds.slice(0, wanted.length), `${name}: ${harness}`).toEqual(wanted)
-      for (const text of offeredIds)
-        expect(labels.has(text), `${name}: ${text} is a label`).toBe(false)
+      expect((await rows(models)).slice(0, wanted.length), `${name}: ${harness}`).toEqual(wanted)
     }
     // Devin: the listed id, and its effort picked beside it.
     await dialog.locator('[name="chiefHarness"]').selectOption({ label: 'Devin' })
@@ -15132,15 +15306,19 @@ test("the model selects of New project, Switch chief, Add member and Edit member
   await page.getByRole('button', { name: 'Project settings' }).click()
   const settings = page.getByRole('dialog', { name: 'Project settings' })
   const add = settings.locator('.staff-add')
-  for (const [harness, wanted] of Object.entries(IDS)) {
+  for (const [harness, wanted] of Object.entries(MODEL_OPTIONS)) {
     await add.locator('[name="memberHarness"]').selectOption({ label: harness })
     await expect(add.locator('[name="memberModel"]')).toBeEnabled()
-    expect((await ids(add.locator('[name="memberModel"]'))).slice(0, wanted.length)).toEqual(wanted)
+    expect((await rows(add.locator('[name="memberModel"]'))).slice(0, wanted.length)).toEqual(
+      wanted,
+    )
   }
   // Edit member: the select holds the member's own id, picked, and the others by theirs.
   await settings.getByRole('button', { name: 'Edit @claude-opus-5-5-high' }).first().click()
   await expect(add.locator('[name="memberModel"]')).toHaveValue('claude-opus-5-5')
-  expect((await ids(add.locator('[name="memberModel"]'))).slice(0, 4)).toEqual(IDS['Claude Code'])
+  expect((await rows(add.locator('[name="memberModel"]'))).slice(0, 4)).toEqual(
+    MODEL_OPTIONS['Claude Code'],
+  )
 })
 
 /**
