@@ -290,6 +290,7 @@ pub(crate) fn page_commands<R: Runtime>(
         commands::pane_input_enqueue,
         commands::pane_reply_enqueue,
         commands::pane_input_wait,
+        commands::pane_input_forget,
         commands::pane_resize,
         commands::pane_ack,
         commands::agents_screen,

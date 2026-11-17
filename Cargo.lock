@@ -594,6 +594,7 @@ dependencies = [
  "cf-proto",
  "futures-channel",
  "futures-executor",
+ "futures-util",
  "libc",
  "portable-pty",
  "serde",

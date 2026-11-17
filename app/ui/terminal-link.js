@@ -1,6 +1,10 @@
 import { paneKey } from './term.js'
 
 const INPUT_CHUNK_BYTES = 32 * 1024
+const ADMISSION_TIMEOUT_MS = 1500
+const WAIT_TIMEOUT_MS = 30_000
+const INPUT_RETRY_MS = 100
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
  * The page's side of the terminals: bytes from the Rust pane host into each
@@ -24,6 +28,8 @@ export class TerminalLink {
   /** By pane: the last message drawn, the last acknowledged, and whether an acknowledgement is on its way. */
   #acks = new Map()
   #inputs = new Map()
+  #replies = new Map()
+  #admissions = new Map()
   #sequences = new Map()
   #sizes = new Map()
   #retired = new Set()
@@ -82,7 +88,7 @@ export class TerminalLink {
 
   /** What the emulator answers the program on its own (cursor reports and the like). */
   reply(pane, data) {
-    return this.#stream('pane_reply_enqueue', pane, data)
+    return this.#stream('pane_reply_enqueue', pane, data).catch((cause) => this.#report(cause))
   }
 
   /** The emulator's size, sent until the live pane accepts it. */
@@ -100,6 +106,8 @@ export class TerminalLink {
   retire(key) {
     this.#retired.add(key)
     this.#inputs.delete(key)
+    this.#replies.delete(key)
+    this.#admissions.delete(key)
     this.#sequences.delete(key)
     this.#sizes.delete(key)
     this.#registry.retire(key)
@@ -129,7 +137,10 @@ export class TerminalLink {
   async #stream(command, pane, data) {
     const key = paneKey(pane)
     const bytes = new TextEncoder().encode(data)
-    const previous = this.#inputs.get(key)
+    // Human input and emulator replies each keep their order. A reply must be
+    // able to pass a paste whose completion depends on that very reply.
+    const streams = command === 'pane_reply_enqueue' ? this.#replies : this.#inputs
+    const previous = streams.get(key)
     const submit = async () => {
       for (let offset = 0; offset < bytes.length; offset += INPUT_CHUNK_BYTES) {
         if (this.#retired.has(key)) return
@@ -137,41 +148,148 @@ export class TerminalLink {
         if (!(await this.#chunk(command, pane, chunk))) return
       }
     }
-    // A keystroke goes at once; a large paste streams and keeps later input behind it.
-    if (!previous && bytes.length <= INPUT_CHUNK_BYTES) return submit()
-    const stream = (previous ?? Promise.resolve()).then(submit)
-    this.#inputs.set(key, stream)
+    const stream = previous ? previous.then(submit, submit) : submit()
+    streams.set(key, stream)
     try {
       await stream
     } finally {
-      if (this.#inputs.get(key) === stream) this.#inputs.delete(key)
+      if (streams.get(key) === stream) streams.delete(key)
+    }
+  }
+
+  /** The bridge may fail before admission, or lose the answer after admission. */
+  async #call(command, args, timeout) {
+    let timer
+    try {
+      return await Promise.race([
+        this.#invoke(command, args),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('pane input call timed out')), timeout)
+        }),
+      ])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /** Only one numbered admission for a pane is in doubt at a time. */
+  async #admit(command, pane, bytes) {
+    const key = paneKey(pane)
+    const send = async () => {
+      let sequence = (this.#sequences.get(key) ?? 0) + 1
+      this.#sequences.set(key, sequence)
+      let failures = 0
+      while (!this.#retired.has(key)) {
+        try {
+          const answer = await this.#call(
+            command,
+            { id: pane.id, generation: pane.generation, sequence, bytes: Array.from(bytes) },
+            ADMISSION_TIMEOUT_MS,
+          )
+          if (answer?.ok === true && typeof answer.ticket === 'string') return answer
+          if (answer?.ok === false && typeof answer.error === 'string') {
+            const mismatch =
+              answer.error === 'pane-input-sequence-gap' ||
+              answer.error === 'pane-input-sequence-regression'
+            if (
+              mismatch &&
+              Number.isSafeInteger(answer.expectedSequence) &&
+              answer.expectedSequence > 0 &&
+              answer.expectedSequence !== sequence
+            ) {
+              sequence = answer.expectedSequence
+              this.#sequences.set(key, sequence)
+              continue
+            }
+            return answer
+          }
+          throw new Error('no admission answer')
+        } catch {
+          // Retrying the same number is safe even if the host admitted it:
+          // it returns the same ticket for an identical request.
+          failures += 1
+          if (failures === 5) {
+            this.#report(new Error('Keep this window open while your typing reconnects.'))
+          }
+          await pause(INPUT_RETRY_MS)
+        }
+      }
+      return null
+    }
+
+    const previous = this.#admissions.get(key)
+    const admission = previous ? previous.then(send, send) : send()
+    this.#admissions.set(key, admission)
+    try {
+      return await admission
+    } finally {
+      if (this.#admissions.get(key) === admission) this.#admissions.delete(key)
     }
   }
 
   async #chunk(command, pane, bytes) {
     const key = paneKey(pane)
-    const sequence = (this.#sequences.get(key) ?? 0) + 1
-    this.#sequences.set(key, sequence)
-    const admitted = await this.#invoke(command, {
-      id: pane.id,
-      generation: pane.generation,
-      sequence,
-      bytes: Array.from(bytes),
-    })
-    // A refused keystroke shows, instead of vanishing.
-    if (admitted?.ok !== true || typeof admitted.ticket !== 'string') {
-      this.#report(
-        new Error(`typing refused: ${admitted?.error ?? 'no answer from the pane host'}`),
+    let admitted
+    let full = 0
+    do {
+      admitted = await this.#admit(command, pane, bytes)
+      if (admitted === null) return false
+      if (
+        admitted.error !== "the pane's input queue is full" &&
+        admitted.error !== 'pane-input-ticket-capacity'
       )
+        break
+      full += 1
+      if (full === 20)
+        this.#report(new Error('Keep this window open while your typing catches up.'))
+      // A known refusal used its number but wrote nothing. Let replies through
+      // while the queue makes room, then submit these same bytes under the next.
+      await pause(INPUT_RETRY_MS)
+    } while (!this.#retired.has(key))
+    if (this.#retired.has(key)) return false
+    if (admitted.ok !== true || typeof admitted.ticket !== 'string') {
+      this.#report(new Error('Typing did not reach this window. Reopen it and type again.'))
       return false
     }
-    const settled = await this.#invoke('pane_input_wait', { ticket: admitted.ticket })
+
+    let settled
+    let failures = 0
+    while (!this.#retired.has(key)) {
+      try {
+        settled = await this.#call('pane_input_wait', { ticket: admitted.ticket }, WAIT_TIMEOUT_MS)
+        break
+      } catch {
+        failures += 1
+        if (failures === 5) {
+          this.#report(new Error('Keep this window open while your typing is checked.'))
+        }
+        await pause(INPUT_RETRY_MS)
+      }
+    }
+    if (this.#retired.has(key)) return false
+    // Keep the receipt until the page has seen it, then release it. Both the
+    // wait and this acknowledgement can be repeated after a lost answer.
+    void this.#forget(key, admitted.ticket)
+    // A wait may have reached the host even if its answer did not. Never
+    // resend admitted bytes on an unknown outcome: that could type them twice.
+    if (failures > 0 && settled?.error === 'pane-input-ticket-not-found') {
+      this.#report(new Error('Check the window to see whether your last typing appeared.'))
+      return true
+    }
     if (settled?.ok !== true) {
-      this.#report(
-        new Error(`typing was not taken: ${settled?.error ?? 'no answer from the pane host'}`),
-      )
+      this.#report(new Error('Check the window, then reopen it if your typing did not appear.'))
       return false
     }
     return true
+  }
+
+  async #forget(key, ticket) {
+    while (!this.#retired.has(key)) {
+      try {
+        const answer = await this.#call('pane_input_forget', { ticket }, ADMISSION_TIMEOUT_MS)
+        if (answer?.ok === true) return
+      } catch {}
+      await pause(INPUT_RETRY_MS)
+    }
   }
 }

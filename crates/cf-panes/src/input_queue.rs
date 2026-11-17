@@ -9,11 +9,12 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
 use futures_channel::oneshot;
+use futures_util::future::{BoxFuture, FutureExt, Shared};
 use serde_json::{json, Value};
 
 use crate::arbiter::{ArbiterError, InputArbiter};
 use crate::pty::{PaneKey, PaneTable};
-use crate::validation::{validate_input, INVALID_BODY};
+use crate::validation::{validate_input, INVALID_BODY, MAX_INPUT_BYTES};
 
 const INPUT_QUEUE_CAPACITY: usize = 1024;
 const MAX_PENDING_INPUT_BYTES_PER_PANE: usize = 4 * 1024 * 1024;
@@ -35,6 +36,7 @@ const INPUT_SEQUENCE_REGRESSION: &str = "pane-input-sequence-regression";
 /// and while the answer waited behind the human's keys held after that paste
 /// (or a delivery's Enter, held the same way), it read none of the paste, and
 /// took the Enter for a line break in it (T-1048).
+#[derive(Clone, PartialEq, Eq)]
 pub enum InputWork {
     Typed(Vec<u8>),
     Write(Vec<u8>),
@@ -59,7 +61,7 @@ impl InputWork {
 /// Why a pane's input did not go in. Refused: nothing of it was written, so
 /// it may be sent again. Uncertain: the write itself failed partway, and some
 /// of it may have reached the window.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum InputError {
     Refused { code: &'static str, cause: String },
     Uncertain(String),
@@ -131,15 +133,36 @@ struct InputJob {
     pending_bytes: Arc<AtomicUsize>,
 }
 
+#[derive(Clone)]
 pub struct PageInputCompletion {
-    pub receiver: oneshot::Receiver<InputResponse>,
+    pub receiver: Shared<BoxFuture<'static, InputResponse>>,
     pub human: bool,
+    key: PaneKey,
+    notified: Arc<AtomicBool>,
+}
+
+impl PageInputCompletion {
+    /// A retried wait may finish in more than one caller; tell the page's
+    /// state about a successful human write only once.
+    pub fn notify_human_once(&self) -> bool {
+        self.human && !self.notified.swap(true, Ordering::AcqRel)
+    }
 }
 
 struct PageInputState {
     last_sequences: HashMap<PaneKey, u64>,
+    last_admissions: HashMap<PaneKey, PageAdmission>,
     completions: HashMap<String, PageInputCompletion>,
     next_ticket: u64,
+}
+
+/// The last request's answer is kept until the next request for this pane.
+/// The page may have lost that answer after the job was admitted. An exact
+/// retry must return the same answer, never submit a second job.
+struct PageAdmission {
+    work: Option<InputWork>,
+    human: bool,
+    answer: Result<String, String>,
 }
 
 struct InputRoute {
@@ -169,6 +192,7 @@ impl InputQueue {
             workers: Mutex::new(HashMap::new()),
             page: Mutex::new(PageInputState {
                 last_sequences: HashMap::new(),
+                last_admissions: HashMap::new(),
                 completions: HashMap::new(),
                 next_ticket: 1,
             }),
@@ -195,33 +219,78 @@ impl InputQueue {
             .checked_add(1)
             .ok_or_else(|| "pane-input-sequence-overflow".to_string())?;
         if sequence < expected {
+            if sequence.checked_add(1) == Some(expected) {
+                if let Some(admission) = page.last_admissions.get(&key) {
+                    if admission.human == human && admission.work.as_ref() == Some(&work) {
+                        return admission.answer.clone();
+                    }
+                }
+            }
             return Err(INPUT_SEQUENCE_REGRESSION.to_string());
         }
         if sequence > expected {
             return Err(INPUT_SEQUENCE_GAP.to_string());
         }
 
+        // An invalid oversized request must not leave an unbounded copy in
+        // the page's memory. Normal page chunks are at most 32 KiB.
+        let remembered = (work.byte_count() <= MAX_INPUT_BYTES).then(|| work.clone());
         page.last_sequences.insert(key.clone(), sequence);
-        match &work {
-            InputWork::Typed(bytes)
-            | InputWork::Write(bytes)
-            | InputWork::Reply(bytes)
-            | InputWork::Paste { body: bytes, .. } => validate_input(bytes)?,
-            InputWork::Claim => {}
-        }
-        if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
-            return Err("pane-input-ticket-capacity".to_string());
-        }
-        let next_ticket = page
-            .next_ticket
+        let answer = (|| {
+            match &work {
+                InputWork::Typed(bytes)
+                | InputWork::Write(bytes)
+                | InputWork::Reply(bytes)
+                | InputWork::Paste { body: bytes, .. } => validate_input(bytes)?,
+                InputWork::Claim => {}
+            }
+            if page.completions.len() >= MAX_PENDING_INPUT_TICKETS {
+                return Err("pane-input-ticket-capacity".to_string());
+            }
+            let next_ticket = page
+                .next_ticket
+                .checked_add(1)
+                .ok_or_else(|| "pane-input-ticket-overflow".to_string())?;
+            let receiver = self
+                .submit(key.clone(), work)
+                .map_err(|error| error.to_string())?;
+            let ticket = format!("pane-input-{}", page.next_ticket);
+            page.next_ticket = next_ticket;
+            page.completions.insert(
+                ticket.clone(),
+                PageInputCompletion {
+                    receiver: async move { wait_for_input(receiver).await }
+                        .boxed()
+                        .shared(),
+                    human,
+                    key: key.clone(),
+                    notified: Arc::new(AtomicBool::new(false)),
+                },
+            );
+            Ok(ticket)
+        })();
+        page.last_admissions.insert(
+            key,
+            PageAdmission {
+                work: remembered,
+                human,
+                answer: answer.clone(),
+            },
+        );
+        answer
+    }
+
+    /// The next number the current page may use for this pane, if it got out
+    /// of step. A gap or regression itself consumes no number.
+    pub fn expected_page_sequence(&self, key: &PaneKey) -> Option<u64> {
+        self.page
+            .lock()
+            .ok()?
+            .last_sequences
+            .get(key)
+            .copied()
+            .unwrap_or(0)
             .checked_add(1)
-            .ok_or_else(|| "pane-input-ticket-overflow".to_string())?;
-        let receiver = self.submit(key, work).map_err(|error| error.to_string())?;
-        let ticket = format!("pane-input-{}", page.next_ticket);
-        page.next_ticket = next_ticket;
-        page.completions
-            .insert(ticket.clone(), PageInputCompletion { receiver, human });
-        Ok(ticket)
     }
 
     /// A new page counts every pane's input from 1: the page that sent the
@@ -230,16 +299,30 @@ impl InputQueue {
     pub fn begin_page(&self) {
         let mut page = self.page.lock().unwrap_or_else(|error| error.into_inner());
         page.last_sequences.clear();
+        page.last_admissions.clear();
         page.completions.clear();
     }
 
-    pub fn take_page_completion(&self, ticket: &str) -> Result<PageInputCompletion, String> {
+    /// A wait may be repeated until the page has actually received its answer.
+    pub fn page_completion(&self, ticket: &str) -> Result<PageInputCompletion, String> {
         self.page
             .lock()
             .map_err(|_| "pane input admission lock is poisoned".to_string())?
             .completions
-            .remove(ticket)
+            .get(ticket)
+            .cloned()
             .ok_or_else(|| "pane-input-ticket-not-found".to_string())
+    }
+
+    /// The page got the answer and no longer needs to retry the wait. It may
+    /// repeat this acknowledgement, including after the first answer was lost.
+    pub fn forget_page_completion(&self, ticket: &str) -> Result<(), String> {
+        self.page
+            .lock()
+            .map_err(|_| "pane input admission lock is poisoned".to_string())?
+            .completions
+            .remove(ticket);
+        Ok(())
     }
 
     pub(crate) fn write(
@@ -340,11 +423,12 @@ impl InputQueue {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .remove(key);
-        self.page
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .last_sequences
-            .remove(key);
+        let mut page = self.page.lock().unwrap_or_else(|error| error.into_inner());
+        page.last_sequences.remove(key);
+        page.last_admissions.remove(key);
+        page.completions
+            .retain(|_, completion| &completion.key != key);
+        drop(page);
         self.arbiter.retire(key);
     }
 
@@ -762,6 +846,131 @@ mod tests {
             InputError::from(ArbiterError::Pane(PaneError::LockPoisoned)).paste_answer(),
             json!({"ok":false,"admitted":null,"error":"uncertain","cause":"pane table lock is poisoned"})
         );
+    }
+
+    /// If admission succeeded but its answer was lost, retrying that exact
+    /// request must recover its ticket, not enqueue the bytes a second time.
+    /// Later keys still follow it, and a different request cannot reuse its number.
+    #[test]
+    fn a_lost_page_admission_answer_can_be_retried_without_repeating_input() {
+        let panes = Arc::new(PaneTable::new());
+        let inputs = InputQueue::new(panes, Arc::new(InputArbiter::new(EnterTiming::fixed(0))));
+        let key = PaneKey::new("a-pane", 1);
+        let (sender, received) = mpsc::sync_channel(4);
+        let (replies, _received_replies) = mpsc::sync_channel(4);
+        inputs.senders.lock().unwrap().insert(
+            key.clone(),
+            InputRoute {
+                sender,
+                replies,
+                pending_bytes: Arc::new(AtomicUsize::new(0)),
+            },
+        );
+        let first = inputs
+            .enqueue_page(key.clone(), 1, InputWork::Typed(b"A".to_vec()), true)
+            .expect("first admission");
+        let recovered = inputs
+            .enqueue_page(key.clone(), 1, InputWork::Typed(b"A".to_vec()), true)
+            .expect("recover the same admission");
+        assert_eq!(recovered, first);
+        assert_eq!(inputs.page.lock().unwrap().completions.len(), 1);
+        assert_eq!(
+            inputs.enqueue_page(key.clone(), 1, InputWork::Typed(b"B".to_vec()), true),
+            Err(INPUT_SEQUENCE_REGRESSION.to_owned())
+        );
+        assert_eq!(
+            inputs.enqueue_page(key.clone(), 1, InputWork::Reply(b"A".to_vec()), false),
+            Err(INPUT_SEQUENCE_REGRESSION.to_owned())
+        );
+        assert_eq!(inputs.expected_page_sequence(&key), Some(2));
+        let second = inputs
+            .enqueue_page(key.clone(), 2, InputWork::Typed(b"B".to_vec()), true)
+            .expect("next admission");
+        assert_ne!(second, first);
+        assert_eq!(inputs.page.lock().unwrap().completions.len(), 2);
+        assert!(
+            matches!(received.try_recv().unwrap().work, InputWork::Typed(bytes) if bytes == b"A")
+        );
+        assert!(
+            matches!(received.try_recv().unwrap().work, InputWork::Typed(bytes) if bytes == b"B")
+        );
+        assert!(matches!(
+            received.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        inputs.begin_page();
+        assert_eq!(inputs.expected_page_sequence(&key), Some(1));
+        let third = inputs
+            .enqueue_page(key, 1, InputWork::Typed(b"C".to_vec()), true)
+            .expect("the new page starts at one");
+        assert_ne!(third, first);
+        assert!(
+            matches!(received.try_recv().unwrap().work, InputWork::Typed(bytes) if bytes == b"C")
+        );
+        inputs.close_and_drain();
+    }
+
+    #[test]
+    fn a_lost_answer_to_a_refused_admission_is_the_same_refusal_on_retry() {
+        let inputs = InputQueue::new(
+            Arc::new(PaneTable::new()),
+            Arc::new(InputArbiter::new(EnterTiming::fixed(0))),
+        );
+        let key = PaneKey::new("full-pane", 1);
+        let (sender, _received) = mpsc::sync_channel(0);
+        let (replies, _received_replies) = mpsc::sync_channel(0);
+        inputs.senders.lock().unwrap().insert(
+            key.clone(),
+            InputRoute {
+                sender,
+                replies,
+                pending_bytes: Arc::new(AtomicUsize::new(0)),
+            },
+        );
+        let typed = || InputWork::Typed(b"A".to_vec());
+        let refusal = inputs.enqueue_page(key.clone(), 1, typed(), true);
+        assert_eq!(refusal, Err("the pane's input queue is full".to_string()));
+        assert_eq!(inputs.enqueue_page(key.clone(), 1, typed(), true), refusal);
+        assert_eq!(inputs.expected_page_sequence(&key), Some(2));
+        assert_eq!(inputs.page.lock().unwrap().completions.len(), 0);
+        inputs.close_and_drain();
+    }
+
+    #[test]
+    fn a_lost_completion_answer_can_be_waited_for_again() {
+        let inputs = InputQueue::new(
+            Arc::new(PaneTable::new()),
+            Arc::new(InputArbiter::new(EnterTiming::fixed(0))),
+        );
+        let key = PaneKey::new("completion-pane", 1);
+        let (sender, received) = mpsc::sync_channel(1);
+        let (replies, _received_replies) = mpsc::sync_channel(1);
+        inputs.senders.lock().unwrap().insert(
+            key.clone(),
+            InputRoute {
+                sender,
+                replies,
+                pending_bytes: Arc::new(AtomicUsize::new(0)),
+            },
+        );
+        let ticket = inputs
+            .enqueue_page(key, 1, InputWork::Typed(b"A".to_vec()), true)
+            .unwrap();
+        let job = received.try_recv().unwrap();
+        job.response.send(Ok(())).unwrap();
+        let first = inputs.page_completion(&ticket).unwrap();
+        assert!(futures_executor::block_on(first.receiver.clone()).is_ok());
+        assert!(first.notify_human_once());
+        let again = inputs.page_completion(&ticket).unwrap();
+        assert!(futures_executor::block_on(again.receiver.clone()).is_ok());
+        assert!(
+            !again.notify_human_once(),
+            "the same write is notified once"
+        );
+        inputs.forget_page_completion(&ticket).unwrap();
+        inputs.forget_page_completion(&ticket).unwrap();
+        assert!(inputs.page_completion(&ticket).is_err());
+        inputs.close_and_drain();
     }
 
     /// The page's input whose answers it never collects is held to a bound,

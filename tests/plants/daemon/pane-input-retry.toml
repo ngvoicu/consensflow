@@ -1,0 +1,37 @@
+# A page can lose an admission's answer after the pane host queued the bytes.
+# Retrying that exact request returns its ticket; a different request cannot
+# take the ticket and no bytes are queued twice (T-1764).
+[run]
+pane-input-retry = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_lost_page_admission_answer_can_be_retried_without_repeating_input"]
+pane-input-completion = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "input_queue::tests::a_lost_completion_answer_can_be_waited_for_again"]
+
+[[plant]]
+name = "pane input retry: forget the accepted answer"
+meant = "a_lost_page_admission_answer_can_be_retried_without_repeating_input"
+runs = ["pane-input-retry"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = "                        return admission.answer.clone();"
+replace = "                        return Err(INPUT_SEQUENCE_REGRESSION.to_string());"
+
+[[plant]]
+name = "pane input retry: reuse a ticket for different bytes"
+meant = "a_lost_page_admission_answer_can_be_retried_without_repeating_input"
+runs = ["pane-input-retry"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = "admission.work.as_ref() == Some(&work)"
+replace = "true"
+
+[[plant]]
+name = "pane input retry: lose the completion after the first wait"
+meant = "a_lost_completion_answer_can_be_waited_for_again"
+runs = ["pane-input-completion"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/input_queue.rs"
+find = '''            .get(ticket)
+            .cloned()'''
+replace = '''            .remove(ticket)'''

@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 use crate::daemon::RosterHandle;
 use crate::runtime::{AppRuntime, PAGE_STATE_EVENT};
 use cf_bridge::Bridge;
-use cf_panes::input_queue::{wait_for_input, InputWork, PageInputCompletion};
+use cf_panes::input_queue::{InputWork, PageInputCompletion};
 use cf_panes::output_hub::PaneOutputMessage;
 use cf_panes::validation::{pane_key, validate_seq, validate_size, validate_text};
 
@@ -56,7 +56,7 @@ async fn input_result(result: Result<PageInputCompletion, String>) -> Value {
         Ok(completion) => completion,
         Err(error) => return json!({"ok":false,"error":error}),
     };
-    match wait_for_input(completion.receiver).await {
+    match completion.receiver.await {
         Ok(()) => json!({"ok":true}),
         Err(error) => json!({"ok":false,"error":error.to_string()}),
     }
@@ -96,8 +96,13 @@ fn enqueue_page_input<R: Runtime>(
         let state = app.state::<AppRuntime>();
         Arc::clone(&state.inputs)
     };
-    match inputs.enqueue_page(key, sequence, work, human) {
+    match inputs.enqueue_page(key.clone(), sequence, work, human) {
         Ok(ticket) => json!({"ok":true,"ticket":ticket}),
+        Err(error)
+            if error == "pane-input-sequence-gap" || error == "pane-input-sequence-regression" =>
+        {
+            json!({"ok":false,"error":error,"expectedSequence":inputs.expected_page_sequence(&key)})
+        }
         Err(error) => json!({"ok":false,"error":error}),
     }
 }
@@ -141,9 +146,12 @@ pub async fn pane_input_wait<R: Runtime>(app: AppHandle<R>, ticket: String) -> V
             let state = app.state::<AppRuntime>();
             Arc::clone(&state.inputs)
         };
-        let completion = inputs.take_page_completion(&ticket);
-        let human = completion.as_ref().is_ok_and(|completion| completion.human);
-        let result = input_result(completion).await;
+        let completion = inputs.page_completion(&ticket);
+        let result = input_result(completion.clone()).await;
+        let human = result["ok"] == true
+            && completion
+                .as_ref()
+                .is_ok_and(PageInputCompletion::notify_human_once);
         page_input_finished(
             human,
             result,
@@ -152,6 +160,22 @@ pub async fn pane_input_wait<R: Runtime>(app: AppHandle<R>, ticket: String) -> V
         )
     })
     .await
+}
+
+/// The page has received a wait's answer. Repeating this is harmless.
+#[tauri::command]
+pub fn pane_input_forget<R: Runtime>(app: AppHandle<R>, ticket: String) -> Value {
+    if let Err(error) = validate_text(&ticket, "pane input ticket") {
+        return json!({"ok":false,"error":error});
+    }
+    let inputs = {
+        let state = app.state::<AppRuntime>();
+        Arc::clone(&state.inputs)
+    };
+    match inputs.forget_page_completion(&ticket) {
+        Ok(()) => json!({"ok":true}),
+        Err(error) => json!({"ok":false,"error":error}),
+    }
 }
 
 #[tauri::command]
@@ -708,7 +732,8 @@ mod tests {
             .invoke_handler(tauri::generate_handler![
                 pane_input_enqueue,
                 pane_reply_enqueue,
-                pane_input_wait
+                pane_input_wait,
+                pane_input_forget
             ])
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .expect("build mock app");
@@ -766,20 +791,36 @@ mod tests {
             "pane_input_enqueue",
             json!({"id":key.id,"generation":1,"sequence":4,"bytes":[66]}),
         );
-        assert_eq!(gap, json!({"ok":false,"error":"pane-input-sequence-gap"}));
+        assert_eq!(
+            gap,
+            json!({"ok":false,"error":"pane-input-sequence-gap","expectedSequence":3})
+        );
         let regression = invoke(
             "pane_input_enqueue",
             json!({"id":key.id,"generation":1,"sequence":2,"bytes":[82]}),
         );
         assert_eq!(
             regression,
-            json!({"ok":false,"error":"pane-input-sequence-regression"})
+            json!({"ok":false,"error":"pane-input-sequence-regression","expectedSequence":3})
         );
         let first_completed = invoke("pane_input_wait", json!({"ticket":first["ticket"]}));
         assert_eq!(first_completed["ok"], true);
+        let repeated = invoke("pane_input_wait", json!({"ticket":first["ticket"]}));
+        assert_eq!(
+            repeated["ok"], true,
+            "a lost completion answer is recoverable"
+        );
         assert_eq!(
             *events.lock().expect("page events"),
             [json!({"reason":"human-input"})]
+        );
+        let forgotten = invoke("pane_input_forget", json!({"ticket":first["ticket"]}));
+        assert_eq!(forgotten["ok"], true);
+        let forgotten_again = invoke("pane_input_forget", json!({"ticket":first["ticket"]}));
+        assert_eq!(forgotten_again["ok"], true);
+        assert_eq!(
+            invoke("pane_input_wait", json!({"ticket":first["ticket"]})),
+            json!({"ok":false,"error":"pane-input-ticket-not-found"})
         );
         // A rejected page input still consumes its sequence, so the next
         // sequence remains valid.
