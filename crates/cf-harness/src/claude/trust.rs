@@ -8,6 +8,11 @@
 //! 2.1.287 the yes came first, numbered: the choice is read by its words. Its prompt,
 //! once it is past the question, is told by the line under its input box.
 //!
+//! Claude Code 2.1.326 also asks about a directory passed with `--add-dir`:
+//! "No, exit" and "Yes, add it", with a yes lasting only for the session.
+//! ConsensFlow answers only where the screen names a directory that this launch
+//! added for its role or its own Specmint copy ([`Question::Added`]).
+//!
 //! The same dialog asks again of a folder whose trust is already accepted, but by a
 //! folder above it rather than for the folder itself (or its repository's root),
 //! where the folder's own settings grant more than trusting it does (2.1.309, T-354:
@@ -46,6 +51,9 @@ pub(crate) const PROMPT: &str = "bypass permissions on";
 /// The choice that trusts the folder, and the one that ends the window.
 const YES: &str = "Yes, I trust this folder";
 const NO: &str = "No, exit";
+const YES_ADD: &str = "Yes, add it";
+const ADD_TITLE: &str = "Adding a new directory:";
+const ADD_QUESTION: &str = "This session";
 
 /// The no of the question asked of a trusted folder's grants: it goes on without them.
 const NO_GRANTS: &str = "No, continue without these permissions";
@@ -101,7 +109,9 @@ pub(crate) fn toward_trust(screen: &[String]) -> Option<Question> {
     }
     Some(match chosen_at(screen, '❯') {
         Some((at, _)) if shows(&screen[at + 1..], PROMPT) => return None,
-        Some((_, choice)) if names(choice, YES) => Question::Toward(ENTER),
+        Some((_, choice)) if names(choice, YES) || names(choice, YES_ADD) => {
+            Question::Toward(ENTER)
+        }
         Some((_, choice)) if names(choice, NO) => Question::Toward(DOWN),
         Some((at, _)) if shows(&screen[at + 1..], HINT) => Question::Unplaced,
         Some(_) => return None,
@@ -188,7 +198,90 @@ fn grants_drawn(screen: &[String]) -> Option<Vec<String>> {
 /// the question does, and so may a conversation that quotes it; a screen past the
 /// question it was answered in does not.
 pub(crate) fn names_choices(screen: &[String]) -> bool {
-    offers(screen, YES) && offers(screen, NO)
+    (offers(screen, YES) || offers(screen, YES_ADD)) && offers(screen, NO)
+}
+
+/// An added-directory question is authorized only by the paths this launch
+/// actually added. The directory is the block between the title and the question,
+/// never a substring of it or another occurrence elsewhere on the screen. A
+/// wrapped path must still match without guessing at missing characters.
+pub(crate) fn added(screen: &[String], allowed: &[String]) -> Option<Question> {
+    if !names_added_choices(screen) {
+        return None;
+    }
+    let title = screen.iter().rposition(|line| line.trim() == ADD_TITLE)?;
+    let after = &screen[title + 1..];
+    let end = after
+        .iter()
+        .position(|line| line.trim().starts_with(ADD_QUESTION))?;
+    // The name and the choices must belong to the current question. A resumed
+    // conversation can quote an earlier question above a different live dialog.
+    let no = after.iter().rposition(|line| names(line, NO))?;
+    let yes = after.iter().rposition(|line| names(line, YES_ADD))?;
+    let last = no.max(yes);
+    if no <= end
+        || yes <= end
+        || no.abs_diff(yes) != 1
+        || after[last + 1..]
+            .iter()
+            .any(|line| !line.trim().is_empty() && !line.contains(HINT))
+        || chosen_at(after, '❯').is_some_and(|(at, _)| at != no && at != yes)
+    {
+        return None;
+    }
+    // The dialog draws one blank separator on either side of the name. Keep
+    // every row within it, including punctuation-only and blank rows: erasing
+    // a character or an interior row could make a different directory match.
+    let mut path = &after[..end];
+    if path.first().is_some_and(|line| line.trim().is_empty()) {
+        path = &path[1..];
+    }
+    if path.last().is_some_and(|line| line.trim().is_empty()) {
+        path = &path[..path.len() - 1];
+    }
+    if path.is_empty() || !allowed.iter().any(|expected| path_matches(path, expected)) {
+        return None;
+    }
+    match toward_trust(after)? {
+        Question::Toward(key) => Some(Question::Added(Some(key))),
+        Question::Unplaced => Some(Question::Added(None)),
+        _ => None,
+    }
+}
+
+pub(crate) fn names_added_choices(screen: &[String]) -> bool {
+    offers(screen, YES_ADD) && offers(screen, NO)
+}
+
+fn path_matches(lines: &[String], expected: &str) -> bool {
+    let expected = if cfg!(windows) {
+        expected.replace('/', "\\")
+    } else {
+        expected.to_owned()
+    };
+    let Some(first) = lines.first() else {
+        return false;
+    };
+    let indent = &first[..first.len() - first.trim_start().len()];
+    let mut remaining = expected.as_str();
+    for line in lines {
+        let Some(segment) = line.strip_prefix(indent) else {
+            return false;
+        };
+        if segment.is_empty() {
+            return false;
+        }
+        let segment = if cfg!(windows) {
+            segment.replace('/', "\\")
+        } else {
+            segment.to_owned()
+        };
+        let Some(rest) = remaining.strip_prefix(&segment) else {
+            return false;
+        };
+        remaining = rest;
+    }
+    remaining.is_empty()
 }
 
 /// Whether `screen` is Claude's prompt, as ConsensFlow opens its windows: the
@@ -213,6 +306,114 @@ mod tests {
 
     fn lines(text: &str) -> Vec<String> {
         text.lines().map(str::to_owned).collect()
+    }
+
+    // Claude Code 2.1.326, zeewin2: the run-owned path is replaced by a fixture.
+    fn added_screen(on_yes: bool) -> Vec<String> {
+        let choices = if on_yes {
+            "  No, exit\n❯ Yes, add it"
+        } else {
+            "❯ No, exit\n  Yes, add it"
+        };
+        lines(&format!("Adding a new directory:\nC:\\run\\role\nThis session hasn't worked here before. Is this a directory you created or one you trust?\nClaude Code'll be able to read, edit, and execute files here. Its skills, commands, and agents load and can run\ncommands, and so can the git settings of its repository. Your answer holds for this session. Starting Claude Code in\nthis directory and trusting it there lasts, and covers its whole repository or everything below it.\nSecurity guide\n{choices}\nEnter to confirm · Esc to cancel"))
+    }
+
+    #[test]
+    fn added_folder_on_no_moves_down() {
+        assert_eq!(
+            toward_trust(&added_screen(false)),
+            Some(Question::Toward(DOWN))
+        );
+    }
+
+    #[test]
+    fn added_folder_on_yes_confirms() {
+        assert_eq!(
+            toward_trust(&added_screen(true)),
+            Some(Question::Toward(ENTER))
+        );
+    }
+
+    #[test]
+    fn safety_added_raw_screen_keeps_blank_separators() {
+        let mut screen = added_screen(false);
+        screen.insert(1, String::new());
+        screen.insert(3, String::new());
+        screen.insert(screen.len() - 1, String::new());
+        assert_eq!(
+            added(&screen, &[r"C:\run\role".to_owned()]),
+            Some(Question::Added(Some(DOWN)))
+        );
+        let mut ambiguous = added_screen(false);
+        ambiguous.splice(
+            1..2,
+            [r"C:\run".to_owned(), String::new(), r"\role".to_owned()],
+        );
+        assert_eq!(added(&ambiguous, &[r"C:\run\role".to_owned()]), None);
+    }
+
+    #[test]
+    fn added_folder_is_answered_only_for_the_named_directory_this_launch_added() {
+        let role = r"C:\run\role".to_owned();
+        let specmint = r"C:\run\specmint".to_owned();
+        let allowed = vec![role.clone(), specmint.clone()];
+        assert_eq!(
+            added(&added_screen(false), &allowed),
+            Some(Question::Added(Some(DOWN)))
+        );
+        assert_eq!(
+            added(&added_screen(true), &allowed),
+            Some(Question::Added(Some(ENTER)))
+        );
+        let spec_screen: Vec<String> = added_screen(false)
+            .into_iter()
+            .map(|line| line.replace(&role, &specmint))
+            .collect();
+        assert_eq!(
+            added(&spec_screen, &allowed),
+            Some(Question::Added(Some(DOWN)))
+        );
+        let other: Vec<String> = added_screen(false)
+            .into_iter()
+            .map(|line| line.replace(&role, r"C:\run\role-other"))
+            .collect();
+        assert_eq!(added(&other, &allowed), None);
+        assert_eq!(
+            added(&added_screen(false), std::slice::from_ref(&specmint)),
+            None
+        );
+        let quoted: Vec<String> = other.into_iter().chain([role]).collect();
+        assert_eq!(added(&quoted, &allowed), None);
+    }
+
+    #[test]
+    fn added_folder_paths_can_wrap_but_must_match_whole() {
+        let mut wrapped = added_screen(false);
+        wrapped.splice(1..2, [r"C:\run".to_owned(), r"\role".to_owned()]);
+        assert_eq!(
+            added(&wrapped, &[r"C:\run\role".to_owned()]),
+            Some(Question::Added(Some(DOWN)))
+        );
+        assert_eq!(added(&wrapped, &[r"C:\run\role ".to_owned()]), None);
+        assert_eq!(added(&wrapped, &[r"C:\run \role".to_owned()]), None);
+        let mut at_prompt = added_screen(true);
+        at_prompt.push("bypass permissions on".to_owned());
+        assert_eq!(added(&at_prompt, &[r"C:\run\role".to_owned()]), None);
+    }
+
+    #[test]
+    fn a_wrapped_path_does_not_discard_an_extra_space() {
+        let mut indented = added_screen(false);
+        indented.splice(1..2, [r" C:\run".to_owned(), r"  \role".to_owned()]);
+        assert_eq!(added(&indented, &[r"C:\run\role".to_owned()]), None);
+    }
+
+    #[test]
+    fn a_quoted_added_folder_does_not_authorize_a_later_different_question() {
+        let mut screen = added_screen(false);
+        screen[7] = "  No, exit".to_owned();
+        screen.extend(lines("Accessing workspace:\nC:\\outside\nQuick safety check: Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder\nEnter to confirm · Esc to cancel"));
+        assert_eq!(added(&screen, &[r"C:\run\role".to_owned()]), None);
     }
 
     #[test]

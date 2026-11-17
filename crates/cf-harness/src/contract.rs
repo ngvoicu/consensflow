@@ -486,6 +486,9 @@ pub enum Question {
     /// The question, its choice drawn where the reader cannot place it (a cursor
     /// drawn otherwise, or a redraw caught halfway): no key is known.
     Unplaced,
+    /// A directory this launch added itself, whose screen names that exact
+    /// directory. Claude's answer applies only to this session.
+    Added(Option<&'static [u8]>),
     /// The question asked of a folder whose trust is already accepted, by a folder
     /// above it, where the folder's own settings grant more than trusting it does
     /// (Claude Code 2.1.309: tools its `.claude/settings.json` pre-approves, folders it
@@ -633,6 +636,11 @@ pub trait Window {
     /// question.
     fn toward_trust(&self, _screen: &[String]) -> Option<Question> {
         None
+    }
+    /// Whether this question needs more of the current screen than the usual
+    /// short tail before the adapter can safely identify what it would trust.
+    fn needs_trust_context(&self, _screen: &[String]) -> bool {
+        false
     }
     /// Whether `screen` (the window's last lines) is its harness's prompt: the
     /// window is past any question it asks as it starts.

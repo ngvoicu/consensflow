@@ -70,6 +70,8 @@ folder-trust-rig-quoted-cursor = ["cargo", "test", "--offline", "-p", "cf-e2e", 
 folder-trust-rig-cursor-again = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_question_whose_cursor_is_drawn_otherwise_is_told_of_again"]
 folder-trust-live-sweep = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_folder_trust", "what_a_window_of_the_resumed_part_wrote"]
 folder-trust-readers = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "trust::"]
+folder-trust-added-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "an_added_directory_can_be_named_above_the_short_screen_tail"]
+folder-trust-added-rows = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "safety_added_punctuation_in_engine_snapshot_is_not_erased"]
 folder-trust-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--features", "test-support", "--lib", "tooling::tests::the_key_toward"]
 folder-trust-rig-claude = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked"]
 folder-trust-rig-claude-outside = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_whose"]
@@ -258,8 +260,12 @@ runs = ["folder-trust-readers"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/trust.rs"
-find = '        Some((_, choice)) if names(choice, YES) => Question::Toward(ENTER),'
-replace = '        Some((_, choice)) if names(choice, NO) => Question::Toward(ENTER),'
+find = '''        Some((_, choice)) if names(choice, YES) || names(choice, YES_ADD) => {
+            Question::Toward(ENTER)
+        }'''
+replace = '''        Some((_, choice)) if names(choice, NO) || names(choice, YES_ADD) => {
+            Question::Toward(ENTER)
+        }'''
 
 [[plant]]
 name = "folder trust: Claude's question is read from its yes alone"
@@ -269,11 +275,41 @@ runs = ["folder-trust-readers"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/trust.rs"
 find = '''
-    offers(screen, YES) && offers(screen, NO)
+    (offers(screen, YES) || offers(screen, YES_ADD)) && offers(screen, NO)
 }'''
 replace = '''
-    offers(screen, YES)
+    offers(screen, YES) || offers(screen, YES_ADD)
 }'''
+
+[[plant]]
+name = "folder trust: Claude's added-directory dialog is answered for a directory the launch did not add"
+meant = "added_folder_is_answered_only_for_the_named_directory_this_launch_added"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = '    if path.is_empty() || !allowed.iter().any(|expected| path_matches(path, expected)) {'
+replace = '    if path.is_empty() {'
+
+[[plant]]
+name = "folder trust: an added directory the launch made is never answered"
+meant = "an_added_directory_can_be_named_above_the_short_screen_tail"
+runs = ["folder-trust-added-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust/watch.rs"
+find = '            Question::Added(Some(key)) => Some(key),'
+replace = '            Question::Added(Some(_)) => None,'
+
+[[plant]]
+name = "folder trust: punctuation-only rows are dropped before an added directory is checked"
+meant = "safety_added_punctuation_in_engine_snapshot_is_not_erased"
+runs = ["folder-trust-added-rows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = '            Some(rows)'
+replace = '            Some(cf_proto::panes::word_tail(rows, BOTTOM_LINES))'
 
 [[plant]]
 name = "folder trust: a yes trusts the window's own folder, not its repository's root"
@@ -489,10 +525,10 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/trust.rs"
 find = '''
-    offers(screen, YES) && offers(screen, NO)
+    (offers(screen, YES) || offers(screen, YES_ADD)) && offers(screen, NO)
 }'''
 replace = '''
-    shows(screen, YES) && shows(screen, NO)
+    (shows(screen, YES) || shows(screen, YES_ADD)) && shows(screen, NO)
 }'''
 
 [[plant]]
@@ -503,10 +539,10 @@ runs = ["folder-trust-readers"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/trust.rs"
 find = '''
-    offers(screen, YES) && offers(screen, NO)
+    (offers(screen, YES) || offers(screen, YES_ADD)) && offers(screen, NO)
 }'''
 replace = '''
-    shows(screen, YES) && shows(screen, NO)
+    (shows(screen, YES) || shows(screen, YES_ADD)) && shows(screen, NO)
 }'''
 
 [[plant]]

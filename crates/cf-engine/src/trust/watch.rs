@@ -155,6 +155,7 @@ impl<'a> Watch<'a> {
         match question {
             _ if self.stuck => None,
             Question::Toward(key) if self.inside || accepted => Some(key),
+            Question::Added(Some(key)) => Some(key),
             Question::Grants(Some(key)) if self.inside => Some(key),
             Question::Servers(Some(key)) if self.inside && self.servers_above.is_none() => {
                 Some(key)
@@ -265,7 +266,7 @@ impl Dispatcher {
         // and the human is told ConsensFlow answered (as since round 4).
         if let Some(key) = pressing {
             // The servers' use is told of once the window is past the dialog.
-            if w.inside && !matches!(question, Question::Servers(_)) {
+            if w.inside && matches!(question, Question::Toward(_) | Question::Grants(_)) {
                 self.tell_yes_pressed(w.project, &w.folder, w.participant, question)?;
             }
             if w.may_press(unmoved) && self.press_toward_trust(w.pane, key).await {
@@ -294,6 +295,12 @@ impl Dispatcher {
         question: Question,
     ) -> Result<(), EngineError> {
         match question {
+            Question::Added(_) => {
+                if w.asking == TELL_LOOKS {
+                    self.tell_added_held(w.project, w.participant)?;
+                }
+                Ok(())
+            }
             Question::Servers(_) if w.asking >= TELL_LOOKS => {
                 // Its servers are not the project's alone, or its choice cannot be
                 // placed: the human's.

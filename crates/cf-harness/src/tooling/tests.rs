@@ -448,6 +448,40 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
 }
 
 #[test]
+fn safety_added_tooling_binds_the_launch_path() {
+    let screen = [
+        "Adding a new directory:",
+        "/run/role",
+        "This session hasn't worked here before. Is this a directory you created or one you trust?",
+        "Security guide",
+        "❯ No, exit",
+        "  Yes, add it",
+        "Enter to confirm · Esc to cancel",
+    ];
+    let read = |added: Value| {
+        answer(&ask(
+            "trust",
+            json!({ "kind": "claude-code", "screen": screen, "added_dirs": added }),
+        ))
+        .unwrap()
+    };
+    assert_eq!(read(json!([]))["key"], Value::Null);
+    assert_eq!(read(json!(["/run/another"]))["key"], Value::Null);
+    assert_eq!(read(json!(["/run/role"]))["key"], "down");
+    let on_yes = screen.map(|line| match line {
+        "❯ No, exit" => "  No, exit",
+        "  Yes, add it" => "❯ Yes, add it",
+        _ => line,
+    });
+    let answer = answer(&ask(
+        "trust",
+        json!({ "kind": "claude-code", "screen": on_yes, "added_dirs": ["/run/role"] }),
+    ))
+    .unwrap();
+    assert_eq!(answer["key"], "enter");
+}
+
+#[test]
 fn a_claude_member_of_a_project_that_chose_a_size_gets_it_in_the_settings_file_of_its_launch() {
     let home = tempfile::tempdir().unwrap();
     let settings = |compaction: Option<u64>| {
