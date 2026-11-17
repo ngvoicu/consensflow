@@ -2511,10 +2511,7 @@ runs = ["muse-live"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/guard.rs"
 find = '''
-    copy_muse_login(
-        &home.join(".config/muse/auth.json"),
-        &scratch.join("config/muse/auth.json"),
-    )?;
+    copy_muse_login_text(auth, &scratch.join("config/muse/auth.json"))?;
 '''
 replace = '''
     copy_folder_kept(&home.join(".config/muse"), &scratch.join("config/muse"))?;

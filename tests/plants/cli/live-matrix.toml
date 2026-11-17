@@ -98,8 +98,8 @@ runs = ["matrix-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/matrix/oracle.rs"
-find = '''            agent.as_deref() == Some(seat.agent().as_str()),'''
-replace = '''            true || agent.as_deref() == Some(seat.agent().as_str()),'''
+find = '''            agent.is_some() && agent == expected,'''
+replace = '''            true || agent.is_some() && agent == expected,'''
 
 [[plant]]
 name = "live matrix: a result not yet delivered to the chief counts"

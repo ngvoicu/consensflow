@@ -72,8 +72,9 @@ runs = ["standin-home-unit"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
-find = '''    if !super::keychain::live_case() {'''
-replace = '''    if false {'''
+find = '''    asked_with(requested, None, super::keychain::live_case(), pi_providers)'''
+replace = '''    let _ = pi_providers();
+    asked_with(requested, None, super::keychain::live_case(), pi_providers)'''
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
