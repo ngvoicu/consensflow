@@ -678,7 +678,7 @@ fn each_case_of_a_muse_members_window_holds_on_the_real_model() -> Result {
     log.launched(&row);
     live.agent = agents::agent_on(&model);
     live.model = model.name;
-    drop(discovery);
+    discovery.close()?;
     let asked = live::list("case");
     let mut checks = Vec::new();
     for case in CASES
