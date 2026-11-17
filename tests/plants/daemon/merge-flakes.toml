@@ -306,5 +306,5 @@ runs = ["trust-tooling"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/trust.rs"
-find = "    offers(screen, YES) && offers(screen, NO)\n}\n\n/// Whether `screen` is Claude's prompt"
-replace = "    true || (offers(screen, YES) && offers(screen, NO))\n}\n\n/// Whether `screen` is Claude's prompt"
+find = "    (offers(screen, YES) || offers(screen, YES_ADD)) && offers(screen, NO)\n}"
+replace = "    true || ((offers(screen, YES) || offers(screen, YES_ADD)) && offers(screen, NO))\n}"

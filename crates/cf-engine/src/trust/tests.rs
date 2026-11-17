@@ -55,6 +55,45 @@ fn asking_of(question: &str, inside: bool) -> Asking {
     }
 }
 
+#[test]
+fn an_added_directory_can_be_named_above_the_short_screen_tail() {
+    let context = Context::new();
+    context.adapter.asks_to_trust(FOLDER, false);
+    context.host.set_snapshot(json!({
+        "tail": ["synthetic added choices"],
+        "bottom": ["synthetic added directory", "synthetic added choices"]
+    }));
+    let project = context.with_tiers(&["zeus", "diana"]).id;
+    context.pool_task(project, "worker", "Write the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = context.task(project, 1).task.assignee.unwrap();
+    let worker = context.id(project, &session);
+    let record = context.dispatcher.record_of(worker);
+    assert!(
+        record.window.borrow().trust_keys > 0,
+        "the added directory was not answered"
+    );
+}
+
+#[test]
+fn safety_added_punctuation_in_engine_snapshot_is_not_erased() {
+    let context = Context::new();
+    context.adapter.asks_to_trust(FOLDER, false);
+    context.host.set_snapshot(json!({
+        "tail": ["synthetic added choices"],
+        "bottom": ["synthetic added directory", "---", "synthetic added choices"]
+    }));
+    let project = context.with_tiers(&["zeus", "diana"]).id;
+    context.pool_task(project, "worker", "Write the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = context.task(project, 1).task.assignee.unwrap();
+    let worker = context.id(project, &session);
+    let record = context.dispatcher.record_of(worker);
+    assert_eq!(record.window.borrow().trust_keys, 0);
+}
+
 impl Asking {
     fn record(&self) -> Rc<Record> {
         self.context.dispatcher.record_of(self.worker)

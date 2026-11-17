@@ -132,13 +132,19 @@ impl Window for FakeWindow {
     /// the question is.
     fn toward_trust(&self, screen: &[String]) -> Option<Question> {
         self.trusts.as_ref()?;
-        if holds(screen, TRUST_QUESTION) {
+        if holds(screen, "synthetic added directory") && !screen.iter().any(|line| line == "---") {
+            Some(Question::Added(Some(b"\x1b[B")))
+        } else if holds(screen, TRUST_QUESTION) {
             Some(Question::Toward(b"\x1b[B"))
         } else if holds(screen, TRUST_UNPLACED) {
             Some(Question::Unplaced)
         } else {
             None
         }
+    }
+
+    fn needs_trust_context(&self, screen: &[String]) -> bool {
+        holds(screen, "synthetic added choices")
     }
 
     /// A box is read empty where a line of the screen is its prompt mark alone, as

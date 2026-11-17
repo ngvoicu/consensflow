@@ -68,7 +68,7 @@ use std::time::Duration;
 use cf_harness::contract::{Pane, Question, Trusts, Window};
 use cf_harness::records::Reading;
 use cf_ledger::{ParticipantView, ProjectView};
-use cf_proto::panes::{SnapshotRequest, TAIL_LINES};
+use cf_proto::panes::{SnapshotRequest, BOTTOM_LINES, TAIL_LINES};
 use serde_json::{json, Value};
 
 use crate::dispatcher::Dispatcher;
@@ -199,6 +199,7 @@ fn dialog(question: Question) -> u8 {
         Question::Toward(_) | Question::Unplaced => 0,
         Question::Grants(_) => 1,
         Question::Servers(_) => 2,
+        Question::Added(_) => 3,
     }
 }
 
@@ -431,7 +432,40 @@ impl Dispatcher {
             return Seen::Unread;
         }
         let shown = Shown::from_snapshot(&answer);
-        let lines = shown.lines();
+        let short = shown.lines();
+        // An added-directory question can put the name above the ordinary tail.
+        // Read a fresh screen, not a mixture of two frames, before pressing a key.
+        let longer = if window.needs_trust_context(short) {
+            let request = SnapshotRequest {
+                id: pane.id.clone(),
+                generation: pane.generation,
+                tail: None,
+                bottom: Some(BOTTOM_LINES),
+            };
+            let Ok(body) = serde_json::to_value(&request) else {
+                return Seen::Unread;
+            };
+            let Ok(answer) = returning(self.seams.host.request("pane.snapshot", body)).await else {
+                return Seen::Unread;
+            };
+            if answer.get("ok") != Some(&Value::Bool(true)) {
+                return Seen::Unread;
+            }
+            let Some(rows) = answer.get("bottom").and_then(Value::as_array) else {
+                return Seen::Unread;
+            };
+            let rows: Vec<String> = rows
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect();
+            // The directory name can occupy rows with no letters or digits.
+            // Dropping such a row would change the name before authorization.
+            Some(rows)
+        } else {
+            None
+        };
+        let lines = longer.as_deref().unwrap_or(short);
         if window.shows_prompt(lines) {
             return Seen::Prompt {
                 cleared: !window.names_trust_choices(lines),
