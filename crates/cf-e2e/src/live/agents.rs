@@ -449,11 +449,7 @@ fn pi_providers() -> Option<Vec<String>> {
     PI_PROVIDER_READS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     static NAMES: std::sync::OnceLock<Option<Vec<String>>> = std::sync::OnceLock::new();
     NAMES
-        .get_or_init(|| {
-            let bytes = super::isolation::copy_pi_login(&folder.join("auth.json")).ok()?;
-            let logins: Value = serde_json::from_slice(&bytes).ok()?;
-            Some(logins.as_object()?.keys().cloned().collect())
-        })
+        .get_or_init(|| super::isolation::pi_provider_names(&folder.join("auth.json")).ok())
         .clone()
 }
 

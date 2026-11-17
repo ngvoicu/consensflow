@@ -40,8 +40,7 @@ pub fn seed_live_home(rig_home: &Path, real_home: &Path) -> Result {
     let config = rig_home.join(".config").join("muse");
     crate::door::write(config.join("settings.json"), "{\"schema_version\":1}\n")?;
     let auth = real_home.join(".config").join("muse").join("auth.json");
-    let text = String::from_utf8(crate::live::isolation::copy_owner_login(&auth)?)
-        .map_err(|_| Error::Daemon("Muse's copied login is not UTF-8".to_owned()))?;
+    let text = files::read_string(&auth)?;
     crate::door::write(config.join("auth.json"), login_copy(&text)?)?;
     let catalog = real_home.join(".local/share/muse/model-catalog");
     if catalog.is_dir() {

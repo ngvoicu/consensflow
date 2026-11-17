@@ -872,20 +872,18 @@ fn a_copy_that_was_refreshed_or_lost_fails_with_a_warning_that_the_machines_logi
 }
 
 #[test]
-fn the_login_the_machine_keeps_changed_while_the_run_went_on_is_said_and_the_mcp_tokens_beside_it_are_not_held_to_it(
-) {
+fn a_file_backed_login_changed_while_the_run_went_on_is_said_by_its_metadata() {
     let person = Person::new();
     let parent = crate::door::made("cf-test-").unwrap();
     let text = machine_text(hours(5));
     let login = login(&text, person.home.path(), parent.path());
     login.folder_at(at(NOW)).unwrap();
     let machine = person.home.path().join("machine-login.json");
-    // The person's MCP servers refresh their own tokens in the same item, all day.
+    // Metadata cannot distinguish a changed MCP entry from a changed login entry.
     std::fs::write(&machine, text.replace(MCP, "mcp-token-REFRESHED")).unwrap();
-    assert!(login.finish().is_ok());
+    assert!(login.finish().is_err());
     // Their own Claude Code writes what it learns of the account beside the tokens
-    // (`subscriptionTypeSource`, Claude Code 2.1.310): the login is held to its tokens, as
-    // the copy is, so that is no change.
+    // (`subscriptionTypeSource`, Claude Code 2.1.310): that changes the file metadata too.
     std::fs::write(
         &machine,
         text.replace(
@@ -894,7 +892,7 @@ fn the_login_the_machine_keeps_changed_while_the_run_went_on_is_said_and_the_mcp
         ),
     )
     .unwrap();
-    assert!(login.finish().is_ok());
+    assert!(login.finish().is_err());
     // Their own Claude Code refreshed the login (or the run's rotated it): not as it was.
     std::fs::write(&machine, text.replace(ACCESS, "sk-ant-oat01-ROTATED")).unwrap();
     let said = login.finish().unwrap_err().to_string();
@@ -905,6 +903,11 @@ fn the_login_the_machine_keeps_changed_while_the_run_went_on_is_said_and_the_mcp
         )),
         "{said}"
     );
+    assert!(
+        said.contains("only the file's size, modification time and identity"),
+        "{said}"
+    );
+    assert!(said.contains("MCP login"), "{said}");
     assert!(
         said.contains("or the owner's own Claude Code did"),
         "{said}"
@@ -1554,4 +1557,46 @@ fn a_login_runs_a_case_with_its_plan_and_ten_minutes_left_and_is_refused_with_le
         .to_string();
     assert!(said.contains("expires in 15 min"), "{said}");
     assert!(said.contains("at least 20 min more"), "{said}");
+}
+
+#[test]
+fn t1744_guard_does_not_open_the_claude_owner_login_file() {
+    const CHILD: &str = "CF_T1744_CLAUDE_GUARD_OWNER";
+    if let Some(root) = crate::process::own_var(CHILD) {
+        let root = PathBuf::from(root);
+        let path = root.join("credential.json");
+        let login = Login::new(
+            Source::File(path.clone()),
+            root.clone(),
+            root,
+            Duration::ZERO,
+        );
+        let before = OwnerLogin::File(cf_base::file::stat(&path).map_err(|e| e.kind()));
+        assert!(login.owner_login_changed(&before).is_none());
+        return;
+    }
+    let root = crate::door::made("cf-claude-guard-no-login-open-").unwrap();
+    let home = root.path().join("home");
+    let temp = root.path().join("temp");
+    crate::door::make_dir(&home).unwrap();
+    crate::door::make_dir(&temp).unwrap();
+    nix::unistd::mkfifo(&home.join("credential.json"), nix::sys::stat::Mode::S_IRUSR).unwrap();
+    let ran = crate::process::case_of(
+        std::env::current_exe().unwrap(),
+        "live::login::tests::t1744_guard_does_not_open_the_claude_owner_login_file",
+        Duration::from_secs(5),
+    )
+    .var(CHILD, &home)
+    .var(crate::standin_process::FIXTURE_HOME, &home)
+    .var("TMPDIR", &temp)
+    .var("TMP", &temp)
+    .var("TEMP", &temp)
+    .run()
+    .unwrap();
+    assert_eq!(
+        ran.code,
+        Some(0),
+        "guard opened a login file or failed: {}",
+        ran.output()
+    );
 }

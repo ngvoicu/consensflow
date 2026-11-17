@@ -42,9 +42,21 @@ use cf_e2e::process::own_var;
 use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
 
-/// Every file under `root` with a digest of its bytes: what a run changed is said by name,
-/// never by what the files hold (Muse's config names its account).
-fn tree(root: &Path) -> Result<BTreeMap<PathBuf, u64>> {
+#[derive(Debug, PartialEq)]
+enum Fingerprint {
+    Content(u64),
+    Login(cf_base::file::Stat),
+}
+
+/// Compare login files by metadata and other files by content, reporting paths only.
+fn tree(root: &Path) -> Result<BTreeMap<PathBuf, Fingerprint>> {
+    tree_with(root, |path| std::fs::read(path))
+}
+
+fn tree_with(
+    root: &Path,
+    mut read: impl FnMut(&Path) -> std::io::Result<Vec<u8>>,
+) -> Result<BTreeMap<PathBuf, Fingerprint>> {
     let mut found = BTreeMap::new();
     let mut folders = vec![root.to_owned()];
     while let Some(folder) = folders.pop() {
@@ -66,9 +78,29 @@ fn tree(root: &Path) -> Result<BTreeMap<PathBuf, u64>> {
             } else if kind.is_dir() {
                 folders.push(path);
             } else if kind.is_file() {
+                let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+                if name == "auth.json"
+                    || name.starts_with("auth.json.")
+                    || name == "credentials.json"
+                    || name == ".credentials.json"
+                {
+                    let stat = cf_base::file::stat(&path).map_err(|source| Error::File {
+                        action: "stat",
+                        path: path.clone(),
+                        source,
+                    })?;
+                    found.insert(path, Fingerprint::Login(stat));
+                    continue;
+                }
                 let mut hasher = DefaultHasher::new();
-                files::read(&path)?.hash(&mut hasher);
-                found.insert(path, hasher.finish());
+                read(&path)
+                    .map_err(|source| Error::File {
+                        action: "read",
+                        path: path.clone(),
+                        source,
+                    })?
+                    .hash(&mut hasher);
+                found.insert(path, Fingerprint::Content(hasher.finish()));
             }
         }
     }
@@ -193,9 +225,31 @@ fn muse_lists_the_accounts_models_and_says_its_allowance_with_no_model_turn() ->
 }
 
 #[cfg(test)]
-#[cfg(unix)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn t1744_muse_owner_tree_does_not_read_login_files() {
+        let root = tempfile::tempdir().unwrap();
+        for name in ["auth.json", "auth.json.bak", "settings.json"] {
+            std::fs::write(root.path().join(name), "synthetic").unwrap();
+        }
+        let mut read_paths = Vec::new();
+        let observed = tree_with(root.path(), |path| {
+            read_paths.push(path.to_path_buf());
+            std::fs::read(path)
+        })
+        .unwrap();
+        assert_eq!(read_paths, [root.path().join("settings.json")]);
+        assert!(matches!(
+            observed.get(&root.path().join("auth.json")),
+            Some(Fingerprint::Login(_))
+        ));
+        assert!(matches!(
+            observed.get(&root.path().join("auth.json.bak")),
+            Some(Fingerprint::Login(_))
+        ));
+    }
 
     #[cfg(unix)]
     #[test]

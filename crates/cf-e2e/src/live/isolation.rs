@@ -53,7 +53,7 @@
 //! T-1067). Codex's copied JSON keeps the empty token field and copy-time timestamp it needs to
 //! load, but no refresh token; Devin's TOML is copied only when
 //! it parses and has no such key. What Codex rewrote is said when the run ends. At the end the copies are compared with what was
-//! copied, and the owner's files with their hashes: a difference fails the run, naming the file, and
+//! copied, and the owner's login files by metadata and other files by content hashes: a difference fails the run, naming the file, and
 //! nothing a login holds is said anywhere.
 //!
 //! **`HOME` stays the person's.** The windows are given the person's home all the same, and none
@@ -167,8 +167,10 @@ struct Plan {
     /// The variables the windows are given, each with its value as it is.
     set: Vec<(&'static str, &'static str)>,
     seeds: Vec<Seed>,
-    /// The owner's files hashed before and after.
+    /// The owner's files compared before and after.
     watched: Vec<PathBuf>,
+    /// Watched login-bearing files, compared by metadata and never read by the guard.
+    login_watched: Vec<PathBuf>,
     /// The owner's folders of records, in which no entry may name a folder of the run.
     records: Vec<PathBuf>,
     /// Where the login is copied from, as a run says it.
@@ -190,6 +192,7 @@ impl Plan {
                 login: true,
             }],
             watched: vec![owner.join("auth.json"), owner.join("config.toml")],
+            login_watched: vec![owner.join("auth.json")],
             records: Vec::new(),
             described: owner.join("auth.json").display().to_string(),
         }
@@ -211,6 +214,10 @@ impl Plan {
             ["auth.json", "settings.json", "models.json", "mcp-auth.json"]
                 .map(|name| owner.join(name))
                 .into();
+        // models.json may hold provider keys; the proxy config may hold its key too.
+        let mut login_watched: Vec<PathBuf> = ["auth.json", "models.json", "mcp-auth.json"]
+            .map(|name| owner.join(name))
+            .into();
         for provider in providers
             .iter()
             .flatten()
@@ -222,6 +229,7 @@ impl Plan {
                 provider,
             });
             watched.extend(provider.watched(owner));
+            login_watched.push(owner.join(provider.config));
         }
         Self {
             folders: Vec::new(),
@@ -237,6 +245,7 @@ impl Plan {
             set: vec![("PI_OFFLINE", "1")],
             seeds,
             watched,
+            login_watched,
             records: vec![owner.join("sessions")],
             described: owner.join("auth.json").display().to_string(),
         }
@@ -291,6 +300,7 @@ impl Plan {
                 owner.join("config.json"),
                 owner.join("cli").join("trusted_workspaces.json"),
             ],
+            login_watched: vec![owner.join("credentials.toml")],
             records: Vec::new(),
             described: owner.join("credentials.toml").display().to_string(),
         }
@@ -312,6 +322,7 @@ impl Plan {
                 config.join("trust.json"),
                 data.join("muse").join("session-index.db"),
             ],
+            login_watched: vec![config.join("auth.json")],
             records: Vec::new(),
             described: config.join("auth.json").display().to_string(),
         }
@@ -357,6 +368,7 @@ impl Plan {
                     .join("cli")
                     .join("trusted_workspaces.json"),
             ],
+            login_watched: vec![data.join("devin").join("credentials.toml")],
             records: Vec::new(),
             described: data
                 .join("devin")
@@ -710,18 +722,14 @@ impl Isolation {
                 providers,
                 left,
             } => {
-                let text = copy_pi_login(from)
-                    .and_then(|bytes| {
-                        String::from_utf8(bytes)
-                            .map_err(|_| Error::Daemon("Pi's copied login is not UTF-8".to_owned()))
-                    })
-                    .map_err(|failed| {
-                        Error::Daemon(format!(
-                            "Pi's login is not in {} ({failed}): {}",
-                            from.display(),
-                            self.harness.log_in()
-                        ))
-                    })?;
+                // The by-design read is used only to make the run's sanitized login.
+                let text = pi_seed_text(from).map_err(|failed| {
+                    Error::Daemon(format!(
+                        "Pi's login is not in {} ({failed}): {}",
+                        from.display(),
+                        self.harness.log_in()
+                    ))
+                })?;
                 let entries = self.pi_entries(from, providers.as_deref(), &text, now, *left)?;
                 Ok(vec![Placed::File {
                     to: to.clone(),
@@ -911,14 +919,9 @@ impl Isolation {
             file: shown.clone(),
             login: format!("Pi's `{provider}` login"),
             read: &|| {
-                copy_pi_login(from)
-                    .and_then(|bytes| {
-                        String::from_utf8(bytes)
-                            .map_err(|_| Error::Daemon("Pi's copied login is not UTF-8".to_owned()))
-                    })
-                    .map_err(|failed| {
-                        Error::Daemon(format!("Pi's login in {shown} is gone ({failed})"))
-                    })
+                fs::read_to_string(from).map_err(|failed| {
+                    Error::Daemon(format!("Pi's login in {shown} is gone ({failed})"))
+                })
             },
             expiry: &|text| pi::expiry(text, provider),
         };
@@ -1016,65 +1019,132 @@ impl Isolation {
         let codex_config = (self.harness == Harness::Codex)
             .then(|| self.plan.watched.get(1).map(PathBuf::as_path))
             .flatten();
-        let pi_auth = (self.harness == Harness::Pi)
-            .then(|| self.plan.watched.first().map(PathBuf::as_path))
-            .flatten();
         Seen::look(
             &self.plan.watched,
             &self.plan.records,
             codex_config,
-            pi_auth,
+            &self.plan.login_watched,
         )
     }
 }
 
-/// Copy Pi's owner file into a private folder before inspecting it. Erase the temporary
-/// copy immediately after reading, including in say-only mode; the door keeps its folder.
-pub(super) fn copy_pi_login(from: &Path) -> Result<Vec<u8>> {
-    copy_owner_login(from)
+/// A Pi seed waiting for the run home which will use it. Only the sanitized copy is on disk.
+struct PiDiscovery {
+    from: PathBuf,
+    stat: cf_base::file::Stat,
+    text: String,
+    folder: crate::door::Made,
 }
 
-/// Inspect an owner login only after the door has copied it to a private run-owned file.
-/// The temporary copy is overwritten even in a say-only run, but can survive an interruption.
-pub(crate) fn copy_owner_login(from: &Path) -> Result<Vec<u8>> {
-    crate::standin_process::require_home(from, "owner login copy");
-    let folder = crate::door::made("cf-login-copy-").map_err(|source| Error::File {
+impl PiDiscovery {
+    /// Names come from the sanitized run-owned copy, never from the owner's text.
+    fn names(&self) -> Result<Vec<String>> {
+        let file = self.folder.path().join("auth.json");
+        let bytes = fs::read(&file).map_err(Error::file("read", &file))?;
+        let entries: Value = serde_json::from_slice(&bytes)
+            .map_err(|_| Error::Daemon("Pi's discovery copy is not JSON".to_owned()))?;
+        let entries = entries
+            .as_object()
+            .ok_or_else(|| Error::Daemon("Pi's discovery copy has no providers".to_owned()))?;
+        Ok(entries.keys().cloned().collect())
+    }
+
+    /// Reuse the by-design read to seed the real home. Refuse a source that moved in between.
+    fn into_seed(self) -> Result<String> {
+        let now = cf_base::file::stat(&self.from).map_err(Error::file("stat", &self.from))?;
+        if now != self.stat {
+            return Err(Error::Daemon(
+                "Pi's login changed between model selection and making the run's home; run again"
+                    .to_owned(),
+            ));
+        }
+        Ok(self.text)
+    }
+}
+
+static PI_DISCOVERY: Mutex<Option<PiDiscovery>> = Mutex::new(None);
+static PI_DISCOVERY_CLEANUP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+extern "C" {
+    fn atexit(callback: extern "C" fn()) -> i32;
+}
+
+extern "C" fn clear_pi_discovery() {
+    let mut held = PI_DISCOVERY.lock().unwrap_or_else(PoisonError::into_inner);
+    held.take();
+}
+
+#[allow(unsafe_code)]
+fn register_pi_discovery_cleanup() -> bool {
+    // This process-lifetime function has no borrowed state and is valid at exit.
+    unsafe { atexit(clear_pi_discovery) == 0 }
+}
+
+/// Make the kit's Pi discovery copy while reading the login once for the run's seed.
+/// No on-disk copy contains refresh keys, even if this process is interrupted.
+fn pi_discovery_copy(from: &Path) -> Result<PiDiscovery> {
+    crate::standin_process::require_home(from, "Pi login copy");
+    let before = cf_base::file::stat(from).map_err(Error::file("stat", from))?;
+    let text = crate::files::read_string(from)?;
+    let after = cf_base::file::stat(from).map_err(Error::file("stat", from))?;
+    if before != after {
+        return Err(Error::Daemon(
+            "Pi's login changed while the run was making its copy; run again".to_owned(),
+        ));
+    }
+    let sanitized = super::login::json_copy(&text, "Pi")?;
+    let folder = crate::door::made("cf-pi-discovery-").map_err(|source| Error::File {
         action: "make a private folder in",
         path: std::env::temp_dir(),
         source,
     })?;
-    let copy = folder.path().join("auth.json");
-    crate::door::copy_keeping_mode(from, &copy)?;
-    // The owner's file may be read-only. The private copy must be writable so it can be
-    // erased even in a say-only run; changing its mode never changes the owner's file.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        crate::door::set_permissions(&copy, fs::Permissions::from_mode(0o600))?;
+    private_folder(folder.path())?;
+    write_private_bytes(&folder.path().join("auth.json"), sanitized.as_bytes())?;
+    Ok(PiDiscovery {
+        from: from.to_owned(),
+        stat: after,
+        text,
+        folder,
+    })
+}
+
+/// Resolve a Pi model from a sanitized copy, retaining its seed for the run's own home.
+pub(super) fn pi_provider_names(from: &Path) -> Result<Vec<String>> {
+    let discovery = pi_discovery_copy(from)?;
+    let names = discovery.names()?;
+    let cleanup = PI_DISCOVERY_CLEANUP.get_or_init(register_pi_discovery_cleanup);
+    if !cleanup {
+        return Err(Error::Daemon(
+            "could not arrange Pi copy cleanup".to_owned(),
+        ));
     }
-    #[cfg(windows)]
-    {
-        let mut permissions = fs::metadata(&copy)
-            .map_err(|source| Error::File {
-                action: "read the permissions of the run's login copy",
-                path: copy.clone(),
-                source,
-            })?
-            .permissions();
-        #[allow(clippy::permissions_set_readonly_false)]
-        // Windows clears a file attribute, not Unix mode bits.
-        permissions.set_readonly(false);
-        crate::door::set_permissions(&copy, permissions)?;
+    *PI_DISCOVERY.lock().unwrap_or_else(PoisonError::into_inner) = Some(discovery);
+    Ok(names)
+}
+
+fn pi_seed_text(from: &Path) -> Result<String> {
+    let discovery = {
+        let mut held = PI_DISCOVERY.lock().unwrap_or_else(PoisonError::into_inner);
+        if held
+            .as_ref()
+            .is_some_and(|copy| same_pi_source(&copy.from, from))
+        {
+            held.take()
+        } else {
+            None
+        }
+    };
+    match discovery {
+        Some(copy) => copy.into_seed(),
+        None => crate::files::read_string(from),
     }
-    let bytes = fs::read(&copy).map_err(|source| Error::File {
-        action: "read the run's login copy",
-        path: copy.clone(),
-        source,
-    });
-    let erased = crate::door::write(&copy, b"{}");
-    let bytes = bytes?;
-    erased?;
-    Ok(bytes)
+}
+
+/// The installed harness may make a relative HOME absolute before making its plan.
+fn same_pi_source(left: &Path, right: &Path) -> bool {
+    left == right
+        || matches!((std::path::absolute(left), std::path::absolute(right)),
+            (Ok(left), Ok(right)) if left == right)
 }
 
 /// What a seed puts in the home.
