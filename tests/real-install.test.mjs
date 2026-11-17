@@ -201,15 +201,23 @@ test('Mac cleanup still fails on another signal error', () => {
 test('Mac cleanup still ends a run-owned process after one disappeared', async () => {
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' })
   const exited = once(child, 'exit')
+  let signalled = false
   try {
     await once(child, 'spawn')
     endListedProcesses(['  -1 /gone', `  ${child.pid} /owned/app`], (pid, signal) => {
       if (pid === -1) throw Object.assign(new Error('gone'), { code: 'ESRCH' })
-      process.kill(pid, signal)
+      assert.equal(process.kill(pid, signal), true)
+      signalled = true
     })
+    assert.equal(signalled, true, 'the run-owned process was signalled')
     const [code, signal] = await exited
-    assert.equal(code, null)
-    assert.equal(signal, 'SIGTERM')
+    if (process.platform === 'win32') {
+      assert.equal(code, 1)
+      assert.equal(signal, null)
+    } else {
+      assert.equal(code, null)
+      assert.equal(signal, 'SIGTERM')
+    }
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
   }
