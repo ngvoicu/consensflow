@@ -49,6 +49,7 @@ impl Front {
             ledger,
             credentials: Rc::new(Credentials::new()),
             kick: kicks.waker(),
+            changed: Rc::new(|| {}),
             finish: Rc::new(|_, _, _| {
                 Box::pin(async {
                     Err(Refusal::new(
