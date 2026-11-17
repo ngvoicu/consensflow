@@ -210,6 +210,7 @@ fn tooling(scene: &Scene, on: bool) -> Rc<context::Context> {
         ledger: Rc::clone(&given.ledger),
         credentials: Rc::clone(&given.credentials),
         kick: Rc::clone(&given.kick),
+        changed: Rc::clone(&given.changed),
         finish: Rc::clone(&given.finish),
         held: Rc::clone(&given.held),
         closing: given.closing.clone(),

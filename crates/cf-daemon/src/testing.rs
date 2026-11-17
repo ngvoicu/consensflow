@@ -121,6 +121,8 @@ pub struct Scene {
     pub context: Rc<Context>,
     /// How many times the dispatcher was woken.
     pub kicks: Rc<Cell<u32>>,
+    /// How many writes told the page without waking the dispatcher.
+    pub changes: Rc<Cell<u32>>,
     /// What the scene's engine was asked to finish.
     pub finishings: Rc<Finishings>,
     pub project: ProjectView,
@@ -294,6 +296,8 @@ pub fn scene() -> Scene {
     let (chief, zeus) = (token("chief"), token("zeus"));
     let kicks = Rc::new(Cell::new(0));
     let counted = Rc::clone(&kicks);
+    let changes = Rc::new(Cell::new(0));
+    let told = Rc::clone(&changes);
     let ledger = Rc::new(RefCell::new(ledger));
     let finishings = Rc::new(Finishings::default());
     let finishing = (Rc::clone(&finishings), Rc::clone(&ledger));
@@ -303,6 +307,7 @@ pub fn scene() -> Scene {
         ledger,
         credentials: Rc::new(credentials),
         kick: Rc::new(move || counted.set(counted.get() + 1)),
+        changed: Rc::new(move || told.set(told.get() + 1)),
         finish: Rc::new(move |project, number, by| {
             let (finishings, ledger) = (Rc::clone(&finishing.0), Rc::clone(&finishing.1));
             Box::pin(async move {
@@ -351,6 +356,7 @@ pub fn scene() -> Scene {
         _home: home,
         context,
         kicks,
+        changes,
         finishings,
         specs_folder,
         ordinary_specs,

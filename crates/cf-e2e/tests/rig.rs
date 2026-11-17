@@ -95,6 +95,8 @@ mod codex_session;
 mod core_board;
 #[path = "rig/core_questions.rs"]
 mod core_questions;
+#[path = "rig/core_route_changes.rs"]
+mod core_route_changes;
 #[path = "rig/core_slice.rs"]
 mod core_slice;
 #[path = "rig/core_tells.rs"]

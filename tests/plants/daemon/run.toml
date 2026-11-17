@@ -1,5 +1,52 @@
 # The daemon’s run: the pass loop and the throttles, the stop, the start.
 
+[run]
+route-change-answer = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "core_route_changes::the_page_hears_the_last_answer_while_it_is_queued_for_a_busy_window"]
+route-change-tell = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "core_route_changes::the_page_hears_a_tell_added_to_an_open_blocked_tasks_brief"]
+route-change-throttle = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api_and_engine_changes_share_the_one_core_event_throttle_in_either_order"]
+
+[[plant]]
+name = "route changes: engine and API changes each have their own throttle"
+meant = "api_and_engine_changes_share_the_one_core_event_throttle_in_either_order"
+runs = ["route-change-throttle"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = '    dispatcher.on_change(board_changed);'
+replace = '''    dispatcher.on_change(throttle(STATE_EVENT, {
+        let bridge = bridge.clone();
+        move || { bridge.event("state.changed", json!({ "reason": "core" })); }
+    }));'''
+
+[[plant]]
+name = "route changes: an API write wakes the engine but does not tell the page"
+meant = "the_page_hears_the_last_answer_while_it_is_queued_for_a_busy_window"
+runs = ["route-change-answer"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = '''            Rc::new(move || {
+                changed();
+                kick();
+            })'''
+replace = '''            Rc::new(move || {
+                let _ = &changed;
+                kick();
+            })'''
+
+[[plant]]
+name = "route changes: a tell to an open task does not tell the page"
+meant = "the_page_hears_a_tell_added_to_an_open_blocked_tasks_brief"
+runs = ["route-change-tell"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '''        (context.changed)();
+        let mut answer = Map::new();'''
+replace = '''        let mut answer = Map::new();'''
+
 [[plant]]
 name = "pass: a kick during a pass is lost"
 meant = "one_pass_at_a_time_and_kicks_during_a_pass_run_one_more_after_it"
@@ -126,14 +173,14 @@ runs = ["daemon-lib-start"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/start.rs"
-find = '''
-        dispatcher.on_change(throttle(STATE_EVENT, move || {
-            bridge.event("state.changed", json!({ "reason": "core" }));
-        }));'''
+find = '    dispatcher.on_change(board_changed);'
 replace = '''
-        dispatcher.on_change(Rc::new(move || {
+    dispatcher.on_change(Rc::new({
+        let bridge = bridge.clone();
+        move || {
             bridge.event("state.changed", json!({ "reason": "core" }));
-        }));'''
+        }
+    }));'''
 
 [[plant]]
 name = "stop: the last reason wins"

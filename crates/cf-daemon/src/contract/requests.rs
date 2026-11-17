@@ -320,6 +320,7 @@ async fn zeus_at_work() -> (Rig, Rc<Context>, String, Value) {
         ledger: Rc::clone(&rig.ledger),
         credentials: Rc::new(credentials),
         kick: Rc::new(|| {}),
+        changed: Rc::new(|| {}),
         finish: Rc::new(|_, _, _| {
             Box::pin(async {
                 Err(cf_base::refusal::Refusal::new(

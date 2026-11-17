@@ -152,6 +152,7 @@ pub struct Daemon {
 pub(crate) struct Parts {
     pub(crate) ledger: Rc<RefCell<cf_ledger::Ledger>>,
     pub(crate) engine: Rc<dyn crate::page::Engine>,
+    pub(crate) api_kick: Rc<dyn Fn()>,
     pub(crate) home: std::path::PathBuf,
     pub(crate) spawn: Rc<DaemonSpawn>,
 }
@@ -272,6 +273,14 @@ async fn run(
         })
         .connect(options.input, options.output);
 
+    // One throttle for both the engine's changes and the agents' API writes:
+    // neither source may send an extra core event during the other's wait.
+    let board_changed = {
+        let bridge = bridge.clone();
+        throttle(STATE_EVENT, move || {
+            bridge.event("state.changed", json!({ "reason": "core" }));
+        })
+    };
     // The tokens, and the HTTP front the agents' and the human's requests come
     // to. The pass loop does not exist yet: a kick waits for it.
     let credentials = Rc::new(Credentials::new());
@@ -290,7 +299,14 @@ async fn run(
     let context = Rc::new(Context {
         ledger: Rc::clone(&ledger),
         credentials: Rc::clone(&credentials),
-        kick: Rc::clone(&kick),
+        kick: {
+            let (kick, changed) = (Rc::clone(&kick), Rc::clone(&board_changed));
+            Rc::new(move || {
+                changed();
+                kick();
+            })
+        },
+        changed: Rc::clone(&board_changed),
         finish: finishing::of(&engine, &spawn),
         held: finishing::held(&engine),
         closing: crate::api::context::Closing::new(),
@@ -436,12 +452,7 @@ async fn run(
     );
     // Set once: nothing between the stop's arming and here awaits.
     let _ = passes.set(passes_running);
-    {
-        let bridge = bridge.clone();
-        dispatcher.on_change(throttle(STATE_EVENT, move || {
-            bridge.event("state.changed", json!({ "reason": "core" }));
-        }));
-    }
+    dispatcher.on_change(board_changed);
     {
         // A window that wrote more changes only a view of what it did: the
         // page reads that again, not the board.
@@ -508,6 +519,7 @@ async fn run(
         parts: Parts {
             ledger,
             engine: Rc::new(dispatcher),
+            api_kick: Rc::clone(&context.kick),
             home,
             spawn,
         },
