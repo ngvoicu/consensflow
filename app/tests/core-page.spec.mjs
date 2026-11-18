@@ -17441,6 +17441,37 @@ async function teamShot(page, name) {
   await page.setViewportSize(size)
 }
 
+test('T1814 a two-role member has one team lane in each role group', async ({ page }) => {
+  const { data, dianaLane } = team({ out: { diana: fromNow(2), hera: fromNow(3) } })
+  dianaLane.participant.role = 'architect'
+  dianaLane.participant.roles = ['architect', 'reviewer']
+  const backup = data.boards[1].lanes.find((lane) => lane.participant.handle === 'hera').participant
+  backup.role = 'architect'
+  backup.roles = ['architect', 'reviewer']
+  backup.harness = 'claude-code'
+  backup.model = 'claude-opus-4-6'
+  backup.modelName = 'claude-opus-4-6'
+  await open(page, data)
+
+  const lanes = page.locator('tr[data-handle="diana"]')
+  await expect(lanes).toHaveCount(2)
+  await expect(page.locator('tr[data-handle="hera"]')).toHaveCount(0)
+  for (const role of ['architect', 'reviewer']) {
+    const group = page.locator(`tbody[data-group="${role}"]`)
+    const lane = group.locator(`tr[data-handle="diana"][data-role="${role}"]`)
+    await expect(lane).toHaveCount(1)
+    await expect(lane.locator('.row-status')).toHaveCount(1)
+    await lane.getByRole('button', { name: "Show @diana's team" }).click()
+    const backupDetail = lane.locator('.row-team [data-part="backup"]')
+    await expect(backupDetail).toHaveCount(1)
+    await expect(backupDetail.locator('.team-handle')).toHaveText('@hera')
+    await expect(backupDetail.locator('.team-meta')).toContainText('claude-opus-4-6')
+  }
+  await expect(page.locator('tr[data-handle="diana"] .row-team [data-part="backup"]')).toHaveCount(
+    2,
+  )
+})
+
 test('T1793 a member and its backup at work are one lane: one lamp, one status, both tasks', async ({
   page,
 }) => {
