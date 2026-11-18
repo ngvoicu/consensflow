@@ -287,7 +287,9 @@ pub(crate) fn reconcile_answered_on_open(store: &mut Store) -> Result<(), Ledger
             .query_map([], |row| row.get::<_, i64>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         for task in tasks {
-            reconcile(store, task)?;
+            if !super::carrying::recovery_conflict_for_task(store, task)? {
+                reconcile(store, task)?;
+            }
         }
         Ok(())
     })
@@ -384,7 +386,13 @@ pub(crate) fn claim_answer(
             }
             None => false,
         };
-        if shut.is_some() || paused {
+        let departed = store.db.prepare(
+            "SELECT 1 FROM message q JOIN task t ON t.id = q.task_id
+             WHERE q.id = ?1 AND (t.assignee_id IS NOT q.sender_id OR t.state IN ('accepted', 'cancelled'))
+             AND EXISTS (SELECT 1 FROM message b WHERE b.task_id = q.task_id AND b.project_id = q.project_id
+                         AND b.kind = 'task' AND b.recipient_id = q.sender_id AND b.id < q.id)"
+        )?.exists([question_id])?;
+        if shut.is_some() || paused || departed {
             return Ok(Claim::Closed);
         }
         let found: Option<(i64, String, Option<i64>, Option<String>)> = store

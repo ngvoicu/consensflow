@@ -25,13 +25,71 @@ pub(super) async fn ask(
         ));
     }
     let body = request.json().await?;
-    let active = context
-        .ledger
-        .borrow()
-        .task_in_hand(caller.participant.id)?;
-    if active.is_none() {
+    let active = caller.question_task.as_ref();
+    if let Some(asked_on) = active {
+        let now = context
+            .ledger
+            .borrow()
+            .task_in_hand(caller.participant.id)?;
+        let generation = |thread: &cf_ledger::TaskThread| {
+            thread
+                .messages
+                .iter()
+                .filter(|message| {
+                    message.kind == "task" && message.recipient_id == caller.participant.id
+                })
+                .map(|message| message.id)
+                .max()
+        };
+        if !now.as_ref().is_some_and(|thread| {
+            thread.task.id == asked_on.task.id && generation(thread) == generation(asked_on)
+        }) {
+            let current = context
+                .ledger
+                .borrow()
+                .task(caller.project.id, asked_on.task.number)?;
+            let task = current
+                .map(|thread| thread.task)
+                .unwrap_or_else(|| asked_on.task.clone());
+            let (code, words) = if task.state == "cancelled" {
+                (
+                    "task-cancelled",
+                    format!(
+                        "T-{} is cancelled: nothing more of it goes to @{}",
+                        task.number, task.requester
+                    ),
+                )
+            } else if task.assignee.as_deref() != Some(caller.participant.handle.as_str()) {
+                (
+                    "question-moved",
+                    format!(
+                        "T-{} moved to another window: this window cannot ask on it now",
+                        task.number
+                    ),
+                )
+            } else {
+                (
+                    "task-ended",
+                    format!(
+                        "T-{} is {}: this window cannot ask on it now",
+                        task.number, task.state
+                    ),
+                )
+            };
+            return Err(Failure::refuse(409, code, words));
+        }
+        if caller.question_unstarted {
+            return Err(Failure::refuse(
+                409,
+                "task-not-started",
+                format!(
+                    "T-{} has not reached this window: this turn cannot ask on it",
+                    asked_on.task.number
+                ),
+            ));
+        }
+    } else {
         refuse_cancelled(context, caller)?;
-        refuse_departed_question(context, caller)?;
     }
     let asked = context.ledger.borrow_mut().ask(
         caller.project.id,
@@ -51,43 +109,6 @@ pub(super) async fn ask(
     Ok(Answer::created(
         json!({ "message": value(&MessageSummary::from(&asked))? }),
     ))
-}
-
-/// An ask already authenticated when its window leaves the task can arrive
-/// after that move. Do not turn it into an unrelated, taskless question.
-fn refuse_departed_question(context: &Context, caller: &Caller) -> Result<(), Failure> {
-    let previous = context
-        .ledger
-        .borrow()
-        .last_started_task(caller.participant.id)?;
-    let Some(thread) = previous else {
-        return Ok(());
-    };
-    let task = thread.task;
-    if task.assignee.as_deref() != Some(caller.participant.handle.as_str()) {
-        return Err(Failure::refuse(
-            409,
-            "question-moved",
-            format!(
-                "T-{} moved to another window: this window cannot ask on it now",
-                task.number
-            ),
-        ));
-    }
-    if matches!(
-        task.state.as_str(),
-        "done" | "accepted" | "cancelled" | "failed"
-    ) {
-        return Err(Failure::refuse(
-            409,
-            "task-ended",
-            format!(
-                "T-{} is {}: this window cannot ask on it now",
-                task.number, task.state
-            ),
-        ));
-    }
-    Ok(())
 }
 
 /// A member's window with no task in progress, whose task was cancelled under

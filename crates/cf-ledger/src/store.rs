@@ -250,6 +250,13 @@ impl Store {
             data.extend(detail);
         }
         self.log(task.project_id, kind, data)?;
+        // Every terminal transition closes the previous window's question doors,
+        // including failures made by a delivery rather than by a task verb.
+        if matches!(to, "done" | "accepted" | "cancelled" | "failed") {
+            if let Some(window) = task.assignee_id {
+                crate::tasks::shut_doors(self, task, window)?;
+            }
+        }
         if !ACTIVE_TASK_STATES.contains(&to) {
             withdraw_continuations(self, task, to)?;
         }

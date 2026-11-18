@@ -1,0 +1,274 @@
+# T-1780 round two: questions, decisions, recovery and the window door.
+
+[[plant]]
+name = "t1780 round 2: authenticated question uses the next task"
+meant = "review_01_an_ask_authenticated_on_one_turn_does_not_belong_to_the_follow_up"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "review_01_an_ask_authenticated_on_one_turn"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/questions.rs"
+find = "if !now.as_ref().is_some_and(|thread| {"
+replace = "if false && !now.as_ref().is_some_and(|thread| {"
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/questions.rs"
+find = "    let asked = context.ledger.borrow_mut().ask("
+replace = "    let redirect = context.ledger.borrow().task_in_hand(caller.participant.id)?.map(|thread| thread.task.number);\n    let asked = context.ledger.borrow_mut().ask("
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/questions.rs"
+find = "task: active.map(|thread| thread.task.number),"
+replace = "task: redirect,"
+
+[[plant]]
+name = "t1780 round 2: unhanded follow-up takes an old question"
+meant = "review_01_a_follow_up_not_yet_handed_over_cannot_capture_an_old_turns_question"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "review_01_a_follow_up_not_yet_handed"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/questions.rs"
+find = "if caller.question_unstarted {"
+replace = "if false && caller.question_unstarted {"
+
+[[plant]]
+name = "t1780 round 2: an idle session cannot ask a taskless question"
+meant = "review_06_a_fresh_idle_session_can_ask_a_taskless_question"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "review_06_a_fresh_idle_session"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/questions.rs"
+find = "        refuse_cancelled(context, caller)?;"
+replace = "        return Err(Failure::refuse(409, \"task-ended\", \"the old task ended\"));"
+
+[[plant]]
+name = "t1780 round 2: acceptance discards an unreceived answer"
+meant = "review_02_accept_reports_a_queued_answer"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "review_02_accept_reports_a_queued_answer"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "    return_unreceived_answers(store, task, \"accepted\")?;"
+replace = "    // The answer is silently discarded."
+
+[[plant]]
+name = "t1780 round 2: cancellation discards an unreceived answer"
+meant = "review_02_human_cancel_reports_a_queued_answer"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "review_02_human_cancel_reports_a_queued_answer"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "    return_unreceived_answers(store, &task, \"cancelled\")?;"
+replace = "    // The answer is silently discarded."
+
+[[plant]]
+name = "t1780 round 2: paused member removal loses its answer"
+meant = "review_03_removing_a_paused_member_keeps_the_answer_for_resume"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "review_03_removing_a_paused_member"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "({told} OR (kind = 'answer' AND urgent = 0))"
+replace = "({told})"
+
+[[plant]]
+name = "t1780 round 2: delivery failure leaves a question door open"
+meant = "review_04_failed_brief_shuts_the_question_door"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "review_04_failed_"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "if matches!(to, \"done\" | \"accepted\" | \"cancelled\" | \"failed\") {"
+replace = "if false && matches!(to, \"done\" | \"accepted\" | \"cancelled\" | \"failed\") {"
+
+[[plant]]
+name = "t1780 round 2: own done permanently closes the question on reopen"
+meant = "review_05_own_done_then_reopen_in_same_session_keeps_the_question"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "review_05_own_done_then_reopen"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "            restore_own_done_questions(store, &task, assignee.id)?;"
+replace = "            // The question is not restored."
+
+[[plant]]
+name = "t1780 round 2: answer after done is accepted before reopen"
+meant = "review_02_declining_after_done_does_not_invite_a_stranded_replacement"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "review_02_declining_after_done"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "            if task.state == \"done\" {"
+replace = "            if false && task.state == \"done\" {"
+
+[[plant]]
+name = "t1780 round 2: done admits an in-flight answer"
+meant = "review_02_own_done_stops_an_unhanded_answer_until_the_task_is_reopened"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "review_02_own_done_stops_an_unhanded"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        if answer_waits_for_reopen(store, &message)? {"
+replace = "        if false && answer_waits_for_reopen(store, &message)? {"
+
+[[plant]]
+name = "t1780 round 2: recovery copies a conflicting answer"
+meant = "review_07_open_never_copies_words_when_answer_sender_conflicts"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "review_07_open_never_copies_words"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "               AND NOT ({conflict})\n"
+replace = "               AND (1 OR NOT ({conflict}))\n"
+
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "AND a.sender_id = q.recipient_id"
+replace = "AND (a.sender_id = q.recipient_id OR 1)"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "AND author.project_id = a.project_id AND author.left_at IS NULL"
+replace = "AND (author.project_id = a.project_id OR 1) AND author.left_at IS NULL"
+
+[[plant]]
+name = "t1780 round 2: recovery retires a conflicting question"
+meant = "review_07_open_leaves_a_question_alone_when_its_holder_belongs_to_another_project"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "review_07_open_leaves_a_question"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "AND EXISTS (SELECT 1 FROM task t WHERE t.id = q.task_id AND NOT ({conflict}))"
+replace = "AND EXISTS (SELECT 1 FROM task t WHERE t.id = q.task_id AND (1 OR NOT ({conflict})))"
+
+[[plant]]
+name = "t1780 round 2: recovery says nothing about conflicting records"
+meant = "review_07_open_leaves_a_question_alone_when_its_holder_belongs_to_another_project"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "review_07_open_leaves_a_question"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "            report_recovery_conflicts(store)?;"
+replace = "            // Conflicts are not reported."
+
+[[plant]]
+name = "t1780 round 2: legacy in-flight answer is not returned"
+meant = "a_legacy_answer_in_flight_after_a_move_is_returned_before_handover"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_legacy_answer_in_flight_after_a_move"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "(super::recover_stranded_inflight_answer(store, message_id)?"
+replace = "(false && super::recover_stranded_inflight_answer(store, message_id)?"
+
+[[plant]]
+name = "t1780 round 2: an old answered door promises another answer"
+meant = "review_a_received_answer_after_its_task_moved_is_not_promised_again"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "review_a_received_answer_after_its_task_moved"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/door.rs"
+find = "let moved = former_window || asked.reason.as_deref() == Some(MOVED_QUESTION);"
+replace = "let moved = false && former_window || asked.reason.as_deref() == Some(MOVED_QUESTION);"
+
+[[plant]]
+name = "t1780 round 2: member removal discards an answer"
+meant = "an_active_member_removal_returns_the_answer_that_never_arrived"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "an_active_member_removal_returns_the_answer_that_never_arrived"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "            return_unreceived_answers(store, task, \"cancelled\")?;"
+replace = "            // The answer is discarded."
+
+[[plant]]
+name = "t1780 round 2: failure discards an answer"
+meant = "a_failed_task_returns_the_answer_that_never_arrived"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_failed_task_returns_the_answer_that_never_arrived"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        return_unreceived_answers(store, &task, \"failed\")?;"
+replace = "        // The answer is discarded."
+
+[[plant]]
+name = "t1780 round 2: own done forgets the prior question state"
+meant = "review_05_own_done_then_reopen_in_same_session_keeps_the_question"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "review_05_own_done_then_reopen"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if !finished_by_word {\n            store.db.execute("
+replace = "        if false && !finished_by_word {\n            store.db.execute("
+
+[[plant]]
+name = "t1780 round 2: a former window claims an unrecovered answer"
+meant = "a_former_window_cannot_claim_an_old_answer_while_its_chief_is_away"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_former_window_cannot_claim_an_old_answer"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "if shut.is_some() || paused || departed {"
+replace = "if shut.is_some() || paused {"
+
+[[plant]]
+name = "t1780 round 2: restart retry strands an old answer"
+meant = "a_legacy_answer_returned_to_queue_after_restart_goes_back_to_its_author"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_legacy_answer_returned_to_queue_after_restart"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "if returned.kind == \"answer\" && super::recover_stranded_answer(store, message_id)? {"
+replace = "if false && returned.kind == \"answer\" && super::recover_stranded_answer(store, message_id)? {"
+
+[[plant]]
+name = "t1780 round 2: conflicting records are reconciled on open"
+meant = "recovery_does_not_reconcile_a_task_with_conflicting_answer_ownership"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "recovery_does_not_reconcile_a_task_with_conflicting"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "if !super::carrying::recovery_conflict_for_task(store, task)? {"
+replace = "if true || !super::carrying::recovery_conflict_for_task(store, task)? {"
+
+[[plant]]
+name = "t1780 round 2: a conflicting answer is removed from its carrier"
+meant = "recovery_leaves_a_conflicting_answer_under_its_existing_carrier"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "recovery_leaves_a_conflicting_answer_under_its_existing_carrier"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "conflict |= recovery_conflict_for_task(store, task)?;"
+replace = "conflict |= false && recovery_conflict_for_task(store, task)?;"
+
+[[plant]]
+name = "t1780 round 2: an older own done loses its delivered question"
+meant = "an_older_own_done_reopened_in_the_same_session_keeps_its_delivered_question"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "an_older_own_done_reopened_in_the_same_session"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "if worker_done && !crate::messages::recovery_conflict_for_task(store, task.id)? {"
+replace = "if false && worker_done && !crate::messages::recovery_conflict_for_task(store, task.id)? {"
+
+[[plant]]
+name = "t1780 round 2: a former windows answer vanishes on a later decision"
+meant = "a_legacy_answer_to_the_former_window_is_returned_if_the_new_task_ends"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_legacy_answer_to_the_former_window_is_returned"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "AND (a.recipient_id = ?3 OR EXISTS (SELECT 1 FROM message b"
+replace = "AND (a.recipient_id = ?3 OR 0 AND EXISTS (SELECT 1 FROM message b"
+
+[[plant]]
+name = "t1780 round 2: engine cancellation loses the unreceived answer"
+meant = "is_handed_nothing_when_it_was_withdrawn_while_its_window_got_ready_and_fails_nothing"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "is_handed_nothing_when_it_was_withdrawn_while_its_window_got_ready"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "    return_unreceived_answers(store, &task, \"cancelled\")?;"
+replace = "    // The answer is discarded."
+
+[[plant]]
+name = "t1780 round 2: recovery copies another authors answer to the chief"
+meant = "a_legacy_answer_is_returned_to_its_author_without_copying_it_to_another_member"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_legacy_answer_is_returned_to_its_author_without_copying_it_to_another_member"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "let author = store.participant_row(author)?;"
+replace = "let author = store.participant_by_handle(project, \"chief\")?;"
+
+[[plant]]
+name = "t1780 round 2: recovery notice cannot reach a nonchief author"
+meant = "a_legacy_answer_is_returned_to_its_author_without_copying_it_to_another_member"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_legacy_answer_is_returned_to_its_author_without_copying_it_to_another_member"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "urgent: author.role != \"chief\","
+replace = "urgent: false,"
+
+[[plant]]
+name = "t1780 round 2: failure notice cannot reach a nonchief author"
+meant = "a_nonchief_answerer_is_told_when_an_active_task_fails"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_nonchief_answerer_is_told_when_an_active_task_fails"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "urgent: recipient.role != \"chief\","
+replace = "urgent: false,"

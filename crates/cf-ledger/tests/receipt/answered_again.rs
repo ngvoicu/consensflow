@@ -160,13 +160,18 @@ fn a_task_sent_back_after_it_failed_with_its_answer_cancelled_tells_the_chief_th
     w.ledger
         .fail_task(w.project, task, "its pane died")
         .expect("failed");
-    assert_eq!(notes(&w, "chief"), [], "nothing is owed while it is over");
+    let returned = (None, format!("Your answer m-{answer} may not have reached its window before T-{task} was failed. Your words:\n\nJSON"));
+    assert_eq!(
+        notes(&w, "chief").as_slice(),
+        std::slice::from_ref(&returned),
+        "the undelivered words are returned"
+    );
     w.ledger
         .reopen_task(w.project, task, "chief", "Try again")
         .expect("sent back");
     assert_eq!(
         notes(&w, "chief"),
-        [(
+        [returned, (
             Some(task),
             format!(
                 "T-{task} was sent back by @chief, and m-{question} still waits for an answer: the one it had did not stand. {}",

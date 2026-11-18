@@ -484,10 +484,32 @@ pub(crate) fn admit(
         if !open {
             return Ok(HandOver::Closed);
         }
+        if message.kind == "answer"
+            && (super::recover_stranded_inflight_answer(store, message_id)?
+                || answer_left_its_window(store, &message)?)
+        {
+            return Ok(HandOver::Withdrawn);
+        }
         let mut stale = withdrawn_if_stale(store, &message)?;
         let carried = carried(store, message_id)?;
         for row in &carried {
+            if row.kind == "answer"
+                && (super::recover_stranded_inflight_answer(store, row.id)?
+                    || answer_left_its_window(store, row)?)
+            {
+                return Ok(HandOver::Withdrawn);
+            }
+        }
+        for row in &carried {
             stale |= withdrawn_if_stale(store, row)?;
+        }
+        if answer_waits_for_reopen(store, &message)? {
+            return Ok(HandOver::Withdrawn);
+        }
+        for row in &carried {
+            if answer_waits_for_reopen(store, row)? {
+                return Ok(HandOver::Withdrawn);
+            }
         }
         if stale {
             return Ok(HandOver::Withdrawn);
@@ -525,6 +547,36 @@ pub(crate) fn admit(
         )?;
         Ok(HandOver::Admitted)
     })
+}
+
+/// A proven former holder cannot receive an answer after the task leaves it,
+/// even when corrupt records or a departed chief prevent recovery for now.
+fn answer_left_its_window(store: &Store, message: &MessageView) -> Result<bool, LedgerError> {
+    Ok(store.db.prepare(
+        "SELECT 1 FROM message a JOIN message q ON q.id = a.reply_to
+         JOIN task t ON t.id = a.task_id WHERE a.id = ?1 AND a.kind = 'answer'
+         AND q.sender_id = a.recipient_id
+         AND (t.assignee_id IS NOT a.recipient_id OR t.state IN ('accepted', 'cancelled'))
+         AND EXISTS (SELECT 1 FROM message b WHERE b.task_id = a.task_id AND b.project_id = a.project_id
+                     AND b.kind = 'task' AND b.recipient_id = a.recipient_id AND b.id < q.id)"
+    )?.exists([message.id])?)
+}
+
+/// A worker's done ends its turn, but its answer may still be used if the
+/// same task is reopened. Do not hand that answer to the finished turn.
+fn answer_waits_for_reopen(store: &Store, message: &MessageView) -> Result<bool, LedgerError> {
+    if message.kind != "answer" {
+        return Ok(false);
+    }
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM message a JOIN message q ON q.id = a.reply_to
+         JOIN task t ON t.id = a.task_id WHERE a.id = ? AND t.state = 'done'
+         AND t.assignee_id = a.recipient_id AND q.sender_id = a.recipient_id
+         AND q.project_id = a.project_id AND q.task_id = a.task_id",
+        )?
+        .exists([message.id])?)
 }
 
 /// The first row of `begun_with` (what the paste of `message_id`, handed over
@@ -893,6 +945,9 @@ pub(crate) fn retry_delivery(
         // longer handed now; neither it nor a returned row riding with it may go again.
         withdraw_stale_among(store, &riding)?;
         let returned = known_message(store, message_id)?;
+        if returned.kind == "answer" && super::recover_stranded_answer(store, message_id)? {
+            return known_message(store, message_id);
+        }
         if withdrawn_if_stale(store, &returned)? {
             return known_message(store, message_id);
         }

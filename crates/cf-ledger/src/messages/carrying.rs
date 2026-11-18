@@ -17,7 +17,7 @@
 
 use cf_base::text::utf16_prefix;
 use cf_proto::ledger::MessageView;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde_json::json;
 
 use super::continuations::{drop_continuations, withdraw_stale_among};
@@ -284,6 +284,15 @@ pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
                 "SELECT id FROM message WHERE carried_by = ? AND state = 'queued' ORDER BY id",
                 [carrier],
             )?;
+            let tasks = ids(store,
+                "SELECT DISTINCT task_id FROM message WHERE carried_by = ? AND state = 'queued' AND task_id IS NOT NULL",
+                [carrier],
+            )?;
+            let mut conflict = false;
+            for task in tasks {
+                conflict |= recovery_conflict_for_task(store, task)?;
+            }
+            if conflict { continue; }
             store.db.execute(
                 "UPDATE message SET carried_by = NULL, handed_at = NULL
                  WHERE carried_by = ? AND state = 'queued'",
@@ -321,6 +330,7 @@ pub(crate) fn reconcile_released(store: &mut Store) -> Result<(), LedgerError> {
             )?
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
+        let mut unsafe_events = Vec::new();
         for (_, event) in &unreconciled {
             for task in ids(
                 store,
@@ -331,6 +341,10 @@ pub(crate) fn reconcile_released(store: &mut Store) -> Result<(), LedgerError> {
                  ORDER BY m.task_id",
                 [event],
             )? {
+                if recovery_conflict_for_task(store, task)? {
+                    unsafe_events.push(*event);
+                    continue;
+                }
                 reconcile(store, task)?;
             }
         }
@@ -340,9 +354,12 @@ pub(crate) fn reconcile_released(store: &mut Store) -> Result<(), LedgerError> {
         for project in projects {
             let events: Vec<i64> = unreconciled
                 .iter()
-                .filter(|(of, _)| *of == project)
+                .filter(|(of, event)| *of == project && !unsafe_events.contains(event))
                 .map(|(_, event)| *event)
                 .collect();
+            if events.is_empty() {
+                continue;
+            }
             store.log(
                 project,
                 "message.reconciled",
@@ -353,31 +370,170 @@ pub(crate) fn reconcile_released(store: &mut Store) -> Result<(), LedgerError> {
     })
 }
 
+/// True when related records disagree about project or answer ownership.
+/// Do not copy words or retire the question while any of them disagree.
+fn recovery_conflict() -> &'static str {
+    "t.project_id IS NOT q.project_id
+     OR NOT EXISTS (SELECT 1 FROM participant p WHERE p.id = q.sender_id AND p.project_id = q.project_id)
+     OR NOT EXISTS (SELECT 1 FROM participant p WHERE p.id = q.recipient_id AND p.project_id = q.project_id)
+     OR (t.assignee_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM participant p
+         WHERE p.id = t.assignee_id AND p.project_id = q.project_id))
+     OR EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer'
+         AND (a.project_id IS NOT q.project_id OR a.task_id IS NOT q.task_id
+           OR a.recipient_id IS NOT q.sender_id
+           OR NOT EXISTS (SELECT 1 FROM participant p WHERE p.id = a.sender_id AND p.project_id = q.project_id)
+           OR NOT (a.sender_id IS q.recipient_id OR
+               (a.sender_id IS q.sender_id AND q.questions IS NOT NULL AND q.questions != 'null'))))"
+}
+
+/// Whether any question of this task has inconsistent project or answer ownership.
+pub(crate) fn recovery_conflict_for_task(store: &Store, task: i64) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(&format!(
+            "SELECT 1 FROM message q JOIN task t ON t.id = q.task_id
+         WHERE t.id = ? AND q.kind = 'question' AND q.urgent = 0 AND ({}) LIMIT 1",
+            recovery_conflict()
+        ))?
+        .exists([task])?)
+}
+
+/// Report an ambiguous recovery once, without copying or changing the disputed rows.
+fn report_recovery_conflicts(store: &mut Store) -> Result<(), LedgerError> {
+    let cases: Vec<(i64, i64, i64)> = store
+        .db
+        .prepare(&format!(
+            "SELECT q.id, q.project_id, t.number FROM message q JOIN task t ON t.id = q.task_id
+         WHERE q.kind = 'question' AND q.urgent = 0
+         AND ({}) AND NOT EXISTS (SELECT 1 FROM event e WHERE e.project_id = q.project_id
+             AND e.kind = 'message.recovery_conflict' AND json_extract(e.data, '$.question') = q.id)
+         ORDER BY q.id",
+            recovery_conflict()
+        ))?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    for (question, project, number) in cases {
+        let chief: Option<i64> = store.db.query_row(
+            "SELECT id FROM participant WHERE project_id = ? AND handle = 'chief' AND left_at IS NULL",
+            [project], |row| row.get(0)).optional()?;
+        let Some(chief) = chief else { continue };
+        let body = format!("T-{number}'s question m-{question} has conflicting project records. Recovery left it and its answers untouched; check the project records.");
+        let notice = queue(
+            store,
+            project,
+            &Queued {
+                to: chief,
+                kind: "note",
+                body: &body,
+                ..Queued::default()
+            },
+        )?;
+        store.log(
+            project,
+            "message.recovery_conflict",
+            json!({"question": question, "notice": notice}),
+        )?;
+    }
+    Ok(())
+}
+
+/// Return unreceived answers to their writer when a decision ends the task.
+/// This is in the same write as the decision, before its normal cancellation sweep.
+pub(crate) fn return_unreceived_answers(
+    store: &mut Store,
+    task: &TaskRow,
+    decision: &str,
+) -> Result<(), LedgerError> {
+    let answers: Vec<(i64, i64, String)> = store
+        .db
+        .prepare(
+            "SELECT a.id, a.sender_id, a.body FROM message a JOIN message q ON q.id = a.reply_to
+         JOIN participant author ON author.id = a.sender_id AND author.project_id = a.project_id
+         JOIN participant receiver ON receiver.id = a.recipient_id AND receiver.project_id = a.project_id
+         WHERE a.project_id = ?1 AND a.task_id = ?2
+           AND (a.recipient_id = ?3 OR EXISTS (SELECT 1 FROM message b
+               WHERE b.task_id = a.task_id AND b.project_id = a.project_id AND b.kind = 'task'
+                 AND b.recipient_id = a.recipient_id AND b.id < q.id))
+         AND a.kind = 'answer' AND a.state IN ('queued', 'delivering', 'gated')
+         AND q.kind = 'question' AND q.project_id = a.project_id AND q.task_id = a.task_id
+         AND q.sender_id = a.recipient_id AND q.recipient_id = a.sender_id AND q.urgent = 0
+         AND COALESCE(json_extract(a.receipt, '$.readEarly'), '') = '' ORDER BY a.id",
+        )?
+        .query_map(params![task.project_id, task.id, task.assignee_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    for (answer, author, words) in answers {
+        let body = format!("Your answer m-{answer} may not have reached its window before T-{} was {decision}. Your words:\n\n{words}", task.number);
+        let recipient = store.participant_row(author)?;
+        let notice = queue(
+            store,
+            task.project_id,
+            &Queued {
+                to: author,
+                kind: "note",
+                body: &body,
+                urgent: recipient.role != "chief",
+                ..Queued::default()
+            },
+        )?;
+        store.db.execute(
+            "UPDATE message SET state = 'cancelled', reason = ? WHERE id = ?",
+            params![
+                format!("T-{} was {decision}; returned in m-{notice}", task.number),
+                answer
+            ],
+        )?;
+        store.log(
+            task.project_id,
+            "message.returned",
+            json!({"message": answer, "notice": notice, "task": task.number}),
+        )?;
+    }
+    Ok(())
+}
+
 struct StrandedAnswer {
     question: i64,
     project: i64,
     number: i64,
     old: String,
+    author: i64,
     words: String,
 }
 
 /// An older build could accept an answer after its task had left the asking
-/// session. Give the chief its words and the task's current place once, in the
+/// session. Give the answerer its words and the task's current place once, in the
 /// same transaction that withdraws the queued answer. Only a prior task brief
 /// proves that this session held the task; another session may legitimately
 /// ask a question about it. Gated and received answers are not ours to recover.
 pub(crate) fn recover_old_stranded_answers(store: &mut Store) -> Result<(), LedgerError> {
-    recover_stranded_answers(store, None).map(|_| ())
+    recover_stranded_answers(store, None, false).map(|_| ())
 }
 
 /// A human may pass on an older answer that was still at the gate at open.
 /// Once approved it is queued, and the same recovery applies before delivery.
 pub(crate) fn recover_stranded_answer(store: &mut Store, answer: i64) -> Result<bool, LedgerError> {
-    Ok(recover_stranded_answers(store, Some(answer))? != 0)
+    Ok(recover_stranded_answers(store, Some(answer), false)? != 0)
 }
 
-fn recover_stranded_answers(store: &mut Store, only: Option<i64>) -> Result<usize, LedgerError> {
+/// A hand-over begun by an older build is checked again before it is admitted.
+pub(crate) fn recover_stranded_inflight_answer(
+    store: &mut Store,
+    answer: i64,
+) -> Result<bool, LedgerError> {
+    Ok(recover_stranded_answers(store, Some(answer), true)? != 0)
+}
+
+fn recover_stranded_answers(
+    store: &mut Store,
+    only: Option<i64>,
+    in_flight: bool,
+) -> Result<usize, LedgerError> {
     store.write(|store| {
+        if only.is_none() {
+            report_recovery_conflicts(store)?;
+        }
         // Select only ids first: even a valid answer can be a million UTF-16
         // units, so opening a ledger must not copy every old answer at once.
         let selected = if only.is_some() { "a.id = ?1" } else { "?1 IS NULL" };
@@ -386,32 +542,38 @@ fn recover_stranded_answers(store: &mut Store, only: Option<i64>) -> Result<usiz
              FROM message a JOIN message q ON q.id = a.reply_to AND q.project_id = a.project_id
              JOIN task t ON t.id = a.task_id AND t.project_id = a.project_id
              JOIN participant p ON p.id = a.recipient_id AND p.project_id = a.project_id
-             WHERE a.kind = 'answer' AND a.state = 'queued' AND p.member_id IS NOT NULL
+             WHERE a.kind = 'answer' AND (a.state = 'queued' OR (?2 = 1 AND a.state = 'delivering'
+                     AND COALESCE(json_extract(a.receipt, '$.readEarly'), '') = '')) AND p.member_id IS NOT NULL
                AND {selected}
                AND q.kind = 'question' AND q.urgent = 0 AND q.task_id = a.task_id
-               AND q.sender_id = a.recipient_id AND t.assignee_id IS NOT a.recipient_id
+               AND q.sender_id = a.recipient_id
+               AND (t.assignee_id IS NOT a.recipient_id OR t.state IN ('accepted', 'cancelled'))
+               AND a.sender_id = q.recipient_id
+               AND EXISTS (SELECT 1 FROM participant author WHERE author.id = a.sender_id
+                           AND author.project_id = a.project_id AND author.left_at IS NULL)
+               AND NOT ({conflict})
                AND (t.assignee_id IS NULL OR EXISTS (SELECT 1 FROM participant holder
                     WHERE holder.id = t.assignee_id AND holder.project_id = t.project_id))
                AND EXISTS (SELECT 1 FROM message b WHERE b.task_id = t.id AND b.project_id = t.project_id
                            AND b.kind = 'task' AND b.recipient_id = a.recipient_id AND b.id < q.id)
-             ORDER BY a.id"),
-            [only],
+             ORDER BY a.id", conflict = recovery_conflict()),
+            params![only, i64::from(in_flight)],
         )?;
         let count = stranded.len();
         for answer in stranded {
-            let StrandedAnswer { question, project, number, old, words } = store.db.query_row(
-                "SELECT q.id, a.project_id, t.number, p.handle, a.body
+            let StrandedAnswer { question, project, number, old, author, words } = store.db.query_row(
+                "SELECT q.id, a.project_id, t.number, p.handle, a.sender_id, a.body
                  FROM message a JOIN message q ON q.id = a.reply_to
                  JOIN task t ON t.id = a.task_id JOIN participant p ON p.id = a.recipient_id
                  WHERE a.id = ?",
                 [answer],
                 |row| Ok(StrandedAnswer {
                     question: row.get(0)?, project: row.get(1)?, number: row.get(2)?,
-                    old: row.get(3)?, words: row.get(4)?,
+                    old: row.get(3)?, author: row.get(4)?, words: row.get(5)?,
                 }),
             )?;
             let task = store.task_row(project, number)?;
-            let chief = store.participant_by_handle(project, "chief")?;
+            let author = store.participant_row(author)?;
             let moved = super::moved_task_takes_no_answer(store, &task)?;
             let body = format!(
                 "Your answer m-{answer} was not received by @{old}. At recovery, {moved}\n\nYour words:\n{words}"
@@ -420,11 +582,11 @@ fn recover_stranded_answers(store: &mut Store, only: Option<i64>) -> Result<usiz
             // plus this short system notice may exceed that limit, so queue it
             // directly rather than dropping words or failing the ledger open.
             let notice = queue(store, project, &Queued {
-                to: chief.id, kind: "note", body: &body, ..Queued::default()
+                to: author.id, kind: "note", body: &body, urgent: author.role != "chief", ..Queued::default()
             })?;
-            let reason = format!("returned to @chief in m-{notice} after T-{number} moved");
+            let reason = format!("returned to @{} in m-{notice} after T-{number} moved", author.handle);
             store.db.execute(
-                "UPDATE message SET state = 'cancelled', reason = ?1 WHERE id = ?2 AND state = 'queued'",
+                "UPDATE message SET state = 'cancelled', reason = ?1 WHERE id = ?2 AND state IN ('queued', 'delivering')",
                 params![reason, answer],
             )?;
             store.db.execute(
@@ -438,7 +600,7 @@ fn recover_stranded_answers(store: &mut Store, only: Option<i64>) -> Result<usiz
                 params![super::MOVED_QUESTION, question],
             )?;
             store.log(project, "message.sent", json!({
-                "message": notice, "kind": "note", "from": null, "to": "chief"
+                "message": notice, "kind": "note", "from": null, "to": author.handle
             }))?;
             store.log(project, "message.recovered", json!({
                 "message": answer, "notice": notice, "task": number
@@ -458,18 +620,20 @@ pub(crate) fn retire_old_moved_questions(store: &mut Store) -> Result<(), Ledger
     store.write(|store| {
         let old = ids(
             store,
-            "SELECT q.id FROM message q WHERE q.kind = 'question' AND q.urgent = 0
+            &format!("SELECT q.id FROM message q WHERE q.kind = 'question' AND q.urgent = 0
                    AND (q.state IN ('queued', 'delivering', 'gated', 'delivered', 'read', 'failed')
                         OR (q.state = 'cancelled' AND (q.reason LIKE '@% no longer has T-%'
                             OR EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer'))))
-                   AND q.reason IS NOT ?1 AND NOT EXISTS (
+                   AND q.reason IS NOT ?1
+                   AND EXISTS (SELECT 1 FROM task t WHERE t.id = q.task_id AND NOT ({conflict}))
+                   AND NOT EXISTS (
                        SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer'
                          AND a.state NOT IN ('gated', 'cancelled', 'failed'))
                    AND EXISTS (
                        SELECT 1 FROM task t WHERE t.id = q.task_id
                          AND t.assignee_id IS NOT q.sender_id
                          AND EXISTS (SELECT 1 FROM message b WHERE b.task_id = t.id
-                                     AND b.kind = 'task' AND b.recipient_id = q.sender_id AND b.id < q.id))",
+                                     AND b.kind = 'task' AND b.recipient_id = q.sender_id AND b.id < q.id))", conflict = recovery_conflict()),
             [super::MOVED_QUESTION],
         )?;
         for question in old {
@@ -494,9 +658,9 @@ pub(crate) fn retire_old_moved_questions(store: &mut Store) -> Result<(), Ledger
                             SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer')))
                    AND NOT {}
                    AND EXISTS (SELECT 1 FROM task t WHERE t.id = q.task_id AND t.state = 'done'
-                               AND t.assignee_id = q.sender_id
+                               AND NOT ({}) AND t.assignee_id = q.sender_id
                                AND q.reason IS NOT ('T-' || t.number || ' was finished'))",
-                super::has_standing_answer("q")
+                super::has_standing_answer("q"), recovery_conflict()
             ),
             [super::MOVED_QUESTION],
         )?;

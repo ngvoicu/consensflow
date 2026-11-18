@@ -392,7 +392,9 @@ async fn a_finished_question_stays_closed_when_the_same_window_is_reopened() {
     let question = working_question(&scene);
     {
         let mut ledger = scene.context.ledger.borrow_mut();
-        ledger.record_result(scene.project.id, 1, "Done").unwrap();
+        ledger
+            .record_finished(scene.project.id, 1, "Done", (0, 0))
+            .unwrap();
         let words = ledger
             .reopen_task(scene.project.id, 1, "chief", "One more change")
             .unwrap()
@@ -700,4 +702,87 @@ fn the_wait_is_read_as_number_reads_it_clamped_to_zero_and_25_seconds() {
     assert_eq!(seconds(Some("25001")), 25.0);
     assert_eq!(seconds(Some("Infinity")), 25.0);
     assert_eq!(seconds(Some("-Infinity")), 0.0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn review_a_received_answer_after_its_task_moved_is_not_promised_again() {
+    let scene = scene();
+    let number = session_task_at_work(&scene);
+    let (question, window, token) = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let task = ledger.task(scene.project.id, number).unwrap().unwrap().task;
+        let handle = task.assignee.unwrap();
+        let window = ledger
+            .project(scene.project.id)
+            .unwrap()
+            .unwrap()
+            .participants
+            .into_iter()
+            .find(|p| p.handle == handle)
+            .unwrap()
+            .id;
+        let token = scene
+            .context
+            .credentials
+            .issue(scene.project.id, window)
+            .unwrap();
+        let question = ledger.ask(scene.project.id, &cf_ledger::NewQuestion {
+            from: Some(handle), to: "chief".into(), task: Some(number),
+            questions: Some(json!([{ "question": "Which?", "header": "Pick", "options": [{"label": "red"}, {"label": "blue"}] }])),
+            ..Default::default()
+        }).unwrap();
+        let chief = ledger
+            .project(scene.project.id)
+            .unwrap()
+            .unwrap()
+            .participants
+            .into_iter()
+            .find(|p| p.handle == "chief")
+            .unwrap()
+            .id;
+        let answer = ledger
+            .answer(question.id, chief, None, Some(&json!([["red"]])))
+            .unwrap();
+        ledger.begin_delivery(answer.id).unwrap();
+        ledger.confirm_delivery(answer.id, None).unwrap();
+        ledger
+            .release_task(scene.project.id, number, "by human")
+            .unwrap();
+        (question, window, token)
+    };
+    let id = question.id.to_string();
+    let (status, body) = door(&scene, &token, &format!("/api/questions/{id}"), &id).await;
+    assert_eq!(status, 409, "{body}, window {window}");
+    let words = body["message"].as_str().unwrap();
+    assert!(
+        words.contains("moved") && !words.contains("comes to you as a message"),
+        "{words}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_workers_done_reopened_in_the_same_window_keeps_its_question_as_a_message() {
+    let scene = scene();
+    let question = working_question(&scene);
+    {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        ledger.record_result(scene.project.id, 1, "Done").unwrap();
+        let reopened = ledger
+            .reopen_task(scene.project.id, 1, "chief", "One more change")
+            .unwrap()
+            .message
+            .unwrap()
+            .id;
+        ledger.begin_delivery(reopened).unwrap();
+        ledger.confirm_delivery(reopened, None).unwrap();
+    }
+    let id = question.id.to_string();
+    let (status, body) = door(&scene, &scene.zeus, &format!("/api/questions/{id}"), &id).await;
+    assert_eq!(status, 409, "{body}");
+    assert!(body["message"]
+        .as_str()
+        .unwrap()
+        .contains("comes to you as a message"));
+    scene.choose(question.id, "red");
+    assert_eq!(scene.next_for_zeus(), Some("H: red".to_owned()));
 }

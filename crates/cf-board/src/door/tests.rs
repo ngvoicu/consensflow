@@ -487,3 +487,28 @@ fn a_window_that_was_given_no_word_says_cf() {
     ]);
     assert_eq!(board_of(&bad).unwrap().cf().as_str(), "cf");
 }
+
+#[test]
+fn a_question_refused_because_its_turn_ended_does_not_suggest_retrying_the_same_route() {
+    for code in [
+        "question-moved",
+        "task-ended",
+        "task-cancelled",
+        "task-not-started",
+    ] {
+        let api = scripted(vec![reply(
+            409,
+            json!({ "error": code, "message": "The task left this turn" }),
+        )]);
+        let board = Board::new(Some(&api.url), "tok");
+        let Reply::Refused(words) =
+            ask(&board, &one_question(), DOOR_WAIT, &AtomicBool::new(false))
+        else {
+            panic!("expected refusal")
+        };
+        assert!(
+            !words.contains("cf ask") && words.contains("end your turn"),
+            "{code}: {words}"
+        );
+    }
+}

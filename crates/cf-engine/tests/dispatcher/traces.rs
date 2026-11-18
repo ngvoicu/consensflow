@@ -271,7 +271,7 @@ const ANSWER_ON_ITS_WAY: &str = "an answer queued for its window moves the task 
 const DEPARTED: &[(&str, &str)] = &[
     ("leaves a task waiting on a question alone, and resumes it with the answer", ANSWER_ON_ITS_WAY),
     ("carries an advisor’s and a reviewer’s question to the chief and the answer back to their own window", ANSWER_ON_ITS_WAY),
-    ("is handed nothing when it was withdrawn while its window got ready, and fails nothing", "the answer moves the waiting task to working as soon as it is queued; the later cancel also withdraws the window's delivered question, where Node leaves it delivered"),
+    ("is handed nothing when it was withdrawn while its window got ready, and fails nothing", "the answer moves the waiting task to working as soon as it is queued; the later cancel withdraws the window's delivered question and returns the unreceived answer's words to the chief, where Node leaves the question delivered and gives no notice"),
     (
         "leaves the window alone once the chief's tell reaches it, answered or not, until the task goes on",
         "an answer to a tell while its task is still paused tells the chief both ways on, and its delivery records that footer so it can be recognised after the task moves; Node's answer did neither",

@@ -111,6 +111,17 @@ fn is_handed_nothing_when_it_was_withdrawn_while_its_window_got_ready_and_fails_
     readying.open();
     context.settle();
     assert_eq!(context.message(answer.id).state, "cancelled");
+    let chief = tiers.id("chief");
+    assert!(
+        context
+            .ledger
+            .borrow()
+            .inbox(chief, 100)
+            .unwrap()
+            .iter()
+            .any(|message| { message.kind == "note" && message.body.contains("The small one") }),
+        "the chief gets the answer's words back"
+    );
     let marker = marker_of(answer.id);
     assert!(
         !context

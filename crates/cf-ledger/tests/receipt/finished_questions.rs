@@ -71,7 +71,7 @@ fn a_failed_prior_answer_does_not_revive_a_finished_question_on_reopen() {
         .cancel_message(answer, "withdrawn by the chief")
         .unwrap();
     w.ledger
-        .record_result(w.project, task, "Done after all")
+        .record_finished(w.project, task, "Done after all", (0, 0))
         .unwrap();
     assert_eq!(answering(&mut w, question), Some("question-withdrawn"));
     let words = w

@@ -6,7 +6,7 @@
 //! views are copied out: the borrow of the ledger is let go before the handler
 //! goes on, so the handler may await its body.
 
-use cf_ledger::{ParticipantView, ProjectView};
+use cf_ledger::{ParticipantView, ProjectView, TaskThread};
 
 use super::answer::Failure;
 use super::context::Context;
@@ -18,6 +18,10 @@ use super::request::Request;
 pub struct Caller {
     pub project: ProjectView,
     pub participant: ParticipantView,
+    /// The task and its messages when this question request was authenticated.
+    pub question_task: Option<TaskThread>,
+    /// A first brief that has not yet been handed to this window.
+    pub question_unstarted: bool,
 }
 
 /// The window behind `request`: 401 `unauthorized` for a request with no
@@ -42,10 +46,46 @@ pub fn caller_of(context: &Context, request: &Request) -> Result<Caller, Failure
             .cloned()
     });
     match (project, participant) {
-        (Some(project), Some(participant)) => Ok(Caller {
-            project,
-            participant,
-        }),
+        (Some(project), Some(participant)) => {
+            let question_task = if request.method == hyper::Method::POST
+                && request.path == "/api/questions"
+                && participant.role != "chief"
+            {
+                context.ledger.borrow().task_in_hand(participant.id)?
+            } else {
+                None
+            };
+            let question_unstarted = if let Some(thread) = question_task.as_ref() {
+                let briefs: Vec<_> = thread
+                    .messages
+                    .iter()
+                    .filter(|message| {
+                        message.kind == "task" && message.recipient_id == participant.id
+                    })
+                    .collect();
+                let arrived = briefs
+                    .iter()
+                    .any(|message| matches!(message.state.as_str(), "delivered" | "read"));
+                let handed =
+                    if !arrived && briefs.iter().any(|message| message.state == "delivering") {
+                        let ids = context.ledger.borrow().handed_over(project.id)?;
+                        briefs.iter().any(|message| {
+                            message.state == "delivering" && ids.contains(&message.id)
+                        })
+                    } else {
+                        false
+                    };
+                !arrived && !handed
+            } else {
+                false
+            };
+            Ok(Caller {
+                project,
+                participant,
+                question_task,
+                question_unstarted,
+            })
+        }
         _ => Err(Failure::refuse(
             401,
             "unauthorized",

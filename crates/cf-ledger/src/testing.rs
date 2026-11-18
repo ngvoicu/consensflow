@@ -108,6 +108,11 @@ pub fn undo_migration_0040(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch("DROP TABLE task_plan_key")
 }
 
+/// Undo the question-suspension columns when a fixture reconstructs an older ledger.
+pub fn undo_migration_0041(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    db.execute_batch("ALTER TABLE message DROP COLUMN done_question_state; ALTER TABLE message DROP COLUMN done_question_reason;")
+}
+
 /// The last schema version Node's ledger had.
 const NODE_LAST_VERSION: i64 = 11;
 
@@ -195,6 +200,8 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
             ("participant", "backup_of"),
             ("participant", "vacation_since"),
             ("participant", "out_kind"),
+            ("message", "done_question_state"),
+            ("message", "done_question_reason"),
         ])
     {
         take_column_out(tables, table, column);
@@ -315,7 +322,10 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
                 *sql = sql
                     .replace(role_note::COLUMN_LINES, "")
                     .replace(handed::COLUMN_LINES, "");
-                *sql = sql.replace(pasted_into::COLUMN_LINES, "");
+                *sql = sql
+                    .replace(pasted_into::COLUMN_LINES, "")
+                    .replace(", done_question_state TEXT", "")
+                    .replace(", done_question_reason TEXT", "");
             }
             Some("transcript") => {
                 *sql = sql

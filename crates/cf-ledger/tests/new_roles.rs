@@ -89,6 +89,13 @@ fn rows(db: &Connection, table: &str) -> Vec<Vec<String>> {
         .expect("the SQL of a test reads the ledger")
         .map(Result::unwrap)
         .filter(|column: &String| table != "project" || column != "own_hands")
+        .filter(|column| {
+            table != "message"
+                || !matches!(
+                    column.as_str(),
+                    "done_question_state" | "done_question_reason"
+                )
+        })
         .collect();
     let quoted = columns
         .iter()
@@ -188,6 +195,7 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     // As a build of the migration before it left it: its checks name the five roles, its
     // version is that migration's.
     let raw = Connection::open(&file).unwrap();
+    cf_ledger::testing::undo_migration_0041(&raw).expect("question suspension undone");
     cf_ledger::testing::undo_migration_0040(&raw).expect("plan keys undone");
     cf_ledger::testing::undo_migration_0038(&raw).expect("own hands undone");
     undo_new_roles_migration(&raw).expect("the new roles' migration undone");
@@ -223,6 +231,8 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
         before,
         "every row of the two tables and the projects kept"
     );
+    let populated: i64 = raw.query_row("SELECT COUNT(*) FROM message WHERE done_question_state IS NOT NULL OR done_question_reason IS NOT NULL", [], |row| row.get(0)).unwrap();
+    assert_eq!(populated, 0, "new question fields default to null");
     let wide = schema(&raw);
     // The test helper reconstructs the old tables with today's columns and
     // index, but drops the new triggers; migration 0039 puts them back.
@@ -242,7 +252,9 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
             (
                 name.clone(),
                 sql.replace(", 'frontend', 'architect', 'researcher', 'integrator'", "")
-                    .replace(", own_hands INTEGER NOT NULL DEFAULT 0", ""),
+                    .replace(", own_hands INTEGER NOT NULL DEFAULT 0", "")
+                    .replace(", done_question_state TEXT", "")
+                    .replace(", done_question_reason TEXT", ""),
             )
         })
         .collect();

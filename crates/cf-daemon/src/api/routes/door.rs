@@ -92,18 +92,24 @@ pub(super) async fn handle(
             Claim::Closed => {
                 // The task may have moved while this poll waited. Read the question
                 // again as well: its withdrawal reason changed in that same step.
-                let (current, task) = {
+                let (current, task, moved) = {
                     let ledger = context.ledger.borrow();
                     let current = ledger.message(asked.id)?.unwrap_or_else(|| asked.clone());
-                    let task = match asked.task_number {
-                        Some(number) => ledger
-                            .task(caller.project.id, number)?
-                            .map(|thread| thread.task),
+                    let thread = match asked.task_number {
+                        Some(number) => ledger.task(caller.project.id, number)?,
                         None => None,
                     };
-                    (current, task)
+                    let moved = thread.as_ref().is_some_and(|thread| {
+                        thread.task.assignee.as_deref() != Some(caller.participant.handle.as_str())
+                            && thread.messages.iter().any(|message| {
+                                message.kind == "task"
+                                    && message.recipient_id == caller.participant.id
+                                    && message.id < asked.id
+                            })
+                    });
+                    (current, thread.map(|thread| thread.task), moved)
                 };
-                return Err(shut(&current, task.as_ref()));
+                return Err(shut(&current, task.as_ref(), moved));
             }
             Claim::Waiting => {}
         }
@@ -136,10 +142,10 @@ fn answered(asked: &MessageView, answer: &MessageView) -> Result<Answer, Failure
 }
 
 /// A shut door says whether its question can still be answered on a later turn.
-fn shut(asked: &MessageView, task: Option<&TaskView>) -> Failure {
+fn shut(asked: &MessageView, task: Option<&TaskView>, former_window: bool) -> Failure {
     let id = asked.id;
     let state = task.map(|task| task.state.as_str());
-    let moved = asked.reason.as_deref() == Some(MOVED_QUESTION);
+    let moved = former_window || asked.reason.as_deref() == Some(MOVED_QUESTION);
     let finished = asked
         .task_number
         .is_some_and(|number| asked.reason.as_deref() == Some(&format!("T-{number} was finished")));

@@ -40,6 +40,7 @@ mod program_gone;
 mod questions;
 mod queued_tells;
 mod read_in_the_inbox;
+mod review_round_two;
 mod self_steps;
 mod sessions;
 mod shown_notes;

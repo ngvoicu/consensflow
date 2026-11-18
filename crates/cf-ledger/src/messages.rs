@@ -45,7 +45,8 @@ pub const MOVED_QUESTION: &str = "the task moved to another window";
 pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{
     adopt, fold, reconcile_released, recover_old_stranded_answers, recover_stranded_answer,
-    release_carried, release_stranded, retire_old_moved_questions, transfer,
+    recover_stranded_inflight_answer, recovery_conflict_for_task, release_carried,
+    release_stranded, retire_old_moved_questions, return_unreceived_answers, transfer,
 };
 pub use continuations::{
     continuation, continuation_in, continuation_tasks, cut_turn, cut_turn_unquoted,
@@ -365,6 +366,15 @@ pub(crate) fn answer(
                 409,
             ));
         }
+        if let Some(task) = message_task(store, question_id)? {
+            if task.state == "done" {
+                return Err(LedgerError::refused_with(
+                    "task-ended",
+                    format!("T-{} is done: reopen it in the same window before answering m-{question_id}", task.number),
+                    409,
+                ));
+            }
+        }
         let asked: Option<Vec<Question>> = match &question.questions {
             Value::Null => None,
             questions => Some(serde_json::from_value(questions.clone())?),
@@ -427,10 +437,14 @@ pub(crate) fn answer(
 fn moved_task_takes_no_answer(store: &Store, task: &TaskRow) -> Result<LedgerError, LedgerError> {
     let number = task.number;
     let place = moved_task_location(store, task)?;
-    let tell = match task.state.as_str() {
+    let tell = if task.deleted_at.is_some() {
+        "This task was deleted. Start a new task with what you meant to answer, or use cf tell on the new task.".to_owned()
+    } else {
+        match task.state.as_str() {
         "done" | "failed" => format!("To go on, reopen it with cf task reopen T-{number} \"…\", then use cf tell T-{number} \"…\" for what you meant to answer."),
         "accepted" | "cancelled" => "This task cannot receive a tell. Start a new task with what you meant to answer, or use cf tell on the new task.".to_owned(),
         _ => format!("Use cf tell T-{number} \"…\" for what you meant to answer."),
+    }
     };
     Ok(LedgerError::refused_with(
         "question-moved",

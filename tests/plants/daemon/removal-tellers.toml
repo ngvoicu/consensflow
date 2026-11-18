@@ -50,6 +50,7 @@ find = '''
             .map(|(task, _)| Dropped::leaving(store, task))
             .collect::<Result<Vec<_>, _>>()?;
         for (task, _) in &open {
+            return_unreceived_answers(store, task, "cancelled")?;
             drop_queued(store, task.id)?;
             withdraw_open_questions(store, task, "was cancelled")?;
             store.move_task(task, "cancelled", json!({ "reason": reason }))?;
@@ -60,6 +61,7 @@ find = '''
 '''
 replace = '''
         for (task, _) in &open {
+            return_unreceived_answers(store, task, "cancelled")?;
             drop_queued(store, task.id)?;
             withdraw_open_questions(store, task, "was cancelled")?;
             store.move_task(task, "cancelled", json!({ "reason": reason }))?;

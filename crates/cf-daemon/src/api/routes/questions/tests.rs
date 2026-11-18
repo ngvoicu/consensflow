@@ -438,3 +438,235 @@ async fn a_question_with_options_is_put_with_them_and_its_words_are_theirs() {
     );
     assert_eq!(scene.kicks.get(), 1);
 }
+
+#[tokio::test]
+async fn review_01_an_ask_authenticated_on_one_turn_does_not_belong_to_the_follow_up() {
+    let scene = scene();
+    let task = session_task_at_work(&scene);
+    let session = {
+        let ledger = scene.context.ledger.borrow();
+        let holder = ledger
+            .task(scene.project.id, task)
+            .unwrap()
+            .unwrap()
+            .task
+            .assignee
+            .unwrap();
+        ledger
+            .project(scene.project.id)
+            .unwrap()
+            .unwrap()
+            .participants
+            .into_iter()
+            .find(|p| p.handle == holder)
+            .unwrap()
+    };
+    let token = scene
+        .context
+        .credentials
+        .issue(scene.project.id, session.id)
+        .unwrap();
+    let request = request(
+        Method::POST,
+        "/api/questions",
+        Some(&token),
+        r#"{"body":"A late question"}"#,
+    );
+    let caller = caller_of(&scene.context, &request).unwrap();
+    {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        ledger
+            .record_result(scene.project.id, task, "Done")
+            .unwrap();
+        ledger
+            .create_task(
+                scene.project.id,
+                &cf_ledger::NewTask {
+                    from: "chief".into(),
+                    after: Some(task),
+                    body: "Next task".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        ledger.accept_task(scene.project.id, task, "chief").unwrap();
+    }
+    let response = said(super::ask(&scene.context, &caller, request).await);
+    assert_eq!(response.0, 409, "{response:?}");
+    let ledger = scene.context.ledger.borrow();
+    assert!(ledger
+        .inbox(scene.id("chief"), 100)
+        .unwrap()
+        .iter()
+        .all(|m| m.body != "A late question"));
+}
+
+#[tokio::test]
+async fn review_06_a_fresh_idle_session_can_ask_a_taskless_question() {
+    let scene = scene();
+    let task = session_task_at_work(&scene);
+    let session = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let holder = ledger
+            .task(scene.project.id, task)
+            .unwrap()
+            .unwrap()
+            .task
+            .assignee
+            .unwrap();
+        let id = ledger
+            .project(scene.project.id)
+            .unwrap()
+            .unwrap()
+            .participants
+            .into_iter()
+            .find(|p| p.handle == holder)
+            .unwrap()
+            .id;
+        ledger
+            .record_result(scene.project.id, task, "Done")
+            .unwrap();
+        ledger.accept_task(scene.project.id, task, "chief").unwrap();
+        id
+    };
+    let token = scene
+        .context
+        .credentials
+        .issue(scene.project.id, session)
+        .unwrap();
+    let (status, body) = ask(&scene, &token, r#"{"body":"A taskless question"}"#).await;
+    assert_eq!(status, 201, "{body}");
+    assert_eq!(body["message"]["task"], json!(null));
+}
+
+#[tokio::test]
+async fn review_01_a_follow_up_not_yet_handed_over_cannot_capture_an_old_turns_question() {
+    for begun in [false, true] {
+        let scene = scene();
+        let task = session_task_at_work(&scene);
+        let session = {
+            let mut ledger = scene.context.ledger.borrow_mut();
+            let holder = ledger
+                .task(scene.project.id, task)
+                .unwrap()
+                .unwrap()
+                .task
+                .assignee
+                .unwrap();
+            let id = ledger
+                .project(scene.project.id)
+                .unwrap()
+                .unwrap()
+                .participants
+                .into_iter()
+                .find(|p| p.handle == holder)
+                .unwrap()
+                .id;
+            ledger
+                .record_result(scene.project.id, task, "Done")
+                .unwrap();
+            let follow = ledger
+                .create_task(
+                    scene.project.id,
+                    &cf_ledger::NewTask {
+                        from: "chief".into(),
+                        after: Some(task),
+                        body: "Next task".into(),
+                        ..Default::default()
+                    },
+                )
+                .unwrap()
+                .task
+                .number;
+            ledger.accept_task(scene.project.id, task, "chief").unwrap();
+            let brief = ledger
+                .task(scene.project.id, follow)
+                .unwrap()
+                .unwrap()
+                .messages
+                .into_iter()
+                .find(|m| m.kind == "task")
+                .unwrap()
+                .id;
+            if begun {
+                ledger.begin_delivery(brief).unwrap();
+            }
+            id
+        };
+        let token = scene
+            .context
+            .credentials
+            .issue(scene.project.id, session)
+            .unwrap();
+        let (status, body) = ask(&scene, &token, r#"{"body":"Still from the old turn"}"#).await;
+        assert_eq!(status, 409, "begun={begun}: {body}");
+    }
+}
+
+#[tokio::test]
+async fn a_follow_up_can_ask_once_its_brief_is_handed_to_the_window() {
+    let scene = scene();
+    let first = session_task_at_work(&scene);
+    let (token, second) = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let holder = ledger
+            .task(scene.project.id, first)
+            .unwrap()
+            .unwrap()
+            .task
+            .assignee
+            .unwrap();
+        let id = ledger
+            .project(scene.project.id)
+            .unwrap()
+            .unwrap()
+            .participants
+            .into_iter()
+            .find(|p| p.handle == holder)
+            .unwrap()
+            .id;
+        // The window token is the same one its preceding task used.
+        let token = scene
+            .context
+            .credentials
+            .issue(scene.project.id, id)
+            .unwrap();
+        ledger
+            .record_result(scene.project.id, first, "Done")
+            .unwrap();
+        let second = ledger
+            .create_task(
+                scene.project.id,
+                &cf_ledger::NewTask {
+                    from: "chief".into(),
+                    after: Some(first),
+                    body: "Next task".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .task
+            .number;
+        ledger
+            .accept_task(scene.project.id, first, "chief")
+            .unwrap();
+        let brief = ledger
+            .task(scene.project.id, second)
+            .unwrap()
+            .unwrap()
+            .messages
+            .into_iter()
+            .find(|m| m.kind == "task")
+            .unwrap()
+            .id;
+        ledger.begin_delivery(brief).unwrap();
+        assert_eq!(
+            ledger.admit(brief, &[]).unwrap(),
+            cf_ledger::HandOver::Admitted
+        );
+        (token, second)
+    };
+    let (status, body) = ask(&scene, &token, r#"{"body":"About the new task"}"#).await;
+    assert_eq!(status, 201, "{body}");
+    assert_eq!(body["message"]["task"], second);
+}

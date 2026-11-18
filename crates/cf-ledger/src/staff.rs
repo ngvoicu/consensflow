@@ -15,7 +15,9 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::conversations::current_conversation;
-use crate::messages::{kept_through_leaving, withdraw_open_questions, Dropped};
+use crate::messages::{
+    kept_through_leaving, return_unreceived_answers, withdraw_open_questions, Dropped,
+};
 use crate::model::{self, sql_list, LedgerError};
 use crate::projects::NewMember;
 use crate::queue::{drop_queued, send, Sent};
@@ -517,6 +519,7 @@ pub(crate) fn remove_member(
             .map(|(task, _)| Dropped::leaving(store, task))
             .collect::<Result<Vec<_>, _>>()?;
         for (task, _) in &open {
+            return_unreceived_answers(store, task, "cancelled")?;
             drop_queued(store, task.id)?;
             withdraw_open_questions(store, task, "was cancelled")?;
             store.move_task(task, "cancelled", json!({ "reason": reason }))?;

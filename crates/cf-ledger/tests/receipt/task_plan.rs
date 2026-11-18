@@ -98,6 +98,7 @@ fn migration_0040_keeps_an_older_ledger_and_an_older_build_refuses_it() {
         .create_task(w.project, &section("first").task)
         .unwrap();
     w.edit(|db| {
+        cf_ledger::testing::undo_migration_0041(db).expect("question suspension undone");
         cf_ledger::testing::undo_migration_0040(db).unwrap();
         db.execute_batch("PRAGMA user_version = 39").unwrap();
         cf_ledger::migrate(db, &cf_ledger::MIGRATIONS[..39]).unwrap();
@@ -111,7 +112,7 @@ fn migration_0040_keeps_an_older_ledger_and_an_older_build_refuses_it() {
     let version: i64 = db
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 40);
+    assert_eq!(version, cf_ledger::SCHEMA_VERSION as i64);
     let error = cf_ledger::migrate(&db, &cf_ledger::MIGRATIONS[..39]).unwrap_err();
     assert_eq!(error.code(), Some("ledger-newer"));
 }
