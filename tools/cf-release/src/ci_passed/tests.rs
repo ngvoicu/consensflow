@@ -109,6 +109,124 @@ impl GitHub for Script {
     }
 }
 
+/// The same API with failures on selected calls and a clock that records waits.
+struct Intermittent {
+    script: Script,
+    failures: BTreeMap<usize, &'static str>,
+    asked: Vec<String>,
+    waits: Vec<Duration>,
+}
+
+impl GitHub for Intermittent {
+    fn get(&mut self, path: &str) -> Result<String, String> {
+        self.asked.push(path.to_owned());
+        match self.failures.get(&self.asked.len()) {
+            Some(said) => Err((*said).to_owned()),
+            None => self.script.get(path),
+        }
+    }
+
+    fn pause(&mut self, duration: Duration) {
+        self.waits.push(duration);
+    }
+}
+
+#[test]
+fn retries_and_growing_waits_are_shared_by_run_and_jobs_pages() {
+    let mut script = Script::default().ci(7, COMMIT, "push", "success", "success");
+    let mut jobs: Vec<Value> = (0..100)
+        .map(|n| json!({"name": format!("test {n}"), "conclusion": "success"}))
+        .collect();
+    jobs.extend(script.jobs.remove(&7).unwrap());
+    script.jobs.insert(7, jobs);
+    let mut github = Intermittent {
+        script,
+        failures: BTreeMap::from([
+            (1, "gh api ended 1: HTTP 500"),
+            (3, "gh api ended 1: HTTP 502"),
+            (5, "gh api ended 1: Get https://api.github.com: EOF"),
+        ]),
+        asked: Vec::new(),
+        waits: Vec::new(),
+    };
+
+    assert_eq!(verdict(&mut github, REPOSITORY, COMMIT).unwrap().run, 7);
+    assert_eq!(github.waits, RETRY_WAITS);
+    assert_eq!(github.asked.len(), 6);
+    assert_eq!(github.asked[0], github.asked[1]);
+    assert_eq!(github.asked[2], github.asked[3]);
+    assert_eq!(github.asked[4], github.asked[5]);
+    assert!(github.asked[4].ends_with("page=2"));
+}
+
+#[test]
+fn a_fourth_transient_error_on_another_run_exhausts_the_same_budget() {
+    let mut github = Intermittent {
+        script: Script::default()
+            .ci(7, COMMIT, "push", "success", "success")
+            .ci(8, COMMIT, "push", "success", "success"),
+        failures: BTreeMap::from([
+            (1, "HTTP 502"),
+            (3, "HTTP 502"),
+            (4, "HTTP 502"),
+            (6, "HTTP 502"),
+        ]),
+        asked: Vec::new(),
+        waits: Vec::new(),
+    };
+
+    let refused = verdict(&mut github, REPOSITORY, COMMIT).unwrap_err();
+    assert!(matches!(refused, Refusal::Unasked(_)), "{refused:?}");
+    assert!(refused.said().contains("/actions/runs/8/jobs?"));
+    assert!(refused.said().contains("HTTP 502"));
+    assert_eq!(github.asked.len(), 6);
+    assert_eq!(github.waits, RETRY_WAITS);
+}
+
+#[test]
+fn client_errors_override_transient_words_and_are_never_retried() {
+    for code in 400..500 {
+        let said = format!("gh: HTTP 503, connection reset (HTTP {code})");
+        assert!(!retryable(&said), "{said}");
+    }
+    let mut github = Intermittent {
+        script: Script::default(),
+        failures: BTreeMap::from([(1, "HTTP 404: connection reset")]),
+        asked: Vec::new(),
+        waits: Vec::new(),
+    };
+    assert!(matches!(
+        verdict(&mut github, REPOSITORY, COMMIT),
+        Err(Refusal::Unasked(_))
+    ));
+    assert_eq!(github.asked.len(), 1);
+    assert!(github.waits.is_empty());
+}
+
+#[test]
+fn server_and_connection_errors_are_retryable_but_other_errors_are_not() {
+    for code in 500..600 {
+        assert!(retryable(&format!("gh: error (HTTP {code})")), "{code}");
+    }
+    for said in [
+        "Get https://api.github.com: EOF",
+        "unexpected EOF",
+        "read: connection reset by peer",
+        "write: broken pipe",
+        "error connecting to api.github.com",
+    ] {
+        assert!(retryable(said), "{said}");
+    }
+    for said in [
+        "gh was not found: is it installed, and on the PATH?",
+        "gh: HTTP 5000",
+        "gh: HTTP 300",
+        "gh: authentication required",
+    ] {
+        assert!(!retryable(said), "{said}");
+    }
+}
+
 /// What the step says of `COMMIT` on `script`, run by `event`: its status as
 /// cf-release ends it, what it printed and what it said.
 fn answered(script: &mut Script, event: Option<&str>) -> (Result<(), String>, String, String) {

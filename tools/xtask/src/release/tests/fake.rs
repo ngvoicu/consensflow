@@ -393,6 +393,8 @@ pub struct Fake {
     pub failed_steps: BTreeMap<(&'static str, &'static str), (&'static str, &'static str)>,
     /// The jobs of a CI run.
     pub ci_jobs: Vec<(&'static str, &'static str)>,
+    /// Jobs API requests that fail with a server error before it answers.
+    pub ci_jobs_failures: usize,
     /// The looks at a new run before it ends, and the lists it is not yet in.
     pub running_for: u32,
     pub unlisted_for: u32,
@@ -468,6 +470,7 @@ impl Fake {
                 ("gate (macos-latest)", "success"),
                 ("gate (windows-latest)", "success"),
             ],
+            ci_jobs_failures: 0,
             running_for: 1,
             unlisted_for: 0,
             publishes: true,
@@ -659,6 +662,14 @@ impl Fake {
         };
         let words: Vec<&str> = args.iter().map(String::as_str).collect();
         match words.as_slice() {
+            ["api", path] if path.contains("/actions/runs/") && self.ci_jobs_failures > 0 => {
+                self.ci_jobs_failures -= 1;
+                Captured {
+                    code: 1,
+                    stdout: String::new(),
+                    stderr: "HTTP 502: Bad Gateway".to_owned(),
+                }
+            }
             ["api", path] => said(&self.api(path)),
             ["release", "download", tag, ..] => {
                 let Some(files) = self.releases.get(*tag) else {

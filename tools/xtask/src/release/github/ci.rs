@@ -69,4 +69,8 @@ impl GitHub for Api<'_, '_> {
             .gh(&["api", path])
             .map_err(|error| error.to_string())
     }
+
+    fn pause(&mut self, duration: std::time::Duration) {
+        self.release.system.pause(duration);
+    }
 }
