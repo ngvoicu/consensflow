@@ -16,6 +16,8 @@ import { aPool, roleIds, roleLabel, takesNoTier } from './roles.js'
  *
  * The rows are grouped: the chief's alone first, then one group a role, each
  * folded until the human opens it, and folded, it says what of it needs them.
+ * A member and its backup are one row, a team, with one lamp and one status line;
+ * unfolded, the row says what each of the two is doing, under it.
  *
  * Everything here is drawn from the daemon's state with `textContent`, never
  * markup, so an agent-written title cannot become HTML. Actions go out through
@@ -197,12 +199,12 @@ export const rowTasks = (lane, board) =>
   ].sort((a, b) => b.number - a.number)
 
 /**
- * The cards a row holds, the newest first: a folded member's row holds its
- * sessions' too, so folding takes rows off the board and no work with them.
+ * The cards a row holds, the newest first: a team's are its member's and its backup's, and a
+ * folded member's row holds its sessions' too, so folding takes rows off the board and no work
+ * with them.
  */
 function rowCards(row, board, folded) {
-  if (!folded) return rowTasks(row, board)
-  return [row, ...row.sessions]
+  return [row, ...(row.backup ? [row.backup] : []), ...(folded ? (row.sessions ?? []) : [])]
     .flatMap((lane) => rowTasks(lane, board))
     .sort((a, b) => b.number - a.number)
 }
@@ -217,6 +219,12 @@ const foldKey = (board, { handle, role }) => `${board.project.id}:${handle}:${ro
  * human has no row: nothing assigns them a task, and what is for them is in For
  * you. The chief has one only while a task is on it, its own or one it asked
  * for: what it is doing is on its card in the dock.
+ *
+ * A member and its backup are one member on the board, a team (the owner, 2026-11-18: "they
+ * should behave like a team; so same status same way just one member"): the backup has no row
+ * of its own. It is the row's `backup`, its lane for the row's role, whose roles and tier follow
+ * its member's; its tasks are the row's, and its sessions are with the member's under the row,
+ * each marked `ofBackup`.
  */
 function boardRows(board) {
   const ordered = laneOrder(board.lanes).filter(
@@ -227,29 +235,111 @@ function boardRows(board) {
   const members = new Set(
     ordered.filter((lane) => isMember(lane.participant)).map((lane) => lane.participant.handle),
   )
+  // Each member's backup, by the member's id, where both are on the board.
+  const backups = new Map(
+    ordered
+      .filter(
+        ({ participant }) =>
+          isMember(participant) &&
+          ordered.some(
+            (owner) => owner.participant.id === participant.backupOf && isMember(owner.participant),
+          ),
+      )
+      .map((lane) => [lane.participant.backupOf, lane]),
+  )
+  const teamed = new Set([...backups.values()].map((lane) => lane.participant.handle))
   const rows = []
   for (const lane of ordered) {
     const { participant } = lane
     // A session is placed under its member's row for its role.
     if (participant.member !== null && members.has(participant.member)) continue
+    if (teamed.has(participant.handle)) continue
     if (!members.has(participant.handle)) {
       rows.push(lane)
       continue
     }
-    const sessions = ordered.filter((other) => other.participant.member === participant.handle)
+    const backup = backups.get(participant.id) ?? null
+    const sessions = ordered
+      .filter(
+        (other) =>
+          other.participant.member === participant.handle ||
+          (backup !== null && other.participant.member === backup.participant.handle),
+      )
+      .map((session) =>
+        session.participant.member === participant.handle
+          ? session
+          : { ...session, participant: { ...session.participant, ofBackup: true } },
+      )
     const roles = participant.roles.length > 0 ? participant.roles : [participant.role]
     for (const role of roles) {
-      rows.push({
+      const row = {
         ...lane,
         participant: { ...participant, role, roles: [role], also: role !== roles[0] },
         tasks: lane.tasks.filter((task) => roleOf(task, roles) === role),
         sessions: sessions.filter((session) => session.participant.role === role),
-      })
+      }
+      if (backup !== null) {
+        row.backup = {
+          ...backup,
+          participant: { ...backup.participant, role, roles: [role] },
+          tasks: backup.tasks.filter((task) => roleOf(task, roles) === role),
+        }
+      }
+      rows.push(row)
     }
     // A session of a role the member no longer holds still shows, last, on its own.
     rows.push(...sessions.filter((session) => !roles.includes(session.participant.role)))
   }
   return rows
+}
+
+/**
+ * A team's parts, the member first; a member with no backup is a team of one, and any other
+ * row is its own.
+ */
+const partsOf = (row) => [row, ...(row.backup ? [row.backup] : [])]
+
+/** Whether a part of a team can take work now: not out, not waiting for an edit, not resting. */
+const canWork = ({ participant }, now) =>
+  !outOfQuota(participant, now) && !participant.needsEdit && !participant.vacationSince
+
+/**
+ * When a part that cannot run work is back by itself, to order them: its reset, and never for
+ * one that waits for an edit or for the human's word (its account, its moved model).
+ */
+const backBy = ({ participant }, now) =>
+  participant.needsEdit || !outOfQuota(participant, now)
+    ? Number.POSITIVE_INFINITY
+    : Date.parse(participant.outUntil)
+
+/**
+ * The part of a team that speaks for it, on its lamp and its status line: the member while it
+ * can take work, else its backup while that can; a member on Vacation, for the team rests with
+ * it (the engine's rule); with neither, the one back first, for then the team is back. So a team
+ * is at work when either is, free when either can take a task, and out only when neither can
+ * run work. A member with no backup speaks for itself.
+ */
+function teamLead(row, now) {
+  const parts = partsOf(row)
+  const working = parts.find((part) => canWork(part, now))
+  if (working !== undefined) return working
+  if (row.participant.vacationSince) return row
+  const held = parts.filter(
+    ({ participant }) => outOfQuota(participant, now) || participant.needsEdit,
+  )
+  if (held.length === 0) return row
+  return held.reduce((first, part) => (backBy(part, now) < backBy(first, now) ? part : first))
+}
+
+/**
+ * What a row says it is doing, and the state that colours it: a team's, said by the part that
+ * speaks for it, with every terminal of the team counted; any other row's own.
+ */
+function rowStatus(row, board, now) {
+  if (!row.backup) return laneStatus(row, board, now)
+  const lead = teamLead(row, now)
+  // The team's own line says nothing of who takes whose tasks: that is in its detail.
+  return laneStatus({ ...lead, backupReady: undefined, team: partsOf(row) }, board, now)
 }
 
 /**
@@ -332,13 +422,18 @@ const MARKS = [
  * Each with how many; none that is none.
  */
 function groupMarks(rows, board, now) {
-  const lanes = rows.flatMap((row) => [row, ...(row.sessions ?? [])])
-  const tasks = rows.flatMap((row) => rowCards(row, board, (row.sessions?.length ?? 0) > 0))
+  const sessions = rows.flatMap((row) => row.sessions ?? [])
+  const lanes = [...rows.flatMap(partsOf), ...sessions]
+  const tasks = rows.flatMap((row) => rowCards(row, board, true))
   const tasksIn = (state) =>
     new Set(tasks.filter((task) => task.state === state).map((task) => task.number)).size
-  const statuses = lanes.map((lane) => laneStatus(lane, board, now)?.[0])
+  // A team says what the team's line says: its member out while its backup works is not out.
+  const statuses = [
+    ...rows.map((row) => rowStatus(row, board, now)?.[0]),
+    ...sessions.map((lane) => laneStatus(lane, board, now)?.[0]),
+  ]
   const out = new Set(
-    lanes
+    [...rows.map((row) => teamLead(row, now)), ...sessions]
       .filter((lane) => outOfQuota(lane.participant, now))
       .map((lane) => lane.participant.handle),
   )
@@ -416,11 +511,15 @@ export const laneName = (participant) =>
 /** "1 note", "3 notes": how many of something. */
 const plural = (count, noun) => `${count} ${noun}${count === 1 ? '' : 's'}`
 
-/** A member's row: how many of its sessions' terminals (of the row's role) are open now; null for none. */
+/**
+ * A member's row: how many of its sessions' terminals (of the row's role) are open now, a team's
+ * (`team`, its parts) all of its parts'; null for none.
+ */
 function sessionsNote(lane, board) {
+  const handles = (lane.team ?? [lane]).map((part) => part.participant.handle)
   const open = board.lanes.filter(
     (other) =>
-      other.participant.member === lane.participant.handle &&
+      handles.includes(other.participant.member) &&
       other.participant.role === lane.participant.role &&
       other.pane !== null,
   ).length
@@ -463,6 +562,15 @@ function route(task, busy = null) {
 /** A member between tasks: its work runs in sessions, so it has no window of its own. */
 const resting = (participant, activity) =>
   isMember(participant) && (activity?.state ?? 'closed') === 'closed'
+
+/** What a team's backup runs on, in its detail: its harness, and its model and effort where its name does not say them. */
+const runsOn = (participant) =>
+  [
+    harnessLabel(participant),
+    ...(nameApart(participant) ? [modelShown(participant), participant.effort] : []),
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
 /** The harnesses a chief runs in, as the human knows them, in the order they are offered. */
 export const HARNESS_NAMES = {
@@ -509,7 +617,8 @@ export const nameApart = (participant) => participant.nameApart === true || part
 
 /**
  * What a row, or the chief's card in the dock, says its participant is, in order, each part
- * with what it is (`kind`): a session's row says whose window it is; the member's row says
+ * with what it is (`kind`): a session's row says whose window it is (a backup's says so, for a
+ * member and its backup are one row); the member's row says
  * what it is, its roles, its tier and its harness, and what it runs on only where its name
  * does not say it (HMD-12: `@claude-opus-5-5-high` is the model and the effort). The chief's
  * card in the dock says its harness and the model it runs on.
@@ -521,7 +630,10 @@ const identityParts = (participant) => {
     : []
   const parts = participant.member
     ? [
-        part('role', `${participant.role} session of @${participant.member}`),
+        part(
+          'role',
+          `${participant.role} session of @${participant.member}${participant.ofBackup ? ', the backup' : ''}`,
+        ),
         part('harness', harnessLabel(participant)),
         ...runs,
       ]
@@ -1148,12 +1260,12 @@ export class BoardView {
   }
 
   /**
-   * Whether a member's row is folded, its sessions' rows off the board and
-   * their cards on its own: every one is until the human unfolds it. Null for
-   * a row with no sessions under it.
+   * Whether a member's row is folded: its sessions' rows off the board and their cards on its
+   * own, and a team's detail (its member and its backup, each as it is) shut. Every one is
+   * until the human unfolds it. Null for a row with neither sessions nor a backup.
    */
   #folded(board, row) {
-    if ((row.sessions?.length ?? 0) === 0) return null
+    if ((row.sessions?.length ?? 0) === 0 && !row.backup) return null
     return !this.#unfolded.has(foldKey(board, row.participant))
   }
 
@@ -1193,47 +1305,106 @@ export class BoardView {
     // The member's model-based name changes with an edit. Make its windows read as
     // sessions, rather than more members whose models changed along with it.
     const name = participant.member ? `Session · ${participant.session}` : laneName(participant)
-    title.append(lamp(lane, now), element('span', 'row-name', name))
+    // A team's lamp is the one of the part that speaks for it, as its status line is.
+    title.append(lamp(teamLead(lane, now), now), element('span', 'row-name', name))
     head.append(title)
     // The chief's row only holds its tasks: what it is doing, what it runs on
     // and Switch chief are on its card in the dock.
     if (participant.role === 'chief') return head
-    const owner = board.lanes.find((other) => other.participant.id === participant.backupOf)
-    head.append(
-      owner
-        ? element('span', 'row-meta', `backup of @${owner.participant.handle}`)
-        : identityLine(participant, 'row-meta'),
-    )
+    head.append(identityLine(participant, 'row-meta'))
     if (isMember(participant) && participant.vacationSince) {
       head.append(element('span', 'row-status', 'on Vacation'))
     }
-    const idleBackup = owner && ['closed', 'idle'].includes(lane.activity?.state ?? 'closed')
-    const said = idleBackup ? null : laneStatus(lane, board, now)
+    const said = rowStatus(lane, board, now)
     if (said !== null) {
       const [state, text] = said
       const status = element('span', 'row-status', text)
       status.dataset.state = state
       head.append(status)
-      if (state === 'out' && !lane.busy && acts(board)) {
-        head.append(tryAgain(participant, this.#onLane(this.#actions.onTryAgain, participant)))
-      }
+      if (state === 'out' && acts(board)) head.append(...this.#tryAgain(lane, now))
     }
+    if (lane.backup && folded === false) head.append(this.#team(lane, board, now))
     head.append(this.#rowTools(lane, board))
     return head
   }
 
-  /** Unfolds a member's row, its sessions' rows under it, or folds it again. */
-  #foldButton({ participant, sessions }, folded) {
-    const sessionsOf = `${laneName(participant)}'s ${plural(sessions.length, 'session')}`
+  /**
+   * The human's way to try a row out of quota again before its reset: a member's own; a team's
+   * tries each of its parts that is out, in one press. None for a model that is busy, which
+   * ConsensFlow tries again after a back-off no press shortens (T-1357).
+   */
+  #tryAgain(row, now) {
+    const out = partsOf(row).filter((part) => outOfQuota(part.participant, now) && !part.busy)
+    if (teamLead(row, now).busy || out.length === 0) return []
+    if (out.length === 1) {
+      const [{ participant }] = out
+      return [tryAgain(participant, this.#onLane(this.#actions.onTryAgain, participant))]
+    }
+    return [
+      button(
+        'Try again now',
+        'quiet-button try-again',
+        async () => {
+          for (const { participant } of out) {
+            await this.#actions.onTryAgain(this.#lane(participant).participant)
+          }
+        },
+        `Try ${laneName(row.participant)} and its backup again now`,
+      ),
+    ]
+  }
+
+  /**
+   * A team's detail, under its status while its row is unfolded: its member and its backup,
+   * each with its lamp and, in its own words, what it is doing or what holds it, with the way to
+   * try it again; the backup also with what it runs on. Which of them runs a task is said by the
+   * sessions under the row and by the task's sidebar.
+   */
+  #team(row, board, now) {
+    const list = element('ul', 'row-team')
+    list.setAttribute('aria-label', `${laneName(row.participant)}'s team`)
+    for (const part of partsOf(row)) {
+      const { participant } = part
+      const backup = part !== row
+      const item = element('li', 'team-part')
+      item.dataset.part = backup ? 'backup' : 'member'
+      const name = element('div', 'team-name')
+      name.append(lamp(part, now), element('span', 'team-handle', `@${participant.handle}`))
+      if (backup) name.append(element('span', 'team-kind', 'backup'))
+      item.append(name)
+      if (backup) item.append(element('span', 'team-meta', runsOn(participant)))
+      if (participant.vacationSince) item.append(element('span', 'team-status', 'on Vacation'))
+      const said = laneStatus(part, board, now)
+      if (said !== null) {
+        const [state, text] = said
+        const status = element('span', 'team-status', text)
+        status.dataset.state = state
+        item.append(status)
+        if (state === 'out' && !part.busy && acts(board)) {
+          item.append(tryAgain(participant, this.#onLane(this.#actions.onTryAgain, participant)))
+        }
+      }
+      list.append(item)
+    }
+    return list
+  }
+
+  /** Unfolds a member's row, its sessions' rows under it and a team's detail, or folds it again. */
+  #foldButton({ participant, sessions, backup }, folded) {
+    const name = laneName(participant)
+    const what = backup
+      ? `${name}'s team${sessions.length === 0 ? '' : ` and ${plural(sessions.length, 'session')}`}`
+      : `${name}'s ${plural(sessions.length, 'session')}`
+    const tip = backup ? (sessions.length === 0 ? 'team' : 'team and sessions') : 'sessions'
     const toggle = iconButton(
       ICONS.fold,
-      folded ? 'Show sessions' : 'Hide sessions',
+      `${folded ? 'Show' : 'Hide'} ${tip}`,
       () => {
         const key = foldKey(this.#board, participant)
         if (!this.#unfolded.delete(key)) this.#unfolded.add(key)
         this.render(this.#drawn)
       },
-      `${folded ? 'Show' : 'Hide'} ${sessionsOf}`,
+      `${folded ? 'Show' : 'Hide'} ${what}`,
       'fold-sessions',
     )
     toggle.setAttribute('aria-expanded', String(!folded))
@@ -1257,9 +1428,10 @@ export class BoardView {
     const name = laneName(participant)
     if (isMember(participant) && acting) {
       const key = `${participant.projectId}:${participant.handle}`
+      const resting = Boolean(participant.vacationSince)
       tools.append(
-        vacationButton(name, Boolean(participant.vacationSince), async () => {
-          const refused = await this.#actions.onVacation(this.#lane(participant).participant)
+        vacationButton(lane.backup ? `${name} and its backup` : name, resting, async () => {
+          const refused = await this.#rest(lane, resting)
           if (refused) this.#vacationErrors.set(key, refused)
           else this.#vacationErrors.delete(key)
           this.render(this.#drawn)
@@ -1303,6 +1475,21 @@ export class BoardView {
       )
     }
     return tools
+  }
+
+  /**
+   * Vacation on the board rests a team, its member and its backup together, and brings it
+   * back together: each part not yet as the press asks, the member first, as the board has it
+   * now; a refusal stops there and is what this says. Project settings keeps each one's own.
+   */
+  async #rest(row, resting) {
+    for (const part of partsOf(row)) {
+      const participant = this.#lane(part.participant).participant
+      if (Boolean(participant.vacationSince) !== resting) continue
+      const refused = await this.#actions.onVacation(participant)
+      if (refused) return refused
+    }
+    return null
   }
 
   /**
@@ -1482,8 +1669,13 @@ export class TaskDrawer {
    * the task, whether that window is closed and whether the human hid it, or
    * null when it has none. `held`: what the task waits on in the background
    * (`{jobs, agents}`), or null when it waits on nothing: the drawer says it.
+   * `backupOf`: the member whose backup runs the task, or null: the board draws a member and
+   * its backup as one, so this is where it says which of the two has it.
    */
-  show(task, { total, closed = false, now = Date.now(), terminal = null, held = null }) {
+  show(
+    task,
+    { total, closed = false, now = Date.now(), terminal = null, held = null, backupOf = null },
+  ) {
     const same = this.#drawn(task)
     const changed = !this.shows(task)
     const head = element('header', 'drawer-head')
@@ -1499,7 +1691,7 @@ export class TaskDrawer {
     const meta = element(
       'p',
       'drawer-meta',
-      `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)} · ${stateLabel({ ...task, held })}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
+      `${who(task.requester)} asked ${task.assignee === null ? `for ${aPool(task)}` : who(task.assignee)}${backupOf === null ? '' : `, the backup of @${backupOf}`} · ${stateLabel({ ...task, held })}${task.deletedAt ? ' · deleted from the board' : ''} · updated ${ago(task.updatedAt, now)}${task.needs.length === 0 ? '' : ` · needs ${task.needs.map((need) => `T-${need.number} (${need.state})`).join(', ')}`}`,
     )
     this.#terminal = terminal
     const top = [head, meta]

@@ -534,11 +534,31 @@ tr[data-session] .row-name { font-weight: 500; }
 .row-status { display: block; margin-top: 6px; font: 600 11px var(--mono); color: var(--muted); }
 .try-again { margin-top: 6px; padding: 2px 9px; font-size: 12px; }
 .terminal-about .try-again { margin: 0 0 0 8px; }
-:is(.row-status, .terminal-status)[data-state="working"] { color: var(--violet); }
-:is(.row-status, .terminal-status)[data-state="waiting"] { color: var(--amber); }
+:is(.row-status, .terminal-status, .team-status)[data-state="working"] { color: var(--violet); }
+:is(.row-status, .terminal-status, .team-status)[data-state="waiting"] { color: var(--amber); }
 /* A window at rest whose task goes on in the background: waiting, not idle. */
-:is(.row-status, .terminal-status)[data-state="held"] { color: var(--amber); }
-:is(.row-status, .terminal-status):is([data-state="out"], [data-state="missing"], [data-state="unstopped"]) { color: var(--danger); }
+:is(.row-status, .terminal-status, .team-status)[data-state="held"] { color: var(--amber); }
+:is(.row-status, .terminal-status, .team-status):is([data-state="out"], [data-state="missing"], [data-state="unstopped"]) { color: var(--danger); }
+/* A member and its backup are one row, a team. Unfolded, its detail is under the team's line,
+   set off by the rule a session's row has: each part with a smaller lamp, the backup marked as
+   one and with what it runs on, and each in its own words, coloured as a row's status. */
+.row-team { display: grid; gap: 8px; margin: 9px 0 0; padding: 1px 0 1px 10px; list-style: none; border-left: 3px solid var(--line); }
+.team-part { min-width: 0; }
+.team-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.team-name .lamp { width: 8px; height: 8px; }
+.team-handle { min-width: 0; font: 600 11px/1.35 var(--mono); color: var(--text); overflow-wrap: anywhere; }
+.team-kind {
+  padding: 2px 6px 1px;
+  border: 1px solid rgba(167, 139, 250, .45);
+  border-radius: 999px;
+  font: 600 9px/1.2 var(--mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--violet);
+}
+.team-meta { display: block; margin-top: 3px; font: 11px/1.45 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.team-status { display: block; margin-top: 3px; font: 600 11px/1.4 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.team-part .try-again { margin-top: 5px; }
 .row-tools { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 /* A button stays in its column: a label too long for it wraps. */
 .row-tools > button { max-width: 100%; white-space: normal; }

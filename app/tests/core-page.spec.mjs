@@ -17278,7 +17278,7 @@ test('BKV05 New project says a copied member and backup are on Vacation and brin
   expect(staff.find((row) => row.backupOf === 30).vacationSince).toBeFalsy()
 })
 
-test('BKV05 board names a resting member, its ready backup and an idle backup', async ({
+test('BKV05 board names a resting member, and a team whose ready backup takes its tasks', async ({
   page,
 }) => {
   const data = model()
@@ -17301,32 +17301,31 @@ test('BKV05 board names a resting member, its ready backup and an idle backup', 
   await open(page, data)
   const zeus = page.locator('tr[data-handle="zeus"]')
   const owner = page.locator('tr[data-handle="diana"]')
-  const backup = page.locator('tr[data-handle="hera"]')
   await expect(zeus).toContainText('on Vacation')
-  await expect(owner).toContainText('@hera, its backup, takes its tasks')
-  await expect(backup).toContainText('backup of @diana')
-  await expect(backup.locator('.row-status')).toHaveCount(0)
+  // diana and hera, its backup, are one member (T-1793): hera can take work, so the team is
+  // free, and who takes whose tasks is in its detail.
+  await expect(page.locator('tr[data-handle="hera"]')).toHaveCount(0)
+  await expect(owner.locator('.row-status')).toHaveCount(0)
+  await owner.getByRole('button', { name: "Show @diana's team" }).click()
+  await expect(owner.getByRole('list', { name: "@diana's team" })).toContainText(
+    '@hera, its backup, takes its tasks',
+  )
   if (process.env.CF_BKV05_SHOTS)
     await page
       .getByRole('table', { name: 'Tasks' })
       .screenshot({ path: `${process.env.CF_BKV05_SHOTS}/board-vacation.png` })
-  await backup.getByText('Send on Vacation', { exact: true }).click()
-  await expect(backup).toContainText('on Vacation')
-  await backup.getByText('Bring back', { exact: true }).click()
   await zeus.getByText('Bring back', { exact: true }).click()
   await expect
     .poll(() => calls(page, 'member.vacation_back'))
-    .toEqual([
-      { project: 1, member: 'hera' },
-      { project: 1, member: 'zeus' },
-    ])
-  await owner.getByText('Send on Vacation', { exact: true }).click()
+    .toEqual([{ project: 1, member: 'zeus' }])
+  await owner.getByRole('button', { name: 'Send @diana and its backup on Vacation' }).click()
   await expect
     .poll(() => calls(page, 'member.vacation'))
     .toEqual([
-      { project: 1, member: 'hera' },
       { project: 1, member: 'diana' },
+      { project: 1, member: 'hera' },
     ])
+  await expect(owner.locator('.row-status', { hasText: 'on Vacation' })).toHaveCount(1)
 })
 
 test('BKV05 settings says a Vacation refusal where it was pressed', async ({ page }) => {
@@ -17366,6 +17365,229 @@ test('BKV05 the board says a Vacation refusal on the row where it was pressed', 
   const row = page.locator('tr[data-handle="zeus"]')
   await row.getByText('Send on Vacation', { exact: true }).click()
   await expect(row).toContainText('This member cannot go on Vacation.')
+})
+
+/**
+ * T-1793: a member and its backup are one member on the board, a team (the owner, 2026-11-18:
+ * "they should behave like a team; so same status same way just one member"). Harbour's diana,
+ * a worker on Codex, with hera as its backup; `out` is until when each is out of quota, and each
+ * handle in `working` has a session at work on a task of its own (diana's T-21, hera's T-22).
+ */
+function team({ out = {}, working = [] } = {}) {
+  const data = model()
+  const lanes = data.boards[1].lanes
+  const dianaLane = lanes.find((lane) => lane.participant.handle === 'diana')
+  const diana = dianaLane.participant
+  diana.outUntil = out.diana ?? null
+  const hera = participant(11, 'hera', 'worker', {
+    harness: 'codex',
+    tier: 'light',
+    backupOf: diana.id,
+    outUntil: out.hera ?? null,
+  })
+  lanes.push({ participant: hera, tasks: [], activity: { state: 'closed' }, pane: null })
+  const windows = {
+    diana: [diana, 12, 'amber-pine', 21, 'Write the lexer'],
+    hera: [hera, 13, 'brisk-birch', 22, 'Write the parser docs'],
+  }
+  for (const handle of working) {
+    const [member, id, name, number, title] = windows[handle]
+    const window = session(id, member, name)
+    const work = task(number, title, 'working', 'chief', window.handle, 2, {
+      pool: 'worker',
+      tier: 'light',
+      session: window.handle,
+    })
+    lanes.push({
+      participant: window,
+      tasks: [work],
+      activity: { state: 'working' },
+      pane: { id: `p1-${window.handle}`, generation: 3 },
+    })
+    data.tasks[`1:${number}`] = {
+      ...work,
+      messages: [message(30 + number, 'task', 'chief', window.handle, title, 2)],
+    }
+  }
+  return { data, dianaLane }
+}
+
+/** A reset `days` from now, as the ledger keeps one. */
+const fromNow = (days) => new Date(Date.now() + days * 86_400_000).toISOString()
+
+/** How a lane says a reset within the week, `iso`: "Thu 17:45". */
+const resetWords = (page, iso) =>
+  page.evaluate((iso) => {
+    const at = new Date(iso)
+    const time = at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+    return `${at.toLocaleDateString([], { weekday: 'short' })} ${time}`
+  }, iso)
+
+/**
+ * T-1793's screenshots, of the board's table with the terminals hidden and the page as it was
+ * after, where `CF_T1793_SHOTS` names a folder.
+ */
+async function teamShot(page, name) {
+  if (!process.env.CF_T1793_SHOTS) return
+  const size = page.viewportSize()
+  const dock = page.locator('#toggle-dock')
+  const docked = (await dock.getAttribute('aria-pressed')) === 'true'
+  await page.setViewportSize({ width: 1500, height: 1200 })
+  if (docked) await dock.click()
+  await page
+    .getByRole('table', { name: 'Tasks' })
+    .screenshot({ path: `${process.env.CF_T1793_SHOTS}/${name}.png` })
+  if (docked) await dock.click()
+  await page.setViewportSize(size)
+}
+
+test('T1793 a member and its backup at work are one lane: one lamp, one status, both tasks', async ({
+  page,
+}) => {
+  const { data } = team({ working: ['diana', 'hera'] })
+  await open(page, data)
+  await teamShot(page, 'both-at-work')
+  await expect(page.locator('tr[data-handle="hera"]')).toHaveCount(0)
+  const lane = page.locator('tr[data-handle="diana"]')
+  await expect(lane).toHaveCount(1)
+  await expect(lane.getByTestId('lamp')).toHaveCount(1)
+  await expect(lane.locator('.row-status')).toHaveText('2 terminals open, one per task')
+  for (const number of [21, 22]) {
+    await expect(
+      lane.locator(`td[data-state="working"] button.card[data-task="${number}"]`),
+    ).toHaveCount(1)
+  }
+  await expect(page.getByText('backup of @diana')).toHaveCount(0)
+  // The group counts the team as one member: zeus and diana.
+  await expect(page.locator('tbody[data-group="worker"] .group-count')).toHaveText('2 members')
+})
+
+test('T1793 a member with an idle backup is drawn as a member without one, its team a click away', async ({
+  page,
+}) => {
+  const { data } = team()
+  await open(page, data)
+  await teamShot(page, 'idle-backup')
+  await expect(page.locator('tr[data-handle="hera"]')).toHaveCount(0)
+  const lane = page.locator('tr[data-handle="diana"]')
+  await expect(lane.locator('.row-meta')).toHaveText(/^worker · light · Codex/)
+  await expect(lane.locator('.row-status')).toHaveCount(0)
+  await expect(lane.getByRole('list', { name: "@diana's team" })).toHaveCount(0)
+  await lane.getByRole('button', { name: "Show @diana's team" }).click()
+  const detail = lane.getByRole('list', { name: "@diana's team" })
+  await expect(detail.getByRole('listitem')).toHaveCount(2)
+  await expect(detail.getByRole('listitem').nth(0)).toHaveText('@diana')
+  await expect(detail.getByRole('listitem').nth(1)).toHaveText(
+    '@herabackupCodex · gpt-6-astra · max',
+  )
+  await teamShot(page, 'idle-backup-team')
+  await lane.getByRole('button', { name: "Hide @diana's team" }).click()
+  await expect(detail).toHaveCount(0)
+})
+
+test('T1793 a member out of quota while its backup works reads as at work, the detail in reach', async ({
+  page,
+}) => {
+  const reset = fromNow(2)
+  const { data, dianaLane } = team({ out: { diana: reset }, working: ['hera'] })
+  // As the daemon says it: hera would take a task of diana's now.
+  dianaLane.backupReady = { worker: 'hera' }
+  await open(page, data)
+  await teamShot(page, 'member-out-backup-at-work')
+  await expect(page.locator('tr[data-handle="hera"]')).toHaveCount(0)
+  const lane = page.locator('tr[data-handle="diana"]')
+  await expect(lane.getByTestId('lamp')).toHaveAttribute('data-state', 'closed')
+  await expect(lane.locator('.row-status')).toHaveText('1 terminal open, one per task')
+  await expect(lane.locator('.row-status')).toHaveAttribute('data-state', 'closed')
+  await expect(lane.locator('td[data-state="working"] button.card[data-task="22"]')).toHaveCount(1)
+  await expect(lane.getByRole('button', { name: /^Try / })).toHaveCount(0)
+  // The team's detail: who is out and until when, who takes its tasks, and the way back.
+  await lane.getByRole('button', { name: "Show @diana's team and 1 session" }).click()
+  const parts = lane.getByRole('list', { name: "@diana's team" }).getByRole('listitem')
+  const until = await resetWords(page, reset)
+  await expect(parts.nth(0)).toContainText(`Out of quota until ${until}`)
+  await expect(parts.nth(0)).toContainText('@hera, its backup, takes its tasks')
+  await expect(parts.nth(0).getByTestId('lamp')).toHaveAttribute('data-state', 'out')
+  await expect(parts.nth(1)).toContainText('@hera')
+  await expect(parts.nth(1)).toContainText('1 terminal open, one per task')
+  await teamShot(page, 'member-out-backup-at-work-team')
+  await parts
+    .nth(0)
+    .getByRole('button', { name: 'Try @diana again now, before its quota resets' })
+    .click()
+  await expect
+    .poll(() => calls(page, 'member.back'))
+    .toEqual([{ project: 1, participant: 'diana' }])
+  // The backup's window is one of the team's sessions, which says whose it is and shows.
+  const window = page.locator('tr[data-handle="hera-brisk-birch"]')
+  await expect(window.locator('.row-meta')).toContainText('worker session of @hera, the backup')
+  await window.getByRole('button', { name: "Show @hera · brisk-birch's terminal" }).click()
+  await expect(page.locator('#stage .terminal-card[data-handle="hera-brisk-birch"]')).toHaveCount(1)
+  // The task's sidebar says it went to the backup.
+  await window.locator('button.card[data-task="22"]').click()
+  await expect(
+    page.getByRole('complementary', { name: 'Task T-22' }).locator('.drawer-meta'),
+  ).toContainText('@chief asked @hera-brisk-birch, the backup of @diana')
+})
+
+test('T1793 a member and its backup both out read as out until the first is back, and Try again tries both', async ({
+  page,
+}) => {
+  const first = fromNow(1.5)
+  const { data } = team({ out: { diana: fromNow(2.5), hera: first } })
+  await open(page, data)
+  await teamShot(page, 'both-out')
+  await expect(page.locator('tr[data-handle="hera"]')).toHaveCount(0)
+  const lane = page.locator('tr[data-handle="diana"]')
+  await expect(lane.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
+  const until = await resetWords(page, first)
+  await expect(lane.locator('.row-status')).toHaveText(
+    `Out of quota until ${until}; renewed early? Try again now`,
+  )
+  await lane.getByRole('button', { name: 'Try @diana and its backup again now' }).click()
+  await expect
+    .poll(() => calls(page, 'member.back'))
+    .toEqual([
+      { project: 1, participant: 'diana' },
+      { project: 1, participant: 'hera' },
+    ])
+})
+
+test('T1793 Vacation on the board rests the team, and a folded group counts the team as one', async ({
+  page,
+}) => {
+  const { data, dianaLane } = team({ out: { diana: fromNow(2) } })
+  dianaLane.backupReady = { worker: 'hera' }
+  data.openGroups = false
+  await open(page, data)
+  const group = page.locator('tbody[data-group="worker"]')
+  await expect(group.locator('.group-count')).toHaveText('2 members')
+  // diana is out and hera takes its tasks: the team is not out.
+  await expect(group.locator('.group-mark[data-mark="out"]')).toHaveCount(0)
+  await changed(page, () => {
+    const hera = window.__model.boards[1].lanes.find((lane) => lane.participant.handle === 'hera')
+    hera.participant.outUntil = new Date(Date.now() + 86_400_000).toISOString()
+    delete window.__model.boards[1].lanes.find((lane) => lane.participant.handle === 'diana')
+      .backupReady
+  })
+  await expect(group.locator('.group-mark[data-mark="out"]')).toHaveText('1 out of quota')
+  await group.getByRole('button', { name: /Workers/ }).click()
+  const lane = page.locator('tr[data-handle="diana"]')
+  await lane.getByText('Send on Vacation', { exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'member.vacation'))
+    .toEqual([
+      { project: 1, member: 'diana' },
+      { project: 1, member: 'hera' },
+    ])
+  await expect(lane.locator('.row-status', { hasText: 'on Vacation' })).toHaveCount(1)
+  await lane.getByText('Bring back', { exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'member.vacation_back'))
+    .toEqual([
+      { project: 1, member: 'diana' },
+      { project: 1, member: 'hera' },
+    ])
 })
 
 test('BKV05 a task held in an out member window keeps its quota hold with a backup', async ({
