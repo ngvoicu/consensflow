@@ -24,11 +24,14 @@ const LINK_KEY = MAC ? 'Cmd' : 'Ctrl'
  */
 const opensLink = (event) => event.button === 0 && (MAC ? event.metaKey : event.ctrlKey)
 
+// Pi's recorded output uses one padding column; leave three more for the other harnesses.
+const PLAIN_LINK_EDGE_COLUMNS = 4
+
 /**
  * Find visible plain addresses in the terminal's buffer. Join only rows xterm marks as a
- * soft wrap, and return the same whole address from each row it crosses. A hard row break
- * carries no such promise: an address ending at the window edge, or at a hard break without
- * visible text after it, is left unlinked. Rows with table borders are left alone as well.
+ * soft wrap, and return the same whole address from each row it crosses. An address ending
+ * in the edge zone with nothing visible after it is left unlinked: a harness might continue it
+ * on a hard row. Rows with table borders are left alone as well.
  * Screen layouts can still hide a continuation behind another column (the stated limit).
  */
 function plainWebLinks(terminal, link) {
@@ -87,17 +90,14 @@ function plainWebLinks(terminal, link) {
         // token we would have to guess how to trim. URL() alone silently accepts backslashes
         // and malformed percent escapes; do not let it repair what the program printed.
         if (before && !/[\s([{<'"=]/u.test(before)) continue
-        if (to.x >= terminal.cols - 2 || url.length > 2048) continue
-        // A hard row ending with an address could be a program's own unfinished row. xterm's
-        // soft wraps carry the continuation marker, so an address crossing them can end whole.
-        if (
-          from.y === to.y &&
-          !buffer
-            .getLine(to.y - 1)
-            .translateToString(true, to.x + 1)
-            .trim()
-        )
-          continue
+        if (url.length > 2048) continue
+        // A harness may hard-wrap just inside the right edge; if visible text follows on
+        // the same row it has ended the address, even inside the zone.
+        const after = buffer
+          .getLine(to.y - 1)
+          .translateToString(true, to.x + 1)
+          .trim()
+        if (!after && to.x >= terminal.cols - PLAIN_LINK_EDGE_COLUMNS) continue
         if (
           url.includes('\\') ||
           [...url].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)

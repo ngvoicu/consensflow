@@ -5628,33 +5628,85 @@ test.describe('R12: plain web addresses', () => {
     await expect.poll(() => linksOpened(page)).toEqual([good])
   })
 
-  test('an address with no visible end before a hard row break is not clickable', async ({
+  test('a Claude Code plain address alone on a row opens when it ends away from the edge', async ({
     page,
   }) => {
     await replayPage(page)
-    const partial = 'https://example.org/unfinished'
-    const place = await replaying(page, `${partial}\r\n`, 80)
-    const point = { x: place.left + 6.5 * place.cell, y: place.top + 0.5 * place.row }
+    // Claude's formatter writes the address itself when its label is the address. Take the
+    // exact destination from the recorded Claude formatter case and print that bare form.
+    const url = HARNESS_CASES.find((item) => item.id === 'claude-wiki-plain').destination
+    const place = await replaying(page, `${url}\r\n`, 80)
+    const point = { x: place.left + 8.5 * place.cell, y: place.top + 0.5 * place.row }
     await page.mouse.move(point.x, point.y)
-    await afterFrames(page)
+    await expect
+      .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+      .toBe(`Cmd+click to open ${url}`)
     await clickWith(page, point, ['Meta'])
-    await afterFrames(page)
-    expect(await page.evaluate(() => window.replayOpened)).toEqual([])
+    await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual([url])
   })
 
-  test('a hard-wrapped address on short rows is never opened as its first fragment', async ({
+  test('an undelimited address inside the four-column edge zone is not clickable', async ({
     page,
   }) => {
     await replayPage(page)
-    const full = 'https://example.org/partial/rest'
-    const place = await replaying(page, 'https://example.org/partial\r\n/rest', 80)
+    const prefix = 'https://example.org/'
+    for (const endColumn of [77, 78, 79, 80]) {
+      const url = prefix + 'a'.repeat(endColumn - prefix.length)
+      const place = await replaying(page, `${url}\r\n`, 80)
+      const point = { x: place.left + 6.5 * place.cell, y: place.top + 0.5 * place.row }
+      await page.mouse.move(1390, 790)
+      await page.mouse.move(point.x, point.y)
+      await afterFrames(page)
+      await clickWith(page, point, ['Meta'])
+      await afterFrames(page)
+      expect(await page.evaluate(() => window.replayOpened), `last column ${endColumn}`).toEqual([])
+    }
+    // One column outside the zone is a link, so the check is not satisfied by refusing all.
+    const url = prefix + 'a'.repeat(76 - prefix.length)
+    const place = await replaying(page, `${url}\r\n`, 80)
+    const point = { x: place.left + 6.5 * place.cell, y: place.top + 0.5 * place.row }
+    await page.mouse.move(1390, 790)
+    await page.mouse.move(point.x, point.y)
+    await expect
+      .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+      .toBe(`Cmd+click to open ${url}`)
+    await clickWith(page, point, ['Meta'])
+    await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual([url])
+  })
+
+  test('the accepted borderless-column ambiguity follows the visible first-row address', async ({
+    page,
+  }) => {
+    await replayPage(page)
+    for (const [printed, visible] of [
+      ['https://example.org/partial   STATUS\r\n/rest', 'https://example.org/partial'],
+      ['https://example   STATUS\r\n.org/path', 'https://example'],
+    ]) {
+      const place = await replaying(page, printed, 80)
+      const point = { x: place.left + 6.5 * place.cell, y: place.top + 0.5 * place.row }
+      await page.mouse.move(1390, 790)
+      await page.mouse.move(point.x, point.y)
+      await expect
+        .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+        .toBe(`Cmd+click to open ${visible}`)
+      await clickWith(page, point, ['Meta'])
+      await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual([visible])
+    }
+  })
+
+  test('an address in the edge zone with visible text after it is clickable', async ({ page }) => {
+    await replayPage(page)
+    const prefix = 'https://example.org/'
+    const url = prefix + 'a'.repeat(78 - prefix.length)
+    // The closing parenthesis is visible in the last column; the address itself ends at 79.
+    const place = await replaying(page, `(${url})`, 80)
     const point = { x: place.left + 6.5 * place.cell, y: place.top + 0.5 * place.row }
     await page.mouse.move(point.x, point.y)
-    await afterFrames(page)
+    await expect
+      .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+      .toBe(`Cmd+click to open ${url}`)
     await clickWith(page, point, ['Meta'])
-    await afterFrames(page)
-    const opened = await page.evaluate(() => window.replayOpened)
-    expect(opened.filter((value) => value !== full)).toEqual([])
+    await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual([url])
   })
 
   test('an address xterm wraps opens whole from either row', async ({ page }) => {
