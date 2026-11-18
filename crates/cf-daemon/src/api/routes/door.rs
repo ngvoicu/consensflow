@@ -10,8 +10,9 @@
 //! anything across the wait. A door of a closed project waits as one with no
 //! answer yet does, whatever came: its answer is kept for the Resume (the
 //! ledger's `claim_answer`). A door that was shut by a pause, or by the
-//! acceptance of its task, is told so at once (409 `door-closed`), in words its
-//! model is to take as they are, the task's state deciding which; a
+//! move, completion, cancellation, failure or acceptance of its task, is told
+//! so at once (409 `door-closed`), in words that say whether an answer may still
+//! come; a
 //! daemon that is stopping, a window that exited (its token revoked), and a
 //! client that has gone (the server runs a handler on after its client left)
 //! end the wait with no answer and claim nothing: an answer claimed for
@@ -24,7 +25,7 @@
 use std::time::Duration;
 
 use cf_base::js;
-use cf_ledger::{Claim, MessageView};
+use cf_ledger::{Claim, MessageView, TaskView, MOVED_QUESTION};
 use serde_json::{json, Value};
 use tokio::time::{sleep, Instant};
 
@@ -89,15 +90,20 @@ pub(super) async fn handle(
                 return answered(&asked, &answer);
             }
             Claim::Closed => {
-                let accepted = match asked.task_number {
-                    Some(number) => context
-                        .ledger
-                        .borrow()
-                        .task(caller.project.id, number)?
-                        .is_some_and(|thread| thread.task.state == "accepted"),
-                    None => false,
+                // The task may have moved while this poll waited. Read the question
+                // again as well: its withdrawal reason changed in that same step.
+                let (current, task) = {
+                    let ledger = context.ledger.borrow();
+                    let current = ledger.message(asked.id)?.unwrap_or_else(|| asked.clone());
+                    let task = match asked.task_number {
+                        Some(number) => ledger
+                            .task(caller.project.id, number)?
+                            .map(|thread| thread.task),
+                        None => None,
+                    };
+                    (current, task)
                 };
-                return Err(shut(&asked, accepted));
+                return Err(shut(&current, task.as_ref()));
             }
             Claim::Waiting => {}
         }
@@ -129,17 +135,34 @@ fn answered(asked: &MessageView, answer: &MessageView) -> Result<Answer, Failure
     })))
 }
 
-/// The door is shut, and the words its model is told say why, whole: its task was
-/// stopped, and the answer comes to the window as a message when the task goes on;
-/// or its task was accepted (`accepted`), which goes on no more, so nothing waits on
-/// the question and no answer will come.
-fn shut(asked: &MessageView, accepted: bool) -> Failure {
+/// A shut door says whether its question can still be answered on a later turn.
+fn shut(asked: &MessageView, task: Option<&TaskView>) -> Failure {
     let id = asked.id;
-    let words = match (asked.task_number, accepted) {
-        (Some(task), true) => format!(
+    let state = task.map(|task| task.state.as_str());
+    let moved = asked.reason.as_deref() == Some(MOVED_QUESTION);
+    let finished = asked
+        .task_number
+        .is_some_and(|number| asked.reason.as_deref() == Some(&format!("T-{number} was finished")));
+    let words = match (asked.task_number, state) {
+        (Some(task), Some("accepted")) => format!(
             "T-{task} is accepted, so nothing waits on m-{id}: it is not answered here and no answer will come. Do not ask it again; end your turn now."
         ),
-        (Some(task), false) => format!(
+        (Some(task), Some("cancelled")) => format!(
+            "T-{task} is cancelled, so nothing waits on m-{id}: it is not answered here and no answer will come. Do not ask it again; end your turn now."
+        ),
+        (Some(task), _) if moved => format!(
+            "T-{task} moved to a new window that starts over, so nothing waits on m-{id}: it is not answered here and no answer will come. Do not ask it again; end your turn now."
+        ),
+        (Some(task), Some("done")) if finished => format!(
+            "T-{task} is done, so nothing waits on m-{id}: it is not answered here and no answer will come. Do not ask it again; end your turn now."
+        ),
+        (Some(task), _) if finished => format!(
+            "T-{task} was finished, so nothing waits on m-{id}: it is not answered here and no answer will come. Do not ask it again; end your turn now."
+        ),
+        (Some(task), Some("failed")) => format!(
+            "T-{task} failed, so m-{id} is not answered here. If it is reopened in this window, the chief can decide what to send. Do not ask it again; end your turn now."
+        ),
+        (Some(task), _) => format!(
             "T-{task} was stopped, so m-{id} is not answered here: its answer comes to you as a message when the task goes on. Do not ask it again; end your turn now."
         ),
         (None, _) => format!(

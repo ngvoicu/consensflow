@@ -51,13 +51,21 @@ find = '''
             .collect::<Result<Vec<_>, _>>()?;
         for (task, _) in &open {
             drop_queued(store, task.id)?;
+            withdraw_open_questions(store, task, "was cancelled")?;
             store.move_task(task, "cancelled", json!({ "reason": reason }))?;
+            if let Some(window) = task.assignee_id {
+                shut_doors(store, task, window)?;
+            }
         }
 '''
 replace = '''
         for (task, _) in &open {
             drop_queued(store, task.id)?;
+            withdraw_open_questions(store, task, "was cancelled")?;
             store.move_task(task, "cancelled", json!({ "reason": reason }))?;
+            if let Some(window) = task.assignee_id {
+                shut_doors(store, task, window)?;
+            }
         }
         let dropped = open
             .iter()

@@ -121,9 +121,7 @@ pub(crate) fn left_running(
 /// The states a task can be finished at the word of the chief or the human.
 const FINISHABLE_TASK_STATES: [&str; 3] = ["working", "waiting", "paused"];
 
-/// `finished_by_word`: the chief or the human finishes the task, so its window's open
-/// questions are withdrawn with the move; the window's own result leaves them to be
-/// answered until the task is accepted.
+/// `finished_by_word`: the chief or the human finishes the task, rather than the window.
 fn record(
     store: &mut Store,
     project_id: i64,
@@ -210,12 +208,9 @@ fn record_counted(
             withdraw_paused_answers(store, &task, "finished")?;
             leave_pause_notes(store, &task, "finished", Afterwards::MovesOn)?;
         }
-        // Finished at a word with a question of its window still open (it waited for the
-        // answer, or was paused on it), nobody waits for the answer any more: the question is
-        // withdrawn, and `cf answer` no longer reaches it (T-1119).
-        if finished_by_word {
-            withdraw_open_questions(store, &task, "was finished")?;
-        }
+        // A result leaves the window free to close. Its open questions no longer
+        // wait, whether the window gave the result or the chief took its words.
+        withdraw_open_questions(store, &task, "was finished")?;
         let message_id = queue(
             store,
             project_id,
@@ -236,9 +231,8 @@ fn record_counted(
         };
         store.move_task(&task, "done", detail)?;
         release_ready(store, project_id)?;
-        // A question its window asked through its harness's tool, still open at its door, is
-        // shut out of waiting as an acceptance does.
-        if let (true, Some(assignee)) = (finished_by_word, task.assignee_id) {
+        // A question at a harness door is shut out of waiting as on acceptance.
+        if let Some(assignee) = task.assignee_id {
             shut_doors(store, &task, assignee)?;
         }
         Ok(TaskMoved {
@@ -332,6 +326,9 @@ fn accepted(
             ],
         )?;
     }
+    // A result can arrive while its window's question is still queued for the
+    // chief. Acceptance ends that question too, before it can be delivered.
+    withdraw_open_questions(store, task, "was accepted")?;
     let detail = match checked {
         // The words are the result, held by the one who wrote them: no hand-off, so no gate.
         Some((author, words)) => {
@@ -738,10 +735,16 @@ pub(crate) fn call_off(
             ],
         )?;
     }
+    // A question already delivered to the chief was not among the rows dropped
+    // above. Neither it nor its harness door waits once the task is cancelled.
+    withdraw_open_questions(store, &task, "was cancelled")?;
     // A note of several that names it, still queued, names it no more.
     leave_pause_notes(store, &task, "cancelled", Afterwards::MovesOn)?;
     say_again(store, &task, "cancelled", warnings)?;
     store.move_task(&task, "cancelled", json!({ "by": by }))?;
+    if let Some(window) = task.assignee_id {
+        shut_doors(store, &task, window)?;
+    }
     release_ready(store, project_id)?;
     Ok(CalledOff {
         task,
@@ -1106,6 +1109,9 @@ fn fail(
         put_back_paused_answers(store, &answers)?;
         recover_after_lost_answer(store, &task, None, true)?;
         store.move_task(&task, "failed", json!({ "reason": reason }))?;
+        if let Some(window) = task.assignee_id {
+            shut_doors(store, &task, window)?;
+        }
         release_ready(store, project_id)?;
         let requester = store.participant_row(task.requester_id)?;
         let failed = |waiting: String| {

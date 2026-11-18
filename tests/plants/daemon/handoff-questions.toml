@@ -4,7 +4,7 @@
 # `cancelled`), and four hours later the handoff listed the question under "What waits on you
 # now". `chief_open_work` (`crates/cf-ledger/src/conversations/chief.rs`) lists a question the
 # chief has no live answer to, and now only while its task is not over: accepted, cancelled or
-# failed. A question on a task that is open, queued, working, waiting, paused or done, and one
+# failed. A question on a task that is open, queued, working, waiting or paused, and one
 # on no task, is listed as it was; an answer cancelled for another reason (withdrawn while the
 # task goes on) leaves its question listed.
 #
@@ -127,14 +127,14 @@ find = "reopen T-{number} to go on with it"
 replace = "nothing more to do with it"
 
 [[plant]]
-name = "handoff questions: a task done and not yet decided on takes no answer either"
-meant = "a_question_on_a_task_that_is_done_but_not_accepted_still_takes_its_answer"
+name = "handoff questions: a task done and not yet decided on takes an answer"
+meant = "a_question_on_a_task_that_is_done_but_not_accepted_takes_no_answer"
 runs = ["handoff-open-work"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/messages.rs"
-find = "if FINISHED_TASK_STATES.contains(&task.state.as_str()) {"
-replace = 'if FINISHED_TASK_STATES.contains(&task.state.as_str()) || task.state == "done" {'
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = '        withdraw_open_questions(store, &task, "was finished")?;'
+replace = '        // The old question stays open.'
 
 [[plant]]
 name = "handoff questions: a failed answer stands, so the list drops a question that waits for another"
@@ -204,8 +204,8 @@ runs = ["daemon-lib-routes-door"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/door.rs"
-find = '.is_some_and(|thread| thread.task.state == "accepted"),'
-replace = '.is_some_and(|thread| thread.task.state == "accepted" && false),'
+find = '(Some(task), Some("accepted")) => format!('
+replace = '(Some(task), Some("accepted")) if false => format!('
 
 [[plant]]
 name = "handoff questions: every door that is shut is told its task is accepted, a pause's too"
@@ -214,8 +214,8 @@ runs = ["daemon-lib-routes-door"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/door.rs"
-find = "return Err(shut(&asked, accepted));"
-replace = "return Err(shut(&asked, accepted || asked.task_number.is_some()));"
+find = 'let state = task.map(|task| task.state.as_str());'
+replace = 'let state = task.map(|_| "accepted");'
 
 [[plant]]
 name = "handoff questions: a door a pause shut on a task accepted since is told it was stopped (the stop that shut it decides, not the state now)"
@@ -224,5 +224,5 @@ runs = ["daemon-lib-routes-door"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/door.rs"
-find = '.is_some_and(|thread| thread.task.state == "accepted"),'
-replace = '.is_some_and(|thread| thread.task.state == "accepted" && thread.task.paused_at.is_none()),'
+find = '.map(|thread| thread.task)'
+replace = '.map(|mut thread| { if thread.task.state == "accepted" && thread.task.paused_at.is_some() { thread.task.state = "paused".to_owned(); } thread.task })'

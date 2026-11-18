@@ -115,21 +115,18 @@ runs = ["qnr-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''        if finished_by_word {
-            withdraw_open_questions(store, &task, "was finished")?;
-        }
-'''
+find = '        withdraw_open_questions(store, &task, "was finished")?;'
 replace = ''
 
 [[plant]]
 name = "questions not results: a withdrawn question is answered"
-meant = "a_waiting_task_finished_withdraws_its_open_question_and_the_chief_cannot_answer_it"
+meant = "a_failed_prior_answer_does_not_revive_a_finished_question_on_reopen"
 runs = ["qnr-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages.rs"
-find = '        if question.state == "cancelled" && !has_any_answer(store, question_id)? {'
-replace = '        if false {'
+find = '        if question.state == "cancelled" && (finished || !has_any_answer(store, question_id)?) {'
+replace = '        if question.state == "cancelled" && !has_any_answer(store, question_id)? {'
 
 [[plant]]
 name = "questions not results: a withdrawal takes a question that has an answer"
@@ -160,18 +157,8 @@ runs = ["qnr-ledger-answers"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages.rs"
-find = '        if question.state == "cancelled" && !has_any_answer(store, question_id)? {'
+find = '        if question.state == "cancelled" && (finished || !has_any_answer(store, question_id)?) {'
 replace = '        if question.state == "cancelled" {'
-
-[[plant]]
-name = "questions not results: the window's own result withdraws its question"
-meant = "the_windows_own_done_leaves_its_open_question_to_be_answered_as_it_always_did"
-runs = ["qnr-ledger"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '    record(store, project_id, number, body, &ACTIVE_TASK_STATES, false)'
-replace = '    record(store, project_id, number, body, &ACTIVE_TASK_STATES, true)'
 
 [[plant]]
 name = "questions not results: a Finish leaves the door of a question open"
@@ -180,7 +167,7 @@ runs = ["qnr-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''        if let (true, Some(assignee)) = (finished_by_word, task.assignee_id) {
+find = '''        if let Some(assignee) = task.assignee_id {
             shut_doors(store, &task, assignee)?;
         }
 '''

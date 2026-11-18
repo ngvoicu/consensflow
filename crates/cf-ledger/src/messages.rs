@@ -39,9 +39,13 @@ use crate::store::Store;
 use crate::tasks::{pause_task_naming, paused_by_consensflow, take_over_pause};
 use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
 
+/// The durable withdrawal reason of a question whose task left its window.
+pub const MOVED_QUESTION: &str = "the task moved to another window";
+
 pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{
-    adopt, fold, reconcile_released, release_carried, release_stranded, transfer,
+    adopt, fold, reconcile_released, release_carried, release_stranded, retire_old_moved_questions,
+    transfer,
 };
 pub use continuations::{
     continuation, continuation_in, continuation_tasks, cut_turn, cut_turn_unquoted,
@@ -304,6 +308,9 @@ pub(crate) fn answer(
             ));
         }
         if let Some(task) = message_task(store, question_id)? {
+            if question.reason.as_deref() == Some(MOVED_QUESTION) {
+                return Err(moved_task_takes_no_answer(store, &task)?);
+            }
             if FINISHED_TASK_STATES.contains(&task.state.as_str()) {
                 return Err(finished_task_takes_no_answer(&task));
             }
@@ -318,7 +325,10 @@ pub(crate) fn answer(
         // A question the ledger withdrew with no answer ever given (its task was finished
         // while it was open) is answered by no one: its words, if the chief took them, are the
         // result. One whose answer failed or was cancelled still obliges, and takes another.
-        if question.state == "cancelled" && !has_any_answer(store, question_id)? {
+        let finished = message_task(store, question_id)?.is_some_and(|task| {
+            question.reason.as_deref() == Some(&format!("T-{} was finished", task.number))
+        });
+        if question.state == "cancelled" && (finished || !has_any_answer(store, question_id)?) {
             return Err(LedgerError::refused_with(
                 "question-withdrawn",
                 format!(
@@ -388,6 +398,52 @@ pub(crate) fn answer(
     })
 }
 
+/// The task may have moved again since the question was withdrawn. Say where it is now,
+/// not where it first went, and direct the answerer's words to the task itself.
+fn moved_task_takes_no_answer(store: &Store, task: &TaskRow) -> Result<LedgerError, LedgerError> {
+    let number = task.number;
+    let place = if matches!(task.state.as_str(), "accepted" | "cancelled") {
+        // The old assignee is still recorded, but no longer holds the task.
+        format!("is {}", task.state)
+    } else if let Some(window) = task.assignee_id {
+        let window = store.participant_row(window)?;
+        let member = match window.member_id {
+            Some(id) => store.participant_row(id)?,
+            None => window,
+        };
+        if let Some(owner) = member.backup_of {
+            let owner = store.participant_row(owner)?;
+            format!(
+                "is {} with backup @{} of @{}",
+                task.state, member.handle, owner.handle
+            )
+        } else {
+            format!("is {} with @{}", task.state, member.handle)
+        }
+    } else {
+        match task.pool.as_deref() {
+            Some(pool) => {
+                let name = crate::roles::pool_name(Some(pool), task.tier.as_deref());
+                let tier = if task.tier.is_some() { " tier" } else { "" };
+                format!("is {} for its {name}{tier}", task.state)
+            }
+            None => format!("is {} and has no member", task.state),
+        }
+    };
+    let tell = match task.state.as_str() {
+        "done" | "failed" => format!("To go on, reopen it with cf task reopen T-{number} \"…\", then use cf tell T-{number} \"…\" for what you meant to answer."),
+        "accepted" | "cancelled" => "This task cannot receive a tell. Start a new task with what you meant to answer, or use cf tell on the new task.".to_owned(),
+        _ => format!("Use cf tell T-{number} \"…\" for what you meant to answer."),
+    };
+    Ok(LedgerError::refused_with(
+        "question-moved",
+        format!(
+            "T-{number} {place}; the new window starts over without the old conversation. {tell}"
+        ),
+        409,
+    ))
+}
+
 /// The refusal of an answer to a question on a task that is over (accepted,
 /// cancelled or failed): nobody waits for it, and a failed task is the one that
 /// can be gone on with, so it is told how.
@@ -431,11 +487,13 @@ pub(crate) fn withdraw_open_questions(
         &format!(
             "UPDATE message SET state = 'cancelled', reason = ?1
               WHERE task_id = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0
-                AND state IN ('queued', 'delivering', 'gated', 'delivered', 'read')
+                AND (state IN ('queued', 'delivering', 'gated', 'delivered', 'read', 'failed')
+                     OR (state = 'cancelled' AND reason IS NOT ?4 AND EXISTS (
+                         SELECT 1 FROM message a WHERE a.reply_to = message.id AND a.kind = 'answer')))
                 AND NOT {}",
             has_standing_answer("message")
         ),
-        params![format!("T-{} {why}", task.number), task.id, window],
+        params![format!("T-{} {why}", task.number), task.id, window, MOVED_QUESTION],
     )?;
     Ok(())
 }

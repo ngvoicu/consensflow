@@ -352,6 +352,64 @@ pub(crate) fn reconcile_released(store: &mut Store) -> Result<(), LedgerError> {
     })
 }
 
+/// An older release left questions the chief had seen live, and gave an unseen
+/// question only a generic withdrawal reason. On open, retire those whose sender
+/// had the task before asking but no longer has it. The earlier task message's id
+/// proves that this was its window, without guessing from a member's current name.
+/// A question from someone else about the task is untouched, as is an answer
+/// already received by the old window.
+pub(crate) fn retire_old_moved_questions(store: &mut Store) -> Result<(), LedgerError> {
+    store.write(|store| {
+        let old = ids(
+            store,
+            &format!(
+                "SELECT q.id FROM message q WHERE q.kind = 'question' AND q.urgent = 0
+                   AND (q.state IN ('queued', 'delivering', 'gated', 'delivered', 'read', 'failed')
+                        OR (q.state = 'cancelled' AND (q.reason LIKE '@% no longer has T-%'
+                            OR EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer'))))
+                   AND q.reason IS NOT ?1 AND NOT {}
+                   AND EXISTS (
+                       SELECT 1 FROM task t WHERE t.id = q.task_id
+                         AND t.state IN ('open', 'queued', 'working', 'waiting', 'paused', 'done')
+                         AND t.assignee_id IS NOT q.sender_id
+                         AND EXISTS (SELECT 1 FROM message b WHERE b.task_id = t.id
+                                     AND b.kind = 'task' AND b.recipient_id = q.sender_id AND b.id < q.id))",
+                super::has_standing_answer("q")
+            ),
+            [super::MOVED_QUESTION],
+        )?;
+        for question in old {
+            store.db.execute(
+                "UPDATE message SET state = 'cancelled', reason = ?1,
+                     door_closed_at = COALESCE(door_closed_at,
+                         (SELECT updated_at FROM task WHERE id = message.task_id)) WHERE id = ?2",
+                params![super::MOVED_QUESTION, question],
+            )?;
+        }
+        // An older window's own result also left its question open while the
+        // window was free to close. Its task's last move supplies the door time.
+        store.db.execute(
+            &format!(
+                "UPDATE message AS q SET state = 'cancelled',
+                     reason = (SELECT 'T-' || number || ' was finished' FROM task WHERE id = q.task_id),
+                     door_closed_at = COALESCE(door_closed_at,
+                         (SELECT updated_at FROM task WHERE id = q.task_id))
+                 WHERE q.kind = 'question' AND q.urgent = 0 AND q.reason IS NOT ?1
+                   AND (q.state IN ('queued', 'delivering', 'gated', 'delivered', 'read', 'failed')
+                        OR (q.state = 'cancelled' AND EXISTS (
+                            SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer')))
+                   AND NOT {}
+                   AND EXISTS (SELECT 1 FROM task t WHERE t.id = q.task_id AND t.state = 'done'
+                               AND t.assignee_id = q.sender_id
+                               AND q.reason IS NOT ('T-' || t.number || ' was finished'))",
+                super::has_standing_answer("q")
+            ),
+            [super::MOVED_QUESTION],
+        )?;
+        Ok(())
+    })
+}
+
 /// Why a row a window kept went no further: [`transfer`] said it in the task's
 /// brief for its next window.
 pub(super) fn carried_into(number: i64) -> String {
@@ -378,8 +436,9 @@ pub(crate) struct Transfer {
 ///   not said twice;
 /// - what it had held at the gate, and any tell, is withdrawn: the human
 ///   gave no word for the next window, and the one that is gone was the tell's;
-/// - what it asked, and no one has seen yet, is withdrawn with it. Only the
-///   next window's own questions count for the task;
+/// - its questions without a standing answer are withdrawn, including those the
+///   chief has already seen and those whose former answer was taken into the brief.
+///   Only the next window's own questions count for the task;
 /// - what told it to go on after a cut turn is withdrawn first, and never said
 ///   in the brief (`continuations`): the next window never began that turn.
 pub(crate) fn transfer(
@@ -453,14 +512,16 @@ pub(crate) fn transfer(
         ],
     )?;
     store.db.execute(
-        "UPDATE message SET state = 'cancelled', reason = ?3
-         WHERE task_id = ?1 AND sender_id = ?2 AND kind = 'question' AND urgent = 0
-           AND state IN ('queued', 'gated')",
-        params![
-            task.id,
-            window.id,
-            format!("@{} no longer has T-{}", window.handle, task.number)
-        ],
+        &format!(
+            "UPDATE message SET state = 'cancelled', reason = ?3
+             WHERE task_id = ?1 AND sender_id = ?2 AND kind = 'question' AND urgent = 0
+               AND (state IN ('queued', 'delivering', 'gated', 'delivered', 'read', 'failed')
+                    OR (state = 'cancelled' AND EXISTS (
+                        SELECT 1 FROM message a WHERE a.reply_to = message.id AND a.kind = 'answer')))
+               AND NOT {}",
+            super::has_standing_answer("message")
+        ),
+        params![task.id, window.id, super::MOVED_QUESTION],
     )?;
     Ok(Transfer { kept, gated })
 }

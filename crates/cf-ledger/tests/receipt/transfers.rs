@@ -3,6 +3,8 @@
 //! was taken back from it.
 
 use crate::fixture::{gated_world, world, World};
+use cf_ledger::{Claim, Read};
+use serde_json::json;
 
 /// A task opened for the standard workers and given to a session of zeus,
 /// whose brief was received, that asked a question and was answered, and was
@@ -79,7 +81,7 @@ fn a_task_resumed_after_its_session_ended_takes_what_the_session_kept_into_its_b
     }
     assert_eq!(
         w.message(unseen.id).reason,
-        Some(format!("@{session} no longer has T-1")),
+        Some("the task moved to another window".to_owned()),
         "what it asked and the chief never saw goes with it"
     );
 
@@ -91,6 +93,354 @@ fn a_task_resumed_after_its_session_ended_takes_what_the_session_kept_into_its_b
         "working",
         "the old session's questions do not hold the new brief back"
     );
+}
+
+/// A tier task whose first window has its brief.
+fn asking_window(w: &mut World) -> (i64, String) {
+    let task = w.open("Parser").task.number;
+    let assigned = w.assign(task, "zeus");
+    let window = assigned.task.assignee.unwrap();
+    let brief = assigned.message.unwrap().id;
+    if w.message(brief).state == "gated" {
+        w.ledger.approve_message(brief, "human").unwrap();
+    }
+    w.deliver(brief);
+    (task, window)
+}
+
+fn moved_refusal(w: &mut World, question: i64) -> String {
+    let chief = w.id("chief");
+    let error = w
+        .ledger
+        .answer(question, chief, Some(&json!("JSON")), None)
+        .unwrap_err();
+    assert_eq!(error.code(), Some("question-moved"));
+    error.to_string()
+}
+
+fn moved_question_in_a_new_window(w: &mut World) -> (i64, i64) {
+    let (task, old) = asking_window(w);
+    let question = w.ask(&old, task, "Which format?").id;
+    w.ledger.release_task(w.project, task, "by @human").unwrap();
+    let next = w.assign(task, "diana");
+    w.deliver(next.message.unwrap().id);
+    (task, question)
+}
+
+#[test]
+fn a_moved_question_after_the_new_window_fails_explains_how_to_pass_the_answer() {
+    let mut w = world();
+    let (task, question) = moved_question_in_a_new_window(&mut w);
+    w.ledger
+        .fail_task(w.project, task, "the window failed")
+        .unwrap();
+
+    let words = moved_refusal(&mut w, question);
+    assert!(
+        words.contains("failed") && words.contains("diana"),
+        "{words}"
+    );
+    assert!(words.contains("starts over"), "{words}");
+    assert!(
+        words.contains("reopen") && words.contains("cf tell T-1"),
+        "{words}"
+    );
+}
+
+#[test]
+fn a_moved_question_after_the_task_is_cancelled_explains_the_move_and_the_end() {
+    let mut w = world();
+    let (task, question) = moved_question_in_a_new_window(&mut w);
+    w.ledger.cancel_task(w.project, task, "chief").unwrap();
+
+    let words = moved_refusal(&mut w, question);
+    assert!(
+        words.contains("cancelled") && words.contains("starts over"),
+        "{words}"
+    );
+    assert!(
+        words.contains("new task") && words.contains("cf tell"),
+        "{words}"
+    );
+}
+
+#[test]
+fn a_moved_question_after_the_task_is_accepted_explains_the_move_and_the_end() {
+    let mut w = world();
+    let (task, question) = moved_question_in_a_new_window(&mut w);
+    w.ledger.record_result(w.project, task, "Done").unwrap();
+    w.ledger.accept_task(w.project, task, "chief").unwrap();
+
+    let words = moved_refusal(&mut w, question);
+    assert!(
+        words.contains("accepted") && words.contains("starts over"),
+        "{words}"
+    );
+    assert!(
+        words.contains("new task") && words.contains("cf tell"),
+        "{words}"
+    );
+}
+
+#[test]
+fn release_withdraws_questions_in_every_delivery_state_and_closes_their_doors() {
+    for state in [
+        "queued",
+        "delivering",
+        "delivered",
+        "read",
+        "gated",
+        "failed",
+    ] {
+        let mut w = if state == "gated" {
+            gated_world()
+        } else {
+            world()
+        };
+        let (task, old) = asking_window(&mut w);
+        let question = w.ask_with_options(&old, task).id;
+        match state {
+            "delivering" => {
+                w.begin(question);
+            }
+            "delivered" => {
+                w.deliver(question);
+            }
+            "failed" => {
+                w.begin(question);
+                w.ledger
+                    .fail_delivery(question, "the chief's window closed")
+                    .unwrap();
+            }
+            "read" => {
+                let chief = w.id("chief");
+                w.ledger
+                    .receive_read(
+                        chief,
+                        &[question],
+                        Read::Inbox,
+                        &cf_proto::cf_word::CfWord::bare(),
+                    )
+                    .unwrap();
+            }
+            _ => {}
+        }
+        assert_eq!(w.message(question).state, state);
+        let old_id = w.id(&old);
+        w.ledger.release_task(w.project, task, "by @human").unwrap();
+        assert_eq!(w.message(question).state, "cancelled", "{state}");
+        assert_eq!(
+            w.ledger.claim_answer(question, old_id).unwrap(),
+            Claim::Closed,
+            "{state}"
+        );
+        let words = moved_refusal(&mut w, question);
+        assert!(
+            words.contains("open") && words.contains("standard") && words.contains("cf tell T-1"),
+            "{state}: {words}"
+        );
+        assert!(w
+            .ledger
+            .chief_open_work(w.project)
+            .unwrap()
+            .questions
+            .iter()
+            .all(|m| m.id != question));
+        assert!(w
+            .ledger
+            .pending(old_id)
+            .unwrap()
+            .iter()
+            .all(|m| m.reply_to != Some(question)));
+    }
+}
+
+#[test]
+fn a_carried_answer_is_kept_once_and_does_not_make_its_old_question_oblige_again() {
+    let mut w = world();
+    let Kept {
+        session,
+        task,
+        question,
+        answer,
+        ..
+    } = kept_for_a_session(&mut w);
+    w.ledger.release_task(w.project, task, "by @human").unwrap();
+    assert_eq!(w.message(answer).state, "cancelled");
+    assert_eq!(w.message(question).state, "cancelled");
+    assert_eq!(
+        w.ledger
+            .task(w.project, task)
+            .unwrap()
+            .unwrap()
+            .task
+            .body
+            .matches("\nJSON\n")
+            .count(),
+        1
+    );
+    let words = moved_refusal(&mut w, question);
+    assert!(words.contains("cf tell T-1"), "{words}");
+
+    let new = w.assign(task, "diana");
+    let new_window = new.task.assignee.unwrap();
+    w.deliver(new.message.unwrap().id);
+    assert_eq!(w.state(task), "working");
+    let fresh = w.ask(&new_window, task, "Which parser?").id;
+    assert_eq!(w.state(task), "waiting");
+    let open = w.ledger.chief_open_work(w.project).unwrap().questions;
+    assert!(open.iter().all(|m| m.id != question));
+    assert!(open.iter().any(|m| m.id == fresh));
+    let words = moved_refusal(&mut w, question);
+    assert!(words.contains("diana"), "{words}");
+    w.answer(fresh, "LALR");
+    assert_eq!(w.state(task), "working");
+    assert!(w
+        .ledger
+        .pending(w.id(&session))
+        .unwrap()
+        .iter()
+        .all(|m| m.reply_to != Some(question)));
+}
+
+#[test]
+fn a_delivered_answer_stays_answered_after_the_task_moves() {
+    let mut w = world();
+    let (task, old) = asking_window(&mut w);
+    let question = w.ask(&old, task, "Which format?").id;
+    let answer = w.answer(question, "JSON").id;
+    w.deliver(answer);
+    w.ledger.release_task(w.project, task, "by @human").unwrap();
+    w.edit(|_| {});
+    let chief = w.id("chief");
+    let error = w
+        .ledger
+        .answer(question, chief, Some(&json!("Again")), None)
+        .unwrap_err();
+    assert_eq!(error.code(), Some("already-answered"));
+    assert_eq!(w.message(answer).state, "delivered");
+}
+
+#[test]
+fn an_older_withdrawal_and_a_carried_answer_get_the_moved_reason_on_open() {
+    let mut w = world();
+    let Kept {
+        session,
+        task,
+        question,
+        answer,
+        ..
+    } = kept_for_a_session(&mut w);
+    let unseen = w.ask(&session, task, "And which version?").id;
+    w.ledger.release_task(w.project, task, "by @human").unwrap();
+    assert_eq!(w.message(answer).state, "cancelled");
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET state = 'read', reason = NULL WHERE id = ?",
+            [question],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE message SET state = 'cancelled', reason = ? WHERE id = ?",
+            rusqlite::params![format!("@{session} no longer has T-{task}"), unseen],
+        )
+        .unwrap();
+    });
+    assert!(moved_refusal(&mut w, question).contains("cf tell T-1"));
+    assert!(moved_refusal(&mut w, unseen).contains("cf tell T-1"));
+}
+
+#[test]
+fn a_window_given_the_task_again_does_not_wait_for_the_question_it_left_behind() {
+    let mut w = world();
+    let Kept {
+        session,
+        task,
+        question,
+        ..
+    } = kept_for_a_session(&mut w);
+    w.ledger.release_task(w.project, task, "by @human").unwrap();
+    let assigned = w.assign(task, "diana");
+    w.deliver(assigned.message.unwrap().id);
+    // Exercise a legacy ledger that gave this task to its earlier session again.
+    w.hand_to(task, &session);
+    let fresh = w.ask(&session, task, "Which parser?").id;
+    w.answer(fresh, "LALR");
+    assert_eq!(
+        w.state(task),
+        "working",
+        "the old question does not hold the task"
+    );
+    w.ledger.record_result(w.project, task, "Done").unwrap();
+    w.ledger
+        .reopen_task(w.project, task, "chief", "One more change")
+        .unwrap();
+    let notes = w.ledger.inbox(w.id("chief"), 100).unwrap();
+    assert!(notes.iter().all(|m| !m
+        .body
+        .contains(&format!("m-{question} still waits for an answer"))));
+}
+
+#[test]
+fn an_older_ledger_retires_a_delivered_question_left_behind_by_a_release() {
+    let mut w = world();
+    let (task, old) = asking_window(&mut w);
+    let question = w.ask(&old, task, "Which format?").id;
+    w.deliver(question);
+    w.ledger.release_task(w.project, task, "by @human").unwrap();
+    let new = w.assign(task, "diana");
+    w.deliver(new.message.unwrap().id);
+    // The old build left the delivered question as it was. Reopen the same file.
+    w.edit(|db| {
+        db.execute("UPDATE message SET state = 'delivered', reason = NULL, door_closed_at = NULL WHERE id = ?", [question]).unwrap();
+    });
+    assert_eq!(w.message(question).state, "cancelled");
+    assert!(w
+        .ledger
+        .chief_open_work(w.project)
+        .unwrap()
+        .questions
+        .iter()
+        .all(|m| m.id != question));
+    let words = moved_refusal(&mut w, question);
+    assert!(
+        words.contains("diana") && words.contains("cf tell T-1"),
+        "{words}"
+    );
+}
+
+#[test]
+fn opening_the_ledger_keeps_the_current_windows_question_and_an_unrelated_one() {
+    let mut w = world();
+    let (task, window) = asking_window(&mut w);
+    let own = w.ask(&window, task, "Which format?").id;
+    let unrelated = w.ask("diana", task, "May I help?").id;
+    w.edit(|_| {});
+    assert_eq!(w.message(own).state, "queued");
+    assert_eq!(w.message(unrelated).state, "queued");
+}
+
+#[test]
+fn removing_a_member_withdraws_its_delivered_question_and_closes_its_door() {
+    let mut w = world();
+    let (task, window) = asking_window(&mut w);
+    let question = w.ask_with_options(&window, task).id;
+    w.deliver(question);
+    let old = w.id(&window);
+    assert_eq!(
+        w.ledger.claim_answer(question, old).unwrap(),
+        Claim::Waiting
+    );
+    w.ledger.remove_member(w.project, "zeus").unwrap();
+    assert_eq!(w.state(task), "cancelled");
+    assert_eq!(w.message(question).state, "cancelled");
+    assert_eq!(w.ledger.claim_answer(question, old).unwrap(), Claim::Closed);
+    let chief = w.id("chief");
+    let error = w
+        .ledger
+        .answer(question, chief, Some(&json!("JSON")), None)
+        .unwrap_err();
+    assert_eq!(error.code(), Some("task-cancelled"));
 }
 
 #[test]

@@ -9,6 +9,7 @@
 use cf_engine::testing::Context;
 use cf_harness::records::Quota;
 use cf_ledger::{HoldKind, NewMember, NewTask, ParticipantView};
+use serde_json::json;
 
 use crate::fixtures::{after, exhausted, now, soon, Tiers};
 
@@ -70,6 +71,96 @@ fn passes(context: &Context, count: usize) {
     for _ in 0..count {
         context.pass().unwrap();
     }
+}
+
+/// A question the chief has received from the window currently working on T-1.
+fn question_at_chief(context: &Context, tiers: &Tiers<'_>) -> (i64, String) {
+    tiers.open();
+    passes(context, 2);
+    let window = tiers.assignee(1);
+    let question = context.ask(tiers.project.id, &window, "chief", 1, "Which format?");
+    context.adapter.answer(&window, "I asked the chief.");
+    passes(context, 2);
+    assert_eq!(tiers.task(1).task.state, "waiting");
+    assert_eq!(context.message(question.id).state, "delivered");
+    (question.id, window)
+}
+
+fn refused_after_move(context: &Context, tiers: &Tiers<'_>, question: i64, old: &str) -> String {
+    let chief = tiers.id("chief");
+    let old_id = tiers.id(old);
+    let error = context
+        .ledger
+        .borrow_mut()
+        .answer(question, chief, Some(&json!("Use JSON")), None)
+        .expect_err("the old window no longer waits for the answer");
+    let words = error.to_string();
+    assert_eq!(error.code(), Some("question-moved"), "{words}");
+    assert!(words.contains("starts over"), "{words}");
+    assert!(words.contains("cf tell T-1"), "{words}");
+    assert_eq!(context.message(question).state, "cancelled");
+    assert!(
+        context
+            .inbox(old_id)
+            .iter()
+            .all(|m| m.reply_to != Some(question)),
+        "nothing was queued to the old window"
+    );
+    words
+}
+
+#[test]
+fn moved_question_after_human_reassign_says_the_task_is_open_and_refuses_the_answer() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    let (question, old) = question_at_chief(&context, &tiers);
+    context.reassign_task(tiers.project.id, 1).unwrap();
+    assert_eq!(tiers.task(1).task.state, "open");
+    let words = refused_after_move(&context, &tiers, question, &old);
+    assert!(
+        words.contains("open") && words.contains("standard"),
+        "{words}"
+    );
+}
+
+#[test]
+fn moved_question_after_backup_takes_the_task_names_the_backup_and_refuses_the_answer() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let backup = backed(&context, &tiers, "zeus");
+    let (question, old) = question_at_chief(&context, &tiers);
+    out(&context, &tiers, "zeus", &soon(&context, 3));
+    passes(&context, 4);
+    assert_eq!(with(&tiers, 1), backup.handle);
+    assert_ne!(tiers.assignee(1), old);
+    let words = refused_after_move(&context, &tiers, question, &old);
+    assert!(words.contains(&backup.handle), "{words}");
+}
+
+#[test]
+fn a_window_that_finishes_its_task_no_longer_waits_for_its_old_question() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let (question, old) = question_at_chief(&context, &tiers);
+    context
+        .ledger
+        .borrow_mut()
+        .record_result(tiers.project.id, 1, "Done after all")
+        .unwrap();
+    passes(&context, 4);
+    assert_eq!(tiers.task(1).task.state, "done");
+    let chief = tiers.id("chief");
+    let error = context
+        .ledger
+        .borrow_mut()
+        .answer(question, chief, Some(&json!("Use JSON")), None)
+        .expect_err("a completed task's old window no longer waits");
+    assert!(error.to_string().contains("T-1"));
+    assert_eq!(context.message(question).state, "cancelled");
+    assert!(context
+        .inbox(tiers.id(&old))
+        .iter()
+        .all(|m| m.reply_to != Some(question)));
 }
 
 #[test]

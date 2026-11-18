@@ -123,18 +123,7 @@ async fn a_question_a_note_and_a_result_can_only_be_passed_on_and_the_human_is_t
             }
             let question = context.ask(held.project, "zeus", "chief", 1, "Which format?");
             let note = context.note(held.project, "zeus", "chief", "Mind the tests");
-            let result = context
-                .ledger
-                .borrow_mut()
-                .record_result(held.project, 1, "Parser done")
-                .unwrap()
-                .message
-                .unwrap();
-            let held_for_the_human = [
-                (question.id, "question"),
-                (note.id, "note"),
-                (result.id, "result"),
-            ];
+            let held_for_the_human = [(question.id, "question"), (note.id, "note")];
             for (id, kind) in held_for_the_human {
                 assert_eq!(context.message(id).state, "gated", "{kind}");
                 assert_eq!(
@@ -150,6 +139,32 @@ async fn a_question_a_note_and_a_result_can_only_be_passed_on_and_the_human_is_t
                 let passed = ask(&held.app, "message.approve", json!({ "message": id })).await;
                 assert_eq!(passed["message"]["state"], "queued", "{kind}: {passed}");
             }
+            // A result ends the window's question, so test the result at the gate
+            // after the human has decided the question and note.
+            let result = context
+                .ledger
+                .borrow_mut()
+                .record_result(held.project, 1, "Parser done")
+                .unwrap()
+                .message
+                .unwrap();
+            assert_eq!(context.message(result.id).state, "gated");
+            assert_eq!(
+                ask(
+                    &held.app,
+                    "message.decline",
+                    json!({ "message": result.id })
+                )
+                .await,
+                json!({ "ok": false, "error": "a result is passed on, not declined" })
+            );
+            let passed = ask(
+                &held.app,
+                "message.approve",
+                json!({ "message": result.id }),
+            )
+            .await;
+            assert_eq!(passed["message"]["state"], "queued", "{passed}");
         })
         .await;
 }

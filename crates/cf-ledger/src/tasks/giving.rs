@@ -794,6 +794,9 @@ fn release_told(
                 task.id
             ],
         )?;
+        if let Some(window) = task.assignee_id {
+            super::pausing::shut_doors(store, &task, window)?;
+        }
         crate::tasks::end_asides(store, task.id, &at)?;
         store.log(
             project_id,

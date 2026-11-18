@@ -211,13 +211,22 @@ fn a_question_on_a_task_the_chief_accepted_is_not_open() {
     result_heard(&mut ledger, project);
     assert_eq!(
         open(&ledger, project),
-        [question],
-        "the task is done and the question was never answered"
+        [] as [i64; 0],
+        "the task is done and its window no longer waits"
     );
 
     ledger
         .accept_task(project, 1, "chief")
         .expect("T-1 accepted");
+    assert_eq!(open(&ledger, project), [] as [i64; 0]);
+    // An older ledger could have left the delivered row live at acceptance.
+    ledger
+        .sqlite()
+        .execute(
+            "UPDATE message SET state = 'delivered', reason = NULL WHERE id = ?",
+            [question],
+        )
+        .unwrap();
     assert_eq!(open(&ledger, project), [] as [i64; 0]);
     ledger.close().expect("the file is given up");
 }
@@ -228,8 +237,8 @@ fn a_question_whose_answer_the_acceptance_took_back_is_not_open() {
     let mut ledger = ledger_in(&dir);
     let project = board(&mut ledger);
     let question = asked(&mut ledger, project, Some(1));
-    result_heard(&mut ledger, project);
     let answer = answered(&mut ledger, project, question);
+    result_heard(&mut ledger, project);
 
     ledger
         .accept_task(project, 1, "chief")
@@ -412,16 +421,15 @@ fn a_question_on_a_failed_task_takes_no_answer_and_says_to_reopen_the_task() {
 }
 
 #[test]
-fn a_question_on_a_task_that_is_done_but_not_accepted_still_takes_its_answer() {
+fn a_question_on_a_task_that_is_done_but_not_accepted_takes_no_answer() {
     let dir = tempfile::tempdir().expect("a folder");
     let mut ledger = ledger_in(&dir);
     let project = board(&mut ledger);
     let question = asked(&mut ledger, project, Some(1));
     result_heard(&mut ledger, project);
 
-    // The result is waiting for the chief's decision: an answer that is late may
-    // still be given (the acceptance takes back one that has not reached its window).
-    let answer = answered(&mut ledger, project, question);
-    assert!(answer > question);
+    let (code, words) = refused_answer(&mut ledger, project, question);
+    assert_eq!(code, "question-withdrawn");
+    assert!(words.contains("T-1 was finished"), "{words}");
     ledger.close().expect("the file is given up");
 }

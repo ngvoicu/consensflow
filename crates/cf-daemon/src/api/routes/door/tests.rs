@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 
 use super::*;
 use crate::api::callers::caller_of;
-use crate::api::routes::tests::support::{state_of, working_question};
+use crate::api::routes::tests::support::{session_task_at_work, state_of, working_question};
 use crate::testing::{request, said, scene, Scene};
 
 /// The door of `zeus` for message `id`, asked as `target` says, answered when it is.
@@ -290,6 +290,144 @@ async fn a_door_the_acceptance_of_its_task_shut_is_told_nothing_waits_on_its_que
             })
         )
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_door_of_a_done_cancelled_or_failed_task_is_told_what_happened() {
+    for ending in ["done", "cancelled", "failed"] {
+        let scene = scene();
+        let question = working_question(&scene);
+        {
+            let mut ledger = scene.context.ledger.borrow_mut();
+            match ending {
+                "done" => {
+                    ledger.record_result(scene.project.id, 1, "Done").unwrap();
+                }
+                "cancelled" => {
+                    ledger.cancel_task(scene.project.id, 1, "chief").unwrap();
+                }
+                "failed" => {
+                    ledger
+                        .fail_task(scene.project.id, 1, "window failed")
+                        .unwrap();
+                }
+                _ => unreachable!(),
+            }
+        }
+        let id = question.id.to_string();
+        let (status, body) = door(
+            &scene,
+            &scene.zeus,
+            &format!("/api/questions/{id}?wait=20000"),
+            &id,
+        )
+        .await;
+        let words = body["message"].as_str().unwrap();
+        assert_eq!(status, 409, "{ending}: {body}");
+        assert!(words.contains(ending), "{ending}: {words}");
+        if ending == "failed" {
+            assert!(words.contains("reopen"), "{words}");
+        } else {
+            assert!(words.contains("no answer will come"), "{words}");
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_moved_tasks_old_door_is_told_the_window_will_get_no_answer() {
+    let scene = scene();
+    let number = session_task_at_work(&scene);
+    let (question, old_id) = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let old = ledger
+            .task(scene.project.id, number)
+            .unwrap()
+            .unwrap()
+            .task
+            .assignee
+            .unwrap();
+        let old_id = ledger
+            .project(scene.project.id)
+            .unwrap()
+            .unwrap()
+            .participants
+            .into_iter()
+            .find(|p| p.handle == old)
+            .unwrap()
+            .id;
+        let question = ledger.ask(scene.project.id, &cf_ledger::NewQuestion {
+            from: Some(old), to: "chief".to_owned(), task: Some(number),
+            questions: Some(json!([{ "question": "Which?", "header": "Pick", "options": [{"label": "red"}, {"label": "blue"}] }])),
+            ..cf_ledger::NewQuestion::default()
+        }).unwrap();
+        (question, old_id)
+    };
+    let token = scene
+        .context
+        .credentials
+        .issue(scene.project.id, old_id)
+        .unwrap();
+    let id = question.id.to_string();
+    let target = format!("/api/questions/{id}?wait=20000");
+    let ((status, body), ()) = tokio::join!(door(&scene, &token, &target, &id), async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .release_task(scene.project.id, number, "by @human")
+            .unwrap();
+    });
+    let words = body["message"].as_str().unwrap();
+    assert_eq!(status, 409, "{body}");
+    assert!(
+        words.contains("moved") && words.contains("no answer will come"),
+        "{words}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_finished_question_stays_closed_when_the_same_window_is_reopened() {
+    let scene = scene();
+    let question = working_question(&scene);
+    {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        ledger.record_result(scene.project.id, 1, "Done").unwrap();
+        let words = ledger
+            .reopen_task(scene.project.id, 1, "chief", "One more change")
+            .unwrap()
+            .message
+            .unwrap()
+            .id;
+        ledger.begin_delivery(words).unwrap();
+        ledger.confirm_delivery(words, None).unwrap();
+    }
+    let id = question.id.to_string();
+    let (status, body) = door(&scene, &scene.zeus, &format!("/api/questions/{id}"), &id).await;
+    assert_eq!(status, 409, "{body}");
+    let words = body["message"].as_str().unwrap();
+    assert!(
+        words.contains("was finished") && words.contains("no answer will come"),
+        "{words}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_done_task_with_an_answer_already_on_its_way_does_not_say_the_answer_is_gone() {
+    let scene = scene();
+    let question = working_question(&scene);
+    scene.choose(question.id, "red");
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .record_result(scene.project.id, 1, "Done")
+        .unwrap();
+    let id = question.id.to_string();
+    let (status, body) = door(&scene, &scene.zeus, &format!("/api/questions/{id}"), &id).await;
+    assert_eq!(status, 409, "{body}");
+    let words = body["message"].as_str().unwrap();
+    assert!(!words.contains("no answer will come"), "{words}");
 }
 
 #[tokio::test(start_paused = true)]

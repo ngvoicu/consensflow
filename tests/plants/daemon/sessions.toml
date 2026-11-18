@@ -116,8 +116,14 @@ runs = ["ledger-receipt"]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = '''
     store.move_task(&task, "cancelled", json!({ "by": by }))?;
+    if let Some(window) = task.assignee_id {
+        shut_doors(store, &task, window)?;
+    }
     release_ready(store, project_id)?;'''
-replace = '    store.move_task(&task, "cancelled", json!({ "by": by }))?;'
+replace = '''    store.move_task(&task, "cancelled", json!({ "by": by }))?;
+    if let Some(window) = task.assignee_id {
+        shut_doors(store, &task, window)?;
+    }'''
 
 [[plant]]
 name = "session: a task waiting for its session is not released when the task fails"
@@ -128,8 +134,14 @@ runs = ["ledger-receipt"]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = '''
         store.move_task(&task, "failed", json!({ "reason": reason }))?;
+        if let Some(window) = task.assignee_id {
+            shut_doors(store, &task, window)?;
+        }
         release_ready(store, project_id)?;'''
-replace = '        store.move_task(&task, "failed", json!({ "reason": reason }))?;'
+replace = '''        store.move_task(&task, "failed", json!({ "reason": reason }))?;
+        if let Some(window) = task.assignee_id {
+            shut_doors(store, &task, window)?;
+        }'''
 
 [[plant]]
 name = "session: a task waiting for its session is not released when a delivery to it fails for good"

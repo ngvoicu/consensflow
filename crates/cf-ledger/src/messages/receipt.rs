@@ -229,6 +229,8 @@ fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerErro
         .prepare(
             "SELECT 1 FROM message q
              WHERE q.task_id = ?1 AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0
+               AND q.reason IS NOT ?3
+               AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')
                AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id
                                AND a.kind = 'answer' AND a.state IN ('queued', 'delivering', 'delivered', 'read'))
                AND (q.state != 'cancelled'
@@ -236,7 +238,7 @@ fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerErro
                                AND a.kind = 'answer'))
              LIMIT 1",
         )?
-        .exists(params![task, window])?)
+        .exists(params![task, window, super::MOVED_QUESTION])?)
 }
 
 /// The one place a task moves between `queued`, `working` and `waiting`:
