@@ -123,6 +123,7 @@ mod tests {
             [
                 "HOME",
                 "USERPROFILE",
+                "CFFIXED_USER_HOME",
                 "CLAUDE_CONFIG_DIR",
                 "CODEX_HOME",
                 "PI_CODING_AGENT_DIR",

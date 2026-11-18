@@ -306,6 +306,10 @@ mod on_a_claude_config_of_the_cases_own {
 fn a_window_opens_as_the_app_opens_one_takes_a_paste_answers_and_is_read_through_the_products_code(
 ) -> Outcome {
     let rig = rig()?;
+    // This case exercises the default Claude model, so the stand-in lists it too.
+    rig.stand_ins(&json!({"agents": [
+        {"id": "fixture", "kind": "claude-code", "model": "claude-sonnet-5-5"}
+    ]}))?;
     // The stand-in is the Claude Code of this rig, and asks nothing of a folder.
     let home = rig.var("HOME").unwrap_or_default().to_owned();
     let install = Installed::at(Harness::Claude, FAKE_AGENT, &home);

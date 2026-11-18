@@ -400,6 +400,7 @@ impl<'a> Open<'a> {
             .ok_or_else(|| Error::Daemon("the rig gives its windows no home".to_owned()))?;
         let workspace = live_folder_in(Path::new(home), &self.folder)?;
         let agent = self.agent.clone().unwrap_or_else(|| agents::agent(harness));
+        agents::validate_window(self.rig, &agent)?;
         let kind = agent["kind"]
             .as_str()
             .unwrap_or_else(|| harness.kind())

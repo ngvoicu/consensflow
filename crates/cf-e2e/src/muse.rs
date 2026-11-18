@@ -12,6 +12,7 @@
 //! `muse-stand-in` program as `muse-bin-<version>.exe`, told what to run by the file
 //! beside it ([`StandIn`]), and Muse is its child.
 
+use std::ffi::OsString;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -88,6 +89,105 @@ pub struct Installed {
     /// The rig's `muse-stand-in`, which a case names (`CARGO_BIN_EXE_muse-stand-in`):
     /// what the rig's Muse is on Windows.
     pub stand_in: Option<PathBuf>,
+}
+
+/// The command which runs Muse behind the Mac's file boundary. Other platforms
+/// use the executable directly and the run-owned home variables.
+pub struct IsolatedCommand {
+    pub program: PathBuf,
+    pub prefix: Vec<OsString>,
+}
+
+/// Build the invocation used for a Muse process (or the helper which starts it).
+/// Every directory exempted from the boundary must have been made by this run.
+pub fn isolated_command(
+    program: &Path,
+    owned: &[PathBuf],
+    readable_executables: &[PathBuf],
+) -> Result<IsolatedCommand> {
+    #[cfg(target_os = "macos")]
+    {
+        let user = nix::unistd::User::from_uid(nix::unistd::Uid::current())
+            .map_err(|error| Error::Daemon(format!("cannot find the account home: {error}")))?
+            .ok_or_else(|| Error::Daemon("cannot find the account home".to_owned()))?;
+        let mut readable = readable_executables.to_vec();
+        readable.push(program.to_path_buf());
+        let profile = sandbox_profile(&user.dir, owned, &readable, user.uid.as_raw())?;
+        Ok(IsolatedCommand {
+            program: PathBuf::from("/usr/bin/sandbox-exec"),
+            prefix: vec!["-p".into(), profile.into(), program.as_os_str().to_owned()],
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (owned, readable_executables);
+        Ok(IsolatedCommand {
+            program: program.to_owned(),
+            prefix: Vec::new(),
+        })
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn sandbox_profile(
+    account: &Path,
+    owned: &[PathBuf],
+    readable: &[PathBuf],
+    uid: u32,
+) -> Result<String> {
+    let quote = |path: &Path| -> Result<String> {
+        let value = path
+            .to_str()
+            .filter(|_| path.is_absolute())
+            .ok_or_else(|| Error::Daemon("a Muse sandbox path is not absolute UTF-8".to_owned()))?;
+        serde_json::to_string(value).map_err(|error| Error::Daemon(error.to_string()))
+    };
+    if !account.is_absolute() || account.parent().is_none() {
+        return Err(Error::Daemon(
+            "the account home cannot be sandboxed".to_owned(),
+        ));
+    }
+    let mut exemptions = String::new();
+    for root in owned {
+        if !crate::door::is_made_or_below(root) || account.starts_with(root) {
+            return Err(Error::Daemon(format!(
+                "Muse's sandbox root is not a run-owned folder: {}",
+                root.display()
+            )));
+        }
+        exemptions.push_str(&format!(" (require-not (subpath {}))", quote(root)?));
+    }
+    let mut reads = exemptions.clone();
+    for executable in readable {
+        let real = fs::canonicalize(executable).map_err(Error::file("resolve", executable))?;
+        for home in [
+            ".claude",
+            ".codex",
+            ".pi",
+            ".config",
+            ".local/share",
+            "Library/Application Support/Muse",
+        ] {
+            if real.starts_with(account.join(home)) {
+                return Err(Error::Daemon(
+                    "a Muse executable is inside a harness home".to_owned(),
+                ));
+            }
+        }
+        reads.push_str(&format!(" (require-not (literal {}))", quote(&real)?));
+    }
+    Ok(format!(
+        "(version 1)\n(allow default)\n\
+         (deny file-read* (require-all (subpath {}){}))\n\
+         (deny file-write* (require-all (subpath {}){}))\n\
+         (deny file-read* file-write* (subpath \"/private/tmp/tbh-{}-rt/muse\"))\n\
+         (deny process-exec (literal \"/usr/bin/security\"))\n",
+        quote(account)?,
+        reads,
+        quote(account)?,
+        exemptions,
+        uid
+    ))
 }
 
 impl Installed {
@@ -208,6 +308,8 @@ pub struct StandIn {
     /// The home of the rig whose window this is: where a live run's Muse keeps its settings,
     /// its login's copy and its sessions ([`StandIn::env`]).
     pub rig_home: PathBuf,
+    /// The run-owned XDG data folder read by the daemon for this window.
+    pub data_home: PathBuf,
 }
 
 impl StandIn {
@@ -230,7 +332,7 @@ impl StandIn {
             Run::Echo { turn_ms } => json!({ "echo": turn_ms }),
             Run::Live { real_home } => json!({ "live": real_home }),
         };
-        json!({ "binary": self.binary, "argv": self.argv, "run": run, "rig": self.rig_home })
+        json!({ "binary": self.binary, "argv": self.argv, "run": run, "rig": self.rig_home, "data": self.data_home })
     }
 
     fn from_json(text: &str) -> Option<Self> {
@@ -248,6 +350,7 @@ impl StandIn {
             argv: PathBuf::from(value["argv"].as_str()?),
             run,
             rig_home: PathBuf::from(value["rig"].as_str()?),
+            data_home: PathBuf::from(value["data"].as_str()?),
         })
     }
 
@@ -300,32 +403,39 @@ impl StandIn {
         args
     }
 
-    /// What Muse is given besides the window's environment: live, the rig's own config, data
-    /// and cache folders (T-1084), with the copy of the person's login and the settings
-    /// [`seed_live_home`] made in the first. Muse on Windows honours these and keeps its login
-    /// in that file (`credential_backend: file`); the person's profile and home are named
-    /// nowhere, so what the window finds of the person's own Muse is nothing.
+    /// What the Windows stand-in gives Muse for either run: only this rig's home
+    /// and its config, data, state, runtime and cache folders.
     pub fn env(&self) -> Vec<(String, String)> {
-        match &self.run {
-            Run::Echo { .. } => Vec::new(),
-            Run::Live { .. } => {
-                let at = |path: PathBuf| path.to_string_lossy().into_owned();
-                vec![
-                    (
-                        "XDG_CONFIG_HOME".to_owned(),
-                        at(self.rig_home.join(".config")),
-                    ),
-                    (
-                        "XDG_DATA_HOME".to_owned(),
-                        at(self.rig_home.join(".local").join("share")),
-                    ),
-                    (
-                        "XDG_CACHE_HOME".to_owned(),
-                        at(self.rig_home.join(".cache")),
-                    ),
-                ]
-            }
-        }
+        let at = |path: PathBuf| path.to_string_lossy().into_owned();
+        vec![
+            ("HOME".to_owned(), at(self.rig_home.clone())),
+            ("USERPROFILE".to_owned(), at(self.rig_home.clone())),
+            (
+                "APPDATA".to_owned(),
+                at(self.rig_home.join("AppData/Roaming")),
+            ),
+            (
+                "LOCALAPPDATA".to_owned(),
+                at(self.rig_home.join("AppData/Local")),
+            ),
+            (
+                "XDG_CONFIG_HOME".to_owned(),
+                at(self.rig_home.join(".config")),
+            ),
+            ("XDG_DATA_HOME".to_owned(), at(self.data_home.clone())),
+            (
+                "XDG_CACHE_HOME".to_owned(),
+                at(self.rig_home.join(".cache")),
+            ),
+            (
+                "XDG_STATE_HOME".to_owned(),
+                at(self.rig_home.join(".local/state")),
+            ),
+            (
+                "XDG_RUNTIME_DIR".to_owned(),
+                at(self.rig_home.join(".local/share/muse/runtime")),
+            ),
+        ]
     }
 }
 
@@ -338,7 +448,9 @@ fn write_windows(
     run: Run,
     argv: &Path,
     rig_home: &Path,
+    data_home: &Path,
 ) -> Result {
+    crate::door::make_dir_private(rig_home.join(".local/share/muse/runtime"))?;
     let program = install.stand_in.as_deref().ok_or_else(|| {
         Error::Daemon("the rig's Muse on Windows is the muse-stand-in program, which the case names (Installed::through)".to_owned())
     })?;
@@ -355,6 +467,7 @@ fn write_windows(
         argv: argv.to_owned(),
         run,
         rig_home: rig_home.to_owned(),
+        data_home: data_home.to_owned(),
     };
     crate::door::write(StandIn::file_of(&pinned), stand_in.to_json().to_string())
 }
@@ -437,13 +550,17 @@ pub fn write_stand_in(
     install: &Installed,
     delay_ms: u64,
     rig_home: &Path,
+    data_home: &Path,
     argv: &Path,
 ) -> Result {
+    require_owned_data(data_home)?;
     if cfg!(windows) {
         let run = Run::Echo { turn_ms: delay_ms };
         // An echo run keeps nothing of Muse's in the rig's home, which is named all the same.
-        return write_windows(dir, install, run, argv, rig_home);
+        return write_windows(dir, install, run, argv, rig_home, data_home);
     }
+    let launch = shell_isolated_command(install, rig_home, data_home)?;
+    crate::door::make_dir_private(rig_home.join(".local/share/muse/runtime"))?;
     let pinned = dir.join(format!("muse-bin-{}", install.version));
     crate::door::write(dir.join(".muse-version"), format!("{}\n", install.version))?;
     crate::door::write_executable(
@@ -455,7 +572,7 @@ pub fn write_stand_in(
 # The rig's Muse: the machine's, on its fake model. Echo takes no model or effort.
 {serve}
 ( IFS=$'\x1f'; printf '%s\x1e' "$*" ) >> '{argv}'
-export XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME='{rig}/.local/share' XDG_CACHE_HOME='{rig}/.cache'
+export HOME='{rig}' CFFIXED_USER_HOME='{rig}' XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME={data} XDG_CACHE_HOME='{rig}/.cache' XDG_STATE_HOME='{rig}/.local/state' XDG_RUNTIME_DIR='{rig}/.local/share/muse/runtime'
 printf '%s %s\n' $$ $$ >> '{pids}'
 words=()
 while [ $# -gt 0 ]; do
@@ -465,13 +582,14 @@ while [ $# -gt 0 ]; do
   esac
 done
 {repaint}
-exec '{binary}' --provider echo --echo-delay-ms "${{CF_TEST_MUSE_DELAY_MS:-{delay_ms}}}" -c 'run.reminder_roster={{"agents":[]}}' "${{words[@]}}"
+exec {launch} --provider echo --echo-delay-ms "${{CF_TEST_MUSE_DELAY_MS:-{delay_ms}}}" -c 'run.reminder_roster={{"agents":[]}}' "${{words[@]}}"
 "#,
         serve = serve_list_script(),
         argv = argv.display(),
         pids = pids_beside(argv).display(),
         rig = rig_home.display(),
-        binary = install.binary.display(),
+        data = shell_word(data_home)?,
+        launch = launch,
         repaint = REPAINT_AT_REST,
     );
     crate::door::write_executable(&pinned, script)
@@ -491,9 +609,8 @@ fi"#;
 /// Writes the rig's Muse in `dir` for a live run: its launcher, the version line, and
 /// the binary that runs `install`'s on the real model, with the model and effort it is
 /// given, writing each command line to `argv` as [`write_stand_in`]'s does. On a Mac Muse
-/// keeps its login's secret in the system's keychain, which it finds by the person's home
-/// (`real_home`: a throwaway home opens its onboarding, T-705); on Windows its login is the
-/// file in its config folder and the person's home is named nowhere ([`StandIn::env`]). Its
+/// keeps its login's secret in the system keychain; on Windows its login is the file in
+/// its config folder ([`StandIn::env`]). Its
 /// settings, the copy of the login ([`login_copy`]), and its sessions are in the rig's home
 /// (`rig_home`), where the daemon reads them, so nothing of the person's Muse folders is
 /// read or written.
@@ -502,14 +619,18 @@ pub fn write_live_stand_in(
     install: &Installed,
     real_home: &Path,
     rig_home: &Path,
+    data_home: &Path,
     argv: &Path,
 ) -> Result {
+    require_owned_data(data_home)?;
     if cfg!(windows) {
         let run = Run::Live {
             real_home: real_home.to_owned(),
         };
-        return write_windows(dir, install, run, argv, rig_home);
+        return write_windows(dir, install, run, argv, rig_home, data_home);
     }
+    let launch = shell_isolated_command(install, rig_home, data_home)?;
+    crate::door::make_dir_private(rig_home.join(".local/share/muse/runtime"))?;
     let pinned = dir.join(format!("muse-bin-{}", install.version));
     crate::door::write(dir.join(".muse-version"), format!("{}\n", install.version))?;
     crate::door::write_executable(
@@ -518,26 +639,55 @@ pub fn write_live_stand_in(
     )?;
     let script = format!(
         r#"#!/bin/bash
-# The rig's Muse, live: the machine's, on its real model, the person's keychain login.
+# The rig's Muse, live: the machine's, on its real model, on the run's own home.
 ( IFS=$'\x1f'; printf '%s\x1e' "$*" ) >> '{argv}'
 printf '%s %s\n' $$ $$ >> '{pids}'
-# Its sessions go where the daemon reads them: the data folder the window was given, which a
-# harness's home of the run's own may have moved for the whole rig (Devin's), by its real
-# path; the rig's own where it was given none, or the person's.
-data="${{XDG_DATA_HOME:-}}"
-case "$data" in ''|'{real}'|'{real}'/*) data='{rig}/.local/share' ;; esac
-data="$(cd "$data" 2>/dev/null && pwd -P || printf '%s' "$data")"
-case "$data" in '{real}'|'{real}'/*) data='{rig}/.local/share' ;; esac
-export HOME='{real}' XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME="$data" XDG_CACHE_HOME='{rig}/.cache'
-exec '{binary}' "$@"
+export HOME='{rig}' CFFIXED_USER_HOME='{rig}' XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME={data} XDG_CACHE_HOME='{rig}/.cache' XDG_STATE_HOME='{rig}/.local/state' XDG_RUNTIME_DIR='{rig}/.local/share/muse/runtime'
+exec {launch} "$@"
 "#,
         argv = argv.display(),
         pids = pids_beside(argv).display(),
-        real = real_home.display(),
         rig = rig_home.display(),
-        binary = install.binary.display(),
+        data = shell_word(data_home)?,
+        launch = launch,
     );
     crate::door::write_executable(&pinned, script)
+}
+
+fn require_owned_data(data_home: &Path) -> Result {
+    if !data_home.is_absolute() || !crate::door::is_made_or_below(data_home) {
+        return Err(Error::Daemon(
+            "Muse's data folder is not owned by this run".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn shell_isolated_command(
+    install: &Installed,
+    rig_home: &Path,
+    data_home: &Path,
+) -> Result<String> {
+    let root = rig_home
+        .parent()
+        .ok_or_else(|| Error::Daemon("Muse's rig has no root".to_owned()))?;
+    let command = isolated_command(
+        &install.binary,
+        &[root.to_path_buf(), data_home.to_path_buf()],
+        &[],
+    )?;
+    std::iter::once(command.program.into_os_string())
+        .chain(command.prefix)
+        .map(|word| shell_word(Path::new(&word)))
+        .collect::<Result<Vec<_>>>()
+        .map(|words| words.join(" "))
+}
+
+fn shell_word(word: &Path) -> Result<String> {
+    let word = word
+        .to_str()
+        .ok_or_else(|| Error::Daemon("Muse's command is not UTF-8".to_owned()))?;
+    Ok(format!("'{}'", word.replace('\'', "'\\''")))
 }
 
 /// The file beside the rig's Muse's `argv` log in which each of its windows writes its
@@ -685,10 +835,10 @@ pub fn has(records: &[Value], wanted: &str) -> bool {
     records.iter().any(|record| kind(record) == wanted)
 }
 
-/// How each run of a SessionStart hook ended, in the order the log wrote them: `completed`
-/// or `failed`, and what Muse says where it failed (`hook_run_terminal`). Muse 1.4.14 ends
-/// a hook that printed more than 16,384 bytes as `failed`, with `output_too_large`, and
-/// takes nothing of what it printed.
+/// How each run of a SessionStart hook ended, in the order the log wrote them: its status
+/// (such as `completed`, `failed`, or `timed_out`) and any error (`hook_run_terminal`).
+/// Muse 1.4.14 ends a hook that printed more than 16,384 bytes as `failed`, with
+/// `output_too_large`, and takes nothing of what it printed.
 pub fn hook_runs(records: &[Value]) -> Vec<(String, Option<String>)> {
     records
         .iter()
@@ -786,12 +936,19 @@ pub fn question_tools(records: &[Value]) -> Vec<Vec<String>> {
 }
 
 /// What `muse usage --json` says of the account's allowance now, asked of the machine's
-/// Muse with the person's login (its secret in the keychain, found by `real_home`) and
+/// Muse with the person's login (its secret in the keychain) and
 /// the settings in `config_home`, a throwaway folder: no model turn.
 pub fn usage(install: &Installed, real_home: &Path, config_home: &Path) -> Result<Value> {
     // By its real path: Muse takes a data folder reached through a link for unsafe (T-931).
     let config_home = &files::real_path(config_home);
-    let mut run = crate::process::Run::new(&install.binary).args(["usage", "--json"]);
+    let root = config_home
+        .parent()
+        .ok_or_else(|| Error::Daemon("Muse's usage home has no root".to_owned()))?;
+    crate::door::make_dir_private(root.join("runtime"))?;
+    let launch = isolated_command(&install.binary, &[root.to_path_buf()], &[])?;
+    let mut run = crate::process::Run::new(&launch.program)
+        .args(&launch.prefix)
+        .args(["usage", "--json"]);
     for (name, value) in usage_vars(real_home, config_home, cfg!(windows)) {
         run = run.var(name, value);
     }
@@ -803,10 +960,10 @@ pub fn usage(install: &Installed, real_home: &Path, config_home: &Path) -> Resul
 
 /// The variables `muse usage --json` is run with: the settings and, on a Mac, the login's
 /// metadata are in `config_home` (a throwaway folder seeded by [`seed_live_home`]), Muse's
-/// secret in the keychain it finds by the person's home. On `windows` the login is the file in
-/// `config_home` and there is no keychain, so the person's profile is named nowhere.
+/// secret in the keychain. On `windows` the login is the file in `config_home` and there
+/// is no keychain. Both use the run's home.
 fn usage_vars(
-    real_home: &Path,
+    _real_home: &Path,
     config_home: &Path,
     windows: bool,
 ) -> Vec<(&'static str, std::ffi::OsString)> {
@@ -816,13 +973,14 @@ fn usage_vars(
         ("MUSE_NO_AUTO_UPDATE", "1".into()),
         ("MUSE_LOGIN", "0".into()),
     ];
+    let root = config_home.parent().unwrap_or(config_home);
+    vars.push(("HOME", root.into()));
+    vars.push(("CFFIXED_USER_HOME", root.into()));
+    vars.push(("XDG_RUNTIME_DIR", root.join("runtime").into()));
     if windows {
-        let root = config_home.parent().unwrap_or(config_home);
         vars.push(("USERPROFILE", root.into()));
-        vars.push(("HOME", root.into()));
         vars.push(("XDG_CONFIG_HOME", config_home.into()));
     } else {
-        vars.push(("HOME", real_home.into()));
         vars.push(("XDG_CONFIG_HOME", config_home.into()));
         vars.push(("PATH", "/usr/bin:/bin".into()));
     }
@@ -1067,6 +1225,50 @@ pub mod members {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn t1778_muse_sandbox_refuses_foreign_harness_homes() {
+        let fixture = crate::door::made("muse-foreign-").unwrap();
+        let foreign = fixture.path().join("foreign");
+        let owned = foreign.join("run");
+        crate::door::make_dir(&owned).unwrap();
+        let own_file = owned.join("writable");
+        crate::door::write(&own_file, "before\n").unwrap();
+        let protected = [
+            foreign
+                .join("Library/Application Support/Muse/session-name-authority/session-names.db"),
+            foreign.join(".config/muse/auth.json"),
+            foreign.join(".pi/agent/config.json"),
+        ];
+        for path in &protected {
+            crate::door::make_dir(path.parent().unwrap()).unwrap();
+            crate::door::write(path, "sentinel\n").unwrap();
+        }
+        let alias = owned.join("foreign-link");
+        std::os::unix::fs::symlink(&protected[0], &alias).unwrap();
+        let script = "own=$1; shift; IFS= read -r line < \"$own\" || exit 13; [ \"$line\" = before ] || exit 14; printf after > \"$own\" || exit 15; for file in \"$@\"; do if IFS= read -r line < \"$file\"; then exit 11; fi; if printf changed > \"$file\"; then exit 12; fi; done; exit 0";
+        let profile = super::sandbox_profile(
+            &foreign,
+            &[owned],
+            &[],
+            nix::unistd::Uid::current().as_raw(),
+        )
+        .unwrap();
+        let mut child = crate::process::Run::new("/usr/bin/sandbox-exec")
+            .args(["-p", &profile, "/bin/sh", "-c", script, "probe"])
+            .arg(&own_file);
+        for path in &protected {
+            child = child.arg(path);
+        }
+        child = child.arg(&alias);
+        let answer = child.run().unwrap();
+        assert_eq!(answer.code, Some(0), "{answer}");
+        assert_eq!(std::fs::read_to_string(own_file).unwrap(), "after");
+        for path in &protected {
+            assert_eq!(std::fs::read_to_string(path).unwrap(), "sentinel\n");
+        }
+    }
+
     use std::path::Path;
 
     use serde_json::json;
@@ -1077,6 +1279,40 @@ mod tests {
     use super::{allowance_left, question_tools, used_percent, Run, StandIn};
     use super::{echo_list, serve_reply};
     use crate::files;
+
+    #[test]
+    fn t1778_muse_standin_bounds_windows_profile_folders_for_echo_and_live() {
+        let home = std::path::PathBuf::from("C:/rig/home");
+        for run in [
+            Run::Echo { turn_ms: 1 },
+            Run::Live {
+                real_home: "C:/Users/person".into(),
+            },
+        ] {
+            let stand_in = StandIn {
+                binary: "C:/m/muse.exe".into(),
+                argv: "C:/rig/argv".into(),
+                run,
+                rig_home: home.clone(),
+                data_home: home.join(".local/share"),
+            };
+            let env = stand_in.env();
+            for (name, path) in [
+                ("APPDATA", home.join("AppData/Roaming")),
+                ("LOCALAPPDATA", home.join("AppData/Local")),
+            ] {
+                let actual = env
+                    .iter()
+                    .find(|(key, _)| key == name)
+                    .map(|(_, value)| value);
+                assert_eq!(
+                    actual.map(String::as_str),
+                    Some(path.to_string_lossy().as_ref()),
+                    "{name}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn the_echo_muse_answers_the_daemons_read_of_the_models_and_nothing_else() {
@@ -1274,11 +1510,18 @@ mod tests {
             std::fs::read_to_string(&said).unwrap()
         };
         let wanted = format!("{0}/.config {0}/.local/share", rig.display());
-        super::write_stand_in(&bin, &install, 10, &rig, &argv).unwrap();
+        super::write_stand_in(&bin, &install, 10, &rig, &rig.join(".local/share"), &argv).unwrap();
         assert_eq!(ran(&bin.join("muse")), wanted, "on echo");
-        super::write_live_stand_in(&bin, &install, folder.path(), &rig, &argv).unwrap();
-        let live = format!("{}/.config /a-home/data", rig.display());
-        assert_eq!(ran(&bin.join("muse")), live, "live");
+        super::write_live_stand_in(
+            &bin,
+            &install,
+            folder.path(),
+            &rig,
+            &rig.join(".local/share"),
+            &argv,
+        )
+        .unwrap();
+        assert_eq!(ran(&bin.join("muse")), wanted, "live");
     }
 
     /// The rig's Muse, run as a window runs it, with a program of 2 s in Muse's place: long
@@ -1298,6 +1541,7 @@ mod tests {
             &install,
             1_000,
             &dir.path().join("rig-home"),
+            &dir.path().join("rig-home/.local/share"),
             &dir.path().join("argv.log"),
         )
         .unwrap();
@@ -1369,6 +1613,7 @@ mod tests {
             argv: "C:/rig/muse-argv.log".into(),
             run: Run::Echo { turn_ms: 4_000 },
             rig_home: "C:/rig/home".into(),
+            data_home: "C:/rig/home/.local/share".into(),
         };
         if crate::process::own_var("CF_TEST_MUSE_DELAY_MS").is_none() {
             assert_eq!(
@@ -1386,8 +1631,10 @@ mod tests {
                 ]
             );
         }
-        assert!(echo.env().is_empty());
-        assert_eq!(StandIn::from_json(&echo.to_json().to_string()), Some(echo));
+        assert_eq!(
+            StandIn::from_json(&echo.to_json().to_string()),
+            Some(echo.clone())
+        );
         let live = StandIn {
             binary: "C:/m/muse-bin-1.4.13-R6996.1.exe".into(),
             argv: "C:/rig/muse-argv.log".into(),
@@ -1395,19 +1642,30 @@ mod tests {
                 real_home: "C:/Users/AGV".into(),
             },
             rig_home: "C:/rig/home".into(),
+            data_home: "C:/rig/home/.local/share".into(),
         };
         assert_eq!(live.args(&words), words);
+        assert_eq!(echo.env(), live.env());
         let rig = std::path::Path::new("C:/rig/home");
         let at = |path: std::path::PathBuf| path.to_string_lossy().into_owned();
         assert_eq!(
             live.env(),
             [
+                ("HOME".to_owned(), at(rig.to_path_buf())),
+                ("USERPROFILE".to_owned(), at(rig.to_path_buf())),
+                ("APPDATA".to_owned(), at(rig.join("AppData/Roaming"))),
+                ("LOCALAPPDATA".to_owned(), at(rig.join("AppData/Local"))),
                 ("XDG_CONFIG_HOME".to_owned(), at(rig.join(".config"))),
                 (
                     "XDG_DATA_HOME".to_owned(),
                     at(rig.join(".local").join("share"))
                 ),
                 ("XDG_CACHE_HOME".to_owned(), at(rig.join(".cache"))),
+                ("XDG_STATE_HOME".to_owned(), at(rig.join(".local/state"))),
+                (
+                    "XDG_RUNTIME_DIR".to_owned(),
+                    at(rig.join(".local/share/muse/runtime"))
+                ),
             ]
         );
         assert_eq!(StandIn::from_json(&live.to_json().to_string()), Some(live));
@@ -1486,12 +1744,23 @@ mod tests {
                 real_home: "C:/Users/AGV".into(),
             },
             rig_home: "C:/rig/home".into(),
+            data_home: "C:/rig/home/.local/share".into(),
         };
         let env = live.env();
         let names: Vec<&str> = env.iter().map(|(name, _)| name.as_str()).collect();
         assert_eq!(
             names,
-            ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME"]
+            [
+                "HOME",
+                "USERPROFILE",
+                "APPDATA",
+                "LOCALAPPDATA",
+                "XDG_CONFIG_HOME",
+                "XDG_DATA_HOME",
+                "XDG_CACHE_HOME",
+                "XDG_STATE_HOME",
+                "XDG_RUNTIME_DIR"
+            ]
         );
         for (name, value) in &env {
             assert!(value.starts_with("C:/rig/home"), "{name}: {value}");
@@ -1693,6 +1962,14 @@ mod tests {
             value(&mac, "XDG_CONFIG_HOME").as_deref(),
             Some("/tmp/throwaway/.config")
         );
-        assert_eq!(value(&mac, "HOME").as_deref(), Some("/Users/AGV"));
+        assert_eq!(value(&mac, "HOME").as_deref(), Some("/tmp/throwaway"));
+        assert_eq!(
+            value(&mac, "CFFIXED_USER_HOME").as_deref(),
+            Some("/tmp/throwaway")
+        );
+        assert_eq!(
+            value(&mac, "XDG_RUNTIME_DIR").as_deref(),
+            Some("/tmp/throwaway/runtime")
+        );
     }
 }

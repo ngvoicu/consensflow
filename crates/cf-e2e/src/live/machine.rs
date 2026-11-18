@@ -605,7 +605,7 @@ fn rig_keeping_claude_in(
 
 /// The machine's Muse that `install` names, as its rig's own launcher runs it: a rig that seats
 /// Muse runs it through that launcher, which gives its windows the rig's folders and the
-/// person's home for its keychain alone ([`crate::muse::write_live_stand_in`]), and never on
+/// run's home and a Mac sandbox ([`crate::muse::write_live_stand_in`]), and never on
 /// the person's own `~/.config/muse` and `~/.local/share/muse` (T-946: the members kit's live
 /// pacing run wrote them). A Muse the launcher cannot be made for stops the run before anything
 /// is spent.

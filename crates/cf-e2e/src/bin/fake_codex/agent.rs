@@ -323,7 +323,7 @@ impl Agent {
         let window_env = held(&self.window_env).clone();
         let ran = cf_e2e::process::Run::new(cf_e2e::process::as_a_shell_finds("cf"))
             .args(words)
-            .inheriting_env()
+            .inheriting_window_env()
             .vars(window_env.iter().map(|(name, value)| (name, value)))
             .var("CODEX_THREAD_ID", &thread)
             .cwd(&folder)
@@ -848,7 +848,7 @@ fn cf_in(text: &str) -> Option<Vec<String>> {
 fn run_cf(words: &[String]) -> String {
     match cf_e2e::process::Run::new(cf_e2e::process::as_a_shell_finds("cf"))
         .args(words)
-        .inheriting_env()
+        .inheriting_window_env()
         .unlimited()
         .run()
     {

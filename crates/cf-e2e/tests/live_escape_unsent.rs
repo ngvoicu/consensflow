@@ -470,6 +470,7 @@ fn open_codex<'r>(rig: &'r Rig, install: &Installed, log: &Log) -> Result<Pane<'
     let home = PathBuf::from(rig.var("HOME").unwrap_or_default());
     let workspace = live::machine::live_folder_in(&home, &format!("{FOLDER}/codex"))?;
     let agent = agents::agent(Harness::Codex);
+    agents::validate_window(rig, &agent)?;
     let mut argv = vec![install.command().to_string_lossy().into_owned()];
     argv.extend(codex::isolation(&codex::mcp_servers(
         install.command(),

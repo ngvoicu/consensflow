@@ -122,6 +122,7 @@ pub fn copy_cloning(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result {
     #[cfg(target_os = "macos")]
     {
         let cloned = std::process::Command::new("/bin/cp")
+            .env_clear()
             .arg("-c")
             .arg(from)
             .arg(to)

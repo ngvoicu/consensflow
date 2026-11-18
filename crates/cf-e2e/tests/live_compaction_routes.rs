@@ -153,6 +153,7 @@ fn codex_compacts_a_thread_past_the_limit_its_launch_gives() -> Result {
     let install = cf_e2e::live::codex()?;
     let model = agents::model(Harness::Codex);
     let home = install.home_outside_a_rig()?;
+    agents::validate_in_env(&model, &home)?;
     let codex_home = home
         .iter()
         .find(|(name, _)| name == "CODEX_HOME")
@@ -355,6 +356,7 @@ fn devin_compacts_at_the_thresholds_its_launch_gives() -> Result {
     let install = machine::installed_for(Harness::Devin, Duration::from_secs(1200))?;
     let model = agents::model(Harness::Devin);
     let home = install.home_outside_a_rig()?;
+    agents::validate_in_env(&model, &home)?;
     let devin = install.command().to_string_lossy().into_owned();
     let turn = |thresholds: &str| -> Result<(cf_e2e::door::Made, PathBuf)> {
         let (scratch, folder) = scratch_folder()?;
@@ -548,24 +550,25 @@ fn muse_compacts_at_the_soft_threshold_its_launch_gives() -> Result {
             path: home.join(".config/muse"),
             source,
         })?;
+        let mut env: std::collections::BTreeMap<String, String> =
+            machine_vars().into_iter().collect();
+        for (name, folder) in [
+            ("XDG_CONFIG_HOME", "config"),
+            ("XDG_DATA_HOME", "data"),
+            ("XDG_CACHE_HOME", "cache"),
+            ("XDG_STATE_HOME", "state"),
+        ] {
+            env.insert(
+                name.to_owned(),
+                scratch.path().join(folder).to_string_lossy().into_owned(),
+            );
+        }
+        env.insert("MUSE_NO_AUTO_UPDATE".to_owned(), "1".to_owned());
         if selected.is_none() {
-            let mut env: std::collections::BTreeMap<String, String> =
-                machine_vars().into_iter().collect();
-            for (name, folder) in [
-                ("XDG_CONFIG_HOME", "config"),
-                ("XDG_DATA_HOME", "data"),
-                ("XDG_CACHE_HOME", "cache"),
-                ("XDG_STATE_HOME", "state"),
-            ] {
-                env.insert(
-                    name.to_owned(),
-                    scratch.path().join(folder).to_string_lossy().into_owned(),
-                );
-            }
-            env.insert("MUSE_NO_AUTO_UPDATE".to_owned(), "1".to_owned());
             selected = Some(agents::muse_in_env(&env)?);
         }
         let model = selected.as_ref().expect("a model was named or selected");
+        agents::validate_in_env(model, &env.into_iter().collect::<Vec<_>>())?;
         let (_folder_scratch, folder) = scratch_folder()?;
         let mut args = vec![
             muse.to_string_lossy().into_owned(),

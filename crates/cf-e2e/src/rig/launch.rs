@@ -87,11 +87,12 @@ impl Rig {
         };
         let workspace = root.join("workspace");
         crate::door::make_dir(&workspace)?;
-        let fake_bin = write_fake_install(&root, &config)?;
-        let muse_launcher = matches!(config.muse, Some((_, crate::muse::Run::Live { .. })))
-            .then(|| own_commands(&root, &config).join("muse"));
+        let fake_bin = root.join("fake-bin");
         let mut env = environment(&root, &fake_bin, &config, &home_vars);
         super::install::bound_standin_homes(&mut env, &root, "window");
+        write_fake_install(&root, &config, &env)?;
+        let muse_launcher = matches!(config.muse, Some((_, crate::muse::Run::Live { .. })))
+            .then(|| own_commands(&root, &config).join("muse"));
         #[cfg(unix)]
         super::install::give_muse_its_folders(&root, &config, &home_vars)?;
         // A restart over the same home keeps the stand-ins a case wrote: they are still
