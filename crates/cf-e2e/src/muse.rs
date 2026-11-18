@@ -835,10 +835,10 @@ pub fn has(records: &[Value], wanted: &str) -> bool {
     records.iter().any(|record| kind(record) == wanted)
 }
 
-/// How each run of a SessionStart hook ended, in the order the log wrote them: `completed`
-/// or `failed`, and what Muse says where it failed (`hook_run_terminal`). Muse 1.4.14 ends
-/// a hook that printed more than 16,384 bytes as `failed`, with `output_too_large`, and
-/// takes nothing of what it printed.
+/// How each run of a SessionStart hook ended, in the order the log wrote them: its status
+/// (such as `completed`, `failed`, or `timed_out`) and any error (`hook_run_terminal`).
+/// Muse 1.4.14 ends a hook that printed more than 16,384 bytes as `failed`, with
+/// `output_too_large`, and takes nothing of what it printed.
 pub fn hook_runs(records: &[Value]) -> Vec<(String, Option<String>)> {
     records
         .iter()
