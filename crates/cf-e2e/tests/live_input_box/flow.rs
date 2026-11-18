@@ -236,6 +236,7 @@ mod tests {
         let home = rig.var("HOME").unwrap_or_default().to_owned();
         let install = Installed::at(Harness::Claude, FAKE_AGENT, &home);
         let window = Open::new(&rig, &install, "input-box", "input-box-ctrl-c")
+            .agent(serde_json::json!({ "kind": "claude-code", "model": "fake-chief" }))
             .without_trust()
             .open(&cf_e2e::live::Log::new("live input-box test"))?;
         let outcome = flow(&window, strategy("ctrl-c")?, stand_in_message)?;
@@ -269,6 +270,7 @@ mod tests {
         let home = rig.var("HOME").unwrap_or_default().to_owned();
         let install = Installed::at(Harness::Claude, FAKE_AGENT, &home);
         let window = Open::new(&rig, &install, "input-box", "input-box-keys")
+            .agent(serde_json::json!({ "kind": "claude-code", "model": "fake-chief" }))
             .without_trust()
             .open(&cf_e2e::live::Log::new("live input-box test"))?;
         assert_eq!(window.ready(), Ok(()));
