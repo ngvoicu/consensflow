@@ -114,16 +114,8 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''
-    store.move_task(&task, "cancelled", json!({ "by": by }))?;
-    if let Some(window) = task.assignee_id {
-        shut_doors(store, &task, window)?;
-    }
-    release_ready(store, project_id)?;'''
-replace = '''    store.move_task(&task, "cancelled", json!({ "by": by }))?;
-    if let Some(window) = task.assignee_id {
-        shut_doors(store, &task, window)?;
-    }'''
+find = "    store.move_task(&task, \"cancelled\", json!({ \"by\": by }))?;\n    if let Some(window) = task.assignee_id {\n        shut_doors(store, &task, window)?;\n    }\n    release_ready(store, project_id)?;"
+replace = "    store.move_task(&task, \"cancelled\", json!({ \"by\": by }))?;\n    if let Some(window) = task.assignee_id {\n        shut_doors(store, &task, window)?;\n    }"
 
 [[plant]]
 name = "session: a task waiting for its session is not released when the task fails"
@@ -132,16 +124,8 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''
-        store.move_task(&task, "failed", json!({ "reason": reason }))?;
-        if let Some(window) = task.assignee_id {
-            shut_doors(store, &task, window)?;
-        }
-        release_ready(store, project_id)?;'''
-replace = '''        store.move_task(&task, "failed", json!({ "reason": reason }))?;
-        if let Some(window) = task.assignee_id {
-            shut_doors(store, &task, window)?;
-        }'''
+find = "        store.move_task(&task, \"failed\", json!({ \"reason\": reason }))?;\n        if let Some(window) = task.assignee_id {\n            shut_doors(store, &task, window)?;\n        }\n        release_ready(store, project_id)?;"
+replace = "        store.move_task(&task, \"failed\", json!({ \"reason\": reason }))?;\n        if let Some(window) = task.assignee_id {\n            shut_doors(store, &task, window)?;\n        }"
 
 [[plant]]
 name = "session: a task waiting for its session is not released when a delivery to it fails for good"

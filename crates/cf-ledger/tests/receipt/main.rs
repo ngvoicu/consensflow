@@ -31,6 +31,7 @@ mod fixture;
 mod gate;
 mod handed;
 mod legacy;
+mod moved_answer_contract;
 mod open_questions;
 mod open_tells;
 mod outage_notes;

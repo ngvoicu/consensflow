@@ -34,50 +34,44 @@ pub(super) async fn ask(
             "this window closed before its question could be placed",
         ));
     }
-    let active = caller.question_task.as_ref();
-    if let Some(asked_on) = active {
-        let now = context
-            .ledger
-            .borrow()
-            .task_in_hand(caller.participant.id)?;
-        let generation = |thread: &cf_ledger::TaskThread| {
-            thread
-                .messages
-                .iter()
-                .filter(|message| {
-                    message.kind == "task" && message.recipient_id == caller.participant.id
-                })
-                .map(|message| message.id)
-                .max()
+    let holding = caller.question_holding;
+    if let Some((task, number)) = caller.question_launch_task {
+        let ledger = context.ledger.borrow();
+        let belongs = match holding {
+            Some(h) if h.task_id == task => ledger.question_holding_matches(
+                caller.participant.id,
+                Some(task),
+                Some(h.first_brief),
+            )?,
+            _ => false,
         };
-        if !now.as_ref().is_some_and(|thread| {
-            thread.task.id == asked_on.task.id && generation(thread) == generation(asked_on)
-        }) {
-            let current = context
-                .ledger
-                .borrow()
-                .task(caller.project.id, asked_on.task.number)?;
-            let task = current
-                .map(|thread| thread.task)
-                .unwrap_or_else(|| asked_on.task.clone());
-            return Err(ended_task(&task, caller));
-        }
-        if caller.question_unstarted {
+        if !belongs {
+            if let Some(current) = ledger.task(caller.project.id, number)? {
+                return Err(ended_task(&current.task, caller));
+            }
             return Err(Failure::refuse(
                 409,
-                "task-not-started",
-                format!(
-                    "T-{} has not reached this window: this turn cannot ask on it",
-                    asked_on.task.number
-                ),
+                "task-ended",
+                format!("T-{number} is no longer held by this window"),
             ));
         }
-    } else if let Some(ended) = caller.question_ended_task.as_ref() {
-        return Err(ended_task(&ended.task, caller));
-    } else if !caller.question_window_known {
-        // A caller without a launch boundary retains the older conservative
-        // cancellation rule. The engine supplies a boundary for real windows.
-        refuse_cancelled(context, caller)?;
+    }
+    if let Some(holding) = holding {
+        let ledger = context.ledger.borrow();
+        if !ledger.question_holding_matches(
+            caller.participant.id,
+            Some(holding.task_id),
+            Some(holding.first_brief),
+        )? {
+            if let Some(current) = ledger.task(caller.project.id, holding.task_number)? {
+                return Err(ended_task(&current.task, caller));
+            }
+            return Err(Failure::refuse(
+                409,
+                "task-ended",
+                format!("T-{} is no longer held by this window", holding.task_number),
+            ));
+        }
     }
     let asked = context.ledger.borrow_mut().ask(
         caller.project.id,
@@ -87,7 +81,7 @@ pub(super) async fn ask(
             // Whatever is no text is no words: the ledger refuses it as it
             // refuses a blank one, once the question is being put.
             body: body.get("body").and_then(Value::as_str).map(str::to_owned),
-            task: active.map(|thread| thread.task.number),
+            task: holding.map(|holding| holding.task_number),
             // Present is not absent: `null` is a list of questions that is none.
             questions: body.get("questions").cloned(),
             urgent: false,
@@ -100,32 +94,32 @@ pub(super) async fn ask(
 }
 
 fn ended_task(task: &cf_ledger::TaskView, caller: &Caller) -> Failure {
-    let (code, words) = if task.state == "cancelled" {
-        (
-            "task-cancelled",
-            format!(
-                "T-{} is cancelled: nothing more of it goes to @{}",
-                task.number, task.requester
-            ),
-        )
+    let code = if task.state == "cancelled" {
+        "task-cancelled"
     } else if task.assignee.as_deref() != Some(caller.participant.handle.as_str()) {
-        (
-            "question-moved",
-            format!(
-                "T-{} moved to another window: this window cannot ask on it now",
-                task.number
-            ),
-        )
+        "question-moved"
     } else {
-        (
-            "task-ended",
-            format!(
-                "T-{} is {}: this window cannot ask on it now",
-                task.number, task.state
-            ),
-        )
+        "task-ended"
     };
-    Failure::refuse(409, code, words)
+    let place = if task.deleted_at.is_some() {
+        "was deleted".to_owned()
+    } else if matches!(task.state.as_str(), "accepted" | "cancelled") {
+        format!("is {}", task.state)
+    } else if let Some(member) = task.assignee.as_ref() {
+        format!("is {} with @{member}", task.state)
+    } else if let Some(pool) = &task.pool {
+        format!("is {} for the {pool} pool", task.state)
+    } else {
+        format!("is {} with no member", task.state)
+    };
+    Failure::refuse(
+        409,
+        code,
+        format!(
+            "T-{} {place}: this window cannot ask on it now",
+            task.number
+        ),
+    )
 }
 
 /// A member's window with no task in progress, whose task was cancelled under

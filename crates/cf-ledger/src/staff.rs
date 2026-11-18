@@ -15,9 +15,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::conversations::current_conversation;
-use crate::messages::{
-    kept_through_leaving, return_unreceived_answers, withdraw_open_questions, Dropped,
-};
+use crate::messages::{kept_through_leaving, withdraw_open_questions, Dropped};
 use crate::model::{self, sql_list, LedgerError};
 use crate::projects::NewMember;
 use crate::queue::{drop_queued, send, Sent};
@@ -519,7 +517,7 @@ pub(crate) fn remove_member(
             .map(|(task, _)| Dropped::leaving(store, task))
             .collect::<Result<Vec<_>, _>>()?;
         for (task, _) in &open {
-            return_unreceived_answers(store, task, "cancelled")?;
+            crate::holding::close_task(store, task, Some(&format!("T-{} is cancelled because @{handle} left the staff.", task.number)))?;
             drop_queued(store, task.id)?;
             withdraw_open_questions(store, task, "was cancelled")?;
             store.move_task(task, "cancelled", json!({ "reason": reason }))?;
@@ -528,12 +526,19 @@ pub(crate) fn remove_member(
             }
         }
         for id in &windows {
+            if let Some(holding) = crate::holding::of(store, *id)? {
+                if holding.active {
+                    crate::holding::close(store, *id, Some(holding.task_id), Some(&format!("T-{} remains on the board; @{handle} left the staff.", holding.task_number)))?;
+                }
+            }
+            crate::holding::close(store, *id, None, None)?;
             let kept = kept_through_leaving(store, *id, &reason)?;
             store.db.execute(
                 "UPDATE message SET state = 'cancelled'
            WHERE ((recipient_id = ?1 AND state IN ('queued', 'delivering', 'gated'))
               OR (sender_id = ?1 AND kind = 'question' AND state IN ('queued', 'gated')))
-             AND id NOT IN (SELECT value FROM json_each(?2))",
+             AND id NOT IN (SELECT value FROM json_each(?2))
+             AND NOT (state = 'gated' AND kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))",
                 params![id, json!(kept).to_string()],
             )?;
         }

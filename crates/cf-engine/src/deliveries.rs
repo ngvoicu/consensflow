@@ -762,6 +762,14 @@ impl Dispatcher {
             self.changed();
             return Ok(());
         }
+        if matches!(outcome, Admission::Admitted { queued: false })
+            && record.window.borrow().pane.as_ref() == Some(&pane)
+        {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .question_brief_handed_over(message.id)?;
+        }
         // The window took the paste: its hold ends here, and not before, as a paste it
         // refused is no paste and keeps the hold's clock (Calliope's P3 on T-919).
         record.delivery.borrow_mut().held = None;
@@ -936,6 +944,14 @@ impl Dispatcher {
             let reason =
                 format!("its harness refused its first message for being at work: {reason}");
             return self.held_once(record, first.message, &reason).await;
+        }
+        if matches!(outcome, Admission::Admitted { queued: false })
+            && record.window.borrow().pane.as_ref() == Some(&pane)
+        {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .question_brief_handed_over(first.message)?;
         }
         record.delivery.borrow_mut().held = None;
         let now = self.now();

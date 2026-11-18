@@ -1,0 +1,149 @@
+# T-1813: the holding, its end, and delivery across physical windows.
+
+[[plant]]
+name = "moved answer simple: a question forgets its window's held task"
+meant = "t1803_finding_07_a_question_about_another_task_follows_the_asking_windows_holding"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_07_a_question_about_another_task_follows_the_asking_windows_holding"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "            (Some(h.task_id), Some(h.first_brief))"
+replace = "            (None, None)"
+
+[[plant]]
+name = "moved answer simple: a prior task cannot be a question's topic"
+meant = "t1803_finding_07_a_current_holding_can_ask_about_its_previous_task"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_07_a_current_holding_can_ask_about_its_previous_task"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "                            .then_some(h)"
+replace = "                            .then_some(h).filter(|_| false)"
+
+[[plant]]
+name = "moved answer simple: a door follows its topic instead of the holding"
+meant = "t1803_finding_07_a_door_follows_the_holding_not_a_paused_topic"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_07_a_door_follows_the_holding_not_a_paused_topic"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "        let task = crate::holding::binding_task(store, question_id)?.unwrap_or(task);"
+replace = "        let task = task;"
+
+[[plant]]
+name = "moved answer simple: a question waits on its topic instead of the holding"
+meant = "t1803_finding_07_accepting_a_question_topic_keeps_the_current_holding_open"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_07_accepting_a_question_topic_keeps_the_current_holding_open"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''             WHERE {} = ?1 AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0'''
+replace = '''             WHERE q.task_id = ?1 AND {} IS NOT NULL AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0'''
+
+[[plant]]
+name = "moved answer simple: accepting the topic cancels a different holding's gated question"
+meant = "t1803_finding_07_accepting_a_topic_keeps_another_holdings_question_at_the_gate"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_07_accepting_a_topic_keeps_another_holdings_question_at_the_gate"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/queue.rs"
+find = '''         AND NOT (kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))
+         AND NOT (kind = 'question' AND id IN (SELECT question_id FROM question_binding WHERE task_id IS NOT ?2))",'''
+replace = '''         AND NOT (kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))",'''
+
+[[plant]]
+name = "moved answer simple: removal loses the queued answer"
+meant = "t1800_finding_03_and_t1803_finding_03_removal_returns_approved_answer_to_chief_once"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1800_finding_03_and_t1803_finding_03_removal_returns_approved_answer_to_chief_once"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "            return_answer(store, answer, location)?;"
+replace = "            let _ = (answer, location);"
+
+[[plant]]
+name = "moved answer simple: a foreign window can receive a question's answer"
+meant = "t1800_finding_07_a_foreign_window_binding_cannot_receive_an_answer"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1800_finding_07_a_foreign_window_binding_cannot_receive_an_answer"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = '''            if !valid {
+                return Err(LedgerError::refused_with(
+                    "question-conflict",
+                    "the question's project, task or window records disagree; no answer was moved",'''
+replace = '''            if false && !valid {
+                return Err(LedgerError::refused_with(
+                    "question-conflict",
+                    "the question's project, task or window records disagree; no answer was moved",'''
+
+[[plant]]
+name = "moved answer simple: an ended holding passes the approval gate"
+meant = "t1803_finding_02_gated_answer_waits_for_approval_after_acceptance"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_02_gated_answer_waits_for_approval_after_acceptance"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/gate.rs"
+find = "                if crate::holding::question_is_live(store, question)? == Some(false) {"
+replace = "                if false && crate::holding::question_is_live(store, question)? == Some(false) {"
+
+[[plant]]
+name = "moved answer simple: an idle window's answer cannot be delivered"
+meant = "t1803_finding_06_taskless_plain_answer_is_dispatchable"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_06_taskless_plain_answer_is_dispatchable"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = " OR (m.kind = 'answer' AND m.task_id IS NULL) OR m.task_id IN ("
+replace = " OR m.task_id IN ("
+
+[[plant]]
+name = "moved answer simple: window exit strands an idle answer"
+meant = "t1813_an_idle_window_exit_returns_its_taskless_answer_to_the_chief"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1813_an_idle_window_exit_returns_its_taskless_answer_to_the_chief"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        let deferred_answers = self.seams.ledger.borrow_mut().close_question_window(
+            record.id,
+            delivering.as_ref().map(|delivery| delivery.message),
+        )?;'''
+replace = "        let deferred_answers = Vec::new();"
+
+[[plant]]
+name = "moved answer simple: a queued brief becomes a handover"
+meant = "t1813_a_brief_queued_in_the_harness_does_not_replace_the_delivered_holding"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1813_a_brief_queued_in_the_harness_does_not_replace_the_delivered_holding"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        if matches!(outcome, Admission::Admitted { queued: false })
+            && record.window.borrow().pane.as_ref() == Some(&pane)
+        {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .question_brief_handed_over(message.id)?;'''
+replace = '''        if matches!(outcome, Admission::Admitted { .. })
+            && record.window.borrow().pane.as_ref() == Some(&pane)
+        {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .question_brief_handed_over(message.id)?;'''
+
+[[plant]]
+name = "moved answer simple: project resume forgets the held task"
+meant = "t1813_project_resume_reopens_the_same_conversation_for_new_questions"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1813_project_resume_reopens_the_same_conversation_for_new_questions"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''                    .resume_question_holding(participant.id, number)?;'''
+replace = '''                    .question_holding(participant.id)?;'''
+
+[[plant]]
+name = "moved answer simple: an early launch question loses its first brief"
+meant = "t1813_a_window_started_with_its_brief_can_ask_before_the_host_answers_open"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "t1813_a_window_started_with_its_brief_can_ask_before_the_host_answers_open"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/callers.rs"
+find = "                                                ledger.question_brief_handed_over(brief)?;"
+replace = "                                                let _ = brief;"
+
+[[plant]]
+name = "moved answer simple: an early resume question loses its holding"
+meant = "t1813_a_resumed_window_can_ask_before_the_host_answers_its_open"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "t1813_a_resumed_window_can_ask_before_the_host_answers_its_open"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/callers.rs"
+find = "                        ledger.resume_question_holding(participant.id, held.task_number)?;"
+replace = "                        let _ = held.task_number;"

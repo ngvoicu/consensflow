@@ -40,15 +40,7 @@ fn migration_0038_keeps_the_0037_ledger_and_defaults_every_project_off() {
             .map(|row| format!("{row}|Null|Null|Null"))
             .collect::<Vec<_>>()
     );
-    assert_eq!(&latest[2..4], &after[2..4]);
-    // Migration 0041 adds two nullable question-suspension columns to messages.
-    assert_eq!(
-        latest[4],
-        after[4]
-            .iter()
-            .map(|row| format!("{row}|Null|Null"))
-            .collect::<Vec<_>>()
-    );
+    assert_eq!(&latest[2..], &after[2..]);
     assert!(!db
         .prepare("PRAGMA foreign_key_check")
         .unwrap()

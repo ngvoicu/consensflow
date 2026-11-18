@@ -541,35 +541,33 @@ fn an_answer_whose_delivery_failed_leaves_a_question_withdrawn_at_the_gate_oblig
 }
 
 #[test]
-fn an_answer_cancelled_by_the_task_failing_leaves_the_question_obliging_through_the_reopen() {
+fn a_failure_closes_the_old_question_even_if_the_task_is_reopened() {
     let mut w = gated_world();
     let (task, question, answer) = answered_at_the_gate(&mut w);
-    w.ledger
-        .approve_message(answer, "human")
-        .expect("passed on");
+    w.ledger.approve_message(answer, "human").unwrap();
     w.ledger
         .fail_task(w.project, task, "its pane died")
-        .expect("failed");
+        .unwrap();
     assert_eq!(w.states(&[question, answer]), ["cancelled", "cancelled"]);
-
     let words = w
         .ledger
         .reopen_task(w.project, task, "chief", "Try again")
-        .expect("reopened")
+        .unwrap()
         .message
-        .expect("its words");
-    w.ledger
-        .approve_message(words.id, "human")
-        .expect("passed on");
+        .unwrap();
+    w.ledger.approve_message(words.id, "human").unwrap();
     w.deliver(words.id);
-    assert_eq!(
-        w.state(task),
-        "waiting",
-        "the answer it was owed was cancelled with the task, and never received"
-    );
-
-    answered_again_and_received(&mut w, question);
     assert_eq!(w.state(task), "working");
+    let chief = w.id("chief");
+    assert!(w
+        .ledger
+        .answer(
+            question,
+            chief,
+            Some(&serde_json::json!("New answer")),
+            None
+        )
+        .is_err());
 }
 
 #[test]

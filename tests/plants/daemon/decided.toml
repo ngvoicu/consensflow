@@ -45,10 +45,8 @@ runs = ["decided-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''
-        withdraw_gated(store, task.id, &format!("sent back by @{by}"))?;
-        withdraw_result(store, &task, "was sent back")?;'''
-replace = '        withdraw_gated(store, task.id, &format!("sent back by @{by}"))?;'
+find = "        withdraw_result(store, &task, \"was sent back\")?;"
+replace = ""
 
 [[plant]]
 name = "decided result: a sending back leaves it, and the dispatcher pastes it into the chief"
@@ -57,10 +55,8 @@ runs = ["decided-engine"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''
-        withdraw_gated(store, task.id, &format!("sent back by @{by}"))?;
-        withdraw_result(store, &task, "was sent back")?;'''
-replace = '        withdraw_gated(store, task.id, &format!("sent back by @{by}"))?;'
+find = "        withdraw_result(store, &task, \"was sent back\")?;"
+replace = ""
 
 [[plant]]
 name = "decided result: a cancel leaves a result queued that an older build left"
@@ -133,10 +129,8 @@ runs = ["decided-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''
-        withdraw_gated(store, task.id, &format!("sent back by @{by}"))?;
-        withdraw_result(store, &task, "was sent back")?;'''
-replace = '        withdraw_gated(store, task.id, &format!("sent back by @{by}"))?;'
+find = "        withdraw_result(store, &task, \"was sent back\")?;"
+replace = ""
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"

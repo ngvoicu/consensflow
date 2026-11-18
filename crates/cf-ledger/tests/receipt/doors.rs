@@ -323,11 +323,11 @@ fn an_acceptance_shuts_the_door_of_a_question_still_open_at_it_as_a_pause_does()
         "nobody has answered, and the door waits"
     );
 
-    // An older build could leave the door open after the window's own result.
+    // The window's turn ended with its result while its question was open at the
+    // door (the member's own `cf task done`), and the chief accepted the task.
     w.ledger
         .record_result(w.project, task, "Done")
         .expect("its result");
-    w.ledger.sqlite().execute("UPDATE message SET state = 'delivered', reason = NULL, door_closed_at = NULL WHERE id = ?", [question.id]).unwrap();
     w.ledger
         .accept_task(w.project, task, "chief")
         .expect("accepted");
@@ -370,13 +370,17 @@ fn an_acceptance_leaves_the_door_of_a_question_on_another_task_open() {
 /// is over hands the window no words the Resume holds: the answer kept is
 /// withdrawn with the task, never claimed.
 #[test]
-fn a_result_while_the_project_is_closed_shuts_the_door_and_acceptance_takes_the_kept_answer() {
+fn an_acceptance_while_the_project_is_closed_shuts_the_door_and_the_answer_kept_for_the_resume_goes(
+) {
     let mut w = world();
     let created = w.give("zeus", "Parser");
     let (task, brief) = (created.task.number, created.message.expect("a brief").id);
     w.deliver(brief);
     let zeus = w.id("zeus");
     let question = w.ask_with_options("zeus", task);
+    w.ledger
+        .record_result(w.project, task, "Done")
+        .expect("its result");
     w.ledger
         .set_project_state(w.project, "suspended")
         .expect("closed");
@@ -385,14 +389,6 @@ fn a_result_while_the_project_is_closed_shuts_the_door_and_acceptance_takes_the_
         w.ledger.claim_answer(question.id, zeus).unwrap(),
         Claim::Waiting,
         "kept for the Resume"
-    );
-
-    w.ledger
-        .record_result(w.project, task, "Done")
-        .expect("its result");
-    assert_eq!(
-        w.ledger.claim_answer(question.id, zeus).unwrap(),
-        Claim::Closed
     );
 
     w.ledger

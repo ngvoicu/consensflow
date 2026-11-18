@@ -51,69 +51,17 @@ fn a_waiting_task_finished_withdraws_its_open_question_and_the_chief_cannot_answ
 }
 
 #[test]
-fn the_windows_own_done_withdraws_its_open_question() {
+fn the_windows_own_done_leaves_its_open_question_to_be_answered_as_it_always_did() {
+    // The window's `cf task done` is its own word, not the chief's: the question it asked
+    // stays open until the task is accepted (`chief_open_work`'s tests hold it).
     let mut w = world();
     let (task, question) = asked(&mut w);
 
     w.ledger
         .record_result(w.project, task, "Done after all")
         .expect("a result");
-    assert_eq!(w.message(question).state, "cancelled");
-    assert_eq!(answering(&mut w, question), Some("question-withdrawn"));
-}
-
-#[test]
-fn a_failed_prior_answer_does_not_revive_a_finished_question_on_reopen() {
-    let mut w = world();
-    let (task, question) = asked(&mut w);
-    let answer = w.answer(question, "JSON").id;
-    w.ledger
-        .cancel_message(answer, "withdrawn by the chief")
-        .unwrap();
-    w.ledger
-        .record_finished(w.project, task, "Done after all", (0, 0))
-        .unwrap();
-    assert_eq!(answering(&mut w, question), Some("question-withdrawn"));
-    let words = w
-        .ledger
-        .reopen_task(w.project, task, "chief", "One more change")
-        .unwrap()
-        .message
-        .unwrap();
-    w.deliver(words.id);
-    assert_eq!(w.state(task), "working");
-    assert_eq!(answering(&mut w, question), Some("question-withdrawn"));
-}
-
-#[test]
-fn opening_an_older_done_task_withdraws_its_unanswered_question() {
-    let mut w = world();
-    let (task, question) = asked(&mut w);
-    w.ledger
-        .record_result(w.project, task, "Done after all")
-        .unwrap();
-    w.edit(|db| {
-        db.execute("UPDATE message SET state = 'delivered', reason = NULL, door_closed_at = NULL WHERE id = ?", [question]).unwrap();
-    });
-    assert_eq!(w.message(question).state, "cancelled");
-    assert_eq!(answering(&mut w, question), Some("question-withdrawn"));
-}
-
-#[test]
-fn the_windows_own_done_closes_its_open_harness_door() {
-    let mut w = world();
-    let created = w.give("zeus", "Parser");
-    let task = created.task.number;
-    w.deliver(created.message.unwrap().id);
-    let question = w.ask_with_options("zeus", task).id;
-    let zeus = w.id("zeus");
-    w.ledger
-        .record_result(w.project, task, "Done after all")
-        .unwrap();
-    assert_eq!(
-        w.ledger.claim_answer(question, zeus).unwrap(),
-        Claim::Closed
-    );
+    assert_ne!(w.message(question).state, "cancelled");
+    assert_eq!(answering(&mut w, question), None, "the answer is taken");
 }
 
 #[test]
@@ -212,90 +160,4 @@ fn a_question_open_at_a_harness_door_is_shut_out_of_waiting_by_the_finish() {
         Claim::Closed,
         "the door is told at once, not when its poll gives up"
     );
-}
-
-#[test]
-fn cancelling_with_a_delivered_question_closes_its_door_and_withdraws_it() {
-    let mut w = world();
-    let created = w.give("zeus", "Parser");
-    let task = created.task.number;
-    w.deliver(created.message.unwrap().id);
-    let question = w.ask_with_options("zeus", task).id;
-    w.deliver(question);
-    let zeus = w.id("zeus");
-    assert_eq!(
-        w.ledger.claim_answer(question, zeus).unwrap(),
-        Claim::Waiting
-    );
-
-    w.ledger.cancel_task(w.project, task, "chief").unwrap();
-    assert_eq!(w.message(question).state, "cancelled");
-    assert_eq!(
-        w.ledger.claim_answer(question, zeus).unwrap(),
-        Claim::Closed
-    );
-    assert_eq!(answering(&mut w, question), Some("task-cancelled"));
-}
-
-#[test]
-fn a_failed_task_closes_its_harness_door_while_it_waits_for_a_reopen() {
-    let mut w = world();
-    let created = w.give("zeus", "Parser");
-    let task = created.task.number;
-    w.deliver(created.message.unwrap().id);
-    let question = w.ask_with_options("zeus", task).id;
-    w.deliver(question);
-    let zeus = w.id("zeus");
-    assert_eq!(
-        w.ledger.claim_answer(question, zeus).unwrap(),
-        Claim::Waiting
-    );
-    w.ledger
-        .fail_task(w.project, task, "the window failed")
-        .unwrap();
-    assert_eq!(
-        w.ledger.claim_answer(question, zeus).unwrap(),
-        Claim::Closed
-    );
-    assert_eq!(answering(&mut w, question), Some("task-failed"));
-    let reopened = w
-        .ledger
-        .reopen_task(w.project, task, "chief", "Try again")
-        .unwrap();
-    w.deliver(reopened.message.unwrap().id);
-    assert_eq!(w.state(task), "waiting");
-    let answer = w.choose(question, "red");
-    assert_eq!(
-        w.message(answer.id).state,
-        "queued",
-        "the same conversation still gets its answer"
-    );
-    assert_eq!(
-        w.ledger.claim_answer(question, zeus).unwrap(),
-        Claim::Closed
-    );
-}
-
-#[test]
-fn accepting_a_result_withdraws_the_unseen_question_before_the_chief_gets_it() {
-    let mut w = world();
-    let created = w.give("zeus", "Parser");
-    let task = created.task.number;
-    w.deliver(created.message.unwrap().id);
-    let question = w.ask("zeus", task, "Which format?").id;
-    assert_eq!(w.message(question).state, "queued");
-    w.ledger.record_result(w.project, task, "Done").unwrap();
-    // An older build could already have left the question queued on a done task.
-    w.ledger
-        .sqlite()
-        .execute(
-            "UPDATE message SET state = 'queued', reason = NULL WHERE id = ?",
-            [question],
-        )
-        .unwrap();
-    w.ledger.accept_task(w.project, task, "chief").unwrap();
-
-    assert_eq!(w.message(question).state, "cancelled");
-    assert_ne!(w.next("chief"), Some(question));
-    assert_eq!(answering(&mut w, question), Some("task-accepted"));
 }

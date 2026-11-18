@@ -130,14 +130,21 @@ fn a_task_whose_answer_a_stopped_start_let_go_of_is_not_finished_from_its_old_re
     for _ in 0..4 {
         after.pass().unwrap();
     }
-    assert_eq!(context.message(answer.id).state, "delivered");
+    assert_eq!(context.message(answer.id).state, "cancelled");
+    assert_eq!(context.message(second.id).state, "cancelled");
     assert_eq!(
-        context.task(project.id, 1).task.state,
-        "waiting",
-        "the other question still waits, with no result from the earlier reply"
+        context
+            .inbox(context.id(project.id, "chief"))
+            .iter()
+            .filter(|m| m.kind == "note" && m.body.contains("JSON"))
+            .count(),
+        1
     );
-    context.answer(project.id, second.id, "The new schema");
-    assert_eq!(context.task(project.id, 1).task.state, "working");
+    assert_ne!(
+        context.task(project.id, 1).task.state,
+        "done",
+        "the ended window's old reply is not taken as the new result"
+    );
     context.close();
 }
 

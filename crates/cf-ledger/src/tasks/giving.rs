@@ -4,7 +4,7 @@
 //! taken back to the board for another member of its tier.
 
 use cf_proto::ledger::{TaskCreated, TaskMoved, TaskReleased, TaskRetiered};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Map, Value};
 
 use super::{delivery_body, m_list, release_ready, require_task_state, task_by_id, task_row_by_id};
@@ -765,6 +765,20 @@ fn release_told(
             .assignee_id
             .map(|id| store.participant_row(id))
             .transpose()?;
+        let mut place = format!("T-{} is open for reassignment.", task.number);
+        if !tell {
+            if let Some(window) = &member {
+                let owner = store.participant_row(window.member_id.unwrap_or(window.id))?;
+                let backup: Option<String> = store.db.query_row(
+                    "SELECT handle FROM participant WHERE backup_of = ? AND left_at IS NULL",
+                    [owner.id], |row| row.get(0),
+                ).optional()?;
+                if let Some(backup) = backup {
+                    place.push_str(&format!(" Backup @{backup} of @{} was selected.", owner.handle));
+                }
+            }
+        }
+        crate::holding::close_task(store, &task, Some(&place))?;
         let carried = match &member {
             Some(member) => Some(transfer(store, &task, member, &delivery_body(&task))?),
             None => None,

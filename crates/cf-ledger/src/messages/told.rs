@@ -513,7 +513,8 @@ pub(crate) fn drop_queued_but_told(store: &Store, task_id: i64) -> Result<(), Le
     store.db.execute(
         &format!(
             "UPDATE message SET state = 'cancelled'
-             WHERE task_id = ? AND state IN ('queued', 'gated') AND NOT ({told})",
+             WHERE task_id = ? AND state IN ('queued', 'gated') AND NOT ({told})
+               AND NOT (state = 'gated' AND kind = 'answer' AND reply_to IN (SELECT question_id FROM question_binding))",
             told = told("message")
         ),
         [task_id],

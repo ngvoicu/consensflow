@@ -458,3 +458,60 @@ async fn a_note_that_tells_its_reader_a_role_says_so_to_its_reader_alone_and_no_
     );
     assert_eq!(scene.kicks.get(), 0);
 }
+
+#[tokio::test]
+async fn t1813_withdrawn_answer_is_not_exposed_to_the_former_window_by_read_routes() {
+    let scene = scene();
+    let task = working_task(&scene);
+    let question = plain_question_on(&scene, task, "Which file?");
+    let answer = answer_in_words(&scene, question.id, "Undelivered answer marker");
+    {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        ledger
+            .record_result(scene.project.id, task, "Result")
+            .unwrap();
+        ledger.accept_task(scene.project.id, task, "human").unwrap();
+    }
+    for route in [
+        "/api/inbox".to_owned(),
+        format!("/api/inbox/{}", answer.id),
+        format!("/api/tasks/{task}"),
+    ] {
+        let (code, body) = api(&scene, Method::GET, &route, &scene.zeus, "").await;
+        assert!(
+            !body.to_string().contains("Undelivered answer marker"),
+            "{route} returned {code}: {body}"
+        );
+    }
+    let (code, body) = api(
+        &scene,
+        Method::GET,
+        &format!("/api/inbox/{}", answer.id),
+        &scene.chief,
+        "",
+    )
+    .await;
+    assert_eq!(code, 200);
+    assert_eq!(body["message"]["body"], "Undelivered answer marker");
+}
+
+#[tokio::test]
+async fn t1813_restart_does_not_expose_an_old_queued_answer_through_read_routes() {
+    let scene = scene();
+    let task = working_task(&scene);
+    let question = plain_question_on(&scene, task, "Which file?");
+    let answer = answer_in_words(&scene, question.id, "Old window restart marker");
+    scene.context.ledger.borrow_mut().begin_question_engine();
+    assert_eq!(scene.message(answer.id).state, "queued");
+    for route in [
+        "/api/inbox".to_owned(),
+        format!("/api/inbox/{}", answer.id),
+        format!("/api/tasks/{task}"),
+    ] {
+        let (_, body) = api(&scene, Method::GET, &route, &scene.zeus, "").await;
+        assert!(
+            !body.to_string().contains("Old window restart marker"),
+            "{route}: {body}"
+        );
+    }
+}

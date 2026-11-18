@@ -82,17 +82,21 @@ fn is_not_confirmed_when_it_shows_after_all_and_its_window_goes_with_its_work() 
             .any(|killed| killed.generation == pane.generation),
         "the window went with its work"
     );
-    // And the task went on elsewhere, with what was on its way in the brief
-    // of the window that took it, once. (Not held to Node's recording, which
-    // let that go with the window.)
+    // The task goes on elsewhere without the old window's answer, which is
+    // returned once to the chief with its full words.
     assert_match(&tiers.assignee(1), "^diana-");
     let first = context.adapter.prepared().last().unwrap()["message"]
         .as_str()
         .unwrap()
         .to_owned();
-    assert!(
-        first.contains("(answer m-3 from @chief to m-2 of @zeus-amber-pine: Which grammar?)\nThe small one\n\nReassigned from @zeus-amber-pine (by @human)"),
-        "{first}"
+    assert!(!first.contains("The small one"), "{first}");
+    assert_eq!(
+        context
+            .inbox(tiers.id("chief"))
+            .iter()
+            .filter(|m| m.kind == "note" && m.body.contains("The small one"))
+            .count(),
+        1
     );
 }
 
@@ -136,5 +140,468 @@ fn is_handed_nothing_when_it_was_withdrawn_while_its_window_got_ready_and_fails_
         context.close(),
         SUITES,
         "is handed nothing when it was withdrawn while its window got ready, and fails nothing",
+    );
+}
+
+#[test]
+fn t1813_an_idle_window_exit_returns_its_taskless_answer_to_the_chief() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    let window = tiers.id(&session);
+    let chief = tiers.id("chief");
+    {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.record_result(tiers.project.id, 1, "Done").unwrap();
+        ledger.accept_task(tiers.project.id, 1, "human").unwrap();
+        let q = ledger
+            .ask(
+                tiers.project.id,
+                &cf_ledger::NewQuestion {
+                    from: Some(session),
+                    to: "chief".into(),
+                    body: Some("Idle question".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        ledger
+            .answer(q.id, chief, Some(&json!("Idle full reply")), None)
+            .unwrap();
+    }
+    context.exit("zeus");
+    let ledger = context.ledger.borrow();
+    assert_eq!(
+        ledger
+            .inbox(chief, 100)
+            .unwrap()
+            .iter()
+            .filter(|m| m.kind == "note" && m.body.contains("Idle full reply"))
+            .count(),
+        1
+    );
+    assert!(ledger
+        .inbox(window, 100)
+        .unwrap()
+        .iter()
+        .filter(|m| m.kind == "answer")
+        .all(|m| m.state == "cancelled"));
+}
+
+#[test]
+fn t1813_project_resume_reopens_the_same_conversation_for_new_questions() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let (tiers, old_answer) = asked(&context);
+    let project = tiers.project.id;
+    let session = tiers.assignee(1);
+    let window = tiers.id(&session);
+    let task = tiers.task(1).task.id;
+    let old_pane = context.host.last(&session).unwrap().pane;
+    let old_question = old_answer.reply_to.unwrap();
+    let chief = tiers.id("chief");
+    let briefs_before = tiers
+        .task(1)
+        .messages
+        .iter()
+        .filter(|m| m.kind == "task")
+        .count();
+
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    context.advance(1_000);
+    let restarted = context.make();
+    restarted.settle_after_restart().unwrap();
+    assert_eq!(context.message(old_question).state, "cancelled");
+    assert_eq!(context.message(old_answer.id).state, "cancelled");
+    assert_eq!(
+        context
+            .inbox(chief)
+            .iter()
+            .filter(|m| m.kind == "note" && m.body.contains("The small one"))
+            .count(),
+        1
+    );
+
+    restarted.resume_project(project).unwrap();
+    context.settle();
+    assert_ne!(
+        context.host.last(&session).unwrap().pane,
+        old_pane,
+        "task={}, windows={:?}",
+        tiers.task(1).task.state,
+        context
+            .host
+            .opened()
+            .iter()
+            .map(|o| &o.pane)
+            .collect::<Vec<_>>()
+    );
+    let ledger = context.ledger.borrow();
+    let holding = ledger
+        .question_holding(window)
+        .unwrap()
+        .expect("the resumed task holding");
+    assert!(
+        holding.active,
+        "the reopened physical window holds its old task"
+    );
+    assert_eq!(holding.task_id, task);
+    assert!(ledger
+        .question_holding_matches(window, Some(task), Some(holding.first_brief))
+        .unwrap());
+    assert_eq!(
+        tiers
+            .task(1)
+            .messages
+            .iter()
+            .filter(|m| m.kind == "task")
+            .count(),
+        briefs_before,
+        "reopening the same conversation needs no new brief"
+    );
+    drop(ledger);
+
+    let question = context.ask(project, &session, "chief", 1, "New window asks");
+    let answer = context.answer(project, question.id, "New window answer");
+    context
+        .ledger
+        .borrow_mut()
+        .close_question_window(window, None)
+        .unwrap();
+    assert_eq!(context.message(question.id).state, "cancelled");
+    assert_eq!(context.message(answer.id).state, "cancelled");
+    assert_eq!(
+        context
+            .inbox(chief)
+            .iter()
+            .filter(|m| m.kind == "note" && m.body.contains("New window answer"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn t1813_project_resume_refuses_a_question_when_the_task_moves_during_open() {
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    let (tiers, _) = asked(&context);
+    let project = tiers.project.id;
+    let session = tiers.assignee(1);
+    let window = tiers.id(&session);
+    let diana = tiers.id("diana");
+    let task = tiers.task(1).task.id;
+    let pane = format!("p{project}-{session}");
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let restarted = context.make();
+    restarted.settle_after_restart().unwrap();
+    let opening = context
+        .host
+        .open_holds
+        .hold(move |args| args[0]["id"] == pane);
+    restarted.resume_project(project).unwrap();
+    context.settle();
+    let start = context
+        .credentials
+        .question_starts
+        .borrow()
+        .iter()
+        .rev()
+        .find(|(id, _)| *id == window)
+        .unwrap()
+        .1;
+    assert_eq!(
+        start.task_in_hand,
+        Some(task),
+        "the reopen credential remembers which task it meant to resume"
+    );
+    {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.release_task(project, 1, "by @human").unwrap();
+        ledger.assign_task(project, 1, diana).unwrap();
+    }
+    opening.open();
+    context.settle();
+    let holding = context
+        .ledger
+        .borrow()
+        .question_holding(window)
+        .unwrap()
+        .unwrap();
+    assert!(
+        !holding.active,
+        "the reopened window cannot reclaim a moved task"
+    );
+    let refusal = context
+        .ledger
+        .borrow_mut()
+        .ask(
+            project,
+            &cf_ledger::NewQuestion {
+                from: Some(session),
+                to: "chief".into(),
+                task: Some(1),
+                body: Some("Where?".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(
+        refusal.contains("diana"),
+        "the refusal names the current member: {refusal}"
+    );
+}
+
+#[test]
+fn t1813_a_brief_queued_in_the_harness_does_not_replace_the_delivered_holding() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let project = tiers.project.id;
+    let session = tiers.assignee(1);
+    let window = tiers.id(&session);
+    let previous = context
+        .ledger
+        .borrow()
+        .question_holding(window)
+        .unwrap()
+        .unwrap();
+    context.open_window(project, &session).unwrap();
+    context.adapter.answer("zeus", "Done.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    let brief = context
+        .ledger
+        .borrow_mut()
+        .reopen_task(project, 1, "chief", "Continue")
+        .unwrap()
+        .message
+        .unwrap()
+        .id;
+    context.adapter.with("zeus", |agent| {
+        agent.settled = true;
+        agent.at_work = false;
+        agent.queued = true;
+        agent.arrive = false;
+    });
+    for _ in 0..4 {
+        context.pass().unwrap();
+        if context.message(brief).state == "delivering" {
+            break;
+        }
+    }
+    assert_eq!(context.message(brief).state, "delivering");
+    let holding = context
+        .ledger
+        .borrow()
+        .question_holding(window)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        holding.last_brief, previous.last_brief,
+        "a harness queue is not a delivered brief"
+    );
+    assert!(holding.active);
+    context
+        .ledger
+        .borrow_mut()
+        .confirm_delivery(brief, Some(&json!({"item":"received"})))
+        .unwrap();
+    let holding = context
+        .ledger
+        .borrow()
+        .question_holding(window)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        holding.last_brief, brief,
+        "only proof of receipt changes the last brief"
+    );
+}
+
+#[test]
+fn t1813_restart_returns_a_queued_answer_without_resuming_its_project() {
+    let context = Context::new();
+    let (tiers, answer) = asked(&context);
+    let chief = tiers.id("chief");
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let restarted = context.make();
+    restarted.settle_after_restart().unwrap();
+    assert_eq!(context.message(answer.id).state, "cancelled");
+    assert_eq!(
+        context
+            .inbox(chief)
+            .iter()
+            .filter(|m| m.kind == "note" && m.body.contains("The small one"))
+            .count(),
+        1,
+        "the chief hears before the project is resumed"
+    );
+}
+
+#[test]
+fn t1813_restart_does_not_send_the_old_windows_answer_into_a_new_window() {
+    let context = Context::new();
+    let (tiers, answer) = asked(&context);
+    let chief = tiers.id("chief");
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let restarted = context.make();
+    restarted.settle_after_restart().unwrap();
+    assert_eq!(
+        context.message(answer.id).state,
+        "cancelled",
+        "the startup window-end path returns the old window's answer"
+    );
+    restarted.resume_project(tiers.project.id).unwrap();
+    for _ in 0..5 {
+        restarted.pass().unwrap();
+    }
+    let notices = context
+        .ledger
+        .borrow()
+        .inbox(chief, 100)
+        .unwrap()
+        .into_iter()
+        .filter(|m| m.kind == "note" && m.body.contains("The small one"))
+        .count();
+    assert_eq!(
+        notices, 1,
+        "the ended window's answer is returned to the chief"
+    );
+    assert_eq!(context.message(answer.id).state, "cancelled");
+    let question = context.message(answer.id).reply_to.unwrap();
+    assert_eq!(
+        context.message(question).state,
+        "cancelled",
+        "restart retry closes the old question"
+    );
+}
+
+#[test]
+fn t1813_a_gated_answer_approved_after_restart_returns_to_the_chief() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let question = context.ask(tiers.project.id, &tiers.assignee(1), "chief", 1, "Which?");
+    context.adapter.answer("zeus", "I asked.");
+    context.pass().unwrap();
+    let chief = tiers.id("chief");
+    let answer = {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.set_gate(tiers.project.id, true).unwrap();
+        ledger
+            .answer(
+                question.id,
+                chief,
+                Some(&json!("Full gated restart answer")),
+                None,
+            )
+            .unwrap()
+            .id
+    };
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let restarted = context.make();
+    restarted.settle_after_restart().unwrap();
+    assert_eq!(context.message(answer).state, "gated");
+    context
+        .ledger
+        .borrow_mut()
+        .approve_message(answer, "human")
+        .unwrap();
+    assert_eq!(context.message(answer).state, "cancelled");
+    assert_eq!(
+        context
+            .inbox(chief)
+            .iter()
+            .filter(|m| m.kind == "note" && m.body.contains("Full gated restart answer"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn t1813_a_done_task_does_not_strand_its_answer_after_restart() {
+    let context = Context::new();
+    let (tiers, answer) = asked(&context);
+    let chief = tiers.id("chief");
+    context
+        .ledger
+        .borrow_mut()
+        .record_result(tiers.project.id, 1, "Done")
+        .unwrap();
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let restarted = context.make();
+    restarted.settle_after_restart().unwrap();
+    assert_eq!(context.message(answer.id).state, "cancelled");
+    restarted.resume_project(tiers.project.id).unwrap();
+    for _ in 0..5 {
+        restarted.pass().unwrap();
+    }
+    assert_eq!(
+        context
+            .inbox(chief)
+            .iter()
+            .filter(|m| m.kind == "note" && m.body.contains("The small one"))
+            .count(),
+        1
+    );
+    assert_eq!(context.message(answer.id).state, "cancelled");
+}
+
+#[test]
+fn t1813_taskless_gated_answer_after_restart_is_returned() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    let chief = tiers.id("chief");
+    let answer = {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.record_result(tiers.project.id, 1, "Done").unwrap();
+        ledger.accept_task(tiers.project.id, 1, "human").unwrap();
+        let q = ledger
+            .ask(
+                tiers.project.id,
+                &cf_ledger::NewQuestion {
+                    from: Some(session),
+                    to: "chief".into(),
+                    body: Some("Idle question".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        ledger.set_gate(tiers.project.id, true).unwrap();
+        ledger
+            .answer(q.id, chief, Some(&json!("Idle gated reply")), None)
+            .unwrap()
+            .id
+    };
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let restarted = context.make();
+    restarted.settle_after_restart().unwrap();
+    assert_eq!(context.message(answer).state, "gated");
+    context
+        .ledger
+        .borrow_mut()
+        .approve_message(answer, "human")
+        .unwrap();
+    assert_eq!(context.message(answer).state, "cancelled");
+    assert_eq!(
+        context
+            .inbox(chief)
+            .iter()
+            .filter(|m| m.kind == "note" && m.body.contains("Idle gated reply"))
+            .count(),
+        1
     );
 }

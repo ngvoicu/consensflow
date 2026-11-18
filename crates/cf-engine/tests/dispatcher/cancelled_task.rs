@@ -55,6 +55,20 @@ fn stops_its_window_an_agent_at_work_on_it_is_interrupted_the_window_closes_and_
         .unwrap()
         .1;
     assert_eq!(first_start.task_in_hand, Some(tiers.task(1).task.id));
+    assert!(
+        first_start.launch_brief.is_some(),
+        "the first brief is passed in the launch"
+    );
+    assert_eq!(
+        context
+            .ledger
+            .borrow()
+            .question_holding(session_id)
+            .unwrap()
+            .unwrap()
+            .task_id,
+        tiers.task(1).task.id
+    );
     let native = native_of(&context, tiers.id(&session));
     let pane = context.host.last("zeus").unwrap().pane;
     let begun = context.recorder.events().len();

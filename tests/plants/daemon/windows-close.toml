@@ -717,10 +717,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''        let sent = record.window.borrow().sent_to.contains(pane);
-        self.closed(&record);'''
-replace = '''        self.closed(&record);
-        let sent = record.window.borrow().sent_to.contains(pane);'''
+find = "        let sent = record.window.borrow().sent_to.contains(pane);\n        let deferred_answers = self.seams.ledger.borrow_mut().close_question_window(\n            record.id,\n            delivering.as_ref().map(|delivery| delivery.message),\n        )?;\n        self.closed(&record);"
+replace = "        let deferred_answers = self.seams.ledger.borrow_mut().close_question_window(\n            record.id,\n            delivering.as_ref().map(|delivery| delivery.message),\n        )?;\n        self.closed(&record);\n        let sent = record.window.borrow().sent_to.contains(pane);"
 
 [[plant]]
 name = "windows close: the guard of a read that a replacement window outlived is gone"

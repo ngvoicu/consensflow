@@ -294,7 +294,7 @@ async fn a_door_the_acceptance_of_its_task_shut_is_told_nothing_waits_on_its_que
 
 #[tokio::test(start_paused = true)]
 async fn a_door_of_a_done_cancelled_or_failed_task_is_told_what_happened() {
-    for ending in ["done", "cancelled", "failed"] {
+    for ending in ["cancelled", "failed"] {
         let scene = scene();
         let question = working_question(&scene);
         {
@@ -325,11 +325,7 @@ async fn a_door_of_a_done_cancelled_or_failed_task_is_told_what_happened() {
         let words = body["message"].as_str().unwrap();
         assert_eq!(status, 409, "{ending}: {body}");
         assert!(words.contains(ending), "{ending}: {words}");
-        if ending == "failed" {
-            assert!(words.contains("reopen"), "{words}");
-        } else {
-            assert!(words.contains("no answer will come"), "{words}");
-        }
+        assert!(words.contains("no answer will come"), "{words}");
     }
 }
 
@@ -427,9 +423,8 @@ async fn a_done_task_with_an_answer_already_on_its_way_does_not_say_the_answer_i
         .unwrap();
     let id = question.id.to_string();
     let (status, body) = door(&scene, &scene.zeus, &format!("/api/questions/{id}"), &id).await;
-    assert_eq!(status, 409, "{body}");
-    let words = body["message"].as_str().unwrap();
-    assert!(!words.contains("no answer will come"), "{words}");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["answer"]["body"], "H: red");
 }
 
 #[tokio::test(start_paused = true)]
@@ -778,11 +773,10 @@ async fn a_workers_done_reopened_in_the_same_window_keeps_its_question_as_a_mess
     }
     let id = question.id.to_string();
     let (status, body) = door(&scene, &scene.zeus, &format!("/api/questions/{id}"), &id).await;
-    assert_eq!(status, 409, "{body}");
-    assert!(body["message"]
-        .as_str()
-        .unwrap()
-        .contains("comes to you as a message"));
+    assert_eq!(status, 200, "{body}");
+    assert!(body["answer"].is_null());
     scene.choose(question.id, "red");
-    assert_eq!(scene.next_for_zeus(), Some("H: red".to_owned()));
+    let (status, body) = door(&scene, &scene.zeus, &format!("/api/questions/{id}"), &id).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["answer"]["body"], "H: red");
 }

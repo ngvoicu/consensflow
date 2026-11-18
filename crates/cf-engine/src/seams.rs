@@ -64,18 +64,30 @@ impl EngineError {
 pub struct QuestionWindowStart {
     pub last_brief: Option<i64>,
     pub task_in_hand: Option<i64>,
+    /// A task brief supplied in the new process's own launch arguments.
+    pub launch_brief: Option<i64>,
 }
 
 impl QuestionWindowStart {
     /// Captures the session's task and last started brief before a window runs.
     pub fn from_ledger(ledger: &Ledger, participant: i64) -> Result<Self, LedgerError> {
+        let holding = ledger.question_holding(participant)?;
+        let task_in_hand = match holding {
+            Some(h)
+                if ledger.question_holding_matches(
+                    participant,
+                    Some(h.task_id),
+                    Some(h.first_brief),
+                )? =>
+            {
+                Some(h.task_id)
+            }
+            _ => None,
+        };
         Ok(Self {
-            last_brief: ledger
-                .last_started_brief(participant)?
-                .map(|brief| brief.id),
-            task_in_hand: ledger
-                .task_in_hand(participant)?
-                .map(|thread| thread.task.id),
+            last_brief: holding.map(|h| h.last_brief),
+            task_in_hand,
+            launch_brief: None,
         })
     }
 }

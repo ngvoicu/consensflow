@@ -199,6 +199,7 @@ mod tests {
         let start = QuestionWindowStart {
             last_brief: Some(10),
             task_in_hand: Some(20),
+            launch_brief: None,
         };
         let token = <Credentials as cf_engine::seams::Credentials>::issue_for_window(
             &credentials,

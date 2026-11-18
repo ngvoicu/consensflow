@@ -262,7 +262,12 @@ impl Dispatcher {
     pub async fn settle_after_restart(self: &Rc<Self>) -> Result<(), EngineError> {
         let _settling = Settling::begin(&self.resumes);
         // An `async` method: its answer reaches this a turn after it was made.
-        returning(self.settle_in_flight()).await
+        let settled = returning(self.settle_in_flight()).await;
+        self.seams
+            .ledger
+            .borrow_mut()
+            .close_questions_of_ended_engine()?;
+        settled
     }
 
     /// The human's Resume: the project is open, with the tasks its suspension

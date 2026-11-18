@@ -84,8 +84,8 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "         AND (?2 = 0 OR m.urgent = 1 OR m.task_id IN ("
-replace = "         AND (?2 = 0 OR m.urgent = 1 OR m.kind = 'task' OR m.task_id IN ("
+find = "         AND (?2 = 0 OR m.urgent = 1 OR (m.kind = 'answer' AND m.task_id IS NULL) OR m.task_id IN ("
+replace = "         AND (?2 = 0 OR m.urgent = 1 OR m.kind = 'task' OR (m.kind = 'answer' AND m.task_id IS NULL) OR m.task_id IN ("
 
 [[plant]]
 name = "pause: a confirm moves the task past the words that resume it"

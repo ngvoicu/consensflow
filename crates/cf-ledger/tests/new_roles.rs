@@ -89,13 +89,6 @@ fn rows(db: &Connection, table: &str) -> Vec<Vec<String>> {
         .expect("the SQL of a test reads the ledger")
         .map(Result::unwrap)
         .filter(|column: &String| table != "project" || column != "own_hands")
-        .filter(|column| {
-            table != "message"
-                || !matches!(
-                    column.as_str(),
-                    "done_question_state" | "done_question_reason"
-                )
-        })
         .collect();
     let quoted = columns
         .iter()
@@ -231,8 +224,6 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
         before,
         "every row of the two tables and the projects kept"
     );
-    let populated: i64 = raw.query_row("SELECT COUNT(*) FROM message WHERE done_question_state IS NOT NULL OR done_question_reason IS NOT NULL", [], |row| row.get(0)).unwrap();
-    assert_eq!(populated, 0, "new question fields default to null");
     let wide = schema(&raw);
     // The test helper reconstructs the old tables with today's columns and
     // index, but drops the new triggers; migration 0039 puts them back.
@@ -247,14 +238,18 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     }
     let narrowed: Vec<(String, String)> = wide
         .iter()
-        .filter(|(name, _)| !backup_triggers.contains(&name.as_str()) && name != "task_plan_key")
+        .filter(|(name, _)| {
+            !backup_triggers.contains(&name.as_str())
+                && name != "task_plan_key"
+                && name != "question_holding"
+                && name != "question_binding"
+                && name != "question_handover"
+        })
         .map(|(name, sql)| {
             (
                 name.clone(),
                 sql.replace(", 'frontend', 'architect', 'researcher', 'integrator'", "")
-                    .replace(", own_hands INTEGER NOT NULL DEFAULT 0", "")
-                    .replace(", done_question_state TEXT", "")
-                    .replace(", done_question_reason TEXT", ""),
+                    .replace(", own_hands INTEGER NOT NULL DEFAULT 0", ""),
             )
         })
         .collect();

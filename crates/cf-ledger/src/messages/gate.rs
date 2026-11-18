@@ -64,10 +64,14 @@ pub(crate) fn approve_message(
             "message.approved",
             json!({ "message": message_id, "by": by }),
         )?;
-        // A legacy answer can have waited at the gate after its task moved.
-        // Once approved, return it to the chief before it reaches the old window.
-        if message.kind == "answer" && super::recover_stranded_answer(store, message_id)? {
-            return known_message(store, message_id);
+        if message.kind == "answer" {
+            if let Some(question) = message.reply_to {
+                if crate::holding::question_is_live(store, question)? == Some(false) {
+                    let place = crate::holding::answer_place(store, message_id)?;
+                    crate::holding::close_question(store, question, &place)?;
+                    return known_message(store, message_id);
+                }
+            }
         }
         adopt(store, message_id)?;
         if let ("answer", Some(tell), Some(task)) = (
@@ -109,7 +113,9 @@ pub(crate) fn decline_message(
             json!({ "message": message_id, "by": by }),
         )?;
         if let (Some(question), "answer") = (message.reply_to, message.kind.as_str()) {
-            reopen_question(store, question)?;
+            if crate::holding::question_is_live(store, question)? != Some(false) {
+                reopen_question(store, question)?;
+            }
         }
         let task = message_task(store, message_id)?;
         let reply_to = message

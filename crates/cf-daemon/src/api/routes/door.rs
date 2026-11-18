@@ -156,8 +156,11 @@ fn shut(asked: &MessageView, task: Option<&TaskView>, former_window: bool) -> Fa
         (Some(task), Some("cancelled")) => format!(
             "T-{task} is cancelled, so nothing waits on m-{id}: it is not answered here and no answer will come. Do not ask it again; end your turn now."
         ),
+        (Some(task), Some("failed")) => format!(
+            "T-{task} failed, so nothing waits on m-{id}: it is not answered here and no answer will come. Do not ask it again; end your turn now."
+        ),
         (Some(task), _) if moved => format!(
-            "T-{task} moved to a new window that starts over, so nothing waits on m-{id}: it is not answered here and no answer will come. Do not ask it again; end your turn now."
+            "T-{task} moved or no longer belongs to this window, so nothing waits on m-{id}: it is not answered here and no answer will come. Do not ask it again; end your turn now."
         ),
         (Some(task), Some("done")) if finished => format!(
             "T-{task} is done, so nothing waits on m-{id}: it is not answered here and no answer will come. Do not ask it again; end your turn now."
@@ -165,11 +168,12 @@ fn shut(asked: &MessageView, task: Option<&TaskView>, former_window: bool) -> Fa
         (Some(task), _) if finished => format!(
             "T-{task} was finished, so nothing waits on m-{id}: it is not answered here and no answer will come. Do not ask it again; end your turn now."
         ),
-        (Some(task), Some("failed")) => format!(
-            "T-{task} failed, so m-{id} is not answered here. If it is reopened in this window, the chief can decide what to send. Do not ask it again; end your turn now."
-        ),
+
         (Some(task), _) => format!(
             "T-{task} was stopped, so m-{id} is not answered here: its answer comes to you as a message when the task goes on. Do not ask it again; end your turn now."
+        ),
+        (None, _) if moved => format!(
+            "The window that asked m-{id} has ended, so no answer will come. Do not ask it again; end your turn now."
         ),
         (None, _) => format!(
             "m-{id} is not answered here: its answer comes to you as a message. Do not ask it again; end your turn now."

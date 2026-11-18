@@ -2,8 +2,8 @@
 
 use super::Ledger;
 use crate::{
-    tasks, HeldTask, LedgerError, MessageView, NewTask, PlanCreated, PlanTask, Stop, TaskCreated,
-    TaskEdit, TaskEdited, TaskMoved, TaskReleased, TaskRetiered, TaskThread, TaskView,
+    tasks, HeldTask, LedgerError, NewTask, PlanCreated, PlanTask, Stop, TaskCreated, TaskEdit,
+    TaskEdited, TaskMoved, TaskReleased, TaskRetiered, TaskThread, TaskView,
 };
 
 impl Ledger {
@@ -555,23 +555,5 @@ impl Ledger {
     /// task message queued for it since is not given yet.
     pub fn task_given(&self, participant_id: i64) -> Result<Option<TaskThread>, LedgerError> {
         tasks::task_given(&self.store, participant_id)
-    }
-
-    /// The last task whose brief began reaching this window, including one
-    /// whose attempted delivery was cancelled or failed afterward.
-    pub fn last_started_task(
-        &self,
-        participant_id: i64,
-    ) -> Result<Option<TaskThread>, LedgerError> {
-        tasks::last_started_task(&self.store, participant_id)
-    }
-
-    /// The last task brief that began reaching this participant, even if that
-    /// attempt was later cancelled or failed.
-    pub fn last_started_brief(
-        &self,
-        participant_id: i64,
-    ) -> Result<Option<MessageView>, LedgerError> {
-        tasks::last_started_brief(&self.store, participant_id)
     }
 }

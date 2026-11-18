@@ -44,9 +44,7 @@ pub const MOVED_QUESTION: &str = "the task moved to another window";
 
 pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{
-    adopt, fold, reconcile_released, recover_old_stranded_answers, recover_stranded_answer,
-    recover_stranded_inflight_answer, recovery_conflict_for_task, release_carried,
-    release_stranded, retire_old_moved_questions, return_unreceived_answers, transfer,
+    adopt, fold, reconcile_released, release_carried, release_stranded, transfer,
 };
 pub use continuations::{
     continuation, continuation_in, continuation_tasks, cut_turn, cut_turn_unquoted,
@@ -232,9 +230,19 @@ pub(crate) fn ask_naming(
             Some(number) => {
                 let row = store.task_row(project_id, number)?;
                 let asker = store.participant_by_handle(project_id, from)?;
-                if !question.urgent {
+                // The named task may be the topic of a question from a later
+                // holding. Only the last delivered holding decides where its
+                // answer goes, including when the topic is an earlier task.
+                let other_holding = match crate::holding::of(store, asker.id)? {
+                    Some(h) if h.active && h.task_id != row.id => {
+                        crate::holding::matches(store, asker.id, Some(h.task_id), Some(h.first_brief))?
+                            .then_some(h)
+                    }
+                    _ => None,
+                };
+                if !question.urgent && other_holding.is_none() {
                     if row.assignee_id == Some(asker.id)
-                        && matches!(row.state.as_str(), "done" | "accepted" | "cancelled" | "failed")
+                        && matches!(row.state.as_str(), "accepted" | "cancelled" | "failed")
                     {
                         return Err(LedgerError::refused_with(
                             "task-ended",
@@ -251,12 +259,16 @@ pub(crate) fn ask_naming(
                     {
                         return Err(LedgerError::refused_with(
                             "question-moved",
-                            format!("T-{number} moved to another window: this window cannot ask on it now"),
+                            format!("T-{number} {}: this window cannot ask on it now", moved_task_location(store, &row)?),
                             409,
                         ));
                     }
                 }
-                (row.assignee_id == Some(asker.id) && !question.urgent).then_some(row)
+                if let Some(holding) = other_holding.filter(|_| !question.urgent) {
+                    Some(store.task_row(project_id, holding.task_number)?)
+                } else {
+                    (row.assignee_id == Some(asker.id) && !question.urgent).then_some(row)
+                }
             }
             None => None,
         };
@@ -279,6 +291,12 @@ pub(crate) fn ask_naming(
                 ..Sent::default()
             },
         )?;
+        if !question.urgent {
+            let asker = store.participant_by_handle(project_id, from)?;
+            if !matches!(asker.role.as_str(), "chief" | "human") {
+                crate::holding::bind(store, message.id, asker.id)?;
+            }
+        }
         if let Some(row) = asking {
             reconcile(store, row.id)?;
         }
@@ -314,11 +332,12 @@ pub(crate) fn answer(
                 )
             })?;
         let answerer = store.participant_row(from)?;
-        let (asker_id, task_id): (Option<i64>, Option<i64>) = store.db.query_row(
+        let (asker_id, mentioned_task): (Option<i64>, Option<i64>) = store.db.query_row(
             "SELECT sender_id, task_id FROM message WHERE id = ?",
             [question_id],
             |row| Ok((row.get("sender_id")?, row.get("task_id")?)),
         )?;
+        let task_id = crate::holding::binding_task(store, question_id)?.unwrap_or(mentioned_task);
         // The one asked, or (a question with options) the asker itself: its
         // window may have answered first, and the board's copy takes that answer.
         let from_window = !question.questions.is_null() && Some(answerer.id) == asker_id;
@@ -332,12 +351,25 @@ pub(crate) fn answer(
                 403,
             ));
         }
-        if let Some(task) = message_task(store, question_id)? {
+        if crate::holding::question_is_live(store, question_id)? == Some(false) {
+            if let Some(task) = crate::holding::task_of_question(store, question_id)? {
+                if FINISHED_TASK_STATES.contains(&task.state.as_str()) {
+                    return Err(finished_task_takes_no_answer(store, &task)?);
+                }
+                return Err(moved_task_takes_no_answer(store, &task)?);
+            }
+            return Err(LedgerError::refused_with("question-window-closed", "the window that asked this question has ended; start a new task with what you meant to answer", 409));
+        }
+        let answer_task = match crate::holding::binding_task(store, question_id)? {
+            Some(_) => crate::holding::task_of_question(store, question_id)?,
+            None => message_task(store, question_id)?,
+        };
+        if let Some(task) = answer_task {
             if question.reason.as_deref() == Some(MOVED_QUESTION) {
                 return Err(moved_task_takes_no_answer(store, &task)?);
             }
             if FINISHED_TASK_STATES.contains(&task.state.as_str()) {
-                return Err(finished_task_takes_no_answer(&task));
+                return Err(finished_task_takes_no_answer(store, &task)?);
             }
         }
         if answered(store, question_id)? {
@@ -350,7 +382,11 @@ pub(crate) fn answer(
         // A question the ledger withdrew with no answer ever given (its task was finished
         // while it was open) is answered by no one: its words, if the chief took them, are the
         // result. One whose answer failed or was cancelled still obliges, and takes another.
-        let finished = message_task(store, question_id)?.is_some_and(|task| {
+        let finished_task = match crate::holding::binding_task(store, question_id)? {
+            Some(_) => crate::holding::task_of_question(store, question_id)?,
+            None => message_task(store, question_id)?,
+        };
+        let finished = finished_task.is_some_and(|task| {
             question.reason.as_deref() == Some(&format!("T-{} was finished", task.number))
         });
         if question.state == "cancelled" && (finished || !has_any_answer(store, question_id)?) {
@@ -365,15 +401,6 @@ pub(crate) fn answer(
                 ),
                 409,
             ));
-        }
-        if let Some(task) = message_task(store, question_id)? {
-            if task.state == "done" {
-                return Err(LedgerError::refused_with(
-                    "task-ended",
-                    format!("T-{} is done: reopen it in the same window before answering m-{question_id}", task.number),
-                    409,
-                ));
-            }
         }
         let asked: Option<Vec<Question>> = match &question.questions {
             Value::Null => None,
@@ -437,11 +464,25 @@ pub(crate) fn answer(
 fn moved_task_takes_no_answer(store: &Store, task: &TaskRow) -> Result<LedgerError, LedgerError> {
     let number = task.number;
     let place = moved_task_location(store, task)?;
+    let holder_gone = match task.assignee_id {
+        Some(id) => {
+            let holder = store.participant_row(id)?;
+            holder.left_at.is_some()
+                || holder.member_id.is_some_and(|member| {
+                    store
+                        .participant_row(member)
+                        .is_ok_and(|p| p.left_at.is_some())
+                })
+        }
+        None => false,
+    };
     let tell = if task.deleted_at.is_some() {
         "This task was deleted. Start a new task with what you meant to answer, or use cf tell on the new task.".to_owned()
+    } else if holder_gone {
+        "Its former window has ended. Start a new task with what you meant to answer.".to_owned()
     } else {
         match task.state.as_str() {
-        "done" | "failed" => format!("To go on, reopen it with cf task reopen T-{number} \"…\", then use cf tell T-{number} \"…\" for what you meant to answer."),
+        "done" | "failed" => "Start a new task with what you meant to answer.".to_owned(),
         "accepted" | "cancelled" => "This task cannot receive a tell. Start a new task with what you meant to answer, or use cf tell on the new task.".to_owned(),
         _ => format!("Use cf tell T-{number} \"…\" for what you meant to answer."),
     }
@@ -449,15 +490,14 @@ fn moved_task_takes_no_answer(store: &Store, task: &TaskRow) -> Result<LedgerErr
     Ok(LedgerError::refused_with(
         "question-moved",
         format!(
-            "T-{number} {place}; the new window starts over without the old conversation. {tell}"
+            "T-{number} {place}; the next window starts over without the old conversation. {tell}"
         ),
         409,
     ))
 }
 
-/// The current location, shared with recovery notices about answers an older
-/// build accepted after the task had moved.
-fn moved_task_location(store: &Store, task: &TaskRow) -> Result<String, LedgerError> {
+/// The current location, shared with notices about undelivered answers.
+pub(crate) fn moved_task_location(store: &Store, task: &TaskRow) -> Result<String, LedgerError> {
     Ok(if matches!(task.state.as_str(), "accepted" | "cancelled") {
         // The old assignee is still recorded, but no longer holds the task.
         format!("is {}", task.state)
@@ -491,7 +531,17 @@ fn moved_task_location(store: &Store, task: &TaskRow) -> Result<String, LedgerEr
 /// The refusal of an answer to a question on a task that is over (accepted,
 /// cancelled or failed): nobody waits for it, and a failed task is the one that
 /// can be gone on with, so it is told how.
-fn finished_task_takes_no_answer(task: &TaskRow) -> LedgerError {
+fn finished_task_takes_no_answer(
+    store: &Store,
+    task: &TaskRow,
+) -> Result<LedgerError, LedgerError> {
+    if task.deleted_at.is_some()
+        || task
+            .assignee_id
+            .is_some_and(|id| store.participant_row(id).is_ok_and(|p| p.left_at.is_some()))
+    {
+        return moved_task_takes_no_answer(store, task);
+    }
     let number = task.number;
     let (code, words) = match task.state.as_str() {
         "cancelled" => (
@@ -501,21 +551,21 @@ fn finished_task_takes_no_answer(task: &TaskRow) -> LedgerError {
         "accepted" => (
             "task-accepted",
             format!(
-                "T-{number} is accepted, so it is finished and nobody waits for this answer: to give what is still wanted, add a task for the same window with cf task add --after T-{number} \"…\""
+                "T-{number} is accepted, so nobody waits for this answer. Start a new task with what you meant to answer."
             ),
         ),
         _ => (
             "task-failed",
             format!(
-                "T-{number} failed, so nobody waits for this answer: reopen T-{number} to go on with it (cf task reopen T-{number} \"…\")"
+                "T-{number} failed, so nobody waits for this answer. Start a new task with what you meant to answer."
             ),
         ),
     };
-    LedgerError::refused_with(code, words, 409)
+    Ok(LedgerError::refused_with(code, words, 409))
 }
 
 /// The questions a task's window asked, still open, are withdrawn when the task is finished
-/// while it waits for their answers (the chief's Finish, or the window's own `cf task done`):
+/// while it waits for their answers (the chief's Finish):
 /// nobody waits for them now. A question not yet given to the chief is never given, and one
 /// the chief has can no longer be answered (`answer` refuses it). One with an answer that
 /// stands is the answerer's, and an urgent one is the chief's tell, not the window's.
@@ -530,11 +580,12 @@ pub(crate) fn withdraw_open_questions(
     store.db.execute(
         &format!(
             "UPDATE message SET state = 'cancelled', reason = ?1
-              WHERE task_id = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0
+              WHERE {} = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0
                 AND (state IN ('queued', 'delivering', 'gated', 'delivered', 'read', 'failed')
                      OR (state = 'cancelled' AND reason IS NOT ?4 AND EXISTS (
                          SELECT 1 FROM message a WHERE a.reply_to = message.id AND a.kind = 'answer')))
                 AND NOT {}",
+            crate::holding::task_for_question_sql("message"),
             has_standing_answer("message")
         ),
         params![format!("T-{} {why}", task.number), task.id, window, MOVED_QUESTION],

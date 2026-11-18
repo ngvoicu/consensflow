@@ -226,9 +226,9 @@ fn arrived(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
 fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerError> {
     Ok(store
         .db
-        .prepare(
+        .prepare(&format!(
             "SELECT 1 FROM message q
-             WHERE q.task_id = ?1 AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0
+             WHERE {} = ?1 AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0
                AND q.reason IS NOT ?3
                AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')
                AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id
@@ -236,8 +236,8 @@ fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerErro
                AND (q.state != 'cancelled'
                     OR EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id
                                AND a.kind = 'answer'))
-             LIMIT 1",
-        )?
+             LIMIT 1", crate::holding::task_for_question_sql("q"),
+        ))?
         .exists(params![task, window, super::MOVED_QUESTION])?)
 }
 
@@ -287,9 +287,7 @@ pub(crate) fn reconcile_answered_on_open(store: &mut Store) -> Result<(), Ledger
             .query_map([], |row| row.get::<_, i64>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         for task in tasks {
-            if !super::carrying::recovery_conflict_for_task(store, task)? {
-                reconcile(store, task)?;
-            }
+            reconcile(store, task)?;
         }
         Ok(())
     })
@@ -375,6 +373,12 @@ pub(crate) fn claim_answer(
                 403,
             ));
         }
+        if shut.is_some() || crate::holding::question_is_live(store, question_id)? == Some(false) {
+            return Ok(Claim::Closed);
+        }
+        // A question may discuss a different task; its door belongs to the
+        // asking window's holding just as its answer does.
+        let task = crate::holding::binding_task(store, question_id)?.unwrap_or(task);
         let paused = match task {
             Some(task) => {
                 let state: String = store.db.query_row(
@@ -386,13 +390,7 @@ pub(crate) fn claim_answer(
             }
             None => false,
         };
-        let departed = store.db.prepare(
-            "SELECT 1 FROM message q JOIN task t ON t.id = q.task_id
-             WHERE q.id = ?1 AND (t.assignee_id IS NOT q.sender_id OR t.state IN ('accepted', 'cancelled'))
-             AND EXISTS (SELECT 1 FROM message b WHERE b.task_id = q.task_id AND b.project_id = q.project_id
-                         AND b.kind = 'task' AND b.recipient_id = q.sender_id AND b.id < q.id)"
-        )?.exists([question_id])?;
-        if shut.is_some() || paused || departed {
+        if paused {
             return Ok(Claim::Closed);
         }
         let found: Option<(i64, String, Option<i64>, Option<String>)> = store

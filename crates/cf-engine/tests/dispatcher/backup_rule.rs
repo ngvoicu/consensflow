@@ -616,3 +616,33 @@ fn the_giver_is_told_once_in_one_line_when_a_task_moves_to_the_backup() {
     assert_eq!(about.len(), 1, "{about:?}");
     assert!(about[0].contains("the backup of @zeus"), "{about:?}");
 }
+
+#[test]
+fn t1813_answer_returned_on_backup_move_names_the_backup() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let backup = backed(&context, &tiers, "zeus");
+    let (question, _) = question_at_chief(&context, &tiers);
+    let chief = tiers.id("chief");
+    let answer = context
+        .ledger
+        .borrow_mut()
+        .answer(question, chief, Some(&json!("Backup answer words")), None)
+        .unwrap()
+        .id;
+    out(&context, &tiers, "zeus", &soon(&context, 3));
+    passes(&context, 4);
+    assert_eq!(with(&tiers, 1), backup.handle);
+    assert_eq!(context.message(answer).state, "cancelled");
+    let notices: Vec<_> = context
+        .inbox(chief)
+        .into_iter()
+        .filter(|m| m.kind == "note" && m.body.contains("Backup answer words"))
+        .collect();
+    assert_eq!(notices.len(), 1);
+    assert!(
+        notices[0].body.contains(&backup.handle),
+        "{}",
+        notices[0].body
+    );
+}

@@ -11,8 +11,6 @@ use cf_harness::contract::Waiting;
 use cf_ledger::{Claim, NewQuestion, Read};
 use serde_json::json;
 
-use crate::fixtures::assert_match;
-
 /// zeus at work on T-1 with a question of its harness's tool asked through a
 /// door, and the chief's choice for it: the project, the question, the answer.
 fn answered_through_a_door(context: &Context) -> (i64, i64, i64) {
@@ -287,21 +285,34 @@ fn a_dialog_of_its_own_gives_up_no_claim_that_was_not_there() {
 }
 
 #[test]
-fn an_unacknowledged_claim_is_voided_when_the_window_exits_and_the_answer_comes_with_the_words() {
+fn an_unacknowledged_claim_is_voided_when_the_window_exits_and_the_answer_returns() {
     let context = Context::new();
     let (project, question, answer) = answered_through_a_door(&context);
     claim(&context, project, question);
     context.exit("zeus");
-    // The exit gives the claim back before it pauses the task, which would too.
-    assert_eq!(unclaimed(&context, project), ["its window exited"]);
-    assert_eq!(context.message(answer).state, "queued");
+    assert_eq!(unclaimed(&context, project).len(), 1);
+    assert_eq!(context.message(answer).state, "cancelled");
+    let zeus = context.id(project, "zeus");
+    assert_eq!(
+        context
+            .ledger
+            .borrow_mut()
+            .claim_answer(question, zeus)
+            .unwrap(),
+        Claim::Closed
+    );
+    assert_eq!(
+        context
+            .inbox(context.id(project, "chief"))
+            .iter()
+            .filter(|m| m.kind == "note" && m.body.contains("Colour: blue"))
+            .count(),
+        1
+    );
     context.resume_task(project, 1, "Carry on");
     context.pass().unwrap();
     let launch = context.adapter.prepared().pop().unwrap();
-    assert_match(
-        launch["message"].as_str().unwrap(),
-        r"\(kept for you: answer m-\d+ from @chief, to your m-\d+\)\nColour: blue\n\nResumed: Carry on$",
-    );
+    assert!(!launch["message"].as_str().unwrap().contains("Colour: blue"));
 }
 
 #[test]
@@ -318,15 +329,22 @@ fn an_unacknowledged_claim_is_voided_when_the_daemon_starts() {
         .is_none());
     context.make().settle_after_restart().unwrap();
     assert_eq!(unclaimed(&context, project), ["the daemon started again"]);
+    assert_eq!(context.message(answer).state, "cancelled");
     assert_eq!(
         context
             .ledger
-            .borrow()
-            .next_delivery(zeus)
-            .unwrap()
-            .map(|message| message.id),
-        Some(answer),
-        "the answer is the ledger's again"
+            .borrow_mut()
+            .claim_answer(question, zeus)
+            .unwrap(),
+        Claim::Closed
+    );
+    assert_eq!(
+        context
+            .inbox(context.id(project, "chief"))
+            .iter()
+            .filter(|m| m.kind == "note" && m.body.contains("Colour: blue"))
+            .count(),
+        1
     );
 }
 

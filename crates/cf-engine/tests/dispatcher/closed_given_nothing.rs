@@ -480,7 +480,8 @@ fn a_session_holding_a_queued_task_beside_one_the_close_paused_opens_for_neither
         .ledger
         .borrow_mut()
         .write_raw(&format!(
-            "UPDATE task SET assignee_id = {zeus}, pool = NULL, tier = NULL, state = 'queued'
+            "DELETE FROM question_holding WHERE task_id = (SELECT id FROM task WHERE project_id = {project} AND number = 2);
+             UPDATE task SET assignee_id = {zeus}, pool = NULL, tier = NULL, state = 'queued'
                WHERE project_id = {project} AND number = 2;
              UPDATE message SET recipient_id = {zeus}, state = 'queued', delivered_at = NULL, receipt = NULL
                WHERE kind = 'task'

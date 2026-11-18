@@ -119,66 +119,47 @@ fn nobody_is_told_of_an_answer_that_failed_for_a_task_that_is_over_or_whose_aske
 }
 
 #[test]
-fn a_task_sent_back_while_an_answer_waited_for_the_human_tells_the_chief_to_answer_it_again() {
+fn a_same_window_reopen_keeps_an_answer_at_the_human_gate() {
     let mut w = gated_world();
     let (task, question, answer) = answered_at_the_gate(&mut w);
-    w.ledger
-        .record_result(w.project, task, "Parser, as far as it goes")
-        .expect("a result");
-    // The human sends it back: what still waited at the gate is withdrawn.
+    w.ledger.record_result(w.project, task, "Result").unwrap();
     let words = w
         .ledger
         .reopen_task(w.project, task, "human", "Try again")
-        .expect("sent back")
+        .unwrap()
         .message
-        .expect("its words");
-    assert_eq!(w.states(&[question, answer]), ["cancelled", "cancelled"]);
-    assert_eq!(
-        notes(&w, "chief"),
-        [(
-            Some(task),
-            format!(
-                "T-{task} was sent back by @human, and m-{question} still waits for an answer: the one it had did not stand. {}",
-                again(question)
-            )
-        )]
-    );
-
-    w.deliver(words.id);
-    assert_eq!(w.state(task), "waiting", "it is owed the answer");
-    answered_again_and_received(&mut w, question);
-    assert_eq!(w.state(task), "working");
+        .unwrap();
+    assert_eq!(w.states(&[question, answer]), ["cancelled", "gated"]);
+    assert!(notes(&w, "chief").is_empty());
+    w.ledger.approve_message(answer, "human").unwrap();
+    if w.message(words.id).state == "gated" {
+        w.ledger.approve_message(words.id, "human").unwrap();
+    }
+    let begun = w.deliver(words.id);
+    assert!(begun.carried.iter().any(|row| row.id == answer));
+    assert_eq!(w.message(answer).state, "delivered");
 }
 
 #[test]
-fn a_task_sent_back_after_it_failed_with_its_answer_cancelled_tells_the_chief_the_same() {
+fn a_failed_task_returns_its_answer_once_and_does_not_reopen_the_old_question() {
     let mut w = gated_world();
     let (task, question, answer) = answered_at_the_gate(&mut w);
-    w.ledger
-        .approve_message(answer, "human")
-        .expect("passed on");
+    w.ledger.approve_message(answer, "human").unwrap();
     w.ledger
         .fail_task(w.project, task, "its pane died")
-        .expect("failed");
-    let returned = (None, format!("Your answer m-{answer} may not have reached its window before T-{task} was failed. Your words:\n\nJSON"));
-    assert_eq!(
-        notes(&w, "chief").as_slice(),
-        std::slice::from_ref(&returned),
-        "the undelivered words are returned"
-    );
+        .unwrap();
+    let notice = notes(&w, "chief");
+    assert_eq!(notice.len(), 1);
+    assert!(notice[0].1.contains("JSON"));
     w.ledger
         .reopen_task(w.project, task, "chief", "Try again")
-        .expect("sent back");
-    assert_eq!(
-        notes(&w, "chief"),
-        [returned, (
-            Some(task),
-            format!(
-                "T-{task} was sent back by @chief, and m-{question} still waits for an answer: the one it had did not stand. {}",
-                again(question)
-            )
-        )]
-    );
+        .unwrap();
+    assert_eq!(notes(&w, "chief").len(), 1);
+    let chief = w.id("chief");
+    assert!(w
+        .ledger
+        .answer(question, chief, Some(&serde_json::json!("Other")), None)
+        .is_err());
 }
 
 #[test]

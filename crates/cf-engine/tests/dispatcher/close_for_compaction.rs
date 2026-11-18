@@ -619,7 +619,7 @@ fn a_tell_and_an_answer_to_a_reopened_task_go_into_the_same_window_once_after_th
 /// answered Busy). A reopened task (and a `cf tell` to it) is queued, in no window's hand: the
 /// engine opens the window again on the same conversation with the words, once, and pauses
 /// nothing. An answer's task waits in the window: it is paused, the chief is told once, and the
-/// resume's words carry the answer into the new window, once, on the same conversation.
+/// an undelivered answer is returned to the chief rather than sent to the replacement window.
 #[test]
 fn a_window_that_ends_by_itself_under_queued_words_loses_and_doubles_none_of_them() {
     for words in [Words::Reopen, Words::Tell, Words::Answer] {
@@ -691,11 +691,23 @@ fn a_window_that_ends_by_itself_under_queued_words_loses_and_doubles_none_of_the
             native.as_deref(),
             "{words:?}: on the same conversation"
         );
+        let expected = usize::from(!matches!(words, Words::Answer));
         assert_eq!(
             pastes(&context, text),
-            1,
-            "{words:?}: the words went in once"
+            expected,
+            "{words:?}: only the replacement's own words go in"
         );
+        if matches!(words, Words::Answer) {
+            assert_eq!(
+                context
+                    .inbox(context.id(project.id, "chief"))
+                    .iter()
+                    .filter(|m| m.kind == "note" && m.body.contains(text))
+                    .count(),
+                1,
+                "the chief receives the full answer once"
+            );
+        }
         assert_eq!(
             told(&context),
             usize::from(paused),
@@ -704,7 +716,7 @@ fn a_window_that_ends_by_itself_under_queued_words_loses_and_doubles_none_of_the
         for _ in 0..3 {
             context.pass().unwrap();
         }
-        assert_eq!(pastes(&context, text), 1, "{words:?}: and not again");
+        assert_eq!(pastes(&context, text), expected, "{words:?}: and not again");
         context.close();
     }
 }

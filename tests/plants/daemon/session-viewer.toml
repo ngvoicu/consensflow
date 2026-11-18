@@ -153,10 +153,8 @@ runs = ["viewer-ledger-held-apart"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/testing.rs"
-find = '''    let made: Vec<&str> = compaction::made("TABLE")
-        .chain([model_list::TABLE, drawn_items::TABLE, "task_plan_key"])
-        .collect();'''
-replace = '''    let made: Vec<&str> = [model_list::TABLE, drawn_items::TABLE, "task_plan_key"].into_iter().collect();'''
+find = "    let made: Vec<&str> = compaction::made(\"TABLE\")\n        .chain([\n            model_list::TABLE,\n            drawn_items::TABLE,\n            \"task_plan_key\",\n            \"question_holding\",\n            \"question_binding\",\n            \"question_handover\",\n        ])\n        .collect();"
+replace = "    let made: Vec<&str> = [model_list::TABLE, drawn_items::TABLE, \"task_plan_key\", \"question_holding\", \"question_binding\", \"question_handover\"].into_iter().collect();"
 
 [[plant]]
 name = "session viewer: the players of Node's recordings keep the indexes of migration 0020 in the schema they compare"
