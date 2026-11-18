@@ -30,7 +30,8 @@ pub(crate) use finishing::{
 };
 pub use giving::{asked_role, NewTask};
 pub(crate) use giving::{
-    assign_task, check_release, create_task, release_inside, release_task, retier_open_task,
+    assign_task, check_release, create_task, hand_task_on, release_inside, release_task,
+    retier_open_task,
 };
 pub(crate) use outage::{no_longer_failed, no_longer_waiting, show_closed, tell_closed};
 pub use outage::{window_closed, SAME_ERROR_WITHIN_MS};

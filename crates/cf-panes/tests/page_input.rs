@@ -1,0 +1,303 @@
+#![cfg(unix)]
+
+use std::collections::HashMap;
+use std::io::Read;
+use std::path::Path;
+use std::sync::{mpsc, Arc};
+use std::thread;
+use std::time::Duration;
+
+use cf_panes::arbiter::{EnterTiming, InputArbiter};
+use cf_panes::input_queue::{InputQueue, InputWork};
+use cf_panes::pty::{PaneKey, PaneTable};
+use cf_panes::validation::MAX_PAGE_INPUT_BYTES;
+use futures_executor::block_on;
+use portable_pty::PtySize;
+
+#[allow(
+    clippy::unwrap_used,
+    reason = "a test fixture failure must fail the test"
+)]
+fn recorder(count: usize) -> (Arc<PaneTable>, InputQueue, PaneKey, mpsc::Receiver<Vec<u8>>) {
+    recorder_after(0, count)
+}
+
+/// A program that reads nothing for `wait` seconds after it says it is ready.
+#[allow(
+    clippy::unwrap_used,
+    reason = "a test fixture failure must fail the test"
+)]
+fn recorder_after(
+    wait: u64,
+    count: usize,
+) -> (Arc<PaneTable>, InputQueue, PaneKey, mpsc::Receiver<Vec<u8>>) {
+    let panes = Arc::new(PaneTable::new());
+    let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+    let inputs = InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter));
+    let opened = panes
+        .open(
+            Path::new("/tmp"),
+            &[
+                "/bin/sh".to_owned(),
+                "-c".to_owned(),
+                format!("stty raw -echo; printf READY; sleep {wait}; head -c {count}"),
+            ],
+            &HashMap::new(),
+            PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            },
+        )
+        .unwrap();
+    let key = opened.key;
+    arbiter.register(&key).unwrap();
+    inputs.open(&key).unwrap();
+    let (ready_send, ready_receive) = mpsc::channel();
+    let (send, receive) = mpsc::channel();
+    thread::spawn(move || {
+        let mut reader = opened.reader;
+        let mut ready = [0; 5];
+        reader.read_exact(&mut ready).unwrap();
+        assert_eq!(&ready, b"READY");
+        ready_send.send(()).unwrap();
+        let mut bytes = vec![0; count];
+        reader.read_exact(&mut bytes).unwrap();
+        send.send(bytes).unwrap();
+    });
+    ready_receive.recv_timeout(Duration::from_secs(5)).unwrap();
+    (panes, inputs, key, receive)
+}
+
+#[allow(clippy::unwrap_used, reason = "a test admission must succeed")]
+fn admitted(inputs: &InputQueue, page: &str, key: &PaneKey, seq: u64, bytes: &[u8]) -> String {
+    inputs
+        .enqueue_page(
+            page,
+            key.clone(),
+            seq,
+            InputWork::Typed(bytes.to_vec()),
+            true,
+        )
+        .unwrap()
+}
+
+#[allow(clippy::unwrap_used, reason = "a test completion must succeed")]
+fn finished(inputs: &InputQueue, page: &str, ticket: &str) {
+    block_on(inputs.page_completion(page, ticket).unwrap().receiver).unwrap();
+}
+
+#[test]
+fn a_delayed_old_page_retry_cannot_write_into_the_new_page() {
+    let (panes, inputs, key, received) = recorder(2);
+    inputs.begin_page("old").unwrap();
+    let first = admitted(&inputs, "old", &key, 1, b"A");
+    finished(&inputs, "old", &first);
+    inputs.begin_page("new").unwrap();
+    let late = inputs.enqueue_page("old", key.clone(), 1, InputWork::Typed(b"A".to_vec()), true);
+    let next = admitted(&inputs, "new", &key, 1, b"B");
+    finished(&inputs, "new", &next);
+    let bytes = received.recv_timeout(Duration::from_secs(5)).unwrap();
+    inputs.close_and_drain();
+    panes.kill(&key).unwrap();
+    assert_eq!(late.unwrap_err(), "pane-input-stale-page");
+    assert_eq!(bytes, b"AB");
+}
+
+#[test]
+fn a_new_pages_equal_first_key_is_not_confused_with_a_stale_call() {
+    let (panes, inputs, key, received) = recorder(3);
+    inputs.begin_page("old").unwrap();
+    let original = admitted(&inputs, "old", &key, 1, b"A");
+    finished(&inputs, "old", &original);
+    inputs.begin_page("new").unwrap();
+    let late = inputs.enqueue_page("old", key.clone(), 1, InputWork::Typed(b"A".to_vec()), true);
+    let fresh = admitted(&inputs, "new", &key, 1, b"A");
+    let next = admitted(&inputs, "new", &key, 2, b"B");
+    finished(&inputs, "new", &fresh);
+    finished(&inputs, "new", &next);
+    let bytes = received.recv_timeout(Duration::from_secs(5)).unwrap();
+    inputs.close_and_drain();
+    panes.kill(&key).unwrap();
+    assert_eq!(late.unwrap_err(), "pane-input-stale-page");
+    assert_eq!(bytes, b"AAB");
+}
+
+fn reply(inputs: &InputQueue, key: &PaneKey, seq: u64, bytes: &[u8]) -> Result<String, String> {
+    inputs.enqueue_page(
+        "page",
+        key.clone(),
+        seq,
+        InputWork::Reply(bytes.to_vec()),
+        false,
+    )
+}
+
+/// T-1769's schedule, on the at-most-once rule: A's call is slow and ends
+/// unknown at the page, which skips it and goes on with B and a terminal
+/// reply in the same order. The original comes late and writes nothing.
+#[test]
+#[allow(clippy::unwrap_used, reason = "a test step must succeed")]
+fn a_late_original_after_its_skip_writes_nothing_and_the_reply_arrives() {
+    let (_panes, inputs, key, received) = recorder(4);
+    inputs.begin_page("page").unwrap();
+    inputs.skip_page_sequence("page", &key, 1).unwrap();
+    let b = admitted(&inputs, "page", &key, 2, b"B");
+    // A reply has its own writer behind the keys it may pass; B is written
+    // before it is admitted so the bytes' order is the admission order.
+    finished(&inputs, "page", &b);
+    let r = reply(&inputs, &key, 3, b"\x1b[R").unwrap();
+    assert_eq!(
+        inputs
+            .enqueue_page(
+                "page",
+                key.clone(),
+                1,
+                InputWork::Typed(b"A".to_vec()),
+                true
+            )
+            .unwrap_err(),
+        "pane-input-sequence-stale"
+    );
+    finished(&inputs, "page", &r);
+    assert_eq!(
+        received.recv_timeout(Duration::from_secs(5)).unwrap(),
+        b"B\x1b[R"
+    );
+    inputs.close_and_drain();
+}
+
+/// The same schedule with the original arriving before the skip: it is
+/// written once, the skip moves nothing, and the next number goes on.
+#[test]
+#[allow(clippy::unwrap_used, reason = "a test step must succeed")]
+fn an_original_that_beat_its_skip_is_written_once() {
+    let (_panes, inputs, key, received) = recorder(5);
+    inputs.begin_page("page").unwrap();
+    let a = admitted(&inputs, "page", &key, 1, b"A");
+    inputs.skip_page_sequence("page", &key, 1).unwrap();
+    let b = admitted(&inputs, "page", &key, 2, b"B");
+    finished(&inputs, "page", &b);
+    let r = reply(&inputs, &key, 3, b"\x1b[R").unwrap();
+    // The page never learned A's ticket; the others finish as usual.
+    assert!(inputs.page_completion("page", &a).is_err());
+    finished(&inputs, "page", &r);
+    assert_eq!(
+        received.recv_timeout(Duration::from_secs(5)).unwrap(),
+        b"AB\x1b[R"
+    );
+    inputs.close_and_drain();
+}
+
+const PASTE_OPEN: &[u8] = b"\x1b[200~";
+const PASTE_CLOSE: &[u8] = b"\x1b[201~";
+
+fn bracketed(body: &[u8]) -> Vec<u8> {
+    [PASTE_OPEN, body, PASTE_CLOSE].concat()
+}
+
+/// A paste is one call with both of its markers, so the program gets all of
+/// it in one write, and a reply that waits behind it stays whole too.
+#[test]
+#[allow(clippy::unwrap_used, reason = "a test step must succeed")]
+fn a_paste_goes_in_as_one_call_with_both_markers() {
+    let paste = bracketed(&[b"echo one\rtwo".as_slice(), &vec![b'p'; 100_000]].concat());
+    let (_panes, inputs, key, received) = recorder(paste.len() + 2);
+    inputs.begin_page("page").unwrap();
+    let ticket = admitted(&inputs, "page", &key, 1, &paste);
+    finished(&inputs, "page", &ticket);
+    let next = admitted(&inputs, "page", &key, 2, b"\r");
+    finished(&inputs, "page", &next);
+    let reply = reply(&inputs, &key, 3, b"R").unwrap();
+    finished(&inputs, "page", &reply);
+    let bytes = received.recv_timeout(Duration::from_secs(5)).unwrap();
+    inputs.close_and_drain();
+    assert_eq!(bytes, [paste.as_slice(), b"\rR"].concat());
+}
+
+/// A terminal reply that comes while a paste is going in waits for all of it:
+/// the paste is one write, so the reply is never inside it.
+#[test]
+#[allow(clippy::unwrap_used, reason = "a test step must succeed")]
+fn a_reply_that_comes_during_a_paste_goes_after_all_of_it() {
+    let paste = bracketed(&vec![b'p'; 100_000]);
+    let (panes, inputs, key, received) = recorder_after(1, paste.len() + 1);
+    let _ = panes;
+    inputs.begin_page("page").unwrap();
+    let ticket = admitted(&inputs, "page", &key, 1, &paste);
+    // The program reads nothing yet: the paste's write is blocked.
+    thread::sleep(Duration::from_millis(300));
+    let answer = reply(&inputs, &key, 2, b"R").unwrap();
+    finished(&inputs, "page", &ticket);
+    finished(&inputs, "page", &answer);
+    let bytes = received.recv_timeout(Duration::from_secs(10)).unwrap();
+    inputs.close_and_drain();
+    assert_eq!(bytes, [paste.as_slice(), b"R"].concat());
+}
+
+/// T-1771's schedule: the call that carried the paste is lost, and the page
+/// skips it. Nothing of the paste is ever written, not its opening, its
+/// payload or its Enter, whether the original comes late or never.
+#[test]
+#[allow(clippy::unwrap_used, reason = "a test step must succeed")]
+fn a_lost_paste_writes_none_of_itself_even_when_it_comes_late() {
+    let paste = bracketed(b"echo PASTE_ONLY\rmore");
+    let (_panes, inputs, key, received) = recorder(2);
+    inputs.begin_page("page").unwrap();
+    inputs.skip_page_sequence("page", &key, 1).unwrap();
+    let late = inputs.enqueue_page("page", key.clone(), 1, InputWork::Typed(paste), true);
+    assert_eq!(late.unwrap_err(), "pane-input-sequence-stale");
+    let z = admitted(&inputs, "page", &key, 2, b"Z");
+    finished(&inputs, "page", &z);
+    let r = reply(&inputs, &key, 3, b"R").unwrap();
+    finished(&inputs, "page", &r);
+    assert_eq!(
+        received.recv_timeout(Duration::from_secs(5)).unwrap(),
+        b"ZR"
+    );
+    inputs.close_and_drain();
+}
+
+/// A paste over the cap is refused whole before anything of it is queued,
+/// and its number is not consumed: the next key goes in at the same one.
+#[test]
+#[allow(clippy::unwrap_used, reason = "a test step must succeed")]
+fn a_paste_over_the_cap_is_refused_whole_and_keeps_its_number() {
+    let (_panes, inputs, key, received) = recorder(1);
+    inputs.begin_page("page").unwrap();
+    let refused = inputs.enqueue_page(
+        "page",
+        key.clone(),
+        1,
+        InputWork::Typed(vec![b'x'; MAX_PAGE_INPUT_BYTES + 1]),
+        true,
+    );
+    assert_eq!(
+        refused.unwrap_err(),
+        format!("pane input exceeds {MAX_PAGE_INPUT_BYTES} bytes")
+    );
+    let next = admitted(&inputs, "page", &key, 1, b"A");
+    finished(&inputs, "page", &next);
+    assert_eq!(received.recv_timeout(Duration::from_secs(5)).unwrap(), b"A");
+    inputs.close_and_drain();
+}
+
+/// The largest paste a window takes goes in whole, in order, with the key
+/// typed after it.
+#[test]
+#[allow(clippy::unwrap_used, reason = "a test step must succeed")]
+fn the_largest_paste_goes_in_whole() {
+    let body = vec![b'p'; MAX_PAGE_INPUT_BYTES - PASTE_OPEN.len() - PASTE_CLOSE.len()];
+    let paste = bracketed(&body);
+    assert_eq!(paste.len(), MAX_PAGE_INPUT_BYTES);
+    let (_panes, inputs, key, received) = recorder(paste.len() + 1);
+    inputs.begin_page("page").unwrap();
+    let ticket = admitted(&inputs, "page", &key, 1, &paste);
+    finished(&inputs, "page", &ticket);
+    let next = admitted(&inputs, "page", &key, 2, b"Z");
+    finished(&inputs, "page", &next);
+    let bytes = received.recv_timeout(Duration::from_secs(60)).unwrap();
+    inputs.close_and_drain();
+    assert!(bytes[..paste.len()] == paste[..] && bytes[paste.len()] == b'Z');
+}

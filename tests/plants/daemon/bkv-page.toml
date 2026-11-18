@@ -65,7 +65,8 @@ find = '''                let candidates = self
                     .seams
                     .ledger
                     .borrow()
-                    .candidates_for(project.id, role, tier)?;'''
+                    .candidates_for(project.id, role, tier)?;
+                let verdicts: Vec<_> = candidates'''
 replace = '''                let mut candidates = self
                     .seams
                     .ledger
@@ -75,4 +76,5 @@ replace = '''                let mut candidates = self
                     if let Some(backup) = &mut candidate.backup {
                         backup.vacation_since = None;
                     }
-                }'''
+                }
+                let verdicts: Vec<_> = candidates'''

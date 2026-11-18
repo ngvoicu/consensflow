@@ -2090,7 +2090,7 @@ async fn bkv05_board_backup_readiness_follows_the_scheduler_for_every_hold() {
                 _ => {},
             }
             let ready = bkv05_board_ready(&s, &owner).await;
-            if case == "quota" || case == "account" {
+            if case == "quota" || case == "account" || case == "moved" {
                 assert_eq!(ready["worker"], backup, "{case}: {ready}");
             } else {
                 assert!(ready.is_null(), "{case}: {ready}");

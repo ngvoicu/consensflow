@@ -70,6 +70,17 @@ impl Ledger {
         tasks::release_task(&mut self.store, project_id, number, because)
     }
 
+    /// [`Ledger::release_task`] for a task given to its member's backup in the same step: the
+    /// requester hears of the move once, from that move's note.
+    pub fn hand_task_on(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        because: &str,
+    ) -> Result<TaskReleased, LedgerError> {
+        tasks::hand_task_on(&mut self.store, project_id, number, because)
+    }
+
     /// The engine holds a queued follow-up that cannot go on in the conversation of the task it
     /// follows: paused, with the mark that it was held for this.
     pub fn hold_for_context(

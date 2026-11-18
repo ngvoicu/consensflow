@@ -22,7 +22,7 @@ mi-engine-named = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "d
 mi-daemon-members = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::members::"]
 mi-daemon-routes = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::"]
 mi-cf-board = ["cargo", "test", "--offline", "-p", "cf", "--test", "board_goldens"]
-mi-page-selects = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "model selects of New project"]
+mi-page-selects = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "model selects show each harness listing"]
 mi-page-cards = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "card says its role"]
 mi-page-last-staff = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "starts a new project's staff on the model"]
 mi-page-window = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "whose window is at work and its terminal stays"]
@@ -359,14 +359,14 @@ export const harnessLabel = (participant) => participant.harness
 
 [[plant]]
 name = "model ids: a model select offers the name its harness's list gives, not its id"
-meant = "the model selects of New project, Switch chief, Add member and Edit member show each model's id, as its harness takes it"
+meant = "the model selects show each harness listing as rows while retaining launch values"
 runs = ["mi-page-selects"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
 find = '''
-      const option = new Option(id, id)
+      const option = new Option(modelOptionText(model), id)
 '''
 replace = '''
       const option = new Option(model.label, id)

@@ -298,7 +298,7 @@ impl InputArbiter {
         self.write_typed_via(table, pane, bytes)
     }
 
-    fn write_typed_via<W: PaneInputWriter + ?Sized>(
+    pub(crate) fn write_typed_via<W: PaneInputWriter + ?Sized>(
         &self,
         writer: &W,
         pane: &PaneKey,

@@ -49,11 +49,16 @@ passwords and needs no API keys.
   new window of a member of that role and tier. If nobody of that role holds
   the tier, the nearest one with a member is used. The other roles need no tier.
 - **Backups and Vacation.** Give a member an optional backup on any harness
-  or model. When no eligible member is free, the backup can take new work if
-  its member is out of quota or its login is refused. The chief and image
-  designer have no backup. Send a member or backup on Vacation from the board
-  or Project settings to stop new tasks; work already in a window finishes
-  there. A member on Vacation is not covered by its backup.
+  or model. A new task always goes to a member first. A task its member cannot
+  run (out of quota, its login or billing refused, its model moved or busy
+  past its tries, its harness not opening, or in need of an edit) goes to the
+  member's backup, whether it was new or already given: a task in progress
+  starts over on the backup in a fresh window, and finishes there even after
+  the member is back. A task given by name, a follow-up, the chief's own and a
+  paused task stay where they are. The chief and image designer have no
+  backup. Send a member or backup on Vacation from the board or Project
+  settings to stop new tasks; work already in a window finishes there. A
+  member on Vacation is not covered by its backup.
 - **Plans with an order.** A task can wait for others to be accepted first,
   so a plan runs in its own order, in parallel where it can. The chief can
   add a plan and its dependencies in one command with
@@ -72,7 +77,8 @@ passwords and needs no API keys.
   back on their conversations. A member cut mid-turn is told to go on. If a
   member's window cannot come back, its task is paused with the reason.
 - **Quota-aware.** A member works up to 100% of its quota and waits when its
-  harness says it is out, keeping its work in its window until the reset. If
+  harness says it is out, keeping its work in its window until the reset (a
+  member with a free backup does not wait: the backup starts its work over). If
   the account's quota is renewed early, **Try again now** brings it back; for
   harnesses with a shared login, it also brings back chiefs and members across
   projects.

@@ -367,7 +367,19 @@ function showTerminal(participant) {
   terminals.show(participant.projectId, participant.handle)
 }
 
+// window.name belongs to this webview across reloads, including when storage
+// is unavailable. The ordinal lets the host reject an older subscription
+// that was delayed before it ever reached the host.
+const savedPage = /^consensflow-page-v1:([0-9a-f-]{36}):([1-9][0-9]*)$/i.exec(window.name)
+const priorPage = savedPage ? Number(savedPage[2]) : 0
+const canAdvancePage =
+  savedPage && Number.isSafeInteger(priorPage) && priorPage < Number.MAX_SAFE_INTEGER
+const pageSession = canAdvancePage ? savedPage[1] : crypto.randomUUID()
+const pageNumber = canAdvancePage ? priorPage + 1 : 1
+const pageId = `${pageSession}:${pageNumber}`
+window.name = `consensflow-page-v1:${pageId}`
 const terminals = new TerminalsView(stage, {
+  pageId,
   invoke: (command, args) => {
     if (command === 'pane_ack') ackObserver?.(args)
     return invoke(command, args)
@@ -973,6 +985,36 @@ $('#specs-settings-button').addEventListener('click', () =>
 )
 $('#specs-dialog').addEventListener('close', () => settingsButton.focus())
 
+async function establishPanePage() {
+  for (const command of ['pane_page_prepare', 'pane_page_activate']) {
+    let failures = 0
+    for (;;) {
+      let timer
+      try {
+        const answer = await Promise.race([
+          invoke(command, { pageId }),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error('pane page call timed out')), 1500)
+          }),
+        ])
+        if (answer?.ok === true) break
+        if (answer?.ok === false) {
+          report('This page is no longer current. Reload ConsensFlow before typing again.')
+          return false
+        }
+      } catch {
+        // Both page registration steps are idempotent for this identity.
+      } finally {
+        clearTimeout(timer)
+      }
+      failures += 1
+      if (failures === 5) report('Keep this window open while its terminals reconnect.')
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+  }
+  return true
+}
+
 async function start() {
   if (typeof invoke !== 'function') {
     report('ConsensFlow is not running this page.')
@@ -1029,13 +1071,14 @@ async function start() {
     }),
   })
   if (typeof Channel === 'function') {
+    if (!(await establishPanePage())) return
     const channel = new Channel()
     channel.onmessage = (message) => {
       outputObserver?.(message)
       terminals.output(message)
     }
     // Once, for the life of the page: a second subscription ends the first.
-    await invoke('subscribe_output', { onOutput: channel })
+    await invoke('subscribe_output', { pageId, onOutput: channel })
   }
   try {
     await readMissing()
