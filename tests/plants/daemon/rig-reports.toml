@@ -26,7 +26,7 @@ reports-nested-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "ri
 reports-nested-rule = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "nested_cases_name_their_limit::"]
 reports-asked = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_report_of_a_rig_whose_close"]
 reports-xtask-driver = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::driver::tests::the_commands_are_given"]
-reports-xtask-runs = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::runs::tests::a_command_is_given"]
+reports-xtask-runs = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::runs::tests::a_plants_cargo_build_keeps_the_callers_temp_and_its_test_uses_the_private_temp"]
 reports-xtask-gitless = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::driver::tests::a_run_refused_for_a_checkout"]
 reports-xtask-socket = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::driver::tests::the_longest_socket"]
 reports-xtask-kept = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::driver::tests::a_run_with_a_plant"]
@@ -417,13 +417,13 @@ replace = "    runner.temp_in(&std::env::temp_dir().join(\"cf-plants-temp\"));\n
 
 [[plant]]
 name = "rig reports: the plant runner's commands are given no temp folder of the run's"
-meant = "a_command_is_given_the_temp_folder_its_run_made_for_it"
+meant = "a_plants_cargo_build_keeps_the_callers_temp_and_its_test_uses_the_private_temp"
 runs = ["reports-xtask-runs"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/execution.rs"
-find = "        self.checkout.env = Env::from_vars(kept.into_iter().chain(given));"
-replace = "        let _ = given;\n        self.checkout.env = Env::from_vars(kept);"
+find = "                invocation = invocation.var(TEST_TEMP, temp);"
+replace = "                invocation = invocation.var(TEST_TEMP, std::env::temp_dir());"
 
 # The round of T-226 (Calliope's check T-214): a plant run keeps its folder when a plant was not
 # caught; a live rig's home stays in the temp folder (no git repository); a rig that starts sweeps

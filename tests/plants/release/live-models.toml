@@ -472,8 +472,8 @@ runs = ["e2e-live"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
-find = "filter(|_| named && row[\"designer\"] != true)"
-replace = "filter(|_| named)"
+find = "launched_on(&row).filter(|_| named && row[\"designer\"] != true)"
+replace = "launched_on(&row).filter(|_| named)"
 
 [[plant]]
 name = "live models: effort rows, a model the harness will not run is given an effort"

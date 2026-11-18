@@ -621,12 +621,13 @@ runs = ["no-low-hold-page-holds"]
 
 [[plant.edit]]
 file = "app/ui/core/board.js"
-find = '''
-      if (state === 'out' && !lane.busy && acts(board)) {
-'''
-replace = '''
-      if (state === 'out' && acts(board)) {
-'''
+find = '''    const out = partsOf(row).filter((part) => outOfQuota(part.participant, now) && !part.busy)'''
+replace = '''    const out = partsOf(row).filter((part) => outOfQuota(part.participant, now))'''
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''    if (teamLead(row, now).busy || out.length === 0) return []'''
+replace = '''    if (out.length === 0) return []'''
 
 [[plant]]
 name = "no low hold: a busy member's chief card has the button"

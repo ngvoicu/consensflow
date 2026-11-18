@@ -181,8 +181,10 @@ runs = ["matrix-rig-install"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/muse.rs"
-find = '''data="${{XDG_DATA_HOME:-}}"'''
-replace = '''data=""'''
+find = '''printf '%s %s\n' $$ $$ >> '{pids}'
+export HOME='{rig}' CFFIXED_USER_HOME='{rig}' XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME={data} XDG_CACHE_HOME='{rig}/.cache' XDG_STATE_HOME='{rig}/.local/state' XDG_RUNTIME_DIR='{rig}/.local/share/muse/runtime''''
+replace = '''printf '%s %s\n' $$ $$ >> '{pids}'
+export HOME='{rig}' CFFIXED_USER_HOME='{rig}' XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME='{rig}/.local/share' XDG_CACHE_HOME='{rig}/.cache' XDG_STATE_HOME='{rig}/.local/state' XDG_RUNTIME_DIR='{rig}/.local/share/muse/runtime''''
 
 # The plant "Devin's home of the run's own reaches the person's Muse folder" went with the links it
 # aimed at (T-1358: a Devin home links nothing of the owner's); muse-advisor-start.toml's twin holds

@@ -121,9 +121,9 @@ runs = ["agents-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
-find = '''        model: "cliproxyapi/swe-2",
+find = '''        model: "cliproxyapi/devin/swe-2",
         effort: Some("medium"),'''
-replace = '''        model: "cliproxyapi/swe-2",
+replace = '''        model: "cliproxyapi/devin/swe-2",
         effort: None,'''
 
 [[plant]]
@@ -133,7 +133,7 @@ runs = ["agents-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/agents.rs"
-find = '''        model: "cliproxyapi/swe-2",'''
+find = '''        model: "cliproxyapi/devin/swe-2",'''
 replace = '''        model: "cliproxyapi/swe-1",'''
 
 [[plant]]

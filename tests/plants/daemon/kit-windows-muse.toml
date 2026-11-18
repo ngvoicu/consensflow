@@ -78,8 +78,8 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/muse.rs"
-find = '''                        at(self.rig_home.join(".config")),'''
-replace = '''                        "C:/Users/AGV/.config".to_owned(),'''
+find = '''                at(self.rig_home.join(".config")),'''
+replace = '''                "C:/Users/AGV/.config".to_owned(),'''
 
 [[plant]]
 name = "kit windows muse: a live window's cache folder is the person's"
@@ -88,8 +88,8 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/muse.rs"
-find = '''                        at(self.rig_home.join(".cache")),'''
-replace = '''                        at(PathBuf::from("C:/Users/AGV/.cache")),'''
+find = '''                at(self.rig_home.join(".cache")),'''
+replace = '''                at(PathBuf::from("C:/Users/AGV/.cache")),'''
 
 [[plant]]
 name = "kit windows muse: a stand-in that names no rig home is read as one"
@@ -108,8 +108,8 @@ runs = ["muse-lib"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/muse.rs"
-find = '''"argv": self.argv, "run": run, "rig": self.rig_home })'''
-replace = '''"argv": self.argv, "run": run, "rig": self.argv })'''
+find = '''"argv": self.argv, "run": run, "rig": self.rig_home, "data": self.data_home })'''
+replace = '''"argv": self.argv, "run": run, "rig": self.argv, "data": self.data_home })'''
 
 # ---------------------------------------------------------------------------- the allowance read
 
@@ -121,7 +121,7 @@ runs = ["muse-lib"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/muse.rs"
 find = '''        vars.push(("USERPROFILE", root.into()));'''
-replace = '''        vars.push(("USERPROFILE", real_home.into()));'''
+replace = '''        vars.push(("USERPROFILE", _real_home.into()));'''
 
 [[plant]]
 name = "kit windows muse: the allowance is read on the person's config folder on Windows"
@@ -132,5 +132,5 @@ runs = ["muse-lib"]
 file = "crates/cf-e2e/src/muse.rs"
 find = '''        vars.push(("XDG_CONFIG_HOME", config_home.into()));
     } else {'''
-replace = '''        vars.push(("XDG_CONFIG_HOME", real_home.join(".config").into()));
+replace = '''        vars.push(("XDG_CONFIG_HOME", _real_home.join(".config").into()));
     } else {'''
