@@ -5,8 +5,11 @@
 use hyper::Method;
 use serde_json::{json, Value};
 
-use crate::api::routes::tests::support::{api, state_of, working_task};
-use crate::testing::{scene, Scene};
+use crate::api::callers::caller_of;
+use crate::api::routes::tests::support::{
+    api, open_task, session_task_at_work, state_of, working_task,
+};
+use crate::testing::{request, said, scene, Scene};
 
 async fn ask(scene: &Scene, token: &str, body: &str) -> (u16, Value) {
     api(scene, Method::POST, "/api/questions", token, body).await
@@ -70,6 +73,209 @@ async fn a_window_with_no_task_asks_about_none() {
     assert_eq!(status, 201);
     assert_eq!(said["message"]["task"], json!(null));
     assert_eq!(said["message"]["preview"], "Which?");
+}
+
+#[tokio::test]
+async fn an_old_windows_ask_that_arrives_after_release_is_refused_not_made_taskless() {
+    let scene = scene();
+    let number = session_task_at_work(&scene);
+    let (old_id, old) = {
+        let ledger = scene.context.ledger.borrow();
+        let task = ledger.task(scene.project.id, number).unwrap().unwrap().task;
+        let old = task.assignee.unwrap();
+        let old_id = ledger
+            .project(scene.project.id)
+            .unwrap()
+            .unwrap()
+            .participants
+            .into_iter()
+            .find(|participant| participant.handle == old)
+            .unwrap()
+            .id;
+        (old_id, old)
+    };
+    // A request can already have its caller while the old window is being stopped.
+    let token = scene
+        .context
+        .credentials
+        .issue(scene.project.id, old_id)
+        .unwrap();
+    let request = request(
+        Method::POST,
+        "/api/questions",
+        Some(&token),
+        r#"{"body":"Which format?"}"#,
+    );
+    let caller = caller_of(&scene.context, &request).unwrap();
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .release_task(scene.project.id, number, "by @human")
+        .unwrap();
+    let said = said(super::ask(&scene.context, &caller, request).await);
+    assert_eq!(said.0, 409, "{said:?}");
+    assert_eq!(said.1["error"], "question-moved");
+    let words = said.1["message"].as_str().unwrap();
+    assert!(words.contains("T-1") && words.contains("moved"), "{words}");
+    let ledger = scene.context.ledger.borrow();
+    let chief = ledger
+        .project(scene.project.id)
+        .unwrap()
+        .unwrap()
+        .participants
+        .into_iter()
+        .find(|p| p.handle == "chief")
+        .unwrap()
+        .id;
+    assert!(ledger
+        .inbox(chief, 100)
+        .unwrap()
+        .iter()
+        .all(|m| { m.sender.as_deref() != Some(old.as_str()) || m.kind != "question" }));
+    assert!(ledger
+        .pending(old_id)
+        .unwrap()
+        .iter()
+        .all(|m| m.kind != "answer"));
+}
+
+async fn ask_after_interrupted_brief(refund: bool) {
+    let scene = scene();
+    let number = open_task(&scene);
+    let (old_id, brief) = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let project = ledger.project(scene.project.id).unwrap().unwrap();
+        let zeus = project
+            .participants
+            .iter()
+            .find(|p| p.handle == "zeus")
+            .unwrap()
+            .id;
+        let assigned = ledger.assign_task(scene.project.id, number, zeus).unwrap();
+        let old = assigned.task.assignee.unwrap();
+        let old_id = ledger
+            .project(scene.project.id)
+            .unwrap()
+            .unwrap()
+            .participants
+            .into_iter()
+            .find(|p| p.handle == old)
+            .unwrap()
+            .id;
+        let brief = assigned.message.unwrap().id;
+        ledger.begin_delivery(brief).unwrap();
+        (old_id, brief)
+    };
+    let token = scene
+        .context
+        .credentials
+        .issue(scene.project.id, old_id)
+        .unwrap();
+    let request = request(
+        Method::POST,
+        "/api/questions",
+        Some(&token),
+        r#"{"body":"Which format?"}"#,
+    );
+    let caller = caller_of(&scene.context, &request).unwrap();
+    {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        if refund {
+            let retried = ledger
+                .retry_delivery(brief, "the window went", true)
+                .unwrap();
+            assert_eq!((retried.state.as_str(), retried.attempts), ("queued", 0));
+        }
+        ledger
+            .release_task(scene.project.id, number, "by @human")
+            .unwrap();
+        assert_eq!(ledger.message(brief).unwrap().unwrap().state, "cancelled");
+    }
+    let said = said(super::ask(&scene.context, &caller, request).await);
+    assert_eq!(said.0, 409, "{said:?}");
+    assert_eq!(said.1["error"], "question-moved");
+}
+
+#[tokio::test]
+async fn an_ask_in_flight_is_refused_when_release_interrupts_its_brief_delivery() {
+    ask_after_interrupted_brief(false).await;
+}
+
+#[tokio::test]
+async fn an_ask_in_flight_is_refused_after_its_brief_attempt_is_refunded() {
+    ask_after_interrupted_brief(true).await;
+}
+
+#[tokio::test]
+async fn an_old_windows_ask_that_arrives_after_it_finishes_is_refused_not_made_taskless() {
+    for ending in ["done", "accepted", "failed", "cancelled"] {
+        let scene = scene();
+        let number = session_task_at_work(&scene);
+        let old_id = {
+            let ledger = scene.context.ledger.borrow();
+            let old = ledger
+                .task(scene.project.id, number)
+                .unwrap()
+                .unwrap()
+                .task
+                .assignee
+                .unwrap();
+            ledger
+                .project(scene.project.id)
+                .unwrap()
+                .unwrap()
+                .participants
+                .into_iter()
+                .find(|p| p.handle == old)
+                .unwrap()
+                .id
+        };
+        let token = scene
+            .context
+            .credentials
+            .issue(scene.project.id, old_id)
+            .unwrap();
+        let request = request(
+            Method::POST,
+            "/api/questions",
+            Some(&token),
+            r#"{"body":"Which format?"}"#,
+        );
+        let caller = caller_of(&scene.context, &request).unwrap();
+        {
+            let mut ledger = scene.context.ledger.borrow_mut();
+            match ending {
+                "done" | "accepted" => {
+                    ledger
+                        .record_result(scene.project.id, number, "Done")
+                        .unwrap();
+                    if ending == "accepted" {
+                        ledger
+                            .accept_task(scene.project.id, number, "chief")
+                            .unwrap();
+                    }
+                }
+                "failed" => {
+                    ledger
+                        .fail_task(scene.project.id, number, "the window failed")
+                        .unwrap();
+                }
+                "cancelled" => {
+                    ledger
+                        .cancel_task(scene.project.id, number, "chief")
+                        .unwrap();
+                }
+                _ => unreachable!(),
+            }
+        }
+        let said = said(super::ask(&scene.context, &caller, request).await);
+        assert_eq!(said.0, 409, "{ending}: {said:?}");
+        assert!(
+            said.1["message"].as_str().unwrap().contains("T-1"),
+            "{ending}: {said:?}"
+        );
+    }
 }
 
 #[tokio::test]

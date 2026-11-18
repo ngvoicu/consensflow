@@ -31,6 +31,7 @@ pub(super) async fn ask(
         .task_in_hand(caller.participant.id)?;
     if active.is_none() {
         refuse_cancelled(context, caller)?;
+        refuse_departed_question(context, caller)?;
     }
     let asked = context.ledger.borrow_mut().ask(
         caller.project.id,
@@ -50,6 +51,43 @@ pub(super) async fn ask(
     Ok(Answer::created(
         json!({ "message": value(&MessageSummary::from(&asked))? }),
     ))
+}
+
+/// An ask already authenticated when its window leaves the task can arrive
+/// after that move. Do not turn it into an unrelated, taskless question.
+fn refuse_departed_question(context: &Context, caller: &Caller) -> Result<(), Failure> {
+    let previous = context
+        .ledger
+        .borrow()
+        .last_started_task(caller.participant.id)?;
+    let Some(thread) = previous else {
+        return Ok(());
+    };
+    let task = thread.task;
+    if task.assignee.as_deref() != Some(caller.participant.handle.as_str()) {
+        return Err(Failure::refuse(
+            409,
+            "question-moved",
+            format!(
+                "T-{} moved to another window: this window cannot ask on it now",
+                task.number
+            ),
+        ));
+    }
+    if matches!(
+        task.state.as_str(),
+        "done" | "accepted" | "cancelled" | "failed"
+    ) {
+        return Err(Failure::refuse(
+            409,
+            "task-ended",
+            format!(
+                "T-{} is {}: this window cannot ask on it now",
+                task.number, task.state
+            ),
+        ));
+    }
+    Ok(())
 }
 
 /// A member's window with no task in progress, whose task was cancelled under

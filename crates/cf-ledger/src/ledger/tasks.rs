@@ -556,4 +556,13 @@ impl Ledger {
     pub fn task_given(&self, participant_id: i64) -> Result<Option<TaskThread>, LedgerError> {
         tasks::task_given(&self.store, participant_id)
     }
+
+    /// The last task whose brief began reaching this window, including one
+    /// whose attempted delivery was cancelled or failed afterward.
+    pub fn last_started_task(
+        &self,
+        participant_id: i64,
+    ) -> Result<Option<TaskThread>, LedgerError> {
+        tasks::last_started_task(&self.store, participant_id)
+    }
 }

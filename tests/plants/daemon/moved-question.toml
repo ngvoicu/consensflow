@@ -200,3 +200,67 @@ runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "a_door_of_a_
 file = "crates/cf-daemon/src/api/routes/door.rs"
 find = '(Some(task), Some("failed")) => format!('
 replace = '(Some(task), Some("failed")) if false => format!('
+
+[[plant]]
+name = "t1780 ledger: a departed window can ask the task it left"
+meant = "a_departed_window_cannot_ask_its_old_task_after_the_release"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_departed_window_cannot_ask_its_old_task_after_the_release"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = '                    if row.assignee_id != Some(asker.id)'
+replace = '                    if false && row.assignee_id != Some(asker.id)'
+
+[[plant]]
+name = "t1780 ledger: a finished window can ask its finished task"
+meant = "a_window_cannot_ask_its_old_task_after_it_reports_done"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_window_cannot_ask_its_old_task_after_it_reports_done"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = '                    if row.assignee_id == Some(asker.id)'
+replace = '                    if false && row.assignee_id == Some(asker.id)'
+
+[[plant]]
+name = "t1780 daemon: a departed windows ask becomes taskless"
+meant = "an_old_windows_ask_that_arrives_after_release_is_refused_not_made_taskless"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "an_old_windows_ask_that_arrives_after_release_is_refused_not_made_taskless"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/questions.rs"
+find = '    if task.assignee.as_deref() != Some(caller.participant.handle.as_str()) {'
+replace = '    if false && task.assignee.as_deref() != Some(caller.participant.handle.as_str()) {'
+
+[[plant]]
+name = "t1780 daemon: a finished windows ask becomes taskless"
+meant = "an_old_windows_ask_that_arrives_after_it_finishes_is_refused_not_made_taskless"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "an_old_windows_ask_that_arrives_after_it_finishes_is_refused_not_made_taskless"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/questions.rs"
+find = '''    if matches!(
+        task.state.as_str(),
+        "done" | "accepted" | "cancelled" | "failed"
+    )'''
+replace = '''    if false && matches!(
+        task.state.as_str(),
+        "done" | "accepted" | "cancelled" | "failed"
+    )'''
+
+[[plant]]
+name = "t1780 daemon: an interrupted brief loses the askers old task"
+meant = "an_ask_in_flight_is_refused_when_release_interrupts_its_brief_delivery"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "an_ask_in_flight_is_refused_when_release_interrupts_its_brief_delivery"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks.rs"
+find = '''OR (m.state IN ('cancelled', 'failed') AND (m.attempts > 0 OR EXISTS (
+                    SELECT 1 FROM event e WHERE e.project_id = m.project_id
+                      AND e.kind = 'delivery.begun'
+                      AND CASE WHEN json_valid(e.data) THEN json_extract(e.data, '$.message') END = m.id
+                ))))'''
+replace = "OR (m.state IN ('cancelled', 'failed') AND m.attempts > 100000))"
+
+[[plant]]
+name = "t1780 daemon: a refunded brief attempt loses the askers old task"
+meant = "an_ask_in_flight_is_refused_after_its_brief_attempt_is_refunded"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "an_ask_in_flight_is_refused_after_its_brief_attempt_is_refunded"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks.rs"
+find = "                      AND e.kind = 'delivery.begun'"
+replace = "                      AND e.kind = 'delivery.never-begun'"

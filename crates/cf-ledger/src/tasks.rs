@@ -484,6 +484,28 @@ pub(crate) fn task_given(
     )
 }
 
+/// The last task whose brief began reaching this window, including a brief
+/// whose in-flight delivery was later cancelled or failed. A request can
+/// already be authenticated when that cancellation takes its task away.
+pub(crate) fn last_started_task(
+    store: &Store,
+    participant_id: i64,
+) -> Result<Option<TaskThread>, LedgerError> {
+    task_found(
+        store,
+        "SELECT t.project_id, t.number FROM message m JOIN task t ON t.id = m.task_id
+         WHERE m.recipient_id = ? AND m.kind = 'task'
+           AND (m.state IN ('delivering', 'delivered', 'read')
+                OR (m.state IN ('cancelled', 'failed') AND (m.attempts > 0 OR EXISTS (
+                    SELECT 1 FROM event e WHERE e.project_id = m.project_id
+                      AND e.kind = 'delivery.begun'
+                      AND CASE WHEN json_valid(e.data) THEN json_extract(e.data, '$.message') END = m.id
+                ))))
+         ORDER BY m.id DESC LIMIT 1",
+        participant_id,
+    )
+}
+
 fn task_row_by_id(store: &Store, id: i64) -> Result<TaskRow, LedgerError> {
     Ok(store
         .db

@@ -118,6 +118,49 @@ fn moved_refusal(w: &mut World, question: i64) -> String {
     error.to_string()
 }
 
+#[test]
+fn a_departed_window_cannot_ask_its_old_task_after_the_release() {
+    let mut w = world();
+    let (task, old) = asking_window(&mut w);
+    w.ledger.release_task(w.project, task, "by @human").unwrap();
+    let error = w
+        .ledger
+        .ask(
+            w.project,
+            &cf_ledger::NewQuestion {
+                from: Some(old),
+                to: "chief".to_owned(),
+                task: Some(task),
+                body: Some("Which format?".to_owned()),
+                ..cf_ledger::NewQuestion::default()
+            },
+        )
+        .expect_err("the old window no longer has the task");
+    assert_eq!(error.code(), Some("question-moved"));
+    assert!(error.to_string().contains("T-1"));
+}
+
+#[test]
+fn a_window_cannot_ask_its_old_task_after_it_reports_done() {
+    let mut w = world();
+    let (task, old) = asking_window(&mut w);
+    w.ledger.record_result(w.project, task, "Done").unwrap();
+    let error = w
+        .ledger
+        .ask(
+            w.project,
+            &cf_ledger::NewQuestion {
+                from: Some(old),
+                to: "chief".to_owned(),
+                task: Some(task),
+                body: Some("Which format?".to_owned()),
+                ..cf_ledger::NewQuestion::default()
+            },
+        )
+        .expect_err("a finished window no longer waits for a new answer");
+    assert!(error.to_string().contains("T-1"));
+}
+
 fn moved_question_in_a_new_window(w: &mut World) -> (i64, i64) {
     let (task, old) = asking_window(w);
     let question = w.ask(&old, task, "Which format?").id;

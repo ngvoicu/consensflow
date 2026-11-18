@@ -231,6 +231,30 @@ pub(crate) fn ask_naming(
             Some(number) => {
                 let row = store.task_row(project_id, number)?;
                 let asker = store.participant_by_handle(project_id, from)?;
+                if !question.urgent {
+                    if row.assignee_id == Some(asker.id)
+                        && matches!(row.state.as_str(), "done" | "accepted" | "cancelled" | "failed")
+                    {
+                        return Err(LedgerError::refused_with(
+                            "task-ended",
+                            format!("T-{number} is {}: this window cannot ask on it now", row.state),
+                            409,
+                        ));
+                    }
+                    // A task message proves this window once held it. A question
+                    // submitted after release must not go to that departed window.
+                    if row.assignee_id != Some(asker.id)
+                        && store.db.prepare(
+                            "SELECT 1 FROM message WHERE task_id = ?1 AND recipient_id = ?2 AND kind = 'task' LIMIT 1"
+                        )?.exists(params![row.id, asker.id])?
+                    {
+                        return Err(LedgerError::refused_with(
+                            "question-moved",
+                            format!("T-{number} moved to another window: this window cannot ask on it now"),
+                            409,
+                        ));
+                    }
+                }
                 (row.assignee_id == Some(asker.id) && !question.urgent).then_some(row)
             }
             None => None,
