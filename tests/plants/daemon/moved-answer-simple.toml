@@ -161,3 +161,12 @@ runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "t1813_a_resu
 file = "crates/cf-daemon/src/api/callers.rs"
 find = "                        ledger.resume_question_holding(participant.id, held.task_number)?;"
 replace = "                        let _ = held.task_number;"
+
+[[plant]]
+name = "moved answer simple: a delayed enter shortens the delivery retry grace"
+meant = "t1813_a_delayed_enter_keeps_the_full_delivery_retry_grace"
+runs = [["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "t1813_a_delayed_enter_keeps_the_full_delivery_retry_grace"]]
+[[plant.edit]]
+file = "crates/cf-panes/src/arbiter.rs"
+find = "                state.pasted = Some(self.clock.now());"
+replace = "                state.pasted = Some(self.clock.now() - std::time::Duration::from_millis(25));"
