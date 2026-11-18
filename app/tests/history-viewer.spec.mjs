@@ -798,8 +798,8 @@ test.describe('the history viewer', () => {
       block(viewer, 'i-1').locator('em'),
     ]
     await expect(italics[1]).toHaveText('only the words typed')
-    /** The face that draws most of a probe line's glyphs, as Chromium names it. */
-    const face = async (slant) => {
+    /** The face that draws most of a probe line's glyphs, as Chromium names it once drawn. */
+    const drawnIn = async (slant) => {
       const cdp = await page.context().newCDPSession(page)
       const { root } = await cdp.send('DOM.getDocument', { depth: -1 })
       const { nodeId } = await cdp.send('DOM.querySelector', {
@@ -810,7 +810,12 @@ test.describe('the history viewer', () => {
       const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId })
       await cdp.detach()
       const most = fonts.toSorted((a, b) => b.glyphCount - a.glyphCount)[0]
-      return most.postScriptName || most.familyName
+      return most ? most.postScriptName || most.familyName : null
+    }
+    const face = async (slant) => {
+      let name = null
+      await expect.poll(async () => (name = await drawnIn(slant))).not.toBeNull()
+      return name
     }
     for (const words of italics) {
       await expect(words).toHaveCSS('font-style', 'italic')
@@ -846,7 +851,12 @@ test.describe('the history viewer', () => {
         return style.fontFamily
       })
       const probe = viewer.locator('.face-probe')
-      // In Chromium, the italic is drawn from a face other than the upright one: a slant of
+      // In every engine the italic line is drawn otherwise than the upright one: an
+      // upright-only face, with the slant forbidden where the engine honours it, draws alike.
+      const upright = await probe.locator('[data-slant="normal"]').screenshot()
+      const italic = await probe.locator('[data-slant="italic"]').screenshot()
+      expect(italic.equals(upright), `${family} has no italic face here`).toBe(false)
+      // And in Chromium the italic is drawn from a face other than the upright one: a slant of
       // the upright face keeps its name, whoever slants it. On Windows that is DirectWrite
       // itself, which no font-synthesis forbids (measured: Lucida Console, T-1807).
       if (browserName === 'chromium') {
@@ -854,11 +864,6 @@ test.describe('the history viewer', () => {
           await face('normal'),
         )
       }
-      // And in every engine the italic line is drawn otherwise than the upright one: an
-      // upright-only face, with the slant forbidden where the engine honours it, draws alike.
-      const upright = await probe.locator('[data-slant="normal"]').screenshot()
-      const italic = await probe.locator('[data-slant="italic"]').screenshot()
-      expect(italic.equals(upright), `${family} has no italic face here`).toBe(false)
       await probe.evaluate((node) => node.remove())
     }
   })
