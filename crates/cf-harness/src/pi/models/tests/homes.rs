@@ -238,13 +238,10 @@ fn every_setup_pi_can_run_in_lists_its_models() {
 }
 
 #[test]
-fn a_pi_with_nothing_set_up_says_so_and_how_to_set_one_up() {
+fn a_pi_with_no_models_says_how_to_recover_without_guessing() {
     let why = listing_of(&home("nothing")).unwrap_err();
-    assert!(
-        why.starts_with("Pi lists no model: no provider is set up ("),
-        "{why}"
-    );
-    for how in ["/login", "providers.md", "models.json"] {
+    assert!(why.starts_with("Pi lists no model."), "{why}");
+    for how in ["/login", "settings"] {
         assert!(why.contains(how), "{how} in {why}");
     }
 }
@@ -253,7 +250,7 @@ fn a_pi_with_nothing_set_up_says_so_and_how_to_set_one_up() {
 fn a_package_whose_provider_listed_nothing_is_not_called_no_provider() {
     let why = listing_of(&home("package-without-models")).unwrap_err();
     assert!(
-        why.starts_with("Pi lists no model though it has packages npm:pi-test-provider"),
+        why.starts_with("Pi lists no model (packages npm:pi-test-provider"),
         "{why}"
     );
     assert!(!why.contains("no provider is set up"), "{why}");

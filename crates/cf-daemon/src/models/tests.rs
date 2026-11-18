@@ -1270,7 +1270,9 @@ mod from_pi_to_the_ledger {
     fn a_pi_with_nothing_set_up_keeps_its_words_through_the_daemon() {
         let why = why_pi_listed_none(&[], &[], (&empties(), Ends::Asked, None));
         assert!(
-            why.starts_with("Pi lists no model: no provider is set up (") && why.contains("/login"),
+            why.starts_with("Pi lists no model.")
+                && why.contains("/login")
+                && why.contains("settings"),
             "{why}"
         );
         assert!(!why.contains(WITHHELD), "{why}");
