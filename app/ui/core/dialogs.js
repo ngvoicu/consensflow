@@ -1002,9 +1002,11 @@ export class NewProjectDialog {
       if (picked === null) return
       const backup = this.#member.backup
       if (backup !== null) {
-        const owner = this.#picked.find(
+        const ownerRows = this.#picked.filter(
           (pick) => pick._id === backup.owner.key && pick.backupOf == null,
         )
+        // A tierless role may be first; use the owner's tiered row when it has one.
+        const owner = ownerRows.find((pick) => pick.tier !== undefined) ?? ownerRows[0]
         if (!owner) return
         const old = this.#picked.find((pick) => pick.backupOf === owner._id)
         this.#picked = this.#picked.filter((pick) => pick.backupOf !== owner._id)
@@ -1197,7 +1199,6 @@ export class NewProjectDialog {
       .map((pick) => ({ ...pick, name: modelShown(pick) }))
       .sort(byRoleAndTier)
     const rows = []
-    const drawn = new Set()
     for (const pick of entries) {
       const remove = button(
         'Remove',
@@ -1226,8 +1227,7 @@ export class NewProjectDialog {
       }
       row.dataset.model = pick.model ?? ''
       rows.push(row)
-      if (drawn.has(pick._id) || pick.role === 'designer') continue
-      drawn.add(pick._id)
+      if (pick.role === 'designer') continue
       const backup = backups.get(pick._id)
       const owner = { key: pick._id, label: pick.name }
       if (backup) {
@@ -1269,7 +1269,7 @@ export class NewProjectDialog {
       } else {
         row.lastElementChild.append(
           button(
-            'Add a backup',
+            `Add ${pick.name}'s backup`,
             'quiet-button',
             () => void this.#member.backupFor(owner),
             `Add backup for ${pick.name}`,
@@ -1684,19 +1684,17 @@ export class ProjectSettingsDialog {
         })),
       )
       .sort(byRoleAndTier)
-    const drawn = new Set()
     const rows = []
     for (const entry of entries) {
       rows.push(entry.row)
       const owner = entry.member
-      if (drawn.has(owner.id) || owner.designer || this.#removing === owner.handle) continue
-      drawn.add(owner.id)
+      if (owner.designer || this.#removing === owner.handle) continue
       const backup = backups.get(owner.id)
       if (backup) rows.push(this.#backupRow(owner, backup))
       else
         entry.row.lastElementChild.append(
           button(
-            'Add a backup',
+            `Add @${owner.handle}'s backup`,
             'quiet-button',
             () => void this.#member.backupFor({ key: owner.handle, label: `@${owner.handle}` }),
             `Add backup for @${owner.handle}`,

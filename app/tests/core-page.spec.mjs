@@ -1794,7 +1794,7 @@ test("draws a member's sessions as lanes under it, named, and counts its open wi
   ])
   const first = page.locator('tr[data-handle="zeus-amber-pine"]')
   await expect(first).toHaveAttribute('data-session', 'zeus')
-  await expect(first.locator('.row-name')).toHaveText('@zeus · amber-pine')
+  await expect(first.locator('.row-name')).toHaveText('Session · amber-pine')
   await expect(first.locator('.row-meta')).toContainText('worker session of @zeus')
   await expect(first.locator('td[data-state="working"] button.card')).toHaveCount(1)
   const second = page.locator('tr[data-handle="zeus-brisk-birch"]')
@@ -15724,7 +15724,7 @@ test('Edit member to another model renames the member: its rows and its windows 
   ])
   await page.locator('button.fold-sessions[aria-expanded="false"]').first().click()
   await expect(page.locator('tr[data-handle="gpt-6-1-sol-max-amber-pine"] .row-name')).toHaveText(
-    '@gpt-6-1-sol-max · amber-pine',
+    'Session · amber-pine',
   )
 })
 
@@ -16591,4 +16591,221 @@ test('BKV05 a task held in an out member window keeps its quota hold with a back
   const card = page.locator('tr[data-handle="diana"] button.card[data-task="19"]')
   await expect(card).toContainText('out of quota until')
   await expect(page.locator('tr[data-handle="hera"] button.card[data-task="19"]')).toHaveCount(0)
+})
+
+// T-1789: edit one member alongside another on the same model, with idle and working sessions.
+test('T1789 an edited member owns its renamed sessions and leaves another same-model member alone', async ({
+  page,
+}) => {
+  const data = model()
+  data.models.codex.listing = listed([
+    { id: 'gpt-6-astra', label: 'GPT-6 Astra', efforts: ['max'] },
+    { id: 'gpt-6.2-astra', label: 'GPT-6.2 Astra', efforts: ['max'] },
+  ])
+  const first = participant(3, 'gpt-6-astra-max', 'worker', {
+    harness: 'codex',
+    model: 'gpt-6-astra',
+    modelName: 'gpt-6-astra',
+    effort: 'max',
+    nameApart: false,
+  })
+  const other = participant(4, 'codex-gpt-6-astra-max', 'worker', {
+    harness: 'codex',
+    model: 'gpt-6-astra',
+    modelName: 'gpt-6-astra',
+    effort: 'max',
+    nameApart: false,
+  })
+  const lane = (who, activity = { state: 'closed' }, pane = null) => ({
+    participant: who,
+    tasks: [],
+    activity,
+    pane,
+  })
+  data.boards[1].lanes = [
+    ...data.boards[1].lanes.slice(0, 2),
+    lane(first),
+    lane(session(20, first, 'amber-pine')),
+    lane(session(21, first, 'brisk-birch')),
+    lane(other),
+    lane(session(22, other, 'calm-reef'), { state: 'working' }, { id: 'p1-other', generation: 1 }),
+  ]
+  data.boards[1].lanes.at(-1).tasks = [
+    task(81, 'Review another change', 'working', 'chief', 'codex-gpt-6-astra-max-calm-reef'),
+  ]
+  data.editRenames = true
+  await open(page, data)
+  await unfold(page)
+  const state = () =>
+    page.evaluate(() =>
+      window.__model.boards[1].lanes.slice(2).map(({ participant: p }) => ({
+        id: p.id,
+        handle: p.handle,
+        member: p.member,
+        model: p.model,
+        effort: p.effort,
+      })),
+    )
+  console.log('T1789 before edit:', JSON.stringify(await state()))
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  await settings.getByRole('button', { name: 'Edit @gpt-6-astra-max' }).click()
+  await pickMember(settings, {
+    harness: 'Codex',
+    model: 'gpt-6.2-astra',
+    effort: 'max',
+    tier: 'standard',
+  })
+  await settings.getByRole('button', { name: 'Save member' }).click()
+  await expect(page.locator('#status')).toContainText('is @gpt-6-2-astra-max now')
+  console.log('T1789 after edit:', JSON.stringify(await state()))
+  expect(await state()).toEqual([
+    { id: 3, handle: 'gpt-6-2-astra-max', member: null, model: 'gpt-6.2-astra', effort: 'max' },
+    {
+      id: 20,
+      handle: 'gpt-6-2-astra-max-amber-pine',
+      member: 'gpt-6-2-astra-max',
+      model: 'gpt-6.2-astra',
+      effort: 'max',
+    },
+    {
+      id: 21,
+      handle: 'gpt-6-2-astra-max-brisk-birch',
+      member: 'gpt-6-2-astra-max',
+      model: 'gpt-6.2-astra',
+      effort: 'max',
+    },
+    { id: 4, handle: 'codex-gpt-6-astra-max', member: null, model: 'gpt-6-astra', effort: 'max' },
+    {
+      id: 22,
+      handle: 'codex-gpt-6-astra-max-calm-reef',
+      member: 'codex-gpt-6-astra-max',
+      model: 'gpt-6-astra',
+      effort: 'max',
+    },
+  ])
+  await settings.getByRole('button', { name: 'Close' }).click()
+  await unfold(page)
+  const sessionRow = page.locator('tr[data-handle="gpt-6-2-astra-max-amber-pine"]')
+  await expect(sessionRow.locator('.row-name')).toHaveText('Session · amber-pine')
+  await expect(sessionRow.locator('.row-meta')).toContainText(
+    'worker session of @gpt-6-2-astra-max',
+  )
+  await expect(page.locator('tr[data-handle="codex-gpt-6-astra-max"] .row-name')).toHaveText(
+    '@codex-gpt-6-astra-max',
+  )
+  await expect(
+    page.locator('tr[data-handle="codex-gpt-6-astra-max-calm-reef"] button.card[data-task="81"]'),
+  ).toBeVisible()
+})
+
+// A role's row offers the one backup belonging to the member, including after it is added.
+test('T1789 settings offers the same member backup on every reviewer and architect row', async ({
+  page,
+}) => {
+  const data = model()
+  const lanes = data.boards[1].lanes
+  const dual = lanes.find((lane) => lane.participant.handle === 'zeus').participant
+  dual.roles = ['architect', 'reviewer']
+  const reviewer = lanes.find((lane) => lane.participant.handle === 'diana').participant
+  reviewer.role = 'reviewer'
+  reviewer.roles = ['reviewer']
+  lanes.push({
+    participant: participant(30, 'codex-default', 'designer', { designer: true, harness: 'codex' }),
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  await open(page, data)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const settings = page.getByRole('dialog', { name: 'Project settings' })
+  const rows = settings.locator('#staff-members tr')
+  const dualRow = (role) =>
+    rows.filter({ has: page.getByText(role, { exact: true }) }).filter({ hasText: '@zeus' })
+  if (process.env.CF_T1789_SHOT) await settings.screenshot({ path: process.env.CF_T1789_SHOT })
+  console.log('T1789 settings rows:', JSON.stringify(await rows.allTextContents()))
+  await expect(
+    rows.filter({ hasText: '@diana' }).getByRole('button', { name: 'Add backup for @diana' }),
+  ).toBeVisible()
+  await expect(
+    dualRow('Architect').getByRole('button', { name: 'Add backup for @zeus' }),
+  ).toBeVisible()
+  const reviewerButton = dualRow('Reviewer').getByRole('button', { name: 'Add backup for @zeus' })
+  await expect(reviewerButton).toBeVisible()
+  await expect(reviewerButton).toHaveText("Add @zeus's backup")
+  await expect(
+    rows.filter({ hasText: '@codex-default' }).getByRole('button', { name: /backup/i }),
+  ).toHaveCount(0)
+  await expect(settings.getByRole('button', { name: /backup for @chief/i })).toHaveCount(0)
+  await reviewerButton.click()
+  await expect(settings.locator('[name="memberTier"]').locator('..')).toBeHidden()
+  await pickMember(settings, { harness: 'Codex', model: 'gpt-6-astra' })
+  await settings.getByRole('button', { name: 'Add backup', exact: true }).click()
+  await expect
+    .poll(() => calls(page, 'backup.add'))
+    .toEqual([{ project: 1, member: 'zeus', harness: 'codex', model: 'gpt-6-astra', effort: null }])
+  await expect(settings.getByText('backup of @zeus')).toHaveCount(2)
+  const backupRow = (role) => dualRow(role).locator('xpath=following-sibling::tr[1]')
+  await backupRow('Reviewer').getByRole('button', { name: 'Change backup for @zeus' }).click()
+  await pickMember(settings, { harness: 'Pi', model: 'meta/muse-spark' })
+  await settings.getByRole('button', { name: 'Save backup' }).click()
+  await expect
+    .poll(() => calls(page, 'backup.change'))
+    .toEqual([
+      { project: 1, member: 'zeus', harness: 'pi', model: 'meta/muse-spark', effort: null },
+    ])
+  await expect(backupRow('Architect')).toContainText('muse-spark')
+  await expect(backupRow('Reviewer')).toContainText('muse-spark')
+  await expect(
+    backupRow('Architect').getByRole('button', { name: 'Remove backup for @zeus' }),
+  ).toBeVisible()
+  await backupRow('Architect').getByRole('button', { name: 'Remove backup for @zeus' }).click()
+  await expect.poll(() => calls(page, 'backup.remove')).toEqual([{ project: 1, member: 'zeus' }])
+  await expect(settings.getByText('backup of @zeus')).toHaveCount(0)
+})
+
+test('T1789 New project offers one member backup from each of its roles', async ({ page }) => {
+  const data = model()
+  data.lastStaff = [
+    lastMember('zeus', 'claude-code', ['architect', 'reviewer']),
+    lastMember('diana', 'codex', ['reviewer']),
+  ]
+  await open(page, data)
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const rows = dialog.getByRole('table', { name: 'Members for the staff' }).locator('tbody tr')
+  const dualRow = (role) =>
+    rows
+      .filter({ has: page.getByText(role, { exact: true }) })
+      .filter({ hasText: 'claude-sonnet-5' })
+  await expect(
+    rows
+      .filter({ hasText: 'gpt-5.6-luna' })
+      .getByRole('button', { name: 'Add backup for gpt-5.6-luna' }),
+  ).toBeVisible()
+  await expect(
+    dualRow('Architect').getByRole('button', { name: 'Add backup for claude-sonnet-5' }),
+  ).toBeVisible()
+  const reviewerButton = dualRow('Reviewer').getByRole('button', {
+    name: 'Add backup for claude-sonnet-5',
+  })
+  await expect(reviewerButton).toBeVisible()
+  await expect(reviewerButton).toHaveText("Add claude-sonnet-5's backup")
+  await reviewerButton.click()
+  await pickMember(dialog, { harness: 'Codex', model: 'gpt-6-astra' })
+  await dialog.getByRole('button', { name: 'Add backup', exact: true }).click()
+  await expect(dialog.getByText('backup of claude-sonnet-5')).toHaveCount(2)
+  await expect(
+    dualRow('Reviewer').locator('xpath=following-sibling::tr[1]').locator('.member-meta').first(),
+  ).toContainText('standard')
+  await pickChief(dialog, 'Codex', 'gpt-6-astra')
+  await dialog.getByRole('button', { name: 'Start project' }).click()
+  await expect.poll(async () => (await calls(page, 'project.open')).at(-1)?.staff).toHaveLength(3)
+  const staff = (await calls(page, 'project.open')).at(-1).staff
+  const owner = staff.find((member) => member.model === 'claude-sonnet-5')
+  const backup = staff.filter((member) => member.backupOf === owner.id)
+  expect(owner.roles).toEqual(['architect', 'reviewer'])
+  expect(backup).toHaveLength(1)
+  expect(backup[0].tier).toBe(owner.tier)
 })
