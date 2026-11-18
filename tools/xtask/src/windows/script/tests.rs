@@ -28,6 +28,50 @@ const DIR: &str = "consensflow-build";
 /// A run's name, as [`run_id`] makes them.
 const ID: &str = "0000abcd-12345678";
 const BUILD: [&str; 2] = ["npm ci --no-audit --no-fund", "npm run build:bridge"];
+const EXIT_PATH_WRAPPER: &str = "try { %BODY% } finally { Remove-Item -LiteralPath (Join-Path $env:TEMP 'cf-nothing-here') -Force -ErrorAction SilentlyContinue }";
+
+fn exit_path_invocation(
+    shell: &str,
+    temporary: &std::path::Path,
+    script: &str,
+) -> crate::process::Invocation {
+    crate::process::Invocation::new(shell, ".")
+        .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+        .arg(encode_script(script).unwrap())
+        .var("TEMP", temporary)
+}
+
+#[test]
+fn exit_path_fixture_leaves_a_same_named_file_in_the_callers_temp() {
+    use cf_base::env::Env;
+
+    let Some(shell) = powershell::shell() else {
+        eprintln!("skipped: no PowerShell on this machine");
+        return;
+    };
+    let outside = tempfile::tempdir().unwrap();
+    let own = tempfile::tempdir().unwrap();
+    let decoy = outside.path().join("cf-nothing-here");
+    std::fs::write(&decoy, b"unrelated").unwrap();
+    let env = Env::from_process()
+        .with_var("TEMP", &outside.path().display().to_string())
+        .with_var(
+            "XDG_CACHE_HOME",
+            &own.path().join("cache").display().to_string(),
+        );
+    let script = format!(
+        "{}\nexit 0",
+        EXIT_PATH_WRAPPER.replace("%BODY%", "Write-Output 'done'")
+    );
+    let env = powershell::shell_environment(shell, env);
+    let ran = powershell::with_shell_turn(shell, || {
+        crate::process::capture(&exit_path_invocation(shell, own.path(), &script), &env)
+    })
+    .unwrap();
+    assert_eq!(ran.code, 0, "{}", said(&ran));
+    assert!(decoy.is_file(), "the unrelated same-named file was removed");
+    assert_eq!(std::fs::read(decoy).unwrap(), b"unrelated");
+}
 
 #[test]
 fn t1655_the_sweep_leaves_old_evidence_alone() {
@@ -504,7 +548,7 @@ fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went()
 fn powershell_says_how_it_went_in_its_last_line_from_every_place_the_script_leaves_from() {
     use cf_base::env::Env;
 
-    use crate::process::{self, Invocation};
+    use crate::process;
 
     let text = bootstrap();
     // The function and the one it calls first (`Free-Machine`, which holds nothing here), as the
@@ -516,7 +560,8 @@ fn powershell_says_how_it_went_in_its_last_line_from_every_place_the_script_leav
         "$held = $false\n$lock = $null\n{}",
         &text[from..end_of_line]
     );
-    let way_out = "try { %BODY% } finally { Remove-Item -LiteralPath (Join-Path $env:TEMP 'cf-nothing-here') -Force -ErrorAction SilentlyContinue }";
+    let temporary = tempfile::tempdir().unwrap();
+    let way_out = EXIT_PATH_WRAPPER;
     for (body, status) in [
         // At the top, as the lock's.
         ("Exit-Run 75".to_owned(), 75),
@@ -535,9 +580,7 @@ fn powershell_says_how_it_went_in_its_last_line_from_every_place_the_script_leav
     ] {
         let script = format!("$ProgressPreference = 'SilentlyContinue'\n{function}\n{body}\n");
         let ran = process::capture(
-            &Invocation::new("powershell", ".")
-                .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
-                .arg(encode_script(&script).unwrap()),
+            &exit_path_invocation("powershell", temporary.path(), &script),
             &Env::from_process(),
         )
         .unwrap();

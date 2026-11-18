@@ -478,7 +478,7 @@ mod tests {
                 assert!(is_parent_session_variable(name), "{name}");
             }
         }
-        // cmux's, which only a removed harness's throwaway server took out before (T-1024).
+        // The terminal's session variables are removed alongside the harnesses' own.
         for name in [
             "CMUX_SOCKET",
             "CMUX_SOCKET_PATH",

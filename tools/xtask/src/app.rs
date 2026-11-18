@@ -25,7 +25,6 @@
 //! by [`without_resources`].
 
 use std::ffi::OsString;
-use std::fs;
 
 use crate::context::Context;
 use crate::dispatch::{Command, Console, Failure, Run};
@@ -102,10 +101,9 @@ fn run_fresh(context: &Context, args: &[OsString], console: &mut Console) -> Res
     Ok(1)
 }
 
-/// The app's tests built and not run: `cargo test --offline --no-run`, in the app's folder,
-/// into the folder [`test`] builds them in ([`on_the_real_target`]).
+/// The app's tests built and not run: `cargo test --offline --no-run`, in the app's folder.
 fn test_build(context: &Context) -> Invocation {
-    on_the_real_target(context, in_the_app(context)).args(["test", "--offline", "--no-run"])
+    in_the_app(context).args(["test", "--offline", "--no-run"])
 }
 
 /// The lines of a verbose cargo build that say a part is made again, and why
@@ -118,28 +116,11 @@ fn dirty_parts(stderr: &str) -> Vec<&str> {
         .collect()
 }
 
-/// The app's tests: `cargo test --offline -- <args>`, in the app's folder. Built into the
-/// folder a linked `target` leads to ([`on_the_real_target`]).
+/// The app's tests: `cargo test --offline -- <args>`, in the app's folder.
 pub(crate) fn test(context: &Context, args: &[OsString]) -> Invocation {
-    on_the_real_target(context, in_the_app(context))
+    in_the_app(context)
         .args(["test", "--offline", "--"])
         .args(args.iter().cloned())
-}
-
-/// `invocation`, told to build into the folder the app's `target` leads to where that is a
-/// link (a tree whose build folder is on the builds disk, `builds-disk.sh place`), unless the
-/// environment names a folder of its own. A test binary run through the link has a symlink
-/// in its `current_exe()`, which Tauri's updater refuses (`StartingBinary`): the app's two
-/// `real_updater` tests failed so in every such tree (T-968).
-fn on_the_real_target(context: &Context, invocation: Invocation) -> Invocation {
-    let target = context.path(APP).join("target");
-    let linked = fs::symlink_metadata(&target).is_ok_and(|found| found.file_type().is_symlink());
-    match fs::canonicalize(&target) {
-        Ok(real) if linked && context.env.text("CARGO_TARGET_DIR").is_none() => {
-            invocation.var("CARGO_TARGET_DIR", real)
-        }
-        _ => invocation,
-    }
 }
 
 /// The app's lint: `cargo clippy --offline --all-targets -- -D warnings <args>`,
@@ -279,24 +260,12 @@ mod tests {
         (root, context, real)
     }
 
-    /// The app's tests are built into the folder a linked `target` leads to, not through the
-    /// link (T-968): Tauri's updater refuses a `current_exe()` that has a symlink in it, so the
-    /// app's two `real_updater` tests failed in every tree whose build folder is on the builds
-    /// disk (`builds-disk.sh place`), and so did the gate's step for them.
     #[cfg(unix)]
     #[test]
-    fn the_app_tests_are_built_where_a_linked_target_leads_so_no_test_binary_runs_through_a_link() {
-        let (_root, context, real) = checkout_with_target(true, Env::default());
-        let mut expected = resources_left_out();
-        expected.push((
-            OsString::from("CARGO_TARGET_DIR"),
-            Some(real.into_os_string()),
-        ));
-        assert_eq!(test(&context, &[]).vars, expected);
-        // `app fresh` builds the same tests, into the same folder (T-1024: on main since).
-        assert_eq!(test_build(&context).vars, expected);
-        // The lint runs no test binary, and the link serves it as it is.
-        assert_eq!(clippy(&context, &[]).vars, resources_left_out());
+    fn app_commands_do_not_resolve_a_target_link_or_override_the_environment() {
+        let (_root, context, _) = checkout_with_target(true, Env::default());
+        assert_eq!(test(&context, &[]).vars, resources_left_out());
+        assert_eq!(test_build(&context).vars, resources_left_out());
     }
 
     #[cfg(unix)]

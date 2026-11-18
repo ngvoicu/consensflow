@@ -14,7 +14,7 @@
 
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
@@ -33,9 +33,16 @@ import {
   signedName,
   updaterKeyLine,
 } from '../install/kit.mjs'
+import {
+  PowerShellStartLock,
+  pwshEnvironment,
+  watchReady,
+} from './support/powershell-start-lock.mjs'
 
 const fixtures = path.join(ROOT, 'tests/fixtures/install')
 const L = 2n ** 252n + 27742317777372353535851937790883648493n
+const powershellStarts = new PowerShellStartLock()
+const POWERSHELL_READY = '__CONSENSFLOW_VERIFIER_START_READY__'
 
 function fixture(name) {
   return readFileSync(path.join(fixtures, name))
@@ -659,15 +666,39 @@ const engines = [
       const script = path.join(work, `verify-${program}.ps1`)
       writeFileSync(
         script,
-        PS_HARNESS.replace('@VERIFIER@', () =>
-          between(INSTALL_PS1, '# verifier: begin', '# verifier: end'),
-        ),
+        `${program === 'pwsh' ? `[Console]::Out.Write('${POWERSHELL_READY}')\n` : ''}${PS_HARNESS.replace('@VERIFIER@', () => between(INSTALL_PS1, '# verifier: begin', '# verifier: end'))}`,
       )
-      return spawnSync(
-        program,
-        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, data],
-        { encoding: 'utf8', maxBuffer: 1 << 26 },
-      )
+      const args = [
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        script,
+        data,
+      ]
+      const env = pwshEnvironment({
+        ...process.env,
+        XDG_CACHE_HOME: mkdtempSync(path.join(work, 'ps-cache-')),
+      })
+      if (program !== 'pwsh')
+        return spawnSync(program, args, { encoding: 'utf8', maxBuffer: 1 << 26, env })
+      return powershellStarts.start(() => {
+        const child = spawn(program, args, { env })
+        let stdout = '',
+          stderr = ''
+        const ready = watchReady(child.stdout, POWERSHELL_READY, (text) => {
+          stdout += text
+        })
+        child.stderr.on('data', (chunk) => {
+          stderr += chunk
+        })
+        const result = new Promise((resolve) => {
+          child.on('error', (error) => resolve({ status: 1, stdout, stderr: error.message }))
+          child.on('close', (status) => resolve({ status, stdout, stderr }))
+        })
+        return { ready: Promise.race([ready, result]), value: result }
+      })
     },
   })),
 ]
@@ -727,8 +758,8 @@ describe("the installers' signature check", () => {
   for (const engine of engines) {
     describe(engine.name, { skip: !engine.available && 'not on this machine' }, () => {
       let answers
-      before(() => {
-        const ran = engine.run(work, input)
+      before(async () => {
+        const ran = await engine.run(work, input)
         assert.equal(ran.status, 0, `${ran.stdout}\n${ran.stderr}`)
         answers = JSON.parse(ran.stdout.trim())
       })

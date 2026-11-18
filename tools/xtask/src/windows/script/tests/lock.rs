@@ -223,6 +223,18 @@ fn start_after(
     packed: &Path,
     before: &str,
 ) -> Child {
+    let start = bootstrap_invocation(scratch, profile, id, packed, before);
+    process::spawn(&start, env, Stdio::null(), false).unwrap()
+}
+
+/// Prepare the bootstrap without starting it, so a case can put its guardian in a job first.
+fn bootstrap_invocation(
+    scratch: &Path,
+    profile: &Path,
+    id: &str,
+    packed: &Path,
+    before: &str,
+) -> Invocation {
     fs::copy(packed, profile.join(upload_name(SHARED, id))).unwrap();
     let sent = remote_script(&Script {
         id,
@@ -237,7 +249,7 @@ fn start_after(
     });
     let file = scratch.join(format!("run-{id}.ps1"));
     fs::write(&file, format!("{before}{sent}")).unwrap();
-    let start = Invocation::new("powershell", scratch)
+    Invocation::new("powershell", scratch)
         .args([
             "-NoProfile",
             "-NonInteractive",
@@ -246,8 +258,7 @@ fn start_after(
             "-File",
         ])
         .arg(&file)
-        .var("USERPROFILE", profile);
-    process::spawn(&start, env, Stdio::null(), false).unwrap()
+        .var("USERPROFILE", profile)
 }
 
 /// `env` with `name` set to `value`, whatever the case of the name it had there (Windows
@@ -389,31 +400,6 @@ fn marked(env: &Env, mark: &str) -> Vec<u32> {
     unreachable!("the last attempt panics")
 }
 
-/// Ends the programs marked by `mark` when it is dropped, whatever the case ended with:
-/// a case that fails must not leave them running on the machine it ran on.
-struct Marks<'a> {
-    env: &'a Env,
-    mark: &'static str,
-}
-
-impl Drop for Marks<'_> {
-    fn drop(&mut self) {
-        // Asked and ended in one script: a program ended by a process id found a moment
-        // before (by the next program to start, once the id is given again) may be another's
-        // by then, and the gap between two programs is long on a machine under load.
-        let script = format!(
-            "$ProgressPreference = 'SilentlyContinue'\nGet-CimInstance Win32_Process -Filter \"Name='PING.EXE'\" | Where-Object {{ $_.CommandLine -like '*{}*' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}\n",
-            self.mark
-        );
-        let _ = process::capture(
-            &Invocation::new("powershell", ".")
-                .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
-                .arg(encode_script(&script).unwrap()),
-            self.env,
-        );
-    }
-}
-
 /// The stop of the run `id`, as ssh has the machine run it: its own PowerShell, with the
 /// profile of the case.
 fn stop(case: &Case, id: &str) {
@@ -434,20 +420,6 @@ fn stop(case: &Case, id: &str) {
         "{}",
         said(&stop)
     );
-}
-
-/// Waits for the run's own process to be gone (a minute at most): what a stop ends is the run, so
-/// it is the process that is waited for, not the end of its output, which stays open as long as
-/// any process that holds a copy of it lives.
-fn gone(mut run: Child) {
-    let until = Instant::now() + Duration::from_secs(60);
-    while run.try_wait().unwrap().is_none() {
-        assert!(
-            Instant::now() < until,
-            "the run's process outlived its stop by a minute"
-        );
-        std::thread::sleep(Duration::from_millis(100));
-    }
 }
 
 /// Two runs of the script as it is sent, started together on one profile.
@@ -562,6 +534,50 @@ pub(super) struct Case {
     pub(super) scratch: tempfile::TempDir,
 }
 
+/// The guardian and everything it starts belong to a sealed Windows job held by this value.
+/// Dropping the job closes its handle and ends its members; no process lookup or pid is used.
+/// The guardian stays alive after the bootstrap exits, so the case can observe children which
+/// the bootstrap intentionally leaves running before it releases the job.
+struct ContainedRun {
+    owned: Option<cf_process::Owned>,
+    _runtime: tokio::runtime::Runtime,
+    done: PathBuf,
+    failure: PathBuf,
+    errors: PathBuf,
+    output: PathBuf,
+}
+
+impl ContainedRun {
+    fn wait_for_bootstrap(&self) -> i32 {
+        let until = Instant::now() + Duration::from_secs(120);
+        loop {
+            if let Ok(failure) = fs::read_to_string(&self.failure) {
+                panic!("the guardian failed: {failure}");
+            }
+            if let Ok(status) = fs::read_to_string(&self.done) {
+                if let Ok(code) = status.trim().parse() {
+                    return code;
+                }
+            }
+            assert!(
+                Instant::now() < until,
+                "the bootstrap did not end; guardian errors: {}; output: {}",
+                fs::read_to_string(&self.errors).unwrap_or_default(),
+                fs::read_to_string(&self.output).unwrap_or_default()
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
+
+impl Drop for ContainedRun {
+    fn drop(&mut self) {
+        // Do not call Owned::end: its fallback uses a pid when ending the job fails. Dropping
+        // the retained job instead closes its handle with KILL_ON_JOB_CLOSE still set.
+        drop(self.owned.take());
+    }
+}
+
 impl Case {
     pub(super) fn new() -> Self {
         let scratch = tempfile::tempdir().unwrap();
@@ -602,9 +618,90 @@ impl Case {
         )
     }
 
+    /// Run a case whose command can outlive the bootstrap inside a job the test owns. The
+    /// guardian waits on `go` until the caller has checked the job was actually assigned.
+    fn contained_run(&self, id: &str, files: &[(&str, &[u8])], command: &str) -> ContainedRun {
+        let context = checkout(self.scratch.path(), &self.env, files);
+        let identity = tree::identity(&context, &tree::files(&context).unwrap()).unwrap();
+        let packed = tarball(self.scratch.path(), &context, &identity, command, id);
+        let bootstrap = bootstrap_invocation(self.scratch.path(), &self.profile, id, &packed, "");
+        let script = bootstrap.args.last().expect("bootstrap file");
+        let go = self.scratch.path().join(format!("guardian-{id}.go"));
+        let done = self.scratch.path().join(format!("guardian-{id}.done"));
+        let failure = self.scratch.path().join(format!("guardian-{id}.failure"));
+        let errors = self.scratch.path().join(format!("guardian-{id}.err"));
+        let output = self.scratch.path().join(format!("guardian-{id}.out"));
+        let guardian = r#"
+$ErrorActionPreference = 'Stop'
+try {
+while (-not (Test-Path -LiteralPath $env:CF_TEST_GO)) { Start-Sleep -Milliseconds 20 }
+$run = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $env:CF_TEST_SCRIPT + '"')) -PassThru -NoNewWindow
+# Windows PowerShell needs the process handle opened before exit to retain its exit code.
+$handle = $run.Handle
+if ($null -eq $handle) { throw 'could not retain the bootstrap process handle' }
+$run.WaitForExit()
+[IO.File]::WriteAllText(($env:CF_TEST_DONE + '.pending'), [string]$run.ExitCode)
+[IO.File]::Move(($env:CF_TEST_DONE + '.pending'), $env:CF_TEST_DONE)
+while ($true) { Start-Sleep -Milliseconds 100 }
+} catch { [IO.File]::WriteAllText($env:CF_TEST_FAILURE, ($_ | Out-String)); exit 97 }
+"#;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        // This command is started only through cf-process, which creates the sealed job.
+        #[allow(clippy::disallowed_methods)]
+        let mut launch =
+            tokio::process::Command::new(process::resolved("powershell".as_ref(), &self.env));
+        launch
+            .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+            .arg(encode_script(guardian).unwrap())
+            .current_dir(self.scratch.path())
+            .env_clear()
+            .envs(self.env.iter())
+            .env("USERPROFILE", &self.profile)
+            .env("CF_TEST_SCRIPT", script)
+            .env("CF_TEST_GO", &go)
+            .env("CF_TEST_DONE", &done)
+            .env("CF_TEST_FAILURE", &failure)
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(fs::File::create(&output).unwrap()))
+            .stderr(Stdio::from(fs::File::create(&errors).unwrap()))
+            .kill_on_drop(true);
+        let entered = runtime.enter();
+        let owned = cf_process::start_owned(&mut launch).unwrap();
+        drop(entered);
+        let refusal = owned.refusal().map(str::to_owned);
+        let contained = ContainedRun {
+            owned: Some(owned),
+            _runtime: runtime,
+            done,
+            failure,
+            errors,
+            output,
+        };
+        assert!(
+            refusal.is_none(),
+            "guardian could not be contained: {refusal:?}"
+        );
+        fs::write(go, "").unwrap();
+        contained
+    }
+
     pub(super) fn copy(&self) -> PathBuf {
         self.profile.join(SHARED)
     }
+}
+
+#[test]
+fn a_contained_bootstrap_reports_its_normal_exit() {
+    let case = Case::new();
+    let run = case.contained_run(
+        "0000b500-00000000",
+        &[("keep.txt", b"kept")],
+        "cmd /c exit 0",
+    );
+    assert_eq!(run.wait_for_bootstrap(), 0);
 }
 
 #[test]
@@ -739,12 +836,8 @@ fn a_stop_ends_the_run_the_owner_file_names_by_its_process_whatever_the_older_fi
     // held the lock (the milliseconds between the open and the write): the stop must end
     // the run, not the process in that file, and must leave that file to the script it is.
     let case = Case::new();
-    let _marks = Marks {
-        env: &case.env,
-        mark: "127.0.0.76",
-    };
     let id = "0000b007-00000007";
-    let run = case.run(id, &[("keep.txt", b"kept")], None, "ping -n 300 127.0.0.76");
+    let run = case.contained_run(id, &[("keep.txt", b"kept")], "ping -n 300 127.0.0.76");
     // The command is running: its program is there to be ended with the run.
     until("the run never started its command", || {
         !marked(&case.env, "127.0.0.76").is_empty()
@@ -753,7 +846,7 @@ fn a_stop_ends_the_run_the_owner_file_names_by_its_process_whatever_the_older_fi
     let other_id = other.id();
     fs::write(case.copy().join(RUNNING), other_id.to_string()).unwrap();
     stop(&case, id);
-    gone(run);
+    run.wait_for_bootstrap();
     // Nothing the run started is running: its `ping -n 300` was five minutes from its end.
     assert_eq!(marked(&case.env, "127.0.0.76"), Vec::<u32>::new());
     assert!(!case.copy().join(OWNER).exists());
@@ -765,6 +858,51 @@ fn a_stop_ends_the_run_the_owner_file_names_by_its_process_whatever_the_older_fi
     }
     drop(other);
     assert!(tarballs_in(&case.profile).is_empty());
+}
+
+#[test]
+fn ending_the_fixture_job_leaves_a_same_marker_ping_outside_it_running() {
+    let case = Case::new();
+    let mark = "127.77.77.77";
+    let mut decoy = Held::new(
+        process::spawn(
+            &Invocation::new("ping", ".").args(["-n", "300", mark]),
+            &case.env,
+            Stdio::null(),
+            false,
+        )
+        .unwrap(),
+    );
+    let pid_file = case.scratch.path().join("fixture-ping.pid");
+    let file = pid_file.display().to_string().replace('\'', "''");
+    let child = format!(
+        "$p = Start-Process ping.exe -ArgumentList '-n','300','{mark}' -PassThru; [IO.File]::WriteAllText('{file}', [string]$p.Id); $p.WaitForExit()"
+    );
+    let command = format!(
+        "powershell.exe -NoProfile -NonInteractive -EncodedCommand {}",
+        encode_script(&child).unwrap()
+    );
+    let run = case.contained_run("0000b501-00000001", &[("keep.txt", b"kept")], &command);
+    until("the fixture did not record its child", || {
+        fs::read_to_string(&pid_file).is_ok_and(|text| text.trim().parse::<u32>().is_ok())
+    });
+    let own_pid: u32 = fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    until("both pings did not start", || {
+        let seen = marked(&case.env, mark);
+        seen.contains(&decoy.id()) && seen.contains(&own_pid)
+    });
+    drop(run);
+    until("the fixture's ping survived its job", || {
+        !marked(&case.env, mark).contains(&own_pid)
+    });
+    assert!(
+        decoy.runs().is_ok(),
+        "the unrelated same-marker ping was ended"
+    );
 }
 
 /// How many programs the batch file of [`spawner`] starts that end by themselves, at the
@@ -807,20 +945,16 @@ fn a_stop_that_lands_while_the_run_is_starting_programs_leaves_none_of_them_runn
     let mark = "127.0.0.71";
     for round in 0..2 {
         let case = Case::new();
-        let _marks = Marks {
-            env: &case.env,
-            mark,
-        };
         let id = format!("0000b1{round:02x}-0000000{round}");
         // Ten of its programs live a minute, so that a run that is not in its job leaves some
         // alive past the grace below (the short ones are gone in 3 s).
         let spawner = spawner(mark, 10);
-        let run = case.run(&id, &[("spawn.cmd", &spawner)], None, "spawn.cmd");
+        let run = case.contained_run(&id, &[("spawn.cmd", &spawner)], "spawn.cmd");
         until("the run never started its programs", || {
             marked(&case.env, mark).len() >= 6
         });
         stop(&case, &id);
-        gone(run);
+        run.wait_for_bootstrap();
         // Still going, for a moment after the run is gone: the system is ending them, and a
         // process it ended is listed until its last handle is closed. Not for the seconds of a
         // ping that nothing ended (the ones the stop did not read lived 11 s).
@@ -946,13 +1080,9 @@ fn a_stop_of_a_run_that_is_starting_programs_ends_no_program_that_is_not_the_run
     let mark = "127.0.0.73";
     for round in 0..2 {
         let case = Case::new();
-        let _marks = Marks {
-            env: &case.env,
-            mark,
-        };
         let id = format!("0000b4{round:02x}-0000000{round}");
         let spawner = spawner(mark, LONG);
-        let run = case.run(&id, &[("spawn.cmd", &spawner)], None, "spawn.cmd");
+        let run = case.contained_run(&id, &[("spawn.cmd", &spawner)], "spawn.cmd");
         until("the run never started its long programs", || {
             marked(&case.env, mark).len() >= LONG
         });
@@ -966,7 +1096,7 @@ fn a_stop_of_a_run_that_is_starting_programs_ends_no_program_that_is_not_the_run
         let bystanders = Bystanders::start(&case.env);
         let stopping = Instant::now();
         stop(&case, &id);
-        gone(run);
+        run.wait_for_bootstrap();
         let took = stopping.elapsed();
         let Seen {
             started,
@@ -1042,27 +1172,10 @@ fn what_a_command_leaves_running_when_the_run_ends_by_itself_is_left_running() {
     // is taken away where the run ends by itself.
     let mark = "127.0.0.72";
     let case = Case::new();
-    let _marks = Marks {
-        env: &case.env,
-        mark,
-    };
     let leave = format!("@echo off\r\nstart \"\" /b ping -n 30 {mark} >nul\r\n").into_bytes();
-    let mut run = case.run(
-        "0000b201-00000001",
-        &[("leave.cmd", &leave)],
-        None,
-        "leave.cmd",
-    );
+    let run = case.contained_run("0000b201-00000001", &[("leave.cmd", &leave)], "leave.cmd");
     // The run's process is gone (its output is not: the program left holds a copy of it).
-    let until = Instant::now() + Duration::from_secs(60);
-    while run.try_wait().unwrap().is_none() {
-        assert!(Instant::now() < until, "the run never ended");
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    assert_eq!(
-        run.try_wait().unwrap().and_then(|status| status.code()),
-        Some(0)
-    );
+    assert_eq!(run.wait_for_bootstrap(), 0);
     assert_eq!(
         marked(&case.env, mark).len(),
         1,
