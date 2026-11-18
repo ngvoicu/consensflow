@@ -140,8 +140,7 @@ fn clippy_windows_lints_the_workspace_but_the_app_for_the_target_from_the_root()
         archiver.starts_with('"') && archiver.ends_with(" --as-archiver\""),
         "{archiver}"
     );
-    // The xtask that is run, as the system resolves it: through a link where the tree's build
-    // folder is on another disk (`builds-disk.sh place`), so both are resolved.
+    // The archiver is the xtask binary built for this test.
     #[cfg(unix)]
     {
         let program = archiver
