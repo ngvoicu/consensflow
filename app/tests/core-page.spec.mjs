@@ -869,7 +869,16 @@ async function open(page, given = model()) {
         return answer({ project })
       },
     }
-    const invoke = async (command, args = {}) => {
+    const invoke = async (command, rawArgs = {}) => {
+      // What is typed goes as base64 text with the length the page counted;
+      // the tests read it as `bytes`, a list, after the length is checked.
+      let args = rawArgs
+      if (typeof rawArgs.bytes === 'string' && 'length' in rawArgs) {
+        const list = Array.from(atob(rawArgs.bytes), (character) => character.charCodeAt(0))
+        if (list.length !== rawArgs.length)
+          throw new Error('a call stated another length than its bytes')
+        args = { ...rawArgs, bytes: list }
+      }
       window.__calls.push([
         command,
         JSON.parse(JSON.stringify(args, (key, value) => (key === 'onOutput' ? 'channel' : value))),
@@ -913,8 +922,19 @@ async function open(page, given = model()) {
           ? { ok: true, url: `${data.screens.url}/${args.page}?token=${data.screens.token}` }
           : { ok: false, error: 'the harnesses screen is not available: the daemon is not up' }
       }
-      if (command === 'pane_input_enqueue' || command === 'pane_reply_enqueue')
+      if (command === 'pane_input_enqueue' || command === 'pane_reply_enqueue') {
+        if (window.__paneInputHook) return window.__paneInputHook(command, args)
         return { ok: true, ticket: 't' }
+      }
+      if (command === 'pane_input_skip') {
+        return window.__paneSkipHook ? window.__paneSkipHook(args) : { ok: true }
+      }
+      if (command === 'pane_input_wait' && window.__paneWaitHook) {
+        return window.__paneWaitHook(args)
+      }
+      if (command === 'pane_input_forget' && window.__paneForgetHook) {
+        return window.__paneForgetHook(args)
+      }
       if (command.startsWith('update_')) return { ok: false, error: 'not in this test' }
       // A link opened in the browser, or refused as a test says (`window.__linkRefused`).
       if (command === 'open_link') return window.__linkRefused ?? { ok: true }
@@ -973,7 +993,7 @@ async function open(page, given = model()) {
       test: data.realTerminals
         ? {}
         : {
-            createEmulator: (host) => {
+            createEmulator: (host, callbacks) => {
               // The keyboard lives in a field inside the host, as xterm's does.
               host.append(
                 Object.assign(document.createElement('textarea'), { className: 'stub-input' }),
@@ -991,6 +1011,7 @@ async function open(page, given = model()) {
                   await window.__writeGate
                   emulator.written.push(...bytes)
                 },
+                reply: (data) => callbacks.onReply(data),
                 onData: (callback) => {
                   emulator.type = callback
                   return { dispose() {} }
@@ -4364,6 +4385,650 @@ test('says how many earlier notes one frame did not hold, and counts them all', 
   })
 })
 
+// A pane host that enforces the page's count the way the real one does: a number at or
+// below it is stale and writes nothing, a skip moves it past a call, and a call is
+// never sent again once its fate is unknown. The first call may be delayed, fail before
+// arrival, or arrive but lose its answer or never answer.
+const hostWithCount = () => {
+  let last = 0
+  window.__paneReceived = ''
+  window.__paneSkips = []
+  window.__paneSkipHook = (args) => {
+    window.__paneSkips.push(args)
+    last = Math.max(last, args.sequence)
+    return { ok: true }
+  }
+  return (args) => {
+    if (args.sequence <= last) return { ok: false, error: 'pane-input-sequence-stale' }
+    last = args.sequence
+    window.__paneReceived += String.fromCharCode(...args.bytes)
+    return { ok: true, ticket: `ticket-${last}` }
+  }
+}
+
+for (const [failure, typed, lost] of [
+  ['delayed arrival', 'ABC', false],
+  ['lost before arrival', 'BC', true],
+  ['lost answer', 'ABC', true],
+  ['no answer', 'ABC', true],
+]) {
+  test(`typing survives ${failure} without repeating a key`, async ({ page }) => {
+    await open(page)
+    await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+    await page.evaluate(
+      ({ failure, hostSource }) => {
+        const admit = new Function(`return (${hostSource})()`)()
+        let first = true
+        window.__paneInputHook = async (_command, args) => {
+          if (first) {
+            first = false
+            if (failure === 'delayed arrival')
+              await new Promise((resolve) => setTimeout(resolve, 100))
+            if (failure === 'lost before arrival') throw new Error('test: call lost before arrival')
+          }
+          const answer = admit(args)
+          if (failure === 'lost answer' && args.sequence === 1) throw new Error('test: answer lost')
+          if (failure === 'no answer' && args.sequence === 1) return new Promise(() => {})
+          return answer
+        }
+        for (const key of ['A', 'B', 'C']) window.__emulators[0].type(key)
+      },
+      { failure, hostSource: hostWithCount.toString() },
+    )
+    await expect
+      .poll(() => page.evaluate(() => window.__paneReceived), { timeout: 4000 })
+      .toBe(typed)
+    const enqueues = await page.evaluate(() =>
+      window.__calls
+        .filter(([name]) => name === 'pane_input_enqueue')
+        .map(([, args]) => args.sequence),
+    )
+    expect(enqueues, 'no call is sent again').toEqual([1, 2, 3])
+    const skips = await page.evaluate(() => window.__paneSkips.map((args) => args.sequence))
+    expect(skips).toEqual(lost ? [1] : [])
+    if (lost)
+      await expect(page.locator('#status')).toHaveText(
+        'Some of your typing may not have reached this window. Check what appeared.',
+      )
+  })
+}
+
+test('an original arriving after its skip is refused and typed nowhere', async ({ page }) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(
+    ({ hostSource }) => {
+      const admit = new Function(`return (${hostSource})()`)()
+      let first = true
+      window.__lateAnswer = null
+      window.__paneInputHook = async (_command, args) => {
+        if (first) {
+          first = false
+          return new Promise((resolve) => {
+            window.__arriveOriginal = () => {
+              window.__lateAnswer = admit(args)
+              resolve(window.__lateAnswer)
+            }
+          })
+        }
+        return admit(args)
+      }
+      for (const key of ['A', 'B', 'C']) window.__emulators[0].type(key)
+    },
+    { hostSource: hostWithCount.toString() },
+  )
+  await expect.poll(() => page.evaluate(() => window.__paneReceived), { timeout: 4000 }).toBe('BC')
+  await page.evaluate(() => window.__arriveOriginal())
+  expect(await page.evaluate(() => window.__lateAnswer)).toEqual({
+    ok: false,
+    error: 'pane-input-sequence-stale',
+  })
+  expect(await page.evaluate(() => window.__paneReceived)).toBe('BC')
+})
+
+test('keys and a terminal reply go in one order, one admission at a time', async ({ page }) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    let running = 0
+    window.__overlap = false
+    window.__order = []
+    window.__paneInputHook = async (command, args) => {
+      running += 1
+      if (running > 1) window.__overlap = true
+      window.__order.push(`${command === 'pane_reply_enqueue' ? 'reply' : 'key'}${args.sequence}`)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      running -= 1
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    window.__emulators[0].type('A')
+    window.__emulators[0].reply('\x1b[1;1R')
+    window.__emulators[0].type('B')
+  })
+  await expect.poll(() => page.evaluate(() => window.__order.length), { timeout: 3000 }).toBe(3)
+  expect(await page.evaluate(() => window.__order)).toEqual(['key1', 'reply2', 'key3'])
+  expect(await page.evaluate(() => window.__overlap)).toBe(false)
+})
+
+// A paste is one call with both of its markers: whole, or not at all.
+const PASTE_OPEN = '\x1b[200~'
+const PASTE_CLOSE = '\x1b[201~'
+
+test('a paste goes in as one call, whole with both markers, however long', async ({ page }) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  const paste = `${PASTE_OPEN}echo one\rtwo${'p'.repeat(200 * 1024)}é${PASTE_CLOSE}`
+  await page.evaluate((paste) => window.__emulators[0].type(paste), paste)
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__calls.filter(([name]) => name === 'pane_input_enqueue').length),
+    )
+    .toBe(1)
+  const call = await page.evaluate(() => {
+    const [, args] = window.__calls.find(([name]) => name === 'pane_input_enqueue')
+    return {
+      keys: Object.keys(args),
+      sequence: args.sequence,
+      length: args.length,
+      text: new TextDecoder().decode(new Uint8Array(args.bytes)),
+    }
+  })
+  expect(call.keys).toEqual(['pageId', 'id', 'generation', 'sequence', 'length', 'bytes'])
+  expect(call.sequence).toBe(1)
+  expect(call.text).toBe(paste)
+  expect(call.length).toBe(new TextEncoder().encode(paste).length)
+})
+
+for (const lost of ['before it arrives', 'with its answer lost']) {
+  test(`a paste lost ${lost} is whole or not there at all, never in part`, async ({ page }) => {
+    await open(page)
+    await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+    const paste = `\x1b[200~echo PASTE_ONLY\r${'p'.repeat(70 * 1024)}\x1b[201~`
+    await page.evaluate(
+      ({ lost, hostSource, paste }) => {
+        const admit = new Function(`return (${hostSource})()`)()
+        window.__sent = []
+        window.__paneInputHook = async (_command, args) => {
+          window.__sent.push(args.sequence)
+          if (args.sequence !== 1) return admit(args)
+          // Before it arrives, the host never has it. With its answer lost, the host has it
+          // whole and the page cannot tell.
+          if (lost === 'with its answer lost') admit(args)
+          throw new Error('test: call lost')
+        }
+        window.__emulators[0].type(paste)
+        window.__emulators[0].type('Z')
+      },
+      { lost, hostSource: hostWithCount.toString(), paste },
+    )
+    const expected = lost === 'before it arrives' ? 'Z' : `${paste}Z`
+    await expect
+      .poll(() => page.evaluate(() => window.__paneReceived), { timeout: 4000 })
+      .toBe(expected)
+    const result = await page.evaluate(() => ({
+      sent: window.__sent,
+      skips: window.__paneSkips.map((args) => args.sequence),
+    }))
+    expect(result.sent, 'one call for the paste, never sent again').toEqual([1, 2])
+    expect(result.skips).toEqual([1])
+    await expect(page.locator('#status')).toHaveText(
+      'Some of your typing may not have reached this window. Check what appeared.',
+    )
+  })
+}
+
+test('a paste over the cap is refused before anything is sent, and typing goes on', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__sent = []
+    window.__paneInputHook = async (_command, args) => {
+      window.__sent.push([args.sequence, args.bytes.length])
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    window.__emulators[0].type(`\x1b[200~${'p'.repeat(4 * 1024 * 1024)}\x1b[201~`)
+  })
+  await expect(page.locator('#status')).toHaveText(
+    'This paste is too large to send (over 4 MiB). Paste less of it.',
+  )
+  expect(await page.evaluate(() => window.__sent)).toEqual([])
+  await page.evaluate(() => window.__emulators[0].type('Z'))
+  await expect.poll(() => page.evaluate(() => window.__sent)).toEqual([[1, 1]])
+})
+
+test('each page uses a new identity on all its pane input calls', async ({ page }) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => window.__emulators[0].type('A'))
+  await expect
+    .poll(() => page.evaluate(() => window.__calls.some(([name]) => name === 'pane_input_forget')))
+    .toBe(true)
+  const first = await page.evaluate(() => {
+    const subscription = window.__calls.find(([name]) => name === 'subscribe_output')[1].pageId
+    return {
+      subscription,
+      calls: window.__calls
+        .filter(([name]) => name.startsWith('pane_input_'))
+        .map(([, args]) => args.pageId),
+    }
+  })
+  expect(first.calls.every((id) => id === first.subscription)).toBe(true)
+  await page.reload()
+  await expect
+    .poll(() => page.evaluate(() => window.__calls.some(([name]) => name === 'subscribe_output')))
+    .toBe(true)
+  const second = await page.evaluate(
+    () => window.__calls.find(([name]) => name === 'subscribe_output')[1].pageId,
+  )
+  expect(second).not.toBe(first.subscription)
+  const [firstSession, firstNumber] = first.subscription.split(':')
+  const [secondSession, secondNumber] = second.split(':')
+  expect(secondSession).toBe(firstSession)
+  expect(Number(secondNumber)).toBe(Number(firstNumber) + 1)
+})
+
+test('a lost completion answer and acknowledgement are retried without typing twice', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    let waits = 0
+    let forgets = 0
+    window.__paneReceived = ''
+    window.__paneInputHook = async (_command, args) => {
+      window.__paneReceived += String.fromCharCode(...args.bytes)
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    window.__paneWaitHook = async () => {
+      waits += 1
+      if (waits === 1) throw new Error('test: completion answer lost')
+      return { ok: true }
+    }
+    window.__paneForgetHook = async () => {
+      forgets += 1
+      if (forgets === 1) throw new Error('test: acknowledgement answer lost')
+      return { ok: true }
+    }
+    for (const key of ['A', 'B', 'C']) window.__emulators[0].type(key)
+  })
+  await expect.poll(() => page.evaluate(() => window.__paneReceived)).toBe('ABC')
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__calls.filter(([name]) => name === 'pane_input_wait').length),
+    )
+    .toBe(4)
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__calls.filter(([name]) => name === 'pane_input_forget').length),
+    )
+    .toBe(4)
+})
+
+test('a delayed input in one pane does not hold typing in another', async ({ page }) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(1)
+  await page.evaluate(() => {
+    window.__panesReceived = []
+    window.__paneInputHook = async (_command, args) => {
+      const value = String.fromCharCode(...args.bytes)
+      if (value === 'A')
+        await new Promise((resolve) => {
+          window.__releaseFirstPane = resolve
+        })
+      window.__panesReceived.push(value)
+      return { ok: true, ticket: `${args.id}-${args.sequence}` }
+    }
+    window.__emulators[0].type('A')
+    window.__emulators[1].type('B')
+  })
+  await expect.poll(() => page.evaluate(() => window.__panesReceived)).toEqual(['B'])
+  await page.evaluate(() => window.__releaseFirstPane())
+  await expect.poll(() => page.evaluate(() => window.__panesReceived)).toEqual(['B', 'A'])
+})
+
+test('a full input queue retries the refused key before later typing', async ({ page }) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    let expected = 1
+    let full = true
+    window.__paneReceived = ''
+    window.__paneInputHook = async (_command, args) => {
+      if (args.sequence !== expected) return { ok: false, error: 'pane-input-sequence-stale' }
+      if (full) {
+        full = false
+        return { ok: false, error: "the pane's input queue is full" }
+      }
+      expected += 1
+      window.__paneReceived += String.fromCharCode(...args.bytes)
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    for (const key of ['A', 'B', 'C']) window.__emulators[0].type(key)
+  })
+  await expect.poll(() => page.evaluate(() => window.__paneReceived), { timeout: 3000 }).toBe('ABC')
+})
+
+test('a paste still being written at the terminal pace never says to restart', async ({ page }) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    let refusals = 0
+    window.__paneReceived = ''
+    window.__paneInputHook = async (_command, args) => {
+      // The queue holds the whole paste until it is written: every try is refused
+      // for far longer than the page once waited before it spoke.
+      refusals += 1
+      if (refusals <= 40) return { ok: false, error: "the pane's input queue is full" }
+      window.__paneReceived += String.fromCharCode(...args.bytes)
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    window.__emulators[0].type('A')
+  })
+  await expect.poll(() => page.evaluate(() => window.__paneReceived), { timeout: 8000 }).toBe('A')
+  await expect(page.locator('#status')).toHaveText('')
+})
+
+test('a write the host refuses says some typing may be missing, not to restart', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__paneReceived = ''
+    let first = true
+    window.__paneInputHook = async (_command, args) => {
+      if (first) {
+        first = false
+        return { ok: false, error: 'pane input bytes do not match their length' }
+      }
+      window.__paneReceived += String.fromCharCode(...args.bytes)
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    window.__emulators[0].type('A')
+    window.__emulators[0].type('B')
+  })
+  await expect.poll(() => page.evaluate(() => window.__paneReceived)).toBe('B')
+  await expect(page.locator('#status')).toHaveText(
+    'Some of your typing may not have reached this window. Check what appeared.',
+  )
+})
+
+for (const [error, written, uncertain] of [
+  ['PTY I/O error: the terminal write failed', 'A', true],
+  ['pane input is failed until restart', '', false],
+]) {
+  test(`a failed pane input says how to resume typing: ${error}`, async ({ page }) => {
+    await open(page)
+    await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+    await page.evaluate(
+      ({ error, written, uncertain }) => {
+        window.__paneReceived = ''
+        window.__paneInputHook = async (_command, args) => {
+          if (written) window.__paneReceived += String.fromCharCode(...args.bytes)
+          return { ok: true, ticket: `ticket-${args.sequence}` }
+        }
+        window.__paneWaitHook = async () => ({
+          ok: false,
+          error,
+          uncertain,
+          failedUntilRestart: true,
+        })
+        window.__emulators[0].type('A')
+      },
+      { error, written, uncertain },
+    )
+    await expect.poll(() => page.evaluate(() => window.__paneReceived)).toBe(written)
+    await expect(page.locator('#status')).toHaveText(
+      'Check whether your last typing appeared, then restart the project before typing again.',
+    )
+  })
+}
+
+test('a late pane refusal cannot replace restart advice with a generic notice', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__paneInputHook = async (_command, args) => ({ ok: true, ticket: `t-${args.sequence}` })
+    window.__paneWaitHook = ({ ticket }) =>
+      ticket === 't-1'
+        ? new Promise((resolve) => {
+            window.__releaseFirstInput = resolve
+          })
+        : {
+            ok: false,
+            error: 'pane input is failed until restart',
+            uncertain: false,
+            failedUntilRestart: true,
+          }
+    window.__emulators[0].type('A')
+    window.__emulators[0].type('B')
+  })
+  const restart =
+    'Check whether your last typing appeared, then restart the project before typing again.'
+  await expect(page.locator('#status')).toHaveText(restart)
+  await expect.poll(() => page.evaluate(() => typeof window.__releaseFirstInput)).toBe('function')
+  await page.evaluate(() =>
+    window.__releaseFirstInput({
+      ok: false,
+      error: 'earlier refusal',
+      uncertain: false,
+      failedUntilRestart: false,
+    }),
+  )
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__calls.filter(([name]) => name === 'pane_input_forget').length),
+    )
+    .toBe(2)
+  await expect(page.locator('#status')).toHaveText(restart)
+})
+
+test('a lost pane admission answer is followed by restart advice from the failed pane', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__paneInputHook = async (_command, args) => {
+      if (args.sequence === 1) throw new Error('the admission answer was lost')
+      return { ok: true, ticket: `t-${args.sequence}` }
+    }
+    window.__paneWaitHook = async () => ({
+      ok: false,
+      error: 'pane input is failed until restart',
+      uncertain: false,
+      failedUntilRestart: true,
+    })
+    window.__emulators[0].type('A')
+    window.__emulators[0].type('B')
+  })
+  await expect(page.locator('#status')).toHaveText(
+    'Check whether your last typing appeared, then restart the project before typing again.',
+  )
+})
+
+test('another pane cannot replace failed pane restart advice with a generic notice', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(1)
+  await page.evaluate(() => {
+    window.__paneInputHook = async (_command, args) => ({ ok: true, ticket: args.id })
+    window.__paneWaitHook = async ({ ticket }) => {
+      const first = window.__calls.find(([name]) => name === 'pane_input_enqueue')[1].id
+      return ticket === first
+        ? {
+            ok: false,
+            error: 'pane input is failed until restart',
+            uncertain: false,
+            failedUntilRestart: true,
+          }
+        : { ok: false, error: 'ordinary refusal', uncertain: false, failedUntilRestart: false }
+    }
+    window.__emulators[0].type('A')
+  })
+  const restart =
+    'Check whether your last typing appeared, then restart the project before typing again.'
+  await expect(page.locator('#status')).toHaveText(restart)
+  await page.evaluate(() => window.__emulators[1].type('B'))
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__calls.filter(([name]) => name === 'pane_input_forget').length),
+    )
+    .toBe(2)
+  await expect(page.locator('#status')).toHaveText(restart)
+
+  // Once the failed generation leaves, a different pane's refusal is no
+  // longer described as needing a project restart.
+  await page.evaluate(() => {
+    const failedId = window.__calls.find(([name]) => name === 'pane_input_enqueue')[1].id
+    window.__model.boards[1].lanes.find((lane) => lane.pane?.id === failedId).pane = null
+    window.__listeners.get('state-changed')()
+  })
+  await expect.poll(() => page.evaluate(() => window.__emulators[0].disposed)).toBe(true)
+  await page.evaluate(() => window.__emulators[1].type('C'))
+  await expect(page.locator('#status')).toHaveText(
+    'Some of your typing may not have reached this window. Check what appeared.',
+  )
+})
+
+for (const boundary of ['UTF-8 character', 'closing paste marker']) {
+  test(`a terminal reply cannot split a ${boundary}`, async ({ page }) => {
+    await open(page)
+    await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+    await page.evaluate((boundary) => {
+      window.__paste =
+        boundary === 'UTF-8 character'
+          ? `${'p'.repeat(32767)}é`
+          : `\x1b[200~${'p'.repeat(32761)}\x1b[201~`
+      window.__paneWire = []
+      window.__paneChunks = []
+      window.__paneInputHook = async (command, args) => {
+        window.__paneWire.push(...args.bytes)
+        if (command === 'pane_input_enqueue') window.__paneChunks.push(args.bytes)
+        return { ok: true, ticket: `ticket-${args.sequence}` }
+      }
+      window.__paneWaitHook = ({ ticket }) =>
+        ticket === 'ticket-1'
+          ? new Promise((resolve) => {
+              window.__releasePasteWait = resolve
+            })
+          : { ok: true }
+      window.__emulators[0].type(window.__paste)
+    }, boundary)
+    await expect.poll(() => page.evaluate(() => typeof window.__releasePasteWait)).toBe('function')
+    await page.evaluate(() => window.__emulators[0].reply('\x1b[10;20R'))
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => window.__calls.filter(([name]) => name === 'pane_reply_enqueue').length,
+        ),
+      )
+      .toBe(1)
+    await page.evaluate(() => window.__releasePasteWait({ ok: true }))
+    const expectedLength = await page.evaluate(
+      () => new TextEncoder().encode(`${window.__paste}\x1b[10;20R`).length,
+    )
+    await expect.poll(() => page.evaluate(() => window.__paneWire.length)).toBe(expectedLength)
+    const result = await page.evaluate(() => {
+      const wire = new Uint8Array(window.__paneWire)
+      let decoded
+      let wholeChunks = true
+      try {
+        decoded = new TextDecoder('utf-8', { fatal: true }).decode(wire)
+        for (const bytes of window.__paneChunks) {
+          const text = new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(bytes))
+          if (text.endsWith('\x1b') || text.startsWith('[201~')) wholeChunks = false
+        }
+      } catch {
+        return { intact: false, validUtf8: false, wholeChunks: false }
+      }
+      return { intact: decoded === `${window.__paste}\x1b[10;20R`, validUtf8: true, wholeChunks }
+    })
+    expect(result).toEqual({ intact: true, validUtf8: true, wholeChunks: true })
+  })
+}
+
+test('a lost completion answer does not hold later pane typing', async ({ page }) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__paneReceived = ''
+    window.__paneInputHook = async (_command, args) => {
+      window.__paneReceived += String.fromCharCode(...args.bytes)
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    window.__paneWaitHook = ({ ticket }) =>
+      ticket === 'ticket-1' ? new Promise(() => {}) : { ok: true }
+    window.__emulators[0].type('A')
+    window.__emulators[0].type('B')
+  })
+  await expect.poll(() => page.evaluate(() => window.__paneReceived), { timeout: 1500 }).toBe('AB')
+})
+
+test('a terminal reply follows the paste admissions without waiting for completion', async ({
+  page,
+}) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__releasePaneWait = null
+    window.__paneWaitHook = ({ ticket }) =>
+      ticket === 'paste-first'
+        ? new Promise((resolve) => {
+            window.__releasePaneWait = resolve
+          })
+        : { ok: true }
+    window.__paneInputHook = async (command, args) => ({
+      ok: true,
+      ticket:
+        command === 'pane_input_enqueue' && args.sequence === 1
+          ? 'paste-first'
+          : `ticket-${args.sequence}`,
+    })
+    window.__emulators[0].type('p'.repeat(33 * 1024))
+    window.__emulators[0].type('z')
+  })
+  await expect.poll(() => page.evaluate(() => typeof window.__releasePaneWait)).toBe('function')
+  await page.evaluate(() => window.__emulators[0].reply('R'))
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () => window.__calls.filter(([name]) => name === 'pane_reply_enqueue').length,
+        ),
+      { timeout: 3000 },
+    )
+    .toBe(1)
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.__calls
+          .filter(([name]) => name === 'pane_input_enqueue')
+          .map(([, args]) => args.bytes.length),
+      ),
+    )
+    .toEqual([32768, 1024, 1])
+  const admissions = await page.evaluate(() =>
+    window.__calls.filter(
+      ([name]) => name === 'pane_input_enqueue' || name === 'pane_reply_enqueue',
+    ),
+  )
+  expect(admissions.map(([name]) => name)).toEqual([
+    'pane_input_enqueue',
+    'pane_input_enqueue',
+    'pane_input_enqueue',
+    'pane_reply_enqueue',
+  ])
+  expect(admissions.every(([, args]) => !('group' in args))).toBe(true)
+  await page.evaluate(() => window.__releasePaneWait({ ok: true }))
+})
+
 // Every key goes to the pane as typed, in order, and none of it holds a paste:
 // text the human leaves unsent no longer keeps a delivery out (2026-10-01).
 test('every key the human types reaches the pane in order, flagged as nothing', async ({
@@ -4387,7 +5052,7 @@ test('every key the human types reaches the pane in order, flagged as nothing', 
     .toEqual(
       ['h', '\r', '\x1b[A', '\x1b[<', '\x1b', '\x1b[2'].map((start) => [
         start,
-        ['id', 'generation', 'sequence', 'bytes'],
+        ['pageId', 'id', 'generation', 'sequence', 'length', 'bytes'],
       ]),
     )
 })
@@ -15050,7 +15715,7 @@ test.describe('file drop on a Mac', () => {
     // the app's window is left where a Mac puts it.
     await expect
       .poll(() => sentSince(page, before))
-      .toEqual(['pane_input_enqueue', 'pane_input_wait'])
+      .toEqual(['pane_input_enqueue', 'pane_input_wait', 'pane_input_forget'])
     // The human's paste of the same words gives the same bytes.
     await humanPaste(page, 'chief', WORDS)
     await expect.poll(async () => (await typedInto(page, 'p1-chief')).length).toBe(2)
@@ -15369,7 +16034,7 @@ test.describe('file drop on Windows', () => {
     // The app's window comes in front, so the keys pressed next go to it and not to Explorer.
     await expect
       .poll(async () => (await sentSince(page, before)).sort())
-      .toEqual(['focus_after_drop', 'pane_input_enqueue', 'pane_input_wait'])
+      .toEqual(['focus_after_drop', 'pane_input_enqueue', 'pane_input_forget', 'pane_input_wait'])
     await humanPaste(page, 'chief', WORDS)
     await expect.poll(async () => (await typedInto(page, 'p1-chief')).length).toBe(2)
     const [dropped, pasted] = await typedInto(page, 'p1-chief')
@@ -16733,4 +17398,43 @@ test('BKV05 a task held in an out member window keeps its quota hold with a back
   const card = page.locator('tr[data-handle="diana"] button.card[data-task="19"]')
   await expect(card).toContainText('out of quota until')
   await expect(page.locator('tr[data-handle="hera"] button.card[data-task="19"]')).toHaveCount(0)
+})
+
+test('pane input keeps a long control sequence whole across chunks', async ({ page }) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__paneChunks = []
+    window.__paneInputHook = async (_command, args) => {
+      window.__paneChunks.push(args.bytes)
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    window.__controlInput = `${'p'.repeat(32760)}\x1b]0;${'q'.repeat(40000)}\x07z`
+    window.__emulators[0].type(window.__controlInput)
+  })
+  await expect.poll(() => page.evaluate(() => window.__paneChunks.length)).toBe(3)
+  const result = await page.evaluate(() => ({
+    lengths: window.__paneChunks.map((bytes) => bytes.length),
+    text: new TextDecoder().decode(new Uint8Array(window.__paneChunks.flat())),
+    expected: window.__controlInput,
+  }))
+  expect(result.lengths).toEqual([32760, 40005, 1])
+  expect(result.text).toBe(result.expected)
+})
+
+test('an oversized control sequence is refused before any pane input is sent', async ({ page }) => {
+  await open(page)
+  await expect.poll(() => page.evaluate(() => window.__emulators.length)).toBeGreaterThan(0)
+  await page.evaluate(() => {
+    window.__paneChunks = []
+    window.__paneInputHook = async (_command, args) => {
+      window.__paneChunks.push(args.bytes)
+      return { ok: true, ticket: `ticket-${args.sequence}` }
+    }
+    window.__emulators[0].type(`\x1b]0;${'q'.repeat(65536)}\x07`)
+  })
+  await expect(page.locator('#status')).toHaveText(
+    'This input contains a control sequence too long to send. Remove that sequence and paste again.',
+  )
+  expect(await page.evaluate(() => window.__paneChunks.length)).toBe(0)
 })

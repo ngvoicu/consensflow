@@ -710,10 +710,12 @@ runs = ["paste-enter-page-reply"]
 
 [[plant.edit]]
 file = "app/src-tauri/src/commands.rs"
-find = """        InputWork::Reply(bytes),
-        false,"""
-replace = """        InputWork::Write(bytes),
-        false,"""
+find = """    let work = if reply {
+        InputWork::Reply(bytes)
+    } else {"""
+replace = """    let work = if reply {
+        InputWork::Write(bytes)
+    } else {"""
 
 # --- the live suite ---
 

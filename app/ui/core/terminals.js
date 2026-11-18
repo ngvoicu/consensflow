@@ -90,6 +90,7 @@ export class TerminalsView {
     stage,
     {
       invoke,
+      pageId,
       report,
       createEmulator,
       onChange = () => {},
@@ -116,7 +117,7 @@ export class TerminalsView {
       onResize: (pane, cols, rows) => this.#link.resize(pane, cols, rows),
       onLink: (url) => void this.#openLink(url),
     })
-    this.#link = new TerminalLink({ invoke, registry: this.#registry, report })
+    this.#link = new TerminalLink({ invoke, registry: this.#registry, report, pageId })
     this.#invoke = invoke
     this.#report = report
   }

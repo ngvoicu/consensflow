@@ -1,13 +1,113 @@
 import { paneKey } from './term.js'
 
 const INPUT_CHUNK_BYTES = 32 * 1024
+// The largest paste: the host's own cap (`MAX_PAGE_INPUT_BYTES`), checked here
+// too so that a larger one is refused before any of it is sent.
+const MAX_PASTE_BYTES = 4 * 1024 * 1024
+const MAX_CONTROL_BYTES = 64 * 1024
+const ADMISSION_TIMEOUT_MS = 1500
+const WAIT_TIMEOUT_MS = 30_000
+const INPUT_RETRY_MS = 100
+const RESTART_INPUT_ADVICE =
+  'Check whether your last typing appeared, then restart the project before typing again.'
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Find escape sequences before choosing byte cuts, including OSC/DCS strings.
+// A cut may be at either end of a sequence, never inside it.
+/** A call's bytes as the base64 text both of Tauri's transports carry in its arguments. */
+function base64Of(bytes) {
+  let binary = ''
+  for (let start = 0; start < bytes.length; start += 0x8000)
+    binary += String.fromCharCode.apply(null, bytes.subarray(start, start + 0x8000))
+  return btoa(binary)
+}
+
+function controlSpans(bytes) {
+  const spans = []
+  for (let i = 0; i < bytes.length; i += 1) {
+    if (bytes[i] !== 0x1b) continue
+    const start = i
+    const kind = bytes[++i]
+    if (kind === 0x5b) {
+      while (++i < bytes.length && (bytes[i] < 0x40 || bytes[i] > 0x7e)) {}
+    } else if ([0x5d, 0x50, 0x58, 0x5e, 0x5f].includes(kind)) {
+      while (++i < bytes.length) {
+        if (bytes[i] === 0x07) break
+        if (bytes[i] === 0x1b && bytes[i + 1] === 0x5c) {
+          i += 1
+          break
+        }
+      }
+    } else {
+      while (i < bytes.length && bytes[i] >= 0x20 && bytes[i] <= 0x2f) i += 1
+    }
+    spans.push({ start, end: Math.min(i + 1, bytes.length) })
+  }
+  return spans
+}
+
+function inputChunks(data) {
+  const bytes = new TextEncoder().encode(data)
+  const spans = controlSpans(bytes)
+  const marker = (span, value) =>
+    span.end - span.start === value.length &&
+    value.every((byte, index) => bytes[span.start + index] === byte)
+  const startMarker = [0x1b, 0x5b, 0x32, 0x30, 0x30, 0x7e]
+  const endMarker = [0x1b, 0x5b, 0x32, 0x30, 0x31, 0x7e]
+  const regions = []
+  let previous = 0
+  let pasteStart = null
+  for (const span of spans) {
+    if (pasteStart === null && marker(span, startMarker)) {
+      if (previous < span.start) regions.push({ start: previous, end: span.start, paste: false })
+      pasteStart = span.start
+    } else if (pasteStart !== null && marker(span, endMarker)) {
+      regions.push({ start: pasteStart, end: span.end, paste: true })
+      previous = span.end
+      pasteStart = null
+    }
+  }
+  if (pasteStart !== null) regions.push({ start: pasteStart, end: bytes.length, paste: true })
+  else if (previous < bytes.length)
+    regions.push({ start: previous, end: bytes.length, paste: false })
+
+  // A paste goes in as one call, whole with its markers, or not at all: a call
+  // that is lost then loses the paste and never splits it. What is typed is cut
+  // into calls at whole units (a character, an escape sequence).
+  return regions.flatMap((region) => {
+    if (region.paste) {
+      if (region.end - region.start > MAX_PASTE_BYTES) {
+        throw new Error(
+          `This paste is too large to send (over ${MAX_PASTE_BYTES / (1024 * 1024)} MiB). Paste less of it.`,
+        )
+      }
+      return [bytes.subarray(region.start, region.end)]
+    }
+    const chunks = []
+    let start = region.start
+    while (start < region.end) {
+      let end = Math.min(start + INPUT_CHUNK_BYTES, region.end)
+      while (end < region.end && (bytes[end] & 0xc0) === 0x80) end -= 1
+      const crossed = spans.find((span) => span.start < end && span.end > end)
+      if (crossed) end = crossed.start === start ? crossed.end : crossed.start
+      if (end - start > MAX_CONTROL_BYTES || end <= start) {
+        throw new Error(
+          'This input contains a control sequence too long to send. Remove that sequence and paste again.',
+        )
+      }
+      chunks.push(bytes.subarray(start, end))
+      start = end
+    }
+    return chunks
+  })
+}
 
 /**
  * The page's side of the terminals: bytes from the Rust pane host into each
  * pane's emulator (in order, acknowledged only after the emulator committed
- * them), keystrokes and emulator replies back (in chunks, each admitted with a
- * ticket and waited for, so a large paste keeps later typing behind it), and
- * the emulator's size into the pane. Pane ownership stays in Rust.
+ * them), keystrokes and emulator replies back (one call each, a paste whole,
+ * each admitted with a number and a ticket, in one order), and the emulator's
+ * size into the pane. Pane ownership stays in Rust.
  *
  * The host stops reading a pane once a window of its output is owed an
  * acknowledgement, and its program then waits on its terminal. So each message
@@ -27,11 +127,14 @@ export class TerminalLink {
   #sequences = new Map()
   #sizes = new Map()
   #retired = new Set()
+  #failedInputs = new Set()
+  #pageId
 
-  constructor({ invoke, registry, report }) {
+  constructor({ invoke, registry, report, pageId = crypto.randomUUID() }) {
     this.#invoke = invoke
     this.#registry = registry
     this.#report = report
+    this.#pageId = pageId
   }
 
   /** One message from `subscribe_output`: bytes for one pane, in order. */
@@ -77,12 +180,16 @@ export class TerminalLink {
 
   /** What the human types into a pane. */
   input(pane, data) {
-    return this.#stream('pane_input_enqueue', pane, data).catch((cause) => this.#report(cause))
+    return this.#stream('pane_input_enqueue', pane, data).catch((cause) =>
+      this.#reportInput(paneKey(pane), cause),
+    )
   }
 
   /** What the emulator answers the program on its own (cursor reports and the like). */
   reply(pane, data) {
-    return this.#stream('pane_reply_enqueue', pane, data)
+    return this.#stream('pane_reply_enqueue', pane, data).catch((cause) =>
+      this.#reportInput(paneKey(pane), cause),
+    )
   }
 
   /** The emulator's size, sent until the live pane accepts it. */
@@ -102,12 +209,20 @@ export class TerminalLink {
     this.#inputs.delete(key)
     this.#sequences.delete(key)
     this.#sizes.delete(key)
+    this.#failedInputs.delete(key)
     this.#registry.retire(key)
   }
 
   /** Whether a pane is gone for good: it gets no emulator again. */
   retired(key) {
     return this.#retired.has(key)
+  }
+
+  // The status line is shared by panes. Once any pane needs a restart,
+  // later input notices must keep that advice until the pane is retired.
+  #reportInput(key, cause, failed = false) {
+    if (failed) this.#failedInputs.add(key)
+    this.#report(this.#failedInputs.size > 0 ? new Error(RESTART_INPUT_ADVICE) : cause)
   }
 
   async #syncSize(key) {
@@ -128,50 +243,191 @@ export class TerminalLink {
 
   async #stream(command, pane, data) {
     const key = paneKey(pane)
-    const bytes = new TextEncoder().encode(data)
-    const previous = this.#inputs.get(key)
+    const calls = inputChunks(data)
+    // Keys and replies go in one order, one admission at a time: each call
+    // finishes its admission before the next one starts.
+    const streams = this.#inputs
+    const previous = streams.get(key)
     const submit = async () => {
-      for (let offset = 0; offset < bytes.length; offset += INPUT_CHUNK_BYTES) {
+      for (const bytes of calls) {
         if (this.#retired.has(key)) return
-        const chunk = bytes.subarray(offset, offset + INPUT_CHUNK_BYTES)
-        if (!(await this.#chunk(command, pane, chunk))) return
+        if (!(await this.#chunk(command, pane, bytes))) return
       }
     }
-    // A keystroke goes at once; a large paste streams and keeps later input behind it.
-    if (!previous && bytes.length <= INPUT_CHUNK_BYTES) return submit()
-    const stream = (previous ?? Promise.resolve()).then(submit)
-    this.#inputs.set(key, stream)
+    const stream = previous ? previous.then(submit, submit) : submit()
+    streams.set(key, stream)
     try {
       await stream
     } finally {
-      if (this.#inputs.get(key) === stream) this.#inputs.delete(key)
+      if (streams.get(key) === stream) streams.delete(key)
     }
+  }
+
+  async #call(command, args, timeout) {
+    let timer
+    try {
+      return await Promise.race([
+        this.#invoke(command, args),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('pane input call timed out')), timeout)
+        }),
+      ])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /**
+   * A call whose fate is unknown is never sent again: the host moves the pane's
+   * count past its number, so the original either went in before this or is
+   * refused when it comes late. The skip itself may be repeated.
+   */
+  async #skip(pane, sequence) {
+    let failures = 0
+    const key = paneKey(pane)
+    while (!this.#retired.has(key)) {
+      try {
+        const answer = await this.#call(
+          'pane_input_skip',
+          {
+            pageId: this.#pageId,
+            id: pane.id,
+            generation: pane.generation,
+            sequence,
+          },
+          ADMISSION_TIMEOUT_MS,
+        )
+        if (typeof answer?.ok === 'boolean') return
+      } catch {}
+      failures += 1
+      if (failures === 5)
+        this.#reportInput(key, new Error('Keep this window open while your typing reconnects.'))
+      await pause(INPUT_RETRY_MS)
+    }
+  }
+
+  /**
+   * One call per number, at most once. A refusal means nothing was written, so
+   * the caller may retry the same number. A call that ends unknown (a timeout,
+   * a lost answer) is skipped and its keys may be lost.
+   */
+  async #admit(command, pane, length, text) {
+    const key = paneKey(pane)
+    if (this.#retired.has(key)) return null
+    const sequence = (this.#sequences.get(key) ?? 0) + 1
+    let answer
+    try {
+      answer = await this.#call(
+        command,
+        {
+          pageId: this.#pageId,
+          id: pane.id,
+          generation: pane.generation,
+          sequence,
+          length,
+          bytes: text,
+        },
+        ADMISSION_TIMEOUT_MS,
+      )
+    } catch {}
+    if (answer?.ok === true && typeof answer.ticket === 'string') {
+      this.#sequences.set(key, sequence)
+      return answer
+    }
+    if (answer?.ok === false) {
+      if (answer.error === 'pane-input-sequence-stale') this.#sequences.set(key, sequence)
+      return answer
+    }
+    this.#sequences.set(key, sequence)
+    await this.#skip(pane, sequence)
+    return this.#retired.has(key) ? null : { ok: false, error: 'pane-input-lost' }
   }
 
   async #chunk(command, pane, bytes) {
     const key = paneKey(pane)
-    const sequence = (this.#sequences.get(key) ?? 0) + 1
-    this.#sequences.set(key, sequence)
-    const admitted = await this.#invoke(command, {
-      id: pane.id,
-      generation: pane.generation,
-      sequence,
-      bytes: Array.from(bytes),
-    })
-    // A refused keystroke shows, instead of vanishing.
-    if (admitted?.ok !== true || typeof admitted.ticket !== 'string') {
-      this.#report(
-        new Error(`typing refused: ${admitted?.error ?? 'no answer from the pane host'}`),
+    let admitted
+    const text = base64Of(bytes)
+    do {
+      admitted = await this.#admit(command, pane, bytes.length, text)
+      if (admitted === null) return false
+      if (
+        admitted.error !== "the pane's input queue is full" &&
+        admitted.error !== 'pane-input-ticket-capacity'
       )
-      return false
-    }
-    const settled = await this.#invoke('pane_input_wait', { ticket: admitted.ticket })
-    if (settled?.ok !== true) {
-      this.#report(
-        new Error(`typing was not taken: ${settled?.error ?? 'no answer from the pane host'}`),
+        break
+      // A full queue is a paste still being written at the terminal's pace:
+      // it says nothing until the host reports an uncertain write.
+      await pause(INPUT_RETRY_MS)
+    } while (!this.#retired.has(key))
+    if (this.#retired.has(key)) return false
+    if (admitted.ok !== true || typeof admitted.ticket !== 'string') {
+      // Refused or lost before anything was written: this call's typing is
+      // missing, and what follows goes on.
+      this.#reportInput(
+        key,
+        new Error('Some of your typing may not have reached this window. Check what appeared.'),
       )
-      return false
+      return admitted.error !== 'pane-input-stale-page'
     }
+    // Completion and its acknowledgement are independent of the next
+    // admission: a lost wait answer cannot hold later typing.
+    void this.#collect(key, admitted.ticket)
     return true
+  }
+
+  async #collect(key, ticket) {
+    let settled
+    let failures = 0
+    while (!this.#retired.has(key)) {
+      try {
+        settled = await this.#call(
+          'pane_input_wait',
+          { pageId: this.#pageId, ticket },
+          WAIT_TIMEOUT_MS,
+        )
+        break
+      } catch {
+        failures += 1
+        if (failures === 5)
+          this.#reportInput(key, new Error('Keep this window open while your typing is checked.'))
+        await pause(INPUT_RETRY_MS)
+      }
+    }
+    if (this.#retired.has(key)) return
+    if (settled?.error === 'pane-input-stale-page') return
+    void this.#forget(key, ticket)
+    if (failures > 0 && settled?.error === 'pane-input-ticket-not-found') {
+      this.#reportInput(
+        key,
+        new Error('Check the window to see whether your last typing appeared.'),
+      )
+      return
+    }
+    if (settled?.ok !== true) {
+      // A failed pane refuses later typing, even when this call wrote nothing.
+      this.#reportInput(
+        key,
+        new Error(
+          settled?.uncertain === true
+            ? RESTART_INPUT_ADVICE
+            : 'Some of your typing may not have reached this window. Check what appeared.',
+        ),
+        settled?.failedUntilRestart === true,
+      )
+    }
+  }
+
+  async #forget(key, ticket) {
+    while (!this.#retired.has(key)) {
+      try {
+        const answer = await this.#call(
+          'pane_input_forget',
+          { pageId: this.#pageId, ticket },
+          ADMISSION_TIMEOUT_MS,
+        )
+        if (answer?.ok === true || answer?.error === 'pane-input-stale-page') return
+      } catch {}
+      await pause(INPUT_RETRY_MS)
+    }
   }
 }

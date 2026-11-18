@@ -51,6 +51,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 name = "app"
 version = "3.0.7-alpha.9"
 dependencies = [
+ "base64 0.22.1",
  "cf-base",
  "cf-bridge",
  "cf-harness",
@@ -587,6 +588,7 @@ name = "cf-panes"
 version = "3.0.7-alpha.9"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "cf-base",
  "cf-bridge",
  "cf-panes",
@@ -594,6 +596,7 @@ dependencies = [
  "cf-proto",
  "futures-channel",
  "futures-executor",
+ "futures-util",
  "libc",
  "portable-pty",
  "serde",

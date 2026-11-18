@@ -27,6 +27,8 @@ cf-process = { workspace = true, features = ["test-support"] }
 # The environment, read once in the bridge's main (`Env`); the programs the tests start that end
 # with the test (src/pty/sentinel.rs and the tests of the crate); on Windows also cygwin.rs, `ps -W`'s
 # parent.
+# A page call's bytes arrive as base64 text (`validation::decode_page_bytes`).
+base64.workspace = true
 cf-base.workspace = true
 cf-bridge.workspace = true
 # The sentinel holds only its streams (test-support alone).
@@ -34,6 +36,7 @@ cf-process = { workspace = true, optional = true }
 cf-proto.workspace = true
 futures-channel.workspace = true
 futures-executor.workspace = true
+futures-util.workspace = true
 portable-pty.workspace = true
 serde.workspace = true
 serde_json.workspace = true
