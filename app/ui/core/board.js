@@ -1190,7 +1190,10 @@ export class BoardView {
     head.setAttribute('scope', 'row')
     const title = element('div', 'row-title')
     if (folded !== null) title.append(this.#foldButton(lane, folded))
-    title.append(lamp(lane, now), element('span', 'row-name', laneName(participant)))
+    // The member's model-based name changes with an edit. Make its windows read as
+    // sessions, rather than more members whose models changed along with it.
+    const name = participant.member ? `Session · ${participant.session}` : laneName(participant)
+    title.append(lamp(lane, now), element('span', 'row-name', name))
     head.append(title)
     // The chief's row only holds its tasks: what it is doing, what it runs on
     // and Switch chief are on its card in the dock.
