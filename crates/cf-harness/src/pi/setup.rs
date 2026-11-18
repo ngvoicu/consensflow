@@ -6,7 +6,7 @@
 //! `settings.json`'s `packages` and `extensions`; each file is parsed into those and into
 //! `serde`'s `IgnoredAny` for everything else, so that no login, key or address is ever held
 //! as a value, and the bytes are read through a small buffer, not kept. The login's own path is
-//! not opened. A settings path can still alias it; see the open login-alias issue. The environment is only
+//! not opened. A settings path that aliases a login can still be read. The environment is only
 //! asked whether a variable is set to something (no copy of what it holds). A package source is
 //! shown without the user and password of its URL, its query and its fragment ([`shown`]).
 //!
