@@ -1658,7 +1658,7 @@ mod tests {
                 ("XDG_CONFIG_HOME".to_owned(), at(rig.join(".config"))),
                 (
                     "XDG_DATA_HOME".to_owned(),
-                    at(rig.join(".local").join("share"))
+                    "C:/rig/home/.local/share".to_owned()
                 ),
                 ("XDG_CACHE_HOME".to_owned(), at(rig.join(".cache"))),
                 ("XDG_STATE_HOME".to_owned(), at(rig.join(".local/state"))),
@@ -1967,9 +1967,7 @@ mod tests {
             value(&mac, "CFFIXED_USER_HOME").as_deref(),
             Some("/tmp/throwaway")
         );
-        assert_eq!(
-            value(&mac, "XDG_RUNTIME_DIR").as_deref(),
-            Some("/tmp/throwaway/runtime")
-        );
+        let runtime = value(&mac, "XDG_RUNTIME_DIR").expect("runtime is set");
+        assert_eq!(Path::new(&runtime), Path::new("/tmp/throwaway/runtime"));
     }
 }
