@@ -54,7 +54,23 @@ const KIT: [&str; 5] = [
 
 /// The sources that name a variable of [`HOMES`] (or a copy of [`COPIES`]) outside the
 /// kit, each with the reason: a source with no reason is a home made by hand.
-const BY_HAND: [(&str, &str, &str); 26] = [
+const BY_HAND: [(&str, &str, &str); 29] = [
+    (
+        "crates/cf-e2e/src/live/ask.rs",
+        "HOME",
+        "Muse's model and usage reads use a config folder validated as run-owned, and the kit \
+         places their process behind the same boundary as a window",
+    ),
+    (
+        "crates/cf-e2e/src/live/ask.rs",
+        "USERPROFILE",
+        "the same validated run-owned config folder, as Windows names the home",
+    ),
+    (
+        "crates/cf-e2e/src/live/ask.rs",
+        "APPDATA",
+        "the roaming folder below that same run-owned config folder on Windows",
+    ),
     (
         "crates/cf-e2e/tests/live_pi_parity.rs",
         "HOME",

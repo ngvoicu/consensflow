@@ -10,9 +10,13 @@ fn t1778_fixture_child_does_not_inherit_the_callers_board_connection() {
             assert_eq!(own_var("CONSENSFLOW_FIXTURE_OWN").as_deref(), Some("owned"));
         }
         depth => {
-            let mut run = Run::new(std::env::current_exe().unwrap())
-                .args(["--exact", CASE, "--nocapture"])
-                .inheriting_env();
+            let mut run = case_of(
+                std::env::current_exe().unwrap(),
+                CASE,
+                Duration::from_secs(120),
+            )
+            .arg("--nocapture")
+            .inheriting_env();
             if depth.is_none() {
                 run = run
                     .var("CF_E2E_T1778_DEPTH", "parent")
