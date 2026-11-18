@@ -781,6 +781,88 @@ test.describe('the history viewer', () => {
     expect(await colour(thinking)).toBe('rgba(0, 0, 0, 0)')
   })
 
+  test("draws thinking and the agent's italic words in a face's own italic, never one the browser slants", async ({
+    page,
+    browserName,
+  }) => {
+    const data = model()
+    data.histories.chief.items.push(
+      item(2, 2, 'i-1', 'assistant', 'The filter now keeps *only the words typed*.', {
+        kind: 'text',
+      }),
+    )
+    await open(page, data)
+    const viewer = await openChief(page)
+    const italics = [
+      block(viewer, 'th-1').locator('.history-thinking'),
+      block(viewer, 'i-1').locator('em'),
+    ]
+    await expect(italics[1]).toHaveText('only the words typed')
+    /** The face that draws most of a probe line's glyphs, as Chromium names it. */
+    const face = async (slant) => {
+      const cdp = await page.context().newCDPSession(page)
+      const { root } = await cdp.send('DOM.getDocument', { depth: -1 })
+      const { nodeId } = await cdp.send('DOM.querySelector', {
+        nodeId: root.nodeId,
+        selector: `.face-probe [data-slant="${slant}"]`,
+      })
+      await cdp.send('CSS.enable')
+      const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId })
+      await cdp.detach()
+      const most = fonts.toSorted((a, b) => b.glyphCount - a.glyphCount)[0]
+      return most.postScriptName || most.familyName
+    }
+    for (const words of italics) {
+      await expect(words).toHaveCSS('font-style', 'italic')
+      // The page forbids the browser's own slant of an upright face (font-synthesis without
+      // `style`): where the face has no italic, the words stand upright.
+      const synthesis = await words.evaluate((node) => {
+        const style = getComputedStyle(node)
+        return (
+          style.getPropertyValue('font-synthesis-style') ||
+          (/\bstyle\b/.test(style.getPropertyValue('font-synthesis')) ? 'auto' : 'none')
+        )
+      })
+      expect(synthesis).toBe('none')
+      // And the face the words are set in has an italic of its own. Its words, upright and
+      // italic with the slant forbidden, in a line each:
+      const family = await words.evaluate((node) => {
+        const style = getComputedStyle(node)
+        const probe = document.createElement('div')
+        probe.className = 'face-probe'
+        probe.style.cssText =
+          'position:fixed;left:0;top:0;z-index:2147483647;width:400px;height:80px;background:#fff;color:#000'
+        for (const [at, slant] of [
+          [0, 'normal'],
+          [40, 'italic'],
+        ]) {
+          const line = document.createElement('div')
+          line.dataset.slant = slant
+          line.textContent = 'afgkxy thinking'
+          line.style.cssText = `position:absolute;left:0;top:${at}px;height:40px;font-family:${style.fontFamily};font-weight:${style.fontWeight};font-size:20px;line-height:40px;font-style:${slant};font-synthesis:none;white-space:pre`
+          probe.append(line)
+        }
+        node.closest('dialog').append(probe)
+        return style.fontFamily
+      })
+      const probe = viewer.locator('.face-probe')
+      // In Chromium, the italic is drawn from a face other than the upright one: a slant of
+      // the upright face keeps its name, whoever slants it. On Windows that is DirectWrite
+      // itself, which no font-synthesis forbids (measured: Lucida Console, T-1807).
+      if (browserName === 'chromium') {
+        expect(await face('italic'), `${family} has no italic face here`).not.toBe(
+          await face('normal'),
+        )
+      }
+      // And in every engine the italic line is drawn otherwise than the upright one: an
+      // upright-only face, with the slant forbidden where the engine honours it, draws alike.
+      const upright = await probe.locator('[data-slant="normal"]').screenshot()
+      const italic = await probe.locator('[data-slant="italic"]').screenshot()
+      expect(italic.equals(upright), `${family} has no italic face here`).toBe(false)
+      await probe.evaluate((node) => node.remove())
+    }
+  })
+
   test('draws a call as a block: its header, its output folded to the last 5 lines, the time it took, green, red or grey', async ({
     page,
   }) => {
