@@ -37,7 +37,7 @@ use crate::resume::Coming;
 use crate::role_change::{Compared, Prelude};
 use crate::role_news::{NewsPart, Told};
 use crate::runtime::{begin, caught, returning};
-use crate::seams::EngineError;
+use crate::seams::{EngineError, QuestionWindowStart};
 use crate::shown::Shown;
 use crate::specs::{ChiefSpecs, RoleText};
 use crate::startup::{Stage, Startup, Why};
@@ -877,7 +877,15 @@ impl Dispatcher {
             .conversation
             .as_ref()
             .and_then(|conversation| conversation.native_session.clone());
-        let token = match self.seams.credentials.issue(project.id, participant.id) {
+        let question_start = {
+            let ledger = self.seams.ledger.borrow();
+            QuestionWindowStart::from_ledger(&ledger, participant.id)?
+        };
+        let token = match self.seams.credentials.issue_for_window(
+            project.id,
+            participant.id,
+            question_start,
+        ) {
             Ok(token) => token,
             Err(cause) => {
                 // The plan wrote the launch's files; no window will read them.

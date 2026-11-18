@@ -58,11 +58,42 @@ impl EngineError {
     }
 }
 
+/// What was already in the session when this window opened. A question can
+/// distinguish a task this window held from an earlier window's history.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct QuestionWindowStart {
+    pub last_brief: Option<i64>,
+    pub task_in_hand: Option<i64>,
+}
+
+impl QuestionWindowStart {
+    /// Captures the session's task and last started brief before a window runs.
+    pub fn from_ledger(ledger: &Ledger, participant: i64) -> Result<Self, LedgerError> {
+        Ok(Self {
+            last_brief: ledger
+                .last_started_brief(participant)?
+                .map(|brief| brief.id),
+            task_in_hand: ledger
+                .task_in_hand(participant)?
+                .map(|thread| thread.task.id),
+        })
+    }
+}
+
 /// A window's token, for the `cf` in it to act as its participant.
 pub trait Credentials {
     /// A token for `participant`'s window in `project` (`credentials.issue`), or
     /// why the system would not make one: no window opens without a token.
     fn issue(&self, project: i64, participant: i64) -> Result<String, String>;
+    /// Issues the same token with the ledger's view at this window's launch.
+    fn issue_for_window(
+        &self,
+        project: i64,
+        participant: i64,
+        _start: QuestionWindowStart,
+    ) -> Result<String, String> {
+        self.issue(project, participant)
+    }
     /// A window's token acts no longer (`credentials.revoke`).
     fn revoke(&self, token: &str);
 }

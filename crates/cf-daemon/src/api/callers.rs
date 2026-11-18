@@ -22,6 +22,10 @@ pub struct Caller {
     pub question_task: Option<TaskThread>,
     /// A first brief that has not yet been handed to this window.
     pub question_unstarted: bool,
+    /// Whether the token has this window's launch boundary.
+    pub question_window_known: bool,
+    /// A task that reached this window and has since left its hands.
+    pub question_ended_task: Option<TaskThread>,
 }
 
 /// The window behind `request`: 401 `unauthorized` for a request with no
@@ -79,11 +83,49 @@ pub fn caller_of(context: &Context, request: &Request) -> Result<Caller, Failure
             } else {
                 false
             };
+            let question_window_known = identity.question_start.is_some();
+            let question_ended_task = if request.method == hyper::Method::POST
+                && request.path == "/api/questions"
+                && question_task.is_none()
+                && participant.role != "chief"
+            {
+                if let Some(start) = identity.question_start {
+                    let ledger = context.ledger.borrow();
+                    match (
+                        ledger.last_started_brief(participant.id)?,
+                        ledger.last_started_task(participant.id)?,
+                    ) {
+                        (None, None) => None,
+                        (Some(brief), Some(thread))
+                            if brief.project_id == project.id
+                                && thread.task.project_id == project.id
+                                && brief.task_number == Some(thread.task.number) =>
+                        {
+                            (start.last_brief.is_none_or(|previous| brief.id > previous)
+                                || start.task_in_hand == Some(thread.task.id))
+                            .then_some(thread)
+                        }
+                        _ => {
+                            return Err(Failure::refuse(
+                                409,
+                                "question-conflict",
+                                "this window's task records conflict, so the question cannot be placed",
+                            ));
+                        }
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
             Ok(Caller {
                 project,
                 participant,
                 question_task,
                 question_unstarted,
+                question_window_known,
+                question_ended_task,
             })
         }
         _ => Err(Failure::refuse(

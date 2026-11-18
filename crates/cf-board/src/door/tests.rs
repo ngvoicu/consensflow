@@ -495,6 +495,8 @@ fn a_question_refused_because_its_turn_ended_does_not_suggest_retrying_the_same_
         "task-ended",
         "task-cancelled",
         "task-not-started",
+        "question-conflict",
+        "question-window-closed",
     ] {
         let api = scripted(vec![reply(
             409,

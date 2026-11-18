@@ -25,6 +25,15 @@ pub(super) async fn ask(
         ));
     }
     let body = request.json().await?;
+    // The window can close while the request body is in flight. A newly opened
+    // window of the same session must not inherit this request.
+    if context.credentials.resolve(request.bearer()).is_none() {
+        return Err(Failure::refuse(
+            409,
+            "question-window-closed",
+            "this window closed before its question could be placed",
+        ));
+    }
     let active = caller.question_task.as_ref();
     if let Some(asked_on) = active {
         let now = context
@@ -51,32 +60,7 @@ pub(super) async fn ask(
             let task = current
                 .map(|thread| thread.task)
                 .unwrap_or_else(|| asked_on.task.clone());
-            let (code, words) = if task.state == "cancelled" {
-                (
-                    "task-cancelled",
-                    format!(
-                        "T-{} is cancelled: nothing more of it goes to @{}",
-                        task.number, task.requester
-                    ),
-                )
-            } else if task.assignee.as_deref() != Some(caller.participant.handle.as_str()) {
-                (
-                    "question-moved",
-                    format!(
-                        "T-{} moved to another window: this window cannot ask on it now",
-                        task.number
-                    ),
-                )
-            } else {
-                (
-                    "task-ended",
-                    format!(
-                        "T-{} is {}: this window cannot ask on it now",
-                        task.number, task.state
-                    ),
-                )
-            };
-            return Err(Failure::refuse(409, code, words));
+            return Err(ended_task(&task, caller));
         }
         if caller.question_unstarted {
             return Err(Failure::refuse(
@@ -88,7 +72,11 @@ pub(super) async fn ask(
                 ),
             ));
         }
-    } else {
+    } else if let Some(ended) = caller.question_ended_task.as_ref() {
+        return Err(ended_task(&ended.task, caller));
+    } else if !caller.question_window_known {
+        // A caller without a launch boundary retains the older conservative
+        // cancellation rule. The engine supplies a boundary for real windows.
         refuse_cancelled(context, caller)?;
     }
     let asked = context.ledger.borrow_mut().ask(
@@ -109,6 +97,35 @@ pub(super) async fn ask(
     Ok(Answer::created(
         json!({ "message": value(&MessageSummary::from(&asked))? }),
     ))
+}
+
+fn ended_task(task: &cf_ledger::TaskView, caller: &Caller) -> Failure {
+    let (code, words) = if task.state == "cancelled" {
+        (
+            "task-cancelled",
+            format!(
+                "T-{} is cancelled: nothing more of it goes to @{}",
+                task.number, task.requester
+            ),
+        )
+    } else if task.assignee.as_deref() != Some(caller.participant.handle.as_str()) {
+        (
+            "question-moved",
+            format!(
+                "T-{} moved to another window: this window cannot ask on it now",
+                task.number
+            ),
+        )
+    } else {
+        (
+            "task-ended",
+            format!(
+                "T-{} is {}: this window cannot ask on it now",
+                task.number, task.state
+            ),
+        )
+    };
+    Failure::refuse(409, code, words)
 }
 
 /// A member's window with no task in progress, whose task was cancelled under

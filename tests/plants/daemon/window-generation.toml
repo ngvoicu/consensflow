@@ -1,0 +1,127 @@
+# T-1780: distinguish a session's new window from its earlier window.
+
+[[plant]]
+name = "t1780 generation: token forgets its boundary"
+meant = "the_engines_window_token_keeps_its_launch_boundary"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "the_engines_window_token_keeps_its_launch_boundary"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/credentials.rs"
+find = "        self.issue_with_start(project, participant, Some(start))"
+replace = "        self.issue_with_start(project, participant, None)"
+
+[[plant]]
+name = "t1780 generation: engine credential adapter drops boundary"
+meant = "the_engines_window_token_keeps_its_launch_boundary"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "the_engines_window_token_keeps_its_launch_boundary"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/credentials.rs"
+find = "        Credentials::issue_for_window(self, project, participant, start)"
+replace = "        Credentials::issue(self, project, participant)"
+
+[[plant]]
+name = "t1780 generation: old window forgets its task"
+meant = "window_generation_refuses_an_ended_tasks_old_window_and_allows_a_fresh_one"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "window_generation_refuses_an_ended_tasks_old_window_and_allows_a_fresh_one"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/callers.rs"
+find = "|| start.task_in_hand == Some(thread.task.id)"
+replace = "|| false"
+
+[[plant]]
+name = "t1780 generation: later brief is mistaken for an earlier one"
+meant = "window_generation_tracks_a_new_brief_on_the_same_task"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "window_generation_tracks_a_new_brief_on_the_same_task"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/callers.rs"
+find = "start.last_brief.is_none_or(|previous| brief.id > previous)"
+replace = "false"
+
+[[plant]]
+name = "t1780 generation: earlier brief is mistaken for a later one"
+meant = "window_generation_allows_a_fresh_idle_question_after_cancellation"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "window_generation_allows_a_fresh_idle_question_after_cancellation"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/callers.rs"
+find = "start.last_brief.is_none_or(|previous| brief.id > previous)"
+replace = "start.last_brief.is_none_or(|previous| brief.id >= previous)"
+
+[[plant]]
+name = "t1780 generation: new window still uses old cancellation guard"
+meant = "window_generation_allows_a_fresh_idle_question_after_cancellation"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "window_generation_allows_a_fresh_idle_question_after_cancellation"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/callers.rs"
+find = "let question_window_known = identity.question_start.is_some();"
+replace = "let question_window_known = false;"
+
+[[plant]]
+name = "t1780 generation: refunded begun brief is forgotten"
+meant = "window_generation_tracks_a_brief_that_starts_after_the_window_opened"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "window_generation_tracks_a_brief_that_starts_after_the_window_opened"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks.rs"
+find = "AND e.kind = 'delivery.begun'"
+replace = "AND e.kind = 'delivery.never-begun'"
+
+[[plant]]
+name = "t1780 generation: launch forgets earlier brief"
+meant = "stops_its_window_an_agent_at_work_on_it_is_interrupted_the_window_closes_and_the_session_stays"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "stops_its_window_an_agent_at_work_on_it_is_interrupted_the_window_closes_and_the_session_stays"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/seams.rs"
+find = "last_brief: ledger\n                .last_started_brief(participant)?\n                .map(|brief| brief.id),"
+replace = "last_brief: None,"
+
+[[plant]]
+name = "t1780 generation: launch forgets its current task"
+meant = "stops_its_window_an_agent_at_work_on_it_is_interrupted_the_window_closes_and_the_session_stays"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "stops_its_window_an_agent_at_work_on_it_is_interrupted_the_window_closes_and_the_session_stays"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/seams.rs"
+find = "task_in_hand: ledger\n                .task_in_hand(participant)?\n                .map(|thread| thread.task.id),"
+replace = "task_in_hand: None,"
+
+[[plant]]
+name = "t1780 generation: engine issues a token without the boundary"
+meant = "stops_its_window_an_agent_at_work_on_it_is_interrupted_the_window_closes_and_the_session_stays"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "stops_its_window_an_agent_at_work_on_it_is_interrupted_the_window_closes_and_the_session_stays"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "let token = match self.seams.credentials.issue_for_window(\n            project.id,\n            participant.id,\n            question_start,\n        ) {"
+replace = "let _ = question_start;\n        let token = match self.seams.credentials.issue(project.id, participant.id) {"
+
+[[plant]]
+name = "t1780 generation: conflicting project evidence is ignored"
+meant = "window_generation_refuses_conflicting_brief_projects_without_writing"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "window_generation_refuses_conflicting_brief_projects_without_writing"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/callers.rs"
+find = "brief.project_id == project.id\n                                && thread.task.project_id == project.id"
+replace = "true"
+
+[[plant]]
+name = "t1780 generation: conflict tells the harness to retry"
+meant = "a_question_refused_because_its_turn_ended_does_not_suggest_retrying_the_same_route"
+runs = [["cargo", "test", "--offline", "-p", "cf-board", "--lib", "a_question_refused_because_its_turn_ended_does_not_suggest_retrying_the_same_route"]]
+[[plant.edit]]
+file = "crates/cf-board/src/door.rs"
+find = "\n                        | \"question-conflict\""
+replace = ""
+
+[[plant]]
+name = "t1780 generation: revoked window places a question"
+meant = "window_generation_revoked_before_the_body_is_read_cannot_ask"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "window_generation_revoked_before_the_body_is_read_cannot_ask"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/questions.rs"
+find = "if context.credentials.resolve(request.bearer()).is_none() {"
+replace = "if false && context.credentials.resolve(request.bearer()).is_none() {"
+
+[[plant]]
+name = "t1780 generation: revoked window tells the harness to retry"
+meant = "a_question_refused_because_its_turn_ended_does_not_suggest_retrying_the_same_route"
+runs = [["cargo", "test", "--offline", "-p", "cf-board", "--lib", "a_question_refused_because_its_turn_ended_does_not_suggest_retrying_the_same_route"]]
+[[plant.edit]]
+file = "crates/cf-board/src/door.rs"
+find = "\n                        | \"question-window-closed\""
+replace = ""

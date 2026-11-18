@@ -491,9 +491,30 @@ pub(crate) fn last_started_task(
     store: &Store,
     participant_id: i64,
 ) -> Result<Option<TaskThread>, LedgerError> {
-    task_found(
-        store,
-        "SELECT t.project_id, t.number FROM message m JOIN task t ON t.id = m.task_id
+    match last_started(store, participant_id)? {
+        Some((_, project, number)) => task(store, project, number),
+        None => Ok(None),
+    }
+}
+
+/// The brief that last began reaching this participant, including a cancelled
+/// or failed attempt. Its id distinguishes a new brief on the same task.
+pub(crate) fn last_started_brief(
+    store: &Store,
+    participant_id: i64,
+) -> Result<Option<MessageView>, LedgerError> {
+    match last_started(store, participant_id)? {
+        Some((id, _, _)) => store.message(id),
+        None => Ok(None),
+    }
+}
+
+fn last_started(
+    store: &Store,
+    participant_id: i64,
+) -> Result<Option<(i64, i64, i64)>, LedgerError> {
+    Ok(store.db.query_row(
+        "SELECT m.id, t.project_id, t.number FROM message m JOIN task t ON t.id = m.task_id
          WHERE m.recipient_id = ? AND m.kind = 'task'
            AND (m.state IN ('delivering', 'delivered', 'read')
                 OR (m.state IN ('cancelled', 'failed') AND (m.attempts > 0 OR EXISTS (
@@ -502,8 +523,9 @@ pub(crate) fn last_started_task(
                       AND CASE WHEN json_valid(e.data) THEN json_extract(e.data, '$.message') END = m.id
                 ))))
          ORDER BY m.id DESC LIMIT 1",
-        participant_id,
-    )
+        [participant_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ).optional()?)
 }
 
 fn task_row_by_id(store: &Store, id: i64) -> Result<TaskRow, LedgerError> {

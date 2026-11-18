@@ -23,6 +23,196 @@ fn refused(answered: &(u16, Value)) -> (u16, &str, &str) {
     )
 }
 
+fn issue_on_open(scene: &Scene, participant: i64) -> String {
+    let ledger = scene.context.ledger.borrow();
+    let start = cf_engine::seams::QuestionWindowStart::from_ledger(&ledger, participant).unwrap();
+    scene
+        .context
+        .credentials
+        .issue_for_window(scene.project.id, participant, start)
+        .unwrap()
+}
+
+fn holder(scene: &Scene, task: i64) -> i64 {
+    let ledger = scene.context.ledger.borrow();
+    let handle = ledger
+        .task(scene.project.id, task)
+        .unwrap()
+        .unwrap()
+        .task
+        .assignee
+        .unwrap();
+    ledger
+        .project(scene.project.id)
+        .unwrap()
+        .unwrap()
+        .participants
+        .into_iter()
+        .find(|p| p.handle == handle)
+        .unwrap()
+        .id
+}
+
+#[tokio::test]
+async fn window_generation_allows_a_fresh_idle_question_after_cancellation() {
+    let scene = scene();
+    let task = session_task_at_work(&scene);
+    let session = holder(&scene, task);
+    let old = issue_on_open(&scene, session);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .cancel_task(scene.project.id, task, "chief")
+        .unwrap();
+    let late = ask(&scene, &old, r#"{"body":"Old turn"}"#).await;
+    assert_eq!(late.0, 409, "{late:?}");
+    assert_eq!(late.1["error"], "task-cancelled");
+    let fresh = issue_on_open(&scene, session);
+    let asked = ask(&scene, &fresh, r#"{"body":"A taskless question"}"#).await;
+    assert_eq!(asked.0, 201, "{asked:?}");
+    assert_eq!(asked.1["message"]["task"], json!(null));
+}
+
+#[tokio::test]
+async fn window_generation_refuses_an_ended_tasks_old_window_and_allows_a_fresh_one() {
+    for ending in ["done", "accepted", "failed", "released"] {
+        let scene = scene();
+        let task = session_task_at_work(&scene);
+        let session = holder(&scene, task);
+        let old = issue_on_open(&scene, session);
+        {
+            let mut ledger = scene.context.ledger.borrow_mut();
+            match ending {
+                "done" | "accepted" => {
+                    ledger
+                        .record_result(scene.project.id, task, "Done")
+                        .unwrap();
+                    if ending == "accepted" {
+                        ledger.accept_task(scene.project.id, task, "chief").unwrap();
+                    }
+                }
+                "failed" => {
+                    ledger
+                        .fail_task(scene.project.id, task, "the window failed")
+                        .unwrap();
+                }
+                "released" => {
+                    ledger
+                        .release_task(scene.project.id, task, "by @human")
+                        .unwrap();
+                }
+                _ => unreachable!(),
+            }
+        }
+        let late = ask(&scene, &old, r#"{"body":"Old turn"}"#).await;
+        assert_eq!(late.0, 409, "{ending}: {late:?}");
+        let fresh = issue_on_open(&scene, session);
+        let asked = ask(&scene, &fresh, r#"{"body":"A taskless question"}"#).await;
+        assert_eq!(asked.0, 201, "{ending}: {asked:?}");
+        assert_eq!(asked.1["message"]["task"], json!(null));
+    }
+}
+
+#[tokio::test]
+async fn window_generation_tracks_a_brief_that_starts_after_the_window_opened() {
+    for delivery in ["confirmed", "interrupted", "refunded"] {
+        let scene = scene();
+        let first = session_task_at_work(&scene);
+        let session = holder(&scene, first);
+        let follow = {
+            let mut ledger = scene.context.ledger.borrow_mut();
+            ledger
+                .record_result(scene.project.id, first, "Done")
+                .unwrap();
+            ledger
+                .create_task(
+                    scene.project.id,
+                    &cf_ledger::NewTask {
+                        from: "chief".into(),
+                        after: Some(first),
+                        body: "Next task".into(),
+                        ..Default::default()
+                    },
+                )
+                .unwrap()
+                .task
+                .number
+        };
+        let token = issue_on_open(&scene, session);
+        {
+            let mut ledger = scene.context.ledger.borrow_mut();
+            ledger
+                .accept_task(scene.project.id, first, "chief")
+                .unwrap();
+            let brief = ledger
+                .task(scene.project.id, follow)
+                .unwrap()
+                .unwrap()
+                .messages
+                .into_iter()
+                .find(|m| m.kind == "task")
+                .unwrap()
+                .id;
+            ledger.begin_delivery(brief).unwrap();
+            if delivery == "confirmed" {
+                ledger
+                    .confirm_delivery(brief, Some(&json!({ "item": "test" })))
+                    .unwrap();
+            } else if delivery == "refunded" {
+                ledger.retry_delivery(brief, "not ready", true).unwrap();
+            }
+            ledger
+                .cancel_task(scene.project.id, follow, "chief")
+                .unwrap();
+        }
+        let late = ask(&scene, &token, r#"{"body":"Old turn"}"#).await;
+        assert_eq!(late.0, 409, "{delivery}: {late:?}");
+        assert_eq!(late.1["error"], "task-cancelled");
+        let fresh = issue_on_open(&scene, session);
+        let asked = ask(&scene, &fresh, r#"{"body":"A taskless question"}"#).await;
+        assert_eq!(asked.0, 201, "{delivery}: {asked:?}");
+        assert_eq!(asked.1["message"]["task"], json!(null));
+    }
+}
+
+#[tokio::test]
+async fn window_generation_tracks_a_new_brief_on_the_same_task() {
+    let scene = scene();
+    let task = session_task_at_work(&scene);
+    let session = holder(&scene, task);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .record_result(scene.project.id, task, "Done")
+        .unwrap();
+    let token = issue_on_open(&scene, session);
+    {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let brief = ledger
+            .reopen_task(scene.project.id, task, "chief", "Go on")
+            .unwrap()
+            .message
+            .unwrap()
+            .id;
+        ledger.begin_delivery(brief).unwrap();
+        ledger
+            .confirm_delivery(brief, Some(&json!({ "item": "test" })))
+            .unwrap();
+        ledger
+            .record_result(scene.project.id, task, "Done again")
+            .unwrap();
+    }
+    let late = ask(&scene, &token, r#"{"body":"Old turn"}"#).await;
+    assert_eq!(late.0, 409, "{late:?}");
+    assert_eq!(late.1["error"], "task-ended");
+    let fresh = issue_on_open(&scene, session);
+    let asked = ask(&scene, &fresh, r#"{"body":"A taskless question"}"#).await;
+    assert_eq!(asked.0, 201, "{asked:?}");
+    assert_eq!(asked.1["message"]["task"], json!(null));
+}
+
 #[tokio::test]
 async fn the_chief_is_sent_to_its_terminal_before_its_body_is_read() {
     let scene = scene();
@@ -669,4 +859,134 @@ async fn a_follow_up_can_ask_once_its_brief_is_handed_to_the_window() {
     let (status, body) = ask(&scene, &token, r#"{"body":"About the new task"}"#).await;
     assert_eq!(status, 201, "{body}");
     assert_eq!(body["message"]["task"], second);
+}
+
+#[tokio::test]
+async fn window_generation_refuses_conflicting_brief_projects_without_writing() {
+    for conflict in ["task", "message"] {
+        let scene = scene();
+        let task = session_task_at_work(&scene);
+        let session = holder(&scene, task);
+        let token = issue_on_open(&scene, session);
+        let chief = scene.id("chief");
+        let (brief, expected, before) = {
+            let mut ledger = scene.context.ledger.borrow_mut();
+            let thread = ledger.task(scene.project.id, task).unwrap().unwrap();
+            let original_task = thread.task.id;
+            let brief = thread
+                .messages
+                .into_iter()
+                .find(|m| m.kind == "task" && m.recipient_id == session)
+                .unwrap()
+                .id;
+            ledger.cancel_task(scene.project.id, task, "chief").unwrap();
+            let other = ledger
+                .create_project(&cf_ledger::NewProject {
+                    directory: "/work/generation-other".into(),
+                    name: "generation-other".into(),
+                    chief: cf_ledger::NewChief {
+                        harness: "claude-code".into(),
+                        model: Some("mybuilder".into()),
+                        effort: None,
+                        model_name: None,
+                    },
+                    staff: vec![cf_ledger::NewMember {
+                        model: Some("mybuilder".into()),
+                        effort: None,
+                        model_name: Some("hera".into()),
+                        harness: "claude-code".into(),
+                        designer: false,
+                        roles: vec!["worker".into()],
+                        tier: "standard".into(),
+                    }],
+                    gate: false,
+                    wake_up: None,
+                    specs: None,
+                    staff_rules: None,
+                    compaction: None,
+                    advisor_tool: false,
+                    prompt_suggestion: false,
+                    own_hands: false,
+                })
+                .unwrap();
+            let foreign = cf_ledger::NewTask {
+                from: "chief".into(),
+                body: "Other project".into(),
+                pool: Some("worker".into()),
+                tier: Some("standard".into()),
+                ..Default::default()
+            };
+            ledger.create_task(other.id, &foreign).unwrap();
+            let foreign_task = ledger.create_task(other.id, &foreign).unwrap().task.id;
+            let expected = if conflict == "task" {
+                ledger
+                    .sqlite()
+                    .execute(
+                        "UPDATE message SET task_id = ?1 WHERE id = ?2",
+                        (foreign_task, brief),
+                    )
+                    .unwrap();
+                (foreign_task, scene.project.id)
+            } else {
+                ledger
+                    .sqlite()
+                    .execute(
+                        "UPDATE message SET project_id = ?1 WHERE id = ?2",
+                        (other.id, brief),
+                    )
+                    .unwrap();
+                (original_task, other.id)
+            };
+            let before = ledger.inbox(chief, 100).unwrap();
+            (brief, expected, before)
+        };
+        let kicks = scene.kicks.get();
+        let said = ask(&scene, &token, r#"{"body":"A question"}"#).await;
+        assert_eq!(said.0, 409, "{conflict}: {said:?}");
+        assert_eq!(said.1["error"], "question-conflict");
+        let ledger = scene.context.ledger.borrow();
+        assert_eq!(ledger.inbox(chief, 100).unwrap(), before);
+        assert_eq!(
+            ledger
+                .sqlite()
+                .query_row(
+                    "SELECT task_id, project_id FROM message WHERE id = ?",
+                    [brief],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+                )
+                .unwrap(),
+            expected
+        );
+        assert_eq!(scene.kicks.get(), kicks);
+    }
+}
+
+#[tokio::test]
+async fn window_generation_revoked_before_the_body_is_read_cannot_ask() {
+    let scene = scene();
+    let task = session_task_at_work(&scene);
+    let session = holder(&scene, task);
+    let old = issue_on_open(&scene, session);
+    let request = request(
+        Method::POST,
+        "/api/questions",
+        Some(&old),
+        r#"{"body":"From the closed window"}"#,
+    );
+    let caller = caller_of(&scene.context, &request).unwrap();
+    scene.context.credentials.revoke(&old);
+    let fresh = issue_on_open(&scene, session);
+    let late = said(super::ask(&scene.context, &caller, request).await);
+    assert_eq!(late.0, 409, "{late:?}");
+    assert_eq!(late.1["error"], "question-window-closed");
+    let asked = ask(&scene, &fresh, r#"{"body":"From the new window"}"#).await;
+    assert_eq!(asked.0, 201, "{asked:?}");
+    assert_eq!(asked.1["message"]["task"], task);
+    let chief = scene.id("chief");
+    let ledger = scene.context.ledger.borrow();
+    assert!(ledger
+        .inbox(chief, 100)
+        .unwrap()
+        .iter()
+        .all(|message| message.body != "From the closed window"));
 }

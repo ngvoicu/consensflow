@@ -52,7 +52,14 @@ pub fn ask(board: &Board, questions: &[Question], wait: Duration, stop: &AtomicB
         Err(cause)
             if matches!(
                 cause.code(),
-                Some("question-moved" | "task-ended" | "task-cancelled" | "task-not-started")
+                Some(
+                    "question-moved"
+                        | "task-ended"
+                        | "task-cancelled"
+                        | "task-not-started"
+                        | "question-conflict"
+                        | "question-window-closed"
+                )
             ) =>
         {
             Reply::Refused(format!("{cause}. Do not ask it again; end your turn now."))

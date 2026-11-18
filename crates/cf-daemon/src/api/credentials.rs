@@ -9,6 +9,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+use cf_engine::seams::QuestionWindowStart;
 use cf_harness::seams::{Entropy, SystemEntropy};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
@@ -18,6 +19,7 @@ use subtle::ConstantTimeEq;
 pub struct Identity {
     pub participant_id: i64,
     pub project_id: i64,
+    pub question_start: Option<QuestionWindowStart>,
 }
 
 /// The tokens of the windows that are open now.
@@ -49,12 +51,32 @@ impl Credentials {
     /// A token for `participant`'s window in `project`: 32 random bytes in
     /// hex, or why the system gave none: no token is made without.
     pub fn issue(&self, project: i64, participant: i64) -> Result<String, String> {
+        self.issue_with_start(project, participant, None)
+    }
+
+    /// A window's token also remembers which task and brief predated it.
+    pub fn issue_for_window(
+        &self,
+        project: i64,
+        participant: i64,
+        start: QuestionWindowStart,
+    ) -> Result<String, String> {
+        self.issue_with_start(project, participant, Some(start))
+    }
+
+    fn issue_with_start(
+        &self,
+        project: i64,
+        participant: i64,
+        question_start: Option<QuestionWindowStart>,
+    ) -> Result<String, String> {
         let token = random_hex(self.entropy.as_ref(), 32)?;
         self.by_digest.borrow_mut().insert(
             digest(&token),
             Identity {
                 participant_id: participant,
                 project_id: project,
+                question_start,
             },
         );
         Ok(token)
@@ -77,6 +99,15 @@ impl Credentials {
 impl cf_engine::seams::Credentials for Credentials {
     fn issue(&self, project: i64, participant: i64) -> Result<String, String> {
         Credentials::issue(self, project, participant)
+    }
+
+    fn issue_for_window(
+        &self,
+        project: i64,
+        participant: i64,
+        start: QuestionWindowStart,
+    ) -> Result<String, String> {
+        Credentials::issue_for_window(self, project, participant, start)
     }
 
     fn revoke(&self, token: &str) {
@@ -142,7 +173,8 @@ mod tests {
             credentials.resolve(Some(&zeus)),
             Some(Identity {
                 participant_id: 7,
-                project_id: 3
+                project_id: 3,
+                question_start: None,
             })
         );
         assert_eq!(
@@ -159,6 +191,26 @@ mod tests {
         );
         credentials.revoke(&zeus);
         credentials.revoke("never issued");
+    }
+
+    #[test]
+    fn the_engines_window_token_keeps_its_launch_boundary() {
+        let credentials = Credentials::new();
+        let start = QuestionWindowStart {
+            last_brief: Some(10),
+            task_in_hand: Some(20),
+        };
+        let token = <Credentials as cf_engine::seams::Credentials>::issue_for_window(
+            &credentials,
+            3,
+            7,
+            start,
+        )
+        .unwrap();
+        assert_eq!(
+            credentials.resolve(Some(&token)).unwrap().question_start,
+            Some(start)
+        );
     }
 
     #[test]
