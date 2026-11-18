@@ -236,8 +236,8 @@ replace = '''matches!(task.state.as_str(), "working" | "waiting" | "paused")'''
 
 [[plant]]
 name = "start suspended: a Resume does not bring back a window whose task waits for an answer"
-meant = "a_session_waiting_for_an_answer_comes_back_at_rest_and_is_given_the_answer_that_came_meanwhile"
-runs = ["engine-resume"]
+meant = "a_session_waiting_for_an_answer_closes_its_old_question_and_can_ask_after_resume"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "a_session_waiting_for_an_answer_closes_its_old_question_and_can_ask_after_resume"]]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"

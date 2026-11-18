@@ -316,6 +316,55 @@ fn an_unacknowledged_claim_is_voided_when_the_window_exits_and_the_answer_return
 }
 
 #[test]
+fn t1813_a_taskless_claim_is_released_when_its_window_exits() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let window = context.id(project.id, "zeus");
+    let chief = context.id(project.id, "chief");
+    let (question, answer) = {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.record_result(project.id, 1, "Done").unwrap();
+        ledger.accept_task(project.id, 1, "human").unwrap();
+        let q = ledger
+            .ask(
+                project.id,
+                &NewQuestion {
+                    from: Some("zeus".into()),
+                    to: "chief".into(),
+                    questions: Some(json!([{ "question": "Which colour?", "header": "Colour",
+                "options": [{"label": "red"}, {"label": "blue"}], "multiple": false }])),
+                    ..NewQuestion::default()
+                },
+            )
+            .unwrap()
+            .id;
+        let a = ledger
+            .answer(q, chief, None, Some(&json!([["blue"]])))
+            .unwrap()
+            .id;
+        assert!(matches!(
+            ledger.claim_answer(q, window).unwrap(),
+            Claim::Answered(_)
+        ));
+        (q, a)
+    };
+    context.exit("zeus");
+    assert_eq!(unclaimed(&context, project.id), ["its window exited"]);
+    assert_eq!(context.message(answer).state, "cancelled");
+    assert_eq!(
+        context
+            .ledger
+            .borrow_mut()
+            .claim_answer(question, window)
+            .unwrap(),
+        Claim::Closed
+    );
+}
+
+#[test]
 fn an_unacknowledged_claim_is_voided_when_the_daemon_starts() {
     let context = Context::new();
     let (project, question, answer) = answered_through_a_door(&context);

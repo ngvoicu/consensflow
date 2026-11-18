@@ -181,8 +181,8 @@ replace = "            Look::Rest => None,"
 
 [[plant]]
 name = "pause: a claim is not voided when its window exits"
-meant = "an_unacknowledged_claim_is_voided_when_the_window_exits_and_the_answer_comes_with_the_words"
-runs = ["pause-receipts", "engine-dispatcher"]
+meant = "t1813_a_taskless_claim_is_released_when_its_window_exits"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1813_a_taskless_claim_is_released_when_its_window_exits"]]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"

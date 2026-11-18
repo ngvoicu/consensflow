@@ -141,6 +141,23 @@ fn a_same_window_reopen_keeps_an_answer_at_the_human_gate() {
 }
 
 #[test]
+fn a_same_window_reopen_reminds_the_chief_when_approval_declined_the_answer() {
+    let mut w = gated_world();
+    let (task, question, answer) = answered_at_the_gate(&mut w);
+    w.ledger.decline_message(answer, "human").unwrap();
+    let previous_notes = notes(&w, "chief").len();
+    w.ledger.record_result(w.project, task, "Result").unwrap();
+    w.ledger
+        .reopen_task(w.project, task, "human", "Try again")
+        .unwrap();
+    let after = notes(&w, "chief");
+    assert_eq!(after.len(), previous_notes + 1);
+    let reminder = &after.last().unwrap().1;
+    assert!(reminder.contains("was sent back"), "{reminder}");
+    assert!(reminder.contains(&again(question)), "{reminder}");
+}
+
+#[test]
 fn a_failed_task_returns_its_answer_once_and_does_not_reopen_the_old_question() {
     let mut w = gated_world();
     let (task, question, answer) = answered_at_the_gate(&mut w);

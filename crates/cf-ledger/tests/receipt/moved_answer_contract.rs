@@ -687,6 +687,40 @@ fn t1803_finding_07_accepting_a_topic_keeps_another_holdings_question_at_the_gat
 }
 
 #[test]
+fn t1813_a_queued_brief_that_moved_never_makes_the_idle_window_its_former_holder() {
+    let mut w = world();
+    let (task, session, _brief) = assigned(&mut w, false);
+    let window = w.id(&session);
+    assert!(w.ledger.question_holding(window).unwrap().is_none());
+    w.ledger.release_task(w.project, task, "Reassign").unwrap();
+    let moved = w.assign(task, "diana");
+    w.deliver(moved.message.unwrap().id);
+    let question = w
+        .ledger
+        .ask(
+            w.project,
+            &NewQuestion {
+                from: Some(session.clone()),
+                to: "chief".into(),
+                task: Some(task),
+                body: Some("Idle question about the task".into()),
+                ..NewQuestion::default()
+            },
+        )
+        .expect("a queued brief was never this idle window's holding")
+        .id;
+    w.deliver(question);
+    let answer = w.answer(question, "Reply to idle session").id;
+    assert_eq!(
+        w.ledger
+            .next_delivery_of(window, answer)
+            .unwrap()
+            .map(|m| m.id),
+        Some(answer)
+    );
+}
+
+#[test]
 fn t1803_finding_07_open_does_not_retire_a_question_when_its_prior_brief_conflicts() {
     use cf_ledger::{NewChief, NewProject};
     let mut w = world();

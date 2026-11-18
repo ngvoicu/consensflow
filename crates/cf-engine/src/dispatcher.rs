@@ -1018,16 +1018,17 @@ impl Dispatcher {
         let said_yes = trust::yes_at_exit(&record, &shown);
         // What the engine had sent this window, told before `closed` clears it.
         let sent = record.window.borrow().sent_to.contains(pane);
+        // No door survives its window. Release claims before closing its
+        // questions, while a claimed answer is still queued and can be found.
+        self.seams
+            .ledger
+            .borrow_mut()
+            .release_claims(record.id, "its window exited")?;
         let deferred_answers = self.seams.ledger.borrow_mut().close_question_window(
             record.id,
             delivering.as_ref().map(|delivery| delivery.message),
         )?;
         self.closed(&record);
-        // No door survives its window: what one claimed and none acknowledged is the ledger's again.
-        self.seams
-            .ledger
-            .borrow_mut()
-            .release_claims(record.id, "its window exited")?;
         // A participant that left is forgotten already: its exit settles nothing more.
         let was_leaving = {
             let mut leaving = self.leaving.borrow_mut();

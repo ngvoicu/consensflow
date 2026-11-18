@@ -7,16 +7,30 @@ runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "
 [[plant.edit]]
 file = "crates/cf-ledger/src/holding.rs"
 find = "            (Some(h.task_id), Some(h.first_brief))"
-replace = "            (None, None)"
+replace = "            (None::<i64>, None::<i64>)"
 
 [[plant]]
-name = "moved answer simple: a prior task cannot be a question's topic"
-meant = "t1803_finding_07_a_current_holding_can_ask_about_its_previous_task"
-runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_07_a_current_holding_can_ask_about_its_previous_task"]]
+name = "moved answer simple: a queued brief is mistaken for a previous holding"
+meant = "t1813_a_queued_brief_that_moved_never_makes_the_idle_window_its_former_holder"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1813_a_queued_brief_that_moved_never_makes_the_idle_window_its_former_holder"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages.rs"
-find = "                            .then_some(h)"
-replace = "                            .then_some(h).filter(|_| false)"
+find = "                let holding = crate::holding::of(store, asker.id)?;"
+replace = '''                let holding = crate::holding::of(store, asker.id)?;
+                if !question.urgent && holding.is_none()
+                    && store.db.prepare("SELECT 1 FROM message WHERE task_id = ?1 AND recipient_id = ?2 AND kind = 'task' LIMIT 1")?.exists(params![row.id, asker.id])?
+                {
+                    return Err(LedgerError::refused_with("question-moved", "a queued brief is mistaken for a handover", 409));
+                }'''
+
+[[plant]]
+name = "moved answer simple: a prior topic leaves the current task working"
+meant = "t1803_finding_07_accepting_a_question_topic_keeps_the_current_holding_open"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_07_accepting_a_question_topic_keeps_the_current_holding_open"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "                    .then_some(h),"
+replace = "                    .then_some(h).filter(|_| false),"
 
 [[plant]]
 name = "moved answer simple: a door follows its topic instead of the holding"

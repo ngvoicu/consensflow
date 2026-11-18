@@ -8,7 +8,6 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     OnceLock,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, OptionalExtension};
 use serde_json::json;
@@ -23,11 +22,8 @@ fn process_run() -> &'static str {
     static RUN: OnceLock<String> = OnceLock::new();
     RUN.get_or_init(|| {
         format!(
-            "{}-{}-{:016x}-{:016x}",
+            "{}-{:016x}-{:016x}",
             std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map_or(0, |v| v.as_nanos()),
             RandomState::new().build_hasher().finish(),
             RandomState::new().build_hasher().finish()
         )
@@ -308,7 +304,8 @@ pub(crate) fn task_of_question(
 
 /// None is a question from before tracking began; no inferred repair is made.
 pub(crate) fn question_is_live(store: &Store, question: i64) -> Result<Option<bool>, LedgerError> {
-    let binding: Option<(i64, Option<i64>, Option<i64>, i64, String, bool)> = store.db.query_row(
+    type Binding = (i64, Option<i64>, Option<i64>, i64, String, bool);
+    let binding: Option<Binding> = store.db.query_row(
         "SELECT b.participant_id, b.task_id, b.first_brief_id, b.closed, b.run_id,
           EXISTS(SELECT 1 FROM message q
             JOIN participant p ON p.id = b.participant_id AND p.project_id = q.project_id

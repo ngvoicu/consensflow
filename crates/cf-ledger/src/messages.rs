@@ -233,35 +233,46 @@ pub(crate) fn ask_naming(
                 // The named task may be the topic of a question from a later
                 // holding. Only the last delivered holding decides where its
                 // answer goes, including when the topic is an earlier task.
-                let other_holding = match crate::holding::of(store, asker.id)? {
-                    Some(h) if h.active && h.task_id != row.id => {
-                        crate::holding::matches(store, asker.id, Some(h.task_id), Some(h.first_brief))?
-                            .then_some(h)
-                    }
+                let holding = crate::holding::of(store, asker.id)?;
+                let other_holding = match holding {
+                    Some(h) if h.active && h.task_id != row.id => crate::holding::matches(
+                        store,
+                        asker.id,
+                        Some(h.task_id),
+                        Some(h.first_brief),
+                    )?
+                    .then_some(h),
                     _ => None,
                 };
                 if !question.urgent && other_holding.is_none() {
-                    if row.assignee_id == Some(asker.id)
-                        && matches!(row.state.as_str(), "accepted" | "cancelled" | "failed")
-                    {
-                        return Err(LedgerError::refused_with(
-                            "task-ended",
-                            format!("T-{number} is {}: this window cannot ask on it now", row.state),
-                            409,
-                        ));
-                    }
-                    // A task message proves this window once held it. A question
-                    // submitted after release must not go to that departed window.
-                    if row.assignee_id != Some(asker.id)
-                        && store.db.prepare(
-                            "SELECT 1 FROM message WHERE task_id = ?1 AND recipient_id = ?2 AND kind = 'task' LIMIT 1"
-                        )?.exists(params![row.id, asker.id])?
-                    {
-                        return Err(LedgerError::refused_with(
-                            "question-moved",
-                            format!("T-{number} {}: this window cannot ask on it now", moved_task_location(store, &row)?),
-                            409,
-                        ));
+                    if let Some(held) = holding.filter(|h| h.task_id == row.id) {
+                        if !crate::holding::matches(
+                            store,
+                            asker.id,
+                            Some(held.task_id),
+                            Some(held.first_brief),
+                        )? {
+                            if row.assignee_id == Some(asker.id)
+                                && matches!(row.state.as_str(), "accepted" | "cancelled" | "failed")
+                            {
+                                return Err(LedgerError::refused_with(
+                                    "task-ended",
+                                    format!(
+                                        "T-{number} is {}: this window cannot ask on it now",
+                                        row.state
+                                    ),
+                                    409,
+                                ));
+                            }
+                            return Err(LedgerError::refused_with(
+                                "question-moved",
+                                format!(
+                                    "T-{number} {}: this window cannot ask on it now",
+                                    moved_task_location(store, &row)?
+                                ),
+                                409,
+                            ));
+                        }
                     }
                 }
                 if let Some(holding) = other_holding.filter(|_| !question.urgent) {

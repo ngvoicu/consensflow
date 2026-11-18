@@ -426,6 +426,204 @@ fn t1813_a_brief_queued_in_the_harness_does_not_replace_the_delivered_holding() 
 }
 
 #[test]
+fn t1813_a_delivered_brief_is_the_holding_before_the_adapter_replies() {
+    use cf_engine::testing::Gate;
+    use cf_harness::contract::FirstMessage;
+    use std::cell::Cell;
+
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    context.host.exits_showing(Some(0), None, None);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    let window = tiers.id(&session);
+    context.adapter.answer("zeus", "Done.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    let next = context.create_task(
+        tiers.project.id,
+        cf_ledger::NewTask {
+            from: "chief".into(),
+            after: Some(1),
+            body: "Next task".into(),
+            ..Default::default()
+        },
+    );
+    context
+        .ledger
+        .borrow_mut()
+        .accept_task(tiers.project.id, 1, "human")
+        .unwrap();
+    let brief = tiers
+        .task(next.task.number)
+        .messages
+        .iter()
+        .find(|m| m.kind == "task")
+        .unwrap()
+        .id;
+    context.adapter.first.set(FirstMessage::Delivered);
+    let handed = Rc::new(Cell::new(false));
+    let saw = Rc::clone(&handed);
+    let gate = Gate::default();
+    let waiting = gate.clone();
+    let fake = Rc::downgrade(&context.adapter);
+    let session_for_delivery = session.clone();
+    let marker = marker_of(brief);
+    *context.adapter.deliver.borrow_mut() = Some(Rc::new(move |taking| {
+        let outcome = taking();
+        let delivered = fake.upgrade().is_some_and(|fake| {
+            fake.agent(&session_for_delivery)
+                .items
+                .iter()
+                .any(|item| item.text.contains(&marker))
+        });
+        if delivered {
+            saw.set(true);
+        }
+        let waiting = waiting.clone();
+        Box::pin(async move {
+            if delivered {
+                waiting.wait().await;
+            }
+            Ok(outcome)
+        })
+    }));
+    for _ in 0..8 {
+        context.advance(6_000);
+        context.pass().unwrap();
+        if handed.get() {
+            break;
+        }
+    }
+    assert!(
+        handed.get(),
+        "the adapter took the brief; state={}, task={:?}, next={:?}, events={:?}",
+        context.message(brief).state,
+        tiers.task(next.task.number).task,
+        context
+            .ledger
+            .borrow()
+            .next_delivery_of(window, brief)
+            .unwrap()
+            .map(|m| m.id),
+        context
+            .ledger
+            .borrow()
+            .events(tiers.project.id, 0, 200)
+            .unwrap()
+            .iter()
+            .map(|e| &e.kind)
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        context
+            .adapter
+            .agent(&session)
+            .items
+            .iter()
+            .any(|item| item.text.contains(&marker_of(brief))),
+        "the new brief was delivered to zeus before the adapter returned"
+    );
+    let holding = context
+        .ledger
+        .borrow()
+        .question_holding(window)
+        .unwrap()
+        .unwrap();
+    let start = context
+        .credentials
+        .question_starts
+        .borrow()
+        .iter()
+        .rev()
+        .find(|(id, _)| *id == window)
+        .unwrap()
+        .1;
+    assert_eq!(
+        start.launch_brief, None,
+        "the first brief is delivered after launch"
+    );
+    assert_eq!(
+        start.task_in_hand, None,
+        "the closed old task is no new holding"
+    );
+    let chief = tiers.id("chief");
+    let (question, answer, answer_task) = {
+        let mut ledger = context.ledger.borrow_mut();
+        let question = ledger
+            .ask(
+                tiers.project.id,
+                &cf_ledger::NewQuestion {
+                    from: Some(session.clone()),
+                    to: "chief".into(),
+                    body: Some("Question after the new brief".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .id;
+        let answer = ledger
+            .answer(question, chief, Some(&json!("Full new-task answer")), None)
+            .unwrap();
+        (question, answer.id, answer.task_number)
+    };
+    gate.open();
+    context.settle();
+    if context.message(brief).state == "delivering" {
+        context
+            .ledger
+            .borrow_mut()
+            .confirm_delivery(brief, Some(&json!({ "item": "received" })))
+            .unwrap();
+    }
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(tiers.project.id, next.task.number, "human")
+        .unwrap();
+    let notices = context
+        .inbox(chief)
+        .iter()
+        .filter(|m| m.kind == "note" && m.body.contains("Full new-task answer"))
+        .count();
+    let eligible = context
+        .ledger
+        .borrow()
+        .next_delivery_of(window, answer)
+        .unwrap()
+        .map(|m| m.id);
+    let answer_state = context.message(answer).state;
+    let admitted = if eligible == Some(answer) {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.begin_delivery(answer).unwrap();
+        Some(ledger.admit(answer, &[]).unwrap())
+    } else {
+        None
+    };
+    assert_eq!(
+        (
+            context.message(question).state.as_str(),
+            answer_state.as_str(),
+            notices,
+            eligible,
+            admitted
+        ),
+        ("cancelled", "cancelled", 1, None, None),
+        "the delivered task's question must close and its full answer must return"
+    );
+    assert_eq!(answer_task, Some(next.task.number));
+    assert_eq!(
+        (holding.task_number, holding.active),
+        (next.task.number, true),
+        "the current holding must be the different task whose brief was already delivered"
+    );
+}
+
+#[test]
 fn t1813_restart_returns_a_queued_answer_without_resuming_its_project() {
     let context = Context::new();
     let (tiers, answer) = asked(&context);
