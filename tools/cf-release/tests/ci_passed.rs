@@ -32,6 +32,16 @@ echo "$*" >> "$FAKE/asked"
 if [ -e "$FAKE/refused" ]; then
   echo "gh: Resource not accessible by integration (HTTP 403)" >&2; exit 1
 fi
+if [ -e "$FAKE/error-target" ]; then
+  target=$(cat "$FAKE/error-target")
+  case "$2" in
+    *"$target"*)
+      attempts=$(grep -F -c -- "$2" "$FAKE/asked")
+      if [ "$attempts" -le "$(cat "$FAKE/error-count")" ]; then
+        cat "$FAKE/error-message" >&2; exit 1
+      fi ;;
+  esac
+fi
 case "$2" in
   */actions/workflows/ci.yml/runs\?*) cat "$FAKE/runs.json" ;;
   */actions/runs/*/jobs\?*)
@@ -150,6 +160,13 @@ impl Runner {
     fn asked(&self) -> String {
         fs::read_to_string(self.fake.join("asked")).unwrap_or_default()
     }
+
+    /// Fail this endpoint's first `count` requests as `gh` would report them.
+    fn fail(&self, target: &str, count: usize, message: &str) {
+        fs::write(self.fake.join("error-target"), target).unwrap();
+        fs::write(self.fake.join("error-count"), count.to_string()).unwrap();
+        fs::write(self.fake.join("error-message"), message).unwrap();
+    }
 }
 
 const GREEN: [(&str, &str); 3] = [
@@ -180,6 +197,85 @@ fn a_tag_on_a_commit_ci_passed_on_both_platforms_goes_on() {
 }
 
 #[test]
+fn two_github_502s_on_the_jobs_page_then_green_pass() {
+    let runner = Runner::new();
+    runner.runs(&[(7, COMMIT, "push", "completed", "success")]);
+    runner.jobs(7, &GREEN);
+    runner.fail("/actions/runs/7/jobs?", 2, "gh: Bad Gateway (HTTP 502)");
+
+    let (status, out, err) = runner.run("push");
+    assert_eq!(status, 0, "{err}");
+    assert!(
+        out.starts_with(&format!("CI passed {COMMIT} on both platforms: run 7")),
+        "{out}"
+    );
+    let asked = runner.asked();
+    assert_eq!(asked.lines().count(), 4, "{asked}");
+    assert_eq!(asked.matches("/actions/runs/7/jobs?").count(), 3, "{asked}");
+}
+
+#[test]
+fn persistent_github_502_refuses_after_three_retries() {
+    let runner = Runner::new();
+    runner.runs(&[(7, COMMIT, "push", "completed", "success")]);
+    runner.jobs(7, &GREEN);
+    runner.fail("/actions/runs/7/jobs?", 99, "gh: Bad Gateway (HTTP 502)");
+
+    let (status, out, err) = runner.run("push");
+    assert_eq!(status, 1, "{err}");
+    assert!(
+        out.starts_with("::error::GitHub could not be asked for "),
+        "{out}"
+    );
+    assert!(
+        err.contains("gh api ended 1: gh: Bad Gateway (HTTP 502)"),
+        "{err}"
+    );
+    let asked = runner.asked();
+    assert_eq!(asked.matches("/actions/runs/7/jobs?").count(), 4, "{asked}");
+}
+
+#[test]
+fn github_404_refuses_without_retry() {
+    let runner = Runner::new();
+    runner.fail(
+        "/actions/workflows/ci.yml/runs?",
+        99,
+        "gh: Not Found (HTTP 404)",
+    );
+
+    let (status, _, err) = runner.run("push");
+    assert_eq!(status, 1, "{err}");
+    assert!(err.contains("gh: Not Found (HTTP 404)"), "{err}");
+    assert_eq!(runner.asked().lines().count(), 1, "{}", runner.asked());
+}
+
+#[test]
+fn a_dropped_connection_then_green_passes() {
+    let runner = Runner::new();
+    runner.runs(&[(7, COMMIT, "push", "completed", "success")]);
+    runner.jobs(7, &GREEN);
+    runner.fail(
+        "/actions/runs/7/jobs?",
+        2,
+        "Get https://api.github.com: connection reset by peer",
+    );
+
+    let (status, out, err) = runner.run("push");
+    assert_eq!(status, 0, "{err}");
+    assert!(
+        out.starts_with(&format!("CI passed {COMMIT} on both platforms: run 7")),
+        "{out}"
+    );
+    assert_eq!(
+        runner.asked().matches("/actions/runs/7/jobs?").count(),
+        3,
+        "{}",
+        runner.asked()
+    );
+}
+
+#[test]
 fn a_tag_on_a_commit_whose_ci_is_red_fails_the_gate() {
     let runner = Runner::new();
     runner.runs(&[(7, COMMIT, "push", "completed", "failure")]);
@@ -192,6 +288,7 @@ fn a_tag_on_a_commit_whose_ci_is_red_fails_the_gate() {
         )),
         "{err}"
     );
+    assert_eq!(runner.asked().lines().count(), 1, "{}", runner.asked());
 }
 
 #[test]
@@ -206,6 +303,7 @@ fn a_tag_on_a_commit_ci_never_ran_on_fails_the_gate() {
         )),
         "{err}"
     );
+    assert_eq!(runner.asked().lines().count(), 1, "{}", runner.asked());
 }
 
 #[test]

@@ -420,6 +420,27 @@ fn ci_that_ended_red_is_refused_and_nothing_is_tagged() {
 }
 
 #[test]
+fn ci_preflight_retries_a_transient_jobs_error_and_then_checks_both_platforms() {
+    let (world, mut fake) = ready();
+    fake.runs[0].running_for = 0;
+    fake.ci_jobs_failures = 2;
+    let (outcome, said) = released(&world, &mut fake, true);
+    outcome.unwrap();
+    assert!(said.contains("ci: run 1000 passed"), "{said}");
+    assert_eq!(fake.pauses, 2);
+    assert_eq!(
+        fake.lines()
+            .iter()
+            .filter(
+                |line| line.starts_with("gh api repos/ngvoicu/consensflow/actions/runs/1000/jobs?")
+            )
+            .count(),
+        3
+    );
+    nothing_tagged(&world, &fake);
+}
+
+#[test]
 fn ci_without_both_platforms_summaries_green_is_refused_and_nothing_is_tagged() {
     for (jobs, unmet) in [
         // A summary that did not pass, though the run says success.
