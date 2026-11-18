@@ -76,10 +76,16 @@ runs = ["busy-models-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-        if tries > BUSY_BACKOFF_MS.len() && self.another_is_free(project, owner, task)? {
+        if spent
+            && !self.backup_is_free(project, owner, task)?
+            && self.another_is_free(project, owner, task)?
+        {
 '''
 replace = '''
-        if false && tries > BUSY_BACKOFF_MS.len() && self.another_is_free(project, owner, task)? {
+        if false && spent
+            && !self.backup_is_free(project, owner, task)?
+            && self.another_is_free(project, owner, task)?
+        {
 '''
 
 [[plant]]
@@ -90,10 +96,16 @@ runs = ["busy-models-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-        if tries > BUSY_BACKOFF_MS.len() && self.another_is_free(project, owner, task)? {
+        if spent
+            && !self.backup_is_free(project, owner, task)?
+            && self.another_is_free(project, owner, task)?
+        {
 '''
 replace = '''
-        if tries > 0 && self.another_is_free(project, owner, task)? {
+        if tries > 0
+            && !self.backup_is_free(project, owner, task)?
+            && self.another_is_free(project, owner, task)?
+        {
 '''
 
 [[plant]]
