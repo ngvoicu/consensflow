@@ -264,3 +264,121 @@ runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "an_ask_in_fl
 file = "crates/cf-ledger/src/tasks.rs"
 find = "                      AND e.kind = 'delivery.begun'"
 replace = "                      AND e.kind = 'delivery.never-begun'"
+
+[[plant]]
+name = "t1780 recovery: a stranded answer is not recovered on open"
+meant = "opening_recovers_an_older_answer_queued_after_its_task_moved_once"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "opening_recovers_an_older_answer_queued_after_its_task_moved_once"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '    recover_old_stranded_answers(&mut store)?;'
+replace = '    // The old answer is left in the former window.'
+
+[[plant]]
+name = "t1780 recovery: the current windows answer is taken too"
+meant = "opening_keeps_the_current_windows_queued_answer"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "opening_keeps_the_current_windows_queued_answer"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = 'AND q.sender_id = a.recipient_id AND t.assignee_id IS NOT a.recipient_id'
+replace = 'AND q.sender_id = a.recipient_id'
+
+[[plant]]
+name = "t1780 recovery: an unrelated windows answer is taken"
+meant = "opening_keeps_an_answer_to_a_different_sessions_question_about_the_task"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "opening_keeps_an_answer_to_a_different_sessions_question_about_the_task"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''               AND EXISTS (SELECT 1 FROM message b WHERE b.task_id = t.id AND b.project_id = t.project_id
+                           AND b.kind = 'task' AND b.recipient_id = a.recipient_id AND b.id < q.id)'''
+replace = '               AND 1 = 1'
+
+[[plant]]
+name = "t1780 recovery: an answer at the gate is recovered before approval"
+meant = "opening_keeps_an_answer_held_for_approval_and_an_answer_already_received"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "opening_keeps_an_answer_held_for_approval_and_an_answer_already_received"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "a.kind = 'answer' AND a.state = 'queued' AND p.member_id IS NOT NULL"
+replace = "a.kind = 'answer' AND a.state IN ('queued', 'gated') AND p.member_id IS NOT NULL"
+
+[[plant]]
+name = "t1780 recovery: the chiefs answer words are omitted"
+meant = "opening_recovers_the_full_words_of_a_maximum_length_answer"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "opening_recovers_the_full_words_of_a_maximum_length_answer"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = 'Your words:\n{words}'
+replace = 'Your words:\n'
+
+[[plant]]
+name = "t1780 recovery: the old answer remains queued"
+meant = "opening_recovers_an_older_answer_queued_after_its_task_moved_once"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "opening_recovers_an_older_answer_queued_after_its_task_moved_once"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "UPDATE message SET state = 'cancelled', reason = ?1 WHERE id = ?2 AND state = 'queued'"
+replace = "UPDATE message SET state = 'queued', reason = ?1 WHERE id = ?2 AND state = 'queued'"
+
+[[plant]]
+name = "t1780 recovery: the recovered question can be answered again"
+meant = "passing_an_old_held_answer_on_returns_it_to_the_chief"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "passing_an_old_held_answer_on_returns_it_to_the_chief"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''            store.db.execute(
+                &format!(
+                    "UPDATE message SET state = 'cancelled', reason = ?1,
+                         door_closed_at = COALESCE(door_closed_at,
+                             (SELECT updated_at FROM task WHERE id = message.task_id))
+                     WHERE id = ?2 AND NOT {}",
+                    super::has_standing_answer("message")
+                ),
+                params![super::MOVED_QUESTION, question],
+            )?;'''
+replace = '            let _ = question;'
+
+[[plant]]
+name = "t1780 recovery: passing a held answer sends it to the old window"
+meant = "passing_an_old_held_answer_on_returns_it_to_the_chief"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "passing_an_old_held_answer_on_returns_it_to_the_chief"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/gate.rs"
+find = '        if message.kind == "answer" && super::recover_stranded_answer(store, message_id)? {'
+replace = '        if false && message.kind == "answer" && super::recover_stranded_answer(store, message_id)? {'
+
+[[plant]]
+name = "t1780 recovery: a declined held answer reopens the old question"
+meant = "declining_an_old_held_answer_does_not_reopen_the_moved_question"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "declining_an_old_held_answer_does_not_reopen_the_moved_question"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "AND a.state NOT IN ('gated', 'cancelled', 'failed'))"
+replace = "AND a.state NOT IN ('cancelled', 'failed'))"
+
+[[plant]]
+name = "t1780 recovery: an answer can cross project boundaries"
+meant = "opening_does_not_move_a_mismatched_project_answer_to_another_chief"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "opening_does_not_move_a_mismatched_project_answer_to_another_chief"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = 'JOIN message q ON q.id = a.reply_to AND q.project_id = a.project_id'
+replace = 'JOIN message q ON q.id = a.reply_to'
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = 'JOIN task t ON t.id = a.task_id AND t.project_id = a.project_id'
+replace = 'JOIN task t ON t.id = a.task_id'
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = 'JOIN participant p ON p.id = a.recipient_id AND p.project_id = a.project_id'
+replace = 'JOIN participant p ON p.id = a.recipient_id'
+
+[[plant]]
+name = "t1780 recovery: another projects member is named as holder"
+meant = "opening_does_not_move_a_mismatched_project_answer_to_another_chief"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "opening_does_not_move_a_mismatched_project_answer_to_another_chief"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''               AND (t.assignee_id IS NULL OR EXISTS (SELECT 1 FROM participant holder
+                    WHERE holder.id = t.assignee_id AND holder.project_id = t.project_id))'''
+replace = '               AND 1 = 1'

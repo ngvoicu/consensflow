@@ -44,8 +44,8 @@ pub const MOVED_QUESTION: &str = "the task moved to another window";
 
 pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{
-    adopt, fold, reconcile_released, release_carried, release_stranded, retire_old_moved_questions,
-    transfer,
+    adopt, fold, reconcile_released, recover_old_stranded_answers, recover_stranded_answer,
+    release_carried, release_stranded, retire_old_moved_questions, transfer,
 };
 pub use continuations::{
     continuation, continuation_in, continuation_tasks, cut_turn, cut_turn_unquoted,
@@ -426,7 +426,25 @@ pub(crate) fn answer(
 /// not where it first went, and direct the answerer's words to the task itself.
 fn moved_task_takes_no_answer(store: &Store, task: &TaskRow) -> Result<LedgerError, LedgerError> {
     let number = task.number;
-    let place = if matches!(task.state.as_str(), "accepted" | "cancelled") {
+    let place = moved_task_location(store, task)?;
+    let tell = match task.state.as_str() {
+        "done" | "failed" => format!("To go on, reopen it with cf task reopen T-{number} \"…\", then use cf tell T-{number} \"…\" for what you meant to answer."),
+        "accepted" | "cancelled" => "This task cannot receive a tell. Start a new task with what you meant to answer, or use cf tell on the new task.".to_owned(),
+        _ => format!("Use cf tell T-{number} \"…\" for what you meant to answer."),
+    };
+    Ok(LedgerError::refused_with(
+        "question-moved",
+        format!(
+            "T-{number} {place}; the new window starts over without the old conversation. {tell}"
+        ),
+        409,
+    ))
+}
+
+/// The current location, shared with recovery notices about answers an older
+/// build accepted after the task had moved.
+fn moved_task_location(store: &Store, task: &TaskRow) -> Result<String, LedgerError> {
+    Ok(if matches!(task.state.as_str(), "accepted" | "cancelled") {
         // The old assignee is still recorded, but no longer holds the task.
         format!("is {}", task.state)
     } else if let Some(window) = task.assignee_id {
@@ -453,19 +471,7 @@ fn moved_task_takes_no_answer(store: &Store, task: &TaskRow) -> Result<LedgerErr
             }
             None => format!("is {} and has no member", task.state),
         }
-    };
-    let tell = match task.state.as_str() {
-        "done" | "failed" => format!("To go on, reopen it with cf task reopen T-{number} \"…\", then use cf tell T-{number} \"…\" for what you meant to answer."),
-        "accepted" | "cancelled" => "This task cannot receive a tell. Start a new task with what you meant to answer, or use cf tell on the new task.".to_owned(),
-        _ => format!("Use cf tell T-{number} \"…\" for what you meant to answer."),
-    };
-    Ok(LedgerError::refused_with(
-        "question-moved",
-        format!(
-            "T-{number} {place}; the new window starts over without the old conversation. {tell}"
-        ),
-        409,
-    ))
+    })
 }
 
 /// The refusal of an answer to a question on a task that is over (accepted,

@@ -20,7 +20,8 @@ use rusqlite::{Connection, ErrorCode};
 use serde_json::Value;
 
 use crate::messages::{
-    reconcile_answered_on_open, reconcile_released, release_stranded, retire_old_moved_questions,
+    reconcile_answered_on_open, reconcile_released, recover_old_stranded_answers, release_stranded,
+    retire_old_moved_questions,
 };
 use crate::model::LedgerError;
 use crate::names;
@@ -75,8 +76,9 @@ pub struct Ledger {
 /// messages of their own again (`messages::release_stranded`). The tasks of what
 /// was let go of, there or by migration 0019 (what rode in every carrier an
 /// earlier build began to paste), are reconciled once, by the first start after
-/// it that gets that far (`messages::reconcile_released`). Old questions left behind
-/// by a moved or completed window are retired; an older waiting task whose answer
+/// it that gets that far (`messages::reconcile_released`). Queued answers an older
+/// build left at a former window are returned to the chief once, then old questions
+/// left by a moved or completed window are retired. An older waiting task whose answer
 /// is on its way is reconciled on open. A task that waits
 /// for a cancelled one, which a cancel up to 3.0.5 left behind, is told to the
 /// chief once (`tasks::note_stranded_waits`).
@@ -105,6 +107,7 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
     let mut store = Store::new(db, options.clock, options.names, options.trace);
     release_stranded(&mut store)?;
     reconcile_released(&mut store)?;
+    recover_old_stranded_answers(&mut store)?;
     retire_old_moved_questions(&mut store)?;
     reconcile_answered_on_open(&mut store)?;
     note_stranded_waits(&mut store)?;

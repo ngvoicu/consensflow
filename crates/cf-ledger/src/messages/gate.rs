@@ -64,6 +64,11 @@ pub(crate) fn approve_message(
             "message.approved",
             json!({ "message": message_id, "by": by }),
         )?;
+        // A legacy answer can have waited at the gate after its task moved.
+        // Once approved, return it to the chief before it reaches the old window.
+        if message.kind == "answer" && super::recover_stranded_answer(store, message_id)? {
+            return known_message(store, message_id);
+        }
         adopt(store, message_id)?;
         if let ("answer", Some(tell), Some(task)) = (
             message.kind.as_str(),
@@ -111,9 +116,19 @@ pub(crate) fn decline_message(
             .reply_to
             .map_or_else(|| "null".to_string(), |id| id.to_string());
         let mut told = message.sender.clone();
+        let moved = match (message.reply_to, task.as_ref()) {
+            (Some(question), Some(task))
+                if store.message(question)?.is_some_and(|asked| {
+                    asked.reason.as_deref() == Some(super::MOVED_QUESTION)
+                }) =>
+            {
+                Some(super::moved_task_takes_no_answer(store, task)?.to_string())
+            }
+            _ => None,
+        };
         let mut word = format!(
             "@{by} declined your answer to m-{reply_to}. {}",
-            answer_again(&reply_to)
+            moved.unwrap_or_else(|| answer_again(&reply_to))
         );
         if message.kind == "task" {
             if let Some(task) = &task {

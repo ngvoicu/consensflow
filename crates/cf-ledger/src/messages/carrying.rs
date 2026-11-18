@@ -26,6 +26,7 @@ use super::messages;
 use super::receipt::reconcile;
 use super::told::{behind_held_words, told};
 use crate::model::LedgerError;
+use crate::queue::{queue, Queued};
 use crate::store::Store;
 use crate::tasks::RESUME_WORDS;
 use crate::views::{message_view, ParticipantRow, TaskRow, MESSAGE_SELECT};
@@ -352,6 +353,101 @@ pub(crate) fn reconcile_released(store: &mut Store) -> Result<(), LedgerError> {
     })
 }
 
+struct StrandedAnswer {
+    question: i64,
+    project: i64,
+    number: i64,
+    old: String,
+    words: String,
+}
+
+/// An older build could accept an answer after its task had left the asking
+/// session. Give the chief its words and the task's current place once, in the
+/// same transaction that withdraws the queued answer. Only a prior task brief
+/// proves that this session held the task; another session may legitimately
+/// ask a question about it. Gated and received answers are not ours to recover.
+pub(crate) fn recover_old_stranded_answers(store: &mut Store) -> Result<(), LedgerError> {
+    recover_stranded_answers(store, None).map(|_| ())
+}
+
+/// A human may pass on an older answer that was still at the gate at open.
+/// Once approved it is queued, and the same recovery applies before delivery.
+pub(crate) fn recover_stranded_answer(store: &mut Store, answer: i64) -> Result<bool, LedgerError> {
+    Ok(recover_stranded_answers(store, Some(answer))? != 0)
+}
+
+fn recover_stranded_answers(store: &mut Store, only: Option<i64>) -> Result<usize, LedgerError> {
+    store.write(|store| {
+        // Select only ids first: even a valid answer can be a million UTF-16
+        // units, so opening a ledger must not copy every old answer at once.
+        let selected = if only.is_some() { "a.id = ?1" } else { "?1 IS NULL" };
+        let stranded = ids(store,
+            &format!("SELECT a.id
+             FROM message a JOIN message q ON q.id = a.reply_to AND q.project_id = a.project_id
+             JOIN task t ON t.id = a.task_id AND t.project_id = a.project_id
+             JOIN participant p ON p.id = a.recipient_id AND p.project_id = a.project_id
+             WHERE a.kind = 'answer' AND a.state = 'queued' AND p.member_id IS NOT NULL
+               AND {selected}
+               AND q.kind = 'question' AND q.urgent = 0 AND q.task_id = a.task_id
+               AND q.sender_id = a.recipient_id AND t.assignee_id IS NOT a.recipient_id
+               AND (t.assignee_id IS NULL OR EXISTS (SELECT 1 FROM participant holder
+                    WHERE holder.id = t.assignee_id AND holder.project_id = t.project_id))
+               AND EXISTS (SELECT 1 FROM message b WHERE b.task_id = t.id AND b.project_id = t.project_id
+                           AND b.kind = 'task' AND b.recipient_id = a.recipient_id AND b.id < q.id)
+             ORDER BY a.id"),
+            [only],
+        )?;
+        let count = stranded.len();
+        for answer in stranded {
+            let StrandedAnswer { question, project, number, old, words } = store.db.query_row(
+                "SELECT q.id, a.project_id, t.number, p.handle, a.body
+                 FROM message a JOIN message q ON q.id = a.reply_to
+                 JOIN task t ON t.id = a.task_id JOIN participant p ON p.id = a.recipient_id
+                 WHERE a.id = ?",
+                [answer],
+                |row| Ok(StrandedAnswer {
+                    question: row.get(0)?, project: row.get(1)?, number: row.get(2)?,
+                    old: row.get(3)?, words: row.get(4)?,
+                }),
+            )?;
+            let task = store.task_row(project, number)?;
+            let chief = store.participant_by_handle(project, "chief")?;
+            let moved = super::moved_task_takes_no_answer(store, &task)?;
+            let body = format!(
+                "Your answer m-{answer} was not received by @{old}. At recovery, {moved}\n\nYour words:\n{words}"
+            );
+            // The original answer already met the input limit. Its full text
+            // plus this short system notice may exceed that limit, so queue it
+            // directly rather than dropping words or failing the ledger open.
+            let notice = queue(store, project, &Queued {
+                to: chief.id, kind: "note", body: &body, ..Queued::default()
+            })?;
+            let reason = format!("returned to @chief in m-{notice} after T-{number} moved");
+            store.db.execute(
+                "UPDATE message SET state = 'cancelled', reason = ?1 WHERE id = ?2 AND state = 'queued'",
+                params![reason, answer],
+            )?;
+            store.db.execute(
+                &format!(
+                    "UPDATE message SET state = 'cancelled', reason = ?1,
+                         door_closed_at = COALESCE(door_closed_at,
+                             (SELECT updated_at FROM task WHERE id = message.task_id))
+                     WHERE id = ?2 AND NOT {}",
+                    super::has_standing_answer("message")
+                ),
+                params![super::MOVED_QUESTION, question],
+            )?;
+            store.log(project, "message.sent", json!({
+                "message": notice, "kind": "note", "from": null, "to": "chief"
+            }))?;
+            store.log(project, "message.recovered", json!({
+                "message": answer, "notice": notice, "task": number
+            }))?;
+        }
+        Ok(count)
+    })
+}
+
 /// An older release left questions the chief had seen live, and gave an unseen
 /// question only a generic withdrawal reason. On open, retire those whose sender
 /// had the task before asking but no longer has it. The earlier task message's id
@@ -362,20 +458,18 @@ pub(crate) fn retire_old_moved_questions(store: &mut Store) -> Result<(), Ledger
     store.write(|store| {
         let old = ids(
             store,
-            &format!(
-                "SELECT q.id FROM message q WHERE q.kind = 'question' AND q.urgent = 0
+            "SELECT q.id FROM message q WHERE q.kind = 'question' AND q.urgent = 0
                    AND (q.state IN ('queued', 'delivering', 'gated', 'delivered', 'read', 'failed')
                         OR (q.state = 'cancelled' AND (q.reason LIKE '@% no longer has T-%'
                             OR EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer'))))
-                   AND q.reason IS NOT ?1 AND NOT {}
+                   AND q.reason IS NOT ?1 AND NOT EXISTS (
+                       SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer'
+                         AND a.state NOT IN ('gated', 'cancelled', 'failed'))
                    AND EXISTS (
                        SELECT 1 FROM task t WHERE t.id = q.task_id
-                         AND t.state IN ('open', 'queued', 'working', 'waiting', 'paused', 'done')
                          AND t.assignee_id IS NOT q.sender_id
                          AND EXISTS (SELECT 1 FROM message b WHERE b.task_id = t.id
                                      AND b.kind = 'task' AND b.recipient_id = q.sender_id AND b.id < q.id))",
-                super::has_standing_answer("q")
-            ),
             [super::MOVED_QUESTION],
         )?;
         for question in old {
