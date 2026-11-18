@@ -2,13 +2,16 @@
 # BKV-03: the scheduler gives a task to a backup only when no member is free, and a member on
 # Vacation takes none (`crates/cf-engine/src/scheduler.rs`, `taker`, `not_free`;
 # `dispatcher.rs`, `send_on_vacation`, `remove_member`). The engine's cases are
-# `crates/cf-engine/tests/dispatcher/backups.rs` and `vacation.rs`.
+# `crates/cf-engine/tests/dispatcher/backups.rs` and `vacation.rs`. The rule of 2026-11-17 (a task
+# its member cannot run goes to its backup, new or given) is `backup_rule.rs`, and its plants
+# are the "bkv engine: rule" ones.
 # Every name contains `bkv ledger` or `bkv engine`, so one turn runs this table.
 
 [run]
 bkv-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vacation"]
 bkv-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backups::"]
 bkv-vacation = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "vacation::"]
+bkv-rule = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]
 bkv-plain-run = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "plain_run::"]
 
 [[plant]]
@@ -324,15 +327,13 @@ find = '''        if let Some(best) = rank(free, candidates).first() {'''
 replace = '''        if let Some(best) = rank(free, candidates).first().filter(|_| false) {'''
 
 [[plant]]
-name = "bkv engine: a busy or moved member's backup takes its tasks"
-meant = "only_a_hold_that_is_a_quota_or_an_account_gives_the_task_to_the_backup"
+name = "bkv engine: a busy model within its tries gives its tasks to the backup"
+meant = "a_busy_model_within_its_tries_gives_nothing_to_the_backup"
 runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backups::"]]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''                held: Held::Quota | Held::Account,
-                kind: Some(HoldKind::Quota | HoldKind::Account),'''
-replace = '''                held: Held::Quota | Held::Account | Held::Busy | Held::Moved,
-                kind: Some(_),'''
+find = '''                Held::Busy => *spent,'''
+replace = '''                Held::Busy => true,'''
 
 [[plant]]
 name = "bkv engine: a hold with no kind gives its task to the backup"
@@ -340,10 +341,11 @@ meant = "a_hold_nobody_typed_never_gives_the_task_to_a_backup"
 runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backups::"]]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''                held: Held::Quota | Held::Account,
-                kind: Some(HoldKind::Quota | HoldKind::Account),'''
-replace = '''                held: Held::Quota | Held::Account,
-                kind: _,'''
+find = '''                    matches!(kind, Some(HoldKind::Quota | HoldKind::Account))'''
+replace = '''                    {
+                        let _ = kind;
+                        true
+                    }'''
 
 [[plant]]
 name = "bkv engine: the backup of the earliest reset takes the task"
@@ -380,6 +382,10 @@ runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher"
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''        if seat.vacation_since.is_some() {'''
 replace = '''        if seat.vacation_since.is_some() && !self.out(member.out_until.as_deref()) {'''
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''of.vacation_since.is_none().then_some(())?;'''
+replace = '''let _ = of.vacation_since;'''
 
 [[plant]]
 name = "bkv engine: the giver is told again at every pick"
@@ -580,3 +586,151 @@ runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "backup_vaca
 file = "crates/cf-ledger/migrations/0039.sql"
 find = "WHEN '9999-12-31T23:59:59.998Z' THEN 'account'"
 replace = "WHEN '9999-12-31T23:59:59.998Z' THEN 'quota'"
+
+[[plant]]
+name = "bkv engine: rule: the sweep never hands work on"
+meant = "a_queued_task_of_a_member_refused_for_its_quota_goes_to_its_free_backup"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''let mut assigned = self.hand_work_to_backups(project)?;'''
+replace = '''let mut assigned = false;'''
+
+[[plant]]
+name = "bkv engine: rule: a task the human paused is handed on too"
+meant = "a_task_by_name_a_follow_up_and_a_paused_task_stay_with_their_member"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''"paused" => task.held_until.is_some(),'''
+replace = '''"paused" => true,'''
+
+[[plant]]
+name = "bkv engine: rule: a task given by name is released"
+meant = "a_task_by_name_a_follow_up_and_a_paused_task_stay_with_their_member"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''                    if task.pool.is_none()
+                        || self
+                            .seams
+                            .ledger
+                            .borrow()
+                            .check_release(project.id, task.number)
+                            .is_err()
+                    {
+                        continue;
+                    }
+'''
+replace = ''''''
+
+[[plant]]
+name = "bkv engine: rule: a member on Vacation hands its work on"
+meant = "a_member_on_vacation_keeps_its_task_and_its_backup_takes_nothing_for_it"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''.filter(|why| why.cannot_run() && of.vacation_since.is_none())'''
+replace = '''.filter(|why| why.cannot_run())'''
+
+[[plant]]
+name = "bkv engine: rule: the backup of a member on Vacation takes a new task"
+meant = "a_member_on_vacation_that_needs_an_edit_leaves_a_new_task_waiting_and_its_backup_rests"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''of.vacation_since.is_none().then_some(())?;'''
+replace = '''let _ = of.vacation_since;'''
+
+[[plant]]
+name = "bkv engine: rule: a busy model past its tries is no failure"
+meant = "a_task_whose_models_busy_tries_are_spent_goes_to_the_backup_not_before"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''Held::Busy => *spent,'''
+replace = '''Held::Busy => false,'''
+
+[[plant]]
+name = "bkv engine: rule: the tries spent are not marked"
+meant = "a_task_whose_models_busy_tries_are_spent_goes_to_the_backup_not_before"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''self.scheduler.busy_spent.borrow_mut().insert(owner.id);'''
+replace = '''let _ = owner;'''
+
+[[plant]]
+name = "bkv engine: rule: another free member is preferred to the backup for a busy model"
+meant = "a_busy_model_past_its_tries_goes_to_the_backup_before_another_free_member"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''        if spent
+            && !self.backup_is_free(project, owner, task)?
+            && self.another_is_free(project, owner, task)?
+        {'''
+replace = '''        if spent && self.another_is_free(project, owner, task)? {'''
+
+[[plant]]
+name = "bkv engine: rule: a backup that is out takes the work"
+meant = "with_the_backup_out_too_the_task_waits_and_goes_to_the_backup_when_it_is_free_first"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''.filter(|backup| self.not_free(&Seat::of_backup(backup)).is_none())'''
+replace = '''.filter(|_| true)'''
+
+[[plant]]
+name = "bkv engine: rule: an edit is no failure"
+meant = "a_working_task_of_a_member_that_needs_an_edit_or_whose_model_moved_goes_to_its_backup"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''NotFree::NoAdapter { .. } | NotFree::NeedsEdit { .. } => true,'''
+replace = '''NotFree::NoAdapter { .. } | NotFree::NeedsEdit { .. } => false,'''
+
+[[plant]]
+name = "bkv engine: rule: a moved model is no failure"
+meant = "a_working_task_of_a_member_that_needs_an_edit_or_whose_model_moved_goes_to_its_backup"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''Held::Moved => matches!(kind, Some(HoldKind::Moved)),'''
+replace = '''Held::Moved => false,'''
+
+[[plant]]
+name = "bkv engine: rule: a member that does not come back is not the latest"
+meant = "with_no_member_able_a_new_task_goes_to_the_backup_of_the_one_that_does_not_come_back"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''NotFree::NoAdapter { .. } | NotFree::NeedsEdit { .. } => Some(i64::MAX),'''
+replace = '''NotFree::NoAdapter { .. } | NotFree::NeedsEdit { .. } => Some(0),'''
+
+[[plant]]
+name = "bkv engine: rule: the started-over task is not warned"
+meant = "a_working_task_of_a_member_out_of_quota_starts_over_on_its_backup_in_a_fresh_window_with_the_warning"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''release_told(store, project_id, number, because, false, false)'''
+replace = '''release_told(store, project_id, number, because, true, false)'''
+
+[[plant]]
+name = "bkv engine: rule: a busy model moves every task of the member"
+meant = "a_busy_model_moves_only_the_task_whose_own_tries_are_spent_not_the_one_at_work"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''.is_none_or(|tries| *tries <= BUSY_BACKOFF_MS.len())'''
+replace = '''.is_some_and(|tries| *tries < 0)'''
+
+[[plant]]
+name = "bkv engine: rule: the move tells its giver twice"
+meant = "the_giver_is_told_once_in_one_line_when_a_task_moves_to_the_backup"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "backup_rule::"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = '''release_told(store, project_id, number, because, false, false)'''
+replace = '''release_told(store, project_id, number, because, false, true)'''

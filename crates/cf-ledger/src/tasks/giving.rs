@@ -731,6 +731,30 @@ pub(crate) fn release_inside(
     because: &str,
     untouched: bool,
 ) -> Result<TaskReleased, LedgerError> {
+    release_told(store, project_id, number, because, untouched, true)
+}
+
+/// [`release_task`] for a task the caller gives to its member's backup in the same step: its
+/// requester is told once, by the note of that move (`tell_backup_took`), so the release says
+/// nothing of its own unless it asks something of the requester (a follow-up left bound, words
+/// withdrawn from the gate).
+pub(crate) fn hand_task_on(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    because: &str,
+) -> Result<TaskReleased, LedgerError> {
+    release_told(store, project_id, number, because, false, false)
+}
+
+fn release_told(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+    because: &str,
+    untouched: bool,
+    tell: bool,
+) -> Result<TaskReleased, LedgerError> {
     model::require_text(because, "because", 1000)?;
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
@@ -837,20 +861,22 @@ pub(crate) fn release_inside(
             ),
             _ => note,
         };
-        send(
-            store,
-            project_id,
-            &Sent {
-                to: &requester.handle,
-                task: Some(number),
-                kind: "note",
-                body: &note,
-                shown: (!asks)
-                    .then(|| note.strip_prefix(&format!("T-{number} ")))
-                    .flatten(),
-                ..Sent::default()
-            },
-        )?;
+        if tell || asks {
+            send(
+                store,
+                project_id,
+                &Sent {
+                    to: &requester.handle,
+                    task: Some(number),
+                    kind: "note",
+                    body: &note,
+                    shown: (!asks)
+                        .then(|| note.strip_prefix(&format!("T-{number} ")))
+                        .flatten(),
+                    ..Sent::default()
+                },
+            )?;
+        }
         release_ready(store, project_id)?;
         Ok(TaskReleased {
             task: task_by_id(store, task.id)?,
