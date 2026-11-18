@@ -12,6 +12,11 @@ use super::*;
 const COMMIT: &str = "2819dc1f0a6b4c3d5e7f8091a2b3c4d5e6f70819";
 const OTHER: &str = "a09025c1aaaabbbbccccddddeeeeffff00001111";
 const REPOSITORY: &str = "ngvoicu/consensflow";
+const EXPECTED_RETRY_WAITS: [Duration; 3] = [
+    Duration::from_secs(5),
+    Duration::from_secs(15),
+    Duration::from_secs(45),
+];
 
 /// A GitHub that answers what the test gave it, and keeps what it was asked.
 #[derive(Default)]
@@ -151,7 +156,7 @@ fn retries_and_growing_waits_are_shared_by_run_and_jobs_pages() {
     };
 
     assert_eq!(verdict(&mut github, REPOSITORY, COMMIT).unwrap().run, 7);
-    assert_eq!(github.waits, RETRY_WAITS);
+    assert_eq!(github.waits, EXPECTED_RETRY_WAITS);
     assert_eq!(github.asked.len(), 6);
     assert_eq!(github.asked[0], github.asked[1]);
     assert_eq!(github.asked[2], github.asked[3]);
@@ -180,7 +185,7 @@ fn a_fourth_transient_error_on_another_run_exhausts_the_same_budget() {
     assert!(refused.said().contains("/actions/runs/8/jobs?"));
     assert!(refused.said().contains("HTTP 502"));
     assert_eq!(github.asked.len(), 6);
-    assert_eq!(github.waits, RETRY_WAITS);
+    assert_eq!(github.waits, EXPECTED_RETRY_WAITS);
 }
 
 #[test]

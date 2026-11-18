@@ -51,9 +51,9 @@ const PAGES: usize = 20;
 
 /// One budget for the whole verdict, including every run and jobs page.
 const RETRY_WAITS: [Duration; 3] = [
-    Duration::from_secs(1),
-    Duration::from_secs(2),
-    Duration::from_secs(4),
+    Duration::from_secs(5),
+    Duration::from_secs(15),
+    Duration::from_secs(45),
 ];
 
 /// GitHub's API, as `gh api` answers it.
