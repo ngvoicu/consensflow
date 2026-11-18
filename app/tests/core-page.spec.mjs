@@ -2832,6 +2832,121 @@ test("reassigns a task given by tier from its drawer, working or paused, never t
   await expect(named.getByRole('button', { name: /^Reassign/ })).toHaveCount(0)
 })
 
+/**
+ * T-12 at work for zeus after a long thread: a hundred and twenty steps (a question and its
+ * answer, again and again) and what its window wrote, as a task worked for hours reads.
+ */
+function longThread() {
+  const data = model()
+  const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+  Object.assign(lane.participant, { member: 'zeus', session: 'amber-pine' })
+  lane.tasks.push(
+    task(12, 'Serve the docs', 'working', 'chief', 'zeus', 3, { pool: 'worker', tier: 'standard' }),
+  )
+  const messages = [message(100, 'task', 'chief', 'zeus', 'Serve the docs', 300)]
+  for (let at = 1; at < 120; at += 2) {
+    messages.push(
+      message(100 + at, 'question', 'zeus', 'chief', `Which port, try ${at}?`, 300 - at),
+      message(101 + at, 'answer', 'chief', 'zeus', `Port ${8000 + at}.`, 299 - at),
+    )
+  }
+  data.tasks['1:12'] = { ...lane.tasks.at(-1), messages }
+  data.transcripts = {
+    '1:12': {
+      total: 1,
+      items: [{ id: 'u1', role: 'user', text: 'Serve the docs', complete: true, at: null }],
+    },
+  }
+  return data
+}
+
+/** Reads the open drawer's thread down to its end, and its window's fold under it. */
+const readToEnd = (drawer) =>
+  drawer.locator('.drawer-body').evaluate((node) => {
+    node.scrollTop = node.scrollHeight
+  })
+
+for (const [width, height] of [
+  [1280, 720],
+  [700, 900],
+]) {
+  test(`shows a long task's buttons as its drawer opens, and keeps them in view down its thread, ${width}px wide`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height })
+    await open(page, longThread())
+    await page.locator('button.card[data-task="12"]').click()
+    const drawer = page.getByRole('complementary', { name: 'Task T-12' })
+    await expect(drawer.locator('.step')).toHaveCount(121)
+    const acts = ['Show terminal', 'Pause', 'Reassign', 'Finish', 'Cancel task']
+    const buttons = drawer.locator('.drawer-actions').getByRole('button')
+    await expect(buttons).toHaveText(acts)
+    // As it opens, before any scroll: each wholly in the drawer's view.
+    expect(await drawer.locator('.drawer-body').evaluate((node) => node.scrollTop)).toBe(0)
+    for (const at of acts.keys()) await expect(buttons.nth(at)).toBeInViewport({ ratio: 1 })
+    // Read down to the thread's end and its window's fold, they are still there, with the
+    // task's title.
+    await readToEnd(drawer)
+    await expect(drawer.locator('details[data-section="transcript"] summary')).toBeInViewport()
+    for (const at of acts.keys()) await expect(buttons.nth(at)).toBeInViewport({ ratio: 1 })
+    await expect(drawer.locator('.drawer-title')).toBeInViewport({ ratio: 1 })
+  })
+}
+
+test("never leaves a step the keys go back to under the task's head", async ({ page }) => {
+  await open(page, longThread())
+  await page.locator('button.card[data-task="12"]').click()
+  const drawer = page.getByRole('complementary', { name: 'Task T-12' })
+  await expect(drawer.locator('.step')).toHaveCount(121)
+  await readToEnd(drawer)
+  const head = await drawer.locator('.drawer-top').boundingBox()
+  const headEnd = head.y + head.height
+  // The first step wholly under the head, then back up through the thread, a step a key.
+  const summaries = drawer.locator('.step > summary')
+  const first = await summaries.evaluateAll(
+    (all, end) => all.findIndex((summary) => summary.getBoundingClientRect().top >= end),
+    headEnd,
+  )
+  await summaries.nth(first).focus()
+  for (let back = 0; back < 3; back += 1) {
+    await page.keyboard.press('Shift+Tab')
+    const focused = page.locator('.step > summary:focus')
+    await expect(focused).toHaveCount(1)
+    expect((await focused.boundingBox()).y).toBeGreaterThanOrEqual(headEnd)
+  }
+})
+
+test("keeps a task's number on one line beside a title too long for one", async ({ page }) => {
+  const data = model()
+  data.tasks['1:2'].title = 'Write the parser, the lexer, its tests and the docs that say how'
+  await open(page, data)
+  await page.locator('button.card[data-task="2"]').click()
+  const number = page.getByRole('complementary', { name: 'Task T-2' }).locator('h2 .card-number')
+  await expect(number).toHaveText('T-2')
+  const lines = (node) => {
+    const range = document.createRange()
+    range.selectNodeContents(node)
+    return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size
+  }
+  expect(await number.evaluate(lines)).toBe(1)
+})
+
+test('opens a task at its top after a drawer closed read down to its end', async ({ page }) => {
+  await open(page, longThread())
+  const card = page.locator('button.card[data-task="12"]')
+  const drawer = page.getByRole('complementary', { name: 'Task T-12' })
+  await card.click()
+  await expect(drawer.locator('.step')).toHaveCount(121)
+  await readToEnd(drawer)
+  // Closed where it was read to, by its own Close, in view there.
+  await drawer.getByRole('button', { name: 'Close the task' }).click()
+  await expect(drawer).toBeHidden()
+  await card.click()
+  await expect(drawer.locator('.step')).toHaveCount(121)
+  expect(await drawer.locator('.drawer-body').evaluate((node) => node.scrollTop)).toBe(0)
+  await expect(drawer.locator('.step-label').first()).toBeInViewport()
+})
+
 /** A board whose worker rests, its task T-12 going on in the background as its lane says. */
 function heldModel(held = { task: 12, jobs: 1, agents: 0 }) {
   const data = model()
@@ -15961,6 +16076,33 @@ for (const scheme of ['dark', 'light']) {
       await shot('member-card-after-edit', row('gpt-6-1-sol-max'))
     }
     testInfo.annotations.push({ type: 'shots', description: SHOTS })
+  })
+}
+
+// Shots of a long task's drawer (T-1751), as it opens and read down to its end, wide and
+// narrow, in dark and light: `CF_SHOTS_VARIANT` names the build they are of.
+for (const scheme of ['dark', 'light']) {
+  test(`shots: a long task's drawer, ${scheme}`, async ({ page }) => {
+    test.skip(!SHOTS, 'CF_SHOTS_DIR names where the shots go')
+    await page.emulateMedia({ colorScheme: scheme })
+    await open(page, longThread())
+    for (const [width, height] of [
+      [1280, 720],
+      [700, 900],
+    ]) {
+      await page.setViewportSize({ width, height })
+      await page.locator('button.card[data-task="12"]').click()
+      const drawer = page.getByRole('complementary', { name: 'Task T-12' })
+      await expect(drawer.locator('.step')).toHaveCount(121)
+      const shot = (where) =>
+        page.screenshot({
+          path: join(SHOTS, `drawer-${SHOT_VARIANT}-${scheme}-${width}-${where}.png`),
+        })
+      await shot('open')
+      await readToEnd(drawer)
+      await shot('end')
+      await drawer.getByRole('button', { name: 'Close the task' }).click()
+    }
   })
 }
 
