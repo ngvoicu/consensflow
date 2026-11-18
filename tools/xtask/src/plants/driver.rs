@@ -754,8 +754,8 @@ pub fn run(
         "copies of what is planted are kept in {}",
         saved.display()
     )?;
-    // The run's folder is the temp folder of every command of it: what a plant makes fail
-    // on purpose leaves reports and homes there, and they go with it.
+    // Tests use the run's folder for their reports and homes; Cargo and other
+    // preparation keep the caller's temp folder.
     runner.temp_in(&saved);
     let limit = family.limit.as_secs();
     let mut built = false;

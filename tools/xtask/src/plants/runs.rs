@@ -134,10 +134,9 @@ pub trait Runner {
     /// came with no command in hand is not lost.
     fn stopped(&mut self) -> bool;
 
-    /// Gives the commands it runs from now on `folder` as their temp folder. A plant
-    /// makes tests fail on purpose, and a rig of the integration suites keeps a report
-    /// of each case that fails (and leaves its home when its run was ended): in the
-    /// machine's own temp folder those stay for good, in the run's they go with it.
+    /// Gives test processes `folder` as their temp folder. Cargo and other non-test
+    /// commands keep the caller's temp: tests that fail on purpose leave reports and
+    /// rig homes in the run's folder rather than the machine's shared temp.
     /// A runner that runs nothing has none to give.
     fn temp_in(&mut self, _folder: &Path) {}
 

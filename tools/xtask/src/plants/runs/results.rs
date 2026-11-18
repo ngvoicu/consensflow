@@ -159,7 +159,10 @@ pub fn junit(xml: &str) -> Result<Results, String> {
                 });
             }
             Event::Empty(element) if element.name().as_ref() == b"testcase" => {
-                results.tests.push(testcase(&element)?);
+                let test = testcase(&element)?;
+                if !test.at.starts_with("@setup-script:") {
+                    results.tests.push(test);
+                }
             }
             Event::Empty(element) if element.name().as_ref() == b"testsuites" => ended = true,
             Event::Start(element) | Event::Empty(element) => {
@@ -187,6 +190,16 @@ pub fn junit(xml: &str) -> Result<Results, String> {
             }
             Event::End(element) if element.name().as_ref() == b"testcase" => {
                 let Some(case) = open.take() else { continue };
+                // Nextest's setup scripts appear in JUnit as testcases, but ran no
+                // test. A failed setup is an error outside tests, never a catch.
+                if case.test.at.starts_with("@setup-script:") {
+                    if case.test.failed || case.skipped {
+                        results
+                            .outside
+                            .push(format!("nextest setup {} did not succeed", case.test.name));
+                    }
+                    continue;
+                }
                 let unstarted = case.unstarted();
                 let test = Test {
                     failed: case.test.failed && !case.skipped && !unstarted,
