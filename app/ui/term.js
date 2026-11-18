@@ -176,6 +176,95 @@ function theme() {
   return said
 }
 
+/** `#rgb` or `#rrggbb` as its three channels, or null. */
+function channels(colour) {
+  const hex = /^#([\da-f]{3}|[\da-f]{6})$/i.exec(colour ?? '')?.[1]
+  if (!hex) return null
+  const full = hex.length === 3 ? [...hex].map((digit) => digit + digit).join('') : hex
+  return [0, 2, 4].map((at) => Number.parseInt(full.slice(at, at + 2), 16))
+}
+
+/** WCAG's contrast of two colours, 1 to 21. */
+function contrast(a, b) {
+  const light = (colour) => {
+    const [r, g, b] = colour.map((value) => {
+      const share = value / 255
+      return share <= 0.03928 ? share / 12.92 : ((share + 0.055) / 1.055) ** 2.4
+    })
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  }
+  const [high, low] = [light(a), light(b)].sort((x, y) => y - x)
+  return (high + 0.05) / (low + 0.05)
+}
+
+/** Colour 16 to 255 of the 256 as xterm draws them: a 6×6×6 cube, then 24 greys. */
+function extended(index) {
+  if (index >= 232) return Array(3).fill(8 + (index - 232) * 10)
+  const level = (step) => (step ? 55 + step * 40 : 0)
+  const cube = index - 16
+  return [Math.floor(cube / 36), Math.floor(cube / 6) % 6, cube % 6].map(level)
+}
+
+/**
+ * A program's dim words (ESC[2m), drawn readable and still dim. xterm draws a dim word at half
+ * its colour's opacity, over whatever is under it: the window's own words dim read at 4.4 to 1
+ * on the well, and a colour dim as low as 2.3 (blue 2.7, grey 2.3), Claude Code's and Codex's
+ * hints and footers among them. Here a dim word is its colour at `--term-dim` of its opacity,
+ * or at the least share above that which reads at `--term-dim-contrast` to 1 on the well
+ * (page.css): the same rule for the window's own words, the sixteen and the 256. Still partly
+ * see-through, as xterm draws it, so over a ground of a program's own it is that colour fainter.
+ *
+ * What it does not reach, as xterm draws it: a colour too dark to read at the floor even whole
+ * is drawn whole (xterm lifts one under half its own 4.5 to that half); a dim word in a colour of
+ * the program's own (ESC[38;2;…m) xterm draws whole, not dim; and the window's own colours
+ * swapped (ESC[7m) xterm draws in a colour of its own making, at its floor.
+ *
+ * The rules outweigh xterm's own (`.xterm-dom-renderer-owner-N .xterm-fg-N.xterm-dim`, made by its
+ * DOM renderer from the theme) and yield to the colours xterm writes on a word itself.
+ */
+function dimWords(page, said) {
+  if (typeof getComputedStyle !== 'function' || !page?.head || page.getElementById('term-dim')) {
+    return
+  }
+  const style = getComputedStyle(page.documentElement)
+  const share = Number.parseFloat(style.getPropertyValue('--term-dim')) || 0.5
+  const floor = Number.parseFloat(style.getPropertyValue('--term-dim-contrast')) || 1
+  const well = channels(said.background)
+  const words = channels(said.foreground)
+  // The sixteen as page.css says them, after the window's own colours in THEME. Without all of
+  // them the page draws no dim word of its own: its rule for the window's own words would
+  // outweigh xterm's for a colour it had not said.
+  const sixteen = Object.keys(THEME)
+    .slice(5)
+    .map((key) => channels(said[key]))
+  if (!well || !words || sixteen.some((colour) => !colour)) return
+  // In 255ths, as a browser keeps a colour's opacity, and read at the floor both as the blend is
+  // and in the whole steps of each channel the screen draws: not a rounding under it either way.
+  const over = (colour, ground, alpha) =>
+    colour.map((value, at) => value * alpha + ground[at] * (1 - alpha))
+  const reads = (colour, ground, alpha) => {
+    const blend = over(colour, ground, alpha)
+    return Math.min(contrast(blend, ground), contrast(blend.map(Math.round), ground)) >= floor
+  }
+  const dim = (colour, ground) => {
+    let step = Math.ceil(share * 255)
+    while (step < 255 && !reads(colour, ground, step / 255)) step += 1
+    return `rgba(${colour.join(', ')}, ${(step / 255).toFixed(4)})`
+  }
+  const rule = (classes, colour, ground = well) =>
+    `.xterm .xterm-rows span.xterm-dim${classes} { color: ${dim(colour, ground)}; }`
+  const rules = [rule('', words)]
+  for (let index = 0; index < 256; index += 1) {
+    rules.push(rule(`.xterm-fg-${index}`, index < 16 ? sixteen[index] : extended(index)))
+  }
+  // The window's own colours swapped: its ground's colour, on its words' colour.
+  rules.push(rule('.xterm-fg-257', well, words))
+  const sheet = page.createElement('style')
+  sheet.id = 'term-dim'
+  sheet.textContent = rules.join('\n')
+  page.head.append(sheet)
+}
+
 /**
  * What a window is sent for Shift+Enter (T-1330, T-1336, T-1348): a line feed, Ctrl+J, **one byte,
  * in every harness on a Mac and on Windows.** xterm.js 6 has neither the kitty keyboard protocol
@@ -256,6 +345,7 @@ export class XtermEmulator {
       },
       leave: () => this.terminal.element?.removeAttribute('title'),
     }
+    const colours = theme()
     this.terminal = new Terminal({
       allowProposedApi: false,
       convertEol: false,
@@ -268,15 +358,17 @@ export class XtermEmulator {
       // A program's words, in any colour on any background it asks for (ESC[41m and the
       // like), drawn at WCAG AA's 4.5 to 1 at least: the palette is bright for words on the
       // well, which no colour can be and still be dark enough under light words. xterm moves
-      // the words' colour lighter or darker until they read; dim words, by its own rule, at half.
+      // the words' colour lighter or darker until they read; dim words, by its own rule, at half
+      // (the page draws them brighter on the well: `dimWords`).
       minimumContrastRatio: 4.5,
       scrollback: 10_000,
-      theme: theme(),
+      theme: colours,
     })
     this.terminal.registerLinkProvider(plainWebLinks(this.terminal, link))
     this.fitAddon = new FitAddon()
     this.terminal.loadAddon(this.fitAddon)
     this.terminal.open(host)
+    dimWords(host.ownerDocument, colours)
     this.terminal.attachCustomKeyEventHandler((event) => this.#programKey(event))
     this.awaitingPaste = false
     this.clearPaste = () => {

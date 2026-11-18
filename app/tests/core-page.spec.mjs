@@ -3064,6 +3064,95 @@ test("keeps a program's words readable in every ANSI colour and the window's own
   expect(pairs.filter((pair) => pair.ratio < 4.5)).toEqual([])
 })
 
+test("draws a program's dim words readable and still dim, in the window's own colour and each it may ask for, on the window's own ground", async ({
+  page,
+}) => {
+  await page.route(`${ui.origin}/terminal-dim`, (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/page.css"><link rel="stylesheet" href="/vendor/xterm.css"><body><div id="host" style="width:1400px;height:500px"></div></body>',
+    }),
+  )
+  await page.goto(`${ui.origin}/terminal-dim`)
+  const cells = await page.evaluate(async () => {
+    const { XtermEmulator } = await import('/term.js')
+    const terminal = new XtermEmulator(document.getElementById('host'), { onLink: () => {} })
+    terminal.resizeObserver.disconnect()
+    clearTimeout(terminal.settling)
+    terminal.terminal.resize(140, 30)
+    // What Claude Code and Codex draw their hints and footers in: dim (ESC[2m) in the window's
+    // own colour (39). Then each of the sixteen colours and three of the 256 a program may ask
+    // for (a blue, a grey, an orange). Each as words of their own, then the same dim, on the
+    // window's own ground. (The window's own colours swapped, ESC[7m, xterm draws in a colour
+    // of its own making, at its floor, whatever the page says.)
+    const eight = (first) => Array.from({ length: 8 }, (_, colour) => `${first}${colour}`)
+    const words = ['39', ...eight(3), ...eight(9), '38;5;75', '38;5;245', '38;5;214']
+    const printed = words
+      .map((word) => `\x1b[${word}mAb\x1b[0m \x1b[2;${word}mAb\x1b[0m`)
+      .join('\r\n')
+    await new Promise((done) => terminal.terminal.write(printed, done))
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+    const rgba = (css) => {
+      const [r, g, b, a = 1] = css.match(/[\d.]+/g).map(Number)
+      return { colour: [r, g, b], alpha: a }
+    }
+    const light = (colour) => {
+      const [r, g, b] = colour.map((value) => {
+        const share = value / 255
+        return share <= 0.03928 ? share / 12.92 : ((share + 0.055) / 1.055) ** 2.4
+      })
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+    const ratio = (a, b) => {
+      const [high, low] = [light(a), light(b)].sort((x, y) => y - x)
+      return (high + 0.05) / (low + 0.05)
+    }
+    // A cell xterm gives no background shows what is under it: the nearest element painted.
+    const ground = (element) => {
+      for (let at = element; at; at = at.parentElement) {
+        const { colour, alpha } = rgba(getComputedStyle(at).backgroundColor)
+        if (alpha > 0) return colour
+      }
+      return [255, 255, 255]
+    }
+    // A dim colour is drawn partly see-through: what the eye gets is it over its ground.
+    const drawn = (span) => {
+      const { colour, alpha } = rgba(getComputedStyle(span).color)
+      const under = ground(span)
+      return colour.map((value, at) => value * alpha + under[at] * (1 - alpha))
+    }
+    const rows = [...document.querySelectorAll('#host .xterm-rows > div')].slice(0, words.length)
+    return rows.map((row, at) => {
+      const [normal, dim] = [...row.querySelectorAll('span')].filter(
+        (span) => span.textContent.trim() === 'Ab',
+      )
+      return {
+        word: words[at],
+        dimmed: dim.classList.contains('xterm-dim'),
+        normal: ratio(drawn(normal), ground(normal)),
+        dim: ratio(drawn(dim), ground(dim)),
+      }
+    })
+  })
+  expect(cells).toHaveLength(20)
+  expect(cells.every((cell) => cell.dimmed)).toBe(true)
+  const at = (word) => cells.find((cell) => cell.word === word)
+  // Black (30) is the window's own ground: its words are lifted to 4.5 by xterm, and dim ones to
+  // xterm's floor for dim words, half that. Every other colour, dim, reads at WCAG AA.
+  const readable = cells.filter((cell) => cell.word !== '30')
+  expect(readable.filter((cell) => cell.dim < 4.5)).toEqual([])
+  expect(at('30').dim).toBeGreaterThanOrEqual(2.25)
+  // The common case, the agents' hints, sits well above the floor.
+  expect(at('39').dim).toBeGreaterThanOrEqual(5.5)
+  // And each still reads as dim beside its colour's own words: in the window's own colour and
+  // the sixteen the page chooses, a third less contrast at least; in the 256, whose greys a
+  // program may pick near the floor, less at all.
+  const chosen = readable.filter((cell) => !cell.word.startsWith('38;5;'))
+  expect(chosen).toHaveLength(16)
+  expect(chosen.filter((cell) => cell.normal / cell.dim < 1.5)).toEqual([])
+  expect(readable.filter((cell) => cell.normal <= cell.dim)).toEqual([])
+})
+
 for (const [held, words] of [
   [{ task: 12, jobs: 3, agents: 0 }, 'waiting on 3 background jobs'],
   [{ task: 12, jobs: 0, agents: 1 }, 'waiting on a background agent'],

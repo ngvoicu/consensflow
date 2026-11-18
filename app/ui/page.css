@@ -45,7 +45,9 @@
   --term-magenta: #c084fc;
   --term-cyan: #22d3ee;
   --term-white: #d4d4d8;
-  --term-bright-black: #8a8a93;
+  /* Grey, the page's own quiet words (--muted), 7.5 to 1 on the well: far enough above the
+     dim floor below that a dim grey still reads dimmer than grey. */
+  --term-bright-black: #a1a1aa;
   --term-bright-red: #fca5a5;
   --term-bright-green: #86efac;
   --term-bright-yellow: #fde68a;
@@ -53,6 +55,12 @@
   --term-bright-magenta: #d8b4fe;
   --term-bright-cyan: #67e8f9;
   --term-bright-white: #fafafa;
+  /* A program's dim words (ESC[2m: Claude Code's and Codex's hints and footers): their colour
+     at this share of its opacity, and more where that would read under the contrast below on
+     the well (term.js). The window's own words dim read at 5.9 to 1 (its words, 15.2), every
+     colour dim at 4.5 or more. */
+  --term-dim: .6;
+  --term-dim-contrast: 4.5;
 }
 
 * { box-sizing: border-box; }
