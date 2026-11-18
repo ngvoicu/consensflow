@@ -41,10 +41,11 @@ extern "C" fn clean_up() {
 }
 
 /// All variables by which a harness may find its home, under `home`.
-pub fn home_vars(home: &Path) -> [(&'static str, PathBuf); 12] {
+pub fn home_vars(home: &Path) -> [(&'static str, PathBuf); 13] {
     [
         ("HOME", home.to_path_buf()),
         ("USERPROFILE", home.to_path_buf()),
+        ("CFFIXED_USER_HOME", home.to_path_buf()),
         ("CLAUDE_CONFIG_DIR", home.join(".claude")),
         ("CODEX_HOME", home.join(".codex")),
         ("PI_CODING_AGENT_DIR", home.join(".pi/agent")),
@@ -579,6 +580,16 @@ pub(crate) fn unowned_tempdir() -> tempfile::TempDir {
 #[cfg(test)]
 mod tests {
     use super::safe_path_entry;
+
+    #[test]
+    fn t1778_standin_home_also_bounds_macos_foundation() {
+        let home = std::path::Path::new("/run-owned-home");
+        let fixed = super::home_vars(home)
+            .into_iter()
+            .find(|(name, _)| *name == "CFFIXED_USER_HOME")
+            .map(|(_, value)| value);
+        assert_eq!(fixed.as_deref(), Some(home));
+    }
 
     #[test]
     fn standin_isolation_missing_inherited_home_refuses_before_searching_path() {

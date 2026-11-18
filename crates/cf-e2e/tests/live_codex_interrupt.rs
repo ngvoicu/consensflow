@@ -191,6 +191,7 @@ fn an_interrupted_question_ends_the_turn_or_idles_the_thread_in_what_codex_says(
     ));
     // The server is started here and not in a rig's window: it is given the kit's home itself.
     let home = install.home_outside_a_rig()?;
+    agents::validate_in_env(&asked, &home)?;
     let flags = isolation(&codex::mcp_servers(install.command(), &home)?)?;
     // The folder is the check's own, and removed with it; Codex knows it by the path it resolves to.
     let scratch = cf_e2e::door::made("live-codex-interrupt-").map_err(|source| Error::File {

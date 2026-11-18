@@ -8,7 +8,8 @@
 //! points `cf` at its own folders, and nothing of the machine's `~/.consensflow`
 //! or of a window this test may itself run in reaches it. A case that needs the
 //! test's own environment under its variables asks for it
-//! ([`Run::inheriting_env`]). The program's input is closed, unless the case
+//! ([`Run::inheriting_env`]); board variables are never inherited implicitly.
+//! The program's input is closed, unless the case
 //! gives it some ([`Run::input`]) or drives it ([`Run::spawn`]).
 //!
 //! On Windows a program is also given the few variables the system needs to
@@ -227,6 +228,12 @@ pub struct Run {
     shipped: Option<PathBuf>,
 }
 
+fn board_variable(name: &OsStr) -> bool {
+    name.to_string_lossy()
+        .to_ascii_uppercase()
+        .starts_with("CONSENSFLOW_")
+}
+
 impl Run {
     /// With leave to start the bundle the release ships, which no case starts otherwise: a
     /// [`Shipped`](crate::shipped::Shipped), made only on GitHub's runner where its workflow
@@ -341,11 +348,21 @@ impl Run {
         run
     }
 
-    /// With the test's own environment underneath its variables, instead of
-    /// the variables alone.
+    /// With the test's own environment underneath its variables, except for
+    /// `CONSENSFLOW_*` (which must be set explicitly by this run).
     #[must_use]
     pub fn inheriting_env(mut self) -> Self {
         self.inherit = true;
+        self
+    }
+
+    /// A stand-in already launched inside a rig's window passes that window's
+    /// own board connection to commands it runs, as a real harness does.
+    #[must_use]
+    pub fn inheriting_window_env(mut self) -> Self {
+        self.inherit = true;
+        self.vars
+            .extend(std::env::vars_os().filter(|(name, _)| board_variable(name)));
         self
     }
 
@@ -444,6 +461,10 @@ impl Run {
             command
                 .env_clear()
                 .envs(required_on_windows(&self.vars, self.finding_programs));
+        } else {
+            for (name, _) in std::env::vars_os().filter(|(name, _)| board_variable(name)) {
+                command.env_remove(name);
+            }
         }
         command.envs(self.vars.iter().map(|(name, value)| (name, value)));
         for name in &self.removed {

@@ -15,7 +15,7 @@
 mod launch;
 mod readiness;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde_json::{json, Map, Value};
@@ -74,11 +74,114 @@ pub fn engine_question(body: &Value) -> Result<Value> {
 
 /// One question to the test binary `program`, called `name`, and what it answered.
 fn ask(program: &Path, name: &str, body: &Value) -> Result<Value> {
-    let ran = Run::new(program)
+    let mut body = body.clone();
+    let muse = matches!(body["op"].as_str(), Some("muse_models" | "muse_usage"))
+        || (body["op"] == "models" && body["kind"] == "muse");
+    let launch = if muse {
+        Some(muse_ask_launch(program, &mut body)?)
+    } else {
+        None
+    };
+    let executable = launch
+        .as_ref()
+        .map_or(program, |launch| launch.program.as_path());
+    let prefix = launch
+        .as_ref()
+        .map_or(&[][..], |launch| launch.prefix.as_slice());
+    let ran = Run::new(executable)
+        .args(prefix)
         .input(format!("{body}\n"))
         .inheriting_env()
         .run()?;
     answered(name, ran.code, &ran.stdout)
+}
+
+/// Model and usage reads also start Muse; keep those processes on the run's
+/// folders and behind the same boundary as a window.
+fn muse_ask_launch(program: &Path, body: &mut Value) -> Result<crate::muse::IsolatedCommand> {
+    let env = body["env"]
+        .as_object_mut()
+        .ok_or_else(|| Error::Daemon("Muse's read has no run-owned environment".to_owned()))?;
+    let mut roots = Vec::new();
+    for name in [
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_STATE_HOME",
+    ] {
+        if let Some(path) = env.get(name).and_then(Value::as_str) {
+            let path = PathBuf::from(path);
+            if !path.is_absolute() || !crate::door::is_made_or_below(&path) {
+                return Err(Error::Daemon(format!("Muse's {name} is not run-owned")));
+            }
+            roots.push(path);
+        }
+    }
+    let config = env
+        .get("XDG_CONFIG_HOME")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .filter(|path| roots.contains(path))
+        .ok_or_else(|| Error::Daemon("Muse's config is not run-owned".to_owned()))?;
+    if !env
+        .get("XDG_DATA_HOME")
+        .and_then(Value::as_str)
+        .is_some_and(|path| roots.contains(&PathBuf::from(path)))
+    {
+        return Err(Error::Daemon("Muse's data is not run-owned".to_owned()));
+    }
+    let runtime = config.join("muse-runtime");
+    crate::door::make_dir_private(&runtime)?;
+    env.insert("HOME".to_owned(), json!(config));
+    env.insert("USERPROFILE".to_owned(), json!(config));
+    env.insert("APPDATA".to_owned(), json!(config.join("AppData/Roaming")));
+    env.insert(
+        "LOCALAPPDATA".to_owned(),
+        json!(config.join("AppData/Local")),
+    );
+    env.insert("CFFIXED_USER_HOME".to_owned(), json!(config));
+    env.insert("XDG_RUNTIME_DIR".to_owned(), json!(runtime));
+
+    #[cfg(target_os = "macos")]
+    let readable = muse_readable(env, crate::muse::installed)?;
+    #[cfg(not(target_os = "macos"))]
+    let readable = Vec::new();
+    crate::muse::isolated_command(program, &roots, &readable)
+}
+
+#[cfg(target_os = "macos")]
+fn muse_readable(
+    env: &mut Map<String, Value>,
+    fallback: impl FnOnce() -> std::result::Result<crate::muse::Installed, String>,
+) -> Result<Vec<PathBuf>> {
+    let path = env
+        .get("PATH")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let selected = super::machine::find_muse_install(&path);
+    let install = match &selected {
+        Some(_) => crate::muse::installed_on(&path, None).map_err(Error::Daemon)?,
+        None => fallback().map_err(Error::Daemon)?,
+    };
+    let bin = install
+        .binary
+        .parent()
+        .ok_or_else(|| Error::Daemon("Muse has no installation folder".to_owned()))?;
+    let launcher = if let Some(selected) = selected {
+        selected
+    } else {
+        let paths = std::iter::once(bin.to_path_buf()).chain(std::env::split_paths(&path));
+        let path = std::env::join_paths(paths)
+            .map_err(|error| Error::Daemon(format!("Muse's PATH: {error}")))?;
+        env.insert("PATH".to_owned(), json!(path.to_string_lossy()));
+        bin.join("muse")
+    };
+    Ok(vec![
+        install.binary.clone(),
+        launcher,
+        bin.join(".muse-version"),
+    ])
 }
 
 /// What a run of the test binary `name` answered: the last line it printed, which
@@ -474,6 +577,30 @@ fn specmint_of(answer: &Value) -> SpecmintSkill {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn t1778_muse_read_preserves_the_run_selected_install() {
+        let root = crate::door::made("muse-list-install-").unwrap();
+        let selected = root.path().join("selected");
+        crate::door::make_dir(&selected).unwrap();
+        crate::door::write_executable(selected.join("muse"), "#!/bin/sh\n").unwrap();
+        crate::door::write(selected.join(".muse-version"), "fixture\n").unwrap();
+        crate::door::write_executable(selected.join("muse-bin-fixture"), "#!/bin/sh\n").unwrap();
+        let fallback = crate::muse::Installed {
+            binary: root.path().join("other/muse-bin-other"),
+            version: "other".to_owned(),
+            stand_in: None,
+        };
+        let selected_path = selected.to_string_lossy().into_owned();
+        let mut env = Map::from_iter([("PATH".to_owned(), json!(selected_path))]);
+        let readable = muse_readable(&mut env, || Ok(fallback)).unwrap();
+        assert_eq!(env["PATH"], json!(selected_path));
+        assert!(readable.contains(&selected.join("muse-bin-fixture")));
+        crate::door::write(selected.join(".muse-version"), "missing\n").unwrap();
+        let error = muse_readable(&mut env, || Err("unexpected fallback".to_owned())).unwrap_err();
+        assert!(error.to_string().contains("muse-bin-missing"), "{error}");
+    }
 
     #[test]
     fn kit_round3_all_record_queries_refuse_foreign_homes() {

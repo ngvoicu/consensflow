@@ -1283,12 +1283,19 @@ fn said(harness: Harness, touched: &[String], refreshed: &[String]) -> String {
     }
     if !touched.is_empty() {
         said.push_str(&format!(
-            "THE RUN CHANGED THE OWNER'S {} SETUP, which a live run on its own login is never to touch \
-             (or the owner's own {name} did, while it ran):\n",
+            "THE OWNER'S {} SETUP CHANGED DURING THE RUN. A live run on its own login is never to touch it; \
+             the owner's own {name} could also have changed it:\n",
             name.to_uppercase()
         ));
         for change in touched {
             said.push_str(&format!("  - {change}\n"));
+        }
+        if harness == Harness::Pi
+            && touched
+                .iter()
+                .any(|change| change.contains("cliproxyapi-models.json"))
+        {
+            said.push_str("Another Pi of the owner's can refresh cliproxyapi-models.json independently; this guard cannot attribute the change.\n");
         }
     }
     if !refreshed.is_empty() {

@@ -63,7 +63,7 @@ pub fn start(
     })?)
     .args(["-c", &format!("{command}; true")]);
     let shell = shell
-        .inheriting_env()
+        .inheriting_window_env()
         .closed_input()
         .spawn()
         .map_err(said)?;

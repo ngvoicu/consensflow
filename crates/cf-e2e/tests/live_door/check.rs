@@ -431,9 +431,13 @@ mod tests {
     fn the_report_names_the_model_door_model_gave_a_member_and_not_the_one_models_gives() {
         let log = Log::begin("live door test").unwrap();
         let models = BTreeMap::from([("codex".to_owned(), "gpt-other".to_owned())]);
-        // What the daemon opens the member's window on is its row, as the roster has it.
-        let rig = cf_e2e::rig::Rig::start(cf_e2e::rig::Config::new(crate::FAKE_AGENT)).unwrap();
-        cf_e2e::live::agents::write_roster(&rig, &[row_of(Harness::Codex, &models)], &log).unwrap();
+        // The fake Codex lists the fixture's model before the live roster is admitted.
+        let row = row_of(Harness::Codex, &models);
+        let config =
+            cf_e2e::rig::Config::new(crate::FAKE_AGENT).codex(env!("CARGO_BIN_EXE_fake-codex"));
+        let rig = cf_e2e::rig::Rig::start(config).unwrap();
+        rig.stand_ins(&json!({ "agents": [row.clone()] })).unwrap();
+        cf_e2e::live::agents::write_roster(&rig, &[row], &log).unwrap();
         rig.close().unwrap();
         assert_eq!(
             log.ran_on().as_deref(),

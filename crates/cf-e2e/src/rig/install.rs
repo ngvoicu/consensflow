@@ -262,9 +262,25 @@ fn system_folders(windows: bool, finder: bool, system_root: Option<&str>) -> Vec
 /// has one likewise, and the stand-in `codex`. The folder they are in, which the `PATH` names.
 /// As the Finder starts it, they are where each harness installs itself instead
 /// (see [`Config::as_the_finder_starts_it`]), and that folder holds none.
-pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf> {
+pub(super) fn write_fake_install(
+    root: &Path,
+    config: &Config,
+    env: &[(String, String)],
+) -> Result<PathBuf> {
     let fake_bin = root.join("fake-bin");
     let home = root.join("home");
+    let selected = var(env, "XDG_DATA_HOME");
+    let data = if selected.is_empty() {
+        home.join(".local/share")
+    } else {
+        PathBuf::from(selected)
+    };
+    if config.muse.is_some() && (!data.is_absolute() || !crate::door::is_made_or_below(&data)) {
+        return Err(Error::Daemon(
+            "Muse's data folder is not owned by this run".to_owned(),
+        ));
+    }
+    let data = files::real_path(&data);
     let projects = home.join(".claude").join("projects").join("integration");
     crate::door::make_dir(&projects)?;
     let own = own_commands(root, config);
@@ -289,6 +305,7 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
                 install,
                 *turn_ms,
                 &files::real_path(&home),
+                &data,
                 &root.join("muse-argv.log"),
             )?;
         }
@@ -304,6 +321,7 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
                 install,
                 real_home,
                 &rig_home,
+                &data,
                 &root.join("muse-argv.log"),
             )?;
         }
@@ -792,7 +810,7 @@ mod tests {
         let root = crate::door::made("cf-test-").unwrap();
         let devin = Path::new("/the/stand-in-devin");
         let given = Config::new("/the/stand-in").devin(devin);
-        let fake_bin = write_fake_install(root.path(), &given).unwrap();
+        let fake_bin = write_fake_install(root.path(), &given, &[]).unwrap();
         let script = files::read_string(&fake_bin.join(stand_in::program_name("devin"))).unwrap();
         if cfg!(windows) {
             assert_eq!(
@@ -814,7 +832,7 @@ mod tests {
     #[test]
     fn the_stand_in_claude_runs_the_program_the_environment_names_and_the_roster_has_two_agents() {
         let root = crate::door::made("cf-test-").unwrap();
-        let fake_bin = write_fake_install(root.path(), &Config::new("/the/stand-in")).unwrap();
+        let fake_bin = write_fake_install(root.path(), &Config::new("/the/stand-in"), &[]).unwrap();
         assert_eq!(fake_bin, root.path().join("fake-bin"));
         assert!(
             !fake_bin.join("codex").exists(),
@@ -910,7 +928,8 @@ mod tests {
     #[test]
     fn the_stand_in_codex_runs_the_program_the_environment_names() {
         let root = crate::door::made("cf-test-").unwrap();
-        let fake_bin = write_fake_install(root.path(), &config().codex("/the/fake-codex")).unwrap();
+        let fake_bin =
+            write_fake_install(root.path(), &config().codex("/the/fake-codex"), &[]).unwrap();
         let script = files::read_string(&fake_bin.join(stand_in::program_name("codex"))).unwrap();
         if cfg!(windows) {
             assert_eq!(
@@ -970,7 +989,7 @@ mod tests {
                 .as_the_finder_starts_it(),
         ] {
             let root = crate::door::made("cf-test-").unwrap();
-            write_fake_install(root.path(), &given).unwrap();
+            write_fake_install(root.path(), &given, &[]).unwrap();
             let launcher = own_commands(root.path(), &given).join("muse");
             assert!(launcher.is_file(), "{}", launcher.display());
         }
@@ -989,14 +1008,14 @@ mod tests {
             .codex("/the/fake-codex")
             .devin("/the/fake-devin")
             .as_the_finder_starts_it();
-        let fake_bin = write_fake_install(root.path(), &given).unwrap();
+        let fake_bin = write_fake_install(root.path(), &given, &[]).unwrap();
         let env = environment(root.path(), &fake_bin, &given, &[]);
         assert_eq!(var(&env, "PATH"), "/usr/bin:/bin:/usr/sbin:/sbin");
         let own = root.path().join("home").join(".local").join("bin");
         assert!(own.join("claude").is_file() && own.join("devin").is_file());
         // The system's folder is there with no Codex in it too, as Homebrew's is.
         let bare = crate::door::made("cf-test-").unwrap();
-        write_fake_install(bare.path(), &config().as_the_finder_starts_it()).unwrap();
+        write_fake_install(bare.path(), &config().as_the_finder_starts_it(), &[]).unwrap();
         assert!(bare.path().join("system-bin").is_dir());
         let system = root.path().join("system-bin");
         assert_eq!(
@@ -1048,6 +1067,24 @@ mod tests {
         muse_in(bin, weekly)
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn t1778_muse_refuses_a_data_folder_the_run_did_not_make() {
+        let bin = crate::door::made("cf-test-").unwrap();
+        let root = crate::door::made("cf-test-").unwrap();
+        let foreign = crate::standin_process::unowned_tempdir();
+        let config = Config::new("/the/stand-in").muse(muse_in(bin.path(), 0), 1);
+        let env = [(
+            "XDG_DATA_HOME".to_owned(),
+            foreign.path().display().to_string(),
+        )];
+        let error = write_fake_install(root.path(), &config, &env)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("not owned by this run"), "{error}");
+        assert!(!root.path().join("fake-bin/muse").exists());
+    }
+
     /// T-1152 (the live matrix's board 0, 2026-11-03): one rig seats a live Muse and Devin. Devin's
     /// home of the run's own moves `XDG_DATA_HOME` for the whole rig, its daemon too, and the
     /// daemon finds a fresh Muse window's session in the data folder that variable names. The
@@ -1097,9 +1134,10 @@ mod tests {
             crate::live::isolation::Isolation::devin(person.path(), &config_home, &data_home)
                 .made_in(root.path());
         let given = Config::new("/the/stand-in").muse_live(install, person.path());
-        let fake_bin = write_fake_install(root.path(), &given).unwrap();
         let homes = devin.vars().unwrap();
+        let fake_bin = root.path().join("fake-bin");
         let env = environment(root.path(), &fake_bin, &given, &homes);
+        write_fake_install(root.path(), &given, &env).unwrap();
         // What the daemon reads a Muse window's sessions by, and what the product's launch adds
         // to the window (`XDG_DATA_HOME` by its real path, where it is reached through a link).
         let daemon = files::real_path(Path::new(var(&env, "XDG_DATA_HOME")));
@@ -1148,7 +1186,7 @@ mod tests {
             );
             let install = muse_at(bin.path(), real.path(), weekly);
             let config = Config::new("/the/stand-in").muse_live(install, real.path());
-            let made = write_fake_install(root.path(), &config);
+            let made = write_fake_install(root.path(), &config, &[]);
             let launcher = root.path().join("fake-bin").join("muse");
             if runs {
                 made.unwrap();

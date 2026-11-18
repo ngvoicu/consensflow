@@ -532,6 +532,9 @@ fn the_app_started_again_on_the_same_home_leaves_the_project_suspended_and_its_r
 fn a_window_is_opened_on_a_conversation_the_harness_keeps_as_the_daemon_opens_one_after_a_quit(
 ) -> Outcome {
     let rig = rig()?;
+    rig.stand_ins(&json!({"agents": [
+        {"id": "fixture", "kind": "claude-code", "model": "claude-sonnet-5-5"}
+    ]}))?;
     let home = rig.var("HOME").unwrap_or_default().to_owned();
     let install = Installed::at(Harness::Claude, FAKE_AGENT, &home);
     let log = Log::begin("live members")?;
@@ -626,6 +629,8 @@ fn a_task_for_a_member_on_a_model_the_flag_names_is_launched_on_it() -> Outcome 
     // The daemon takes the row as the live suites seat it: a member on that model, at that
     // effort; the run's report says it.
     let rig = Rig::start(config())?;
+    // The stand-in must list the model before the live roster admits it.
+    rig.stand_ins(&json!({"agents": [row.clone()]}))?;
     let log = Log::begin("live members")?;
     agents::write_roster(&rig, &[members::stand_in_chief(), row], &log)?;
     assert_eq!(

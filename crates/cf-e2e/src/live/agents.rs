@@ -257,8 +257,8 @@ struct PiOn {
 /// model on that login and ran Pi 6 of 6 there (T-1136). The owner's Mac's Pi 1.5.0 holds
 /// one `cliproxyapi` login, the local CLIProxyAPI proxy's, and no other (T-1172; the owner,
 /// 2026-11-03: "Pi on this Mac can be used with the models pi has now"); its model is the proxy's
-/// `swe-2`, a free pool (the owner, 2026-11-09), at `medium`, the lowest of the efforts Pi's own
-/// list in the kit's folder gives it (`medium`, `high`, `max`; T-1358). The contributor model the
+/// `devin/swe-2`, a free pool, at `medium`, the lowest of the efforts Pi's own
+/// list in the kit's folder gives it (`medium`, `high`, `max`; T-1755). The contributor model the
 /// kit ran before is no longer served there. A machine
 /// this has no row for keeps the cheap model, and the kit's isolation refuses the run
 /// before anything is spent, naming the logins Pi has.
@@ -280,7 +280,7 @@ const PI_ON: [PiOn; 3] = [
     PiOn {
         machine: None,
         provider: "cliproxyapi",
-        model: "cliproxyapi/swe-2",
+        model: "cliproxyapi/devin/swe-2",
         effort: Some("medium"),
         cheap: "the person's own CLIProxyAPI proxy's swe-2, a free pool, at the lowest effort Pi lists for it",
     },
@@ -515,12 +515,180 @@ pub fn write_roster(rig: &Rig, rows: &[Value], log: &Log) -> Result {
                 .to_owned(),
         ));
     }
+    validate_rows(&rows, |harness| listed_by(rig, harness))?;
     let roster = json!({ "agents": rows });
     rig.stand_ins(&roster)?;
     for row in &rows {
         log.launched(row);
     }
     Ok(())
+}
+
+/// Refuse a named model that this run's isolated harness does not list before
+/// opening a chief or member window, including rows that already name an effort.
+fn validate_rows(
+    rows: &[Value],
+    mut read: impl FnMut(Harness) -> std::result::Result<Vec<Listed>, String>,
+) -> Result {
+    let mut lists: Vec<(Harness, Vec<Listed>)> = Vec::new();
+    for row in rows {
+        let named = row["model"].as_str().is_some_and(|name| !name.is_empty());
+        let Some(model) = launched_on(row).filter(|_| named && row["designer"] != true) else {
+            continue;
+        };
+        if !lists.iter().any(|(harness, _)| *harness == model.harness) {
+            let list = read(model.harness).map_err(|reason| {
+                Error::Daemon(format!(
+                    "cannot check {} model {} against this run's list: {reason}",
+                    model.harness.name(),
+                    model.name
+                ))
+            })?;
+            lists.push((model.harness, list));
+        }
+        let list = &lists
+            .iter()
+            .find(|(harness, _)| *harness == model.harness)
+            .ok_or_else(|| Error::Daemon("model list was not kept".to_owned()))?
+            .1;
+        if list
+            .iter()
+            .any(|item| item.name == model.name && !item.disabled)
+        {
+            continue;
+        }
+        let mut nearest: Vec<_> = list.iter().collect();
+        nearest.sort_by_key(|item| (distance(&model.name, &item.name), item.name.as_str()));
+        let names = nearest
+            .iter()
+            .take(5)
+            .map(|item| {
+                if item.disabled {
+                    format!("{} (disabled)", item.name)
+                } else {
+                    item.name.clone()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(Error::Daemon(format!(
+            "{} model {} is not enabled in this run's own list; closest listed ids: {}",
+            model.harness.name(),
+            model.name,
+            if names.is_empty() { "none" } else { &names }
+        )));
+    }
+    Ok(())
+}
+
+/// Admit a directly opened window against the list its rig's daemon reads.
+pub fn validate_window(rig: &Rig, agent: &Value) -> Result {
+    validate_rows(std::slice::from_ref(agent), |harness| {
+        listed_by(rig, harness)
+    })
+}
+
+/// Admit a model for a direct, non-rig probe, using only a run-owned harness
+/// home. The listing operation opens no window and spends no model turn.
+pub fn validate_in_env(model: &Model, home: &[(String, String)]) -> Result {
+    let names: &[&str] = match model.harness {
+        Harness::Claude => &["CLAUDE_CONFIG_DIR"],
+        Harness::Codex => &["CODEX_HOME"],
+        Harness::Pi => &["PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR"],
+        Harness::Devin if cfg!(windows) => &["USERPROFILE", "APPDATA", "LOCALAPPDATA"],
+        Harness::Devin | Harness::Muse => &[
+            "XDG_CONFIG_HOME",
+            "XDG_DATA_HOME",
+            "XDG_CACHE_HOME",
+            "XDG_STATE_HOME",
+        ],
+    };
+    let value = |name: &str| {
+        home.iter()
+            .rev()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    };
+    for name in names {
+        let safe = value(name).is_some_and(|value| {
+            let path = std::path::Path::new(value);
+            path.is_absolute() && crate::door::is_made_or_below(path)
+        });
+        if !safe {
+            return Err(Error::Daemon(format!(
+                "cannot check {} models: {name} is not a run-owned folder",
+                model.harness.name()
+            )));
+        }
+    }
+    let mut env: BTreeMap<String, String> = [
+        "PATH",
+        "PATHEXT",
+        "USER",
+        "LANG",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "SHELL",
+        "SystemRoot",
+        "ComSpec",
+    ]
+    .into_iter()
+    .filter_map(|key| crate::process::own_var(key).map(|value| (key.to_owned(), value)))
+    .collect();
+    for name in names {
+        env.insert(
+            (*name).to_owned(),
+            value(name).unwrap_or_default().to_owned(),
+        );
+    }
+    env.extend(
+        super::launcher::updates_off().map(|(name, value)| (name.to_owned(), value.to_owned())),
+    );
+    if model.harness == Harness::Pi {
+        env.insert("PI_OFFLINE".to_owned(), "1".to_owned());
+    }
+    if let Some(git) = value("GIT_CONFIG_GLOBAL") {
+        let path = std::path::Path::new(git);
+        if !path.is_absolute() || !crate::door::is_made_or_below(path) {
+            return Err(Error::Daemon(
+                "the run's Git config is not its own".to_owned(),
+            ));
+        }
+        env.insert("GIT_CONFIG_GLOBAL".to_owned(), git.to_owned());
+    }
+    // Do not let any omitted home variable fall back to the owner's home.
+    let owned_home = names
+        .first()
+        .and_then(|name| value(name))
+        .ok_or_else(|| Error::Daemon("the run has no harness home".to_owned()))?;
+    env.insert("HOME".to_owned(), owned_home.to_owned());
+    if !env.contains_key("USERPROFILE") {
+        env.insert("USERPROFILE".to_owned(), owned_home.to_owned());
+    }
+    validate_rows(&[agent_on(model)], |harness| {
+        let answer = super::ask::question(&json!({
+            "op": "models", "kind": harness.kind(), "env": env,
+        }))
+        .map_err(|why| why.to_string())?;
+        listing(&answer["listing"], harness)
+    })
+}
+
+fn distance(a: &str, b: &str) -> usize {
+    let mut previous: Vec<usize> = (0..=b.chars().count()).collect();
+    for (i, left) in a.chars().enumerate() {
+        let mut next = vec![i + 1];
+        for (j, right) in b.chars().enumerate() {
+            next.push(
+                (previous[j + 1] + 1)
+                    .min(next[j] + 1)
+                    .min(previous[j] + usize::from(left != right)),
+            );
+        }
+        previous = next;
+    }
+    *previous.last().unwrap_or(&0)
 }
 
 /// A model a harness lists, as the daemon's `models.get` answers it: the name `--model` takes
@@ -603,10 +771,14 @@ fn listed_by(rig: &Rig, harness: Harness) -> std::result::Result<Vec<Listed>, St
         let said = answer["error"].as_str().unwrap_or("no reason given");
         return Err(said.to_owned());
     }
-    if harness == Harness::Muse && answer["listing"]["freshness"]["state"] != "fresh" {
+    listing(&answer["listing"], harness)
+}
+
+fn listing(listing: &Value, harness: Harness) -> std::result::Result<Vec<Listed>, String> {
+    if harness == Harness::Muse && listing["freshness"]["state"] != "fresh" {
         return Err("Muse did not return a fresh account model list".to_owned());
     }
-    let models = answer["listing"]["models"].as_array();
+    let models = listing["models"].as_array();
     let Some(models) = models.filter(|models| !models.is_empty()) else {
         return Err("it lists no model".to_owned());
     };
@@ -728,6 +900,98 @@ pub fn question_tool(harness: Harness) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn t1778_direct_model_admission_never_reads_a_foreign_or_missing_home() {
+        let model = Model {
+            harness: Harness::Codex,
+            name: "example".to_owned(),
+            effort: None,
+        };
+        let empty = validate_in_env(&model, &[]).unwrap_err().to_string();
+        assert!(empty.contains("CODEX_HOME") && empty.contains("run-owned"));
+        let outside = if cfg!(windows) {
+            std::path::PathBuf::from(r"C:\not-a-home-of-this-run")
+        } else {
+            std::path::PathBuf::from("/not-a-home-of-this-run")
+        };
+        let foreign = validate_in_env(
+            &model,
+            &[(
+                "CODEX_HOME".to_owned(),
+                outside.to_string_lossy().into_owned(),
+            )],
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(foreign.contains("CODEX_HOME") && foreign.contains("run-owned"));
+    }
+
+    #[test]
+    fn t1778_both_model_list_doors_preserve_the_provider_and_reject_stale_muse() {
+        let supplied = json!({
+            "freshness": {"state": "fresh"},
+            "models": [{"provider": "cliproxyapi", "id": "devin/swe-2", "efforts": ["medium"]}]
+        });
+        let rows = super::listing(&supplied, Harness::Pi).unwrap();
+        assert_eq!(rows[0].name, "cliproxyapi/devin/swe-2");
+        let mut stale = supplied;
+        stale["freshness"]["state"] = json!("stale");
+        assert!(super::listing(&stale, Harness::Muse).is_err());
+    }
+
+    #[test]
+    fn t1778_owner_proxy_uses_its_current_model_id() {
+        let models = parse(None, None)
+            .unwrap()
+            .on_machine(None, Some(&["cliproxyapi".to_owned()]));
+        assert_eq!(models.of(Harness::Pi).name, "cliproxyapi/devin/swe-2");
+    }
+
+    #[test]
+    fn t1778_a_named_effort_does_not_hide_an_unlisted_model() {
+        let rows = [row_on(
+            &Model {
+                harness: Harness::Pi,
+                name: "cliproxyapi/swe-2".to_owned(),
+                effort: Some("medium".to_owned()),
+            },
+            "standard",
+        )];
+        let error = validate_rows(&rows, |_| {
+            Ok(listing(&[(
+                "cliproxyapi/devin/swe-2",
+                &["medium", "high", "max"],
+            )]))
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("cliproxyapi/swe-2"), "{error}");
+        assert!(error.contains("cliproxyapi/devin/swe-2"), "{error}");
+        assert!(validate_rows(&rows, |_| Err("not available".to_owned())).is_err());
+        let matching = [row_on(
+            &Model {
+                harness: Harness::Pi,
+                name: "cliproxyapi/devin/swe-2".to_owned(),
+                effort: Some("medium".to_owned()),
+            },
+            "standard",
+        )];
+        assert!(validate_rows(&matching, |_| Ok(listing(&[(
+            "cliproxyapi/devin/swe-2",
+            &["medium"]
+        )])))
+        .is_ok());
+        let disabled = vec![Listed {
+            name: "cliproxyapi/devin/swe-2".to_owned(),
+            efforts: vec![],
+            disabled: true,
+        }];
+        assert!(validate_rows(&matching, |_| Ok(disabled.clone()))
+            .unwrap_err()
+            .to_string()
+            .contains("disabled"));
+    }
 
     #[test]
     fn t1744_reading_the_models_for_a_non_pi_live_run_never_reads_pi_providers() {
@@ -1364,11 +1628,11 @@ mod tests {
             .unwrap()
             .on_machine(None, Some(&have(&["cliproxyapi"])));
         let pi = models.of(Harness::Pi);
-        assert_eq!(pi.name, "cliproxyapi/swe-2");
+        assert_eq!(pi.name, "cliproxyapi/devin/swe-2");
         assert_eq!(pi.effort.as_deref(), Some("medium"));
         let said = models.line();
         assert!(
-            said.contains("pi cliproxyapi/swe-2, effort medium"),
+            said.contains("pi cliproxyapi/devin/swe-2, effort medium"),
             "{said}"
         );
         assert!(

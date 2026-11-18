@@ -212,7 +212,7 @@ pub enum Reply {
 pub fn run_cf(words: &[String]) -> String {
     match Run::new(cf_e2e::process::as_a_shell_finds("cf"))
         .args(words)
-        .inheriting_env()
+        .inheriting_window_env()
         .unlimited()
         .run()
     {
@@ -250,7 +250,7 @@ fn ask_through_hook(window: &Window, questions: &Value) -> Result<String, String
         "tool_input": { "questions": questions },
     });
     let run = shell(command)
-        .inheriting_env()
+        .inheriting_window_env()
         .unlimited()
         .input(event.to_string());
     let ran = run.run().map_err(|failed| failed.to_string())?;

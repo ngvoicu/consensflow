@@ -90,7 +90,7 @@ pub fn lose_a_parent() {
             };
             let _ = Run::new(program)
                 .arg(LAUNCHER)
-                .inheriting_env()
+                .inheriting_window_env()
                 .closed_input()
                 .run();
         });

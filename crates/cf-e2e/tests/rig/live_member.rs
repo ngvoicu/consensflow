@@ -735,6 +735,7 @@ fn the_launch_of_a_member_is_prepared_for_devin_and_pi_alone() -> Outcome {
     let home = rig.var("HOME").unwrap_or_default().to_owned();
     let claude = Installed::at(Harness::Claude, "/nowhere/claude", &home);
     let refused = Open::new(&rig, &claude, "member", "member-claude")
+        .agent(json!({"kind": "claude-code", "model": "fake"}))
         .member(Member::new("worker", "# worker\n"))
         .open(&Log::new("live member"))
         .err()
