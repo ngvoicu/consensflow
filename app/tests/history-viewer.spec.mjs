@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { loadavg } from 'node:os'
 
 import { expect, test } from '@playwright/test'
 
@@ -475,6 +476,64 @@ const colour = (locator, property = 'background-color') =>
 
 /** The quiet first row that loads what comes before the items shown. */
 const earlier = (viewer) => viewer.locator('.history-earlier')
+
+// B37: keep Playwright's actionability trace (`--trace on`) and load around the actual
+// fold click. This fixture has two members and multiple sessions, so the wrong fold cannot pass.
+test('B37: the intended session fold opens without hiding another session', async ({
+  page,
+}, testInfo) => {
+  const data = model()
+  const lane = data.board.lanes.find((entry) => entry.participant.handle === 'zeus-amber-pine')
+  data.board.lanes.push({
+    ...lane,
+    participant: { ...lane.participant, id: 5, handle: 'zeus-copper-leaf', session: 'copper-leaf' },
+    pane: null,
+  })
+  const hera = participant(6, 'hera', 'worker', { agent: 'hera', harness: 'pi', tier: 'standard' })
+  const heraSession = participant(7, 'hera-moss-oak', 'worker', {
+    agent: 'hera',
+    harness: 'pi',
+    tier: 'standard',
+    memberId: 6,
+    member: 'hera',
+    session: 'moss-oak',
+  })
+  data.board.lanes.push({ participant: hera, tasks: [], activity: { state: 'closed' }, pane: null })
+  data.board.lanes.push({
+    participant: heraSession,
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  const samples = []
+  const sample = (event) => samples.push({ event, at: new Date().toISOString(), load: loadavg() })
+  try {
+    await open(page, data)
+    const zeus = page.locator('tr[data-handle="zeus"] button.fold-sessions')
+    const heraFold = page.locator('tr[data-handle="hera"] button.fold-sessions')
+    await expect(zeus).toHaveAttribute('aria-expanded', 'false')
+    await expect(heraFold).toHaveAttribute('aria-expanded', 'false')
+    sample('before zeus click')
+    await zeus.click()
+    sample('after zeus click')
+    await expect(zeus).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.locator('tr[data-handle="zeus-amber-pine"]')).toBeVisible()
+    await expect(page.locator('tr[data-handle="zeus-copper-leaf"]')).toBeVisible()
+    await expect(heraFold).toHaveAttribute('aria-expanded', 'false')
+    sample('before hera click')
+    await heraFold.click()
+    sample('after hera click')
+    await expect(page.locator('tr[data-handle="hera-moss-oak"]')).toBeVisible()
+    await expect(page.locator('tr[data-handle="zeus-amber-pine"]')).toBeVisible()
+    await expect(page.locator('tr[data-handle="zeus-copper-leaf"]')).toBeVisible()
+  } finally {
+    sample('test end')
+    const readings = JSON.stringify(samples, null, 2)
+    mkdirSync(testInfo.outputDir, { recursive: true })
+    writeFileSync(testInfo.outputPath('fold-load.json'), readings)
+    await testInfo.attach('fold-load', { body: readings, contentType: 'application/json' })
+  }
+})
 
 test.describe('the History button', () => {
   test("is on the chief's head beside Switch chief, on a session's, and on the chief's card with no window", async ({
