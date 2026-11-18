@@ -645,23 +645,21 @@ fn powershell_ends_the_line_a_command_left_unfinished_before_it_says_how_it_went
 }
 
 #[test]
-fn the_script_that_ends_a_run_there_ends_the_run_the_lock_names_and_takes_its_tarball_away() {
-    assert_eq!(
-        stop_script(DIR, ID),
-        "\n$ProgressPreference = 'SilentlyContinue'\n\
-         $dir = Join-Path $env:USERPROFILE 'consensflow-build'\n\
-         $running = Join-Path $dir '.windows-run.pid'\n\
-         $owner = Join-Path $dir '.windows-run.id'\n\
-         $of = @(Get-Content $owner -ErrorAction SilentlyContinue)\n\
-         if ($of[0] -eq '0000abcd-12345678') {\n\
-         \x20 $run = try { Get-Process -Id $of[1] -ErrorAction Stop | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime } } catch {}\n\
-         \x20 $ends = @('/PID', $of[1], '/F'); if ($of[2] -ne 'job') { $ends += '/T' }\n\
-         \x20 if ($run) { taskkill @ends 2>&1 | Out-Null }\n\
-         \x20 Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }\n\
-         }\n\
-         Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'consensflow-build.0000abcd-12345678.tgz') -Force -ErrorAction SilentlyContinue\n\
-         exit 0\n"
-    );
+fn a_stop_without_its_record_leaves_a_same_named_tarball_alone() {
+    let Some(shell) = powershell::shell() else {
+        eprintln!("skipped: no PowerShell on this machine");
+        return;
+    };
+    let folder = tempfile::tempdir().unwrap();
+    let profile = folder.path().join("profile");
+    std::fs::create_dir_all(profile.join(DIR)).unwrap();
+    let tarball = profile.join(upload_name(DIR, ID));
+    std::fs::write(&tarball, b"unrelated").unwrap();
+    let profile = profile.display().to_string().replace('\'', "''");
+    let script = format!("$env:USERPROFILE = '{profile}'\n{}", stop_script(DIR, ID));
+    let failure = powershell::told(shell, folder.path(), &script).unwrap_err();
+    assert!(failure.contains("No matching run record"), "{failure}");
+    assert_eq!(std::fs::read(tarball).unwrap(), b"unrelated");
 }
 
 /// The script of a run named `id`, in the usual folder.
@@ -882,98 +880,50 @@ fn a_command_whose_last_output_has_no_line_end_still_passes() {
 }
 
 #[test]
-fn a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another() {
-    let text = stop_script(DIR, ID);
-    // The process is ended only where the owner file names this run, and it is the process
-    // the owner file names (the older file may have been written over by another script).
+fn a_stop_checks_the_run_and_the_process_handle_before_termination() {
+    let stop = stop_script(DIR, ID);
+    for required in [
+        "$of[0] -ne '0000abcd-12345678'",
+        "$of[2] -ne 'job'",
+        "$of[4] -ne 'consensflow-build.0000abcd-12345678.tgz'",
+        "[int64]::TryParse($of[3]",
+        "if ($actual -ne $created)",
+        "OpenProcess(0x101001, false, pid)",
+        "GetProcessTimes(p, out created",
+        "if (created != expected) return \"gone\"",
+        "TerminateProcess(p, 1)",
+    ] {
+        assert!(stop.contains(required), "missing {required}: {stop}");
+    }
+    assert!(!stop.contains("taskkill"), "{stop}");
     assert!(
-        text.contains("if ($of[0] -eq '0000abcd-12345678') {\n"),
-        "{text}"
+        !stop.contains("Remove-Item"),
+        "a later run can replace these paths: {stop}"
     );
-    assert!(
-        text.contains("$of = @(Get-Content $owner -ErrorAction SilentlyContinue)\n"),
-        "{text}"
-    );
-    let ending: Vec<&str> = text
-        .lines()
-        .filter(|line| line.contains("taskkill"))
-        .collect();
-    assert_eq!(ending.len(), 1, "{text}");
-    assert_eq!(
-        ending[0], "  if ($run) { taskkill @ends 2>&1 | Out-Null }",
-        "{text}"
-    );
-    assert!(text.contains("taskkill @ends"), "{text}");
-    assert!(text.contains("$ends = @('/PID', $of[1], '/F'); "), "{text}");
-    // It is the run's: a PowerShell that was started before the owner file was last
-    // written. A process id that a program has been given since the run ended is no
-    // run, and ending it ends that program.
-    let run = text
-        .lines()
-        .find(|line| line.starts_with("  $run = "))
-        .unwrap_or_else(|| panic!("no line finds the run's process: {text}"));
-    assert!(
-        run.contains("Get-Process -Id $of[1] -ErrorAction Stop")
-            && run.contains("$_.Name -in @('powershell', 'pwsh')")
-            && run.contains("$_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime")
-            && run.ends_with("catch {}"),
-        "{run}"
-    );
-    // Its records go with it: the owner file, and the older file only if it still holds the
-    // process that was ended.
-    assert!(
-        text.contains("  Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }\n}\n"),
-        "{text}"
-    );
-    // The run's own tarball goes whatever the lock says: it is the run's.
-    let removal: Vec<&str> = text.lines().filter(|line| line.contains(".tgz")).collect();
-    assert_eq!(
-        removal,
-        ["Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'consensflow-build.0000abcd-12345678.tgz') -Force -ErrorAction SilentlyContinue"]
-    );
-    // Another run's stop names another run.
     assert!(!stop_script(DIR, "0000abce-9abcdef0").contains(ID));
 }
 
 #[test]
-fn a_run_that_is_in_its_job_is_ended_by_its_process_alone_and_the_tree_is_walked_only_for_one_that_is_not(
-) {
-    let stop = stop_script(DIR, ID);
-    // The tree is read and walked only when the owner file does not say the run is in its
-    // job: the walk ends what it read by process id, and an id that has been given again
-    // since is a program that is no part of the run (the stop's own text says how it was
-    // found).
-    assert!(
-        stop.contains(&format!("if ($of[2] -ne '{IN_JOB}') {{ $ends += '/T' }}\n")),
-        "{stop}"
-    );
-    assert_eq!(stop.matches("/T").count(), 1, "{stop}");
-    // The run says it, once it is in the job, in the owner file's third line, where the
-    // stop reads it: the run script appends it, and says if it could not.
+fn a_run_records_its_job_and_process_identity_before_starting_its_command() {
     let run = script(&[], "cmd /c exit 0", &[]);
-    let at = |what: &str| {
-        run.find(what)
-            .unwrap_or_else(|| panic!("{what} is not there: {run}"))
-    };
+    let at = |what: &str| run.find(what).unwrap_or_else(|| panic!("no {what}: {run}"));
     assert!(
-        run.contains(&format!(
-            "if ($null -ne $job) {{\n  try {{ Add-Content -LiteralPath $owner -Value '{IN_JOB}' }} catch {{ Write-Output \"== no job record: "
-        )),
+        run.contains("Add-Content -LiteralPath $owner -Value @('job',"),
         "{run}"
     );
-    // After the job is made and before any program of the run is started, so that a stop
-    // that finds the third line finds a run whose programs are all in the job.
-    assert!(at("$job = $made") < at("Add-Content -LiteralPath $owner"));
-    assert!(at("Add-Content -LiteralPath $owner") < at("Set-Location $dir"));
-    assert!(at("Add-Content -LiteralPath $owner") < at("foreach ($step in"));
-    // The bootstrap writes the first two lines and no third: a run that has not got so far
-    // is ended with its tree.
-    let boot = bootstrap();
     assert!(
-        boot.contains("Set-Content -Path $owner -Value @('0000abcd-12345678', $PID)\n"),
-        "{boot}"
+        run.contains("GetCurrentProcess().StartTime.ToFileTimeUtc()"),
+        "{run}"
     );
-    assert!(!boot.contains("Add-Content"), "{boot}");
+    assert!(
+        run.contains("consensflow-build.0000abcd-12345678.tgz"),
+        "{run}"
+    );
+    assert!(at("$job = $made") < at("Add-Content -LiteralPath $owner"));
+    assert!(at("Add-Content -LiteralPath $owner") < at("foreach ($step in"));
+    let stop = stop_script(DIR, ID);
+    assert!(stop.contains("$of.Count -lt 5"), "{stop}");
+    assert!(!stop.contains("/T"), "{stop}");
 }
 
 #[test]
@@ -1110,7 +1060,7 @@ fn a_run_is_put_in_a_job_that_ends_with_it_before_it_starts_anything_and_a_run_t
     // A run that cannot be put in a job (no compiler, no right, the system's no) goes on as it did,
     // saying so, and never ends without its exit line for it.
     assert!(
-        text.contains("} catch { Write-Output \"== no job: $($_.Exception.Message), so a stop will not end at once what this run starts\" }\n"),
+        text.contains("} catch { Write-Output \"== no job: $($_.Exception.Message), so a stop cannot safely end this run\" }\n"),
         "{text}"
     );
     // What the C# does: a job that ends what is in it when its last handle closes (the only one is this
@@ -1157,7 +1107,7 @@ fn the_job_is_released_where_a_run_ends_by_itself_and_not_where_it_is_killed() {
         "{boot}"
     );
     // The stop ends that process, and the system ends the programs of the run when it is gone.
-    assert!(stop_script(DIR, ID).contains("taskkill @ends"));
+    assert!(stop_script(DIR, ID).contains("[CfStop]::End($number, $created)"));
 }
 
 #[test]
@@ -1413,4 +1363,28 @@ fn a_run_whose_preparation_fails_ends_with_its_status_before_the_command() {
         "{loop_body}"
     );
     assert!(loop_body.contains("Exit-Run $LASTEXITCODE"), "{loop_body}");
+}
+
+#[test]
+fn a_reused_pid_does_not_identify_a_run_for_stopping() {
+    let Some(shell) = powershell::shell() else {
+        eprintln!("skipped: no PowerShell on this machine");
+        return;
+    };
+    let folder = tempfile::tempdir().unwrap();
+    let profile = folder.path().join("profile");
+    let marker = folder.path().join("wrong-process-ended");
+    std::fs::create_dir_all(profile.join(DIR)).unwrap();
+    let quoted = |path: &std::path::Path| path.display().to_string().replace('\'', "''");
+    let script = format!(
+        "$env:USERPROFILE = '{}'\n$owner = Join-Path (Join-Path $env:USERPROFILE '{DIR}') '{OWNER}'\nSet-Content -LiteralPath $owner -Value @('{ID}', $PID, 'job', '1', '{DIR}.{ID}.tgz')\nfunction Get-Process {{ [pscustomobject]@{{ Name = 'powershell'; Id = $PID; StartTime = (Get-Date).AddMinutes(-1) }} }}\nfunction Get-Item {{ [pscustomobject]@{{ LastWriteTime = Get-Date }} }}\nfunction taskkill {{ [IO.File]::WriteAllText('{}', 'wrong process') }}\n{}",
+        quoted(&profile),
+        quoted(&marker),
+        stop_script(DIR, ID)
+    );
+    powershell::run(shell, folder.path(), &script);
+    assert!(
+        !marker.exists(),
+        "a reused PID was selected for termination"
+    );
 }

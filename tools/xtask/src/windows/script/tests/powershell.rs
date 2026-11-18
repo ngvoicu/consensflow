@@ -282,7 +282,7 @@ fn why(report: &Report) -> String {
 
 /// What `run` has to tell of `script` on `folder`: the output it gives, or all a run that
 /// did not end can still say of why.
-fn told(shell: &str, folder: &Path, script: &str) -> Result<String, String> {
+pub(super) fn told(shell: &str, folder: &Path, script: &str) -> Result<String, String> {
     let file = folder.join("case.ps1");
     let wrapped = WRAPPED.replace("«case»", script);
     fs::write(&file, &wrapped).unwrap();
@@ -376,7 +376,7 @@ fn a_running_powershell_holds_the_shared_turn_until_it_ends() {
     let release = folder.path().join("release");
     let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
     let script = format!(
-        "[IO.File]::WriteAllText('{}', 'ready')\nwhile (-not (Test-Path -LiteralPath '{}')) {{ [Threading.Thread]::Sleep(25) }}\n",
+        "[IO.File]::WriteAllText('{}', 'ready')\n$clock = [Diagnostics.Stopwatch]::StartNew()\nwhile (-not (Test-Path -LiteralPath '{}')) {{ if ($clock.Elapsed.TotalSeconds -gt 45) {{ throw 'release did not arrive' }}; [Threading.Thread]::Sleep(25) }}\n",
         quoted(&ready),
         quoted(&release),
     );
@@ -387,16 +387,21 @@ fn a_running_powershell_holds_the_shared_turn_until_it_ends() {
         std::thread::sleep(Duration::from_millis(10));
     }
     let started = ready.exists();
-    let env = Env::from_process();
     let lock = fs::File::options()
         .read(true)
         .write(true)
-        .open(env.os("CF_PWSH_START_LOCK").expect("this run's lock"))
-        .unwrap();
-    let held = matches!(lock.try_lock(), Err(std::fs::TryLockError::WouldBlock));
-    // Release and join before asserting, even on a red: no test-owned shell is left behind.
-    fs::write(&release, "go").unwrap();
+        .open(powershell_start_lock::lock_path());
+    let held = lock
+        .as_ref()
+        .is_ok_and(|file| matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)));
+    // Release and join before asserting, even if opening the lock failed.
+    let released = fs::write(&release, "go");
     let ended = run.join().unwrap();
+    assert!(
+        released.is_ok(),
+        "could not release the shell: {released:?}"
+    );
+    assert!(lock.is_ok(), "could not open the shared lock: {lock:?}");
     assert!(
         started,
         "the shell never reached its ready marker: {ended:?}"

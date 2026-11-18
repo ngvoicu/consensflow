@@ -402,23 +402,24 @@ fn marked(env: &Env, mark: &str) -> Vec<u32> {
 
 /// The stop of the run `id`, as ssh has the machine run it: its own PowerShell, with the
 /// profile of the case.
-fn stop(case: &Case, id: &str) {
-    let stop = process::capture(
+fn stop_result(case: &Case, id: &str) -> crate::process::Captured {
+    process::capture(
         &Invocation::new("powershell", ".")
             .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
             .arg(encode_script(&stop_script(SHARED, id)).unwrap())
             .var("USERPROFILE", &case.profile),
         &case.env,
     )
-    .unwrap();
-    assert_eq!(stop.code, 0, "{}", said(&stop));
-    // It says nothing: what `taskkill` says of the programs the system is ending as it
-    // reads them ("could not be terminated", "not supported") is for no one, and the
-    // person who stopped the run would have it on their terminal.
+    .unwrap()
+}
+
+fn stop(case: &Case, id: &str) {
+    let stopped = stop_result(case, id);
+    assert_eq!(stopped.code, 0, "{}", said(&stopped));
     assert!(
-        stop.stdout.is_empty() && stop.stderr.is_empty(),
+        stopped.stdout.is_empty() && stopped.stderr.is_empty(),
         "{}",
-        said(&stop)
+        said(&stopped)
     );
 }
 
@@ -849,7 +850,7 @@ fn a_stop_ends_the_run_the_owner_file_names_by_its_process_whatever_the_older_fi
     run.wait_for_bootstrap();
     // Nothing the run started is running: its `ping -n 300` was five minutes from its end.
     assert_eq!(marked(&case.env, "127.0.0.76"), Vec::<u32>::new());
-    assert!(!case.copy().join(OWNER).exists());
+    assert!(case.copy().join(OWNER).exists());
     // The process in the older file is alive and its file is as it was written.
     let left = fs::read_to_string(case.copy().join(RUNNING)).unwrap();
     assert_eq!(left.trim(), other_id.to_string());
@@ -857,7 +858,7 @@ fn a_stop_ends_the_run_the_owner_file_names_by_its_process_whatever_the_older_fi
         panic!("the process in the older file was ended by the stop, or ended: {why}");
     }
     drop(other);
-    assert!(tarballs_in(&case.profile).is_empty());
+    assert_eq!(tarballs_in(&case.profile), vec![upload_name(SHARED, id)]);
 }
 
 #[test]
@@ -969,7 +970,7 @@ fn a_stop_that_lands_while_the_run_is_starting_programs_leaves_none_of_them_runn
             "round {round}: {} of the programs the run started are still running after its stop",
             left.len()
         );
-        assert!(tarballs_in(&case.profile).is_empty());
+        assert_eq!(tarballs_in(&case.profile), vec![upload_name(SHARED, &id)]);
     }
 }
 
@@ -1089,8 +1090,10 @@ fn a_stop_of_a_run_that_is_starting_programs_ends_no_program_that_is_not_the_run
         // It says it is in its job, in the owner file, where a stop reads it.
         let owner = fs::read_to_string(case.copy().join(OWNER)).unwrap();
         let lines: Vec<&str> = owner.lines().map(str::trim).collect();
-        assert_eq!(lines.len(), 3, "{owner:?}");
+        assert_eq!(lines.len(), 5, "{owner:?}");
         assert_eq!((lines[0], lines[2]), (id.as_str(), IN_JOB), "{owner:?}");
+        assert!(lines[3].parse::<i64>().is_ok(), "{owner:?}");
+        assert_eq!(lines[4], upload_name(SHARED, &id), "{owner:?}");
         std::thread::sleep(Duration::from_secs(2));
         let alive = marked(&case.env, mark).len();
         let bystanders = Bystanders::start(&case.env);
@@ -1119,50 +1122,34 @@ fn a_stop_of_a_run_that_is_starting_programs_ends_no_program_that_is_not_the_run
             "round {round}: {} of the {started} programs of other cases, started while the stop of a run went on ({took:?}, {alive} of the run's alive when it began), ended otherwise than by themselves: {ended_otherwise:?}",
             ended_otherwise.len()
         );
-        assert!(tarballs_in(&case.profile).is_empty());
+        assert_eq!(tarballs_in(&case.profile), vec![upload_name(SHARED, &id)]);
     }
 }
 
 #[test]
-fn a_stop_ends_the_process_the_owner_file_names_only_if_it_is_a_powershell_older_than_the_file() {
-    // A run that ended leaves its record only if the stop landed as it ended, and its process
-    // id is the next program's by then: a stop that ended what the record names would end
-    // that program.
+fn a_reused_pid_does_not_stop_an_unrelated_powershell() {
     let case = Case::new();
     let id = "0000b402-00000002";
+    let mut other = sleeper(&case.env);
     let owner = case.copy().join(OWNER);
-    // A program that is no PowerShell.
-    let mut ping = Held::new(
-        process::spawn(
-            &Invocation::new("ping", ".").args(["-n", &HELD_SECONDS.to_string(), "127.0.0.74"]),
-            &case.env,
-            Stdio::null(),
-            false,
-        )
-        .unwrap(),
+    fs::write(
+        &owner,
+        format!(
+            "{id}\n{}\n{IN_JOB}\n1\n{}\n",
+            other.id(),
+            upload_name(SHARED, id)
+        ),
+    )
+    .unwrap();
+    let stopped = stop_result(&case, id);
+    assert_eq!(stopped.code, 0, "{}", said(&stopped));
+    assert!(
+        stopped.stdout.contains("belongs to another process"),
+        "{}",
+        said(&stopped)
     );
-    fs::write(&owner, format!("{id}\n{}\n", ping.id())).unwrap();
-    stop(&case, id);
-    if let Err(why) = ping.runs() {
-        panic!("a ping the owner file named was ended: {why}");
-    }
-    assert!(!owner.exists(), "the record stayed");
-    drop(ping);
-    // A PowerShell that was started after the file was written.
-    let mut later = sleeper(&case.env);
-    fs::write(&owner, format!("{id}\n{}\n", later.id())).unwrap();
-    fs::File::options()
-        .write(true)
-        .open(&owner)
-        .unwrap()
-        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000))
-        .unwrap();
-    stop(&case, id);
-    if let Err(why) = later.runs() {
-        panic!("a PowerShell started after the owner file was written was ended: {why}");
-    }
-    assert!(!owner.exists(), "the record stayed");
-    drop(later);
+    assert!(other.runs().is_ok(), "the unrelated PowerShell was ended");
+    assert!(owner.exists(), "the ownership record was removed");
 }
 
 #[test]
@@ -1213,16 +1200,16 @@ fn a_stop_that_cannot_take_the_records_away_says_nothing_of_it() {
         .share_mode(1)
         .open(&owner)
         .unwrap();
-    stop(&case, id);
+    let stopped = stop_result(&case, id);
+    assert_eq!(stopped.code, 1, "{}", said(&stopped));
     assert!(owner.exists(), "the file was removed while it was held");
     drop(holding);
 }
 
 #[test]
-fn a_stop_of_a_run_that_has_already_ended_says_nothing_and_takes_its_records_away() {
-    // A Ctrl-C that lands as the run ends, or the records a killed run left: the owner file
-    // names a process that is not there. The stop has nothing to end, says nothing (what
-    // `taskkill` says of a process it cannot find is for no one) and clears the records.
+fn a_stop_with_a_legacy_record_keeps_it_when_identity_is_unknown() {
+    // A legacy record has no creation time or job marker. A stop cannot use its PID
+    // as an identity, even when the process originally recorded there has ended.
     let case = Case::new();
     let id = "0000b301-00000001";
     let mut ended = process::spawn(
@@ -1236,9 +1223,10 @@ fn a_stop_of_a_run_that_has_already_ended_says_nothing_and_takes_its_records_awa
     let pid = ended.id();
     fs::write(case.copy().join(OWNER), format!("{id}\n{pid}\n")).unwrap();
     fs::write(case.copy().join(RUNNING), pid.to_string()).unwrap();
-    stop(&case, id);
-    assert!(!case.copy().join(OWNER).exists());
-    assert!(!case.copy().join(RUNNING).exists());
+    let stopped = stop_result(&case, id);
+    assert_eq!(stopped.code, 1, "{}", said(&stopped));
+    assert!(case.copy().join(OWNER).exists());
+    assert!(case.copy().join(RUNNING).exists());
 }
 
 #[test]
@@ -1299,4 +1287,20 @@ fn a_run_on_a_machine_without_windows_own_tar_ends_saying_so_before_it_unpacks_a
     assert!(!ran.said.contains("== tree "), "{}", ran.said);
     assert!(!case.copy().join("keep.txt").exists());
     assert!(tarballs_in(&case.profile).is_empty());
+}
+
+#[test]
+fn a_stop_without_its_record_keeps_an_unrelated_tarball_and_reports_uncertainty() {
+    let case = Case::new();
+    let id = "0000b601-00000001";
+    let tarball = case.profile.join(upload_name(SHARED, id));
+    fs::write(&tarball, b"unrelated").unwrap();
+    let stopped = stop_result(&case, id);
+    assert_eq!(stopped.code, 1, "{}", said(&stopped));
+    assert!(
+        stopped.stdout.contains("may still be going"),
+        "{}",
+        said(&stopped)
+    );
+    assert_eq!(fs::read(tarball).unwrap(), b"unrelated");
 }

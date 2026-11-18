@@ -23,23 +23,17 @@
 //! (below). One run at a time: a second is refused
 //! while the first goes on there (the machine says "A run is still going on this
 //! machine (process N): one at a time." and ends with 75, which is the answer),
-//! and a run stopped here (Ctrl-C, or a `kill`) is ended there too, which
-//! Windows' SSH server does not do (the status is then 130).
+//! and a run stopped here (Ctrl-C, or a `kill`) is asked to stop there too, which
+//! Windows' SSH server does not do. If it cannot be identified safely, it may continue.
 //!
 //! The runs of several trees queue for the one machine ([`queue`]: a run that finds it busy
 //! waits for its turn, first come first served, with every project's runner on this Mac, and says
 //! where it stands; `--wait MINUTES`, an hour by default, 0 asks once), so a run shares nothing with
 //! another before it holds the lock. Each run's tarball has a name of its own (this
 //! process's id and a random part, `script::run_id`), sent before the script is asked
-//! for, and that script unpacks that one and removes it however it ends, a refusal by
-//! the lock too; a run that is stopped here ends only the run whose name and process the
-//! lock's owner file holds, and takes its own tarball away. What a run left when it never
-//! got so far (this program killed, a connection lost) is taken away by the sweep of the
-//! next run that holds the lock: its own folder's an hour after it was written, which
-//! is safe for a folder in use (a run's tarball is written seconds before its script asks
-//! for the lock), and the uploads of a folder that is gone a day after. (Before, every
-//! run sent to the same name: a run whose script had not unpacked yet was handed the tree
-//! of the run that sent after it, and its result was another tree's, 2026-10-22.)
+//! for, and that script unpacks that one and tries to remove it when it ends. A stopped or
+//! interrupted run can leave its tarball and records behind; the sweep does not take
+//! tarballs by name or age. A stop verifies the recorded process identity before ending it.
 //!
 //! The lock is a file opened for the run alone, as the script's first act in the folder:
 //! one act of the system, so of two runs that ask at once one is refused, and closed by
@@ -82,45 +76,14 @@
 //! the command's own as T-602's wrapper made, and T-602's own command. The next run is no longer
 //! refused by it.)
 //!
-//! A stop ends the run and everything it started. The run script puts the run in a job
-//! (`CfJob`, compiled by `Add-Type` in about 150 ms) before it starts anything: a job that
-//! the system ends, every process in it, when the last handle to it closes, and the run's
-//! process holds the only one. The stop kills the run's process (`taskkill /F`), and the
-//! system ends the rest at once, those the stop would have read and those that were started
-//! while it read them. A stop that was `taskkill /T /F` alone left the second kind:
-//! `taskkill /T` reads the tree, then ends what it read, leaves first and the program that
-//! starts the others last (about 7 ms a process), so that what the run starts while that
-//! goes on is never read. Measured on zeewin, 2026-10-23: a stop that landed on a command
-//! that kept starting programs left 21 to 50 of them running every time, and, of 142 stops
-//! of a run that was starting a single `ping -n 60` (every 10 ms from 0 to 700 ms after it
-//! began, twice each), 7 left it running, for its whole minute and holding the run's
-//! output open; with the job, none of 142 did. At a normal end the run releases the
-//! job (the end-on-close is taken away), so a program a command leaves running stays
-//! running, as before. A run that cannot be put in a job says so in its output (`== no
-//! job: …`) and goes on, its stop being the walk alone.
-//!
-//! The walk is also a harm of its own (T-545). It takes seconds under load (5 s for the 33
-//! programs of one case, zeewin, 2026-10-25), long enough for the run to end by itself while
-//! it goes on: the job is released and the records are taken away, the programs the run
-//! started are left running (3,000 of them, in 4 of 20 runs of `windows::script` with the
-//! processor busy), the stop's own `Remove-Item` of a record that has gone says "Cannot find
-//! path", and the walk goes on ending, by the process id it read, what it read. A process id
-//! that a program has been given since is ended with it: in CI (2026-10-24, run
-//! 40132724600) two PowerShells of other cases died in their first seconds while this stop's
-//! case ran, one with 1 and a bare `#< CLIXML` on its error stream, the other never making
-//! the file it was started to make. That is the reading of that run's timing, and not a
-//! reproduction: on zeewin the ids were not given again within a few starts (60 sequential
-//! starts, 60 different ids: `windows-ids.ps1`), and the two programs of other cases that
-//! ended during a walk, once in 20 runs, ended with an access violation, which is a crash
-//! and not what the walk ends a program with (`taskkill` ends one with 1, `Stop-Process`
-//! with -1: `windows-exits.ps1`). What is reproduced, and mended, is the rest. So a run that
-//! is in its job says so, in the third
-//! line of the owner file ([`script::IN_JOB`], written once it is in), and its stop ends its
-//! process and nothing else, in silence; the walk is for a run that has not said it (not in
-//! the job yet, or cannot be). The process is ended only if it is still the run's, a
-//! PowerShell that was started before the owner file was written (as the lock reads the older
-//! file's): the id of a run that has ended, which a stop that landed as the run ended finds in
-//! the record, is some other program's by then (the stop ended a `ping` that way, in a case).
+//! The run script puts the run in a Windows job before it starts anything. Its process
+//! holds the job's only handle; ending that process ends the other job processes as well.
+//! The stop checks the run id, job marker and exact process creation time, then verifies
+//! the creation time again on the same process handle it uses to terminate it. It does not
+//! walk a process tree, whose PIDs can be reused while the walk is in progress. A run
+//! without a complete identity and job record cannot be stopped safely, so the stop says
+//! it may still be going. At a normal end the job is released, and a program the command
+//! leaves running stays running. Stopped runs' records and tarballs remain for cleanup.
 //!
 //! What a run packs it packs apart from the checkout: the list of what went over, the tree's
 //! identity, the sweep and the run script are written in the run's own scratch folder and appended
@@ -339,6 +302,9 @@ pub enum Error {
     /// what the command came to is not known, and the words say what is known of the run.
     #[error("{0}")]
     Silent(String),
+    /// ssh ended without the machine's exit line, so the run may still be going there.
+    #[error("{0}")]
+    Disconnected(String),
     /// The machine could not be asked whether a run may go to it now.
     #[error("{0}")]
     Unready(String),
@@ -349,7 +315,7 @@ impl Error {
     /// silent, and 1 for the rest.
     fn status(&self) -> i32 {
         match self {
-            Self::Silent(_) => SILENT,
+            Self::Silent(_) | Self::Disconnected(_) => SILENT,
             _ => 1,
         }
     }

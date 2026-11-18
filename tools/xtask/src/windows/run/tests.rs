@@ -690,9 +690,8 @@ fn a_run_answers_what_the_machine_said_of_the_command_whatever_ssh_answered() {
 
 #[test]
 fn a_run_whose_machine_said_nothing_of_the_command_answers_what_ssh_did_and_says_so() {
-    // A connection lost, a machine gone: ssh's status is what there is, and 0 is no success.
+    // For non-255 failures ssh's status is what there is, and 0 is no success.
     for (ssh, answer, why) in [
-        (255, 255, "so ssh's own status is the answer: 255"),
         (1, 1, "so ssh's own status is the answer: 1"),
         (
             0,
@@ -1819,4 +1818,21 @@ fn a_run_whose_ticket_could_not_be_kept_alive_under_way_ends_as_the_command_did_
         err.contains("windows: the run's place in the queue could not be kept alive ("),
         "{err}"
     );
+}
+
+#[test]
+fn a_broken_ssh_connection_is_not_reported_as_an_unstarted_run() {
+    let rig = Rig::new();
+    rig.program("scp", KEEPS);
+    rig.program(
+        "ssh",
+        r#"printf 'ssh\t%s\t%s\n' "$1" "$2" >> "$CF_LOG"; echo 'Read from remote host: Operation timed out' >&2; echo 'client_loop: send disconnect: Broken pipe' >&2; exit 255"#,
+    );
+    let (ended, _, _) = run_it(&rig, &Interrupt::default());
+    let message = match ended {
+        Ok(outcome) => panic!("an SSH failure cannot prove the run never began: {outcome:?}"),
+        Err(error) => error.to_string(),
+    };
+    assert!(message.contains("may still be going"), "{message}");
+    assert_eq!(rig.log().len(), 2, "no PID-based stop is safe here");
 }

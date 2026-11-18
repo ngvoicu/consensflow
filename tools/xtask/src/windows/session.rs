@@ -45,9 +45,8 @@ pub enum Ended {
     /// With this status, the remote command's own, as far as it is known: what the
     /// machine said of it, or else ssh's (`exited` says which, and why).
     Exited(i32),
-    /// With this status, the machine's or ssh's, before the machine had said which tree it
-    /// unpacked: the command was not started there as far as is known (the machine's lock refused
-    /// the run, 75; the unpack failed; the connection ended first), so it left nothing to bring back.
+    /// With this status, before the machine said which tree it unpacked. A 255 without an
+    /// exit line is reported separately because a lost connection proves no such thing.
     Unstarted(i32),
     /// Because this program was stopped: ssh is gone, the run may not be.
     Stopped,
@@ -59,6 +58,8 @@ pub enum Ended {
     /// Because ssh gave the machine up for its silence, and said so: nothing is known of how the
     /// command ended, and the run may be going on there still.
     Silent,
+    /// Because ssh ended with 255 without the machine's exit line: the remote run may continue.
+    Disconnected,
 }
 
 /// The stream a chunk was written to.
@@ -187,9 +188,9 @@ pub fn stream(
 /// run that did not say how it ended is. A failure needs no tree said: the lock's
 /// refusal and an unpack that failed end before there is one.
 ///
-/// ssh's 255 with its words about a peer it gave up on (`silent`) and no line of the machine's
-/// is [`Ended::Silent`], not a status: the command did not end, as far as is known, and the
-/// connection did. A stop heard comes first, as it does for any 255.
+/// ssh's 255 without the machine's exit line is a lost connection, not proof of the run's
+/// outcome. The particular timeout text is [`Ended::Silent`]; other failures are
+/// [`Ended::Disconnected`]. A stop heard comes first, as it does for any 255.
 fn exited(
     code: Option<i32>,
     said: Option<i32>,
@@ -217,8 +218,15 @@ fn exited(
     if matches!(code, None | Some(255)) && interrupt.heard_after_failure() {
         return (Ended::Stopped, None);
     }
-    if silent && code == Some(255) {
-        return (Ended::Silent, None);
+    if code == Some(255) {
+        return (
+            if silent {
+                Ended::Silent
+            } else {
+                Ended::Disconnected
+            },
+            None,
+        );
     }
     let no_line = format!("no `{EXIT_MARK}N` line ended the output");
     match code {

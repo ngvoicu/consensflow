@@ -215,6 +215,7 @@ fn shown(ended: &Ended) -> String {
         Ended::Unwritten(cause) => format!("unwritten: {cause}"),
         Ended::WrongTree(said) => format!("another tree: {said}"),
         Ended::Silent => "silent".into(),
+        Ended::Disconnected => "disconnected".into(),
     }
 }
 
@@ -434,7 +435,7 @@ fn a_status_a_stop_may_have_made_waits_a_moment_for_the_stop_and_another_does_no
     assert_eq!(answer(Some(255), &interrupt), "stopped");
     telling.join().unwrap();
     // Not heard within the grace, it is the status it is (a signal is told as 1).
-    assert_eq!(answer(Some(255), &Interrupt::default()), "exited 255");
+    assert_eq!(answer(Some(255), &Interrupt::default()), "disconnected");
     assert_eq!(answer(None, &Interrupt::default()), "exited 1");
     // Heard, the same two are the stop's; any other status is ssh's, heard or not,
     // and a 0 that the machine did not stand behind is no success.
@@ -470,14 +471,10 @@ fn what_ssh_did_when_the_machine_said_nothing_is_told_in_a_note_whatever_it_did(
             )
         );
     }
-    // A plain failure of ssh's is its own, said as it is.
-    assert_eq!(
-        told(Some(255)),
-        (
-            "exited 255".into(),
-            format!("{no_line}, so ssh's own status is the answer: 255")
-        )
-    );
+    // 255 without a machine's exit line cannot establish the remote outcome.
+    let (ended, note) = exited(Some(255), None, true, false, &none);
+    assert_eq!(shown(&ended), "disconnected");
+    assert!(note.is_none());
 }
 
 #[test]
@@ -615,7 +612,7 @@ fn the_words_of_a_silent_peer_are_not_silence_unless_ssh_ended_with_255_without_
         assert_ne!(format!("{ended:?}"), "Silent", "ssh {status}");
     }
     let (ended, _) = exits("255", "!Connection to zeewin2 closed by remote host.");
-    assert_eq!(shown(&ended), "exited 255");
+    assert_eq!(shown(&ended), "disconnected");
 }
 
 #[test]

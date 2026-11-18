@@ -9,10 +9,10 @@
 //! unpacks that one, so that no run unpacks what another sent, and the machine says
 //! which tree it unpacked, which must be the one this run sent.
 //!
-//! A run that is stopped here is ended there: ssh is ended, and a second ssh ends
-//! the run's whole tree on the machine and takes its record away, which Windows'
-//! SSH server does not do when the connection goes. A stop heard before ssh has
-//! started ends nothing there, for nothing has started.
+//! A stop ends ssh and asks the machine to end the run. The second ssh can end the
+//! whole job only when the run recorded a complete process identity; otherwise it
+//! reports that the run may still be going. It leaves the records and tarball for
+//! ownership-based cleanup. A stop before the run's ssh starts ends nothing there.
 //!
 //! A connection that goes silent is ended by ssh, after the bounds of [`reach`], and is told as
 //! what it is ([`Error::Silent`]): it is no result of the command's. A run whose connection
@@ -289,6 +289,10 @@ fn stream_run(
                 reach::silent_words(&machine.host, reach::RUN)
             )))
         }
+        Ended::Disconnected => Err(Error::Disconnected(format!(
+            "ssh to {} ended without the machine's exit line; the run may still be going on the machine",
+            machine.host
+        ))),
         Ended::Unwritten(cause) => {
             say_if_not_ended(end_there(context, machine, plan)?, console)?;
             Err(Error::Output(cause))
@@ -307,8 +311,7 @@ fn stopped(interrupt: &Interrupt, failed: bool) -> bool {
     }
 }
 
-/// Ends the run on the machine: its whole tree, and its record. Whether the machine
-/// was asked and said it was done.
+/// Asks the machine to end the run's job and reports whether it was ended.
 fn end_there(context: &Context, machine: &Machine, plan: &Plan) -> Result<Ending, Error> {
     let stop = ssh(context, &machine.host, &plan.stop);
     Ok(match process::run(&stop, &context.env)? {

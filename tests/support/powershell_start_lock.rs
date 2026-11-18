@@ -8,7 +8,7 @@ fn value(name: &str) -> Option<std::ffi::OsString> {
 }
 
 #[allow(clippy::expect_used)] // A Windows machine names its system folder.
-fn lock_path() -> PathBuf {
+pub fn lock_path() -> PathBuf {
     if let Some(path) = value("CF_PWSH_START_LOCK") {
         return path.into();
     }
