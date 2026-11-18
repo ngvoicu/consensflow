@@ -5743,6 +5743,41 @@ test.describe('R12: plain web addresses', () => {
     }
   })
 
+  test('both cells of a wide final character open the whole plain address', async ({ page }) => {
+    await replayPage(page)
+    const prefix = 'https://example.org/'
+    const url = `${prefix}你`
+    const place = await replaying(page, `${url} end`, 80)
+    const expected = []
+    for (const column of [prefix.length, prefix.length + 1]) {
+      const point = { x: place.left + (column + 0.5) * place.cell, y: place.top + 0.5 * place.row }
+      await page.mouse.move(1390, 790)
+      await page.mouse.move(point.x, point.y)
+      await expect
+        .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+        .toBe(`Cmd+click to open ${url}`)
+      await clickWith(page, point, ['Meta'])
+      expected.push(url)
+      await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual(expected)
+    }
+  })
+
+  test('a wide final character entering the edge zone is not clickable without a delimiter', async ({
+    page,
+  }) => {
+    await replayPage(page)
+    const prefix = 'https://example.org/'
+    // The wide character occupies columns 76 and 77; the latter is inside the last four.
+    const url = `${prefix}${'a'.repeat(75 - prefix.length)}你`
+    const place = await replaying(page, `${url}\r\n`, 80)
+    const point = { x: place.left + 6.5 * place.cell, y: place.top + 0.5 * place.row }
+    await page.mouse.move(point.x, point.y)
+    await afterFrames(page)
+    await clickWith(page, point, ['Meta'])
+    await afterFrames(page)
+    expect(await page.evaluate(() => window.replayOpened)).toEqual([])
+  })
+
   test('an address ending at the window edge remains unclickable', async ({ page }) => {
     await replayPage(page)
     const prefix = 'https://example.org/'
@@ -5790,6 +5825,28 @@ for (const [system, agent, key, other] of [
       const expected = []
       for (const row of [0, 1]) {
         const point = { x: place.left + 8.5 * place.cell, y: place.top + (row + 0.5) * place.row }
+        await page.mouse.move(point.x, point.y)
+        await expect
+          .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+          .toBe(`${named}+click to open ${url}`)
+        await clickWith(page, point, [key])
+        expected.push(url)
+        await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual(expected)
+      }
+    })
+
+    test(`${named}+click opens both cells of a wide final link character`, async ({ page }) => {
+      await replayPage(page)
+      const prefix = 'https://example.org/'
+      const url = `${prefix}你`
+      const place = await replaying(page, `${url} end`, 80)
+      const expected = []
+      for (const column of [prefix.length, prefix.length + 1]) {
+        const point = {
+          x: place.left + (column + 0.5) * place.cell,
+          y: place.top + 0.5 * place.row,
+        }
+        await page.mouse.move(1390, 790)
         await page.mouse.move(point.x, point.y)
         await expect
           .poll(() => page.evaluate(() => window.replay.terminal.element.title))

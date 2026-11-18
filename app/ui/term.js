@@ -85,6 +85,9 @@ function plainWebLinks(terminal, link) {
         const end = start + url.length - 1
         const from = places[start]
         const to = places[end]
+        // A character may occupy two terminal cells; its trailing cell is part of the
+        // link and, at the right edge, determines whether its ending is ambiguous.
+        const lastColumn = to.x + cells[end].getWidth() - 1
         if (from.y > y || to.y < y) continue
         // Reject an address embedded in a path, another scheme or a larger word, and any
         // token we would have to guess how to trim. URL() alone silently accepts backslashes
@@ -95,9 +98,9 @@ function plainWebLinks(terminal, link) {
         // the same row it has ended the address, even inside the zone.
         const after = buffer
           .getLine(to.y - 1)
-          .translateToString(true, to.x + 1)
+          .translateToString(true, lastColumn + 1)
           .trim()
-        if (!after && to.x >= terminal.cols - PLAIN_LINK_EDGE_COLUMNS) continue
+        if (!after && lastColumn >= terminal.cols - PLAIN_LINK_EDGE_COLUMNS) continue
         if (
           url.includes('\\') ||
           [...url].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)
@@ -126,7 +129,7 @@ function plainWebLinks(terminal, link) {
           continue
         }
         links.push({
-          range: { start: { x: from.x + 1, y: from.y }, end: { x: to.x + 1, y: to.y } },
+          range: { start: { x: from.x + 1, y: from.y }, end: { x: lastColumn + 1, y: to.y } },
           text: url,
           ...link,
         })
