@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use cf_engine::delivery_text::{delivery_text, marker_of};
 use cf_engine::testing::Context;
-use cf_harness::contract::Readiness;
+use cf_harness::contract::{Pane, Readiness};
 use cf_harness::records::Role;
 use cf_ledger::MessageView;
 use serde_json::json;
@@ -408,6 +408,35 @@ fn t1813_a_brief_queued_in_the_harness_does_not_replace_the_delivered_holding() 
         "a harness queue is not a delivered brief"
     );
     assert!(holding.active);
+    let pane = context.host.last("zeus").unwrap().pane;
+    let stale = Pane {
+        id: pane.id.clone(),
+        generation: pane.generation + 1,
+    };
+    context.dispatcher.brief_written(&stale, brief).unwrap();
+    assert_eq!(
+        context
+            .ledger
+            .borrow()
+            .question_holding(window)
+            .unwrap()
+            .unwrap()
+            .last_brief,
+        previous.last_brief,
+        "an old physical window cannot report a new holding"
+    );
+    context.dispatcher.brief_written(&pane, brief).unwrap();
+    assert_eq!(
+        context
+            .ledger
+            .borrow()
+            .question_holding(window)
+            .unwrap()
+            .unwrap()
+            .last_brief,
+        previous.last_brief,
+        "a report after the delivery ended cannot replace a holding"
+    );
     context
         .ledger
         .borrow_mut()
@@ -620,6 +649,79 @@ fn t1813_a_delivered_brief_is_the_holding_before_the_adapter_replies() {
         (holding.task_number, holding.active),
         (next.task.number, true),
         "the current holding must be the different task whose brief was already delivered"
+    );
+}
+
+#[test]
+fn t1813_a_brief_reported_after_cancellation_marks_the_ended_holding() {
+    use cf_engine::testing::Gate;
+    use cf_harness::contract::FirstMessage;
+    use std::cell::Cell;
+
+    let context = Context::new();
+    context.adapter.resumes_records.set(true);
+    context.host.exits_showing(Some(0), None, None);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    let window = tiers.id(&session);
+    context.adapter.answer("zeus", "Done.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let next = context.create_task(
+        tiers.project.id,
+        cf_ledger::NewTask {
+            from: "chief".into(),
+            after: Some(1),
+            body: "Next task".into(),
+            ..Default::default()
+        },
+    );
+    context
+        .ledger
+        .borrow_mut()
+        .accept_task(tiers.project.id, 1, "human")
+        .unwrap();
+    context.adapter.first.set(FirstMessage::Delivered);
+    let gate = Gate::default();
+    let waiting = gate.clone();
+    let entered = Rc::new(Cell::new(false));
+    let saw = Rc::clone(&entered);
+    *context.adapter.deliver.borrow_mut() = Some(Rc::new(move |taking| {
+        saw.set(true);
+        let waiting = waiting.clone();
+        Box::pin(async move {
+            waiting.wait().await;
+            Ok(taking())
+        })
+    }));
+    for _ in 0..8 {
+        context.advance(6_000);
+        context.pass().unwrap();
+        if entered.get() {
+            break;
+        }
+    }
+    assert!(entered.get(), "the next brief's transport began");
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(tiers.project.id, next.task.number, "human")
+        .unwrap();
+    gate.open();
+    context.settle();
+    let holding = context
+        .ledger
+        .borrow()
+        .question_holding(window)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (holding.task_number, holding.active),
+        (next.task.number, false),
+        "the reported brief's task ended, so a question cannot become taskless"
     );
 }
 

@@ -30,6 +30,8 @@ use crate::pacing::Pace;
 use crate::record::Record;
 use crate::role_change::Prelude;
 use crate::runtime::returning;
+#[cfg(test)]
+mod tests;
 use crate::seams::EngineError;
 use crate::shown::{after_words, words_key, Evidence, Paste, Shown};
 use crate::windows::pane_body_drawn;
@@ -126,6 +128,8 @@ pub struct HeldBack {
 #[derive(Debug, Default)]
 pub(crate) struct DeliveryPart {
     pub(crate) delivering: Option<Delivering>,
+    /// The physical window and message whose transport is reporting now.
+    brief_report: Option<(Pane, i64, bool)>,
     /// The reads that came to nothing for the message on its way, or the last.
     pub(crate) unread: Option<Unread>,
     /// A message waits for what the human typed and has not sent.
@@ -224,6 +228,37 @@ pub(crate) struct DeliveryPart {
     pub(crate) head_items: Option<(i64, usize)>,
 }
 
+/// The report is accepted only while this exact window's delivery is in flight.
+struct AwaitingBriefReport {
+    record: Rc<Record>,
+    pane: Pane,
+    message: i64,
+}
+
+impl AwaitingBriefReport {
+    fn new(record: &Rc<Record>, pane: &Pane, message: i64) -> Self {
+        record.delivery.borrow_mut().brief_report = Some((pane.clone(), message, false));
+        Self {
+            record: Rc::clone(record),
+            pane: pane.clone(),
+            message,
+        }
+    }
+}
+
+impl Drop for AwaitingBriefReport {
+    fn drop(&mut self) {
+        let mut delivery = self.record.delivery.borrow_mut();
+        if delivery
+            .brief_report
+            .as_ref()
+            .is_some_and(|(pane, message, _)| *pane == self.pane && *message == self.message)
+        {
+            delivery.brief_report = None;
+        }
+    }
+}
+
 /// A paste whose Enter was withheld, left in its window's input box.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Uncleared {
@@ -293,6 +328,8 @@ pub(crate) struct Admitting<'a> {
     pause_changed: Cell<bool>,
     /// Why it could not tell, where the ledger could not be read.
     failed: RefCell<Option<EngineError>>,
+    /// The transport reported a delivery but its holding could not be recorded.
+    report_failed: RefCell<Option<EngineError>>,
 }
 
 impl<'a> Admitting<'a> {
@@ -309,6 +346,7 @@ impl<'a> Admitting<'a> {
             withdrawn: Cell::new(false),
             pause_changed: Cell::new(false),
             failed: RefCell::new(None),
+            report_failed: RefCell::new(None),
         }
     }
 
@@ -377,7 +415,26 @@ impl<'a> Admitting<'a> {
 }
 
 impl PaneHost for Admitting<'_> {
-    fn request<'b>(&'b self, op: &'b str, body: Value) -> Work<'b, Result<Value, HostError>> {
+    fn request<'b>(&'b self, op: &'b str, mut body: Value) -> Work<'b, Result<Value, HostError>> {
+        if op == "pane.write_paste" && !self.again {
+            let message = self.dispatcher.seams.ledger.borrow().message(self.message);
+            match message {
+                Ok(Some(message)) if message.kind == "task" => body["brief"] = json!(self.message),
+                Ok(_) => {}
+                Err(error) => {
+                    let cause = EngineError::from(error);
+                    let message = cause.to_string();
+                    *self.failed.borrow_mut() = Some(cause);
+                    self.refused.set(true);
+                    return Box::pin(async move {
+                        Err(HostError {
+                            error: None,
+                            message,
+                        })
+                    });
+                }
+            }
+        }
         self.dispatcher.seams.host.request(op, body)
     }
 
@@ -394,9 +451,46 @@ impl PaneHost for Admitting<'_> {
         self.refused.set(true);
         false
     }
+
+    fn delivery_reported(&self, pane: &Pane) {
+        if let Err(cause) = self.dispatcher.brief_written(pane, self.message) {
+            *self.report_failed.borrow_mut() = Some(cause);
+        }
+    }
 }
 
 impl Dispatcher {
+    /// The transport reported a brief to this physical pane. Ignore a late
+    /// report from an old pane or one naming another participant's message.
+    pub fn brief_written(&self, pane: &Pane, message: i64) -> Result<(), EngineError> {
+        let Some(record) = self.record_of_pane(pane) else {
+            return Ok(());
+        };
+        if !record.delivery.borrow().brief_report.as_ref().is_some_and(
+            |(pending_pane, pending_message, reported)| {
+                pending_pane == pane && *pending_message == message && !reported
+            },
+        ) {
+            return Ok(());
+        }
+        let valid = self
+            .seams
+            .ledger
+            .borrow()
+            .message(message)?
+            .is_some_and(|message| message.kind == "task" && message.recipient_id == record.id);
+        if valid {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .question_brief_reported(message)?;
+            if let Some((_, _, reported)) = record.delivery.borrow_mut().brief_report.as_mut() {
+                *reported = true;
+            }
+            self.changed();
+        }
+        Ok(())
+    }
     /// Whether `message`, handed over into a window that holds the task `owner`'s work,
     /// begins a turn: in a member's window that holds a task, only one its result is taken
     /// from, as the ledger's `last_pasted` finds it (the task's message, an answer, or words
@@ -702,6 +796,7 @@ impl Dispatcher {
         // open and nothing of the paste was withdrawn since it was begun.
         let cleared = record.delivery.borrow().emptied.as_ref() == Some(&pane);
         let admitting = Admitting::handing(self, message.id, carried.clone()).cleared(cleared);
+        let awaiting_report = AwaitingBriefReport::new(record, &pane, message.id);
         let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {
             Ok(admission) => admission,
             // An adapter that failed never handed it over, and its error must show.
@@ -709,6 +804,16 @@ impl Dispatcher {
                 reason: format!("the delivery failed: {error}"),
             },
         };
+        let reported = record
+            .delivery
+            .borrow()
+            .brief_report
+            .as_ref()
+            .is_some_and(|(_, _, reported)| *reported);
+        drop(awaiting_report);
+        if let Some(cause) = admitting.report_failed.borrow_mut().take() {
+            return Err(cause);
+        }
         // Something went into the box, or may have: it is no longer known empty.
         if !matches!(outcome, Admission::Refused { .. } | Admission::Busy { .. }) {
             record.delivery.borrow_mut().emptied = None;
@@ -762,7 +867,8 @@ impl Dispatcher {
             self.changed();
             return Ok(());
         }
-        if matches!(outcome, Admission::Admitted { queued: false })
+        if !reported
+            && matches!(outcome, Admission::Admitted { queued: false })
             && record.window.borrow().pane.as_ref() == Some(&pane)
         {
             self.seams
@@ -906,7 +1012,15 @@ impl Dispatcher {
         }
         let session = conversation.and_then(|conversation| conversation.native_session);
         let admitting = Admitting::handing(self, first.message, first.carried.clone());
+        let awaiting_report = AwaitingBriefReport::new(record, &pane, first.message);
         let handed = returning(window.deliver(&admitting, &pane, &text)).await;
+        let reported = record
+            .delivery
+            .borrow()
+            .brief_report
+            .as_ref()
+            .is_some_and(|(_, _, reported)| *reported);
+        drop(awaiting_report);
         let outcome = match handed {
             Ok(admission) => admission,
             // An adapter that failed never handed it over, and its error must show.
@@ -914,6 +1028,9 @@ impl Dispatcher {
                 reason: format!("the delivery failed: {error}"),
             },
         };
+        if let Some(cause) = admitting.report_failed.borrow_mut().take() {
+            return Err(cause);
+        }
         if self.forgotten(record) {
             return Ok(());
         }
@@ -945,7 +1062,8 @@ impl Dispatcher {
                 format!("its harness refused its first message for being at work: {reason}");
             return self.held_once(record, first.message, &reason).await;
         }
-        if matches!(outcome, Admission::Admitted { queued: false })
+        if !reported
+            && matches!(outcome, Admission::Admitted { queued: false })
             && record.window.borrow().pane.as_ref() == Some(&pane)
         {
             self.seams

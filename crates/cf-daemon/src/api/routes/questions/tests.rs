@@ -184,6 +184,164 @@ async fn t1813_a_launch_token_follows_a_later_delivered_brief() {
 }
 
 #[tokio::test]
+async fn t1813_a_reported_different_brief_binds_the_http_question_before_delivery_reply() {
+    let scene = scene();
+    let (number, _, session, first) = first_brief_opening(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .question_brief_handed_over(first)
+        .unwrap();
+    let token = issue_on_open(&scene, session);
+    let (next, brief) = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        ledger
+            .confirm_delivery(first, Some(&json!({"item":"first"})))
+            .unwrap();
+        ledger
+            .record_result(scene.project.id, number, "Done")
+            .unwrap();
+        let next = ledger
+            .create_task(
+                scene.project.id,
+                &cf_ledger::NewTask {
+                    from: "chief".into(),
+                    after: Some(number),
+                    body: "Follow-up".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .task
+            .number;
+        ledger
+            .accept_task(scene.project.id, number, "chief")
+            .unwrap();
+        let brief = ledger
+            .task(scene.project.id, next)
+            .unwrap()
+            .unwrap()
+            .messages
+            .into_iter()
+            .find(|m| m.kind == "task")
+            .unwrap()
+            .id;
+        ledger.begin_delivery(brief).unwrap();
+        (next, brief)
+    };
+    let before = ask(&scene, &token, r#"{"body":"Before the report"}"#).await;
+    assert_eq!(
+        before.0, 409,
+        "the ended previous holding still applies: {before:?}"
+    );
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .question_brief_reported(brief)
+        .unwrap();
+    let after = ask(&scene, &token, r#"{"body":"After the report"}"#).await;
+    assert_eq!(after.0, 201, "{after:?}");
+    assert_eq!(after.1["message"]["task"], next);
+    let question = after.1["message"]["id"].as_i64().unwrap();
+    let chief = scene.id("chief");
+    let answer = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let answer = ledger
+            .answer(question, chief, Some(&json!("The complete answer")), None)
+            .unwrap()
+            .id;
+        ledger.cancel_task(scene.project.id, next, "chief").unwrap();
+        assert_eq!(
+            ledger.message(question).unwrap().unwrap().state,
+            "cancelled"
+        );
+        assert_eq!(ledger.message(answer).unwrap().unwrap().state, "cancelled");
+        assert_eq!(
+            ledger
+                .inbox(chief, 100)
+                .unwrap()
+                .iter()
+                .filter(|m| { m.kind == "note" && m.body.contains("The complete answer") })
+                .count(),
+            1
+        );
+        answer
+    };
+    assert!(scene
+        .context
+        .ledger
+        .borrow()
+        .next_delivery_of(session, answer)
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn t1813_a_brief_reported_after_cancellation_refuses_the_window_with_the_task_location() {
+    let scene = scene();
+    let (number, _, session, first) = first_brief_opening(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .question_brief_handed_over(first)
+        .unwrap();
+    let token = issue_on_open(&scene, session);
+    let next = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        ledger
+            .confirm_delivery(first, Some(&json!({"item":"first"})))
+            .unwrap();
+        ledger
+            .record_result(scene.project.id, number, "Done")
+            .unwrap();
+        let next = ledger
+            .create_task(
+                scene.project.id,
+                &cf_ledger::NewTask {
+                    from: "chief".into(),
+                    after: Some(number),
+                    body: "Follow-up".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .task
+            .number;
+        ledger
+            .accept_task(scene.project.id, number, "chief")
+            .unwrap();
+        let brief = ledger
+            .task(scene.project.id, next)
+            .unwrap()
+            .unwrap()
+            .messages
+            .into_iter()
+            .find(|m| m.kind == "task")
+            .unwrap()
+            .id;
+        ledger.begin_delivery(brief).unwrap();
+        ledger.cancel_task(scene.project.id, next, "chief").unwrap();
+        ledger.question_brief_reported(brief).unwrap();
+        next
+    };
+    let response = ask(
+        &scene,
+        &token,
+        r#"{"body":"A question from the new brief"}"#,
+    )
+    .await;
+    assert_eq!(response.0, 409, "{response:?}");
+    let words = response.1["message"].as_str().unwrap();
+    assert!(
+        words.contains(&format!("T-{next}")) && words.contains("cancelled"),
+        "{words}"
+    );
+}
+
+#[tokio::test]
 async fn t1813_a_resumed_window_can_ask_before_the_host_answers_its_open() {
     let scene = scene();
     let task = session_task_at_work(&scene);

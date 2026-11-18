@@ -187,6 +187,47 @@ pub(crate) fn hand_brief(store: &mut Store, message: i64) -> Result<(), LedgerEr
     Ok(())
 }
 
+/// The transport has reported that this brief reached the window. If the
+/// task ended while the write was in flight, remember that ended holding too:
+/// a question from that window must not be mistaken for an idle question.
+pub(crate) fn reported_brief(store: &mut Store, message: i64) -> Result<(), LedgerError> {
+    let brief: Option<(i64, i64, bool)> = store
+        .db
+        .query_row(
+            "SELECT m.recipient_id, m.task_id,
+           t.assignee_id IS m.recipient_id AND p.left_at IS NULL AND t.deleted_at IS NULL
+             AND t.state NOT IN ('accepted', 'cancelled', 'failed')
+         FROM message m JOIN task t ON t.id = m.task_id AND t.project_id = m.project_id
+         JOIN participant p ON p.id = m.recipient_id AND p.project_id = m.project_id
+         WHERE m.id = ? AND m.kind = 'task' AND p.role NOT IN ('chief', 'human')",
+            [message],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+    let Some((window, task, active)) = brief else {
+        return Ok(());
+    };
+    if active {
+        hand_brief(store, message)?;
+        // A report of the actual write is final even if its later Enter fails.
+        confirm_brief(store, message)?;
+        return Ok(());
+    }
+    if let Some(previous) = of(store, window)?.filter(|h| h.active) {
+        close(store, window, Some(previous.task_id), None)?;
+    }
+    store.db.execute(
+        "INSERT INTO question_holding (participant_id, task_id, first_brief_id, last_brief_id, closed, run_id)
+         VALUES (?1, ?2, ?3, ?3, 1, ?4)
+         ON CONFLICT(participant_id) DO UPDATE SET task_id = excluded.task_id,
+           first_brief_id = excluded.first_brief_id, last_brief_id = excluded.last_brief_id,
+           closed = 1, run_id = excluded.run_id",
+        params![window, task, message, store.question_run],
+    )?;
+    confirm_brief(store, message)?;
+    Ok(())
+}
+
 /// A confirmed brief needs no rollback checkpoint.
 pub(crate) fn confirm_brief(store: &Store, brief: i64) -> Result<(), LedgerError> {
     store

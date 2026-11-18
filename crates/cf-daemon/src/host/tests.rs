@@ -742,6 +742,38 @@ async fn what_an_exit_has_still_to_do_goes_on_apart_and_is_never_waited_for_ther
 }
 
 #[tokio::test]
+async fn t1813_a_brief_write_report_is_handled_before_the_next_bridge_frame() {
+    LocalSet::new()
+        .run_until(async {
+            let Worked { spawn, .. } = worked();
+            let (daemon, app) = bridge_pair_over(&spawn);
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let reports = Rc::clone(&seen);
+            let _watching = watch_briefs(&daemon, spawn, move |pane, brief| {
+                reports.borrow_mut().push((pane.clone(), brief));
+                Ok(())
+            });
+            daemon.on("ping", |_, _| async { Ok(json!({ "ok": true })) });
+            for invalid in [
+                json!({}),
+                json!({ "id": "p1", "generation": 0, "brief": 2 }),
+                json!({ "id": "p1", "generation": 1, "brief": -1 }),
+            ] {
+                app.event("pane.brief_written", invalid);
+            }
+            app.event(
+                "pane.brief_written",
+                json!({ "id": "p1", "generation": 7, "brief": 42 }),
+            );
+            app.request("ping", json!({}), Some(Duration::from_secs(5)))
+                .await
+                .unwrap();
+            assert_eq!(*seen.borrow(), [(pane("p1", 7), 42)]);
+        })
+        .await;
+}
+
+#[tokio::test]
 async fn an_exit_that_names_no_pane_exits_nothing() {
     LocalSet::new()
         .run_until(async {

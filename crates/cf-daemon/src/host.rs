@@ -415,6 +415,40 @@ pub fn watch_exits(
     })
 }
 
+/// A pane host reports a brief as soon as its body was written, before its
+/// delayed Enter and the paste's response. Handle the report on the daemon's
+/// thread before the bridge reads the next frame.
+pub fn watch_briefs(
+    bridge: &Bridge,
+    spawn: Rc<DaemonSpawn>,
+    written: impl Fn(&Pane, i64) -> Result<(), cf_engine::seams::EngineError> + 'static,
+) -> Subscription {
+    bridge.on_event("pane.brief_written", move |body| {
+        let (Some(id), Some(generation), Some(brief)) = (
+            body.get("id").and_then(Value::as_str),
+            body.get("generation").and_then(Value::as_u64),
+            body.get("brief").and_then(Value::as_i64),
+        ) else {
+            return;
+        };
+        if id.is_empty() || generation == 0 || brief <= 0 {
+            return;
+        }
+        let pane = Pane {
+            id: id.to_owned(),
+            generation,
+        };
+        match contain_now(|| written(&pane, brief)) {
+            Ok(Ok(())) => {}
+            Ok(Err(cause)) => spawn
+                .errors()
+                .log()
+                .error("a brief report failed", Some(&cause.to_string())),
+            Err(panicked) => spawn.errors().caught("a brief report failed", &panicked),
+        }
+    })
+}
+
 /// What the host says of the system's privacy dialogs (`pane.tcc`, `pane.tcc_unreadable`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PrivacyEvent {

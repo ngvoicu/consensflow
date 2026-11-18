@@ -29,7 +29,7 @@ use cf_proto::agents::Harness;
 use jiff::tz::TimeZone;
 use serde_json::Value;
 
-use crate::contract::{HostError, PaneHost, Records, Work};
+use crate::contract::{HostError, Pane, PaneHost, Records, Work};
 use crate::records::{self, Boundary, Cache, Options, Reading, IDLE_MS};
 use crate::seams::{Bundle, Entropy, Loopback, Ports, Probes, Processes, Services, Time};
 
@@ -468,6 +468,7 @@ pub struct ScriptedHost {
     held: RefCell<VecDeque<HeldRequest>>,
     refusing: Cell<bool>,
     admissions: Cell<usize>,
+    pub reports: Cell<usize>,
 }
 
 /// A request held: its operation, the work it belongs to, and where its
@@ -587,6 +588,10 @@ impl PaneHost for ScriptedHost {
         self.admissions.set(self.admissions.get() + 1);
         !self.refusing.get()
     }
+
+    fn delivery_reported(&self, _pane: &Pane) {
+        self.reports.set(self.reports.get() + 1);
+    }
 }
 
 /// A pane host that answers each request as `answer` says, at once, and
@@ -594,6 +599,7 @@ impl PaneHost for ScriptedHost {
 pub struct AnsweringHost<F> {
     answer: F,
     pub asked: RefCell<Vec<(String, Value)>>,
+    pub reports: Cell<usize>,
 }
 
 impl<F: Fn(&str) -> Result<Value, HostError>> AnsweringHost<F> {
@@ -601,6 +607,7 @@ impl<F: Fn(&str) -> Result<Value, HostError>> AnsweringHost<F> {
         Self {
             answer,
             asked: RefCell::new(Vec::new()),
+            reports: Cell::new(0),
         }
     }
 }
@@ -610,6 +617,10 @@ impl<F: Fn(&str) -> Result<Value, HostError>> PaneHost for AnsweringHost<F> {
         self.asked.borrow_mut().push((op.to_owned(), body));
         let answer = (self.answer)(op);
         Box::pin(async move { answer })
+    }
+
+    fn delivery_reported(&self, _pane: &Pane) {
+        self.reports.set(self.reports.get() + 1);
     }
 }
 

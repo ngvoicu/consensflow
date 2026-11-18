@@ -30,7 +30,7 @@ use super::host::Host;
 use crate::api::credentials::Credentials;
 use crate::errors::Errors;
 use crate::files::{Log, Trace};
-use crate::host::{daemon_bridge, watch_exits, BridgeHost};
+use crate::host::{daemon_bridge, watch_briefs, watch_exits, BridgeHost};
 use crate::seams::{DaemonSpawn, LaunchFolders, RoleTexts, WindowEnv};
 
 /// What the bridge runs over.
@@ -247,6 +247,12 @@ impl Rig {
             limits: Limits::default(),
         };
         let dispatcher = Dispatcher::new(seams);
+        let written = Rc::clone(&dispatcher);
+        drop(watch_briefs(
+            bridge,
+            Rc::clone(spawn),
+            move |pane, brief| written.brief_written(pane, brief),
+        ));
         let exiting = Rc::clone(&dispatcher);
         // Dropped, it leaves the handler where it is.
         drop(watch_exits(bridge, Rc::clone(spawn), move |pane| {

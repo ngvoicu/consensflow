@@ -205,7 +205,13 @@ pub async fn send(
     text: &str,
 ) -> Result<Answer, String> {
     match before(time, entropy, target, text).await {
-        Ok(handover) => Ok(after(time, handover).await),
+        Ok(handover) => {
+            let answer = after(time, handover).await;
+            if answer.ok && answer.admitted == Some(true) {
+                target.host.delivery_reported(target.pane);
+            }
+            Ok(answer)
+        }
         Err(Failed::Answered(answer)) => Ok(answer),
         Err(Failed::Threw(thrown)) => Err(thrown),
     }

@@ -151,6 +151,7 @@ pub type InputResponse = Result<(), InputError>;
 
 struct InputJob {
     work: InputWork,
+    written: Option<Box<dyn FnOnce() + Send>>,
     response: oneshot::Sender<InputResponse>,
     reserved_bytes: usize,
     pending_bytes: Arc<AtomicUsize>,
@@ -504,6 +505,17 @@ impl InputQueue {
         self.submit(key, InputWork::Paste { body, read_empty })
     }
 
+    /// A paste whose completed body must be reported before its delayed Enter.
+    pub(crate) fn paste_notifying(
+        &self,
+        key: PaneKey,
+        body: Vec<u8>,
+        read_empty: Option<u64>,
+        written: Box<dyn FnOnce() + Send>,
+    ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
+        self.submit_with(key, InputWork::Paste { body, read_empty }, Some(written))
+    }
+
     /// Admit a native-channel send: the pane is current and its input works,
     /// and no paste is going in, since the pane's worker runs one job at a
     /// time.
@@ -578,6 +590,15 @@ impl InputQueue {
         key: PaneKey,
         work: InputWork,
     ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
+        self.submit_with(key, work, None)
+    }
+
+    fn submit_with(
+        &self,
+        key: PaneKey,
+        work: InputWork,
+        written: Option<Box<dyn FnOnce() + Send>>,
+    ) -> Result<oneshot::Receiver<InputResponse>, InputError> {
         let closed = || InputError::refused(INPUT_CLOSED, "pane input admission is closed");
         if !self.accepting.load(Ordering::Acquire) {
             return Err(closed());
@@ -604,6 +625,7 @@ impl InputQueue {
         let (response, receiver) = oneshot::channel();
         let job = InputJob {
             work,
+            written,
             response,
             reserved_bytes,
             pending_bytes: Arc::clone(&route.pending_bytes),
@@ -664,9 +686,12 @@ fn input_worker(
             InputWork::Write(bytes) | InputWork::Reply(bytes) => {
                 arbiter.write(&panes, &key, &bytes)
             }
-            InputWork::Paste { body, read_empty } => {
-                arbiter.write_paste(&panes, &key, &body, read_empty)
-            }
+            InputWork::Paste { body, read_empty } => match job.written {
+                Some(written) => {
+                    arbiter.write_paste_notifying(&panes, &key, &body, read_empty, written)
+                }
+                None => arbiter.write_paste(&panes, &key, &body, read_empty),
+            },
             InputWork::Claim => arbiter.claim(&key),
         }
         .map_err(InputError::from);

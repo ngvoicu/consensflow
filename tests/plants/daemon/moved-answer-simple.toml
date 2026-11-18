@@ -120,14 +120,16 @@ meant = "t1813_a_brief_queued_in_the_harness_does_not_replace_the_delivered_hold
 runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1813_a_brief_queued_in_the_harness_does_not_replace_the_delivered_holding"]]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''        if matches!(outcome, Admission::Admitted { queued: false })
+find = '''        if !reported
+            && matches!(outcome, Admission::Admitted { queued: false })
             && record.window.borrow().pane.as_ref() == Some(&pane)
         {
             self.seams
                 .ledger
                 .borrow_mut()
                 .question_brief_handed_over(message.id)?;'''
-replace = '''        if matches!(outcome, Admission::Admitted { .. })
+replace = '''        if !reported
+            && matches!(outcome, Admission::Admitted { .. })
             && record.window.borrow().pane.as_ref() == Some(&pane)
         {
             self.seams
@@ -170,3 +172,81 @@ runs = [["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "t1813_a_delay
 file = "crates/cf-panes/src/arbiter.rs"
 find = "                state.pasted = Some(self.clock.now());"
 replace = "                state.pasted = Some(self.clock.now() - std::time::Duration::from_millis(25));"
+
+[[plant]]
+name = "moved answer simple: a written brief sends no pane report"
+meant = "t1813_a_briefs_write_report_precedes_the_pastes_reply"
+runs = [["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "t1813_a_briefs_write_report_precedes_the_pastes_reply"]]
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = '''                    let _ = bridge.event(
+                        "pane.brief_written",
+                        json!({
+                            "id": pane.id, "generation": pane.generation, "brief": brief
+                        }),
+                    );'''
+replace = '''                    let _ = (bridge, pane, brief);'''
+
+[[plant]]
+name = "moved answer simple: Pi's take is not reported"
+meant = "t1813_pi_reports_the_extensions_take_not_the_inbox_rename"
+runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_pi_reports_the_extensions_take_not_the_inbox_rename"]]
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/channel/send.rs"
+find = "                target.host.delivery_reported(target.pane);"
+replace = "                let _ = target;"
+
+[[plant]]
+name = "moved answer simple: Codex acceptance is not reported"
+meant = "t1813_codex_reports_app_server_acceptance_not_a_refusal"
+runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_codex_reports_app_server_acceptance_not_a_refusal"]]
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/channel/send.rs"
+find = "        target.host.delivery_reported(target.pane);"
+replace = "        let _ = target;"
+
+[[plant]]
+name = "moved answer simple: a brief paste is not marked for a report"
+meant = "t1813_only_a_brief_paste_asks_the_host_for_a_write_report"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "t1813_only_a_brief_paste_asks_the_host_for_a_write_report"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''Ok(Some(message)) if message.kind == "task" => body["brief"] = json!(self.message),'''
+replace = '''Ok(Some(message)) if message.kind == "task" => { let _ = self.message; },'''
+
+[[plant]]
+name = "moved answer simple: the daemon ignores a brief report"
+meant = "t1813_a_brief_write_report_is_handled_before_the_next_bridge_frame"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "t1813_a_brief_write_report_is_handled_before_the_next_bridge_frame"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = "        match contain_now(|| written(&pane, brief)) {"
+replace = "        match contain_now(|| { let _ = (&written, &pane, brief); Ok::<(), cf_engine::seams::EngineError>(()) }) {"
+
+[[plant]]
+name = "moved answer simple: a reported brief does not change the holding"
+meant = "t1813_a_delivered_brief_is_the_holding_before_the_adapter_replies"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1813_a_delivered_brief_is_the_holding_before_the_adapter_replies"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                .question_brief_reported(message)?;"
+replace = "                .message(message)?;"
+
+[[plant]]
+name = "moved answer simple: an old report replaces a later holding"
+meant = "t1813_a_brief_queued_in_the_harness_does_not_replace_the_delivered_holding"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "t1813_a_brief_queued_in_the_harness_does_not_replace_the_delivered_holding"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        if !record.delivery.borrow().brief_report.as_ref().is_some_and("
+replace = "        if false && !record.delivery.borrow().brief_report.as_ref().is_some_and("
+
+[[plant]]
+name = "moved answer simple: an ended reported brief becomes an idle window"
+meant = "t1813_a_brief_reported_after_cancellation_refuses_the_window_with_the_task_location"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "t1813_a_brief_reported_after_cancellation_refuses_the_window_with_the_task_location"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = '''        self.store
+            .write(|store| crate::holding::reported_brief(store, message_id))'''
+replace = "        self.question_brief_handed_over(message_id)"

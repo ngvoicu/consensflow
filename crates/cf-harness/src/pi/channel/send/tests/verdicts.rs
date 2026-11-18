@@ -6,6 +6,37 @@ use std::cell::RefCell;
 use super::*;
 
 #[test]
+fn t1813_pi_reports_the_extensions_take_not_the_inbox_rename() {
+    let mut stage = Stage::admitting();
+    assert!(stage.send("first").is_empty());
+    assert_eq!(stage.host.reports.get(), 0, "the inbox is only a queue");
+    stage.acknowledges(&json!({ "admitted": false, "bytesWritten": 0 }));
+    assert!(!stage.until_answered().ok);
+    assert_eq!(stage.host.reports.get(), 0, "a refusal is no take");
+
+    let mut stage = Stage::admitting();
+    assert!(stage.send("uncertain").is_empty());
+    stage.acknowledges(&json!({ "admitted": null }));
+    assert!(!stage.until_answered().ok);
+    assert_eq!(
+        stage.host.reports.get(),
+        0,
+        "an uncertain take is not a report"
+    );
+
+    let mut stage = Stage::admitting();
+    assert!(stage.send("second").is_empty());
+    assert_eq!(stage.host.reports.get(), 0);
+    stage.acknowledges(&json!({ "admitted": true, "mode": "tui" }));
+    assert!(stage.until_answered().ok);
+    assert_eq!(
+        stage.host.reports.get(),
+        1,
+        "the extension reported its take"
+    );
+}
+
+#[test]
 fn what_each_verdict_says_is_what_the_answer_says() {
     let ack = |fields: Value| {
         let mut ack = json!({ "id": "m-x" });

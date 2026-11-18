@@ -51,7 +51,9 @@ use crate::computer_use::{system_opener, MachineComputerUse};
 use crate::console::Console;
 use crate::errors::{contain, Errors};
 use crate::files::{Log, Trace};
-use crate::host::{daemon_bridge, watch_exits, watch_privacy, BridgeHost, PrivacyEvent};
+use crate::host::{
+    daemon_bridge, watch_briefs, watch_exits, watch_privacy, BridgeHost, PrivacyEvent,
+};
 use crate::machine;
 use crate::models::ModelLists;
 use crate::page::{self, Page};
@@ -478,6 +480,10 @@ async fn run(
         models: Rc::new(ModelLists::new(adapters, env.clone())),
     });
     page::register(&bridge, &page, &spawn);
+    let written = Rc::clone(&dispatcher);
+    watch_briefs(&bridge, Rc::clone(&spawn), move |pane, brief| {
+        written.brief_written(pane, brief)
+    });
     let exiting = Rc::clone(&dispatcher);
     watch_exits(&bridge, Rc::clone(&spawn), move |pane| {
         exiting.pane_exited(pane)

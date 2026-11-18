@@ -421,7 +421,20 @@ impl InputArbiter {
         body: &[u8],
         read_empty: Option<u64>,
     ) -> Result<(), ArbiterError> {
-        self.write_paste_via(table, pane, body, read_empty)
+        self.write_paste_notifying(table, pane, body, read_empty, || {})
+    }
+
+    /// Report the written body before waiting for its Enter. The retry clock
+    /// still begins after Enter, independently of this report.
+    pub(crate) fn write_paste_notifying(
+        &self,
+        table: &PaneTable,
+        pane: &PaneKey,
+        body: &[u8],
+        read_empty: Option<u64>,
+        written: impl FnOnce(),
+    ) -> Result<(), ArbiterError> {
+        self.write_paste_via_notifying(table, pane, body, read_empty, written)
     }
 
     /// Admit a native-channel send (a harness's own server, inbox or socket)
@@ -436,12 +449,24 @@ impl InputArbiter {
 
     /// A paste and its Enter. While it goes in, the pane's snapshot says so,
     /// and a newer generation of the pane cannot take its place.
+    #[cfg(test)]
     fn write_paste_via<W: PaneInputWriter + ?Sized>(
         &self,
         writer: &W,
         pane: &PaneKey,
         body: &[u8],
         read_empty: Option<u64>,
+    ) -> Result<(), ArbiterError> {
+        self.write_paste_via_notifying(writer, pane, body, read_empty, || {})
+    }
+
+    fn write_paste_via_notifying<W: PaneInputWriter + ?Sized>(
+        &self,
+        writer: &W,
+        pane: &PaneKey,
+        body: &[u8],
+        read_empty: Option<u64>,
+        written: impl FnOnce(),
     ) -> Result<(), ArbiterError> {
         let body = sanitize(body)?;
         let state = self.pane_state(pane)?;
@@ -466,6 +491,7 @@ impl InputArbiter {
         let mut pasted = false;
         let written = write_paste_via(writer, pane, &body, || {
             pasted = true;
+            written();
             enter.wait(self.clock.as_ref(), &output, self.clock.now());
         });
         // A paste is answered as it went: a lock poisoned meanwhile fails the

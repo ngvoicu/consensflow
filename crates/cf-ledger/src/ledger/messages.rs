@@ -736,6 +736,13 @@ impl Ledger {
         })
     }
 
+    /// Record an authenticated transport report, even if the task ended
+    /// between the transport's admission and its report.
+    pub fn question_brief_reported(&mut self, message_id: i64) -> Result<(), LedgerError> {
+        self.store
+            .write(|store| crate::holding::reported_brief(store, message_id))
+    }
+
     /// Whether an Enter may send a paste already handed over: its words cannot be
     /// prepared again, even if a tell's pause changed after the hand-over.
     pub fn admit_again(

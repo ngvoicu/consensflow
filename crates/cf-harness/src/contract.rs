@@ -892,6 +892,10 @@ pub trait PaneHost {
         true
     }
 
+    /// A native transport reported that this window took its message.
+    /// A queue admission without that report must not call this.
+    fn delivery_reported(&self, _pane: &Pane) {}
+
     /// Whether the engine emptied the window's input box just before this
     /// hand-over, with the keys of its [`Input::Pasted`]: an adapter that would
     /// empty it itself presses nothing more (a second Control-C in a row ends

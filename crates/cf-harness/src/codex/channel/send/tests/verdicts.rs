@@ -6,6 +6,35 @@ use super::*;
 use crate::seams::loopback::BodyFailed;
 
 #[test]
+fn t1813_codex_reports_app_server_acceptance_not_a_refusal() {
+    let mut stage = Stage::new();
+    stage.claim_with(json!({ "ok": true }));
+    stage.replies(
+        409,
+        r#"{"admitted":false,"bytesWritten":0,"error":"expired"}"#,
+    );
+    assert!(!stage.sends("first").unwrap().ok);
+    assert_eq!(stage.host.reports.get(), 0);
+
+    stage.claim_with(json!({ "ok": true }));
+    stage
+        .fakes
+        .loopback
+        .serve("POST /deliver", [Served::NoHead]);
+    assert!(!stage.sends("uncertain").unwrap().ok);
+    assert_eq!(
+        stage.host.reports.get(),
+        0,
+        "an uncertain reply is not a report"
+    );
+
+    stage.claim_with(json!({ "ok": true }));
+    stage.replies(200, r#"{"ok":true,"admitted":true}"#);
+    assert!(stage.sends("second").unwrap().ok);
+    assert_eq!(stage.host.reports.get(), 1, "the app-server accepted it");
+}
+
+#[test]
 fn a_broker_that_gives_no_head_or_breaks_off_its_body_is_a_failure_of_the_transport() {
     let mut stage = Stage::new();
     for served in [
