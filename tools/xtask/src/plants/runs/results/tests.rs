@@ -1,5 +1,23 @@
 use super::*;
 
+#[test]
+fn nextest_setup_is_not_a_test_and_a_failed_setup_is_an_outside_error() {
+    let xml = r#"<testsuites>
+      <testsuite name="@setup-script:plants-private"><testcase classname="@setup-script:plants-private" name="plants-private"/></testsuite>
+      <testsuite name="suite"><testcase classname="suite" name="real"/></testsuite>
+    </testsuites>"#;
+    let got = junit(xml).unwrap();
+    assert_eq!(got.tests.len(), 1);
+    assert_eq!(got.tests[0].name, "real");
+    let failed = xml.replace(
+        "name=\"plants-private\"/>",
+        "name=\"plants-private\"><failure/></testcase>",
+    );
+    let got = junit(&failed).unwrap();
+    assert_eq!(got.tests.len(), 1);
+    assert_eq!(got.outside.len(), 1);
+}
+
 /// The names of `tests`, and whether each failed.
 fn said(tests: &[Test]) -> Vec<(&str, bool)> {
     tests

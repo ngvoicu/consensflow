@@ -25,8 +25,8 @@ const OUTPUT_LIMIT: usize = 64 * 1024 * 1024;
 /// The variable `node --test` sets for the ones it starts.
 const NODE_TEST_CONTEXT: &str = "NODE_TEST_CONTEXT";
 
-/// The variables a program is told its temp folder by: Unix's, and Windows' two.
-const TEMP_FOLDER: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
+/// Carries the run's test-only temp folder through nextest, without changing Cargo's temp.
+const TEST_TEMP: &str = "CF_PLANTS_PRIVATE_TEMP";
 
 /// Where each run's report is written, under the build folder git leaves out.
 const RUNS: &str = "app/src-tauri/target/plants-runs";
@@ -53,6 +53,7 @@ pub struct Execute {
     /// Whether a run that takes no threads was told the driver's threads have no
     /// effect on it: said once, and the run goes on.
     said_no_effect: bool,
+    test_temp: Option<PathBuf>,
 }
 
 impl Execute {
@@ -114,6 +115,7 @@ impl Execute {
                 .map(|build| build.iter().map(|word| (*word).to_owned()).collect())
                 .collect(),
             said_no_effect: false,
+            test_temp: None,
         }
     }
 
@@ -272,17 +274,7 @@ impl Runner for Execute {
     }
 
     fn temp_in(&mut self, folder: &Path) {
-        let kept = self
-            .checkout
-            .env
-            .iter()
-            .filter(|(name, _)| !TEMP_FOLDER.iter().any(|temp| *name == OsStr::new(temp)))
-            .map(|(name, value)| (name.to_owned(), value.to_owned()))
-            .collect::<Vec<_>>();
-        let given = TEMP_FOLDER
-            .iter()
-            .map(|name| (OsString::from(name), folder.as_os_str().to_owned()));
-        self.checkout.env = Env::from_vars(kept.into_iter().chain(given));
+        self.test_temp = Some(folder.to_path_buf());
     }
 
     fn say_no_effect(&mut self, command: &[String]) {
@@ -333,9 +325,59 @@ impl Runner for Execute {
             Reporter::Nextest => self.nextest()?,
             _ => String::new(),
         };
-        let invocation = reporter
+        let mut invocation = reporter
             .setup(command, dir, &self.checkout, &nextest)
             .map_err(Error::files("write the config of a run in", dir))?;
+        if let Some(temp) = &self.test_temp {
+            if reporter == Reporter::Nextest {
+                // Nextest invokes Cargo first, then runs setup scripts and tests. The
+                // setup script supplies only the tests' environment, without wrapping
+                // their executables: a binary nextest cannot start must remain an error,
+                // never a test failure that could falsely catch a plant.
+                let config = dir.join("nextest.toml");
+                let original = fs::read_to_string(&config)
+                    .map_err(Error::files("read nextest's config", &config))?;
+                let setup = if cfg!(windows) {
+                    r#"command = ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', '[IO.File]::WriteAllText($env:NEXTEST_ENV, ("TMPDIR={0}`nTMP={0}`nTEMP={0}`n" -f $env:CF_PLANTS_PRIVATE_TEMP), [Text.UTF8Encoding]::new($false))']"#
+                } else {
+                    r#"command = ['/bin/sh', '-c', 'printf "TMPDIR=%s\nTMP=%s\nTEMP=%s\n" "$CF_PLANTS_PRIVATE_TEMP" "$CF_PLANTS_PRIVATE_TEMP" "$CF_PLANTS_PRIVATE_TEMP" > "$NEXTEST_ENV"']"#
+                };
+                // Listing also starts the binary (and any constructors) before
+                // setup. Wrap listing alone: if it cannot start, nextest refuses
+                // the whole run. Actual tests must run directly so an unstartable
+                // test is never mistaken for a failed assertion.
+                let list = if cfg!(windows) {
+                    let script = dir.join("plants-list.ps1");
+                    fs::write(
+                        &script,
+                        r#"$env:TMPDIR=$env:CF_PLANTS_PRIVATE_TEMP
+$env:TMP=$env:CF_PLANTS_PRIVATE_TEMP
+$env:TEMP=$env:CF_PLANTS_PRIVATE_TEMP
+if ($args.Count -lt 1) { exit 127 }
+$program=$args[0]
+$remaining=@($args | Select-Object -Skip 1)
+& $program @remaining
+exit $LASTEXITCODE
+"#,
+                    )
+                    .map_err(Error::files("write nextest's list wrapper in", &script))?;
+                    let path = serde_json::to_string(&script.to_string_lossy())
+                        .map_err(std::io::Error::other)
+                        .map_err(Error::files("encode nextest's list wrapper", &script))?;
+                    format!("command = ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', {path}]")
+                } else {
+                    r#"command = ['/bin/sh', '-c', 'export TMPDIR="$CF_PLANTS_PRIVATE_TEMP" TMP="$CF_PLANTS_PRIVATE_TEMP" TEMP="$CF_PLANTS_PRIVATE_TEMP"; exec "$@"', 'plants-list']"#.to_owned()
+                };
+                fs::write(&config, format!(
+                    "experimental = [\"setup-scripts\", \"wrapper-scripts\"]\n{original}\n[scripts.setup.plants-private]\n{setup}\n\n[scripts.wrapper.plants-list]\n{list}\ntarget-runner = \"within-wrapper\"\n\n[[profile.plants.scripts]]\nfilter = \"all()\"\nsetup = \"plants-private\"\nlist-wrapper = \"plants-list\"\n"
+                )).map_err(Error::files("write nextest's test setup in", &config))?;
+                invocation = invocation.var(TEST_TEMP, temp);
+            } else if matches!(reporter, Reporter::Node | Reporter::Playwright) {
+                for name in ["TMPDIR", "TMP", "TEMP"] {
+                    invocation = invocation.var(name, temp);
+                }
+            }
+        }
         let invocation = match built {
             Some(folder) => invocation.var(CF_E2E_BUILT, folder),
             None => invocation,
