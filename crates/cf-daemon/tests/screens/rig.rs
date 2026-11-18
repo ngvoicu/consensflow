@@ -23,6 +23,15 @@ pub struct Rig {
     _state: tempfile::TempDir,
 }
 
+// The server's tasks can retain the ledger after the fixture itself is dropped.
+impl Drop for Rig {
+    fn drop(&mut self) {
+        if let Ok(mut ledger) = self.ledger.try_borrow_mut() {
+            ledger.let_go_of_its_file();
+        }
+    }
+}
+
 /// The front for the UI token `token`, over the environment `env` and a ledger
 /// opened at `ledger_file`.
 pub async fn start(token: &str, env: Env, ledger_file: &Path) -> Rig {
@@ -49,4 +58,19 @@ impl Rig {
     pub fn take_kicks(&self) -> usize {
         self.front.take_kicks()
     }
+}
+
+#[test]
+fn temp_fixture_releases_ledger_for_the_next_owner() {
+    crate::support::trace::locally(async {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("consensflow.db");
+        let rig = start("token", Env::default(), &path).await;
+        let still_held = Rc::clone(&rig.ledger);
+        drop(rig);
+        let reopened = open_ledger(&path, Options::default())
+            .unwrap_or_else(|error| panic!("the dropped fixture still owns the ledger: {error}"));
+        drop(reopened);
+        drop(still_held);
+    });
 }

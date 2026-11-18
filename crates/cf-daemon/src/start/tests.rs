@@ -39,6 +39,15 @@ struct Rig {
     home: PathBuf,
 }
 
+// The local set may still hold the daemon's ledger when the test's home drops.
+impl Drop for Rig {
+    fn drop(&mut self) {
+        if let Ok(mut ledger) = self.daemon.parts.ledger.try_borrow_mut() {
+            ledger.let_go_of_its_file();
+        }
+    }
+}
+
 /// The environment the app gives a daemon on `root`: the home inside it, a
 /// `claude` to be found on PATH and only it, and on Windows what finds and
 /// starts a `.cmd` there (`PATHEXT`, `SystemRoot`, `ComSpec`).
@@ -547,4 +556,22 @@ fn a_system_that_gives_no_randomness_refuses_the_start_in_words_and_never_makes_
         "the system gave no randomness: unavailable"
     );
     assert_eq!(ui_token(&SystemEntropy).unwrap().len(), UI_TOKEN_DIGITS);
+}
+
+#[tokio::test]
+async fn temp_fixture_releases_ledger_for_the_next_owner() {
+    LocalSet::new()
+        .run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let rig = started(root.path()).await;
+            let path = rig.home.join("consensflow.db");
+            let still_held = Rc::clone(&rig.daemon.parts.ledger);
+            drop(rig);
+            let reopened = open_ledger(&path, LedgerOptions::default()).unwrap_or_else(|error| {
+                panic!("the dropped fixture still owns the ledger: {error}")
+            });
+            drop(reopened);
+            drop(still_held);
+        })
+        .await;
 }

@@ -44,6 +44,15 @@ pub struct Rig {
     _home: tempfile::TempDir,
 }
 
+// The server can retain the ledger after the trace's rig is dropped.
+impl Drop for Rig {
+    fn drop(&mut self) {
+        if let Ok(mut ledger) = self.ledger.ledger.try_borrow_mut() {
+            ledger.let_go_of_its_file();
+        }
+    }
+}
+
 impl Rig {
     pub async fn start() -> Self {
         let home = tempfile::tempdir().expect("a home");
@@ -79,4 +88,19 @@ impl Rig {
     pub fn received(&self) -> usize {
         self.seen.borrow().len()
     }
+}
+
+#[test]
+fn temp_fixture_releases_ledger_for_the_next_owner() {
+    crate::support::trace::locally(async {
+        let mut rig = Rig::start().await;
+        let home = std::mem::replace(&mut rig._home, tempfile::tempdir().unwrap());
+        let path = home.path().join("consensflow.db");
+        let still_held = Rc::clone(&rig.ledger.ledger);
+        drop(rig);
+        let reopened = cf_ledger::open_ledger(&path, cf_ledger::Options::default())
+            .unwrap_or_else(|error| panic!("the dropped fixture still owns the ledger: {error}"));
+        drop(reopened);
+        drop(still_held);
+    });
 }

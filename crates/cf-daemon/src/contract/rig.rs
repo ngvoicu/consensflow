@@ -170,6 +170,16 @@ pub struct Rig {
     pub pieces: Pieces,
 }
 
+// Tasks on the local set can outlive this fixture. Release its file before
+// Pieces drops the home, even if one of those tasks still holds the ledger.
+impl Drop for Rig {
+    fn drop(&mut self) {
+        if let Ok(mut ledger) = self.ledger.try_borrow_mut() {
+            ledger.let_go_of_its_file();
+        }
+    }
+}
+
 /// How much was logged and asked when the project opened.
 #[derive(Default)]
 struct Opened {
@@ -393,4 +403,22 @@ impl Rig {
     fn asked(&self, method: &str) -> usize {
         self.recorder.calls("adapter:claude-code", &[method]).len()
     }
+}
+
+#[tokio::test]
+async fn temp_fixture_releases_ledger_for_the_next_owner() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let mut rig = Rig::new().await;
+            let home = std::mem::replace(&mut rig.pieces.home, tempfile::tempdir().unwrap());
+            let path = home.path().join("consensflow.db");
+            let still_held = Rc::clone(&rig.ledger);
+            drop(rig);
+            let reopened = open_ledger(&path, Options::default()).unwrap_or_else(|error| {
+                panic!("the dropped fixture still owns the ledger: {error}")
+            });
+            drop(reopened);
+            drop(still_held);
+        })
+        .await;
 }
