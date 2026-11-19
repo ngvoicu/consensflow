@@ -1,4 +1,4 @@
-//! Member holds: selected return, edits and reset precedence.
+//! Member holds: shared-login return, edits and reset precedence.
 use super::fixtures::{after, now, soon, Tiers};
 use cf_engine::testing::Context;
 use cf_harness::records::Quota;
@@ -10,7 +10,7 @@ fn passes(c: &Context, n: usize) {
     }
 }
 #[test]
-fn try_again_now_releases_only_the_pressed_member_on_a_shared_login() {
+fn try_again_now_releases_members_on_the_same_login() {
     let c = Context::new();
     c.adapter.one_account.set(true);
     let t = Tiers::new(&c, &["zeus", "diana"]);
@@ -24,7 +24,7 @@ fn try_again_now_releases_only_the_pressed_member_on_a_shared_login() {
     }
     c.back_from_quota(t.project.id, "zeus").unwrap();
     assert_eq!(t.out_until("zeus"), None);
-    assert_eq!(t.out_until("diana").as_deref(), Some(far.as_str()));
+    assert_eq!(t.out_until("diana"), None, "the shared login is back");
 }
 
 #[test]

@@ -7,8 +7,8 @@
 # The rules: where a harness logs every window into one account (`Adapter::one_account`, Claude
 # Code's), a turn of any window that gets through is news for every other participant out on that
 # harness, the chief among them, marked out before it (`crates/cf-engine/src/scheduler.rs`,
-# `back_on_its_account`, called in `dispatcher.rs`'s step). The human's Try again now returns
-# only the selected participant (`back_from_quota`). One account is not one quota (T-287):
+# `back_on_its_account`, called in `dispatcher.rs`'s step), and the human's Try again now on any of
+# them brings back all (`back_from_quota`). One account is not one quota (Calliope's review, T-287):
 # a member back from its reset brings back none out until a later one, and a window that was never
 # out brings one back once for each reset. A window out of quota with a message waiting for it is
 # said to the human once for each mark, naming what waits (`tell_what_waits`, called in
@@ -66,14 +66,36 @@ replace = '''
 '''
 
 [[plant]]
+name = "quota-accounts: the human's Try again now brings back only the one it was pressed on"
+meant = "a_chief_out_on_its_members_account_is_back_once_the_human_says_the_member_is_back"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        self.back_on_its_account(project, &member, &News::Human)?;
+'''
+replace = "\n"
+
+[[plant]]
+name = "quota-accounts: the human's Try again now on the chief leaves its members out"
+meant = "a_members_held_task_goes_on_once_the_human_says_the_chief_is_back"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''                News::Human => true,'''
+replace = '''                News::Human => other.role == "chief",'''
+
+[[plant]]
 name = "quota-accounts: news of an account brings back the others on its harness whether or not its windows share one account"
 meant = "a_chief_stays_out_when_its_harness_may_log_windows_into_several_accounts"
 runs = ["quota-accounts-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''            .is_some_and(|adapter| adapter.one_account());'''
-replace = '''            .is_some_and(|_| true);'''
+find = '''                News::Turn { .. } => adapter.one_account(),'''
+replace = '''                News::Turn { .. } => true,'''
 
 [[plant]]
 name = "quota-accounts: news of an account brings back those out on any harness"
@@ -106,8 +128,8 @@ runs = ["quota-accounts-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''                None => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),'''
-replace = '''                None => self.tried_anew(other.id, &until),'''
+find = '''                } => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),'''
+replace = '''                } => self.tried_anew(other.id, &until),'''
 
 [[plant]]
 name = "quota-accounts: a member back from its reset brings back one out until a later reset"
@@ -138,8 +160,8 @@ runs = ["quota-accounts-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''                None => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),'''
-replace = '''                None => self.answered_since(&other, observed) && !until.is_empty(),'''
+find = '''                } => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),'''
+replace = '''                } => self.answered_since(&other, observed) && !until.is_empty(),'''
 
 [[plant]]
 name = "quota-accounts: Claude Code is taken for a harness whose windows may be on several accounts, and the chief at rest is never handed its worker's result"

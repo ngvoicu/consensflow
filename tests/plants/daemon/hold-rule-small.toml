@@ -4,7 +4,7 @@ hold-rule-allowance = ["cargo", "test", "--offline", "-p", "cf-engine", "--test"
 
 [[plant]]
 name = "hold rule small: selected button keeps its member held"
-meant = "try_again_now_releases_only_the_pressed_member_on_a_shared_login"
+meant = "try_again_now_releases_members_on_the_same_login"
 runs = ["hold-rule-small"]
 
 [[plant.edit]]
@@ -13,14 +13,14 @@ find = "        } else {\n            self.seams\n                .ledger\n     
 replace = "        } else {\n            member.clone()\n        };\n"
 
 [[plant]]
-name = "hold rule small: selected button also returns its peers"
-meant = "try_again_now_releases_only_the_pressed_member_on_a_shared_login"
+name = "hold rule small: the button leaves peers on its shared login held"
+meant = "try_again_now_releases_members_on_the_same_login"
 runs = ["hold-rule-small"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "        self.changed();\n        match busy {\n"
-replace = "        for other in &found.participants {\n            if other.id != member.id && other.role != \"human\" && other.member_id.is_none() {\n                self.seams.ledger.borrow_mut().mark_back(other.id, \"by @human\")?;\n            }\n        }\n        self.changed();\n        match busy {\n"
+find = "        self.back_on_its_account(project, &member, &News::Human)?;\n"
+replace = ""
 
 [[plant]]
 name = "hold rule small: an edit does not return a held member"

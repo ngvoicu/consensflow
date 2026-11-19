@@ -106,16 +106,12 @@ fn a_chief_out_on_its_members_account_is_back_once_a_window_of_the_member_gets_a
 }
 
 #[test]
-fn pressing_the_member_leaves_the_chief_held() {
+fn a_chief_out_on_its_members_account_is_back_once_the_human_says_the_member_is_back() {
     let context = Context::new();
     let (tiers, session) = out_together(&context);
     let back = context.back_from_quota(tiers.project.id, "zeus").unwrap();
     assert_eq!(back.out_until, None);
-    assert!(
-        tiers.out_until("chief").is_some(),
-        "the chief keeps its own hold"
-    );
-    context.back_from_quota(tiers.project.id, "chief").unwrap();
+    assert_eq!(tiers.out_until("chief"), None, "the chief is back with it");
     context.adapter.with(&session, |agent| {
         agent.quota = None;
         agent.failed = false;
@@ -591,13 +587,11 @@ fn a_teammates_turn_that_got_through_brings_back_an_unavailable_chief_and_it_is_
 }
 
 #[test]
-fn pressing_the_chief_leaves_a_members_task_held() {
+fn a_members_held_task_goes_on_once_the_human_says_the_chief_is_back() {
     let context = Context::new();
     let (tiers, session) = out_together(&context);
     context.back_from_quota(tiers.project.id, "chief").unwrap();
-    assert!(tiers.out_until("zeus").is_some(), "zeus keeps its hold");
-    assert_eq!(tiers.task(1).task.state, "paused");
-    context.back_from_quota(tiers.project.id, "zeus").unwrap();
+    assert_eq!(tiers.out_until("zeus"), None, "zeus is back with it");
     context.adapter.with(&session, |agent| {
         agent.quota = None;
         agent.failed = false;

@@ -2,7 +2,8 @@
 //! let a waiting review start, and the board kept it waiting). The board learns of a quota from
 //! a record of one of the member's windows; a member out until its reset, with no window
 //! running, stays out until that time passes unless the human says it is back (Try again now,
-//! `back_from_quota`). The human's word is for the selected member alone, and a wait says what to
+//! `back_from_quota`). The human's word is for the account they renewed: every member on the
+//! machine's one login for the harness is back, in every project, and a wait says what to
 //! press. Held to no Node trace: Node's dispatcher had neither.
 
 use cf_engine::testing::{Context, Made};
@@ -175,7 +176,7 @@ fn a_member_the_human_says_is_back_is_given_the_next_task_at_once_and_a_refusal_
 }
 
 #[test]
-fn the_humans_word_for_one_codex_member_leaves_other_members_held_in_both_projects() {
+fn the_humans_word_for_one_codex_member_brings_back_every_member_on_its_login_in_every_project() {
     let context = Context::made(Made {
         codex: true,
         ..Made::default()
@@ -204,13 +205,13 @@ fn the_humans_word_for_one_codex_member_leaves_other_members_held_in_both_projec
     assert_eq!(out_until(&context, first, "zeus"), None);
     assert_eq!(
         out_until(&context, first, "diana"),
-        Some(until.clone()),
-        "diana keeps her own hold even on the same Codex login"
+        None,
+        "diana is on the same Codex login"
     );
     assert_eq!(
         out_until(&context, second, "apollo"),
-        Some(until.clone()),
-        "apollo keeps his own hold in another project"
+        None,
+        "and so is apollo, in another project"
     );
     assert_eq!(
         out_until(&context, first, "hera"),
@@ -291,7 +292,7 @@ fn a_wait_names_for_a_renewal_only_the_members_out_now() {
 }
 
 #[test]
-fn the_humans_word_only_makes_the_pressed_member_eligible_for_waiting_work() {
+fn the_humans_word_gives_every_member_it_brought_back_the_work_that_waited_for_it() {
     let context = Context::made(Made {
         codex: true,
         ..Made::default()
@@ -336,8 +337,8 @@ fn the_humans_word_only_makes_the_pressed_member_eligible_for_waiting_work() {
     };
     assert_eq!(
         (by("zeus-"), by("diana-")),
-        (2, 0),
-        "only zeus is available; diana remains held: {first:?} {second:?}"
+        (1, 1),
+        "one task each, diana's quota being back as zeus's: {first:?} {second:?}"
     );
 }
 
@@ -374,7 +375,8 @@ fn a_refusal_stamped_at_the_very_moment_of_the_humans_word_is_history_and_one_a_
 }
 
 #[test]
-fn pressing_one_member_leaves_other_quota_account_busy_and_moved_holds() {
+fn the_humans_word_clears_a_quota_and_an_account_on_the_login_and_leaves_a_busy_model_and_a_moved_model_held(
+) {
     // The word means "this login works again" (quota renewed, logged in again, credit bought).
     // It is not about a model busy for a moment, whose back-off is its own, nor about a model
     // its harness moved, which only the human's word for that member ends.
@@ -429,16 +431,8 @@ fn pressing_one_member_leaves_other_quota_account_busy_and_moved_holds() {
     context.back_from_quota(first, "zeus").unwrap();
 
     assert_eq!(out_until(&context, first, "zeus"), None);
-    assert_eq!(
-        out_until(&context, second, "diana"),
-        Some(until.clone()),
-        "quota stays with its member"
-    );
-    assert_eq!(
-        out_until(&context, second, "ares").as_deref(),
-        Some(ACCOUNT_HELD),
-        "account stays with its member"
-    );
+    assert_eq!(out_until(&context, second, "diana"), None, "quota");
+    assert_eq!(out_until(&context, second, "ares"), None, "account");
     assert_eq!(
         out_until(&context, second, "hermes").as_deref(),
         Some(MODEL_MOVED),
@@ -535,10 +529,11 @@ fn a_message_waiting_for_a_window_of_a_member_whose_model_is_busy_is_told_to_the
 }
 
 #[test]
-fn the_humans_word_on_a_busy_member_leaves_its_backoff_and_other_members_holds() {
+fn the_humans_word_on_a_member_whose_model_is_busy_leaves_its_back_off_says_so_and_still_clears_the_others_on_its_login(
+) {
     // A stale row's button, or a call of the API: the member was out of quota when the page
     // was drawn and is busy now. The press does not shorten its back-off (a try is spent for
-    // nothing), and says why; the others on the login stay held.
+    // nothing), and says why; the others on the login are cleared all the same.
     let context = Context::made(Made {
         codex: true,
         ..Made::default()
@@ -585,8 +580,8 @@ fn the_humans_word_on_a_busy_member_leaves_its_backoff_and_other_members_holds()
     );
     assert_eq!(
         out_until(&context, second, "diana"),
-        Some(soon(&context, 3)),
-        "the other member remains held"
+        None,
+        "the others are cleared"
     );
     context.advance(30_000);
     context.pass().unwrap();
