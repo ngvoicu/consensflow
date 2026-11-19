@@ -143,6 +143,25 @@ fn neither_diagnostic_reads_a_readable_login_even_if_it_ignores_the_contents() {
 }
 
 #[test]
+fn a_timeout_says_a_package_or_extension_may_be_stuck_without_login_advice() {
+    let pi = StandIn::new(&[], &[]);
+    pi.child(&[], Ends::Asked);
+    let mut driver = pi.begin(false);
+    assert!(driver.run().is_empty());
+    assert!(pi.time.fire_next(i64::MAX));
+    let why = settled(&mut driver).unwrap_err();
+    assert!(why.contains("did not answer within"), "{why}");
+    assert!(
+        why.contains("package") && why.contains("extension") && why.contains("stuck"),
+        "{why}"
+    );
+    assert!(
+        !why.contains("/login") && !why.to_lowercase().contains("log in"),
+        "{why}"
+    );
+}
+
+#[test]
 fn a_timeout_never_attempts_to_read_the_login_and_says_how_to_recover() {
     let pi = StandIn::new(
         &[("auth.json", r#"{"hidden-provider":{"type":"oauth"}}"#)],
@@ -160,7 +179,11 @@ fn a_timeout_never_attempts_to_read_the_login_and_says_how_to_recover() {
         "login content must never be requested"
     );
     assert!(why.contains("did not answer within"), "{why}");
-    assert!(why.contains("/login") && why.contains("settings"), "{why}");
+    assert!(
+        why.contains("package") && why.contains("extension") && why.contains("stuck"),
+        "{why}"
+    );
+    assert!(!why.contains("/login"), "{why}");
     assert!(!why.contains("hidden-provider"), "{why}");
 }
 
@@ -220,8 +243,8 @@ fn a_read_given_up_on_says_what_pi_had_said_so_far_and_names_what_it_was_loading
     // last, after the mark, so that they can be screened whole (the third reading, F2).
     assert_eq!(
         why,
-        "pi --mode rpc did not answer within 30 s. Log in inside Pi with /login, or check Pi's \
-         settings (packages npm:@scope/slow-provider@1.2.3); it said:\nwarming the provider's cache"
+        "pi --mode rpc did not answer within 30 s. A package or extension of Pi's may be stuck \
+         (packages npm:@scope/slow-provider@1.2.3); it said:\nwarming the provider's cache"
     );
 }
 
@@ -251,8 +274,8 @@ fn a_read_whose_stderr_lost_its_front_hands_on_none_of_pi_s_words() {
     assert_eq!(
         why,
         format!(
-            "pi --mode rpc did not answer within 30 s. Log in inside Pi with /login, or check Pi's \
-             settings (packages npm:@scope/slow-provider@1.2.3){IT_SAID}{WORDS_WITHHELD}"
+            "pi --mode rpc did not answer within 30 s. A package or extension of Pi's may be stuck \
+             (packages npm:@scope/slow-provider@1.2.3){IT_SAID}{WORDS_WITHHELD}"
         )
     );
 }

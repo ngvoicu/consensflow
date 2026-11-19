@@ -360,7 +360,7 @@ async fn waiting_on(failed: Said, time: &dyn Time, env: &Env) -> Said {
         .await
         .loading()
         .map_or_else(String::new, |loading| format!(" ({loading})"));
-    let head = format!("{head}. Log in inside Pi with /login, or check Pi's settings{loading}");
+    let head = format!("{head}. A package or extension of Pi's may be stuck{loading}");
     let words = match said {
         Some(said) => format!("{head}{IT_SAID}{said}"),
         None => head,
