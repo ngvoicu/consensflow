@@ -1715,10 +1715,10 @@ runs = ["muse-accounts"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-                Some(returned) if later_limit(&until, returned) && !never(&until) => {
+                    if later_limit(&until, returned) && !never(&until) {
 '''
 replace = '''
-                Some(returned) if later_limit(&until, returned) => {
+                    if later_limit(&until, returned) {
 '''
 
 [[plant]]
@@ -2076,7 +2076,7 @@ replace = '''
 
 [[plant]]
 name = "muse: an allowance shown is no news"
-meant = "an_unavailable_chief_retains_its_existing_usage_recovery"
+meant = "an_allowance_the_harness_shows_again_brings_an_unavailable_member_back_a_still_full_one_does_not"
 runs = ["muse-engine"]
 
 [[plant.edit]]

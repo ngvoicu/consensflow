@@ -461,7 +461,7 @@ impl Dispatcher {
     }
 
     /// The human brings this member or chief back before its reset. A busy model
-    /// keeps its own backoff, and the answer says when it will be tried again.
+    /// keeps its backoff, and the answer says when it will be tried again.
     pub fn back_from_quota(
         &self,
         project: i64,
@@ -861,7 +861,6 @@ impl Dispatcher {
         let _burst = self.stalls.begin_burst();
         self.resume_held()?;
         let listed = self.seams.ledger.borrow().projects()?;
-        self.watch_held_logins(&listed);
         let mut projects = Vec::with_capacity(listed.len());
         for project in listed {
             if project.state == "open" && self.assign_open_tasks(&project)? {
@@ -1660,19 +1659,15 @@ impl Dispatcher {
         }
         let mut out = self.is_out(&owner);
         let mut returned = None;
-        // A successful turn can end a busy backoff as on main. Quota and login
-        // holds are not released by a usage count or a window's answer.
-        let busy_hold = owner
-            .out_until
-            .as_deref()
-            .is_some_and(|until| self.kind_of_hold(owner.id, until) == Held::Busy);
+        // A window that got a turn through after its member was marked out says the quota is
+        // back, and so does the harness's own count of an allowance, for an account that
+        // was unavailable with no reset to wait for (MUS-23: Muse's `usage`). Not for a member
+        // held for its model's move, which only the human's word for it brings back, whatever
+        // another of its windows answered (T-816).
         let answered = out
-            && (busy_hold || owner.role == "chief")
             && !owner.out_until.as_deref().is_some_and(moved_hold)
             && self.answered_since(&owner, &observed);
-        let chief_allowance =
-            out && owner.role == "chief" && self.shows_an_allowance(&owner, &observed);
-        if answered || chief_allowance {
+        if answered || (out && self.shows_an_allowance(&owner, &observed)) {
             let because = if answered {
                 format!("@{} answered again", participant.handle)
             } else {
@@ -1686,14 +1681,9 @@ impl Dispatcher {
             self.changed();
             out = false;
         }
-        // A successful member window still supplies the chief's existing account news,
-        // while the member keeps its own hold.
-        let member_answer = out && owner.role != "chief" && self.answered_since(&owner, &observed);
-        if !out || member_answer {
-            if member_answer {
-                returned.clone_from(&owner.out_until);
-            }
-            let news = News {
+        // A turn that got through is its account's news: whoever else is out on it is back.
+        if !out {
+            let news = News::Turn {
                 record,
                 observed: &observed,
                 returned,
@@ -1900,13 +1890,12 @@ impl Dispatcher {
             return self.perform_switch(project, participant, record, to).await;
         }
         let until = owner.out_until.clone().unwrap_or_default();
-        let kind = self.kind_of_hold(owner.id, &until);
         let reported = record.quota.borrow().reported.clone();
         let unwell = Unwell::of(reported.as_deref());
         // A window of a member out for its busy model whose own record shows no refusal says
         // so too (T-1112).
         let words = match unwell {
-            None if kind == Held::Busy => {
+            None if self.kind_of_hold(owner.id, &until) == Held::Busy => {
                 format!("model busy, tried again at {until}")
             }
             _ => out_words(&until, unwell),
@@ -1920,33 +1909,6 @@ impl Dispatcher {
             self.changed();
         }
         self.tell_what_waits(project, participant, record, owner)?;
-        if matches!(kind, Held::Quota | Held::Account)
-            && record.delivery.borrow().delivering.is_some()
-        {
-            returning(self.watch_arrival(record, observed)).await?;
-            if self.forgotten(record) {
-                return Ok(());
-            }
-        }
-        // A window can finish work it began before the hold without releasing it.
-        if matches!(kind, Held::Quota | Held::Account)
-            && participant.role != "chief"
-            && !observed.failed
-            && !self.cut_short(observed)
-        {
-            self.went_on_by_itself(project, participant, observed)?;
-            let working = self
-                .seams
-                .ledger
-                .borrow()
-                .active_task(participant.id, false)?
-                .is_some_and(|task| task.task.state == "working");
-            if working {
-                let watching = self.watch_monitors(participant, record, observed).await;
-                self.collect(project, participant, record, observed, watching)
-                    .await?;
-            }
-        }
         // The time a launch waits while its member is out is no slowness of its
         // window: the role it was to say first is told when the quota is back.
         if let Some(prelude) = record.delivery.borrow_mut().prelude.as_mut() {
@@ -2025,17 +1987,6 @@ impl Dispatcher {
         observed: &Observed,
     ) -> Result<(), EngineError> {
         self.handled(record);
-        let generation = record.window.borrow().setup_generation;
-        if generation.is_some_and(|old| {
-            self.seams
-                .ledger
-                .borrow()
-                .member_setup_generation(owner.id)
-                .ok()
-                != Some(old)
-        }) {
-            return Ok(());
-        }
         // A refused turn leaves nothing running that wakes its agent: its task waits for
         // the quota now, not for a job of an earlier turn (`turn_end`).
         record.held.borrow_mut().reset();
@@ -2053,44 +2004,24 @@ impl Dispatcher {
             Some(Unwell::Busy(_)) => HoldKind::Busy,
             None => HoldKind::Quota,
         };
-        let login_adapter = (owner.role != "chief"
-            && matches!(kind, HoldKind::Quota | HoldKind::Account))
-        .then(|| {
-            owner
-                .harness
-                .as_deref()
-                .and_then(|h| self.seams.adapters.adapter(h))
-        })
-        .flatten();
-        let login_revision = match login_adapter {
-            Some(adapter) => adapter.login_revision().await,
-            None => None,
-        };
-        // An edit while metadata was being read invalidates this old observation.
-        let current = self.known_project(project.id)?;
-        if current
-            .participants
-            .iter()
-            .find(|p| p.id == owner.id)
-            .is_none_or(|p| p.harness != owner.harness || p.model != owner.model)
-            || generation.is_some_and(|old| {
-                self.seams
-                    .ledger
-                    .borrow()
-                    .member_setup_generation(owner.id)
-                    .ok()
-                    != Some(old)
+        let reported_reset = matches!(
+            reported.as_deref(),
+            Some(cf_harness::records::Quota::Exhausted {
+                resets_at: Some(_),
+                ..
             })
-        {
-            return Ok(());
-        }
-        let marked = self.seams.ledger.borrow_mut().mark_out_with_login(
-            owner.id,
-            &reset,
-            unwell.map_or("out of quota", Unwell::hold),
-            kind,
-            login_revision,
-        )?;
+        );
+        let marked = self
+            .seams
+            .ledger
+            .borrow_mut()
+            .mark_out_with_kind_and_reported_reset(
+                owner.id,
+                &reset,
+                unwell.map_or("out of quota", Unwell::hold),
+                kind,
+                reported_reset,
+            )?;
         let until = marked.out_until.clone().unwrap_or_default();
         self.set_activity(
             record,

@@ -25,7 +25,7 @@ cut-turn-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::r
 
 [[plant]]
 name = "cut-turn: Claude's close of a cut turn brings its member back"
-meant = "a_busy_member_stays_out_for_a_synthetic_close_and_returns_at_its_answer"
+meant = "keeps_a_member_out_when_claude_only_closes_a_turn_the_quit_cut_and_takes_it_back_at_its_answer"
 runs = ["cut-turn-engine"]
 
 [[plant.edit]]
@@ -45,7 +45,7 @@ replace = ".find(|item| item.role == Role::Assistant)"
 
 [[plant]]
 name = "cut-turn: a progress note of the model's is no turn through"
-meant = "a_busy_member_returns_at_a_progress_note_of_a_turn_that_got_through"
+meant = "takes_a_member_back_at_a_progress_note_of_a_turn_that_got_through"
 runs = ["cut-turn-engine"]
 
 [[plant.edit]]
@@ -55,7 +55,7 @@ replace = ".find(|item| item.role == Role::Assistant && !item.commentary)"
 
 [[plant]]
 name = "cut-turn: an answer dated in milliseconds is no turn through"
-meant = "a_busy_member_returns_at_a_millisecond_answer_but_not_a_synthetic_reply"
+meant = "takes_a_member_back_at_an_answer_its_record_dates_in_milliseconds_and_not_at_a_reply_never_begun"
 runs = ["cut-turn-engine"]
 
 [[plant.edit]]

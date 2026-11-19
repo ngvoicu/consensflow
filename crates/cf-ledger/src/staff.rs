@@ -29,7 +29,7 @@ pub(crate) use pools::{
     candidates, candidates_for, has_members_of_tier, holders_of_tier, members, nearest_tier,
 };
 pub use pools::{BackupCandidate, Candidate, HoldKind};
-pub(crate) use quota::{account_hold, hold_kind, mark_back, mark_out, mark_out_kind};
+pub(crate) use quota::{hold_kind, mark_back, mark_out, mark_out_kind};
 use sessions::close_session;
 pub(crate) use sessions::{
     bring_back, can_continue, end_session, follow_up_session, has_task_in_hand, require_free,
@@ -376,11 +376,10 @@ pub(crate) fn edit_member(
         } else {
             Some(edit.tier.clone())
         };
-        if member.harness.as_deref() != Some(edit.harness.as_str()) || member.model != edit.model {
-            if quota::account_hold(store, &member)? {
-                quota::mark_back(store, member.id, "member setup edited")?;
-            }
-            store.db.execute("UPDATE participant SET setup_generation = setup_generation + 1 WHERE id = ?", [member.id])?;
+        if (member.harness.as_deref() != Some(edit.harness.as_str()) || member.model != edit.model)
+            && quota::account_hold_for_edit(store, &member)?
+        {
+            quota::mark_back(store, member.id, "by @human")?;
         }
         store.db.execute(
             "UPDATE participant SET harness = ?, model = ?, effort = ?, model_name = ?, tier = ?,

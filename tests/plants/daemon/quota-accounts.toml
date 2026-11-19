@@ -7,8 +7,8 @@
 # The rules: where a harness logs every window into one account (`Adapter::one_account`, Claude
 # Code's), a turn of any window that gets through is news for every other participant out on that
 # harness, the chief among them, marked out before it (`crates/cf-engine/src/scheduler.rs`,
-# `back_on_its_account`, called in `dispatcher.rs`'s step), and the human's Try again now on any of
-# them brings back all (`back_from_quota`). One account is not one quota (Calliope's review, T-287):
+# `back_on_its_account`, called in `dispatcher.rs`'s step). The human's Try again now returns
+# only the selected participant (`back_from_quota`). One account is not one quota (T-287):
 # a member back from its reset brings back none out until a later one, and a window that was never
 # out brings one back once for each reset. A window out of quota with a message waiting for it is
 # said to the human once for each mark, naming what waits (`tell_what_waits`, called in
@@ -57,10 +57,12 @@ runs = ["quota-accounts-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
-        if !out || member_answer {
+        if !out {
+            let news = News::Turn {
 '''
 replace = '''
-        if !out && returned.is_some() {
+        if returned.is_some() {
+            let news = News::Turn {
 '''
 
 [[plant]]
@@ -92,12 +94,11 @@ runs = ["quota-accounts-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-                    self.answered_since(&other, news.observed) && self.tried_anew(other.id, &until)
+find = '''                        self.answered_since(&other, observed) && self.tried_anew(other.id, &until)
 '''
-replace = '''
-                    self.tried_anew(other.id, &until)
+replace = '''                        self.tried_anew(other.id, &until)
 '''
+
 [[plant]]
 name = "quota-accounts: a teammate's turn that got through before another was marked out brings it back"
 meant = "a_chief_stays_out_when_a_teammates_turn_that_got_through_before_its_refusal_is_read_after_it"
@@ -105,12 +106,9 @@ runs = ["quota-accounts-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-                    self.answered_since(&other, news.observed) && self.tried_anew(other.id, &until)
-'''
-replace = '''
-                    self.tried_anew(other.id, &until)
-'''
+find = '''                None => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),'''
+replace = '''                None => self.tried_anew(other.id, &until),'''
+
 [[plant]]
 name = "quota-accounts: a member back from its reset brings back one out until a later reset"
 meant = "a_member_back_from_its_reset_brings_back_no_chief_out_until_a_later_one"
@@ -118,8 +116,20 @@ runs = ["quota-accounts-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''                Some(returned) if later_limit(&until, returned) && !never(&until) => {'''
-replace = '''                Some(returned) if later_limit(&until, returned) && !never(&until) && returned.is_empty() => {'''
+find = '''                    if later_limit(&until, returned) && !never(&until) {'''
+replace = '''                    if later_limit(&until, returned) && !never(&until) && returned.is_empty() {'''
+
+[[plant]]
+name = "quota-accounts: a later reset a member's return left out is brought back by the member's next turn"
+meant = "a_member_back_from_its_reset_brings_back_no_chief_out_until_a_later_one"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''                        if self.tried_anew(other.id, &until) {
+'''
+replace = '''                        if until.is_empty() {
+'''
 
 [[plant]]
 name = "quota-accounts: a teammate's turn brings back one refused again with the same reset"
@@ -128,12 +138,9 @@ runs = ["quota-accounts-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-                    self.answered_since(&other, news.observed) && self.tried_anew(other.id, &until)
-'''
-replace = '''
-                    self.answered_since(&other, news.observed)
-'''
+find = '''                None => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),'''
+replace = '''                None => self.answered_since(&other, observed) && !until.is_empty(),'''
+
 [[plant]]
 name = "quota-accounts: Claude Code is taken for a harness whose windows may be on several accounts, and the chief at rest is never handed its worker's result"
 meant = "a_chief_out_of_quota_with_its_worker_is_handed_the_result_once_the_human_says_the_worker_is_back"
@@ -255,6 +262,18 @@ find = "        .is_some_and(|(until, returned)| until - returned > SAME_LIMIT_M
 replace = "        .is_some_and(|(until, returned)| until > returned)"
 
 [[plant]]
+name = "quota-accounts: a chief a member's return left out for a later limit is not said to the human"
+meant = "a_member_back_from_its_reset_brings_back_no_chief_out_until_a_later_one"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                            self.tell_still_out(project, &other, owner, &until)?;
+'''
+replace = "\n"
+
+[[plant]]
 name = "quota-accounts: a member's own return brings one back without remembering its limit"
 meant = "a_chief_brought_back_by_its_members_return_and_refused_again_with_the_same_reset_stays_out"
 runs = ["quota-accounts-engine"]
@@ -262,11 +281,12 @@ runs = ["quota-accounts-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-                    self.answered_since(&other, news.observed) && self.tried_anew(other.id, &until)
+                        self.answered_since(&other, observed) && self.tried_anew(other.id, &until)
 '''
 replace = '''
-                    self.answered_since(&other, news.observed)
+                        self.answered_since(&other, observed)
 '''
+
 [[plant]]
 name = "quota-accounts: a limit is remembered by its exact reset, and one that names none is brought back at every teammate's turn"
 meant = "a_chief_refused_again_with_no_reset_named_within_the_hour_is_not_brought_back_by_a_teammates_turn_again"
@@ -299,7 +319,7 @@ replace = '''        "a"
 # plant takes both away, so a refusal reaches collect.
 [[plant]]
 name = "quota-accounts: a member brought back by a teammate's turn takes the refusal its window still reads for its turn's answer"
-meant = "a_chiefs_turn_does_not_release_the_member_and_its_refusal_is_no_result"
+meant = "a_member_brought_back_by_the_chiefs_turn_goes_on_with_its_task_and_its_refusal_is_no_result"
 runs = ["quota-accounts-engine"]
 
 [[plant.edit]]

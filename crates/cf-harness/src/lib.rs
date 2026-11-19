@@ -54,6 +54,3 @@ pub mod testing;
 // the test binary `harness-ask`: they ship with nothing.
 #[cfg(any(test, feature = "test-support"))]
 pub mod tooling;
-
-#[cfg(test)]
-mod test_login_revision;

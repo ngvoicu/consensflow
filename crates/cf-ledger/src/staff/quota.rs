@@ -10,17 +10,25 @@ use crate::model::{self, quoted, LedgerError};
 use crate::store::Store;
 use crate::views::{participant_view, ParticipantRow};
 
-/// Quota/account holds from before kinds were stored are distinguished from a
-/// moved model by its sentinel and a busy backoff by its original event.
-pub(crate) fn account_hold(store: &Store, member: &ParticipantRow) -> Result<bool, LedgerError> {
+/// Whether a member's old hold is for quota or an unavailable account, rather
+/// than a moved model or a busy backoff. Old timed holds can lack a kind.
+pub(crate) fn account_hold_for_edit(
+    store: &Store,
+    member: &ParticipantRow,
+) -> Result<bool, LedgerError> {
+    let Some(until) = member.out_until.as_deref() else {
+        return Ok(false);
+    };
+    if until == "9999-12-31T23:59:59.999Z" {
+        return Ok(false);
+    }
+    if until.starts_with("9999-") {
+        return Ok(true);
+    }
     match HoldKind::read(member.out_kind.as_deref()) {
-        Some(HoldKind::Quota | HoldKind::Account) => Ok(true),
-        Some(HoldKind::Busy | HoldKind::Moved) => Ok(false),
-        None if member
-            .out_until
-            .as_deref()
-            .is_some_and(|until| until != "9999-12-31T23:59:59.999Z") =>
-        {
+        Some(HoldKind::Quota | HoldKind::Account | HoldKind::Moved) => Ok(true),
+        Some(HoldKind::Busy) => Ok(false),
+        None => {
             let busy = store.db.query_row(
                 "SELECT EXISTS(SELECT 1 FROM event e WHERE e.project_id=?1 AND e.kind='member.out'
                    AND e.at=?2 AND json_valid(e.data) AND json_extract(e.data, '$.reason')='model busy'
@@ -31,14 +39,13 @@ pub(crate) fn account_hold(store: &Store, member: &ParticipantRow) -> Result<boo
             )?;
             Ok(!busy)
         }
-        None => Ok(false),
     }
 }
 
 /// A member that ran out of quota takes no work until `until`, kept and logged
 /// as a store keeps a time ([`time::canonical`]); when it was marked is its
-/// `outSince`. A quota or account hold keeps its earliest reset. Other kinds
-/// retain their existing precedence and the time of the first mark.
+/// `outSince`. A known quota or account hold keeps the earlier reset. Other
+/// kinds and older untyped holds retain their existing precedence.
 pub(crate) fn mark_out(
     store: &mut Store,
     participant_id: i64,
@@ -54,16 +61,18 @@ pub(crate) fn mark_out(
         "model moved" => Some(HoldKind::Moved),
         _ => None,
     };
-    mark_out_kind(store, participant_id, until, reason, kind)
+    mark_out_kind(store, participant_id, until, reason, kind, true)
 }
 
-/// Keep the kind with the end which wins.
+/// Keep the kind with the end which wins; a shorter, later report must not
+/// relabel the hold that is still in force.
 pub(crate) fn mark_out_kind(
     store: &mut Store,
     participant_id: i64,
     until: &str,
     reason: &str,
     kind: Option<HoldKind>,
+    reported_reset: bool,
 ) -> Result<ParticipantView, LedgerError> {
     // Kept as a store keeps a time, however it was written.
     let (Some(reset), Some(until)) = (time::parse(until), time::canonical(until)) else {
@@ -79,10 +88,28 @@ pub(crate) fn mark_out_kind(
         let now = store.at();
         let out_until = member.out_until.as_deref().and_then(time::parse);
         let out = matches!((out_until, time::parse(&now)), (Some(until), Some(now)) if until > now);
-        let account_hold = member.role != "chief"
-            && account_hold(store, &member)?
-            && matches!(kind, Some(HoldKind::Quota | HoldKind::Account));
-        let keep_old = out && out_until.is_some_and(|old| if account_hold { old <= reset } else { old >= reset });
+        // Main identifies moved and unavailable holds by their sentinel times
+        // even when the stored kind disagrees. Untyped old holds keep main's path.
+        let prior_kind = HoldKind::read(member.out_kind.as_deref()).map(|kind| {
+            match member.out_until.as_deref() {
+                Some("9999-12-31T23:59:59.999Z") => HoldKind::Moved,
+                Some(until) if until.starts_with("9999-") => HoldKind::Account,
+                _ => kind,
+            }
+        });
+        let account_hold = reported_reset
+            && member.role != "chief"
+            && matches!(prior_kind, Some(HoldKind::Quota | HoldKind::Account))
+            && matches!(kind, Some(HoldKind::Quota | HoldKind::Account))
+            && (prior_kind == kind || kind == Some(HoldKind::Quota));
+        let keep_old = out
+            && out_until.is_some_and(|old| {
+                if account_hold {
+                    old <= reset
+                } else {
+                    old >= reset
+                }
+            });
         if keep_old {
             if out_until == Some(reset) && member.out_kind.is_none() && kind.is_some() {
                 store.db.execute(
@@ -104,12 +131,6 @@ pub(crate) fn mark_out_kind(
                 params![until, member.out_until, member.id],
             )?;
         }
-        if !out {
-            store.db.execute(
-                "UPDATE participant SET hold_generation = hold_generation + 1, hold_login_revision = NULL WHERE id = ?",
-                [member.id],
-            )?;
-        }
         let since = if out {
             member.out_since.clone()
         } else {
@@ -128,9 +149,10 @@ pub(crate) fn mark_out_kind(
     })
 }
 
-/// A participant comes back before its reset when the applicable recovery rule
-/// says so. Its previous refusals are history, and the tasks held for it,
-/// its own and its sessions', go on at once.
+/// A member out of quota is back before its reset: one of its windows
+/// answered again, or the human says so (another account, a bigger plan).
+/// What its windows ran into before now is history, and the tasks held for
+/// it, its own and its sessions', go on at once.
 pub(crate) fn mark_back(
     store: &mut Store,
     participant_id: i64,

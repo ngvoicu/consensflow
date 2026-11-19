@@ -167,13 +167,6 @@ const CODEX_ON_WINDOWS: SilentPaste = SilentPaste {
 };
 
 impl Adapter for CodexAdapter {
-    fn login_revision(&self) -> Work<'_, Option<u64>> {
-        let path = super::paths::codex_home(&self.services.env)
-            .ok()
-            .map(|root| std::path::Path::new(&root).join("auth.json"));
-        Box::pin(async move { crate::shared::login_metadata::revision_async(path?).await })
-    }
-
     /// Codex keeps the machine's one login, which all its windows use.
     fn one_login(&self) -> bool {
         true

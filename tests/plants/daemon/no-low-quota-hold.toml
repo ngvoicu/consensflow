@@ -22,9 +22,8 @@
 # The same table holds the plants of T-1357, the quota the person renewed by hand: the board
 # learns of a quota from a record of one of a member's windows, so a member marked out until its
 # reset stays out when the human renews the quota early, unless they say so (Try again now,
-# `member.back`, `back_from_quota`). Their word is for the account they renewed: every member on
-# the harness's one login is back (`Adapter::one_login`: Claude Code, Codex, Devin and Muse, not
-# Pi, which logs into a provider for each model), in every project; the wait for a free member
+# `member.back`, `back_from_quota`). Their word returns only the selected member, even where
+# several members share a harness login; the wait for a free member
 # says what to press (`scheduler.rs`, `out_for_a_reset`), and the board's lane and a held task's
 # card say the quota may have been renewed. Tests: `crates/cf-engine/tests/dispatcher/
 # renewed_quota.rs`, `crates/cf-harness/tests/launch/one_login.rs`, the page's.
@@ -36,6 +35,7 @@ no-low-hold-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test",
 no-low-hold-accounts = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts::"]
 no-low-hold-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
 no-low-hold-renewed = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "renewed_quota::"]
+no-low-hold-moved = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "moved_models::"]
 no-low-hold-busy = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "busy_models::"]
 no-low-hold-login = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "one_login"]
 no-low-hold-page-lane = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "shows a member out of quota"]
@@ -220,7 +220,7 @@ replace = '''
 
 [[plant]]
 name = "no low hold: a count nearly spent is no allowance for a member whose account was unavailable"
-meant = "an_unavailable_chief_retains_its_existing_low_usage_recovery"
+meant = "an_allowance_nearly_spent_brings_an_unavailable_member_back_too"
 runs = ["no-low-hold-accounts"]
 
 [[plant.edit]]
@@ -468,6 +468,24 @@ find = '''
 '''
 replace = '''
                     held_of(until, candidate.out_kind) == held
+'''
+
+[[plant]]
+name = "no low hold: a teammate's turn clears a member whose model moved"
+meant = "a_teammates_turn_and_the_humans_word_for_another_member_release_no_member_held_for_a_move"
+runs = ["no-low-hold-moved"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            if moved_hold(&until) {
+                continue;
+            }
+'''
+replace = '''
+            if false {
+                continue;
+            }
 '''
 
 [[plant]]

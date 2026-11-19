@@ -35,11 +35,6 @@ pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 /// conversation's record with no window open is the engine's own look through
 /// [`Records`], the same for every harness.
 pub trait Adapter {
-    /// A fingerprint of the login file's path and metadata, never its contents.
-    fn login_revision(&self) -> Work<'_, Option<u64>> {
-        Box::pin(async { None })
-    }
-
     /// Prepares a window on `launch`: writes the files it runs with and
     /// says how it opens, or why it cannot (the launch then fails with that
     /// sentence).

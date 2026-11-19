@@ -269,10 +269,6 @@ pub struct FakeAdapter {
     /// login changed under them (`adapter.one_login`, T-1357): not, as an adapter that says
     /// no more. A harness with `one_account` has one as well.
     pub one_login: Cell<bool>,
-    /// The test's opaque login-file revision, or no observable file.
-    pub login_revision: Cell<Option<u64>>,
-    /// Holds an individual metadata observation in a test.
-    pub login_holds: Holds,
     /// Whether its windows are asked whether they are ready before they have
     /// drawn their screens too, as Devin's are: not, as an adapter that says no more.
     pub ready_while_drawing: Cell<bool>,
@@ -447,8 +443,6 @@ impl FakeAdapter {
             keeps_first_instructions: Cell::new(false),
             one_account: Cell::new(false),
             one_login: Cell::new(false),
-            login_revision: Cell::new(None),
-            login_holds: Holds::default(),
             ready_while_drawing: Cell::new(false),
             prepare_holds: Holds::default(),
             observe_holds: Holds::default(),
@@ -1371,15 +1365,6 @@ impl Asked {
 }
 
 impl Adapter for Asked {
-    fn login_revision(&self) -> Work<'_, Option<u64>> {
-        let value = self.fake.login_revision.get();
-        let wrapped = self.fake.login_holds.wrap(&serde_json::json!([]));
-        Box::pin(async move {
-            wrapped.before().await;
-            value
-        })
-    }
-
     /// The fake of Codex ends its window as Codex's does: with the status of why when the
     /// supervisor could not start Codex.
     fn never_ran(&self, status: u32) -> Option<cf_base::startup::StartFailure> {

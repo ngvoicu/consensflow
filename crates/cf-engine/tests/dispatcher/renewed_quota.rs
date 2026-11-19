@@ -374,8 +374,7 @@ fn a_refusal_stamped_at_the_very_moment_of_the_humans_word_is_history_and_one_a_
 }
 
 #[test]
-fn the_humans_word_clears_a_quota_and_an_account_on_the_login_and_leaves_a_busy_model_and_a_moved_model_held(
-) {
+fn pressing_one_member_leaves_other_quota_account_busy_and_moved_holds() {
     // The word means "this login works again" (quota renewed, logged in again, credit bought).
     // It is not about a model busy for a moment, whose back-off is its own, nor about a model
     // its harness moved, which only the human's word for that member ends.

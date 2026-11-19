@@ -32,11 +32,9 @@ const TAIL: &str = ", or sooner if its account has quota again; it goes on by it
 /// A task held by an older build has its note so, delivered or not.
 const OLD_TAIL: &str = "; it goes on by itself then.";
 
-/// The previous wording is still recognized for already-delivered notes.
-const OLD_TAIL_UNAVAILABLE: &str =
-    ", and nothing resets that; it goes on when the human says the account works again.";
+/// How a hold note of an unavailable account ends: nothing resets such an account.
 const TAIL_UNAVAILABLE: &str =
-    "; it can go on when the login changes or the human presses Try again now.";
+    ", and nothing resets that; it goes on when the human says the account works again.";
 
 /// How a hold note of a window whose model its harness moved ends: nothing resets that
 /// either, and only the human's word for the member lets it go on (MUS-24).
@@ -107,15 +105,9 @@ pub(super) fn goes_on(number: i64) -> String {
 /// ends so.
 fn is_hold_note(number: i64, body: &str) -> bool {
     body.starts_with(&format!("T-{number} waits with @"))
-        && [
-            TAIL,
-            OLD_TAIL,
-            TAIL_UNAVAILABLE,
-            OLD_TAIL_UNAVAILABLE,
-            TAIL_MOVED,
-        ]
-        .iter()
-        .any(|tail| body.ends_with(tail))
+        && [TAIL, OLD_TAIL, TAIL_UNAVAILABLE, TAIL_MOVED]
+            .iter()
+            .any(|tail| body.ends_with(tail))
 }
 
 /// What T-`number`'s line says of the hold whose note is `body` (quota, an unavailable
@@ -133,17 +125,13 @@ pub(crate) fn said(number: i64, body: &str) -> Option<String> {
         return Some(quota.to_owned());
     }
     if let Some(account) = rest.strip_suffix(TAIL_UNAVAILABLE) {
-        return Some(account.to_owned());
-    }
-    if let Some(account) = rest.strip_suffix(OLD_TAIL_UNAVAILABLE) {
         return Some(format!("{account} until the human says it works"));
     }
     rest.strip_suffix(TAIL_MOVED)
         .map(|moved| format!("{moved}, until the human says it may go on"))
 }
 
-/// An active quota hold shows the deadline it has now, even when an older
-/// note was written before a later refusal reported an earlier reset.
+/// Show the current quota deadline when a later refusal shortened it.
 pub(crate) fn said_until(number: i64, body: &str, until: &str) -> Option<String> {
     let words = said(number, body)?;
     if body.ends_with(TAIL) || body.ends_with(OLD_TAIL) {
@@ -182,7 +170,7 @@ fn hold_of(number: i64, body: &str) -> Option<Hold<'_>> {
     {
         let (_, until) = quota.split_once(": out of quota until ")?;
         HoldKind::Quota(until)
-    } else if rest.ends_with(TAIL_UNAVAILABLE) || rest.ends_with(OLD_TAIL_UNAVAILABLE) {
+    } else if rest.ends_with(TAIL_UNAVAILABLE) {
         HoldKind::Unavailable
     } else if rest.ends_with(TAIL_MOVED) {
         HoldKind::Moved
