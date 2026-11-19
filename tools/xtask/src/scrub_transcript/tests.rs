@@ -139,14 +139,14 @@ fn a_transcript_made_a_fixture_loses_what_is_personal_in_it() {
     assert_eq!(kept[3]["attachment"], json!({ "type": "session_context" }));
     assert!(kept[3].get("rendered").is_none());
     assert_eq!(kept[4]["bridgeSessionId"], "[scrubbed]");
-    assert!(kept[4].get("ownerAccountUuid").is_none());
-    assert!(kept[4].get("ownerOrganizationUuid").is_none());
+    assert_eq!(kept[4]["ownerAccountUuid"], "[scrubbed]");
+    assert_eq!(kept[4]["ownerOrganizationUuid"], "[scrubbed]");
     assert_eq!(kept[5]["requestId"], "req_scrubbed");
     assert_eq!(kept[5]["message"]["content"][0]["signature"], "[scrubbed]");
 }
 
 #[test]
-fn claude_2_1_328_session_owner_ids_are_removed() {
+fn claude_2_1_328_session_owner_ids_are_scrubbed_without_losing_the_fields() {
     let input = [json!({
         "type": "session-owner",
         "version": "2.1.328",
@@ -162,13 +162,15 @@ fn claude_2_1_328_session_owner_ids_are_removed() {
             "type": "session-owner",
             "version": "2.1.328",
             "sessionId": "$SESSION",
+            "accountUuid": "[scrubbed]",
+            "organizationUuid": "[scrubbed]",
             "userType": "external",
         })]
     );
 }
 
 #[test]
-fn account_and_organization_uuid_fields_are_removed_at_any_depth() {
+fn account_and_organization_uuid_values_are_scrubbed_at_any_depth() {
     let input = [json!({
         "type": "user",
         "sessionId": SESSION,
@@ -193,9 +195,19 @@ fn account_and_organization_uuid_fields_are_removed_at_any_depth() {
         [json!({
             "type": "user",
             "sessionId": "$SESSION",
+            "ownerAccountUuid": "[scrubbed]",
+            "ownerOrganizationUuid": "[scrubbed]",
             "nested": [
-                { "deep": { "accountUuidSuffix": "keep", "otherUuid": "keep-too" } },
-                [ {} ],
+                { "accountUuid": "[scrubbed]", "deep": {
+                    "organizationUuid": "[scrubbed]",
+                    "billingAccountUuid": "[scrubbed]",
+                    "partnerOrganizationUuid": "[scrubbed]",
+                    "AccountUuid": "[scrubbed]",
+                    "OrganizationUuid": "[scrubbed]",
+                    "accountUuidSuffix": "keep",
+                    "otherUuid": "keep-too",
+                } },
+                [ { "subAccountUuid": "[scrubbed]" } ],
             ],
         })]
     );

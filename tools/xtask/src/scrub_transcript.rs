@@ -12,7 +12,7 @@
 //! - the session id, which becomes `$SESSION` (a test puts its own there), wherever
 //!   in a record it is written;
 //! - the folder the window ran in (`/work/app`), the git branch (`main`);
-//! - account and organization UUID fields, at any depth, and the bridge id;
+//! - account and organization UUID values, at any depth, and the bridge id;
 //! - what an attachment carried (a hook's command and output, the skills, the
 //!   environment, the instructions, the e-mail address of the user): only its type,
 //!   and a hook's name, event, exit code and duration, are kept;
@@ -210,26 +210,28 @@ fn scrubbed(mut record: Map<String, Value>) -> String {
         }
     }
     let mut record = Value::Object(record);
-    remove_account_uuids(&mut record);
+    scrub_account_uuids(&mut record);
     record.to_string()
 }
 
 /// Account and organization UUIDs identify an owner, even inside arrays and objects.
-fn remove_account_uuids(value: &mut Value) {
+fn scrub_account_uuids(value: &mut Value) {
     match value {
         Value::Object(fields) => {
-            fields.retain(|name, _| {
-                !matches!(name.as_str(), "accountUuid" | "organizationUuid")
-                    && !name.ends_with("AccountUuid")
-                    && !name.ends_with("OrganizationUuid")
-            });
-            for value in fields.values_mut() {
-                remove_account_uuids(value);
+            for (name, value) in fields {
+                if matches!(name.as_str(), "accountUuid" | "organizationUuid")
+                    || name.ends_with("AccountUuid")
+                    || name.ends_with("OrganizationUuid")
+                {
+                    *value = json!(SCRUBBED);
+                } else {
+                    scrub_account_uuids(value);
+                }
             }
         }
         Value::Array(items) => {
             for value in items {
-                remove_account_uuids(value);
+                scrub_account_uuids(value);
             }
         }
         _ => {}

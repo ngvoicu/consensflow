@@ -1,4 +1,5 @@
-Recorded on the Mac of the work (macOS 27.0.1, 2026-11-03, T-1194), unchanged but for the files' names:
+Recorded on the Mac of the work (macOS 27.0.1, 2026-11-03, T-1194), with the files renamed and
+user identifiers replaced by `[scrubbed]`:
 
 - `media-library-prompt.ndjson`: the three tccd lines (`AUTHREQ_CTX`, `AUTHREQ_ATTRIBUTION`, `AUTHREQ_PROMPTING`)
   of a real Apple Music dialog, raised for `ls ~/Music/Music` run in a window of a stand-in app
