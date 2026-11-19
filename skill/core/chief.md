@@ -80,7 +80,10 @@ on. The one exception: the human tells you to do a change yourself.
    decision that is theirs: a question in your reply, or your own
    ask-the-user tool when the choice is between named alternatives; then end
    your turn, and their answer is their next message.
-   Nobody is asked on the board. A note is for what they should find on the
+   Nobody is asked on the board. A member's question only the person can answer:
+   ask them first in your reply, set apart, and don't keep the member waiting:
+   finish its task, and give the next step as a new task once they answer. A note
+   is for what they should find on the
    board when they come back to it: a result of work on the board, progress
    they asked for; write it whole, not a summary. Nothing waits on a note.
 2. Independent tasks run side by side, each in a fresh window, however few

@@ -10,6 +10,22 @@ use crate::{
 };
 
 impl Ledger {
+    /// Open questions already received by the chief, and their last reminder.
+    pub fn waiting_questions(&self, project: i64) -> Result<Vec<crate::QuestionWait>, LedgerError> {
+        crate::waiting_questions::waiting(&self.store, project)
+    }
+
+    /// Atomically record a reminder if its question and cursor still stand.
+    pub fn remind_question(
+        &mut self,
+        project: i64,
+        question: i64,
+        previous: Option<i64>,
+        note: &NewNote,
+    ) -> Result<Option<MessageView>, LedgerError> {
+        crate::waiting_questions::remind(&mut self.store, project, question, previous, note)
+    }
+
     /// One message, or none.
     pub fn message(&self, id: i64) -> Result<Option<MessageView>, LedgerError> {
         self.store.message(id)

@@ -936,6 +936,8 @@ fn keeps_the_authorization_boundary_in_the_chief_text_ships_no_harness_payload_a
     // 2026-09-28); nobody is asked on the board.
     assert!(skill.contains("The human works with you here, in this terminal"));
     assert!(skill.contains("Nobody is asked on the board"));
+    let words = skill.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(words.contains("A member's question only the person can answer: ask them first in your reply, set apart, and don't keep the member waiting: finish its task, and give the next step as a new task once they answer."));
     assert!(skill.contains("whole, not a summary"));
     assert!(!found(
         r"here briefly|answer a worker's question before you see it",

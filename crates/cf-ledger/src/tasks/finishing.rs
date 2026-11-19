@@ -216,6 +216,9 @@ fn record_counted(
         if finished_by_word {
             withdraw_open_questions(store, &task, "was finished")?;
         }
+        if finished_by_word {
+            crate::waiting_questions::end_for_task(store, task.id, task.assignee_id)?;
+        }
         let message_id = queue(
             store,
             project_id,
