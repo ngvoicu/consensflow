@@ -2118,8 +2118,9 @@ test("shows a member out of quota, and a reviewer's review tasks as cards on its
   await open(page, data)
   const diana = page.locator('tr[data-handle="diana"]')
   await expect(diana.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
-  await expect(diana.locator('.row-status')).toHaveText(
-    /^Out of quota until (\S+ )?\d\d:\d\d; renewed early\? Try again now$/,
+  // A member's own words, short, as a team's member's (T-1850).
+  await expect(diana.locator('[data-part="member"] .team-words')).toHaveText(
+    /^Out of quota until (\S+ )?\d\d:\d\d$/,
   )
   const hera = page.locator('tr[data-handle="hera"]')
   await expect(hera.locator('td[data-state="working"] button.card[data-task="9"]')).toHaveCount(1)
@@ -2166,8 +2167,8 @@ test('says an account that refused for its billing or login is unavailable, with
   await open(page, data)
   const diana = page.locator('tr[data-handle="diana"]')
   await expect(diana.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
-  await expect(diana.locator('.row-status')).toHaveText(
-    'Unavailable: its account was refused for billing or login. Logged in again, or paid? Press Try again now',
+  await expect(diana.locator('[data-part="member"] .team-words')).toHaveText(
+    'Unavailable: its account was refused for billing or login',
   )
   await diana.getByRole('button', { name: 'Try @diana again now, once its account works' }).click()
   expect(await calls(page, 'member.back')).toEqual([{ project: 1, participant: 'diana' }])
@@ -2187,8 +2188,8 @@ test('says a member whose harness moved its model on its own is held, why in the
       'moved: its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own), a model nobody chose',
   }
   await open(page, data)
-  await expect(page.locator('tr[data-handle="diana"] .row-status')).toHaveText(
-    'Held: its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own), a model nobody chose. Press Try again now once it is on the model you chose',
+  await expect(page.locator('tr[data-handle="diana"] [data-part="member"] .team-words')).toHaveText(
+    'Held: its model moved from muse-spark-1.3 to muse-spark-1.3-contributor on its own (Muse switched on its own), a model nobody chose',
   )
   await expect(
     page.getByRole('button', {
@@ -2205,8 +2206,8 @@ test('says a held member whose engine lost its words after a restart is held for
   diana.participant.outUntil = '9999-12-31T23:59:59.999Z'
   diana.activity = null
   await open(page, data)
-  const status = page.locator('tr[data-handle="diana"] .row-status')
-  await expect(status).toHaveText(/^Held: its model moved on its own\. Press Try again now/)
+  const status = page.locator('tr[data-handle="diana"] [data-part="member"] .team-words')
+  await expect(status).toHaveText(/^Held: its model moved on its own$/)
   await expect(status).not.toContainText('billing')
 })
 
@@ -2228,8 +2229,8 @@ test('names the day of a reset that is not today, and tries a member or the chie
     return `${at.toLocaleDateString([], { weekday: 'short' })} ${time}`
   }, reset)
   const diana = page.locator('tr[data-handle="diana"]')
-  await expect(diana.locator('.row-status')).toHaveText(
-    `Out of quota until ${day}; renewed early? Try again now`,
+  await expect(diana.locator('[data-part="member"] .team-words')).toHaveText(
+    `Out of quota until ${day}`,
   )
   await diana.getByRole('button', { name: 'Try @diana again now, before its quota resets' }).click()
   expect(await calls(page, 'member.back')).toEqual([{ project: 1, participant: 'diana' }])
@@ -2311,8 +2312,15 @@ test('a member out of quota says so, to renew early, on its row, the chief’s c
 }) => {
   const shown = await heldFor(page, 'quota')
   const said = /^Out of quota until (\S+ )?\d\d:\d\d; renewed early\? Try again now$/
-  await expect(shown.row.locator('.row-status')).toHaveText(said)
+  // The row says it short, as a team's member does, and its Try again's tip says when (T-1850).
+  await expect(shown.row.locator('[data-part="member"] .team-words')).toHaveText(
+    /^Out of quota until (\S+ )?\d\d:\d\d$/,
+  )
   await expect(shown.row.locator('.try-again')).toHaveCount(1)
+  await expect(shown.row.locator('.try-again')).toHaveAttribute(
+    'title',
+    'Try @zeus again now, before its quota resets',
+  )
   await expect(shown.chief.locator('.terminal-status')).toHaveText(said)
   await expect(shown.chief.locator('.try-again')).toHaveCount(1)
   await expect(shown.card).toHaveText(
@@ -2329,8 +2337,14 @@ test('a member held for its account says so, to log in again or pay, on its row,
   const shown = await heldFor(page, 'account')
   const said =
     'Unavailable: its account was refused for billing or login. Logged in again, or paid? Press Try again now'
-  await expect(shown.row.locator('.row-status')).toHaveText(said)
+  await expect(shown.row.locator('[data-part="member"] .team-words')).toHaveText(
+    'Unavailable: its account was refused for billing or login',
+  )
   await expect(shown.row.locator('.try-again')).toHaveCount(1)
+  await expect(shown.row.locator('.try-again')).toHaveAttribute(
+    'title',
+    'Try @zeus again now, once its account works',
+  )
   await expect(shown.chief.locator('.terminal-status')).toHaveText(said)
   await expect(shown.chief.locator('.try-again')).toHaveCount(1)
   await expect(shown.card).toHaveText(
@@ -2346,7 +2360,9 @@ test('a member whose model is busy says so, and when it is tried again, with no 
 }) => {
   const shown = await heldFor(page, 'busy')
   const said = /^Its model is busy: ConsensFlow tries it again at (\S+ )?\d\d:\d\d$/
-  await expect(shown.row.locator('.row-status')).toHaveText(said)
+  await expect(shown.row.locator('[data-part="member"] .team-words')).toHaveText(
+    /^Model busy: tried again at (\S+ )?\d\d:\d\d$/,
+  )
   await expect(shown.row.getByTestId('lamp')).toHaveAttribute('data-state', 'out')
   await expect(shown.row.locator('.try-again')).toHaveCount(0)
   await expect(shown.chief.locator('.terminal-status')).toHaveText(said)
@@ -10975,7 +10991,9 @@ test('shows a member between tasks with no status line, its window gone until th
   const row = page.locator('tr[data-handle="diana"]')
   await expect(row.locator('.row-meta')).toBeVisible()
   await expect(row.locator('.row-status')).toHaveCount(0)
-  await expect(row.getByTestId('lamp')).toHaveAttribute('data-state', 'closed')
+  // Ready for a task, as a team's member says it (T-1850).
+  await expect(row.getByTestId('lamp')).toHaveAttribute('data-state', 'idle')
+  await expect(row.locator('[data-part="member"] .team-words')).toHaveText('Ready for a task')
 })
 
 test('shows an image designer between tasks as any member: no status line until a terminal of it opens, then the count', async ({
@@ -18008,7 +18026,7 @@ test('BKV05 board names a resting member, and a team whose ready backup takes it
   await open(page, data)
   const zeus = page.locator('tr[data-handle="zeus"]')
   const owner = page.locator('tr[data-handle="diana"]')
-  await expect(zeus).toContainText('on Vacation')
+  await expect(zeus.locator('[data-part="member"] .team-words')).toHaveText('On Vacation')
   // diana and hera, its backup, are one member (T-1793): hera can take work, so the team is
   // free, and who takes whose tasks is on the lane, folded (T-1847).
   await expect(page.locator('tr[data-handle="hera"]')).toHaveCount(0)
@@ -18737,6 +18755,130 @@ test('BKG a two-role member shows its backup once in each role lane, folded', as
     await expect(lane.locator('.team-part[data-part="backup"] .team-handle')).toHaveText('@hera')
     await expect(lane.locator(':scope > th > .row-status')).toHaveText(/^Neither can take a task/)
   }
+})
+
+/**
+ * T-1850: a member with no backup, harbour's zeus, resting between tasks as members do (no
+ * window of its own), with a session at work on T-23 when `working`, and out of quota until
+ * `out` when given.
+ */
+function solo({ working = false, out = null } = {}) {
+  const data = model()
+  const lanes = data.boards[1].lanes
+  const zeusLane = lanes.find((lane) => lane.participant.handle === 'zeus')
+  zeusLane.activity = { state: 'closed' }
+  zeusLane.pane = null
+  zeusLane.participant.outUntil = out
+  if (working) {
+    const window = session(12, zeusLane.participant, 'amber-pine')
+    lanes.push({
+      participant: window,
+      tasks: [
+        task(23, 'Write the tokenizer', 'working', 'chief', window.handle, 2, {
+          pool: 'worker',
+          tier: 'standard',
+          session: window.handle,
+        }),
+      ],
+      activity: { state: 'working' },
+      pane: { id: `p1-${window.handle}`, generation: 3 },
+    })
+  }
+  return data
+}
+
+/** A member's lane head as its lamp, its own words and their state, its buttons and its status line. */
+const memberHead = (lane) =>
+  lane.locator('.row-head').evaluate((head) => {
+    const own = head.querySelector(
+      ':scope > .team-part[data-part="member"], .row-team > [data-part="member"]',
+    )
+    return {
+      lamp: head.querySelector('.row-title .lamp')?.dataset.state,
+      words: own?.querySelector('.team-words')?.textContent ?? null,
+      state: own?.querySelector('.team-status')?.dataset.state ?? null,
+      buttons: [...(own?.querySelectorAll('button') ?? [])].map((button) => button.textContent),
+      status: head.querySelector(':scope > .row-status')?.textContent ?? null,
+    }
+  })
+
+test('BKG a member with no backup at work in a session has a working lamp and says Working', async ({
+  page,
+}) => {
+  await open(page, solo({ working: true }))
+  const lane = page.locator('tr[data-handle="zeus"]')
+  expect(await memberHead(lane)).toEqual({
+    lamp: 'working',
+    words: 'Working',
+    state: 'working',
+    buttons: [],
+    status: '1 terminal open, one per task',
+  })
+})
+
+test('BKG a member with no backup out of quota says until when once, with its Try again beside it', async ({
+  page,
+}) => {
+  const reset = fromNow(2)
+  await open(page, solo({ out: reset }))
+  const lane = page.locator('tr[data-handle="zeus"]')
+  expect(await memberHead(lane)).toEqual({
+    lamp: 'out',
+    words: `Out of quota until ${await resetWords(page, reset)}`,
+    state: 'out',
+    buttons: ['Try again now'],
+    status: null,
+  })
+  await lane.getByRole('button', { name: 'Try @zeus again now, before its quota resets' }).click()
+  await expect.poll(() => calls(page, 'member.back')).toEqual([{ project: 1, participant: 'zeus' }])
+})
+
+test('BKG a member with no backup between tasks is ready, and on Vacation says so in its words', async ({
+  page,
+}) => {
+  const data = solo()
+  await open(page, data)
+  const lane = page.locator('tr[data-handle="zeus"]')
+  expect(await memberHead(lane)).toEqual({
+    lamp: 'idle',
+    words: 'Ready for a task',
+    state: 'idle',
+    buttons: [],
+    status: null,
+  })
+  await lane.getByText('Send on Vacation', { exact: true }).click()
+  await expect(lane.locator('[data-part="member"] .team-words')).toHaveText('On Vacation')
+  await expect(lane.locator('.row-status', { hasText: /vacation/i })).toHaveCount(0)
+})
+
+test('BKG a member with no backup and a team member read alike: the same lamp and words for the same state', async ({
+  page,
+}) => {
+  const data = solo({ working: true })
+  // diana, with hera as its backup, at work too.
+  const { data: teamed } = team({ working: ['diana'] })
+  data.boards[1].lanes = data.boards[1].lanes
+    .filter((lane) => lane.participant.handle !== 'diana')
+    .concat(
+      teamed.boards[1].lanes.filter((lane) =>
+        ['diana', 'hera', 'diana-amber-pine'].includes(lane.participant.handle),
+      ),
+    )
+  data.tasks = { ...data.tasks, ...teamed.tasks }
+  // The two windows are each their own session: diana's gets an id of its own.
+  data.boards[1].lanes.find(
+    (lane) => lane.participant.handle === 'diana-amber-pine',
+  ).participant.id = 14
+  await open(page, data)
+  await teamShot(page, 'solo-and-team-at-work')
+  const solo_ = await memberHead(page.locator('tr[data-handle="zeus"]'))
+  const teamed_ = await memberHead(page.locator('tr[data-handle="diana"]'))
+  expect([solo_.lamp, solo_.words, solo_.state]).toEqual(['working', 'Working', 'working'])
+  expect([teamed_.lamp, teamed_.words, teamed_.state]).toEqual([
+    solo_.lamp,
+    solo_.words,
+    solo_.state,
+  ])
 })
 
 /**

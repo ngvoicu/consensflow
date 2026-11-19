@@ -358,6 +358,17 @@ function teamStatus(row, board, now) {
 }
 
 /**
+ * A member's lane with no backup, its one status line (T-1850): its own, as `laneStatus` says
+ * it, but not why it cannot run work, which its own words under its name say, with its Try
+ * again now beside them, as a team's member's do.
+ */
+function soloStatus(lane, board, now) {
+  const said = laneStatus(lane, board, now)
+  if (said?.[0] !== 'out') return said
+  return lane.holding ? ['holding', HOLDING] : null
+}
+
+/**
  * What one part of a team does, in a few words, and the state that colours its lamp and its
  * words (T-1847, the owner on alpha.11: "you have to expand to see the backup"): out, and until
  * when; held, refused or waiting for an edit; on Vacation; else what its windows of the row's
@@ -840,17 +851,17 @@ export function laneStatus(lane, board, now) {
  * The human's way to try a member, or the chief, out of quota again before
  * its reset: its harness runs on another account now, or a bigger plan.
  */
-export const tryAgain = (participant, action) =>
-  button(
-    'Try again now',
-    'quiet-button try-again',
-    action,
-    modelMoved(participant)
-      ? `Try ${laneName(participant)} again now, once it is on the model you chose`
-      : unavailable(participant)
-        ? `Try ${laneName(participant)} again now, once its account works`
-        : `Try ${laneName(participant)} again now, before its quota resets`,
-  )
+export function tryAgain(participant, action) {
+  const label = modelMoved(participant)
+    ? `Try ${laneName(participant)} again now, once it is on the model you chose`
+    : unavailable(participant)
+      ? `Try ${laneName(participant)} again now, once its account works`
+      : `Try ${laneName(participant)} again now, before its quota resets`
+  const node = button('Try again now', 'quiet-button try-again', action, label)
+  // Its tip says when to press, which a member's short words on the board leave out (T-1850).
+  node.title = label
+  return node
+}
 
 /** The same Vacation control on the board and in the staff dialogs. */
 export const vacationButton = (name, resting, action) =>
@@ -1375,11 +1386,13 @@ export class BoardView {
     // The member's model-based name changes with an edit. Make its windows read as
     // sessions, rather than more members whose models changed along with it.
     const name = participant.member ? `Session · ${participant.session}` : laneName(participant)
-    // A team's member has its own lamp, as its backup has under it (T-1847): which of the two
-    // works, and which is out, is seen without unfolding.
+    // A member's lamp is its own state, its sessions' included, as its words say it; a team's
+    // backup has its own under it (T-1847, T-1850): which works, and which is out, is seen
+    // without unfolding. A session's lamp, and the chief's, are their window's.
     const team = Boolean(lane.backup)
+    const member = isMember(participant)
     title.append(
-      lamp(team ? partLamp(lane, lane, now) : lane, now),
+      lamp(member ? partLamp(lane, lane, now) : lane, now),
       element('span', 'row-name', name),
     )
     head.append(title)
@@ -1391,26 +1404,34 @@ export class BoardView {
     if (participant.ofBackup) meta.prepend(element('span', 'team-kind', 'backup'))
     head.append(meta)
     if (team) head.append(this.#team(lane, board, now))
-    else if (isMember(participant) && participant.vacationSince) {
-      head.append(element('span', 'row-status', 'on Vacation'))
+    else if (member) {
+      // A member with no backup says what it does as a team's member does (T-1850).
+      const own = element('div', 'team-part')
+      own.dataset.part = 'member'
+      own.append(this.#partWords(lane, lane, board, now))
+      head.append(own)
     }
-    const said = team ? teamStatus(lane, board, now) : rowStatus(lane, board, now)
+    const said = team
+      ? teamStatus(lane, board, now)
+      : member
+        ? soloStatus(lane, board, now)
+        : rowStatus(lane, board, now)
     if (said !== null) {
       const [state, text] = said
       const status = element('span', 'row-status', text)
       status.dataset.state = state
       head.append(status)
-      // A team's parts each have their own Try again now, beside what holds each.
-      if (state === 'out' && acts(board) && !team) head.append(...this.#tryAgain(lane, now))
+      // A member's Try again now is beside its own words.
+      if (state === 'out' && acts(board) && !member) head.append(...this.#tryAgain(lane, now))
     }
     head.append(this.#rowTools(lane, board))
     return head
   }
 
   /**
-   * The human's way to try a member's row out of quota again before its reset. None for a model
-   * that is busy, which ConsensFlow tries again after a back-off no press shortens (T-1357). A
-   * team's parts each have their own, in `#team`.
+   * The human's way to try a row out of quota again before its reset, where its words are its
+   * status line. None for a model that is busy, which ConsensFlow tries again after a back-off
+   * no press shortens (T-1357). A member's is beside its own words (`#partWords`).
    */
   #tryAgain(row, now) {
     if (!outOfQuota(row.participant, now) || row.busy) return []
@@ -1442,17 +1463,26 @@ export class BoardView {
         )
         item.append(name, element('span', 'team-meta', runsOn(participant)))
       }
-      const [state, text] = partState(part, row, now)
-      const words = element('div', 'team-status')
-      words.dataset.state = state
-      words.append(element('span', 'team-words', text))
-      if (state === 'out' && !part.busy && acts(board)) {
-        words.append(tryAgain(participant, this.#onLane(this.#actions.onTryAgain, participant)))
-      }
-      item.append(words)
+      item.append(this.#partWords(part, row, board, now))
       list.append(item)
     }
     return list
+  }
+
+  /**
+   * What a member, or a team's backup, does in its own few words (`partState`), coloured as its
+   * lamp, with its Try again now beside them while it is out: none for a model that is busy.
+   */
+  #partWords(part, row, board, now) {
+    const { participant } = part
+    const [state, text] = partState(part, row, now)
+    const words = element('div', 'team-status')
+    words.dataset.state = state
+    words.append(element('span', 'team-words', text))
+    if (state === 'out' && !part.busy && acts(board)) {
+      words.append(tryAgain(participant, this.#onLane(this.#actions.onTryAgain, participant)))
+    }
+    return words
   }
 
   /** Unfolds a member's row, its sessions' rows under it, or folds it again. */
