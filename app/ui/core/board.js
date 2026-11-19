@@ -338,8 +338,65 @@ function teamLead(row, now) {
 function rowStatus(row, board, now) {
   if (!row.backup) return laneStatus(row, board, now)
   const lead = teamLead(row, now)
-  // The team's own line says nothing of who takes whose tasks: that is in its detail.
+  // The team's own line says nothing of who takes whose tasks: each part says what it does.
   return laneStatus({ ...lead, backupReady: undefined, team: partsOf(row) }, board, now)
+}
+
+/**
+ * A team's one status line (T-1847): the team's, as `rowStatus` says it, but where neither part
+ * can run work, only when the first is back, for each part says under the lane why it is out.
+ */
+function teamStatus(row, board, now) {
+  const said = rowStatus(row, board, now)
+  if (said?.[0] !== 'out') return said
+  const lead = teamLead(row, now)
+  const back = backBy(lead, now)
+  const words = Number.isFinite(back)
+    ? `Neither can take a task until ${backAt(lead.participant.outUntil, now)}`
+    : 'Neither can take a task now'
+  return ['out', lead.holding ? `${words}. ${HOLDING}` : words]
+}
+
+/**
+ * What one part of a team does, in a few words, and the state that colours its lamp and its
+ * words (T-1847, the owner on alpha.11: "you have to expand to see the backup"): out, and until
+ * when; held, refused or waiting for an edit; on Vacation; else what its windows of the row's
+ * role do: at work, or waiting for the human; else the member is ready for a task, and its
+ * backup stands by, or takes its tasks while the member cannot. So a folded lane says which of
+ * the two works and which is out.
+ */
+function partState(part, row, now) {
+  const { participant } = part
+  if (participant.vacationSince) return ['closed', 'On Vacation']
+  if (participant.needsEdit) return ['missing', 'Needs an edit under Project settings']
+  if (outOfQuota(participant, now)) return ['out', outShort(part, now)]
+  // A member on Vacation rests its team: its backup takes none of its tasks (the engine's rule).
+  if (part !== row && row.participant.vacationSince) return ['closed', 'Rests with its member']
+  const windows = [
+    part,
+    ...(row.sessions ?? []).filter((session) => session.participant.member === participant.handle),
+  ].map((lane) => lane.activity?.state)
+  if (windows.includes('working')) return ['working', 'Working']
+  if (windows.includes('waiting')) return ['waiting', 'Waiting for you']
+  if (part === row) return ['idle', 'Ready for a task']
+  // A new task goes to the member, never straight to its backup: the backup stands by while
+  // its member can work, and takes the member's tasks while it cannot.
+  return canWork(row, now) ? ['closed', 'Standing by'] : ['idle', "Takes its member's tasks"]
+}
+
+/**
+ * Why a part of a team cannot run work, short: its words in full are `outWords`, which a lane
+ * of its own says; in a team the way back is the button beside them.
+ */
+function outShort({ participant, activity, busy }, now) {
+  if (typeof busy === 'string') return `Model busy: tried again at ${backAt(busy, now)}`
+  const said = (prefix) =>
+    activity?.reason?.startsWith(prefix) ? activity.reason.slice(prefix.length) : null
+  if (modelMoved(participant)) return `Held: ${said('moved: ') ?? 'its model moved on its own'}`
+  if (unavailable(participant)) {
+    return `Unavailable: ${said('unavailable: ') ?? 'its account was refused for billing or login'}`
+  }
+  return `Out of quota until ${backAt(participant.outUntil, now)}`
 }
 
 /**
@@ -559,6 +616,9 @@ function route(task, busy = null) {
     : `blocked by ${taskNumbers(task.blockedBy)} · from ${who(task.requester)}`
 }
 
+/** What a lane says while what the human typed and did not send holds a message (T-288). */
+const HOLDING = 'A message waits until you send or erase what you typed here'
+
 /** A member between tasks: its work runs in sessions, so it has no window of its own. */
 const resting = (participant, activity) =>
   isMember(participant) && (activity?.state ?? 'closed') === 'closed'
@@ -623,7 +683,7 @@ export const nameApart = (participant) => participant.nameApart === true || part
  * does not say it (HMD-12: `@claude-opus-5-5-high` is the model and the effort). The chief's
  * card in the dock says its harness and the model it runs on.
  */
-const identityParts = (participant) => {
+const identityParts = (participant, inLane = false) => {
   const part = (kind, text) => (text ? { kind, text } : null)
   const runs = nameApart(participant)
     ? [part('model', modelShown(participant)), part('effort', participant.effort)]
@@ -632,7 +692,11 @@ const identityParts = (participant) => {
     ? [
         part(
           'role',
-          `${participant.role} session of @${participant.member}${participant.ofBackup ? ', the backup' : ''}`,
+          // Under its team's lane a backup's session is marked as the backup's (T-1847); a
+          // terminal's card, with no lane around it, says whose.
+          participant.ofBackup && inLane
+            ? `${participant.role} session`
+            : `${participant.role} session of @${participant.member}${participant.ofBackup ? ', the backup' : ''}`,
         ),
         part('harness', harnessLabel(participant)),
         ...runs,
@@ -665,7 +729,7 @@ export const identity = (participant) =>
  */
 function identityLine(participant, className) {
   const line = element('span', className)
-  identityParts(participant).forEach((part, at) => {
+  identityParts(participant, true).forEach((part, at) => {
     if (at > 0) line.append(' · ')
     const span = element('span', `meta-${part.kind}`, part.text)
     if (part.kind === 'tier') span.dataset.tier = part.text
@@ -736,7 +800,7 @@ export function laneStatus(lane, board, now) {
   }
   // What the human typed and did not send holds a message whether or not the window
   // is out of quota: the lane says both, or the hold hides behind the wait (T-288).
-  const holding = 'A message waits until you send or erase what you typed here'
+  const holding = HOLDING
   // A chief the update could not tell the model of (T-1202), whose harness's record named
   // none: its window stays closed until a model is picked for it, and nothing is lost.
   if (participant.needsEdit && participant.role === 'chief') {
@@ -796,6 +860,12 @@ export const vacationButton = (name, resting, action) =>
     action,
     resting ? `Bring ${name} back from Vacation` : `Send ${name} on Vacation`,
   )
+
+/** A team's part as its lamp shows it: the state its words say (`partState`). */
+const partLamp = (part, row, now) => ({
+  participant: part.participant,
+  activity: { state: partState(part, row, now)[0] },
+})
 
 /** A participant's lamp: what its window is doing, at a glance, or that it is out of quota. */
 export function lamp({ participant, activity }, now) {
@@ -1261,11 +1331,11 @@ export class BoardView {
 
   /**
    * Whether a member's row is folded: its sessions' rows off the board and their cards on its
-   * own, and a team's detail (its member and its backup, each as it is) shut. Every one is
-   * until the human unfolds it. Null for a row with neither sessions nor a backup.
+   * own. Every one is until the human unfolds it. Null for a row with no sessions: a team's
+   * member and backup are on its row either way (T-1847).
    */
   #folded(board, row) {
-    if ((row.sessions?.length ?? 0) === 0 && !row.backup) return null
+    if ((row.sessions?.length ?? 0) === 0) return null
     return !this.#unfolded.has(foldKey(board, row.participant))
   }
 
@@ -1305,60 +1375,55 @@ export class BoardView {
     // The member's model-based name changes with an edit. Make its windows read as
     // sessions, rather than more members whose models changed along with it.
     const name = participant.member ? `Session · ${participant.session}` : laneName(participant)
-    // A team's lamp is the one of the part that speaks for it, as its status line is.
-    title.append(lamp(teamLead(lane, now), now), element('span', 'row-name', name))
+    // A team's member has its own lamp, as its backup has under it (T-1847): which of the two
+    // works, and which is out, is seen without unfolding.
+    const team = Boolean(lane.backup)
+    title.append(
+      lamp(team ? partLamp(lane, lane, now) : lane, now),
+      element('span', 'row-name', name),
+    )
     head.append(title)
     // The chief's row only holds its tasks: what it is doing, what it runs on
     // and Switch chief are on its card in the dock.
     if (participant.role === 'chief') return head
-    head.append(identityLine(participant, 'row-meta'))
-    if (isMember(participant) && participant.vacationSince) {
+    const meta = identityLine(participant, 'row-meta')
+    // A backup's session is marked as the team's backup is (T-1847), not named after it again.
+    if (participant.ofBackup) meta.prepend(element('span', 'team-kind', 'backup'))
+    head.append(meta)
+    if (team) head.append(this.#team(lane, board, now))
+    else if (isMember(participant) && participant.vacationSince) {
       head.append(element('span', 'row-status', 'on Vacation'))
     }
-    const said = rowStatus(lane, board, now)
+    const said = team ? teamStatus(lane, board, now) : rowStatus(lane, board, now)
     if (said !== null) {
       const [state, text] = said
       const status = element('span', 'row-status', text)
       status.dataset.state = state
       head.append(status)
-      if (state === 'out' && acts(board)) head.append(...this.#tryAgain(lane, now))
+      // A team's parts each have their own Try again now, beside what holds each.
+      if (state === 'out' && acts(board) && !team) head.append(...this.#tryAgain(lane, now))
     }
-    if (lane.backup && folded === false) head.append(this.#team(lane, board, now))
     head.append(this.#rowTools(lane, board))
     return head
   }
 
   /**
-   * The human's way to try a row out of quota again before its reset: a member's own; a team's
-   * tries each of its parts that is out, in one press. None for a model that is busy, which
-   * ConsensFlow tries again after a back-off no press shortens (T-1357).
+   * The human's way to try a member's row out of quota again before its reset. None for a model
+   * that is busy, which ConsensFlow tries again after a back-off no press shortens (T-1357). A
+   * team's parts each have their own, in `#team`.
    */
   #tryAgain(row, now) {
-    const out = partsOf(row).filter((part) => outOfQuota(part.participant, now) && !part.busy)
-    if (teamLead(row, now).busy || out.length === 0) return []
-    if (out.length === 1) {
-      const [{ participant }] = out
-      return [tryAgain(participant, this.#onLane(this.#actions.onTryAgain, participant))]
-    }
-    return [
-      button(
-        'Try again now',
-        'quiet-button try-again',
-        async () => {
-          for (const { participant } of out) {
-            await this.#actions.onTryAgain(this.#lane(participant).participant)
-          }
-        },
-        `Try ${laneName(row.participant)} and its backup again now`,
-      ),
-    ]
+    if (!outOfQuota(row.participant, now) || row.busy) return []
+    const { participant } = row
+    return [tryAgain(participant, this.#onLane(this.#actions.onTryAgain, participant))]
   }
 
   /**
-   * A team's detail, under its status while its row is unfolded: its member and its backup,
-   * each with its lamp and, in its own words, what it is doing or what holds it, with the way to
-   * try it again; the backup also with what it runs on. Which of them runs a task is said by the
-   * sessions under the row and by the task's sidebar.
+   * A team's two parts on its lane, folded or not, drawn as the staff screens draw a member and
+   * its backup (T-1847): the member's own words under its name, and under them its backup, set
+   * off by the team's rule, with its lamp, its mark, its name, what it runs on and its own
+   * words. Each that is out says until when, with its own Try again now beside it. The
+   * sessions, unfolded, are the rest of the detail.
    */
   #team(row, board, now) {
     const list = element('ul', 'row-team')
@@ -1368,34 +1433,33 @@ export class BoardView {
       const backup = part !== row
       const item = element('li', 'team-part')
       item.dataset.part = backup ? 'backup' : 'member'
-      const name = element('div', 'team-name')
-      name.append(lamp(part, now), element('span', 'team-handle', `@${participant.handle}`))
-      if (backup) name.append(element('span', 'team-kind', 'backup'))
-      item.append(name)
-      if (backup) item.append(element('span', 'team-meta', runsOn(participant)))
-      if (participant.vacationSince) item.append(element('span', 'team-status', 'on Vacation'))
-      const said = laneStatus(part, board, now)
-      if (said !== null) {
-        const [state, text] = said
-        const status = element('span', 'team-status', text)
-        status.dataset.state = state
-        item.append(status)
-        if (state === 'out' && !part.busy && acts(board)) {
-          item.append(tryAgain(participant, this.#onLane(this.#actions.onTryAgain, participant)))
-        }
+      if (backup) {
+        const name = element('div', 'team-name')
+        name.append(
+          lamp(partLamp(part, row, now), now),
+          element('span', 'team-kind', 'backup'),
+          element('span', 'team-handle', `@${participant.handle}`),
+        )
+        item.append(name, element('span', 'team-meta', runsOn(participant)))
       }
+      const [state, text] = partState(part, row, now)
+      const words = element('div', 'team-status')
+      words.dataset.state = state
+      words.append(element('span', 'team-words', text))
+      if (state === 'out' && !part.busy && acts(board)) {
+        words.append(tryAgain(participant, this.#onLane(this.#actions.onTryAgain, participant)))
+      }
+      item.append(words)
       list.append(item)
     }
     return list
   }
 
-  /** Unfolds a member's row, its sessions' rows under it and a team's detail, or folds it again. */
-  #foldButton({ participant, sessions, backup }, folded) {
+  /** Unfolds a member's row, its sessions' rows under it, or folds it again. */
+  #foldButton({ participant, sessions }, folded) {
     const name = laneName(participant)
-    const what = backup
-      ? `${name}'s team${sessions.length === 0 ? '' : ` and ${plural(sessions.length, 'session')}`}`
-      : `${name}'s ${plural(sessions.length, 'session')}`
-    const tip = backup ? (sessions.length === 0 ? 'team' : 'team and sessions') : 'sessions'
+    const what = `${name}'s ${plural(sessions.length, 'session')}`
+    const tip = 'sessions'
     const toggle = iconButton(
       ICONS.fold,
       `${folded ? 'Show' : 'Hide'} ${tip}`,

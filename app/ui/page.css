@@ -547,13 +547,17 @@ tr[data-session] .row-name { font-weight: 500; }
 /* A window at rest whose task goes on in the background: waiting, not idle. */
 :is(.row-status, .terminal-status, .team-status)[data-state="held"] { color: var(--amber); }
 :is(.row-status, .terminal-status, .team-status):is([data-state="out"], [data-state="missing"], [data-state="unstopped"]) { color: var(--danger); }
-/* A member and its backup are one row, a team. Unfolded, its detail is under the team's line,
-   set off by the rule a session's row has: each part with a smaller lamp, the backup marked as
-   one and with what it runs on, and each in its own words, coloured as a row's status. */
-.row-team { display: grid; gap: 8px; margin: 9px 0 0; padding: 1px 0 1px 10px; list-style: none; border-left: 3px solid var(--line); }
+/* A member and its backup are one row, a team, drawn as the staff screens draw them, folded or
+   not (T-1847): the member's own words under its name, then its backup, set off by the team's
+   rule, with its lamp, its mark, its name, what it runs on and its own words, each coloured as
+   a row's status, and each that is out with its Try again now beside what holds it. The team's
+   one status line is under both. */
+.row-team { display: grid; gap: 7px; margin: 5px 0 0; padding: 0; list-style: none; }
 .team-part { min-width: 0; }
+.team-part[data-part="backup"] { padding: 1px 0 1px 9px; border-left: 3px solid var(--line); }
 .team-name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
 .team-name .lamp { width: 8px; height: 8px; }
+.row-meta .team-kind { margin-right: 6px; vertical-align: 1px; }
 .team-handle { min-width: 0; font: 600 11px/1.35 var(--mono); color: var(--text); overflow-wrap: anywhere; }
 .team-kind {
   padding: 2px 6px 1px;
@@ -565,8 +569,9 @@ tr[data-session] .row-name { font-weight: 500; }
   color: var(--violet);
 }
 .team-meta { display: block; margin-top: 3px; font: 11px/1.45 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
-.team-status { display: block; margin-top: 3px; font: 600 11px/1.4 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
-.team-part .try-again { margin-top: 5px; }
+.team-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 3px; font: 600 11px/1.4 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+/* Its Try again now is a button as every other, not words of the status it stands beside. */
+.team-status .try-again { margin-top: 0; font: 12px var(--ui); color: var(--text); }
 .row-tools { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 /* A button stays in its column: a label too long for it wraps. */
 .row-tools > button { max-width: 100%; white-space: normal; }
@@ -823,6 +828,24 @@ tr[data-session] .row-name { font-weight: 500; }
 .staff .member-meta { color: var(--muted); font: 11px/1.6 var(--mono); }
 .staff .member-out { color: var(--danger); font-size: 12px; margin-right: 8px; }
 .staff .try-again { margin-top: 2px; }
+/* A member and its backup are one group, as the board draws them one team (the owner,
+   2026-11-19): the member's rows, one a role with that role's Remove, its name and its own tools
+   once beside them, and under them its backup's slot, set off by the rule a team has on the board.
+   Only a group's first row has the table's rule above it. */
+.staff .staff-group-more > td { border-top: 0; padding-top: 0; }
+.staff .staff-group > td:not([rowspan]):not(.staff-tools) { padding-bottom: 6px; }
+.staff .staff-group-more:not(.backup-slot) > td { padding-bottom: 6px; }
+.staff .backup-slot > td { padding-top: 4px; padding-bottom: 12px; }
+.staff .staff-role-remove { width: 1%; padding-left: 0; }
+.staff .staff-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.staff .backup-part { padding: 2px 0 2px 10px; border-left: 3px solid var(--line); }
+.staff .backup-part .team-kind { margin-right: 8px; vertical-align: 1px; }
+.staff .backup-part .member-name { overflow-wrap: anywhere; }
+/* No backup yet: the same slot, its mark quiet, so a member without one is seen at a glance. */
+.staff .backup-none { border-left-color: var(--line-soft); }
+.staff .backup-none .team-kind { border-color: var(--line); color: var(--muted); }
+/* Words for a screen reader only: what a mark says to the eye by where it is. */
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 /* The chief's pick in New project and Switch chief, and Switch chief's turn choice: boxed as
    the sections are, not in the browser's own frame. */
 .chief-pick, .dialog-form > fieldset:not([class]) { min-width: 0; margin: 0; border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; }
