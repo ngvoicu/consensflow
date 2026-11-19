@@ -2,9 +2,9 @@
 /**
  * Regenerates `harness-cases.json`: what Pi, Claude Code and Codex print for a link, replayed
  * offline from the harnesses' own formatting code (T-1314's review, T-1315). No harness starts, no
- * model runs and no provider is called. **Only an OSC 8 hyperlink is a link in a pane**: a plain
- * address, however a program laid it out, is no link (three reviews found a layout that cut one),
- * so a case holds one of two things: the destination opens exactly (OSC 8) or nothing does.
+ * model runs and no provider is called. OSC 8 carries the destination whole. A plain address
+ * may also be a link; the page test checks that a clicked fixture opens its exact destination
+ * or nothing. The legacy `expect` field still records the fixture's original OSC-only rule.
  *
  * - Pi 1.5.0: `Markdown.render` of the installed `@earendil-works/pi-tui`, with an ANSI-only theme,
  *   `PI_HYPERLINKS` set to 0 (the plain `words (address)` fallback) or 1 (what ConsensFlow's launch
@@ -27,8 +27,8 @@
  * A case is `{id, harness, mode, width, printed, destination, expect}`: `printed` is what the
  * program wrote into the pane, `destination` the address the program meant, `mode` how the
  * program carries it (`"osc8"`, or `"plain"`: text) and `expect` what a click on it must do:
- * `"exact"` opens `destination` and nothing else (OSC 8 only), `"none"` is no link and opens
- * nothing. Never a shortened address.
+ * `"exact"` opens `destination` and nothing else (OSC 8); `"none"` was the original expectation
+ * for plain text. The current page check accepts an exact destination or no link for plain text.
  *
  * Run: `node app/tests/fixtures/pane-links/make-harness-cases.mjs` (Pi and Claude Code installed).
  */
@@ -93,9 +93,8 @@ function execNode(script, env) {
 
 /**
  * What a click on the address must do. An OSC 8 hyperlink carries its destination whole, on every
- * row it is drawn on: `"exact"`. A plain address is `"none"` however it is laid out: the pane
- * cannot tell from the screen where a program broke an address, and no link is better than a
- * wrong one.
+ * row it is drawn on: `"exact"`. The legacy fixture label for a plain address is `"none"`;
+ * the page's current replay also accepts its exact destination, never a shortened one.
  */
 function expected(mode) {
   return mode === 'osc8' ? 'exact' : 'none'

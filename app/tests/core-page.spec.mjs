@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { chromium, expect, test } from '@playwright/test'
@@ -3064,6 +3064,95 @@ test("keeps a program's words readable in every ANSI colour and the window's own
   expect(pairs.filter((pair) => pair.ratio < 4.5)).toEqual([])
 })
 
+test("draws a program's dim words readable and still dim, in the window's own colour and each it may ask for, on the window's own ground", async ({
+  page,
+}) => {
+  await page.route(`${ui.origin}/terminal-dim`, (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/page.css"><link rel="stylesheet" href="/vendor/xterm.css"><body><div id="host" style="width:1400px;height:500px"></div></body>',
+    }),
+  )
+  await page.goto(`${ui.origin}/terminal-dim`)
+  const cells = await page.evaluate(async () => {
+    const { XtermEmulator } = await import('/term.js')
+    const terminal = new XtermEmulator(document.getElementById('host'), { onLink: () => {} })
+    terminal.resizeObserver.disconnect()
+    clearTimeout(terminal.settling)
+    terminal.terminal.resize(140, 30)
+    // What Claude Code and Codex draw their hints and footers in: dim (ESC[2m) in the window's
+    // own colour (39). Then each of the sixteen colours and three of the 256 a program may ask
+    // for (a blue, a grey, an orange). Each as words of their own, then the same dim, on the
+    // window's own ground. (The window's own colours swapped, ESC[7m, xterm draws in a colour
+    // of its own making, at its floor, whatever the page says.)
+    const eight = (first) => Array.from({ length: 8 }, (_, colour) => `${first}${colour}`)
+    const words = ['39', ...eight(3), ...eight(9), '38;5;75', '38;5;245', '38;5;214']
+    const printed = words
+      .map((word) => `\x1b[${word}mAb\x1b[0m \x1b[2;${word}mAb\x1b[0m`)
+      .join('\r\n')
+    await new Promise((done) => terminal.terminal.write(printed, done))
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
+    const rgba = (css) => {
+      const [r, g, b, a = 1] = css.match(/[\d.]+/g).map(Number)
+      return { colour: [r, g, b], alpha: a }
+    }
+    const light = (colour) => {
+      const [r, g, b] = colour.map((value) => {
+        const share = value / 255
+        return share <= 0.03928 ? share / 12.92 : ((share + 0.055) / 1.055) ** 2.4
+      })
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+    const ratio = (a, b) => {
+      const [high, low] = [light(a), light(b)].sort((x, y) => y - x)
+      return (high + 0.05) / (low + 0.05)
+    }
+    // A cell xterm gives no background shows what is under it: the nearest element painted.
+    const ground = (element) => {
+      for (let at = element; at; at = at.parentElement) {
+        const { colour, alpha } = rgba(getComputedStyle(at).backgroundColor)
+        if (alpha > 0) return colour
+      }
+      return [255, 255, 255]
+    }
+    // A dim colour is drawn partly see-through: what the eye gets is it over its ground.
+    const drawn = (span) => {
+      const { colour, alpha } = rgba(getComputedStyle(span).color)
+      const under = ground(span)
+      return colour.map((value, at) => value * alpha + under[at] * (1 - alpha))
+    }
+    const rows = [...document.querySelectorAll('#host .xterm-rows > div')].slice(0, words.length)
+    return rows.map((row, at) => {
+      const [normal, dim] = [...row.querySelectorAll('span')].filter(
+        (span) => span.textContent.trim() === 'Ab',
+      )
+      return {
+        word: words[at],
+        dimmed: dim.classList.contains('xterm-dim'),
+        normal: ratio(drawn(normal), ground(normal)),
+        dim: ratio(drawn(dim), ground(dim)),
+      }
+    })
+  })
+  expect(cells).toHaveLength(20)
+  expect(cells.every((cell) => cell.dimmed)).toBe(true)
+  const at = (word) => cells.find((cell) => cell.word === word)
+  // Black (30) is the window's own ground: its words are lifted to 4.5 by xterm, and dim ones to
+  // xterm's floor for dim words, half that. Every other colour, dim, reads at WCAG AA.
+  const readable = cells.filter((cell) => cell.word !== '30')
+  expect(readable.filter((cell) => cell.dim < 4.5)).toEqual([])
+  expect(at('30').dim).toBeGreaterThanOrEqual(2.25)
+  // The common case, the agents' hints, sits well above the floor.
+  expect(at('39').dim).toBeGreaterThanOrEqual(5.5)
+  // And each still reads as dim beside its colour's own words: in the window's own colour and
+  // the sixteen the page chooses, a third less contrast at least; in the 256, whose greys a
+  // program may pick near the floor, less at all.
+  const chosen = readable.filter((cell) => !cell.word.startsWith('38;5;'))
+  expect(chosen).toHaveLength(16)
+  expect(chosen.filter((cell) => cell.normal / cell.dim < 1.5)).toEqual([])
+  expect(readable.filter((cell) => cell.normal <= cell.dim)).toEqual([])
+})
+
 for (const [held, words] of [
   [{ task: 12, jobs: 3, agents: 0 }, 'waiting on 3 background jobs'],
   [{ task: 12, jobs: 0, agents: 1 }, 'waiting on a background agent'],
@@ -5417,12 +5506,12 @@ test("New project and Switch chief say the same of the chief's model: the harnes
     [
       'New project',
       'New project',
-      "The chief starts on the harness and model you pick. To change only its model later, switch it in the chief's own window: ConsensFlow follows it, and a reopen keeps it. Switch the chief, on its card, is for another harness or a fresh conversation.",
+      "The chief starts on the harness and model you pick. To change only its model later, use the harness's own model switch in the chief's window: ConsensFlow follows it, and a reopen keeps it. Switch the chief, on its card, is for another harness or a fresh conversation.",
     ],
     [
       'Switch the chief to another harness or model',
       'Switch the chief',
-      "The chief goes on in a new window on the harness and model you pick: a fresh conversation, whose first message is the handoff, what you and the chiefs before it said and what waits on the board. The staff keeps working. To change only the model, switch it in the chief's own window instead: it keeps its conversation, ConsensFlow follows it, and a reopen keeps it.",
+      "The chief goes on in a new window on the harness and model you pick: a fresh conversation, whose first message is the handoff, what you and the chiefs before it said and what waits on the board. The staff keeps working. To change only the model, use the harness's own model switch in the chief's window: it keeps its conversation, ConsensFlow follows it, and a reopen keeps it.",
     ],
   ]) {
     await page.getByRole('button', { name: button }).click()
@@ -5433,8 +5522,7 @@ test("New project and Switch chief say the same of the chief's model: the harnes
   }
 })
 
-// Links in a pane (T-1291): only an OSC 8 hyperlink (words with the address hidden behind them) is
-// a link; a web address a program prints as text is none, in any form (T-1323). A link is
+// Links in a pane: OSC 8 hyperlinks and complete-looking plain web addresses are links. A link is
 // underlined and titled with what opens it as the pointer comes onto it, and it opens in the
 // human's browser, through the app's `open_link`, only for a click with the system's key held
 // (Cmd on a Mac, Ctrl on Windows, as VS Code's terminal does), so a click into a pane to type
@@ -5549,6 +5637,250 @@ async function clickWith(page, place, keys = [], button = 'left') {
   for (const key of keys) await page.keyboard.up(key)
 }
 
+test.describe('R12: plain web addresses', () => {
+  test.use({ userAgent: MAC_AGENT, viewport: { width: 1400, height: 800 } })
+
+  test('opens a plain address through the stand-in, while a drag across it selects', async ({
+    page,
+  }) => {
+    const url = 'https://example.org/docs?a=1&b=%20#part'
+    await printing(page, `Before ${url} after\r\n`, 'after')
+    const place = await placeOf(page, url)
+    await page.mouse.move(place.x, place.y)
+    await expect(page.locator(CHIEF_TERMINAL)).toHaveAttribute('title', `Cmd+click to open ${url}`)
+    await clickWith(page, place, ['Meta'])
+    await expect.poll(() => linksOpened(page)).toEqual([url])
+    await replayPage(page)
+    const replay = await replaying(page, `Before ${url} after`, 100)
+    const from = { x: replay.left + 0.5 * replay.cell, y: replay.top + 0.5 * replay.row }
+    const to = { x: replay.left + (8 + url.length) * replay.cell, y: from.y }
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await page.mouse.move(to.x, to.y, { steps: 8 })
+    await page.mouse.up()
+    await expect
+      .poll(() => page.evaluate(() => window.replay.terminal.getSelection()))
+      .toContain(url)
+    expect(await page.evaluate(() => window.replayOpened)).toEqual([])
+  })
+
+  test('refuses malformed, escaped, path and non-web strings', async ({ page }) => {
+    const bad = [
+      'https://example.org/%ZZ',
+      'https://example.org/\\escaped',
+      '/tmp/https://example.org/path',
+      'ftp://https://example.org/path',
+    ]
+    const sentinel = 'https://example.org/good'
+    await printing(
+      page,
+      `${bad.map((text) => `${text} end`).join('\r\n')}\r\n${sentinel} end\r\n`,
+      sentinel,
+    )
+    for (const [row, text] of bad.entries()) {
+      const place = await placeInRow(page, row, text.slice(0, 12))
+      await page.mouse.move(place.x, place.y)
+      await afterFrames(page)
+      await expect(page.locator(CHIEF_TERMINAL), text).not.toHaveAttribute('title', /.*/)
+      await clickWith(page, place, ['Meta'])
+    }
+    await page.mouse.move((await placeOf(page, sentinel)).x, (await placeOf(page, sentinel)).y)
+    await expect(page.locator(CHIEF_TERMINAL)).toHaveAttribute(
+      'title',
+      `Cmd+click to open ${sentinel}`,
+    )
+    await clickWith(page, await placeOf(page, sentinel), ['Meta'])
+    await expect.poll(() => linksOpened(page)).toEqual([sentinel])
+  })
+
+  test('control sequences and an OSC link with a refused destination do not expose plain links', async ({
+    page,
+  }) => {
+    const disguised = 'https://example.org/disguised'
+    const good = 'https://example.org/visible'
+    const text = `\u001b]0;https://example.org/hidden\u0007No link here\r\n${hyperlink('file:///etc/passwd', disguised)} end\r\n${good} end\r\n`
+    await printing(page, text, good)
+    for (const [row, words] of [
+      [0, 'No link here'],
+      [1, disguised],
+    ]) {
+      const place = await placeInRow(page, row, words)
+      await page.mouse.move(place.x, place.y)
+      await afterFrames(page)
+      await expect(page.locator(CHIEF_TERMINAL)).not.toHaveAttribute('title', /.*/)
+      await clickWith(page, place, ['Meta'])
+    }
+    const place = await placeOf(page, good)
+    await page.mouse.move(place.x, place.y)
+    await expect(page.locator(CHIEF_TERMINAL)).toHaveAttribute('title', `Cmd+click to open ${good}`)
+    await clickWith(page, place, ['Meta'])
+    await expect.poll(() => linksOpened(page)).toEqual([good])
+  })
+
+  test('a Claude Code plain address alone on a row opens when it ends away from the edge', async ({
+    page,
+  }) => {
+    await replayPage(page)
+    // Claude's formatter writes the address itself when its label is the address. Take the
+    // exact destination from the recorded Claude formatter case and print that bare form.
+    const url = HARNESS_CASES.find((item) => item.id === 'claude-wiki-plain').destination
+    const place = await replaying(page, `${url}\r\n`, 80)
+    const point = { x: place.left + 8.5 * place.cell, y: place.top + 0.5 * place.row }
+    await page.mouse.move(point.x, point.y)
+    await expect
+      .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+      .toBe(`Cmd+click to open ${url}`)
+    await clickWith(page, point, ['Meta'])
+    await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual([url])
+  })
+
+  test('an undelimited address inside the four-column edge zone is not clickable', async ({
+    page,
+  }) => {
+    await replayPage(page)
+    const prefix = 'https://example.org/'
+    for (const endColumn of [77, 78, 79, 80]) {
+      const url = prefix + 'a'.repeat(endColumn - prefix.length)
+      const place = await replaying(page, `${url}\r\n`, 80)
+      const point = { x: place.left + 6.5 * place.cell, y: place.top + 0.5 * place.row }
+      await page.mouse.move(1390, 790)
+      await page.mouse.move(point.x, point.y)
+      await afterFrames(page)
+      await clickWith(page, point, ['Meta'])
+      await afterFrames(page)
+      expect(await page.evaluate(() => window.replayOpened), `last column ${endColumn}`).toEqual([])
+    }
+    // One column outside the zone is a link, so the check is not satisfied by refusing all.
+    const url = prefix + 'a'.repeat(76 - prefix.length)
+    const place = await replaying(page, `${url}\r\n`, 80)
+    const point = { x: place.left + 6.5 * place.cell, y: place.top + 0.5 * place.row }
+    await page.mouse.move(1390, 790)
+    await page.mouse.move(point.x, point.y)
+    await expect
+      .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+      .toBe(`Cmd+click to open ${url}`)
+    await clickWith(page, point, ['Meta'])
+    await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual([url])
+  })
+
+  test('the accepted borderless-column ambiguity follows the visible first-row address', async ({
+    page,
+  }) => {
+    await replayPage(page)
+    for (const [printed, visible] of [
+      ['https://example.org/partial   STATUS\r\n/rest', 'https://example.org/partial'],
+      ['https://example   STATUS\r\n.org/path', 'https://example'],
+    ]) {
+      const place = await replaying(page, printed, 80)
+      const point = { x: place.left + 6.5 * place.cell, y: place.top + 0.5 * place.row }
+      await page.mouse.move(1390, 790)
+      await page.mouse.move(point.x, point.y)
+      await expect
+        .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+        .toBe(`Cmd+click to open ${visible}`)
+      await clickWith(page, point, ['Meta'])
+      await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual([visible])
+    }
+  })
+
+  test('an address in the edge zone with visible text after it is clickable', async ({ page }) => {
+    await replayPage(page)
+    const prefix = 'https://example.org/'
+    const url = prefix + 'a'.repeat(78 - prefix.length)
+    // The closing parenthesis is visible in the last column; the address itself ends at 79.
+    const place = await replaying(page, `(${url})`, 80)
+    const point = { x: place.left + 6.5 * place.cell, y: place.top + 0.5 * place.row }
+    await page.mouse.move(point.x, point.y)
+    await expect
+      .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+      .toBe(`Cmd+click to open ${url}`)
+    await clickWith(page, point, ['Meta'])
+    await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual([url])
+  })
+
+  test('an address xterm wraps opens whole from either row', async ({ page }) => {
+    await replayPage(page)
+    const url = `https://example.org/${'segment/'.repeat(4)}end`
+    const place = await replaying(page, `${url}\r\n`, 40)
+    const expected = []
+    for (const row of [0, 1]) {
+      const point = { x: place.left + 8.5 * place.cell, y: place.top + (row + 0.5) * place.row }
+      await page.mouse.move(point.x, point.y)
+      await expect
+        .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+        .toBe(`Cmd+click to open ${url}`)
+      await clickWith(page, point, ['Meta'])
+      expected.push(url)
+      await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual(expected)
+    }
+  })
+
+  test('a wrapped address after wide characters opens whole on every row', async ({ page }) => {
+    await replayPage(page)
+    const url = `https://example.org/${'segment/'.repeat(8)}end`
+    const place = await replaying(page, `🔒 ${url}\r\n`, 40)
+    const expected = []
+    for (const row of [0, 1, 2]) {
+      const point = { x: place.left + 8.5 * place.cell, y: place.top + (row + 0.5) * place.row }
+      await page.mouse.move(point.x, point.y)
+      await expect
+        .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+        .toBe(`Cmd+click to open ${url}`)
+      await clickWith(page, point, ['Meta'])
+      expected.push(url)
+      await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual(expected)
+    }
+  })
+
+  test('both cells of a wide final character open the whole plain address', async ({ page }) => {
+    await replayPage(page)
+    const prefix = 'https://example.org/'
+    const url = `${prefix}你`
+    const place = await replaying(page, `${url} end`, 80)
+    const expected = []
+    for (const column of [prefix.length, prefix.length + 1]) {
+      const point = { x: place.left + (column + 0.5) * place.cell, y: place.top + 0.5 * place.row }
+      await page.mouse.move(1390, 790)
+      await page.mouse.move(point.x, point.y)
+      await expect
+        .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+        .toBe(`Cmd+click to open ${url}`)
+      await clickWith(page, point, ['Meta'])
+      expected.push(url)
+      await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual(expected)
+    }
+  })
+
+  test('a wide final character entering the edge zone is not clickable without a delimiter', async ({
+    page,
+  }) => {
+    await replayPage(page)
+    const prefix = 'https://example.org/'
+    // The wide character occupies columns 76 and 77; the latter is inside the last four.
+    const url = `${prefix}${'a'.repeat(75 - prefix.length)}你`
+    const place = await replaying(page, `${url}\r\n`, 80)
+    const point = { x: place.left + 6.5 * place.cell, y: place.top + 0.5 * place.row }
+    await page.mouse.move(point.x, point.y)
+    await afterFrames(page)
+    await clickWith(page, point, ['Meta'])
+    await afterFrames(page)
+    expect(await page.evaluate(() => window.replayOpened)).toEqual([])
+  })
+
+  test('an address ending at the window edge remains unclickable', async ({ page }) => {
+    await replayPage(page)
+    const prefix = 'https://example.org/'
+    const url = prefix + 'a'.repeat(40 - prefix.length)
+    const place = await replaying(page, `${url} end`, 40)
+    const point = { x: place.left + 8.5 * place.cell, y: place.top + 0.5 * place.row }
+    await page.mouse.move(point.x, point.y)
+    await afterFrames(page)
+    await clickWith(page, point, ['Meta'])
+    await afterFrames(page)
+    expect(await page.evaluate(() => window.replayOpened)).toEqual([])
+  })
+})
+
 for (const [system, agent, key, other] of [
   ['a Mac', MAC_AGENT, 'Meta', 'Control'],
   ['Windows', WINDOWS_AGENT, 'Control', 'Meta'],
@@ -5557,26 +5889,61 @@ for (const [system, agent, key, other] of [
   test.describe(`pane links on ${system}`, () => {
     test.use({ userAgent: agent })
 
-    // Only an OSC 8 hyperlink is a link (the third review, T-1323): a plain address cannot be told
-    // whole from the screen, as a program that lays out its text in rows of its own writes it cut.
-    test(`a plain URL is no link: no underline, no title, and ${named}+click opens nothing`, async ({
+    test(`a plain web address is titled and ${named}+click opens it through the app`, async ({
       page,
     }) => {
       const plain = 'https://example.com/docs/a?x=1&y=%20z#frag'
       const web = 'https://example.org/linked'
-      await printing(page, `Sources: ${plain}\r\n${hyperlink(web, 'Linked')}\r\n`, 'Linked')
+      await printing(page, `Sources: ${plain} end\r\n${hyperlink(web, 'Linked')}\r\n`, 'Linked')
       const place = await placeOf(page, plain)
       await page.mouse.move(place.x, place.y)
-      await afterFrames(page)
-      expect(await decorationAt(page, place), 'underlined under the pointer').toBe('none solid')
-      await expect(page.locator(CHIEF_TERMINAL)).not.toHaveAttribute('title', /.*/)
-      await expect(page.locator(`${CHIEF_TERMINAL} .xterm-screen`)).not.toHaveClass(
-        /xterm-cursor-pointer/,
+      await expect(page.locator(CHIEF_TERMINAL)).toHaveAttribute(
+        'title',
+        `${named}+click to open ${plain}`,
       )
+      await expect.poll(() => decorationAt(page, place)).toBe('underline solid')
       await clickWith(page, place, [key])
-      // The click above was heard before this one is: the hyperlink is the only that opens.
       await clickWith(page, await placeOf(page, 'Linked'), [key])
-      await expect.poll(() => linksOpened(page)).toEqual([web])
+      await expect.poll(() => linksOpened(page)).toEqual([plain, web])
+    })
+
+    test(`${named}+click opens a plain address xterm wrapped from either row`, async ({ page }) => {
+      await replayPage(page)
+      const url = `https://example.org/${'segment/'.repeat(4)}end`
+      const place = await replaying(page, `${url}\r\n`, 40)
+      const expected = []
+      for (const row of [0, 1]) {
+        const point = { x: place.left + 8.5 * place.cell, y: place.top + (row + 0.5) * place.row }
+        await page.mouse.move(point.x, point.y)
+        await expect
+          .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+          .toBe(`${named}+click to open ${url}`)
+        await clickWith(page, point, [key])
+        expected.push(url)
+        await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual(expected)
+      }
+    })
+
+    test(`${named}+click opens both cells of a wide final link character`, async ({ page }) => {
+      await replayPage(page)
+      const prefix = 'https://example.org/'
+      const url = `${prefix}你`
+      const place = await replaying(page, `${url} end`, 80)
+      const expected = []
+      for (const column of [prefix.length, prefix.length + 1]) {
+        const point = {
+          x: place.left + (column + 0.5) * place.cell,
+          y: place.top + 0.5 * place.row,
+        }
+        await page.mouse.move(1390, 790)
+        await page.mouse.move(point.x, point.y)
+        await expect
+          .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+          .toBe(`${named}+click to open ${url}`)
+        await clickWith(page, point, [key])
+        expected.push(url)
+        await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual(expected)
+      }
     })
 
     test(`a click without ${named} opens nothing, nor does the other system's key, nor another button`, async ({
@@ -5703,61 +6070,64 @@ for (const [system, agent, key, other] of [
       await expect.poll(() => linksOpened(page)).toEqual([url])
     })
 
-    // Every way a program prints an address as text: none of it is a link, the address whole or not.
-    test('a plain address in any form is no link, with the system key held or not', async ({
+    test('plain addresses open whole or are left as text when punctuation is ambiguous', async ({
       page,
     }) => {
       const forms = [
-        'https://example.com/a',
-        'HTTPS://example.com/a',
-        'https://en.wikipedia.org/wiki/Function_(mathematics)',
-        "https://en.wikipedia.org/wiki/Bayes'_theorem",
-        'https://example.com/a,b^c',
-        'See https://example.com/a.',
-        '(https://example.com/a)',
-        'Source (https://en.wikipedia.org/wiki/Yahoo!)',
-        '[docs](https://example.com/a?b=1&c=2)',
-        '"https://example.com/a"',
-        'https://[2001:db8::1]/a',
+        ['https://example.com/a', true],
+        ['HTTPS://example.com/a', true],
+        ['https://en.wikipedia.org/wiki/Function_(mathematics)', true],
+        ["https://en.wikipedia.org/wiki/Bayes'_theorem", true],
+        ['https://example.com/a,b^c', true],
+        ['See https://example.com/a.', false],
+        ['(https://example.com/a)', true],
+        ['[docs](https://example.com/a?b=1&c=2)', true],
       ]
-      const web = 'https://example.org/linked'
-      await printing(page, `${forms.join('\r\n')}\r\n${hyperlink(web, 'Linked')}\r\n`, 'Linked')
-      for (const [row, printed] of forms.entries()) {
-        // The cell the address begins in, found by the twelve characters from its scheme.
+      await printing(page, `${forms.map(([text]) => `${text} end`).join('\r\n')}\r\n`, 'docs')
+      const expected = []
+      for (const [row, [printed, linked]] of forms.entries()) {
         const start = printed.search(/https?:\/\//i)
+        const url = printed.slice(start).replace(/\)$/, printed[start - 1] === '(' ? '' : ')')
         const place = await placeInRow(page, row, printed.slice(start, start + 12))
         await page.mouse.move(place.x, place.y)
-        await afterFrames(page)
-        await expect(page.locator(CHIEF_TERMINAL), printed).not.toHaveAttribute('title', /.*/)
-        expect(await decorationAt(page, place), printed).toBe('none solid')
-        await clickWith(page, place, [key])
+        if (linked) {
+          await expect(page.locator(CHIEF_TERMINAL), printed).toHaveAttribute(
+            'title',
+            `${named}+click to open ${url}`,
+          )
+          await clickWith(page, place, [key])
+          expected.push(url)
+          await expect.poll(() => linksOpened(page)).toEqual(expected)
+        } else {
+          await afterFrames(page)
+          await expect(page.locator(CHIEF_TERMINAL), printed).not.toHaveAttribute('title', /.*/)
+          await clickWith(page, place, [key])
+        }
       }
-      await clickWith(page, await placeOf(page, 'Linked'), [key])
-      await expect.poll(() => linksOpened(page)).toEqual([web])
+      expect(await linksOpened(page)).toEqual(expected)
     })
 
-    test('an address with a host in letters of its own language or without its slashes is a link as an OSC 8 hyperlink and text is none', async ({
+    test('an international host opens whole as text and OSC 8; an address without slashes is OSC 8 only', async ({
       page,
     }) => {
-      // As text neither is a link, as no plain address is; as an OSC 8 hyperlink each opens whole.
       const idn = 'https://bücher.example/a'
       const bare = 'http:example.com/a'
       await printing(
         page,
-        `${idn}\r\n${bare}\r\n${hyperlink(idn, 'Büchersuche')}\r\n${hyperlink(bare, 'Bare')}\r\n`,
+        `${idn} end\r\n${bare}\r\n${hyperlink(idn, 'Büchersuche')}\r\n${hyperlink(bare, 'Bare')}\r\n`,
         'Bare',
       )
-      for (const [row, words] of [
-        [0, idn],
-        [1, bare],
-      ]) {
-        const place = await placeInRow(page, row, words)
-        await clickWith(page, place, [key])
-        await expect(page.locator(CHIEF_TERMINAL), words).not.toHaveAttribute('title', /.*/)
-      }
+      const place = await placeInRow(page, 0, idn)
+      await page.mouse.move(place.x, place.y)
+      await expect(page.locator(CHIEF_TERMINAL)).toHaveAttribute(
+        'title',
+        `${named}+click to open ${idn}`,
+      )
+      await clickWith(page, place, [key])
+      await clickWith(page, await placeInRow(page, 1, bare), [key])
       await clickWith(page, await placeInRow(page, 2, 'Büchersuche'), [key])
       await clickWith(page, await placeInRow(page, 3, 'Bare'), [key])
-      await expect.poll(() => linksOpened(page)).toEqual([idn, bare])
+      await expect.poll(() => linksOpened(page)).toEqual([idn, idn, bare])
     })
 
     test('a refusal of the app shows in the status line, and the link goes on working', async ({
@@ -5781,16 +6151,9 @@ for (const [system, agent, key, other] of [
   })
 }
 
-// What the harnesses print for a link, replayed (T-1314's review, T-1315). The cases are the output
-// of Pi's, Claude Code's and Codex's own formatting code, with hyperlinks off (the plain `words
-// (address)` each falls back to) and on (what ConsensFlow's launch asks of Pi and Claude Code), at
-// the widths a pane has; `app/tests/fixtures/pane-links/make-harness-cases.mjs` says how each was
-// made. Each case is held to one of two things: a click on the address opens exactly the address the
-// program meant (an OSC 8 hyperlink), or it is no link and opens nothing (a plain address, however
-// the program laid it out). Never a shortened one. A program that lays its text out in rows of its
-// own (Pi writes its rows with CR/LF, so xterm does not mark them wrapped) cuts a plain address
-// with nothing on the screen to say so, which is why none is a link; an OSC 8 hyperlink carries its
-// address whole on every row it is drawn on.
+// What the harnesses print for a link, replayed. Pi, Claude Code and Codex formatting fixtures
+// cover OSC 8 and plain text at real pane widths. A click may open only the exact destination or
+// nothing: a hard-wrapped or table-cut plain address must never open as a shorter address.
 const HARNESS_CASES = JSON.parse(
   readFileSync(new URL('./fixtures/pane-links/harness-cases.json', import.meta.url), 'utf8'),
 )
@@ -5857,6 +6220,9 @@ const replaying = (page, printed, width) =>
       clearTimeout(window.replay.settling)
       window.replay.terminal.resize(width, 24)
       await new Promise((done) => window.replay.terminal.write(printed, done))
+      // Focus redraws xterm's cursor row. Settle it before measuring hover/click timing;
+      // the separate unfocused-click check below covers the first click into a terminal.
+      window.replay.terminal.focus()
       await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))
       const box = host.querySelector('.xterm-screen').getBoundingClientRect()
       return { left: box.left, top: box.top, cell: box.width / width, row: box.height / 24 }
@@ -5913,6 +6279,161 @@ async function clickingCell(page, place, row, column, wanted, saw) {
   return { opened, title }
 }
 
+test.describe('B36 real provider during output', () => {
+  test.use({ userAgent: MAC_AGENT, viewport: { width: 1400, height: 800 } })
+  for (const mode of ['OSC 8', 'plain']) {
+    test(`${mode} link remains clickable when output redraws its row between press and release`, async ({
+      page,
+    }) => {
+      await replayPage(page)
+      const url = 'https://example.org/while-printing'
+      const shown = mode === 'OSC 8' ? hyperlink(url, 'Source') : url
+      const place = await replaying(page, `${shown} end`, 80)
+      const point = { x: place.left + 3.5 * place.cell, y: place.top + 0.5 * place.row }
+      await page.mouse.move(point.x, point.y)
+      await expect
+        .poll(() => page.evaluate(() => window.replay.terminal.element.title))
+        .toContain(url)
+      await page.keyboard.down('Meta')
+      await page.mouse.down()
+      // New output really rewrites the link's row and prints a second line. Wait for xterm's
+      // render event before releasing: the mouse-down and mouse-up straddle the redraw.
+      const rendered = await page.evaluate(async (bytes) => {
+        const terminal = window.replay.terminal
+        let subscription
+        const repaint = new Promise((resolve) => {
+          subscription = terminal.onRender(({ start, end }) => {
+            if (start <= 0 && end >= 0) {
+              subscription.dispose()
+              resolve({ start, end })
+            }
+          })
+        })
+        await new Promise((done) => terminal.write(bytes, done))
+        return await repaint
+      }, `\r\u001b[2K${shown} end\r\nNew output`)
+      expect(rendered.start).toBe(0)
+      await page.mouse.up()
+      await page.keyboard.up('Meta')
+      await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual([url])
+    })
+  }
+})
+
+test('B36: a first click into an unfocused terminal opens the OSC link with its real provider', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 800 })
+  await replayPage(page)
+  const url = 'https://example.org/unfocused'
+  const place = await replaying(page, hyperlink(url, 'Source'), 80)
+  await page.evaluate(() => window.replay.terminal.blur())
+  await afterFrames(page)
+  const point = { x: place.left + 3.5 * place.cell, y: place.top + 0.5 * place.row }
+  await page.mouse.move(point.x, point.y)
+  await expect.poll(() => page.evaluate(() => window.replay.terminal.element.title)).toContain(url)
+  const key = await page.evaluate(() =>
+    /Macintosh|Mac OS X/.test(navigator.userAgent) ? 'Meta' : 'Control',
+  )
+  await clickWith(page, point, [key])
+  await expect.poll(() => page.evaluate(() => window.replayOpened)).toEqual([url])
+})
+
+// B36: retain the provider, hover and mouse timeline for each controlled delayed-OSC run. The
+// provider and the opener here are stand-ins; no page test can reach the system's opener.
+test.describe('B36 delayed OSC', () => {
+  test.use({ userAgent: MAC_AGENT })
+  test('a delayed OSC provider is hovered before its click opens', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1400, height: 800 })
+    await replayPage(page)
+    const url = 'https://en.wikipedia.org/wiki/Function_(mathematics)'
+    const place = await replaying(page, hyperlink(url, 'Source'), 80)
+    await page.evaluate(() => {
+      const terminal = window.replay.terminal
+      const provider = terminal._core._linkProviderService.linkProviders[0]
+      const original = provider.provideLinks.bind(provider)
+      const events = []
+      window.__linkTrace = events
+      const record = (type, data = {}) => events.push({ type, at: performance.now(), ...data })
+      provider.provideLinks = (row, callback) => {
+        record('provider-request', { row })
+        original(row, (links) => {
+          record('provider-answer', { row, links: links?.map((item) => item.text) ?? [] })
+          setTimeout(() => {
+            record('provider-deliver', { row })
+            callback(
+              links?.map((item) => ({
+                ...item,
+                hover: (event, text) => {
+                  record('hover', { text })
+                  item.hover?.(event, text)
+                },
+                leave: (event, text) => {
+                  record('leave', { text })
+                  item.leave?.(event, text)
+                },
+                activate: (event, text) => {
+                  record('activate', { text })
+                  item.activate(event, text)
+                },
+              })),
+            )
+          }, 250)
+        })
+      }
+      terminal.onRender(({ start, end }) => record('render', { start, end }))
+      terminal.element.addEventListener(
+        'focusin',
+        (event) => record('focusin', { target: event.target.className }),
+        true,
+      )
+      terminal.element.addEventListener(
+        'focusout',
+        (event) => record('focusout', { target: event.target.className }),
+        true,
+      )
+      for (const type of ['mousemove', 'mousedown', 'mouseup', 'click']) {
+        terminal.element.addEventListener(
+          type,
+          (event) =>
+            record(type, {
+              x: event.clientX,
+              y: event.clientY,
+              button: event.button,
+              metaKey: event.metaKey,
+            }),
+          true,
+        )
+      }
+      new MutationObserver(() => record('title', { value: terminal.element.title })).observe(
+        terminal.element,
+        { attributes: true, attributeFilter: ['title'] },
+      )
+    })
+    try {
+      const point = { x: place.left + 3.5 * place.cell, y: place.top + 0.5 * place.row }
+      await page.mouse.move(1390, 790)
+      await page.mouse.move(point.x, point.y)
+      await expect
+        .poll(() => page.evaluate(() => window.replay.terminal.element.title), { timeout: 10_000 })
+        .toBe(`Cmd+click to open ${url}`)
+      await clickWith(page, point, ['Meta'])
+      await expect
+        .poll(() => page.evaluate(() => window.replayOpened), { timeout: 10_000 })
+        .toEqual([url])
+    } finally {
+      const timeline = JSON.stringify(
+        await page.evaluate(() => ({ events: window.__linkTrace, opened: window.replayOpened })),
+        null,
+        2,
+      )
+      mkdirSync(testInfo.outputDir, { recursive: true })
+      writeFileSync(testInfo.outputPath('link-timeline.json'), timeline)
+      await testInfo.attach('link-timeline', { body: timeline, contentType: 'application/json' })
+    }
+  })
+})
+
 for (const [group, harness, mode] of [
   ['Pi prints as text', 'pi', 'plain'],
   ['Pi prints as OSC 8 hyperlinks (PI_HYPERLINKS=1)', 'pi', 'osc8'],
@@ -5943,8 +6464,6 @@ for (const [group, harness, mode] of [
               wrong.push(`${saw}: opened ${JSON.stringify(opened)}, not ${c.destination}`)
             } else if (title !== '' && title !== `Cmd+click to open ${c.destination}`) {
               wrong.push(`${saw}: title ${title}`)
-            } else if (c.expect === 'none' && (opened.length > 0 || title !== '')) {
-              wrong.push(`${saw}: a link where ${c.destination} was cut`)
             } else if (wanted && JSON.stringify(opened) !== JSON.stringify(wanted)) {
               wrong.push(`${saw}: opened ${JSON.stringify(opened)}, not ${c.destination}`)
             }

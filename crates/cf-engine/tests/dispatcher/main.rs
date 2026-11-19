@@ -81,6 +81,7 @@ mod held_at_work;
 mod hold_notes;
 mod interrupts;
 mod lanes;
+mod later_quota_reset;
 mod launch_stops;
 mod launch_wait;
 mod launched_harness;
@@ -186,3 +187,5 @@ mod withheld_enter;
 mod work_in_flight;
 mod work_in_flight_launches;
 mod work_in_flight_pastes;
+
+mod hold_rule;

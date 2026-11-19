@@ -540,8 +540,8 @@ fn a_run_that_ended_there_with_a_status_brings_its_reports_back_and_answers_the_
     assert!(
         // The tarball goes under the run's own name.
         log[0].starts_with("scp\t")
-            && log[0].contains("\tzeewin:consensflow-build.")
-            && log[0].ends_with(".tgz"),
+            && log[0].contains("\tzeewin:consensflow-wrun-")
+            && log[0].ends_with("/tree.tgz"),
         "{log:?}"
     );
     assert_eq!(&log[1..3], ["ssh\t1", "ssh\t2"]);

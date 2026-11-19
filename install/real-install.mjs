@@ -44,6 +44,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import {
+  PowerShellStartLock,
+  pwshEnvironment,
+  watchReady,
+} from '../tests/support/powershell-start-lock.mjs'
+import {
   feedOf,
   INSTALL_PS1,
   INSTALL_SH,
@@ -68,6 +73,10 @@ const { values: options } = parseArgs({
     'no-open': { type: 'boolean', default: false },
   },
 })
+
+const pwsh = !mac && /^pwsh(?:\.exe)?$/i.test(path.win32.basename(options.shell))
+const powershellStarts = new PowerShellStartLock()
+const POWERSHELL_READY = '__CONSENSFLOW_PWSH_START_READY__'
 
 function say(words) {
   console.log(`real-install: ${words}`)
@@ -142,20 +151,30 @@ function runScript(script, env, args = []) {
           '-ExecutionPolicy',
           'Bypass',
           '-Command',
-          `Get-Content -Raw -LiteralPath '${script}' | Invoke-Expression`,
+          `${pwsh ? `[Console]::Out.Write('${POWERSHELL_READY}'); ` : ''}Get-Content -Raw -LiteralPath '${script}' | Invoke-Expression`,
         ],
       ]
-  return new Promise((resolve) => {
-    const child = spawn(program, words, { env: { ...process.env, ...env } })
+  const start = () => {
+    const baseEnv = { ...process.env, ...env }
+    const child = spawn(program, words, { env: pwsh ? pwshEnvironment(baseEnv) : baseEnv })
     let out = ''
-    for (const stream of [child.stdout, child.stderr]) {
-      stream.on('data', (chunk) => {
-        out += chunk
-        process.stdout.write(chunk)
-      })
+    const forward = (chunk) => {
+      out += chunk
+      process.stdout.write(chunk)
     }
-    child.on('close', (status) => resolve({ status, out }))
-  })
+    const ready = pwsh ? watchReady(child.stdout, POWERSHELL_READY, forward) : Promise.resolve()
+    if (!pwsh) child.stdout.on('data', forward)
+    child.stderr.on('data', forward)
+    const result = new Promise((resolve) => {
+      child.on('error', (error) => {
+        forward(error.message)
+        resolve({ status: 1, out })
+      })
+      child.on('close', (status) => resolve({ status, out }))
+    })
+    return { ready: pwsh ? Promise.race([ready, result]) : ready, value: result }
+  }
+  return pwsh ? powershellStarts.start(start) : start().value
 }
 
 // The `cf` asked for its version runs as a person's terminal runs it: without the variables a

@@ -17,6 +17,176 @@ fn empty() -> String {
     answer("models", &[])
 }
 
+// Only this test-owned file is made unreadable; its permissions are restored on drop.
+#[cfg(unix)]
+struct DeniedLogin(std::path::PathBuf);
+
+#[cfg(unix)]
+impl Drop for DeniedLogin {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+}
+
+#[cfg(unix)]
+fn deny_login(pi: &StandIn) -> DeniedLogin {
+    use std::os::unix::fs::PermissionsExt;
+    let path = pi.agent.join("auth.json");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    assert!(
+        std::fs::File::open(&path).is_err(),
+        "fixture must deny content opens"
+    );
+    DeniedLogin(path)
+}
+
+// Windows denies another content open while the fixture holds this exclusive handle.
+#[cfg(windows)]
+fn deny_login(pi: &StandIn) -> std::fs::File {
+    use std::os::windows::fs::OpenOptionsExt;
+    let path = pi.agent.join("auth.json");
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&path)
+        .unwrap();
+    assert!(
+        std::fs::File::open(&path).is_err(),
+        "fixture must deny content opens"
+    );
+    held
+}
+
+#[test]
+fn an_empty_list_never_attempts_to_read_the_login_and_says_how_to_recover() {
+    let pi = StandIn::new(
+        &[("auth.json", r#"{"hidden-provider":{"type":"oauth"}}"#)],
+        &[],
+    );
+    let _denied = deny_login(&pi);
+    pi.child(&[empty()], Ends::Asked);
+    let why = pi.read(false).unwrap_err();
+    assert_eq!(
+        crate::pi::setup::login_reads(),
+        0,
+        "login content must never be requested"
+    );
+    assert!(why.contains("Pi lists no model"), "{why}");
+    assert!(why.contains("/login") && why.contains("settings"), "{why}");
+    assert!(
+        !why.contains("hidden-provider") && !why.contains("no provider is set up"),
+        "{why}"
+    );
+}
+
+#[test]
+fn a_readable_login_does_not_change_the_empty_list_diagnostic() {
+    let pi = StandIn::new(
+        &[("auth.json", r#"{"hidden-provider":{"type":"oauth"}}"#)],
+        &[],
+    );
+    pi.child(&[empty()], Ends::Asked);
+    let why = pi.read(false).unwrap_err();
+    assert_eq!(crate::pi::setup::login_reads(), 0);
+    assert_eq!(
+        why,
+        "Pi lists no model. Log in inside Pi with /login, or check Pi's settings."
+    );
+    assert!(!why.contains("hidden-provider"));
+}
+
+/// On this filesystem an actual content read changes the old access time. The control proves
+/// that the observation works before either diagnostic is exercised.
+#[cfg(target_os = "macos")]
+#[test]
+fn neither_diagnostic_reads_a_readable_login_even_if_it_ignores_the_contents() {
+    use std::time::{Duration, UNIX_EPOCH};
+
+    for timeout in [false, true] {
+        let pi = StandIn::new(&[("auth.json", r#"{"hidden-provider":{}}"#)], &[]);
+        let login = pi.agent.join("auth.json");
+        let control = pi.agent.join("control.json");
+        std::fs::write(&control, b"fictional").unwrap();
+        let old = UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+        for path in [&login, &control] {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_times(std::fs::FileTimes::new().set_accessed(old))
+                .unwrap();
+        }
+        let before = std::fs::metadata(&login).unwrap().accessed().unwrap();
+        let control_before = std::fs::metadata(&control).unwrap().accessed().unwrap();
+        std::fs::read(&control).unwrap();
+        assert!(
+            std::fs::metadata(&control).unwrap().accessed().unwrap() > control_before,
+            "the control read must update this filesystem's access time"
+        );
+        if timeout {
+            pi.child(&[], Ends::Asked);
+            let mut driver = pi.begin(false);
+            assert!(driver.run().is_empty());
+            assert!(pi.time.fire_next(i64::MAX));
+            settled(&mut driver).unwrap_err();
+        } else {
+            pi.child(&[empty()], Ends::Asked);
+            pi.read(false).unwrap_err();
+        }
+        assert_eq!(
+            std::fs::metadata(&login).unwrap().accessed().unwrap(),
+            before,
+            "login content was read on the timeout={timeout} path"
+        );
+    }
+}
+
+#[test]
+fn a_timeout_says_a_package_or_extension_may_be_stuck_without_login_advice() {
+    let pi = StandIn::new(&[], &[]);
+    pi.child(&[], Ends::Asked);
+    let mut driver = pi.begin(false);
+    assert!(driver.run().is_empty());
+    assert!(pi.time.fire_next(i64::MAX));
+    let why = settled(&mut driver).unwrap_err();
+    assert!(why.contains("did not answer within"), "{why}");
+    assert!(
+        why.contains("package") && why.contains("extension") && why.contains("stuck"),
+        "{why}"
+    );
+    assert!(
+        !why.contains("/login") && !why.to_lowercase().contains("log in"),
+        "{why}"
+    );
+}
+
+#[test]
+fn a_timeout_never_attempts_to_read_the_login_and_says_how_to_recover() {
+    let pi = StandIn::new(
+        &[("auth.json", r#"{"hidden-provider":{"type":"oauth"}}"#)],
+        &[],
+    );
+    let _denied = deny_login(&pi);
+    pi.child(&[], Ends::Asked);
+    let mut driver = pi.begin(false);
+    assert!(driver.run().is_empty());
+    assert!(pi.time.fire_next(i64::MAX));
+    let why = settled(&mut driver).unwrap_err();
+    assert_eq!(
+        crate::pi::setup::login_reads(),
+        0,
+        "login content must never be requested"
+    );
+    assert!(why.contains("did not answer within"), "{why}");
+    assert!(
+        why.contains("package") && why.contains("extension") && why.contains("stuck"),
+        "{why}"
+    );
+    assert!(!why.contains("/login"), "{why}");
+    assert!(!why.contains("hidden-provider"), "{why}");
+}
+
 /// F3: a read that ends before it answers takes one start, and says what that start said and
 /// the code it exited with. A second start would say something else, and run what a package
 /// does at its start twice.
@@ -73,9 +243,8 @@ fn a_read_given_up_on_says_what_pi_had_said_so_far_and_names_what_it_was_loading
     // last, after the mark, so that they can be screened whole (the third reading, F2).
     assert_eq!(
         why,
-        "pi --mode rpc did not answer within 30 s. Pi loads the packages and extensions it has \
-         before it lists, and one of them may be waiting for something (packages \
-         npm:@scope/slow-provider@1.2.3); it said:\nwarming the provider's cache"
+        "pi --mode rpc did not answer within 30 s. A package or extension of Pi's may be stuck \
+         (packages npm:@scope/slow-provider@1.2.3); it said:\nwarming the provider's cache"
     );
 }
 
@@ -105,9 +274,8 @@ fn a_read_whose_stderr_lost_its_front_hands_on_none_of_pi_s_words() {
     assert_eq!(
         why,
         format!(
-            "pi --mode rpc did not answer within 30 s. Pi loads the packages and extensions it \
-             has before it lists, and one of them may be waiting for something (packages \
-             npm:@scope/slow-provider@1.2.3){IT_SAID}{WORDS_WITHHELD}"
+            "pi --mode rpc did not answer within 30 s. A package or extension of Pi's may be stuck \
+             (packages npm:@scope/slow-provider@1.2.3){IT_SAID}{WORDS_WITHHELD}"
         )
     );
 }
@@ -159,7 +327,7 @@ fn a_provider_key_of_the_environment_is_named_and_its_value_is_never_said() {
     pi.child(&[empty()], Ends::Asked);
     let why = pi.read(false).unwrap_err();
     assert!(
-        why.contains("a key in the environment for ANTHROPIC, OPENROUTER:"),
+        why.contains("a key in the environment for ANTHROPIC, OPENROUTER"),
         "{why}"
     );
     assert!(
@@ -233,31 +401,25 @@ mod unread {
     }
 
     #[test]
-    fn a_pipe_where_a_file_should_be_is_not_opened_and_is_said_unread() {
+    fn a_pipe_where_the_login_should_be_is_not_opened() {
         let read = with_a_pipe(vec![empty()]);
         let why = read
             .expect("the read ended: it opened no pipe")
             .unwrap_err();
-        assert!(
-            why.contains("could not read") && why.contains("the file of logins"),
-            "{why}"
-        );
+        assert!(why.contains("/login") && why.contains("settings"), "{why}");
         assert!(!why.contains("no provider is set up"), "{why}");
     }
 }
 
 /// F4: a file larger than a setup is is not read whole.
 #[test]
-fn a_file_larger_than_a_setup_is_not_read_and_is_said_unread() {
+fn a_login_file_larger_than_a_setup_is_ignored() {
     let padding = " ".repeat(2 << 20);
     let auth = format!(r#"{{"openai":{{"type":"api_key"}}{padding}}}"#);
     let pi = StandIn::new(&[("auth.json", &auth)], &[]);
     pi.child(&[empty()], Ends::Asked);
     let why = pi.read(false).unwrap_err();
-    assert!(
-        why.contains("could not read") && why.contains("the file of logins"),
-        "{why}"
-    );
+    assert!(why.contains("/login") && why.contains("settings"), "{why}");
     assert!(!why.contains("a login for openai"), "{why}");
 }
 

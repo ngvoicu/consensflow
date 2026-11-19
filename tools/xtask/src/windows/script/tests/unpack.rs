@@ -37,7 +37,9 @@ fn the_tree_is_unpacked_by_tar_with_each_file_given_the_time_of_the_unpack() {
         limits: None,
     });
     assert!(
-        other.contains("$tarball = Join-Path $env:USERPROFILE 'build two.0000abcd-12345678.tgz'\n"),
+        other.contains(
+            "$tarball = Join-Path $env:USERPROFILE 'consensflow-wrun-0000abcd-12345678/tree.tgz'\n"
+        ),
         "{other}"
     );
     assert!(other.contains("-xmzf $tarball -C $dir\n"), "{other}");
@@ -110,7 +112,7 @@ fn the_tree_is_unpacked_by_windows_own_tar_named_by_its_path_and_never_by_the_fi
             .unwrap_or_else(|| panic!("{what} is not there: {text}"))
     };
     let named = "\n$tar = Join-Path $env:SystemRoot 'System32\\tar.exe'\n";
-    let missing = "\nif (-not (Test-Path -LiteralPath $tar -PathType Leaf)) { Write-Output \"Windows' own tar is not there ($tar), so the tree cannot be unpacked.\"; Exit-Run 1 }\n";
+    let missing = "\nif (-not (Test-Path -LiteralPath $tar -PathType Leaf)) { echo \"Windows' own tar is not there ($tar), so the tree cannot be unpacked.\"; Exit-Run 1 }\n";
     assert!(text.contains(named), "{text}");
     assert!(text.contains(missing), "{text}");
     // Named, then looked for, then run; all of it before the sweep.

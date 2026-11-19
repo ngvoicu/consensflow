@@ -8,7 +8,39 @@ use serde_json::json;
 use super::HoldKind;
 use crate::model::{self, quoted, LedgerError};
 use crate::store::Store;
-use crate::views::participant_view;
+use crate::views::{participant_view, ParticipantRow};
+
+/// Whether a member's old hold is for quota or an unavailable account, rather
+/// than a moved model or a busy backoff. Old timed holds can lack a kind.
+pub(crate) fn account_hold_for_edit(
+    store: &Store,
+    member: &ParticipantRow,
+) -> Result<bool, LedgerError> {
+    let Some(until) = member.out_until.as_deref() else {
+        return Ok(false);
+    };
+    if until == "9999-12-31T23:59:59.999Z" {
+        return Ok(false);
+    }
+    if until.starts_with("9999-") {
+        return Ok(true);
+    }
+    match HoldKind::read(member.out_kind.as_deref()) {
+        Some(HoldKind::Quota | HoldKind::Account | HoldKind::Moved) => Ok(true),
+        Some(HoldKind::Busy) => Ok(false),
+        None => {
+            let busy = store.db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM event e WHERE e.project_id=?1 AND e.kind='member.out'
+                   AND e.at=?2 AND json_valid(e.data) AND json_extract(e.data, '$.reason')='model busy'
+                   AND (json_extract(e.data, '$.handle')=?3 OR json_extract(e.data, '$.handle') IN
+                        (SELECT value FROM json_each(?4))))",
+                params![member.project_id, member.out_since, member.handle, member.former_handles],
+                |row| row.get::<_, bool>(0),
+            )?;
+            Ok(!busy)
+        }
+    }
+}
 
 /// A member that ran out of quota takes no work until `until`, kept and logged
 /// as a store keeps a time ([`time::canonical`]); when it was marked is its

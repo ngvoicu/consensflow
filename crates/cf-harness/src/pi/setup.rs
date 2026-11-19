@@ -1,14 +1,12 @@
-//! What gives a Pi its providers, named: the one thing the human needs said when Pi lists no
-//! model (HMD-13). Pi's own answer to `get_available_models` is an empty list for a Pi with
-//! nothing set up and for a Pi whose provider could not list (a package's provider whose server
-//! is down lists none, and says nothing), so the list cannot tell them apart. This can, by
-//! names alone.
+//! What Pi's non-login settings name when Pi lists no models or its listing times out.
+//! An empty list cannot establish whether a provider or login is configured.
 //!
 //! **Names only, and never a value** (the review T-1270, F2). What is read is the keys of
-//! `auth.json` (the providers), the keys of `models.json`'s `providers`, and the sources of
+//! `models.json`'s `providers`, and the sources of
 //! `settings.json`'s `packages` and `extensions`; each file is parsed into those and into
 //! `serde`'s `IgnoredAny` for everything else, so that no login, key or address is ever held
-//! as a value, and the bytes are read through a small buffer, not kept. The environment is only
+//! as a value, and the bytes are read through a small buffer, not kept. The login's own path is
+//! not opened. A settings path that aliases a login can still be read. The environment is only
 //! asked whether a variable is set to something (no copy of what it holds). A package source is
 //! shown without the user and password of its URL, its query and its fragment ([`shown`]).
 //!
@@ -16,8 +14,8 @@
 //! Pi listed no model or the read failed. A file is read only if it is a regular file of at
 //! most [`FILE_CAP`] bytes, so a pipe where a file should be is never opened (it would wait for
 //! a writer for ever) and a file of a size no setup is is not read whole; the `extensions` folder
-//! is read to [`ENTRIES`] entries. A file that is there and cannot be read so is *unread*, and is
-//! said so: a setup that could not be read is never called "no provider is set up".
+//! is read to [`ENTRIES`] entries. A file that is there and cannot be read so is *unread*;
+//! the optional detail is shortened, and a diagnosis never claims that no provider is set up.
 //!
 //! **On a thread of its own** (the second reading, F4). The daemon runs every project's
 //! requests, timers and deliveries on one thread, and a file that does not open (a stalled
@@ -41,13 +39,13 @@
 //! ledger and the page, where the engine withholds a line that may hold a credential
 //! (`cf_engine::quotable`): ConsensFlow's own words here use none of the words that rule takes
 //! for one. A variable of the environment is named by whose it is (`OPENROUTER` for
-//! `OPENROUTER_API_KEY`, [`provider_of`]), the logins file is not named, and Pi is told how to
+//! `OPENROUTER_API_KEY`, [`provider_of`]), and Pi is told how to
 //! give a provider without a variable's name. A test in the daemon holds each of these words to
 //! it.
 //!
 //! Pi (1.5.0, `model-runtime.js`, `resource-loader.js`) has its models from, in the order the
 //! docs give them:
-//! - a login in the agent folder's `auth.json`, an OAuth one or an API key, one entry a provider;
+//! - a login in the agent folder, whose own path the diagnostic does not read;
 //! - a provider key in the environment (`providers.md`, "Use an API key from the environment");
 //! - a custom provider in `models.json`;
 //! - a provider an installed Pi package registers, named in `settings.json`'s `packages`;
@@ -87,6 +85,18 @@ const FILE_CAP: u64 = 1 << 20;
 
 /// The most entries of the `extensions` folder that are read.
 const ENTRIES: usize = 256;
+
+/// Keep the optional setup detail short, even if a settings file names many sources.
+const DETAIL_CHARS: usize = 200;
+
+fn brief(detail: &str) -> String {
+    let mut chars = detail.chars();
+    let mut shown: String = chars.by_ref().take(DETAIL_CHARS).collect();
+    if chars.next().is_some() {
+        shown.push('…');
+    }
+    shown
+}
 
 /// The environment variables Pi takes a provider's credentials from (`providers.md`): a key or a
 /// token, or the base of a local server's address. The ones that only tune a provider that has a
@@ -169,8 +179,6 @@ fn provider_of(name: &str) -> String {
 /// names of one source, empty where it has none.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct Setup {
-    /// The providers `auth.json` holds an entry for.
-    pub logins: Vec<String>,
     /// The providers `models.json` defines.
     pub custom: Vec<String>,
     /// The sources `settings.json` lists under `packages` (`npm:@scope/name`, a path), shown
@@ -207,6 +215,8 @@ mod probe {
         pub before: Option<Hook>,
         /// How many setups were read: a read that lists models reads none.
         pub reads: Arc<AtomicUsize>,
+        /// Attempts to parse the login file, even if the OS refuses the open.
+        pub login_reads: Arc<AtomicUsize>,
         /// How many times the folder was asked for ([`super::inspect`]), whether a read was
         /// begun for the ask or not.
         pub asks: Arc<AtomicUsize>,
@@ -233,6 +243,11 @@ pub(crate) fn reads() -> usize {
     probe::current()
         .reads
         .load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[cfg(test)]
+pub(crate) fn login_reads() -> usize {
+    probe::current().login_reads.load(Ordering::SeqCst)
 }
 
 /// How many times the asking thread's reads asked for the folder (a test's): a read that is held
@@ -453,15 +468,9 @@ impl Setup {
         };
         let in_agent = |name: &str| path::join(&[&agent, name]);
         let mut unread = Vec::new();
-        let mut logins = Vec::new();
         let mut custom = Vec::new();
         let mut packages = Vec::new();
         let mut extensions = Vec::new();
-        match parsed::<HashMap<String, IgnoredAny>>(&in_agent("auth.json")) {
-            Got::Found(table) => logins = sorted(table.into_keys()),
-            Got::Absent => {}
-            Got::Unread => unread.push("the file of logins".to_owned()),
-        }
         match parsed::<Models>(&in_agent("models.json")) {
             Got::Found(models) => custom = sorted(models.providers.into_keys()),
             Got::Absent => {}
@@ -496,7 +505,6 @@ impl Setup {
             Got::Unread => unread.push("settings.json".to_owned()),
         }
         Self {
-            logins,
             custom,
             packages,
             extensions,
@@ -514,7 +522,7 @@ impl Setup {
         }
     }
 
-    /// Whether nothing at all is set up, and nothing is unread.
+    /// Whether the observed non-login sources are empty and none is unread.
     pub(crate) fn is_empty(&self) -> bool {
         *self == Self::default()
     }
@@ -530,30 +538,21 @@ impl Setup {
         .filter(|(_, names)| !names.is_empty())
         .map(|(what, names)| format!("{what} {}", names.join(", ")))
         .collect();
-        (!parts.is_empty()).then(|| parts.join("; "))
+        (!parts.is_empty()).then(|| brief(&parts.join("; ")))
     }
 
-    /// What Pi's empty list is to be told as: that no provider is set up and how to give one
-    /// where that is true, else what is set up that listed nothing, and what could not be read.
+    /// Pi's empty list, with only what the non-login settings say and how to recover.
     pub(crate) fn unlisted(&self) -> String {
-        if self.late {
-            return "Pi lists no model, and Pi's folder could not be read in time: it cannot say \
-                    whether a provider is set up there (a file of it did not open)"
+        if self.is_empty() {
+            return "Pi lists no model. Log in inside Pi with /login, or check Pi's settings."
                 .to_owned();
         }
-        if self.is_empty() {
-            // No name of a variable, of a file of logins or of a key: a line that says one is a
-            // line the engine withholds (`cf_engine::quotable`), and this is the commonest
-            // message of all.
-            return "Pi lists no model: no provider is set up (no login, no provider in \
-                    models.json, no installed package or extension, no provider key in the \
-                    environment). Run pi and sign in with /login, or set the variable of a \
-                    provider's key in the environment, or add a provider to models.json (Pi's \
-                    providers.md and models.md say how)"
+        if self.late {
+            return "Pi lists no model. Pi's folder could not be read in time. \
+                    Log in inside Pi with /login, or check Pi's settings."
                 .to_owned();
         }
         let parts: Vec<String> = [
-            ("a login for", &self.logins),
             ("custom providers", &self.custom),
             ("packages", &self.packages),
             ("extensions", &self.extensions),
@@ -563,21 +562,16 @@ impl Setup {
         .filter(|(_, names)| !names.is_empty())
         .map(|(what, names)| format!("{what} {}", names.join(", ")))
         .collect();
-        let unread = (!self.unread.is_empty())
-            .then(|| format!("ConsensFlow could not read {}", self.unread.join(", ")));
-        match (parts.is_empty(), unread) {
-            (true, Some(unread)) => format!(
-                "Pi lists no model, and {unread}: it cannot say whether a provider is set up there \
-                 (each is a plain file of Pi's, of the size a setup is)"
-            ),
-            (_, unread) => format!(
-                "Pi lists no model though it has {}{}: none of them gave it one. A provider that \
-                 a package or an extension registers can list its models from a server of its \
-                 own, and lists none while that server is down; a login Pi cannot use lists none",
-                parts.join("; "),
-                unread.map_or_else(String::new, |unread| format!("; and {unread}")),
-            ),
+        let mut details = parts;
+        if !self.unread.is_empty() {
+            details.push(format!("could not read {}", self.unread.join(", ")));
         }
+        let details = if details.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", brief(&details.join("; ")))
+        };
+        format!("Pi lists no model{details}. Log in inside Pi with /login, or check Pi's settings.")
     }
 }
 
@@ -595,6 +589,10 @@ enum Got<T> {
 /// opened, and `T` takes the names and ignores every value.
 fn parsed<T: for<'de> Deserialize<'de>>(file: &str) -> Got<T> {
     let file = Path::new(file);
+    #[cfg(test)]
+    if file.file_name().is_some_and(|name| name == "auth.json") {
+        probe::current().login_reads.fetch_add(1, Ordering::SeqCst);
+    }
     match fs::metadata(file) {
         Err(failed) if failed.kind() == std::io::ErrorKind::NotFound => return Got::Absent,
         Err(_) => return Got::Unread,

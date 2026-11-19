@@ -134,23 +134,20 @@ fn arg_lines_without_the_bounds(report: &str) -> Vec<&str> {
     lines
 }
 
-/// The run's own name in the `host:folder.<id>.tgz` its scp was asked to send to.
+/// The run's own name in the folder its scp was asked to send to.
 fn id_in_scp(destination: &str) -> String {
     let name = destination
-        .strip_prefix("arg: \"zeewin:")
-        .and_then(|rest| rest.strip_suffix(".tgz\""))
+        .strip_prefix("arg: \"zeewin:consensflow-wrun-")
+        .and_then(|rest| rest.strip_suffix("/tree.tgz\""))
         .unwrap_or_else(|| panic!("not a tarball for the machine: {destination}"));
-    let (_, id) = name
-        .split_once('.')
-        .unwrap_or_else(|| panic!("no run name in {name}"));
-    assert_eq!(id.len(), 17, "{id}");
-    id.to_owned()
+    assert_eq!(name.len(), 17, "{name}");
+    name.to_owned()
 }
 
 /// The run's own name in the script that unpacks its tarball.
 fn id_in_script(script: &str) -> String {
     let at =
-        script.find("'consensflow-build.").expect("a tarball named") + "'consensflow-build.".len();
+        script.find("'consensflow-wrun-").expect("a tarball named") + "'consensflow-wrun-".len();
     script[at..at + 17].to_owned()
 }
 
@@ -162,6 +159,7 @@ fn on(tree: &tempfile::TempDir, fakes: &Path, vars: &[(&str, &str)], args: &[&st
     let mut all = vec![
         ("CARGO_MANIFEST_DIR", manifest),
         ("FAKE_CHILD_PROBE", "free 614"),
+        ("FAKE_CHILD_OWNED", "1"),
     ];
     all.extend_from_slice(vars);
     xtask(tree.path(), &path_with(fakes), &all, args)
@@ -264,6 +262,7 @@ fn a_run_sends_the_tree_as_it_is_and_has_the_machine_run_the_script_the_javascri
     fs::remove_file(tree.path().join("gone.txt")).unwrap();
     let said_tree = tree_line(&tree);
     let kept = tempfile::tempdir().unwrap();
+    let owned = fakes.path().join("owned.log");
     let ran = on(
         &tree,
         fakes.path(),
@@ -272,6 +271,7 @@ fn a_run_sends_the_tree_as_it_is_and_has_the_machine_run_the_script_the_javascri
             ("FAKE_CHILD_FIRST", &said_tree),
             ("FAKE_CHILD_KEEP", kept.path().to_str().unwrap()),
             ("FAKE_CHILD_LAST", "== exit 0"),
+            ("FAKE_CHILD_OWNED_LOG", owned.to_str().unwrap()),
         ],
         &[
             "windows",
@@ -297,7 +297,7 @@ fn a_run_sends_the_tree_as_it_is_and_has_the_machine_run_the_script_the_javascri
     let id = id_in_scp(scp[2]);
     assert_eq!(
         scp[2],
-        arg_line(format!("zeewin:consensflow-build.{id}.tgz"))
+        arg_line(format!("zeewin:consensflow-wrun-{id}/tree.tgz"))
     );
 
     let ssh = arg_lines_without_the_bounds(programs[1]);
@@ -312,7 +312,14 @@ fn a_run_sends_the_tree_as_it_is_and_has_the_machine_run_the_script_the_javascri
     // The script the template makes for a run of that name is the one that was recorded.
     assert!(script.replace(&id, "0000abcd-12345678") == golden("xtask-test-integration"));
     // What the run is asked for went in the tarball, as it was recorded.
-    assert!(run_script_kept(kept.path(), 1) == golden("xtask-test-integration.run"));
+    assert_eq!(
+        run_script_kept(kept.path(), 1).replace(&id, "0000abcd-12345678"),
+        golden("xtask-test-integration.run")
+    );
+    assert_eq!(
+        fs::read_to_string(owned).unwrap(),
+        format!("claim == claimed {id}\ncleanup == removed {id}\n")
+    );
     // What each said on its error stream: scp's on the terminal's, ssh's relayed.
     assert_eq!(err(&ran).matches("said").count(), 2, "{}", err(&ran));
 }
@@ -367,8 +374,8 @@ fn a_run_starts_no_ssh_when_the_tree_could_not_be_sent() {
         "{said}"
     );
     assert!(
-        said.contains(" zeewin:consensflow-build.")
-            && said.ends_with(".tgz` ended with status 3\n"),
+        said.contains(" zeewin:consensflow-wrun-")
+            && said.ends_with("/tree.tgz` ended with status 3\n"),
         "{said}"
     );
     // The one that was asked is the one that said what it was asked.
@@ -457,7 +464,7 @@ fn a_run_asks_for_the_folder_the_build_and_the_variables_it_was_given() {
     let id = id_in_scp(arg_lines_without_the_bounds(programs[0])[2]);
     assert_eq!(
         arg_lines_without_the_bounds(programs[0])[2],
-        arg_line(format!("zeewin:build-2.{id}.tgz"))
+        arg_line(format!("zeewin:consensflow-wrun-{id}/tree.tgz"))
     );
     // The folder is on the command line, and nothing the run is asked for is.
     let script = script_in(arg_lines_without_the_bounds(programs[1])[1]);
@@ -493,9 +500,17 @@ fn script(folder: &Path, name: &str, body: &str) {
     // before the host and the files are left out, so that the body reads the host and the
     // command, or the files, where it always did.
     let leaves_out_the_options = "quiet=; if [ \"$1\" = -q ]; then quiet=-q; shift; fi\nwhile [ \"$1\" = -o ]; do shift 2; done\nif [ -n \"$quiet\" ]; then set -- -q \"$@\"; fi\n";
+    // Answer only the ownership requests; do not log them as the run or its stop.
+    let ownership = r#"for word; do last=$word; done
+owned=$(printf '%s' "${last##* }" | base64 -d 2>/dev/null | iconv -f UTF-16LE -t UTF-8 2>/dev/null)
+case "$owned" in
+  *CF_OWNED_CLAIM*) printf '%s\n' "$owned" | sed -n "s/^Write-Output '\(== claimed [^']*\)'$/\1/p"; exit 0 ;;
+  *CF_OWNED_CLEANUP*) printf '%s\n' "$owned" | sed -n "s/^Write-Output '\(== removed [^']*\)'$/\1/p"; exit 0 ;;
+esac
+"#;
     let body = match name {
         "ssh" => format!(
-            "case \"$*\" in *zeelin*) ;; *ServerAliveCountMax=1\\ *) echo \"free 614\"; exit 0 ;; esac\n{leaves_out_the_options}{body}"
+            "{ownership}case \"$*\" in *zeelin*) ;; *ServerAliveCountMax=1\\ *) echo \"free 614\"; exit 0 ;; esac\n{leaves_out_the_options}{body}"
         ),
         "scp" => format!("{leaves_out_the_options}{body}"),
         _ => body.to_owned(),
@@ -675,27 +690,10 @@ fn a_run_that_is_stopped_ends_ssh_and_asks_the_machine_to_end_the_run_and_answer
     // The run's ssh is gone, and the second ssh carried the script that ends the run.
     assert!(!cf_process::alive(held[0].parse().unwrap()), "{logged:?}");
     let stop = script_in(&format!("arg: \"{}\"", ends[1]));
-    // It ends the run its record names: this run's, by the name its tarball has, which
-    // is the one it sent and the one its script unpacks, and it takes that tarball away.
+    // It asks to end exactly this run. The golden retains the identity and job checks,
+    // and leaves the owned upload for receipt-based cleanup.
     let id = id_in_script(&script_in(&format!("arg: \"{}\"", held[1])));
-    assert_eq!(
-        stop,
-        format!(
-            "\n$ProgressPreference = 'SilentlyContinue'\n\
-             $dir = Join-Path $env:USERPROFILE 'consensflow-build'\n\
-             $running = Join-Path $dir '.windows-run.pid'\n\
-             $owner = Join-Path $dir '.windows-run.id'\n\
-             $of = @(Get-Content $owner -ErrorAction SilentlyContinue)\n\
-             if ($of[0] -eq '{id}') {{\n\
-             \x20 $run = try {{ Get-Process -Id $of[1] -ErrorAction Stop | Where-Object {{ ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime }} }} catch {{}}\n\
-             \x20 $ends = @('/PID', $of[1], '/F'); if ($of[2] -ne 'job') {{ $ends += '/T' }}\n\
-             \x20 if ($run) {{ taskkill @ends 2>&1 | Out-Null }}\n\
-             \x20 Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) {{ Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }}\n\
-             }}\n\
-             Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'consensflow-build.{id}.tgz') -Force -ErrorAction SilentlyContinue\n\
-             exit 0\n"
-        )
-    );
+    assert_eq!(stop.replace(&id, "0000abcd-12345678"), golden("xtask-stop"));
 }
 
 /// The Windows machine the live case below runs on: `CF_WINDOWS_MACHINE` (zeewin2 or zeewin,

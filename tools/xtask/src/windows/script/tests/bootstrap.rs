@@ -5,8 +5,8 @@
 //! into the copy, and tar replaces a file of the same name: if the copy is a junction into a folder that
 //! holds the owner's `README.md`, and the tree has one too, the owner's file is gone before the sweep
 //! refuses the link. So the bootstrap itself looks first, and where the profile or the copy is a link it
-//! names it and ends the run (1) with nothing made there, nothing locked, nothing unpacked, and its own
-//! tarball (the one thing it may remove, by its exact name) gone.
+//! names it and ends the run (1) with nothing made there, nothing locked and nothing unpacked.
+//! Its upload remains until a matching completion receipt permits the controller to remove it.
 //!
 //! Each case runs the bootstrap text as it is sent, in the machine's PowerShell, on a profile made for
 //! it. On the Mac the unpack is done by the system's bsdtar (which is what Windows' own tar is) behind a
@@ -114,7 +114,9 @@ fn bootstrap_run(shell: &str, scratch: &Path, label: &str, profile: &Path) -> Ra
     let pack = scratch.join("pack");
     fs::create_dir_all(&pack).unwrap();
     let packed = tree::pack(&context, &files, &identity, &run_script(&script), &pack).unwrap();
-    fs::copy(&packed, profile.join(upload_name(DIR, RUN))).unwrap();
+    let upload = profile.join(upload_name(DIR, RUN));
+    fs::create_dir_all(upload.parent().unwrap()).unwrap();
+    fs::copy(&packed, upload).unwrap();
     // Where the system's tar is: Windows has it; on the Mac, a stand-in that is the system's bsdtar.
     let system = scratch.join("system");
     #[cfg(not(windows))]
@@ -171,10 +173,12 @@ fn bootstrap_run(shell: &str, scratch: &Path, label: &str, profile: &Path) -> Ra
 
 /// The tarballs in `profile`.
 fn tarballs(profile: &Path) -> Vec<String> {
-    listing(profile)
-        .into_keys()
-        .filter(|name| name.ends_with(".tgz"))
-        .collect()
+    let name = upload_name(DIR, RUN);
+    if profile.join(&name).is_file() {
+        vec![name]
+    } else {
+        vec![]
+    }
 }
 
 #[test]
@@ -221,8 +225,8 @@ fn a_copy_that_is_a_link_is_refused_before_the_unpack_can_replace_a_file_of_the_
     );
     assert!(!ran.out.contains("== tree "), "{}", ran.report);
     assert!(
-        tarballs(&profile).is_empty(),
-        "its own tarball is taken away: {:?}\n{}",
+        tarballs(&profile) == vec![upload_name(DIR, RUN)],
+        "the unacknowledged tarball stays: {:?}\n{}",
         tarballs(&profile),
         ran.report
     );
@@ -249,11 +253,14 @@ fn a_profile_that_is_a_link_is_refused_before_anything_is_made_in_the_folder_it_
         "{}",
         ran.report
     );
-    // The tarball was put in the profile before the run, and is gone after it: the folder is as it was.
+    // The unacknowledged upload remains; no receipt is written through the linked profile.
+    let mut after = listing(&real);
+    let upload = upload_name(DIR, RUN);
+    assert!(after.remove(&upload).is_some(), "the upload was removed");
+    after.remove(&format!("consensflow-wrun-{RUN}/"));
     assert_eq!(
-        listing(&real),
-        before,
-        "nothing was made, locked or unpacked behind the link: {}",
+        after, before,
+        "nothing else was made, locked or unpacked behind the link: {}",
         ran.report
     );
     assert_eq!(ran.code, Some(1), "{}", ran.report);
@@ -307,7 +314,7 @@ fn the_look_at_the_profile_and_the_copy_is_the_first_thing_the_bootstrap_does_in
         .find("is a link")
         .expect("the bootstrap says a link is refused");
     for later in [
-        "New-Item -ItemType Directory",
+        "ni -Type Directory",
         "[IO.File]::Open(",
         "Set-Content -Path $running",
         "& $tar -xmzf",
@@ -319,7 +326,10 @@ fn the_look_at_the_profile_and_the_copy_is_the_first_thing_the_bootstrap_does_in
         assert!(guard < at, "the look follows {later}: {text}");
     }
     // Both folders, the profile first; a folder that is not there yet is no link; the run ends with its line.
-    assert!(text.contains("$env:USERPROFILE,$dir|%{if(("), "{text}");
+    assert!(
+        text.contains("$env:USERPROFILE,$dir,$runFolder|%{if(("),
+        "{text}"
+    );
     assert!(text.contains("-EA 0"), "{text}");
     assert!(text.contains("-band 1024"), "{text}");
     assert!(text.contains(";Exit-Run 1}}"), "{text}");

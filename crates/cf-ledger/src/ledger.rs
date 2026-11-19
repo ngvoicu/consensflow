@@ -63,6 +63,33 @@ pub struct Ledger {
     store: Store,
     #[cfg(feature = "test-support")]
     watcher: std::cell::RefCell<Option<Watcher>>,
+    // Dropped after `store`, so an outstanding borrow cannot drop the test
+    // home while this ledger still has a file open in it.
+    #[cfg(feature = "test-support")]
+    test_file_owners: Vec<Box<dyn std::any::Any>>,
+}
+
+#[cfg(feature = "test-support")]
+struct DeferredTestFileReleases(std::cell::RefCell<Vec<std::rc::Rc<std::cell::RefCell<Ledger>>>>);
+
+#[cfg(feature = "test-support")]
+impl Drop for DeferredTestFileReleases {
+    fn drop(&mut self) {
+        // A fixture can be dropped inside an outstanding borrow. By the time
+        // the test thread exits its stack and local tasks are gone, so retry
+        // before the retained home is allowed to drop.
+        for ledger in self.0.get_mut().drain(..) {
+            if let Ok(mut ledger) = ledger.try_borrow_mut() {
+                ledger.let_go_of_its_file();
+            }
+        }
+    }
+}
+
+#[cfg(feature = "test-support")]
+thread_local! {
+    static DEFERRED_TEST_FILE_RELEASES: DeferredTestFileReleases =
+        const { DeferredTestFileReleases(std::cell::RefCell::new(Vec::new())) };
 }
 
 /// Opens the ledger at `file`, made or brought to this build's schema: the
@@ -108,6 +135,8 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
         store,
         #[cfg(feature = "test-support")]
         watcher: std::cell::RefCell::new(None),
+        #[cfg(feature = "test-support")]
+        test_file_owners: Vec::new(),
     })
 }
 
@@ -153,6 +182,24 @@ fn opening_refusal(file: &Path, cause: LedgerError) -> LedgerError {
 
 #[cfg(feature = "test-support")]
 impl Ledger {
+    /// Keep a fixture's home until the file is closed, even if the fixture
+    /// drops while this ledger is borrowed by a task.
+    pub fn keep_test_file_owner(&mut self, owner: impl std::any::Any) {
+        self.test_file_owners.push(Box::new(owner));
+    }
+
+    /// Close a fixture's file now, or retry when its test thread ends if a
+    /// borrow is still active. The ledger retains the home until it closes.
+    pub fn finish_test_fixture(ledger: &std::rc::Rc<std::cell::RefCell<Self>>) {
+        if let Ok(mut ledger) = ledger.try_borrow_mut() {
+            ledger.let_go_of_its_file();
+        } else {
+            DEFERRED_TEST_FILE_RELEASES.with(|pending| {
+                pending.0.borrow_mut().push(std::rc::Rc::clone(ledger));
+            });
+        }
+    }
+
     /// A test is over: lets go of the file, the connection on it closed and a ledger on memory
     /// left in its place, so that the folder the file is in can be removed. Windows will not
     /// remove a folder from under a file that is open, and something else may still hold this
@@ -161,6 +208,7 @@ impl Ledger {
     pub fn let_go_of_its_file(&mut self) {
         if let Ok(memory) = Connection::open_in_memory() {
             self.store.db = memory;
+            self.test_file_owners.clear();
         }
     }
 

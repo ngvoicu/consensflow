@@ -138,7 +138,7 @@ pub struct Scene {
     /// The question `zeus` asked the chief, which waits for an answer.
     pub question: MessageView,
     /// The home, which holds the ledger, the log and the trace until the scene goes.
-    pub _home: tempfile::TempDir,
+    pub _home: Rc<tempfile::TempDir>,
 }
 
 impl Drop for Scene {
@@ -146,9 +146,7 @@ impl Drop for Scene {
     /// still holds the ledger (the finishing closure, a task left in a local set): Windows will
     /// not remove a folder from under a file that is open.
     fn drop(&mut self) {
-        if let Ok(mut ledger) = self.context.ledger.try_borrow_mut() {
-            ledger.let_go_of_its_file();
-        }
+        cf_ledger::Ledger::finish_test_fixture(&self.context.ledger);
     }
 }
 
@@ -235,8 +233,9 @@ impl Scene {
 
 /// A scene with its ledger open on a file of its own.
 pub fn scene() -> Scene {
-    let home = tempfile::tempdir().unwrap();
+    let home = Rc::new(tempfile::tempdir().unwrap());
     let mut ledger = open_ledger(&home.path().join("consensflow.db"), Options::default()).unwrap();
+    ledger.keep_test_file_owner(Rc::clone(&home));
     let project = ledger
         .create_project(&NewProject {
             directory: "/work/app".to_owned(),

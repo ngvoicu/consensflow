@@ -31,42 +31,49 @@ try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false) } catch {}
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
 $dir = Join-Path $env:USERPROFILE '«dir»'
 $tarball = Join-Path $env:USERPROFILE '«tarball»'
+$runFolder = Split-Path $tarball
 $running = Join-Path $dir '«running»'
 $owner = Join-Path $dir '«owner»'
 $held = $false
 $lock = $null
 $job = $null
+$completed = $null
+$recordable = $false
 function Free-Machine {
   if ($script:held) {
-    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue
-    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }
+    ri -Lit $owner -Force -ea 0
+    if ((gc $running -ea 0) -eq $PID) { ri -Lit $running -Force -ea 0 }
     $script:held = $false
   }
   if ($script:lock) { $script:lock.Dispose(); $script:lock = $null }
 }
-function Exit-Run([int]$code) { Free-Machine; Write-Output "`n«exit»$code"; exit $code }
+function Exit-Run([int]$code) { $script:completed = $code; exit $code }
 try {
-$env:USERPROFILE,$dir|%{if((gi -Lit $_ -Force -EA 0).Attributes -band 1024){"$_ is a link: nothing was made or unpacked";Exit-Run 1}}
-New-Item -ItemType Directory -Force $dir | Out-Null
+$env:USERPROFILE,$dir,$runFolder|%{if((gi -Lit $_ -Force -EA 0).Attributes -band 1024){"$_ is a link: nothing was made or unpacked";Exit-Run 1}}
+$recordable = $true
+ni -Type Directory -Force $dir | Out-Null
 try { $lock = [IO.File]::Open((Join-Path $dir '«lock»'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {} catch { $why = $_.Exception.Message }
-$holder = Get-Content $running -ErrorAction SilentlyContinue
-$other = if ($holder) { try { Get-Process -Id $holder -ErrorAction Stop | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item $running).LastWriteTime } } catch {} }
-if (-not $lock -or $other) { Write-Output "A run is still going on this machine$(if ($other) { " (process $($other.Id))" })$(if ($why) { " (the lock could not be opened: $why)" }): one at a time."; Exit-Run 75 }
+$holder = gc $running -ea 0
+$other = if ($holder) { try { gps -Id $holder -ea Stop | ? { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (gi $running).LastWriteTime } } catch {} }
+if (-not $lock -or $other) { echo "A run is still going on this machine$(if ($other) { " (process $($other.Id))" })$(if ($why) { " (the lock could not be opened: $why)" }): one at a time."; Exit-Run 75 }
 Set-Content -Path $running -Value $PID
 Set-Content -Path $owner -Value @('«id»', $PID)
 $held = $true
 $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
-if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) { Write-Output "Windows' own tar is not there ($tar), so the tree cannot be unpacked."; Exit-Run 1 }
+if (-not (Test-Path -LiteralPath $tar -PathType Leaf)) { echo "Windows' own tar is not there ($tar), so the tree cannot be unpacked."; Exit-Run 1 }
 & $tar -xmzf $tarball -C $dir
 if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
 . ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '«sweep»'))))
 if ($failed.Count) { Exit-Run 1 }
-Write-Output "«tree_mark»$(Get-Content -LiteralPath (Join-Path $dir '«tree_file»') -TotalCount 1)"
+echo "«tree_mark»$(Get-Content -LiteralPath (Join-Path $dir '«tree_file»') -TotalCount 1)"
 . ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '«run»'))))
 } finally {
   if ($null -ne $job) { [CfJob]::Release($job) }
   Free-Machine
-  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue
+  if ($null -ne $script:completed) {
+    if ($recordable) { [IO.File]::WriteAllText((Join-Path $runFolder 'completed.txt'), 'finished «id»') }
+    echo "`n«exit»$script:completed"
+  }
 }
 "##;
 
@@ -75,18 +82,18 @@ Write-Output "«tree_mark»$(Get-Content -LiteralPath (Join-Path $dir '«tree_fi
 ///
 /// - It puts the run in a job (`CfJob`, [`JOB_SOURCE`]) before anything it asks for is
 ///   started: the job ends every process in it when the last handle to it closes, and
-///   this process holds the only one, so that a run that is killed (a stop's `taskkill`
-///   ends its process) has every program it started ended with it by the system, and not
+///   this process holds the only one, so that a run killed by the stop has every program
+///   it started ended with it by the system, and not
 ///   as `taskkill /T` does, a tree it has read and then walks while the run goes on
 ///   starting programs, which leaves what is started during the walk (measured on zeewin,
 ///   2026-10-23: a stop that landed while a command was starting programs left 21 to 50 of
 ///   them running every time, and a single `ping -n 60` was left 7 times in 142 stops, for
-///   its whole 60 seconds; with the job, 0 in 142). A run that cannot be put in a job is said (`== no job`) and goes on as it
-///   did before: its stop is the one that walks the tree.
+///   its whole 60 seconds; with the job, 0 in 142). A run that cannot be put in a job says so
+///   and goes on; a stop cannot safely end it and reports uncertainty.
 /// - Once it is in the job it says so in the owner file ([`super::OWNER`], a third line,
 ///   [`super::IN_JOB`]), which is how a stop knows that ending the run's process ends all it
-///   started and walks no tree ([`super::stop_script`]). A run that cannot say it is ended with its
-///   tree, as one that is not in the job.
+///   started and walks no tree ([`super::stop_script`]). A run without a complete job and
+///   process identity record cannot be stopped safely by that script.
 /// - Codex's own PATH entry is a junction an SSH session may not cross ("an untrusted
 ///   mount point"): its release folder is named outright.
 /// - After the build's steps, if there were any, the steps of [`super::PREPARE_STEPS`] make sure of
@@ -102,9 +109,9 @@ try {
   $made = [CfJob]::Enter()
   if ($made -eq [IntPtr]::Zero) { throw [CfJob]::Why }
   $job = $made
-} catch { Write-Output "== no job: $($_.Exception.Message), so a stop will not end at once what this run starts" }
+} catch { Write-Output "== no job: $($_.Exception.Message), so a stop cannot safely end this run" }
 if ($null -ne $job) {
-  try { Add-Content -LiteralPath $owner -Value '«in_job»' } catch { Write-Output "== no job record: $($_.Exception.Message), so a stop will walk this run's tree" }
+  try { Add-Content -LiteralPath $owner -Value @('«in_job»', ([Diagnostics.Process]::GetCurrentProcess().StartTime.ToFileTimeUtc()), '«tarball»') } catch { Write-Output "== no job record: $($_.Exception.Message), so a stop cannot safely end this run" }
 }
 $env:Path = "«node»;$env:USERPROFILE\.cargo\bin;" + $env:Path
 $codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorAction SilentlyContinue).Target
@@ -376,15 +383,42 @@ if (Test-Path -LiteralPath $reports -PathType Container) {
 pub(super) const STOP: &str = r##"
 $ProgressPreference = 'SilentlyContinue'
 $dir = Join-Path $env:USERPROFILE '«dir»'
-$running = Join-Path $dir '«running»'
 $owner = Join-Path $dir '«owner»'
-$of = @(Get-Content $owner -ErrorAction SilentlyContinue)
-if ($of[0] -eq '«id»') {
-  $run = try { Get-Process -Id $of[1] -ErrorAction Stop | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item -LiteralPath $owner).LastWriteTime } } catch {}
-  $ends = @('/PID', $of[1], '/F'); if ($of[2] -ne '«in_job»') { $ends += '/T' }
-  if ($run) { taskkill @ends 2>&1 | Out-Null }
-  Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }
+$of = @(Get-Content -LiteralPath $owner -ErrorAction SilentlyContinue)
+if ($of.Count -eq 0 -or $of[0] -ne '«id»') { Write-Output 'No matching run record; it may still be going.'; exit 1 }
+[uint32]$number = 0; [int64]$created = 0
+if ($of.Count -lt 5 -or $of[2] -ne '«in_job»' -or $of[4] -ne '«tarball»' -or -not [uint32]::TryParse($of[1], [ref]$number) -or -not [int64]::TryParse($of[3], [ref]$created)) {
+  Write-Output 'The run has no complete process identity and job record; it may still be going.'; exit 1
 }
-Remove-Item -LiteralPath (Join-Path $env:USERPROFILE '«tarball»') -Force -ErrorAction SilentlyContinue
+$run = try { Get-Process -Id $number -ErrorAction Stop } catch { $null }
+if ($null -eq $run) { Write-Output 'The run could not be identified; it may still be going.'; exit 1 }
+try { $actual = $run.StartTime.ToFileTimeUtc() } catch { Write-Output 'The process start time could not be read; the run may still be going.'; exit 1 }
+if ($actual -ne $created) { Write-Output 'The recorded process is gone; the current PID belongs to another process.'; exit 0 }
+try {
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class CfStop {
+  [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetProcessTimes(IntPtr p, out long created, out long exited, out long kernel, out long user);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool TerminateProcess(IntPtr p, uint code);
+  [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr p, uint ms);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr p);
+  public static string End(uint pid, long expected) {
+    IntPtr p = OpenProcess(0x101001, false, pid);
+    if (p == IntPtr.Zero) return "failed";
+    try {
+      long created, exited, kernel, user;
+      if (!GetProcessTimes(p, out created, out exited, out kernel, out user)) return "failed";
+      if (created != expected) return "gone";
+      if (!TerminateProcess(p, 1) && WaitForSingleObject(p, 0) != 0) return "failed";
+      return WaitForSingleObject(p, 5000) == 0 ? "ended" : "failed";
+    } finally { CloseHandle(p); }
+  }
+}
+'@
+  $result = [CfStop]::End($number, $created)
+  if ($result -notin @('ended', 'gone')) { throw 'the verified process could not be ended' }
+} catch { Write-Output "The run could not be ended safely: $($_.Exception.Message)"; exit 1 }
 exit 0
 "##;

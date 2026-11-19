@@ -615,8 +615,8 @@ runs = ["live-app-rules"]
 
 [[plant.edit]]
 file = "tools/xtask/tests/live_app.rs"
-find = "            Some((_, _, held)) if start_lines(text) != *held => unheld.push(format!("
-replace = "            Some((_, _, held)) if false && start_lines(text) != *held => unheld.push(format!("
+find = "                if start_lines(text)\n"
+replace = "                if false && start_lines(text)\n"
 
 [[plant]]
 name = "live app: the Windows rule reads a built app's name in one case alone"

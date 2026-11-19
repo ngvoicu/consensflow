@@ -3,9 +3,9 @@
 # human has (crates/cf-harness/src/pi/models.rs); a failure takes one start of Pi and says what
 # that start said and the code it exited with (crates/cf-harness/src/shared/one_shot.rs, over
 # cf-process's `Streams::Conversation`, which keeps the last of a child's error stream and its
-# exit code and ends the group it leads); a Pi that lists nothing says whether any provider is
-# set up, by names alone and only then, read on a thread of its own, one read at a time, waited for
-# a bounded time (crates/cf-harness/src/pi/setup.rs); a Refresh runs the update and asks Pi once;
+# exit code and ends the group it leads); a Pi that lists nothing reports that fact without
+# opening the login's own path, and offers recovery. Settings are read on a thread of their own,
+# one read at a time, waited for a bounded time (crates/cf-harness/src/pi/setup.rs); a Refresh runs the update and asks Pi once;
 # and the words of Pi that a failure carries (after the mark `cf_proto::models::IT_SAID`) are screened
 # whole, every line of them a stack frame among them, before any cut, and withheld whole if anything in
 # them may hold a credential or a row end falls in a URL's user and password (T-1276); where the front
@@ -162,14 +162,27 @@ find = '.filter(|name| env.os(name).is_some_and(|value| !value.is_empty()))'
 replace = '.filter(|_| false)'
 
 [[plant]]
-name = "pi-setups: a login in auth.json is not read"
-meant = "each_source_of_a_provider_is_named_by_its_names_only"
-runs = ["ps-setup"]
+name = "pi-setups: the diagnostic attempts to read login content"
+meant = "an_empty_list_never_attempts_to_read_the_login_and_says_how_to_recover"
+runs = ["ps-models"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/setup.rs"
-find = 'Got::Found(table) => logins = sorted(table.into_keys()),'
-replace = 'Got::Found(_) => {}'
+find = '        let in_agent = |name: &str| path::join(&[&agent, name]);'
+replace = '''        let in_agent = |name: &str| path::join(&[&agent, name]);
+        let _ = parsed::<HashMap<String, IgnoredAny>>(&in_agent("auth.json"));'''
+
+[[plant]]
+name = "pi-setups: the diagnostic silently reads login bytes"
+meant = "neither_diagnostic_reads_a_readable_login_even_if_it_ignores_the_contents"
+platforms = ["macos"]
+runs = ["ps-models"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/setup.rs"
+find = '        let in_agent = |name: &str| path::join(&[&agent, name]);'
+replace = '''        let in_agent = |name: &str| path::join(&[&agent, name]);
+        let _ = std::fs::read(in_agent("auth.json"));'''
 
 [[plant]]
 name = "pi-setups: a custom provider of models.json is not read"
@@ -262,7 +275,7 @@ runs = ["ps-setup"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/setup.rs"
-find = 'Got::Unread => unread.push("the file of logins".to_owned()),'
+find = 'Got::Unread => unread.push("models.json".to_owned()),'
 replace = 'Got::Unread => {}'
 
 [[plant]]
@@ -273,7 +286,7 @@ runs = ["ps-setup"]
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/setup.rs"
 find = '        *self == Self::default()'
-replace = '        self.logins.is_empty() && self.custom.is_empty() && self.packages.is_empty() && self.extensions.is_empty() && self.keys.is_empty()'
+replace = '        self.custom.is_empty() && self.packages.is_empty() && self.extensions.is_empty() && self.keys.is_empty()'
 
 [[plant]]
 name = "pi-setups: a pipe is opened"
@@ -361,24 +374,14 @@ find = '    let url = source.contains("://") || source.starts_with("git:") || so
 replace = '    let url = true;'
 
 [[plant]]
-name = "pi-setups: a login's token is named in the words"
-meant = "each_source_of_a_provider_is_named_by_its_names_only"
-runs = ["ps-setup"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/pi/setup.rs"
-find = '("a login for", &self.logins),'
-replace = '("a login for", &self.logins.iter().map(|name| format!("{name} SECRET-ACCESS")).collect::<Vec<_>>()),'
-
-[[plant]]
 name = "pi-setups: no word of how to give Pi a provider"
-meant = "a_folder_that_holds_nothing_is_no_provider_set_up"
+meant = "a_folder_that_holds_nothing_offers_recovery_without_guessing"
 runs = ["ps-setup"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/setup.rs"
-find = 'environment). Run pi and sign in with /login, or set the variable of a'
-replace = 'environment). Run pi and sign in, or set the variable of a'
+find = "Pi lists no model. Log in inside Pi with /login, or check Pi's settings."
+replace = "Pi lists no model. Check Pi's settings."
 
 [[plant]]
 name = "pi-setups: a conversation's error stream is let go"
@@ -595,13 +598,13 @@ replace = '''fn provider_of(name: &str) -> String {
     }'''
 
 [[plant]]
-name = "pi-setups: a file of logins is named by its name"
+name = "pi-setups: an unread setting is called a login file"
 meant = "a_file_that_is_there_and_not_what_pi_s_files_are_is_unread_and_never_nothing"
 runs = ["ps-setup"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/pi/setup.rs"
-find = 'Got::Unread => unread.push("the file of logins".to_owned()),'
+find = 'Got::Unread => unread.push("models.json".to_owned()),'
 replace = 'Got::Unread => unread.push("auth.json".to_owned()),'
 
 [[plant]]

@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { loadavg } from 'node:os'
 
 import { expect, test } from '@playwright/test'
 
@@ -476,6 +477,64 @@ const colour = (locator, property = 'background-color') =>
 /** The quiet first row that loads what comes before the items shown. */
 const earlier = (viewer) => viewer.locator('.history-earlier')
 
+// B37: keep Playwright's actionability trace (`--trace on`) and load around the actual
+// fold click. This fixture has two members and multiple sessions, so the wrong fold cannot pass.
+test('B37: the intended session fold opens without hiding another session', async ({
+  page,
+}, testInfo) => {
+  const data = model()
+  const lane = data.board.lanes.find((entry) => entry.participant.handle === 'zeus-amber-pine')
+  data.board.lanes.push({
+    ...lane,
+    participant: { ...lane.participant, id: 5, handle: 'zeus-copper-leaf', session: 'copper-leaf' },
+    pane: null,
+  })
+  const hera = participant(6, 'hera', 'worker', { agent: 'hera', harness: 'pi', tier: 'standard' })
+  const heraSession = participant(7, 'hera-moss-oak', 'worker', {
+    agent: 'hera',
+    harness: 'pi',
+    tier: 'standard',
+    memberId: 6,
+    member: 'hera',
+    session: 'moss-oak',
+  })
+  data.board.lanes.push({ participant: hera, tasks: [], activity: { state: 'closed' }, pane: null })
+  data.board.lanes.push({
+    participant: heraSession,
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  const samples = []
+  const sample = (event) => samples.push({ event, at: new Date().toISOString(), load: loadavg() })
+  try {
+    await open(page, data)
+    const zeus = page.locator('tr[data-handle="zeus"] button.fold-sessions')
+    const heraFold = page.locator('tr[data-handle="hera"] button.fold-sessions')
+    await expect(zeus).toHaveAttribute('aria-expanded', 'false')
+    await expect(heraFold).toHaveAttribute('aria-expanded', 'false')
+    sample('before zeus click')
+    await zeus.click()
+    sample('after zeus click')
+    await expect(zeus).toHaveAttribute('aria-expanded', 'true')
+    await expect(page.locator('tr[data-handle="zeus-amber-pine"]')).toBeVisible()
+    await expect(page.locator('tr[data-handle="zeus-copper-leaf"]')).toBeVisible()
+    await expect(heraFold).toHaveAttribute('aria-expanded', 'false')
+    sample('before hera click')
+    await heraFold.click()
+    sample('after hera click')
+    await expect(page.locator('tr[data-handle="hera-moss-oak"]')).toBeVisible()
+    await expect(page.locator('tr[data-handle="zeus-amber-pine"]')).toBeVisible()
+    await expect(page.locator('tr[data-handle="zeus-copper-leaf"]')).toBeVisible()
+  } finally {
+    sample('test end')
+    const readings = JSON.stringify(samples, null, 2)
+    mkdirSync(testInfo.outputDir, { recursive: true })
+    writeFileSync(testInfo.outputPath('fold-load.json'), readings)
+    await testInfo.attach('fold-load', { body: readings, contentType: 'application/json' })
+  }
+})
+
 test.describe('the History button', () => {
   test("is on the chief's head beside Switch chief, on a session's, and on the chief's card with no window", async ({
     page,
@@ -720,6 +779,93 @@ test.describe('the history viewer', () => {
     const dim = await colour(thinking.locator('.history-text'), 'color')
     expect(dim).not.toBe(await colour(block(viewer, 'a-2').locator('p').first(), 'color'))
     expect(await colour(thinking)).toBe('rgba(0, 0, 0, 0)')
+  })
+
+  test("draws thinking and the agent's italic words in a face's own italic, never one the browser slants", async ({
+    page,
+    browserName,
+  }) => {
+    const data = model()
+    data.histories.chief.items.push(
+      item(2, 2, 'i-1', 'assistant', 'The filter now keeps *only the words typed*.', {
+        kind: 'text',
+      }),
+    )
+    await open(page, data)
+    const viewer = await openChief(page)
+    const italics = [
+      block(viewer, 'th-1').locator('.history-thinking'),
+      block(viewer, 'i-1').locator('em'),
+    ]
+    await expect(italics[1]).toHaveText('only the words typed')
+    /** The face that draws most of a probe line's glyphs, as Chromium names it once drawn. */
+    const drawnIn = async (slant) => {
+      const cdp = await page.context().newCDPSession(page)
+      const { root } = await cdp.send('DOM.getDocument', { depth: -1 })
+      const { nodeId } = await cdp.send('DOM.querySelector', {
+        nodeId: root.nodeId,
+        selector: `.face-probe [data-slant="${slant}"]`,
+      })
+      await cdp.send('CSS.enable')
+      const { fonts } = await cdp.send('CSS.getPlatformFontsForNode', { nodeId })
+      await cdp.detach()
+      const most = fonts.toSorted((a, b) => b.glyphCount - a.glyphCount)[0]
+      return most ? most.postScriptName || most.familyName : null
+    }
+    const face = async (slant) => {
+      let name = null
+      await expect.poll(async () => (name = await drawnIn(slant))).not.toBeNull()
+      return name
+    }
+    for (const words of italics) {
+      await expect(words).toHaveCSS('font-style', 'italic')
+      // The page forbids the browser's own slant of an upright face (font-synthesis without
+      // `style`): where the face has no italic, the words stand upright.
+      const synthesis = await words.evaluate((node) => {
+        const style = getComputedStyle(node)
+        return (
+          style.getPropertyValue('font-synthesis-style') ||
+          (/\bstyle\b/.test(style.getPropertyValue('font-synthesis')) ? 'auto' : 'none')
+        )
+      })
+      expect(synthesis).toBe('none')
+      // And the face the words are set in has an italic of its own. Its words, upright and
+      // italic with the slant forbidden, in a line each:
+      const family = await words.evaluate((node) => {
+        const style = getComputedStyle(node)
+        const probe = document.createElement('div')
+        probe.className = 'face-probe'
+        probe.style.cssText =
+          'position:fixed;left:0;top:0;z-index:2147483647;width:400px;height:80px;background:#fff;color:#000'
+        for (const [at, slant] of [
+          [0, 'normal'],
+          [40, 'italic'],
+        ]) {
+          const line = document.createElement('div')
+          line.dataset.slant = slant
+          line.textContent = 'afgkxy thinking'
+          line.style.cssText = `position:absolute;left:0;top:${at}px;height:40px;font-family:${style.fontFamily};font-weight:${style.fontWeight};font-size:20px;line-height:40px;font-style:${slant};font-synthesis:none;white-space:pre`
+          probe.append(line)
+        }
+        node.closest('dialog').append(probe)
+        return style.fontFamily
+      })
+      const probe = viewer.locator('.face-probe')
+      // In every engine the italic line is drawn otherwise than the upright one: an
+      // upright-only face, with the slant forbidden where the engine honours it, draws alike.
+      const upright = await probe.locator('[data-slant="normal"]').screenshot()
+      const italic = await probe.locator('[data-slant="italic"]').screenshot()
+      expect(italic.equals(upright), `${family} has no italic face here`).toBe(false)
+      // And in Chromium the italic is drawn from a face other than the upright one: a slant of
+      // the upright face keeps its name, whoever slants it. On Windows that is DirectWrite
+      // itself, which no font-synthesis forbids (measured: Lucida Console, T-1807).
+      if (browserName === 'chromium') {
+        expect(await face('italic'), `${family} has no italic face here`).not.toBe(
+          await face('normal'),
+        )
+      }
+      await probe.evaluate((node) => node.remove())
+    }
   })
 
   test('draws a call as a block: its header, its output folded to the last 5 lines, the time it took, green, red or grey', async ({

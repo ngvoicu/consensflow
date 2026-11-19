@@ -41,6 +41,8 @@
 #![allow(clippy::expect_used, clippy::disallowed_methods)]
 
 mod common;
+#[path = "../../../tests/support/powershell_start_lock.rs"]
+mod powershell_start_lock;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -175,20 +177,33 @@ impl Case {
         let native = |path: &Path| path.to_string_lossy().into_owned();
         let (text_file, exe) = (self.at("question.md"), own_cf());
         let path = self.path_with_the_command();
-        let ran = cf_at(
-            program,
-            args,
-            &[
-                ("CONSENSFLOW_URL", &api.url),
-                ("CONSENSFLOW_TOKEN", "tok"),
-                ("TEXT_FILE", &slashed(&text_file)),
-                ("BIN_UNDER_TEST", &slashed(&exe)),
-                ("PATH", &path),
-                // cmd.exe's own commands take a path with backslashes.
-                ("TEXT_FILE_WIN", &native(&text_file)),
-            ],
-            "",
-        );
+        let text_slash = slashed(&text_file);
+        let exe_slash = slashed(&exe);
+        let text_native = native(&text_file);
+        let pwsh = program
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case("pwsh.exe"));
+        let mut vars = vec![
+            ("CONSENSFLOW_URL", api.url.as_str()),
+            ("CONSENSFLOW_TOKEN", "tok"),
+            ("TEXT_FILE", text_slash.as_str()),
+            ("BIN_UNDER_TEST", exe_slash.as_str()),
+            ("PATH", path.as_str()),
+            ("TEXT_FILE_WIN", text_native.as_str()),
+        ];
+        if pwsh {
+            vars.extend([
+                ("DOTNET_MultiCoreJitMinNumCpus", "65535"),
+                ("COMPlus_MultiCoreJitMinNumCpus", "65535"),
+                ("POWERSHELL_TELEMETRY_OPTOUT", "1"),
+            ]);
+        }
+        let start = || cf_at(program, args, &vars, "");
+        let ran = if pwsh {
+            powershell_start_lock::one_at_a_time(start)
+        } else {
+            start()
+        };
         let body = api
             .received()
             .into_iter()

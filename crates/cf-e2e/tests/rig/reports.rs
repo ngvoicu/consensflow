@@ -1155,6 +1155,12 @@ fn finds(pattern: &str, path: &str) -> Result<bool, regex::Error> {
 /// says it is.
 const COLLECTED: &str = "path: ${{ env.RIG_TEMP }}/consensflow-integration-*-left.txt";
 
+/// The stand-in process's own h-* folder is under a job-owned platform scratch parent.
+const COLLECTED_WINDOWS: &str =
+    "path: ${{ env.RIG_PUBLIC }}/h-*/consensflow-integration-*-left.txt";
+const COLLECTED_MACOS: &str =
+    "path: ${{ env.RIG_MAC_TEMP }}/h-*/consensflow-integration-*-left.txt";
+
 /// The path the other upload collects from, relative to the workspace, which the action
 /// reads it against: where a rig built for the real harnesses keeps its report
 /// (`live::rig`), and where the cases CI runs on such a rig, with the stand-in, keep it.
@@ -1195,8 +1201,9 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
     let uploads = steps_with(&steps, "uses: actions/upload-artifact@");
     assert_eq!(
         uploads.len(),
-        6,
-        "one upload for the temp folder's reports, one for the live rigs', one for the checks job's \
+        8,
+        "one upload each for macOS and Windows stand-in homes, one for the temp folder's reports, \
+         one for the live rigs', one for the checks job's \
          live cases, the live matrix's two, its rigs' reports and its evidence, and the packaged \
          smoke's machines: {uploads:?}"
     );
@@ -1208,6 +1215,8 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
             .ok_or_else(|| format!("no upload has `{path}`: {uploads:?}"))
     };
     let (temp_upload, live_upload) = (upload_of(COLLECTED)?, upload_of(COLLECTED_LIVE)?);
+    let windows_upload = upload_of(COLLECTED_WINDOWS)?;
+    let macos_upload = upload_of(COLLECTED_MACOS)?;
     let matrix_upload = upload_of(COLLECTED_MATRIX)?;
     let smoke_upload = upload_of(COLLECTED_SMOKE)?;
 
@@ -1228,6 +1237,14 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
     }
     let pinned = Regex::new(r"^uses: actions/upload-artifact@[0-9a-f]{40} # v\d+\.\d+\.\d+$")?;
     for (upload, name) in [
+        (
+            windows_upload,
+            "name: windows-rig-reports-${{ strategy.job-index }}",
+        ),
+        (
+            macos_upload,
+            "name: macos-rig-reports-${{ strategy.job-index }}",
+        ),
         (
             temp_upload,
             "name: rig-reports-${{ matrix.os }}-${{ strategy.job-index }}",
@@ -1252,6 +1269,19 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
                 "no `{line}`: {upload:?}"
             );
         }
+    }
+
+    for (upload, condition) in [
+        (
+            windows_upload,
+            "if: failure() && runner.os == 'Windows' && env.RIG_PUBLIC != ''",
+        ),
+        (
+            macos_upload,
+            "if: failure() && runner.os == 'macOS' && env.RIG_MAC_TEMP != ''",
+        ),
+    ] {
+        assert!(upload.iter().any(|line| line == condition), "{upload:?}");
     }
 
     // The checks job's live cases keep a failed rig's report and a failed matrix case's evidence
@@ -1361,6 +1391,73 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
     let _ = fs::remove_file(&kept);
     assert!(found, "`{live}` does not find {}", kept.display());
     assert!(!in_the_temp_pattern, "{collected}");
+    Ok(())
+}
+
+#[test]
+fn ci_collects_only_its_own_standin_process_reports() -> Outcome {
+    let steps = ci_steps()?;
+    let daemon = steps
+        .iter()
+        .position(|step| step.iter().any(|line| line == "run: npm run test:daemons"))
+        .ok_or("CI has no daemon suite")?;
+    for (name, required) in [
+        (
+            "Isolate Windows rig scratch",
+            vec![
+                "if: runner.os == 'Windows'",
+                "shell: pwsh",
+                "$rigPublic = Join-Path $env:PUBLIC 'cf-daemons'",
+                "New-Item -ItemType Directory -Path $rigPublic -ErrorAction Stop | Out-Null",
+                "\"RIG_PUBLIC=$rigPublic\" >> $env:GITHUB_ENV",
+                "\"PUBLIC=$rigPublic\" >> $env:GITHUB_ENV",
+            ],
+        ),
+        (
+            "Isolate macOS rig scratch",
+            vec![
+                "if: runner.os == 'macOS'",
+                "shell: bash",
+                "rig_temp=\"$RUNNER_TEMP/cf-daemons\"",
+                "mkdir -m 700 \"$rig_temp\"",
+                "printf 'RIG_MAC_TEMP=%s\\nTMPDIR=%s\\n' \"$rig_temp\" \"$rig_temp\" >> \"$GITHUB_ENV\"",
+            ],
+        ),
+    ] {
+        let at = steps
+            .iter()
+            .position(|step| step.iter().any(|line| line == &format!("name: {name}")))
+            .ok_or_else(|| format!("missing {name}"))?;
+        assert!(at < daemon, "{name} starts after the suite");
+        for line in required {
+            assert!(steps[at].iter().any(|have| have == line), "{name}: {line}");
+        }
+    }
+
+    // An actual failed rig keeps its report in this test process's h-* folder.
+    let temp = std::env::temp_dir();
+    let parent = temp.parent().ok_or("the process temp has no parent")?;
+    let mut home = None;
+    assert!(a_case_that_waits_for_what_never_comes(&mut home).is_err());
+    let report = report_beside(&home.ok_or("the case never started its rig")?);
+    assert!(report.is_file(), "{} was not kept", report.display());
+    for (pattern, variable) in [
+        (COLLECTED_WINDOWS, "${{ env.RIG_PUBLIC }}"),
+        (COLLECTED_MACOS, "${{ env.RIG_MAC_TEMP }}"),
+    ] {
+        let pattern = pattern
+            .trim_start_matches("path: ")
+            .replace(variable, &parent.to_string_lossy());
+        assert!(finds(&pattern, &report.to_string_lossy())?, "{pattern}");
+        assert!(!finds(&pattern, &format!("{}.old", report.display()))?);
+        let outside = parent
+            .join("another-job")
+            .join(temp.file_name().ok_or("temp has no name")?)
+            .join(report.file_name().ok_or("report has no name")?);
+        assert!(!finds(&pattern, &outside.to_string_lossy())?);
+    }
+    fs::remove_file(&report)?;
+    assert!(!report.exists(), "an absent report must stay absent");
     Ok(())
 }
 
