@@ -29,7 +29,7 @@ fn migration_0038_keeps_the_0037_ledger_and_defaults_every_project_off() {
             .collect::<Vec<_>>()
     );
     // A later backup migration must also leave the original rows and the
-    // own-hands defaults intact; its three participant columns start null.
+    // own-hands defaults intact; later hold metadata starts empty.
     migrate(&db, &MIGRATIONS).unwrap();
     let latest = tables.map(|table| rows(&db, &format!("SELECT * FROM {table} ORDER BY rowid")));
     assert_eq!(latest[0], after[0]);
@@ -37,7 +37,7 @@ fn migration_0038_keeps_the_0037_ledger_and_defaults_every_project_off() {
         latest[1],
         after[1]
             .iter()
-            .map(|row| format!("{row}|Null|Null|Null"))
+            .map(|row| format!("{row}|Null|Null|Null|Null|Integer(0)|Integer(0)"))
             .collect::<Vec<_>>()
     );
     assert_eq!(&latest[2..], &after[2..]);

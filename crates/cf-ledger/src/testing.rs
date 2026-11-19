@@ -108,6 +108,11 @@ pub fn undo_migration_0040(db: &rusqlite::Connection) -> rusqlite::Result<()> {
     db.execute_batch("DROP TABLE task_plan_key")
 }
 
+/// Remove the hold metadata when a test reconstructs a ledger from before 0041.
+pub fn undo_migration_0041(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    db.execute_batch("ALTER TABLE participant DROP COLUMN hold_login_revision; ALTER TABLE participant DROP COLUMN setup_generation; ALTER TABLE participant DROP COLUMN hold_generation")
+}
+
 /// The last schema version Node's ledger had.
 const NODE_LAST_VERSION: i64 = 11;
 
@@ -195,6 +200,9 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
             ("participant", "backup_of"),
             ("participant", "vacation_since"),
             ("participant", "out_kind"),
+            ("participant", "hold_login_revision"),
+            ("participant", "setup_generation"),
+            ("participant", "hold_generation"),
         ])
     {
         take_column_out(tables, table, column);
@@ -288,7 +296,10 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
                     .replace(former_handles::COLUMN_LINES, "")
                     .replace(", backup_of INTEGER REFERENCES participant(id)", "")
                     .replace(", vacation_since TEXT", "")
-                    .replace(", out_kind TEXT\n  CHECK (out_kind IS NULL OR out_kind IN ('quota', 'account', 'busy', 'moved'))", "");
+                    .replace(", out_kind TEXT\n  CHECK (out_kind IS NULL OR out_kind IN ('quota', 'account', 'busy', 'moved'))", "")
+                    .replace(", hold_login_revision TEXT", "")
+                    .replace(", setup_generation INTEGER NOT NULL DEFAULT 0", "")
+                    .replace(", hold_generation INTEGER NOT NULL DEFAULT 0", "");
             }
             Some("task") => {
                 *sql = sql

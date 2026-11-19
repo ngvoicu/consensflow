@@ -210,6 +210,13 @@ impl ClaudeAdapter {
 }
 
 impl Adapter for ClaudeAdapter {
+    fn login_revision(&self) -> Work<'_, Option<u64>> {
+        let path = super::paths::config_folder(&self.env)
+            .ok()
+            .map(|root| std::path::Path::new(&root).join(".credentials.json"));
+        Box::pin(async move { crate::shared::login_metadata::revision_async(path?).await })
+    }
+
     fn models(&self, _fetch: bool) -> Work<'_, Result<ModelListing, String>> {
         Box::pin(super::models::listed(
             &self.env,

@@ -79,6 +79,7 @@ mod follow_ups;
 mod harness_dialogs;
 mod held_at_work;
 mod hold_notes;
+mod hold_rule;
 mod interrupts;
 mod lanes;
 mod launch_stops;

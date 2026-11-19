@@ -79,7 +79,7 @@ fn holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_h
         .is_some_and(|until| until.starts_with("9999-")));
     assert_match(
         tiers.notes("chief").last().unwrap(),
-        r"^T-1 waits with @zeus-amber-pine: its account is unavailable \(Muse refused: the account has no allowance; set up billing at accountscenter\.meta\.com/muse_code\), and nothing resets that; it goes on when the human says the account works again\.$",
+        r"^T-1 waits with @zeus-amber-pine: its account is unavailable \(Muse refused: the account has no allowance; set up billing at accountscenter\.meta\.com/muse_code\); it can go on when the login changes or the human presses Try again now\.$",
     );
     // The first note of a hold is typed (RS-25), and T-1's line says the hold as well.
     assert_eq!(
@@ -90,14 +90,14 @@ fn holds_the_task_with_its_window_for_no_reset_and_tells_the_requester_and_the_h
     assert_eq!(
         tiers.task(1).task.aside,
         Some(format!(
-            "waits with @zeus-amber-pine: its account is unavailable ({BECAUSE}) until the human says it works"
+            "waits with @zeus-amber-pine: its account is unavailable ({BECAUSE})"
         ))
     );
     let told = human_notes(&tiers);
     assert_eq!(told.len(), 1, "{told:?}");
     assert_match(
         &told[0],
-        r"^@zeus-amber-pine's account is unavailable: Muse refused: the account has no allowance; .* Nothing is sent to it until you say it works again: press Try again now on @zeus once it does\.$",
+        r"^@zeus-amber-pine's account is unavailable: Muse refused: the account has no allowance; .* It can take work after its login changes, or you can press Try again now on @zeus\.$",
     );
     // Hours later, passes and a window that still shows the refusal change nothing, and
     // nobody is told again.
@@ -219,20 +219,19 @@ fn the_human_saying_the_account_works_again_brings_the_member_back_and_its_task_
             .task(1)
             .task
             .aside
-            .is_some_and(|aside| aside.ends_with("until the human says it works")),
+            .is_some_and(|aside| aside.contains("its account is unavailable")),
         "{:?}",
         tiers.task(1).task.aside
     );
 }
 
 #[test]
-fn an_allowance_the_harness_shows_again_brings_an_unavailable_member_back_a_still_full_one_does_not(
-) {
+fn an_allowance_the_harness_shows_does_not_release_the_member() {
     brought_back_by_a_count_of(Level::Ok, 3);
 }
 
 #[test]
-fn an_allowance_nearly_spent_brings_an_unavailable_member_back_too() {
+fn an_allowance_nearly_spent_does_not_release_the_member() {
     // A count past 95 percent (`Level::Low`) holds no member (T-1356): it is an allowance.
     brought_back_by_a_count_of(Level::Low, 96);
 }
@@ -270,7 +269,11 @@ fn brought_back_by_a_count_of(level: Level, used: u64) {
         agent.quota = Some(Arc::new(usage(level, used)));
     });
     context.pass().unwrap();
-    assert_eq!(tiers.out_until("zeus"), None, "its allowance is back");
+    assert!(
+        tiers.out_until("zeus").is_some(),
+        "usage does not release its hold"
+    );
+    context.back_from_quota(tiers.project.id, "zeus").unwrap();
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(
@@ -278,4 +281,37 @@ fn brought_back_by_a_count_of(level: Level, used: u64) {
         ("working", Some("zeus-amber-pine")),
         "its task went on"
     );
+}
+
+fn chief_back_by_usage(level: Level, used: u64) {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    context.pass().unwrap();
+    context.adapter.refuse("chief", unavailable(&context));
+    context.pass().unwrap();
+    assert!(tiers.out_until("chief").is_some());
+    context.adapter.with("chief", |agent| {
+        agent.failed = false;
+        agent.quota = Some(Arc::new(Quota::Usage {
+            level,
+            used_percent: Some(used.into()),
+            resets_at: None,
+        }));
+    });
+    context.pass().unwrap();
+    assert_eq!(
+        tiers.out_until("chief"),
+        None,
+        "the chief retains its existing allowance recovery"
+    );
+}
+
+#[test]
+fn an_unavailable_chief_retains_its_existing_usage_recovery() {
+    chief_back_by_usage(Level::Ok, 3);
+}
+
+#[test]
+fn an_unavailable_chief_retains_its_existing_low_usage_recovery() {
+    chief_back_by_usage(Level::Low, 96);
 }

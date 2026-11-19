@@ -8,7 +8,7 @@ use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
 use super::transcripts::items_of;
-use crate::messages::{has_standing_answer, hold_said, is_busy_note};
+use crate::messages::{has_standing_answer, hold_said_until, is_busy_note};
 use crate::model::{self, sql_list, LedgerError, FINISHED_TASK_STATES};
 use crate::projects::known_project;
 use crate::store::Store;
@@ -153,9 +153,9 @@ fn held_tasks(store: &Store, project_id: i64, chief: i64) -> Result<Vec<TaskView
             held.push(task);
             continue;
         }
-        if task.held_until.is_none() {
+        let Some(until) = task.held_until.as_deref() else {
             continue;
-        }
+        };
         let notes = store
             .db
             .prepare(
@@ -169,7 +169,7 @@ fn held_tasks(store: &Store, project_id: i64, chief: i64) -> Result<Vec<TaskView
             if is_busy_note(task.number, body) {
                 Some(None)
             } else {
-                hold_said(task.number, body).map(Some)
+                hold_said_until(task.number, body, until).map(Some)
             }
         });
         if let Some(Some(said)) = hold {

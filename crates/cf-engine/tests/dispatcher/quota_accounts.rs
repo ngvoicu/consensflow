@@ -100,18 +100,26 @@ fn a_chief_out_on_its_members_account_is_back_once_a_window_of_the_member_gets_a
     context.advance(60_000);
     goes_on(&context.adapter, &session, &now(&context));
     context.pass().unwrap();
-    assert_eq!(tiers.out_until("zeus"), None);
+    assert!(
+        tiers.out_until("zeus").is_some(),
+        "the member keeps its hold"
+    );
     assert_eq!(tiers.out_until("chief"), None, "the chief is back with it");
+    context.back_from_quota(tiers.project.id, "zeus").unwrap();
     finished_and_handed_over(&tiers, &session);
 }
 
 #[test]
-fn a_chief_out_on_its_members_account_is_back_once_the_human_says_the_member_is_back() {
+fn pressing_the_member_leaves_the_chief_held() {
     let context = Context::new();
     let (tiers, session) = out_together(&context);
     let back = context.back_from_quota(tiers.project.id, "zeus").unwrap();
     assert_eq!(back.out_until, None);
-    assert_eq!(tiers.out_until("chief"), None, "the chief is back with it");
+    assert!(
+        tiers.out_until("chief").is_some(),
+        "the chief keeps its own hold"
+    );
+    context.back_from_quota(tiers.project.id, "chief").unwrap();
     context.adapter.with(&session, |agent| {
         agent.quota = None;
         agent.failed = false;
@@ -144,7 +152,10 @@ fn a_chief_marked_out_after_the_turn_that_got_through_stays_out() {
     assert_eq!(tiers.out_until("chief"), Some(resets_at.clone()));
     goes_on(&context.adapter, &session, &through);
     context.pass().unwrap();
-    assert_eq!(tiers.out_until("zeus"), None);
+    assert!(
+        tiers.out_until("zeus").is_some(),
+        "the member keeps its hold"
+    );
     assert_eq!(
         tiers.out_until("chief"),
         Some(resets_at),
@@ -199,7 +210,10 @@ fn a_chief_stays_out_when_its_harness_may_log_windows_into_several_accounts() {
     context.advance(60_000);
     goes_on(&context.adapter, &session, &now(&context));
     context.pass().unwrap();
-    assert_eq!(tiers.out_until("zeus"), None);
+    assert!(
+        tiers.out_until("zeus").is_some(),
+        "the member keeps its hold"
+    );
     assert!(
         tiers.out_until("chief").is_some(),
         "zeus's account may be another"
@@ -258,7 +272,7 @@ fn a_chief_stays_out_when_the_member_that_came_back_runs_on_another_harness() {
     context.advance(60_000);
     goes_on(&context.codex, &session, &now(&context));
     context.pass().unwrap();
-    assert_eq!(out("zeus"), None);
+    assert!(out("zeus").is_some(), "the member keeps its hold");
     assert!(out("chief").is_some(), "Codex's account is not Claude's");
 }
 
@@ -478,7 +492,10 @@ fn a_chief_marked_out_in_the_same_pass_as_its_members_answer_is_back_with_the_me
         .adapter
         .refuse("chief", exhausted(Some(&now(&context)), Some(&resets_at)));
     context.pass().unwrap();
-    assert_eq!(tiers.out_until("zeus"), None);
+    assert!(
+        tiers.out_until("zeus").is_some(),
+        "the member keeps its hold"
+    );
     assert_eq!(tiers.out_until("chief"), Some(resets_at));
     // zeus works on: its next turn is the account's news for the chief.
     context.advance(60_000);
@@ -514,7 +531,10 @@ fn a_member_back_from_its_reset_brings_back_no_chief_out_until_a_later_one() {
     context.advance(60_000);
     goes_on(&context.adapter, &session, &now(&context));
     context.pass().unwrap();
-    assert_eq!(tiers.out_until("zeus"), None);
+    assert!(
+        tiers.out_until("zeus").is_some(),
+        "the member keeps its hold"
+    );
     assert_eq!(tiers.out_until("chief"), Some(week.clone()));
     // The human hears the chief stays out, as a /login in zeus's window brought back zeus alone.
     let still_out = || -> Vec<String> {
@@ -524,23 +544,18 @@ fn a_member_back_from_its_reset_brings_back_no_chief_out_until_a_later_one() {
             .filter(|note| note.starts_with("@chief is still out of quota"))
             .collect()
     };
-    assert_eq!(
-        still_out(),
-        [format!(
-            "@chief is still out of quota until {week}, though @zeus is back on the same account: its limit resets later than @zeus's. If its account has quota again (another account, a bigger plan), press Try again now on @chief."
-        )]
-    );
+    assert!(still_out().is_empty(), "the member is still held");
     // zeus works on: none of its turns undoes the chief's week, nor tells it again.
     context.pass().unwrap();
     context.pass().unwrap();
-    assert_eq!(tiers.task(1).task.state, "working");
+    assert_eq!(tiers.task(1).task.state, "paused");
     context.advance(60_000);
     context
         .adapter
         .writes(&session, "Tests pass.", &now(&context));
     context.pass().unwrap();
     assert_eq!(tiers.out_until("chief"), Some(week));
-    assert_eq!(still_out().len(), 1);
+    assert!(still_out().is_empty());
 }
 
 #[test]
@@ -574,7 +589,10 @@ fn a_teammates_turn_that_got_through_brings_back_an_unavailable_chief_and_it_is_
     context.advance(60_000);
     goes_on(&context.adapter, &session, &now(&context));
     context.pass().unwrap();
-    assert_eq!(tiers.out_until("zeus"), None);
+    assert!(
+        tiers.out_until("zeus").is_some(),
+        "the member keeps its hold"
+    );
     assert_eq!(tiers.out_until("chief"), None, "the account works");
     assert!(
         tiers
@@ -587,11 +605,13 @@ fn a_teammates_turn_that_got_through_brings_back_an_unavailable_chief_and_it_is_
 }
 
 #[test]
-fn a_members_held_task_goes_on_once_the_human_says_the_chief_is_back() {
+fn pressing_the_chief_leaves_a_members_task_held() {
     let context = Context::new();
     let (tiers, session) = out_together(&context);
     context.back_from_quota(tiers.project.id, "chief").unwrap();
-    assert_eq!(tiers.out_until("zeus"), None, "zeus is back with it");
+    assert!(tiers.out_until("zeus").is_some(), "zeus keeps its hold");
+    assert_eq!(tiers.task(1).task.state, "paused");
+    context.back_from_quota(tiers.project.id, "zeus").unwrap();
     context.adapter.with(&session, |agent| {
         agent.quota = None;
         agent.failed = false;
@@ -703,7 +723,10 @@ fn a_chief_whose_reset_is_within_the_hour_of_its_members_is_back_with_it() {
     context.advance(60_000);
     goes_on(&context.adapter, &session, &now(&context));
     context.pass().unwrap();
-    assert_eq!(tiers.out_until("zeus"), None);
+    assert!(
+        tiers.out_until("zeus").is_some(),
+        "the member keeps its hold"
+    );
     assert_eq!(
         tiers.out_until("chief"),
         None,
@@ -796,7 +819,7 @@ fn results_of(tiers: &Tiers<'_>, number: i64) -> Vec<(String, String)> {
 }
 
 #[test]
-fn a_member_brought_back_by_the_chiefs_turn_goes_on_with_its_task_and_its_refusal_is_no_result() {
+fn a_chiefs_turn_does_not_release_the_member_and_its_refusal_is_no_result() {
     // Turn-end meets the account's news: zeus's window still reads the refusal its turn
     // ended on when the chief's turn brings zeus back, and that answer is no result, nor
     // its task's failure, however T-1 waited for the reset.
@@ -812,7 +835,8 @@ fn a_member_brought_back_by_the_chiefs_turn_goes_on_with_its_task_and_its_refusa
     });
     context.pass().unwrap();
     assert_eq!(tiers.out_until("chief"), None);
-    assert_eq!(tiers.out_until("zeus"), None, "zeus is back with it");
+    assert!(tiers.out_until("zeus").is_some(), "zeus keeps its hold");
+    context.back_from_quota(tiers.project.id, "zeus").unwrap();
     assert!(
         context.adapter.agent(&session).failed,
         "its record still reads the refusal"

@@ -5,6 +5,7 @@ use crate::{
     staff, Candidate, HoldKind, LedgerError, MemberEdit, MemberView, NewMember, ParticipantView,
     ProjectView, RemovedMember, StaffMember,
 };
+use rusqlite::params;
 
 impl Ledger {
     /// Whether this staff row is a backup rather than an independent member.
@@ -51,6 +52,24 @@ impl Ledger {
         staff::hold_kind(&self.store, participant)
     }
 
+    /// The generation of a member's configured harness and model.
+    pub fn member_setup_generation(&self, participant: i64) -> Result<i64, LedgerError> {
+        Ok(self.store.db.query_row(
+            "SELECT setup_generation FROM participant WHERE id = ?",
+            [participant],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// A fresh hold increments this even when its timestamps match an older hold.
+    pub fn member_hold_generation(&self, participant: i64) -> Result<i64, LedgerError> {
+        Ok(self.store.db.query_row(
+            "SELECT hold_generation FROM participant WHERE id = ?",
+            [participant],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Put a staff row on Vacation. `unopened` identifies its sessions the caller
     /// has proved have no window or open in flight, while holding its engine step.
     pub fn send_on_vacation(
@@ -91,6 +110,111 @@ impl Ledger {
         kind: HoldKind,
     ) -> Result<ParticipantView, LedgerError> {
         staff::mark_out_kind(&mut self.store, participant, until, reason, Some(kind))
+    }
+
+    /// Mark a refusal and keep the login's metadata fingerprint with the new hold.
+    pub fn mark_out_with_login(
+        &mut self,
+        participant: i64,
+        until: &str,
+        reason: &str,
+        kind: HoldKind,
+        revision: Option<u64>,
+    ) -> Result<ParticipantView, LedgerError> {
+        self.store.write(|store| {
+            let old = store.participant_row(participant)?;
+            let now = store.at();
+            let already_out = old
+                .out_until
+                .as_deref()
+                .and_then(cf_base::time::parse)
+                .zip(cf_base::time::parse(&now))
+                .is_some_and(|(end, now)| end > now);
+            let previous: Option<String> = store.db.query_row(
+                "SELECT hold_login_revision FROM participant WHERE id = ?",
+                [participant],
+                |row| row.get(0),
+            )?;
+            let current = revision.map(|value| value.to_string());
+            let login_changed = already_out
+                && staff::account_hold(store, &old)?
+                && matches!(kind, HoldKind::Quota | HoldKind::Account)
+                && previous
+                    .as_ref()
+                    .zip(current.as_ref())
+                    .is_some_and(|(a, b)| a != b);
+            if login_changed {
+                staff::mark_back(store, participant, "login metadata changed")?;
+            }
+            let marked = staff::mark_out_kind(store, participant, until, reason, Some(kind))?;
+            if (!already_out || login_changed)
+                && matches!(kind, HoldKind::Quota | HoldKind::Account)
+            {
+                store.db.execute(
+                    "UPDATE participant SET hold_login_revision = ?1 WHERE id = ?2",
+                    params![current, participant],
+                )?;
+            }
+            Ok(marked)
+        })
+    }
+
+    /// Observe a held setup only if the hold and member still match the look begun.
+    #[allow(clippy::too_many_arguments)]
+    pub fn observe_hold_login(
+        &mut self,
+        participant: i64,
+        since: Option<&str>,
+        until: &str,
+        harness: &str,
+        model: Option<&str>,
+        generation: i64,
+        hold_generation: i64,
+        revision: u64,
+    ) -> Result<bool, LedgerError> {
+        self.store.write(|store| {
+            let row = store.participant_row(participant)?;
+            let now = store.at();
+            if row.left_at.is_some()
+                || store.db.query_row(
+                    "SELECT setup_generation FROM participant WHERE id = ?",
+                    [participant],
+                    |r| r.get::<_, i64>(0),
+                )? != generation
+                || store.db.query_row(
+                    "SELECT hold_generation FROM participant WHERE id = ?",
+                    [participant],
+                    |r| r.get::<_, i64>(0),
+                )? != hold_generation
+                || row.harness.as_deref() != Some(harness)
+                || row.model.as_deref() != model
+                || row.out_since.as_deref() != since
+                || row.out_until.as_deref() != Some(until)
+                || cf_base::time::parse(until)
+                    .zip(cf_base::time::parse(&now))
+                    .is_none_or(|(end, now)| end <= now)
+                || !staff::account_hold(store, &row)?
+            {
+                return Ok(false);
+            }
+            let previous: Option<String> = store.db.query_row(
+                "SELECT hold_login_revision FROM participant WHERE id = ?",
+                [participant],
+                |r| r.get(0),
+            )?;
+            let revision = revision.to_string();
+            if previous.as_deref().is_some_and(|old| old != revision) {
+                staff::mark_back(store, participant, "login metadata changed")?;
+                return Ok(true);
+            }
+            if previous.is_none() {
+                store.db.execute(
+                    "UPDATE participant SET hold_login_revision = ? WHERE id = ?",
+                    params![revision, participant],
+                )?;
+            }
+            Ok(false)
+        })
     }
 
     /// A member joins the staff, named by its model, or one that left on the same

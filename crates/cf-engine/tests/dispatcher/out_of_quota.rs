@@ -1,11 +1,11 @@
 //! A member out of quota mid-task: its task is held with its window when the
 //! reset is near or nobody else could take it, and goes on by itself at the
 //! reset; every window of the member acts on its own refusal; the member is
-//! back once a window gets a turn through, or when the human says so.
+//! eligible again at its reset or when the person acts.
 
 use cf_engine::testing::Context;
 use cf_engine::ActivityState;
-use cf_harness::records::Role;
+use cf_harness::records::{Quota, Role};
 use cf_harness::seams::Time;
 use cf_ledger::NewTask;
 
@@ -107,6 +107,7 @@ fn holds_the_task_when_nobody_else_of_its_tier_is_free_whatever_the_reset() {
     context.pass().unwrap();
     context.pass().unwrap();
     let resets_at = after(&context, 3 * 3_600_000);
+    let hold_until = resets_at.clone();
     context
         .adapter
         .quota("zeus", Some(exhausted(None, Some(&resets_at))));
@@ -114,7 +115,7 @@ fn holds_the_task_when_nobody_else_of_its_tier_is_free_whatever_the_reset() {
     let held = tiers.task(1).task;
     assert_eq!(
         (held.state.as_str(), held.held_until),
-        ("paused", Some(resets_at))
+        ("paused", Some(hold_until))
     );
     held_to(
         context.close(),
@@ -178,13 +179,14 @@ fn holds_the_task_of_every_one_of_a_members_windows_that_runs_into_its_quota_not
         ["working", "working"]
     );
     let resets_at = after(&context, 48 * 3_600_000);
+    let hold_until = resets_at.clone();
     let refusal = || exhausted(Some(&now(&context)), Some(&resets_at));
     context.adapter.refuse(&one, refusal());
     context.pass().unwrap();
     let first = tiers.task(1).task;
     assert_eq!(
         (first.state.as_str(), first.held_until),
-        ("paused", Some(resets_at.clone()))
+        ("paused", Some(hold_until.clone()))
     );
     // The other window runs into the same limit a minute later, its member out by then.
     context.advance(60_000);
@@ -193,16 +195,16 @@ fn holds_the_task_of_every_one_of_a_members_windows_that_runs_into_its_quota_not
     let second = tiers.task(2).task;
     assert_eq!(
         (second.state.as_str(), second.held_until),
-        ("paused", Some(resets_at.clone()))
+        ("paused", Some(hold_until.clone()))
     );
     assert_eq!(
         tiers.notes("chief"),
         [
             format!(
-                "T-1 waits with @{one}: out of quota until {resets_at}, or sooner if its account has quota again; it goes on by itself."
+                "T-1 waits with @{one}: out of quota until {hold_until}, or sooner if its account has quota again; it goes on by itself."
             ),
             format!(
-                "T-2 waits with @{two}: out of quota until {resets_at}, or sooner if its account has quota again; it goes on by itself."
+                "T-2 waits with @{two}: out of quota until {hold_until}, or sooner if its account has quota again; it goes on by itself."
             ),
         ]
     );
@@ -220,8 +222,7 @@ fn holds_the_task_of_every_one_of_a_members_windows_that_runs_into_its_quota_not
 }
 
 #[test]
-fn takes_a_member_back_once_one_of_its_windows_gets_a_turn_through_and_what_was_held_for_it_goes_on(
-) {
+fn another_window_answer_does_not_release_the_member_but_try_again_does() {
     // The human logged the harness into another account (poker-lab, 2026-10-04).
     let context = Context::new();
     let tiers = Tiers::new(&context, &["zeus"]);
@@ -231,13 +232,14 @@ fn takes_a_member_back_once_one_of_its_windows_gets_a_turn_through_and_what_was_
     context.pass().unwrap();
     let (one, two) = (tiers.assignee(1), tiers.assignee(2));
     let resets_at = after(&context, 48 * 3_600_000);
+    let hold_until = resets_at.clone();
     context
         .adapter
         .refuse(&one, exhausted(Some(&now(&context)), Some(&resets_at)));
     context.pass().unwrap();
     assert_eq!(
         (tiers.task(1).task.state, tiers.out_until("zeus")),
-        ("paused".to_owned(), Some(resets_at))
+        ("paused".to_owned(), Some(hold_until.clone()))
     );
     // The other window was in a long command meanwhile; its next turn gets through.
     context.advance(60_000);
@@ -245,7 +247,13 @@ fn takes_a_member_back_once_one_of_its_windows_gets_a_turn_through_and_what_was_
         .adapter
         .writes(&two, "The tests pass.", &now(&context));
     context.pass().unwrap();
-    assert_eq!(tiers.out_until("zeus"), None, "back before its reset");
+    assert_eq!(
+        tiers.out_until("zeus"),
+        Some(hold_until),
+        "the other window does not release the hold"
+    );
+    assert_eq!(tiers.task(1).task.state, "paused");
+    context.back_from_quota(tiers.project.id, "zeus").unwrap();
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(
@@ -268,8 +276,7 @@ fn takes_a_member_back_once_one_of_its_windows_gets_a_turn_through_and_what_was_
 }
 
 #[test]
-fn keeps_a_member_out_when_claude_only_closes_a_turn_the_quit_cut_and_takes_it_back_at_its_answer()
-{
+fn a_cut_turn_and_a_later_answer_do_not_release_a_members_hold() {
     // T-530: the check that a window got a turn through counted Claude Code's own
     // close of a cut turn, written when its next message comes, as an answer.
     let context = Context::new();
@@ -280,11 +287,12 @@ fn keeps_a_member_out_when_claude_only_closes_a_turn_the_quit_cut_and_takes_it_b
     context.pass().unwrap();
     let (one, two) = (tiers.assignee(1), tiers.assignee(2));
     let resets_at = after(&context, 48 * 3_600_000);
+    let hold_until = resets_at.clone();
     context
         .adapter
         .refuse(&one, exhausted(Some(&now(&context)), Some(&resets_at)));
     context.pass().unwrap();
-    assert_eq!(tiers.out_until("zeus"), Some(resets_at.clone()));
+    assert_eq!(tiers.out_until("zeus"), Some(hold_until.clone()));
     // The app's quit cut the other window in a long command; opened again on its
     // conversation, it is given its next message, whose turn is still on its way.
     context.advance(60_000);
@@ -295,7 +303,7 @@ fn keeps_a_member_out_when_claude_only_closes_a_turn_the_quit_cut_and_takes_it_b
     context.pass().unwrap();
     assert_eq!(
         tiers.out_until("zeus"),
-        Some(resets_at),
+        Some(hold_until.clone()),
         "Claude's own close of the cut turn is no turn through"
     );
     assert_eq!(tiers.task(1).task.state, "paused", "T-1 is still held");
@@ -305,7 +313,12 @@ fn keeps_a_member_out_when_claude_only_closes_a_turn_the_quit_cut_and_takes_it_b
         .adapter
         .writes(&two, "The tests pass.", &now(&context));
     context.pass().unwrap();
-    assert_eq!(tiers.out_until("zeus"), None, "back at its answer");
+    assert_eq!(
+        tiers.out_until("zeus"),
+        Some(hold_until),
+        "another window's answer leaves the hold in place"
+    );
+    context.back_from_quota(tiers.project.id, "zeus").unwrap();
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(
@@ -316,7 +329,7 @@ fn keeps_a_member_out_when_claude_only_closes_a_turn_the_quit_cut_and_takes_it_b
 }
 
 #[test]
-fn takes_a_member_back_at_a_progress_note_of_a_turn_that_got_through() {
+fn a_progress_note_does_not_release_a_members_hold() {
     // Codex's progress notes are the harness's commentary, but the model wrote them:
     // only what the harness wrote with no model behind it is no turn through.
     let context = Context::new();
@@ -327,11 +340,12 @@ fn takes_a_member_back_at_a_progress_note_of_a_turn_that_got_through() {
     context.pass().unwrap();
     let (one, two) = (tiers.assignee(1), tiers.assignee(2));
     let resets_at = after(&context, 48 * 3_600_000);
+    let hold_until = resets_at.clone();
     context
         .adapter
         .refuse(&one, exhausted(Some(&now(&context)), Some(&resets_at)));
     context.pass().unwrap();
-    assert_eq!(tiers.out_until("zeus"), Some(resets_at));
+    assert_eq!(tiers.out_until("zeus"), Some(hold_until.clone()));
     context.advance(60_000);
     let mut note = context
         .adapter
@@ -341,12 +355,15 @@ fn takes_a_member_back_at_a_progress_note_of_a_turn_that_got_through() {
     note.commentary = true;
     context.adapter.with(&two, |agent| agent.items.push(note));
     context.pass().unwrap();
-    assert_eq!(tiers.out_until("zeus"), None, "back at the model's note");
+    assert_eq!(
+        tiers.out_until("zeus"),
+        Some(hold_until),
+        "a model's note does not release the hold"
+    );
 }
 
 #[test]
-fn takes_a_member_back_at_an_answer_its_record_dates_in_milliseconds_and_not_at_a_reply_never_begun(
-) {
+fn an_answer_dated_in_milliseconds_does_not_release_a_members_hold() {
     // A record may date its messages in milliseconds, which the check that a window got a
     // turn through never read: such a member was back only at its reset. A message made
     // before the model's reply is no turn through (T-530).
@@ -358,11 +375,12 @@ fn takes_a_member_back_at_an_answer_its_record_dates_in_milliseconds_and_not_at_
     context.pass().unwrap();
     let (one, two) = (tiers.assignee(1), tiers.assignee(2));
     let resets_at = after(&context, 48 * 3_600_000);
+    let hold_until = resets_at.clone();
     context
         .adapter
         .refuse(&one, exhausted(Some(&now(&context)), Some(&resets_at)));
     context.pass().unwrap();
-    assert_eq!(tiers.out_until("zeus"), Some(resets_at.clone()));
+    assert_eq!(tiers.out_until("zeus"), Some(hold_until.clone()));
     let replying = |text: &str, synthetic: bool| {
         context.advance(60_000);
         let mut reply = context.adapter.item(Role::Assistant, text);
@@ -375,11 +393,15 @@ fn takes_a_member_back_at_an_answer_its_record_dates_in_milliseconds_and_not_at_
     replying("", true);
     assert_eq!(
         tiers.out_until("zeus"),
-        Some(resets_at),
+        Some(hold_until.clone()),
         "a reply never begun is no turn through"
     );
     replying("The tests pass.", false);
-    assert_eq!(tiers.out_until("zeus"), None, "back at its answer");
+    assert_eq!(
+        tiers.out_until("zeus"),
+        Some(hold_until),
+        "a later answer does not release the hold"
+    );
 }
 
 #[test]
@@ -693,4 +715,129 @@ fn keeps_a_held_task_paused_its_hold_cleared_when_the_member_it_was_given_to_by_
         SUITES,
         "keeps a held task paused, its hold cleared, when the member it was given to by name left the staff, and says what the ledger refused",
     );
+}
+
+#[test]
+fn a_busy_member_stays_out_for_a_synthetic_close_and_returns_at_its_answer() {
+    // T-530: the check that a window got a turn through counted Claude Code's own
+    // close of a cut turn, written when its next message comes, as an answer.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open_body("One");
+    tiers.open_body("Two");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let (one, two) = (tiers.assignee(1), tiers.assignee(2));
+    let resets_at = after(&context, 60_000);
+    context.adapter.refuse(
+        &one,
+        Quota::Busy {
+            at: Some(now(&context)),
+            because: "model busy".to_owned(),
+        },
+    );
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), Some(resets_at.clone()));
+    // The app's quit cut the other window in a long command; opened again on its
+    // conversation, it is given its next message, whose turn is still on its way.
+    context.advance(5_000);
+    context
+        .adapter
+        .closes_a_cut_turn(&two, "Go on where you stopped.", &now(&context));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        tiers.out_until("zeus"),
+        Some(resets_at),
+        "Claude's own close of the cut turn is no turn through"
+    );
+    assert_eq!(tiers.task(1).task.state, "paused", "T-1 is still held");
+    // The model answers: that turn got through.
+    context.advance(5_000);
+    context
+        .adapter
+        .writes(&two, "The tests pass.", &now(&context));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), None, "back at its answer");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        placed(&tiers.task(1).task),
+        ("working", Some(one.as_str())),
+        "held, it goes on in its own window"
+    );
+}
+
+#[test]
+fn a_busy_member_returns_at_a_progress_note_of_a_turn_that_got_through() {
+    // Codex's progress notes are the harness's commentary, but the model wrote them:
+    // only what the harness wrote with no model behind it is no turn through.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open_body("One");
+    tiers.open_body("Two");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let (one, two) = (tiers.assignee(1), tiers.assignee(2));
+    let resets_at = after(&context, 60_000);
+    context.adapter.refuse(
+        &one,
+        Quota::Busy {
+            at: Some(now(&context)),
+            because: "model busy".to_owned(),
+        },
+    );
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), Some(resets_at));
+    context.advance(5_000);
+    let mut note = context
+        .adapter
+        .item(Role::Assistant, "I'll read the diff, then run the tests.");
+    note.at = Some(json!(now(&context)));
+    note.complete = false;
+    note.commentary = true;
+    context.adapter.with(&two, |agent| agent.items.push(note));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), None, "back at the model's note");
+}
+
+#[test]
+fn a_busy_member_returns_at_a_millisecond_answer_but_not_a_synthetic_reply() {
+    // A record may date its messages in milliseconds, which the check that a window got a
+    // turn through never read: such a member was back only at its reset. A message made
+    // before the model's reply is no turn through (T-530).
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open_body("One");
+    tiers.open_body("Two");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let (one, two) = (tiers.assignee(1), tiers.assignee(2));
+    let resets_at = after(&context, 60_000);
+    context.adapter.refuse(
+        &one,
+        Quota::Busy {
+            at: Some(now(&context)),
+            because: "model busy".to_owned(),
+        },
+    );
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), Some(resets_at.clone()));
+    let replying = |text: &str, synthetic: bool| {
+        context.advance(5_000);
+        let mut reply = context.adapter.item(Role::Assistant, text);
+        reply.at = Some(json!(context.time.wall_ms()));
+        reply.complete = false;
+        reply.synthetic = synthetic;
+        context.adapter.with(&two, |agent| agent.items.push(reply));
+        context.pass().unwrap();
+    };
+    replying("", true);
+    assert_eq!(
+        tiers.out_until("zeus"),
+        Some(resets_at),
+        "a reply never begun is no turn through"
+    );
+    replying("The tests pass.", false);
+    assert_eq!(tiers.out_until("zeus"), None, "back at its answer");
 }

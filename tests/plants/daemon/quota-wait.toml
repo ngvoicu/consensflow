@@ -492,17 +492,3 @@ runs = ["quota-wait-engine"]
 file = "crates/cf-engine/src/scheduler.rs"
 find = "            item.role == Role::User && !item.compaction && header_id(&item.text).is_some()"
 replace = "            item.role == Role::User && header_id(&item.text).is_some()"
-
-[[plant]]
-name = "quota wait: the chief's continuation brings nobody back on its account, and the worker's own goes on with no resume words"
-meant = "the_chief_continuing_first_brings_the_worker_back_and_the_task_ends_once_with_its_result"
-runs = ["quota-wait-continues"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = """
-        if !out {
-            let news = News::Turn {"""
-replace = """
-        if false && !out {
-            let news = News::Turn {"""

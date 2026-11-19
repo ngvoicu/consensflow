@@ -1,0 +1,179 @@
+# Mutations of the hold rule; the dispatcher tests use only fake logins.
+[run]
+hold-rule = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "hold_rule::"]
+
+[[plant]]
+name = "hold rule: polling is skipped"
+meant = "changed_login_metadata_ends_the_old_hold"
+runs = ["hold-rule"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        self.watch_held_logins(&listed);
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "hold rule: another window answer ends its hold"
+meant = "a_different_window_answer_does_not_release_the_members_hold"
+runs = ["hold-rule"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+            && (busy_hold || owner.role == "chief")
+'''
+replace = '''
+            && (busy_hold || owner.role == "chief" || owner.role != "chief")
+'''
+
+[[plant]]
+name = "hold rule: another member answer releases a shared hold"
+meant = "another_members_answer_does_not_release_a_shared_login_hold"
+runs = ["hold-rule"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+            if other.role != "chief"
+                && matches!(
+                    self.kind_of_hold(other.id, &until),
+                    Held::Quota | Held::Account
+                )
+            {
+                continue;
+            }
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "hold rule: old metadata observation releases a newer hold"
+meant = "an_inflight_old_login_look_cannot_release_a_new_hold_with_identical_times"
+runs = ["hold-rule"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/staff.rs"
+find = '''
+                || store.db.query_row(
+                    "SELECT hold_generation FROM participant WHERE id = ?",
+                    [participant],
+                    |r| r.get::<_, i64>(0),
+                )? != hold_generation
+'''
+replace = '''
+                || hold_generation < 0
+'''
+
+[[plant]]
+name = "hold rule: later reset wins over earlier reset"
+meant = "later_refusal_with_an_earlier_reset_shortens_the_quota_hold"
+runs = ["hold-rule"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = '''
+if account_hold { old <= reset } else { old >= reset }'''
+replace = '''
+if account_hold { old >= reset } else { old >= reset }'''
+
+[[plant]]
+name = "hold rule: a new login refusal keeps its old reset"
+meant = "a_refusal_on_a_changed_login_starts_a_fresh_reset_before_the_poll"
+runs = ["hold-rule"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/staff.rs"
+find = '''
+            if login_changed {
+                staff::mark_back(store, participant, "login metadata changed")?;
+            }
+'''
+replace = '''
+            if false && login_changed {
+                staff::mark_back(store, participant, "login metadata changed")?;
+            }
+'''
+
+[[plant]]
+name = "hold rule: legacy busy backoff is released by login"
+meant = "a_legacy_busy_hold_is_not_released_by_login_metadata"
+runs = ["hold-rule"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/staff.rs"
+find = '''
+                || !staff::account_hold(store, &row)?
+'''
+replace = '''
+                || false
+'''
+
+[[plant]]
+name = "hold rule: edit leaves a member held"
+meant = "editing_the_model_ends_its_quota_hold"
+runs = ["hold-rule"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = '''
+            if quota::account_hold(store, &member)? {
+                quota::mark_back(store, member.id, "member setup edited")?;
+            }
+'''
+replace = '''
+            if false && quota::account_hold(store, &member)? {
+                quota::mark_back(store, member.id, "member setup edited")?;
+            }
+'''
+
+[[plant]]
+name = "hold rule: an answer already in progress is not collected"
+meant = "a_held_window_that_continues_on_its_own_delivers_its_result_without_releasing_the_member"
+runs = ["hold-rule"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+            if working {
+                let watching = self.watch_monitors(participant, record, observed).await;
+'''
+replace = '''
+            if working && false {
+                let watching = self.watch_monitors(participant, record, observed).await;
+'''
+
+[[plant]]
+name = "hold rule: try again also releases the other members"
+meant = "try_again_now_releases_only_the_pressed_member_on_a_shared_login"
+runs = ["hold-rule"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        self.changed();
+        match busy {
+'''
+replace = '''
+        for other in found.participants.iter().filter(|other| other.member_id.is_none() && other.role != "human" && other.id != member.id) {
+            self.seams.ledger.borrow_mut().mark_back(other.id, "shared login")?;
+        }
+        self.changed();
+        match busy {
+'''
+[[plant]]
+name = "hold rule: migration shortens an existing hold"
+meant = "pre_upgrade_hold_retains_its_end_after_restart"
+runs = ["hold-rule"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0041.sql"
+find = '''
+ALTER TABLE participant ADD COLUMN hold_generation INTEGER NOT NULL DEFAULT 0;
+'''
+replace = '''
+ALTER TABLE participant ADD COLUMN hold_generation INTEGER NOT NULL DEFAULT 0;
+UPDATE participant SET out_until = '2001-01-01T00:00:00.000Z' WHERE out_until IS NOT NULL;
+'''

@@ -188,6 +188,7 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     // As a build of the migration before it left it: its checks name the five roles, its
     // version is that migration's.
     let raw = Connection::open(&file).unwrap();
+    cf_ledger::testing::undo_migration_0041(&raw).expect("hold metadata undone");
     cf_ledger::testing::undo_migration_0040(&raw).expect("plan keys undone");
     cf_ledger::testing::undo_migration_0038(&raw).expect("own hands undone");
     undo_new_roles_migration(&raw).expect("the new roles' migration undone");
@@ -196,7 +197,7 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
         new_roles_version() - 1
     ))
     .unwrap();
-    let before = kept(&raw);
+    let mut before = kept(&raw);
     let suggestions: Vec<(String, i64)> = raw
         .prepare("SELECT name, prompt_suggestion FROM project ORDER BY id")
         .unwrap()
@@ -218,6 +219,11 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
     ledger.close().expect("closed");
     let raw = Connection::open(&file).unwrap();
     assert_eq!(version(&raw), SCHEMA_VERSION as i64);
+    for row in before["participant"].as_array_mut().unwrap() {
+        row.as_array_mut()
+            .unwrap()
+            .extend([json!("NULL"), json!("0"), json!("0")]);
+    }
     assert_eq!(
         kept(&raw),
         before,
@@ -242,7 +248,10 @@ fn a_ledger_a_build_before_the_new_roles_left_with_members_and_tasks_of_the_five
             (
                 name.clone(),
                 sql.replace(", 'frontend', 'architect', 'researcher', 'integrator'", "")
-                    .replace(", own_hands INTEGER NOT NULL DEFAULT 0", ""),
+                    .replace(", own_hands INTEGER NOT NULL DEFAULT 0", "")
+                    .replace(", hold_login_revision TEXT", "")
+                    .replace(", setup_generation INTEGER NOT NULL DEFAULT 0", "")
+                    .replace(", hold_generation INTEGER NOT NULL DEFAULT 0", ""),
             )
         })
         .collect();

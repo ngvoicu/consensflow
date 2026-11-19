@@ -86,6 +86,13 @@ impl PiAdapter {
 }
 
 impl Adapter for PiAdapter {
+    fn login_revision(&self) -> Work<'_, Option<u64>> {
+        let path = super::paths::agent_dir(&self.env)
+            .ok()
+            .map(|root| std::path::Path::new(&root).join("auth.json"));
+        Box::pin(async move { crate::shared::login_metadata::revision_async(path?).await })
+    }
+
     fn models(&self, fetch: bool) -> Work<'_, Result<ModelListing, String>> {
         Box::pin(async move {
             super::models::listed(

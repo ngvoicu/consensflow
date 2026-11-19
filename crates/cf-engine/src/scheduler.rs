@@ -8,6 +8,7 @@
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_base::refusal::Refusal;
@@ -38,9 +39,9 @@ const AGAIN_MS: i64 = 5 * 60_000;
 const UNKNOWN_RESET_MS: i64 = 60 * 60_000;
 
 /// What a member is marked out until when its account is unavailable (MUS-23): no
-/// reset exists, so nothing resets it, and its held tasks are due at no time of their
-/// own. Only the human's Try again now, or a count of its allowance that is not used up
-/// (Muse's `usage`), or a turn of its account that got through, ends it.
+/// reset exists, so its held tasks are due at no time of their own. A member comes
+/// back through Try again now, a login metadata change, or an edit. The chief keeps
+/// its existing allowance and successful-turn recovery too.
 const NEVER: &str = "9999-12-31T23:59:59.998Z";
 
 /// What a member is marked out until when its harness moved its window's model on its own
@@ -168,18 +169,11 @@ pub(crate) struct QuotaPart {
     pub(crate) drifts_told: HashSet<String>,
 }
 
-/// News that an account has quota again.
-pub(crate) enum News<'a> {
-    /// A turn of the window `record` got through (`observed`, its look).
-    /// `returned` is the reset its member was out until, where that turn brought
-    /// it back: none where the member was not out.
-    Turn {
-        record: &'a Record,
-        observed: &'a Observed,
-        returned: Option<String>,
-    },
-    /// The human's Try again now.
-    Human,
+/// A turn that got through, used for the existing busy-model behavior.
+pub(crate) struct News<'a> {
+    pub(crate) record: &'a Record,
+    pub(crate) observed: &'a Observed,
+    pub(crate) returned: Option<String>,
 }
 
 /// What the scheduler keeps across records: the open tasks whose requester
@@ -188,6 +182,8 @@ pub(crate) enum News<'a> {
 /// the time its participant was marked out.
 #[derive(Debug, Default)]
 pub(crate) struct SchedulerState {
+    login_polled: RefCell<HashMap<i64, i64>>,
+    login_polling: RefCell<HashSet<i64>>,
     waiting_noted: RefCell<HashMap<i64, i64>>,
     out_noted: RefCell<HashSet<(i64, String)>>,
     /// The members held for no time whose human was told why, each with the time it was
@@ -448,6 +444,108 @@ impl Taker<'_> {
 }
 
 impl Dispatcher {
+    /// Check only the metadata of the login used by a held member.
+    pub(crate) fn watch_held_logins(self: &Rc<Self>, projects: &[ProjectView]) {
+        for project in projects {
+            for member in project.participants.iter().filter(|p| {
+                p.member_id.is_none()
+                    && !matches!(p.role.as_str(), "human" | "chief")
+                    && p.left_at.is_none()
+                    && self.is_out(p)
+            }) {
+                let Some(until) = member.out_until.as_deref() else {
+                    continue;
+                };
+                if !matches!(
+                    self.kind_of_hold(member.id, until),
+                    Held::Quota | Held::Account
+                ) {
+                    continue;
+                }
+                let Some(harness) = member.harness.as_deref() else {
+                    continue;
+                };
+                let Some(adapter) = self.seams.adapters.adapter(harness) else {
+                    continue;
+                };
+                let now = self.seams.time.monotonic_ms();
+                if self
+                    .scheduler
+                    .login_polled
+                    .borrow()
+                    .get(&member.id)
+                    .is_some_and(|last| now.saturating_sub(*last) < 10_000)
+                    || !self.scheduler.login_polling.borrow_mut().insert(member.id)
+                {
+                    continue;
+                }
+                self.scheduler
+                    .login_polled
+                    .borrow_mut()
+                    .insert(member.id, now);
+                let generation = match self
+                    .seams
+                    .ledger
+                    .borrow()
+                    .member_setup_generation(member.id)
+                {
+                    Ok(generation) => generation,
+                    Err(cause) => {
+                        self.scheduler.login_polling.borrow_mut().remove(&member.id);
+                        self.seams
+                            .log
+                            .error("a held login could not be checked", &cause.to_string());
+                        continue;
+                    }
+                };
+                let hold_generation =
+                    match self.seams.ledger.borrow().member_hold_generation(member.id) {
+                        Ok(generation) => generation,
+                        Err(cause) => {
+                            self.scheduler.login_polling.borrow_mut().remove(&member.id);
+                            self.seams
+                                .log
+                                .error("a held login could not be checked", &cause.to_string());
+                            continue;
+                        }
+                    };
+                let (id, harness, model, since, until) = (
+                    member.id,
+                    harness.to_owned(),
+                    member.model.clone(),
+                    member.out_since.clone(),
+                    until.to_owned(),
+                );
+                let this = Rc::clone(self);
+                self.seams.spawn.spawn(Box::pin(async move {
+                    let revision = adapter.login_revision().await;
+                    let confirmed = adapter.login_revision().await;
+                    this.scheduler.login_polling.borrow_mut().remove(&id);
+                    let Some(revision) = revision.filter(|_| revision == confirmed) else {
+                        return;
+                    };
+                    match this.seams.ledger.borrow_mut().observe_hold_login(
+                        id,
+                        since.as_deref(),
+                        &until,
+                        &harness,
+                        model.as_deref(),
+                        generation,
+                        hold_generation,
+                        revision,
+                    ) {
+                        Ok(true) => this.changed(),
+                        Ok(false) => {}
+                        Err(cause) => this
+                            .seams
+                            .log
+                            .error("a held login could not be checked", &cause.to_string()),
+                    }
+                }));
+            }
+        }
+    }
+
     /// The backups the scheduler would pick for a fresh task of each role and tier now.
     /// This uses the same verdict and choice as a real assignment, including other members.
     pub fn backup_ready(
@@ -1159,7 +1257,7 @@ impl Dispatcher {
         let because = unwell.because();
         let body = match unwell {
             Unwell::Account(_) => format!(
-                "@{}'s account is unavailable: {because}. Nothing is sent to it until you say it works again: press Try again now on @{} once it does.",
+                "@{}'s account is unavailable: {because}. It can take work after its login changes, or you can press Try again now on @{}.",
                 participant.handle, owner.handle
             ),
             Unwell::Moved(_) => format!(
@@ -1230,23 +1328,7 @@ impl Dispatcher {
             .is_some_and(|(opened, at)| at < opened)
     }
 
-    /// News that an account has quota again brings back the others out on it.
-    /// Where every window of `owner`'s harness is logged into the one account
-    /// (`Adapter::one_account`), a quota that came back is theirs too: each other
-    /// member out on that harness, and the chief, is back. A chief at rest takes
-    /// no turn of its own, so a `/login` that brought its members back left it out
-    /// until its reset, with everything sent to it queued (the field report of
-    /// 2026-10-22, T-254).
-    ///
-    /// The human's word brings back all of them, in every project (`back_from_quota`):
-    /// the quota they renewed by hand is the account's. A window's turn that got through
-    /// is news for those marked out before it, read from the ledger as it is now
-    /// (one marked out earlier in this pass too), once for each answer. One
-    /// account is not one quota: a plan may limit one model by the week, so a
-    /// member back from a reset brings back none out until a later one, and the
-    /// human hears it stays out; and a turn brings one back once for each limit
-    /// it is out until: refused again with the same reset, or one within the hour
-    /// of it, its limit is not the teammate's.
+    /// Preserve main's shared-account busy behavior; quota and login holds are independent.
     pub(crate) fn back_on_its_account(
         &self,
         project: i64,
@@ -1256,28 +1338,19 @@ impl Dispatcher {
         let Some(harness) = owner.harness.as_deref() else {
             return Ok(());
         };
-        // A window's turn is news for the others only where nobody has to look to know they
-        // share the account (`one_account`); the human's word is for the harness's one login on
-        // the machine (`one_login`): the quota they renewed is the account's.
         let shared = self
             .seams
             .adapters
             .adapter(harness)
-            .is_some_and(|adapter| match news {
-                News::Human => adapter.one_login(),
-                News::Turn { .. } => adapter.one_account(),
-            });
+            .is_some_and(|adapter| adapter.one_account());
         if !shared {
             return Ok(());
         }
-        if let News::Turn {
-            record, observed, ..
-        } = news
         {
-            let Some(at) = last_answer(observed) else {
+            let Some(at) = last_answer(news.observed) else {
                 return Ok(());
             };
-            let mut quota = record.quota.borrow_mut();
+            let mut quota = news.record.quota.borrow_mut();
             if quota.answered.as_deref() == Some(at.as_str()) {
                 return Ok(());
             }
@@ -1304,38 +1377,26 @@ impl Dispatcher {
             if moved_hold(&until) {
                 continue;
             }
-            // The human's word is that the login works again (a quota renewed, a login
-            // done again, a credit bought). A model busy for a moment is none of those:
-            // its back-off is its own, and a press that shortened it would send its task
-            // back into a model still at capacity and spend one of its tries (T-1357).
-            if matches!(news, News::Human) && self.kind_of_hold(other.id, &until) == Held::Busy {
+            if other.role != "chief"
+                && matches!(
+                    self.kind_of_hold(other.id, &until),
+                    Held::Quota | Held::Account
+                )
+            {
                 continue;
             }
-            let back = match news {
-                News::Human => true,
-                News::Turn {
-                    observed,
-                    returned: Some(returned),
-                    ..
-                } => {
-                    // A later reset is a limit of its own; an account unavailable has none (MUS-23),
-                    // and a turn that got through says its refusal is over.
-                    if later_limit(&until, returned) && !never(&until) {
-                        // A later reset is a limit of its own, which no teammate's turn
-                        // undoes: the human hears it stays out, once for the limit.
-                        if self.tried_anew(other.id, &until) {
-                            self.tell_still_out(project, &other, owner, &until)?;
-                        }
-                        false
-                    } else {
-                        self.answered_since(&other, observed) && self.tried_anew(other.id, &until)
+            let back = match &news.returned {
+                Some(returned) if later_limit(&until, returned) && !never(&until) => {
+                    // A later reset is a limit of its own, which no teammate's turn
+                    // undoes: the human hears it stays out, once for the limit.
+                    if !self.is_out(owner) && self.tried_anew(other.id, &until) {
+                        self.tell_still_out(project, &other, owner, &until)?;
                     }
+                    false
                 }
-                News::Turn {
-                    observed,
-                    returned: None,
-                    ..
-                } => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),
+                _ => {
+                    self.answered_since(&other, news.observed) && self.tried_anew(other.id, &until)
+                }
             };
             if back {
                 self.seams

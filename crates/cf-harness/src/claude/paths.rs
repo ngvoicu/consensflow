@@ -12,7 +12,7 @@ use crate::shared::specmint;
 
 /// Claude Code's config folder: `CLAUDE_CONFIG_DIR`, an empty one too, else
 /// `.claude` in the user's home.
-fn config_folder(env: &Env) -> Result<String, String> {
+pub(crate) fn config_folder(env: &Env) -> Result<String, String> {
     match env.os("CLAUDE_CONFIG_DIR") {
         Some(root) => Ok(root.to_string_lossy().into_owned()),
         None => Ok(path::join(&[&home(env)?, ".claude"])),

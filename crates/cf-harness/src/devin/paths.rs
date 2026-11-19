@@ -46,7 +46,7 @@ pub(crate) fn global_specmint(env: &Env, variant: Variant) -> Option<String> {
 /// in the home when it is not set), and elsewhere in `XDG_DATA_HOME`
 /// (`.local/share` in the home). A variable set empty is kept, as `??`
 /// kept it.
-fn data(env: &Env) -> Result<String, String> {
+pub(crate) fn data(env: &Env) -> Result<String, String> {
     let base = if env.on_windows() {
         roaming(env)?
     } else {

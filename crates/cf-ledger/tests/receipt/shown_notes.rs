@@ -80,7 +80,7 @@ fn said_of(hold: Hold, session: &str) -> String {
     match hold {
         Hold::Quota => format!("waits with @{session}: out of quota until {UNTIL}"),
         Hold::Unavailable => format!(
-            "waits with @{session}: its account is unavailable (signed out) until the human says it works"
+            "waits with @{session}: its account is unavailable (signed out)"
         ),
         Hold::Moved => format!(
             "waits with @{session}: its harness moved it from Opus to Sonnet, until the human says it may go on"

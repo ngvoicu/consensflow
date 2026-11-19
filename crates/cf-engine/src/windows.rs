@@ -260,6 +260,7 @@ pub(crate) struct WindowPart {
     /// which harness it is, which the pane host is told where a turn begins.
     pub(crate) servers: Servers,
     pub(crate) harness: String,
+    pub(crate) setup_generation: Option<i64>,
     pub(crate) pane: Option<Pane>,
     pub(crate) opening: Option<Opening>,
     /// How many times a window was asked for it, counted as its window is asked for
@@ -417,6 +418,7 @@ impl Default for WindowPart {
             input: Input::Channel,
             servers: Servers::Unknown,
             harness: String::new(),
+            setup_generation: None,
             pane: None,
             opening: None,
             launches: 0,
@@ -545,6 +547,7 @@ struct Planned {
     /// ([`Adapter::silent_paste`](cf_harness::contract::Adapter::silent_paste)).
     silent_paste: Option<SilentPaste>,
     harness: String,
+    setup_generation: i64,
     argv: Vec<String>,
     env: Vec<(String, String)>,
     drop_env: Vec<String>,
@@ -593,6 +596,7 @@ impl Dispatcher {
             let mut window = record.window.borrow_mut();
             let taken = (window.token.take(), window.launch_id.take());
             window.window = None;
+            window.setup_generation = None;
             window.pane = None;
             window.failed_resume_window = None;
             window.retiring = false;
@@ -1091,6 +1095,7 @@ impl Dispatcher {
             part.input = planned.input;
             part.servers = planned.servers;
             part.harness.clone_from(&planned.harness);
+            part.setup_generation = Some(planned.setup_generation);
             part.pane = Some(pane.clone());
             part.opened_at = Some(asked_at);
             part.paid_untaken = None;
@@ -1203,6 +1208,11 @@ impl Dispatcher {
         role: Option<RoleText>,
         prelude: Option<Prelude>,
     ) -> Result<Option<Planned>, EngineError> {
+        let member = participant.member_id.unwrap_or(participant.id);
+        let setup_generation = self.seams.ledger.borrow().member_setup_generation(member)?;
+        if self.seams.ledger.borrow().member_setup_generation(member)? != setup_generation {
+            return Ok(None);
+        }
         // A member the update could not run on what it ran on (T-1202) opens no window on
         // its harness's default: its work goes back to the board, and the human hears why.
         if participant.role != "chief" && participant.needs_edit {
@@ -1441,6 +1451,7 @@ impl Dispatcher {
                 .map(Harness::as_str)
                 .unwrap_or_default()
                 .to_owned(),
+            setup_generation,
             argv: prepared.argv,
             env: prepared.env,
             drop_env: prepared.drop_env,

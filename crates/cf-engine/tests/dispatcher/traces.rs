@@ -350,7 +350,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "takes a member back once one of its windows gets a turn through, and what was held for it goes on",
-        HOLD_THEN_GOES_ON,
+        "another window's answer leaves the member held; its Try again now brings it back (T-1830)",
     ),
     (
         "steps no session with no window and nothing for it, and steps it again once something is",

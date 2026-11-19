@@ -18,7 +18,7 @@
 use std::fs::{self, File, Metadata};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 mod append;
 mod errno;
@@ -41,6 +41,13 @@ pub use write::{make_folder, write_file, write_whole, Mkdir};
 pub struct Identity {
     volume: u64,
     index: u64,
+}
+
+impl Identity {
+    /// Stable filesystem identifiers, used without opening or reading file contents.
+    pub fn parts(self) -> (u64, u64) {
+        (self.volume, self.index)
+    }
 }
 
 /// The identity of `file`, read from its open handle.
@@ -72,6 +79,8 @@ pub struct Stat {
     pub identity: Identity,
     pub size: u64,
     pub mtime_ms: f64,
+    /// The full filesystem timestamp, without Node's floating-point rounding.
+    pub modified: SystemTime,
 }
 
 /// `fs.stat(path)`, following a link as it does.
@@ -86,6 +95,7 @@ pub fn stat(path: &Path) -> io::Result<Stat> {
         },
         size: metadata.len(),
         mtime_ms: mtime_ms(&metadata)?,
+        modified: metadata.modified()?,
     })
 }
 
@@ -106,6 +116,7 @@ pub fn stat(path: &Path) -> io::Result<Stat> {
         identity: identity(&file)?,
         size: metadata.len(),
         mtime_ms: mtime_ms(&metadata)?,
+        modified: metadata.modified()?,
     })
 }
 

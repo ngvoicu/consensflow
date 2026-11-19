@@ -286,6 +286,13 @@ const DEVIN_PASTE: SilentPaste = SilentPaste {
 };
 
 impl Adapter for DevinAdapter {
+    fn login_revision(&self) -> Work<'_, Option<u64>> {
+        let path = super::paths::data(&self.services.env)
+            .ok()
+            .map(|root| std::path::Path::new(&root).join("credentials.toml"));
+        Box::pin(async move { crate::shared::login_metadata::revision_async(path?).await })
+    }
+
     /// Devin keeps the machine's one login, which all its windows use.
     fn one_login(&self) -> bool {
         true

@@ -113,6 +113,13 @@ const MUSE_ON_WINDOWS: SilentPaste = SilentPaste {
 };
 
 impl Adapter for MuseAdapter {
+    fn login_revision(&self) -> Work<'_, Option<u64>> {
+        let path = super::paths::settings(self.env())
+            .ok()
+            .map(|root| root.with_file_name("auth.json"));
+        Box::pin(async move { crate::shared::login_metadata::revision_async(path?).await })
+    }
+
     /// Muse keeps the machine's one login, which all its windows use.
     fn one_login(&self) -> bool {
         true

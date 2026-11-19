@@ -220,7 +220,7 @@ replace = '''
 
 [[plant]]
 name = "no low hold: a count nearly spent is no allowance for a member whose account was unavailable"
-meant = "an_allowance_nearly_spent_brings_an_unavailable_member_back_too"
+meant = "an_unavailable_chief_retains_its_existing_low_usage_recovery"
 runs = ["no-low-hold-accounts"]
 
 [[plant.edit]]
@@ -244,48 +244,6 @@ find = '''
 '''
 replace = '''
         .filter(|quota| quota.level() == Level::Exhausted)
-'''
-
-[[plant]]
-name = "no low hold: the human's word is for the harnesses whose windows follow a login, as a turn's is"
-meant = "the_humans_word_for_one_codex_member_brings_back_every_member_on_its_login_in_every_project"
-runs = ["no-low-hold-renewed"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-                News::Human => adapter.one_login(),
-'''
-replace = '''
-                News::Human => adapter.one_account(),
-'''
-
-[[plant]]
-name = "no low hold: the human's word is for Pi's members too"
-meant = "the_humans_word_for_one_pi_member_is_for_that_member_alone"
-runs = ["no-low-hold-renewed"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-                News::Human => adapter.one_login(),
-'''
-replace = '''
-                News::Human => true,
-'''
-
-[[plant]]
-name = "no low hold: the human's word is for the project it is said in"
-meant = "the_humans_word_for_one_codex_member_brings_back_every_member_on_its_login_in_every_project"
-runs = ["no-low-hold-renewed"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = '''
-        for other in projects.into_iter().filter(|other| *other != project) {
-'''
-replace = '''
-        for other in projects.into_iter().filter(|_| false) {
 '''
 
 [[plant]]
@@ -513,52 +471,6 @@ replace = '''
 '''
 
 [[plant]]
-name = "no low hold: the human's word clears a member whose model is busy"
-meant = "the_humans_word_clears_a_quota_and_an_account_on_the_login_and_leaves_a_busy_model_and_a_moved_model_held"
-runs = ["no-low-hold-renewed"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-            if matches!(news, News::Human) && self.kind_of_hold(other.id, &until) == Held::Busy {
-'''
-replace = '''
-            if false && self.kind_of_hold(other.id, &until) == Held::Busy {
-'''
-
-[[plant]]
-name = "no low hold: the human's word clears only a quota, not an account"
-meant = "the_humans_word_clears_a_quota_and_an_account_on_the_login_and_leaves_a_busy_model_and_a_moved_model_held"
-runs = ["no-low-hold-renewed"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-            if matches!(news, News::Human) && self.kind_of_hold(other.id, &until) == Held::Busy {
-'''
-replace = '''
-            if matches!(news, News::Human) && self.kind_of_hold(other.id, &until) != Held::Quota {
-'''
-
-[[plant]]
-name = "no low hold: the human's word clears a member whose model moved"
-meant = "the_humans_word_clears_a_quota_and_an_account_on_the_login_and_leaves_a_busy_model_and_a_moved_model_held"
-runs = ["no-low-hold-renewed"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-            if moved_hold(&until) {
-                continue;
-            }
-'''
-replace = '''
-            if false {
-                continue;
-            }
-'''
-
-[[plant]]
 name = "no low hold: a member out of quota counts as busy for the page"
 meant = "a_lane_of_a_member_out_of_quota_has_no_busy"
 runs = ["no-low-hold-page-daemon"]
@@ -701,7 +613,7 @@ replace = '''
 
 [[plant]]
 name = "no low hold: the human's word on a member whose model is busy shortens its back-off"
-meant = "the_humans_word_on_a_member_whose_model_is_busy_leaves_its_back_off_says_so_and_still_clears_the_others_on_its_login"
+meant = "the_humans_word_on_a_busy_member_leaves_its_backoff_and_other_members_holds"
 runs = ["no-low-hold-renewed"]
 
 [[plant.edit]]
