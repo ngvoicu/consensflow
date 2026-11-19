@@ -149,7 +149,7 @@ impl StatusLine {
     fn run(self, script: &Path, jobs: &Jobs) -> Result<(), String> {
         let mut run = Run::new("/bin/bash")
             .arg(script)
-            .inheriting_env()
+            .inheriting_window_env()
             .closed_input();
         if self == Self::InAGroupOfItsOwn {
             run = run.own_group();

@@ -420,6 +420,124 @@ fn edit_member_renames_a_member_and_all_its_windows_one_with_a_task_in_hand_too(
     );
 }
 
+/// The page's session rows are not other members: an edit follows the selected member's id,
+/// even when another independent member and its session run the very same model and effort.
+#[test]
+fn an_edit_changes_only_the_member_its_sessions_and_its_backups_tier() {
+    let dir = tempfile::tempdir().expect("a home");
+    let mut ledger = ledger_in(&dir);
+    let project = project(
+        &mut ledger,
+        vec![
+            on(
+                "codex",
+                "gpt-6-astra",
+                Some("max"),
+                "gpt-6-astra",
+                "standard",
+            ),
+            on(
+                "codex",
+                "gpt-6-astra",
+                Some("max"),
+                "gpt-6-astra",
+                "standard",
+            ),
+        ],
+    );
+    let member = named(&ledger, project.id, "gpt-6-astra-max");
+    let other = named(&ledger, project.id, "codex-gpt-6-astra-max");
+    let backup = ledger
+        .add_backup(
+            project.id,
+            &member.handle,
+            &on(
+                "claude-code",
+                "claude-sonnet-5",
+                None,
+                "claude-sonnet-5",
+                "standard",
+            ),
+        )
+        .expect("a backup");
+    let mut sessions = Vec::new();
+    for owner in [member.id, member.id, other.id] {
+        let task = ledger
+            .create_task(
+                project.id,
+                &NewTask {
+                    from: "chief".into(),
+                    pool: Some("worker".into()),
+                    tier: Some("standard".into()),
+                    body: "A task".into(),
+                    ..NewTask::default()
+                },
+            )
+            .expect("a task")
+            .task;
+        let assigned = ledger
+            .assign_task(project.id, task.number, owner)
+            .expect("assigned");
+        let window = named(
+            &ledger,
+            project.id,
+            assigned.task.assignee.as_deref().unwrap(),
+        );
+        sessions.push(window);
+        if owner == member.id {
+            ledger
+                .fail_task(project.id, task.number, "finished")
+                .expect("idle");
+        }
+    }
+    let edited = ledger
+        .edit_member(
+            project.id,
+            &member.handle,
+            &MemberEdit {
+                harness: "codex".into(),
+                model: Some("gpt-6.2-astra".into()),
+                effort: Some("max".into()),
+                model_name: Some("gpt-6.2-astra".into()),
+                tier: "critical".into(),
+            },
+        )
+        .expect("edited");
+    assert_eq!(edited.id, member.id);
+    assert_eq!(edited.handle, "gpt-6-2-astra-max");
+    let view = ledger
+        .project(project.id)
+        .expect("read")
+        .expect("the project");
+    let by_id = |id| {
+        view.participants
+            .iter()
+            .find(|participant| participant.id == id)
+            .unwrap()
+    };
+    for (before, suffix) in sessions[..2].iter().zip(["amber-pine", "brisk-birch"]) {
+        let after = by_id(before.id);
+        assert_eq!(after.member_id, Some(member.id));
+        assert_eq!(after.handle, format!("gpt-6-2-astra-max-{suffix}"));
+        assert_eq!(after.model.as_deref(), Some("gpt-6.2-astra"));
+        assert_eq!(after.tier.as_deref(), Some("critical"));
+    }
+    let unchanged = by_id(other.id);
+    assert_eq!(unchanged.handle, other.handle);
+    assert_eq!(unchanged.model.as_deref(), Some("gpt-6-astra"));
+    assert_eq!(unchanged.effort.as_deref(), Some("max"));
+    assert_eq!(unchanged.tier.as_deref(), Some("standard"));
+    let other_session = by_id(sessions[2].id);
+    assert_eq!(other_session.handle, sessions[2].handle);
+    assert_eq!(other_session.member_id, Some(other.id));
+    assert_eq!(other_session.model.as_deref(), Some("gpt-6-astra"));
+    assert_eq!(other_session.tier.as_deref(), Some("standard"));
+    let backup = by_id(backup.id);
+    assert_eq!(backup.backup_of, Some(member.id));
+    assert_eq!(backup.model.as_deref(), Some("claude-sonnet-5"));
+    assert_eq!(backup.tier.as_deref(), Some("critical"));
+}
+
 #[test]
 fn a_member_that_left_rejoins_under_its_handle_when_its_model_and_effort_come_back() {
     let dir = tempfile::tempdir().expect("a home");

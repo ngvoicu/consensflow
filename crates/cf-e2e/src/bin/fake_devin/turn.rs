@@ -220,7 +220,7 @@ fn cf_words(line: &str) -> Vec<String> {
 fn run_cf(words: &[String]) -> String {
     match Run::new(cf_e2e::process::as_a_shell_finds("cf"))
         .args(words)
-        .inheriting_env()
+        .inheriting_window_env()
         .unlimited()
         .run()
     {

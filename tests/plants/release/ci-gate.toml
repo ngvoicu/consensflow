@@ -309,10 +309,12 @@ runs = ["ci-passed", "xtask-release"]
 file = "tools/cf-release/src/ci_passed.rs"
 find = '''
         "workflow_runs",
+        &mut retries,
     )
     .map_err(Refusal::Unasked)?;'''
 replace = '''
         "workflow_runs",
+        &mut retries,
     )
     .map_err(Refusal::NeverRan)?;'''
 

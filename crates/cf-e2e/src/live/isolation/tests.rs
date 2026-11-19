@@ -1550,7 +1550,10 @@ fn a_run_that_changes_a_file_of_the_owners_fails_naming_it_and_saying_none_of_wh
                 said.contains(&format!("{shown} is not as it was")),
                 "{which}: {said}"
             );
-            assert!(said.contains("THE RUN CHANGED THE OWNER'S"), "{said}");
+            assert!(
+                said.contains("THE OWNER'S") && said.contains("CHANGED DURING THE RUN"),
+                "{said}"
+            );
             assert!(
                 said.contains(
                     "Login files were compared by size, modification time and file identity only"
@@ -1558,7 +1561,7 @@ fn a_run_that_changes_a_file_of_the_owners_fails_naming_it_and_saying_none_of_wh
                 "{said}"
             );
             assert!(
-                said.contains("(or the owner's own"),
+                said.contains("the owner's own") && said.contains("could also have changed it"),
                 "the owner's own harness could have: {said}"
             );
             assert!(!said.contains(SENTINEL) && !said_anywhere(&said), "{said}");
@@ -1840,6 +1843,21 @@ fn a_home_never_made_has_nothing_to_say_and_the_words_never_hold_a_login() {
         !said_anywhere(&debug) && !debug.contains(SENTINEL),
         "{debug}"
     );
+}
+
+#[test]
+fn t1778_pi_proxy_cache_change_is_not_attributed_to_the_run() {
+    let text = said(
+        Harness::Pi,
+        &["~/.pi/agent/cliproxyapi-models.json is not as it was".to_owned()],
+        &[],
+    );
+    assert!(
+        text.contains("Another Pi of the owner's can refresh"),
+        "{text}"
+    );
+    assert!(text.contains("cannot attribute the change"), "{text}");
+    assert!(!text.contains("THE RUN CHANGED"), "{text}");
 }
 
 #[test]

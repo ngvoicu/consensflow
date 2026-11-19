@@ -382,6 +382,7 @@ mod tests {
         let log = Log::new("live asks test");
         let window = |pane: &str| {
             Open::new(&rig, &install, "asks", pane)
+                .agent(serde_json::json!({ "kind": "claude-code", "model": "fake-chief" }))
                 .without_trust()
                 .open(&log)
         };

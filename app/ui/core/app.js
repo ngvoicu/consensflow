@@ -425,6 +425,7 @@ async function openTask(project, number) {
     closed: closedProject(project),
     terminal: terminalOf(task),
     held: heldOf(task),
+    backupOf: backupOf(task),
   })
 }
 
@@ -436,6 +437,20 @@ async function openTask(project, number) {
 function heldOf(task) {
   const lane = state.board?.lanes.find((l) => l.participant.handle === task.assignee)
   return task.state === 'working' && lane?.held?.task === task.number ? lane.held : null
+}
+
+/**
+ * The member whose backup has `task`, on the board shown: the backup itself or a session of it
+ * is its assignee. Null for any other task. A member and its backup are one member on the board,
+ * so the task's sidebar is where it says the backup runs it.
+ */
+function backupOf(task) {
+  const lanes = state.board?.lanes ?? []
+  const assignee = lanes.find((l) => l.participant.handle === task.assignee)?.participant
+  const handle = assignee?.member ?? assignee?.handle
+  const backup = lanes.find((l) => l.participant.handle === handle)?.participant
+  if (backup?.backupOf == null) return null
+  return lanes.find((l) => l.participant.id === backup.backupOf)?.participant.handle ?? null
 }
 
 /**
@@ -479,6 +494,7 @@ async function rereadTask() {
       closed: closedProject(project),
       terminal: terminalOf(task),
       held: heldOf(task),
+      backupOf: backupOf(task),
     })
   } catch (cause) {
     closeTask()

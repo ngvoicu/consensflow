@@ -18,6 +18,7 @@
 //! the commit), behind [`GitHub`], so that the tests give it a GitHub of their own.
 
 use std::ffi::{OsStr, OsString};
+use std::time::Duration;
 
 use cf_base::env::Env;
 use serde_json::Value;
@@ -48,10 +49,22 @@ const EVENTS: [&str; 2] = ["push", "workflow_dispatch"];
 const PER_PAGE: usize = 100;
 const PAGES: usize = 20;
 
+/// One budget for the whole verdict, including every run and jobs page.
+const RETRY_WAITS: [Duration; 3] = [
+    Duration::from_secs(5),
+    Duration::from_secs(15),
+    Duration::from_secs(45),
+];
+
 /// GitHub's API, as `gh api` answers it.
 pub trait GitHub {
     /// What GET `path` answers, or what was said when it could not be asked.
     fn get(&mut self, path: &str) -> Result<String, String>;
+
+    /// Wait between retries. The release command and tests can supply their own clock.
+    fn pause(&mut self, duration: Duration) {
+        std::thread::sleep(duration);
+    }
 }
 
 /// GitHub through the machine's `gh`, logged in by `GH_TOKEN` on a runner.
@@ -259,10 +272,12 @@ impl Refusal {
 /// the rule the release's gate holds a tag to, and `cargo xtask release` its
 /// commit before it tags.
 pub fn verdict(github: &mut dyn GitHub, repository: &str, commit: &str) -> Result<Passed, Refusal> {
+    let mut retries = RETRY_WAITS.into_iter();
     let runs = list(
         github,
         &format!("repos/{repository}/actions/workflows/{CI_WORKFLOW}/runs?head_sha={commit}"),
         "workflow_runs",
+        &mut retries,
     )
     .map_err(Refusal::Unasked)?;
     let runs: Vec<CiRun> = runs.iter().filter_map(CiRun::of).collect();
@@ -305,6 +320,7 @@ pub fn verdict(github: &mut dyn GitHub, repository: &str, commit: &str) -> Resul
                 github,
                 &format!("repos/{repository}/actions/runs/{}/jobs", run.id),
                 "jobs",
+                &mut retries,
             )
             .map_err(Refusal::Unasked)?;
             let unmet = unmet(jobs.iter().map(|job| {
@@ -363,16 +379,32 @@ fn unmet<'a>(jobs: impl Iterator<Item = (&'a str, &'a str)> + Clone) -> Vec<Stri
 }
 
 /// Every item of the list `key` that GET `path` answers, page by page.
-fn list(github: &mut dyn GitHub, path: &str, key: &str) -> Result<Vec<Value>, String> {
+fn list(
+    github: &mut dyn GitHub,
+    path: &str,
+    key: &str,
+    retries: &mut impl Iterator<Item = Duration>,
+) -> Result<Vec<Value>, String> {
     let mut items = Vec::new();
     for page in 1..=PAGES {
         let address = format!(
             "{path}{}per_page={PER_PAGE}&page={page}",
             if path.contains('?') { '&' } else { '?' }
         );
-        let said = github
-            .get(&address)
-            .map_err(|cause| format!("GitHub could not be asked for {address}: {cause}"))?;
+        let said = loop {
+            match github.get(&address) {
+                Ok(said) => break said,
+                Err(cause) => {
+                    if retryable(&cause) {
+                        if let Some(wait) = retries.next() {
+                            github.pause(wait);
+                            continue;
+                        }
+                    }
+                    return Err(format!("GitHub could not be asked for {address}: {cause}"));
+                }
+            }
+        };
         let answer: Value = serde_json::from_str(&said)
             .map_err(|cause| format!("GitHub's answer to {address} could not be read: {cause}"))?;
         let Some(found) = answer.get(key).and_then(Value::as_array) else {
@@ -391,6 +423,46 @@ fn list(github: &mut dyn GitHub, path: &str, key: &str) -> Result<Vec<Value>, St
     Err(format!(
         "GitHub's list at {path} goes on past {PAGES} pages of {PER_PAGE}"
     ))
+}
+
+/// `gh api` names HTTP errors as `(HTTP 502)` and network failures with the
+/// underlying connection error. A client error always wins, even if its text
+/// also happens to mention a connection. Other failures stay immediate.
+fn retryable(cause: &str) -> bool {
+    let lower = cause.to_ascii_lowercase();
+    let mut server_error = false;
+    for (start, _) in lower.match_indices("http ") {
+        let bytes = &lower.as_bytes()[start + 5..];
+        let Some(code) = bytes.get(..3) else {
+            continue;
+        };
+        if !code.iter().all(u8::is_ascii_digit) || bytes.get(3).is_some_and(u8::is_ascii_digit) {
+            continue;
+        }
+        if code[0] == b'4' {
+            return false;
+        }
+        server_error |= code[0] == b'5';
+    }
+    server_error
+        || lower.trim() == "eof"
+        || lower.trim_end().ends_with(": eof")
+        || [
+            "unexpected eof",
+            "connection reset",
+            "connection refused",
+            "connection closed",
+            "closed network connection",
+            "server closed idle connection",
+            "broken pipe",
+            "error connecting to ",
+            "i/o timeout",
+            "tls handshake timeout",
+            "context deadline exceeded",
+            "no such host",
+        ]
+        .iter()
+        .any(|failure| lower.contains(failure))
 }
 
 #[cfg(test)]

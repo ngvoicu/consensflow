@@ -366,6 +366,7 @@ mod tests {
         let home = rig.var("HOME").unwrap_or_default().to_owned();
         let install = Installed::at(Harness::Claude, &program, &home);
         let window = Open::new(&rig, &install, "terminal", "terminal-slow")
+            .agent(serde_json::json!({ "kind": "claude-code", "model": "fake-chief" }))
             .without_trust()
             .open(&cf_e2e::live::Log::new("live terminal test"))?;
         let opened = Instant::now();

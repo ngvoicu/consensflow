@@ -70,10 +70,10 @@ runs = ["muse-advisor-start-kit-muse"]
 [[plant.edit]]
 file = "crates/cf-e2e/src/muse.rs"
 find = '''( IFS=$'\x1f'; printf '%s\x1e' "$*" ) >> '{argv}'
-export XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME='{rig}/.local/share' XDG_CACHE_HOME='{rig}/.cache'
+export HOME='{rig}' CFFIXED_USER_HOME='{rig}' XDG_CONFIG_HOME='{rig}/.config' XDG_DATA_HOME={data} XDG_CACHE_HOME='{rig}/.cache' XDG_STATE_HOME='{rig}/.local/state' XDG_RUNTIME_DIR='{rig}/.local/share/muse/runtime'
 '''
 replace = '''( IFS=$'\x1f'; printf '%s\x1e' "$*" ) >> '{argv}'
-: '{rig}'
+export HOME='{rig}' CFFIXED_USER_HOME='{rig}' XDG_DATA_HOME={data} XDG_CACHE_HOME='{rig}/.cache' XDG_STATE_HOME='{rig}/.local/state' XDG_RUNTIME_DIR='{rig}/.local/share/muse/runtime'
 '''
 
 [[plant]]

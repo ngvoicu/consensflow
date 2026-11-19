@@ -1,6 +1,6 @@
 //! What the live tests that run Muse Code's own TUI in a pty share (`live_muse_background`,
 //! `live_muse_posture`): the owner's binary run directly, on the owner's login (the
-//! keychain, through the real `HOME`) with every Muse folder the run's own, a throwaway
+//! keychain) with every Muse folder the run's own, a throwaway
 //! project, the allowance asked, the owner's files fingerprinted, one live session at a
 //! time, and the record read for a model Muse moved to by itself.
 
@@ -57,7 +57,26 @@ pub fn ran(
     env: &BTreeMap<String, String>,
     cwd: &Path,
 ) -> Result<String, String> {
-    let ran = Run::new(program)
+    let muse = program
+        .file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with("muse-bin-"));
+    let launch = if muse {
+        let root = cwd.parent().ok_or("Muse's workspace has no run root")?;
+        Some(
+            cf_e2e::muse::isolated_command(program, &[root.to_path_buf()], &[])
+                .map_err(|error| error.to_string())?,
+        )
+    } else {
+        None
+    };
+    let command = launch
+        .as_ref()
+        .map_or(program, |launch| launch.program.as_path());
+    let prefix = launch
+        .as_ref()
+        .map_or(&[][..], |launch| launch.prefix.as_slice());
+    let ran = Run::new(command)
+        .args(prefix)
         .args(args)
         .vars(env.iter())
         .cwd(cwd)
@@ -139,11 +158,12 @@ pub fn other_tests_muse() -> Vec<String> {
         .collect()
 }
 
-/// The run's environment: the owner's home for the keychain, every Muse folder its own.
+/// The run's environment: its own home and Muse folders.
 pub fn environment(root: &Path) -> BTreeMap<String, String> {
     let mut env = BTreeMap::new();
     for (name, value) in [
-        ("HOME", home().display().to_string()),
+        ("HOME", root.display().to_string()),
+        ("CFFIXED_USER_HOME", root.display().to_string()),
         (
             "PATH",
             "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin".to_owned(),
@@ -382,7 +402,10 @@ impl Window {
                 pixel_height: 0,
             })
             .map_err(|error| error.to_string())?;
-        let mut command = CommandBuilder::new(binary);
+        let launch = cf_e2e::muse::isolated_command(binary, &[root.to_path_buf()], &[])
+            .map_err(|error| error.to_string())?;
+        let mut command = CommandBuilder::new(&launch.program);
+        command.args(&launch.prefix);
         command.args(["--trust-workspace", "--model", &model.name]);
         if let Some(effort) = &model.effort {
             command.args(["--reasoning-effort", effort]);

@@ -584,8 +584,8 @@ fn helper_has_no_node_test_context() {
 
 #[test]
 #[ignore = "a program the tests of runs start"]
-fn helper_has_the_temp_folder_its_run_gave_it() {
-    assert!(std::env::temp_dir().ends_with("the-runs-temp"));
+fn helper_keeps_the_callers_temp_folder() {
+    assert!(!std::env::temp_dir().ends_with("the-runs-temp"));
 }
 
 #[test]
@@ -675,12 +675,12 @@ fn a_command_that_says_no_more_than_its_status_is_the_catch_itself_whatever_it_p
 }
 
 #[test]
-fn a_command_is_given_the_temp_folder_its_run_made_for_it() {
+fn a_non_test_command_keeps_the_callers_temp_folder() {
     let mut runner = runner(Duration::from_secs(120));
     runner.temp_in(&std::env::temp_dir().join("the-runs-temp"));
     let ran = ended(
         runner
-            .run(&helper("helper_has_the_temp_folder_its_run_gave_it"))
+            .run(&helper("helper_keeps_the_callers_temp_folder"))
             .unwrap(),
     );
     assert_eq!(ran.code, Some(0), "{}", ran.output);
@@ -1342,6 +1342,82 @@ fn fixture_crate(package: &str, lib: &str) -> (tempfile::TempDir, Vec<String>) {
         package,
     ]);
     (fixture, command)
+}
+
+#[test]
+fn a_plants_cargo_build_keeps_the_callers_temp_and_its_test_uses_the_private_temp() {
+    let caller = tempfile::tempdir().unwrap();
+    let private = tempfile::tempdir().unwrap();
+    // A test binary can run constructors even when nextest only lists it. The
+    // list phase must be isolated too, before nextest's setup script runs.
+    let lib = r#"
+#[used]
+#[cfg_attr(target_vendor = "apple", unsafe(link_section = "__DATA,__mod_init_func"))]
+#[cfg_attr(windows, unsafe(link_section = ".CRT$XCU"))]
+#[cfg_attr(all(unix, not(target_vendor = "apple")), unsafe(link_section = ".init_array"))]
+static INITIALIZE: extern "C" fn() = {
+    extern "C" fn initialize() {
+        if std::env::args_os().any(|arg| arg == "--list") {
+            if std::env::var_os("TMPDIR") != std::env::var_os("EXPECT_TEST_TEMP") {
+                eprintln!("the test binary was listed with the wrong TMPDIR");
+                std::process::exit(99);
+            }
+            std::fs::write(std::env::var_os("EXPECT_LIST_MARK").unwrap(), "listed").unwrap();
+        }
+    }
+    initialize
+};
+#[test] fn test_temp() {
+    assert!(std::path::Path::new(&std::env::var_os("EXPECT_LIST_MARK").unwrap()).is_file());
+    for key in ["TMPDIR", "TMP", "TEMP"] {
+        assert_eq!(std::env::var_os(key), std::env::var_os("EXPECT_TEST_TEMP"), "{key}");
+    }
+}"#;
+    let (fixture, command) = fixture_crate("plants-temp", lib);
+    let mut checkout = context();
+    checkout.env = Env::from_vars(
+        checkout
+            .env
+            .iter()
+            .filter(|(name, _)| {
+                ![
+                    "TMPDIR",
+                    "TMP",
+                    "TEMP",
+                    "EXPECT_CARGO_TEMP",
+                    "EXPECT_TEST_TEMP",
+                    "EXPECT_LIST_MARK",
+                ]
+                .iter()
+                .any(|key| *name == OsStr::new(key))
+            })
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .chain(
+                ["TMPDIR", "TMP", "TEMP", "EXPECT_CARGO_TEMP"]
+                    .into_iter()
+                    .map(|name| (OsString::from(name), caller.path().as_os_str().to_owned())),
+            )
+            .chain([
+                (
+                    OsString::from("EXPECT_TEST_TEMP"),
+                    private.path().as_os_str().to_owned(),
+                ),
+                (
+                    OsString::from("EXPECT_LIST_MARK"),
+                    fixture.path().join("listed").into_os_string(),
+                ),
+            ]),
+    );
+    let mut runner = runner_with(&checkout, Duration::from_secs(600), Stops::never);
+    runner.temp_in(private.path());
+    fs::write(fixture.path().join("build.rs"), r#"fn main() {
+        for key in ["TMPDIR", "TMP", "TEMP"] {
+            assert_eq!(std::env::var_os(key), std::env::var_os("EXPECT_CARGO_TEMP"), "cargo build {key}");
+        }
+    }"#).unwrap();
+    let ran = ended(runner.run(&command).unwrap());
+    assert_eq!(ran.code, Some(0), "{}", ran.output);
+    assert_eq!(ran.report.unwrap().unwrap().tests.len(), 1);
 }
 
 #[test]

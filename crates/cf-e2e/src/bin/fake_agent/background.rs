@@ -398,7 +398,7 @@ impl Jobs {
         // The window's environment, which every program of a window has.
         let shell_end = how.shell_end.clone();
         let mut job = Self::running(&program, words, &how)?
-            .inheriting_env()
+            .inheriting_window_env()
             .closed_input()
             .spawn()
             .map_err(|failed| failed.to_string())?;
@@ -743,7 +743,7 @@ impl Job {
             .arg(JOB)
             .arg(self.seconds.to_string())
             .arg(file)
-            .inheriting_env()
+            .inheriting_window_env()
             .closed_input()
             .spawn()
             .map(Some)

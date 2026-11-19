@@ -197,9 +197,15 @@ fn done(rig: &Rig, project: &Project<'_>, number: i64, within: Duration) -> Resu
     })
 }
 
+/// Check the case's own Muse list before its project can open a model window.
+fn admitted_project<'a>(rig: &'a Rig, agent: &Value) -> Result<Project<'a>> {
+    agents::validate_window(rig, agent)?;
+    project(rig, agent)
+}
+
 fn result_case(live: &Live) -> Result<String> {
     let rig = Rig::start(live.config())?;
-    let project = project(&rig, &live.agent)?;
+    let project = admitted_project(&rig, &live.agent)?;
     dispatch(&rig, &project, "Reply with exactly: T1_DONE")?;
     done(&rig, &project, 1, secs(240))?;
     let task = project.task(1)?;
@@ -220,7 +226,7 @@ fn result_case(live: &Live) -> Result<String> {
 
 fn early_case(live: &Live) -> Result<String> {
     let rig = Rig::start(live.config())?;
-    let project = project(&rig, &live.agent)?;
+    let project = admitted_project(&rig, &live.agent)?;
     dispatch(&rig, &project, "Reply with exactly: T1_DONE")?;
     // The pause goes in the moment the log has the turn begun, before its first token.
     rig.wait_for("the turn to begin", secs(240), || {
@@ -278,7 +284,7 @@ fn early_case(live: &Live) -> Result<String> {
 
 fn tell_case(live: &Live) -> Result<String> {
     let rig = Rig::start(live.config())?;
-    let project = project(&rig, &live.agent)?;
+    let project = admitted_project(&rig, &live.agent)?;
     dispatch(&rig, &project, LONG)?;
     in_its_turn(&rig, &project, 1, secs(240))?;
     // Into the shell command: the stop comes after the model's first output.
@@ -321,7 +327,7 @@ fn tell_case(live: &Live) -> Result<String> {
 
 fn steer_case(live: &Live) -> Result<String> {
     let rig = Rig::start(live.config())?;
-    let project = project(&rig, &live.agent)?;
+    let project = admitted_project(&rig, &live.agent)?;
     dispatch(&rig, &project, LONG)?;
     in_its_turn(&rig, &project, 1, secs(240))?;
     rig.wait_for("the shell command to run", secs(120), || {
@@ -379,7 +385,7 @@ fn steer_case(live: &Live) -> Result<String> {
 fn cut_case(live: &Live) -> Result<String> {
     let config = live.config();
     let rig = Rig::start(config.clone())?;
-    let project = project(&rig, &live.agent)?;
+    let project = admitted_project(&rig, &live.agent)?;
     let id = project.id();
     dispatch(&rig, &project, LONG)?;
     in_its_turn(&rig, &project, 1, secs(240))?;
@@ -423,7 +429,7 @@ fn cut_case(live: &Live) -> Result<String> {
 fn after_case(live: &Live, restart: bool) -> Result<String> {
     let config = live.config();
     let rig = Rig::start(config.clone())?;
-    let project = project(&rig, &live.agent)?;
+    let project = admitted_project(&rig, &live.agent)?;
     let id = project.id();
     dispatch(&rig, &project, "Reply with exactly: T1_DONE")?;
     done(&rig, &project, 1, secs(240))?;
@@ -478,7 +484,7 @@ fn after_case(live: &Live, restart: bool) -> Result<String> {
 
 fn rest_case(live: &Live) -> Result<String> {
     let rig = Rig::start(live.config())?;
-    let project = project(&rig, &live.agent)?;
+    let project = admitted_project(&rig, &live.agent)?;
     dispatch(&rig, &project, "Reply with exactly: T1_DONE")?;
     rig.wait_for("the turn to begin", secs(240), || {
         Ok(rig
@@ -518,7 +524,7 @@ fn question_case(live: &Live) -> Result<String> {
         .config()
         .var("CODEX_HOME", foreign.path().display().to_string());
     let rig = Rig::start(config)?;
-    let project = project(&rig, &live.agent)?;
+    let project = admitted_project(&rig, &live.agent)?;
     dispatch(&rig, &project, QUESTION)?;
     let chiefs = |project: &Project<'_>, kind: &str| -> Result<Value> {
         Ok(project
@@ -673,6 +679,7 @@ fn each_case_of_a_muse_members_window_holds_on_the_real_model() -> Result {
                 .to_owned(),
         ));
     }
+    agents::validate_window(&discovery, &row)?;
     let model = agents::launched_on(&row)
         .ok_or_else(|| Error::Daemon("Muse's model row is invalid".to_owned()))?;
     log.launched(&row);

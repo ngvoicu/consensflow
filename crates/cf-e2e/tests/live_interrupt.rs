@@ -266,6 +266,7 @@ mod tests {
         let home = rig.var("HOME").unwrap_or_default().to_owned();
         let install = Installed::at(Harness::Claude, FAKE_AGENT, &home);
         let window = Open::new(&rig, &install, "interrupt", "interrupt-claude")
+            .agent(serde_json::json!({ "kind": "claude-code", "model": "fake-chief" }))
             .without_trust()
             .open(&Log::new("live interrupt test"))?;
         let check = check_of(&window, &stand_in_asks())?;

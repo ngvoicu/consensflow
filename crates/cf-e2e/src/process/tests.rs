@@ -1,6 +1,38 @@
 use super::*;
 
 #[test]
+fn t1778_fixture_child_does_not_inherit_the_callers_board_connection() {
+    const CASE: &str =
+        "process::tests::t1778_fixture_child_does_not_inherit_the_callers_board_connection";
+    match own_var("CF_E2E_T1778_DEPTH").as_deref() {
+        Some("child") => {
+            assert_eq!(own_var("CONSENSFLOW_CALLER_SECRET"), None);
+            assert_eq!(own_var("CONSENSFLOW_FIXTURE_OWN").as_deref(), Some("owned"));
+        }
+        depth => {
+            let mut run = case_of(
+                std::env::current_exe().unwrap(),
+                CASE,
+                Duration::from_secs(120),
+            )
+            .arg("--nocapture")
+            .inheriting_env();
+            if depth.is_none() {
+                run = run
+                    .var("CF_E2E_T1778_DEPTH", "parent")
+                    .var("CONSENSFLOW_CALLER_SECRET", "sentinel");
+            } else {
+                run = run
+                    .var("CF_E2E_T1778_DEPTH", "child")
+                    .var("CONSENSFLOW_FIXTURE_OWN", "owned");
+            }
+            let ran = run.run().unwrap();
+            assert_eq!(ran.code, Some(0), "{}", ran.output());
+        }
+    }
+}
+
+#[test]
 fn a_program_that_cannot_be_started_is_an_error_that_names_it() {
     let failed = Run::new("cf-e2e-no-such-program").run().unwrap_err();
     assert!(matches!(
