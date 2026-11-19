@@ -378,6 +378,8 @@ fn from_alpha10(name: &str) -> World {
         "backup" => include_bytes!("goldens/t1813-alpha10/backup.db.gz"),
         "reassign" => include_bytes!("goldens/t1813-alpha10/reassign.db.gz"),
         "working-suspended" => include_bytes!("goldens/t1813-alpha10/working-suspended.db.gz"),
+        "old-unanswered" => include_bytes!("goldens/t1813-alpha10/old-unanswered.db.gz"),
+        "old-inflight" => include_bytes!("goldens/t1813-alpha10/old-inflight.db.gz"),
         _ => panic!("unknown historical fixture"),
     };
     let mut bytes = Vec::new();
@@ -960,4 +962,289 @@ fn t1823_finding_09_already_delivered_legacy_answer_remains_visible() {
         !hidden.contains(&answer),
         "limit 16 preserves an answer already delivered before tracking"
     );
+}
+
+#[tokio::test]
+async fn t1827_finding_14_a_new_answer_to_an_old_question_follows_the_legacy_path() {
+    let w = from_alpha10("old-unanswered");
+    let project = w.project;
+    let (question, window): (i64, i64) = w.ledger.sqlite().query_row(
+        "SELECT id, sender_id FROM message WHERE kind='question' AND body='Unanswered on alpha.10'",
+        [], |r| Ok((r.get(0)?, r.get(1)?)),
+    ).unwrap();
+    let chief = w.id("chief");
+    let (context, _dir) = into_context(w);
+    context.ledger.borrow_mut().begin_question_engine();
+    context
+        .ledger
+        .borrow_mut()
+        .close_questions_of_ended_engine()
+        .unwrap();
+    let chief_token = issued(&context, project, chief);
+    let words = "Composed after upgrade, never present on alpha.10";
+    let (status, body) = post(
+        &context,
+        req(
+            "/api/answers",
+            &chief_token,
+            json!({"question": question, "body": words}),
+        ),
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+    let answer = body["message"]["id"].as_i64().unwrap();
+    let member = issued(&context, project, window);
+    let (status, detail) = got(&context, &format!("/api/inbox/{answer}"), &member).await;
+    assert_eq!(status, 200, "{detail}");
+    assert_eq!(detail["message"]["body"], words);
+    let mut ledger = context.ledger.borrow_mut();
+    assert_eq!(
+        ledger
+            .next_delivery_of(window, answer)
+            .unwrap()
+            .map(|m| m.id),
+        Some(answer)
+    );
+    ledger.begin_delivery(answer).unwrap();
+    assert_eq!(ledger.admit(answer, &[]).unwrap(), HandOver::Admitted);
+    ledger
+        .confirm_delivery(answer, Some(&json!({"item":"received"})))
+        .unwrap();
+    assert_eq!(ledger.message(answer).unwrap().unwrap().state, "delivered");
+}
+
+#[tokio::test]
+async fn t1827_finding_15_a_receipted_old_answer_does_not_block_project_resume() {
+    let w = from_alpha10("old-inflight");
+    let (old, window): (i64, i64) = w
+        .ledger
+        .sqlite()
+        .query_row(
+            "SELECT id, recipient_id FROM message WHERE kind='answer' AND state='delivering'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    let c = cf_engine::testing::Context::new();
+    c.adapter.resumes_records.set(true);
+    *c.ledger.borrow_mut() = w.ledger;
+    let dispatcher = c.make();
+    dispatcher.settle_after_restart().unwrap();
+    assert_eq!(c.message(old).state, "delivered");
+    assert_eq!(c.message(old).receipt, json!({"item":"i-4"}));
+    dispatcher.resume_project(1).unwrap();
+    c.settle();
+    let session = c.task(1, 1).task.assignee.unwrap();
+    for _ in 0..5 {
+        dispatcher.pass().unwrap();
+    }
+    assert!(c.host.last(&session).is_some());
+    let start = c
+        .credentials
+        .question_starts
+        .borrow()
+        .iter()
+        .rev()
+        .find(|(id, _)| *id == window)
+        .unwrap()
+        .1;
+    let (mut context, _dir) = into_context(world());
+    context.ledger = Rc::clone(&c.ledger);
+    let worker = context
+        .credentials
+        .issue_for_window(1, window, start)
+        .unwrap();
+    let chief = issued(&context, 1, c.id(1, "chief"));
+    let (status, body) = post(
+        &context,
+        req(
+            "/api/questions",
+            &worker,
+            json!({"body":"First question composed after Resume"}),
+        ),
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+    assert_eq!(body["message"]["task"], 1);
+    let question = body["message"]["id"].as_i64().unwrap();
+    let (status, reply) = post(
+        &context,
+        req(
+            "/api/answers",
+            &chief,
+            json!({"question":question,"body":"First answer composed after Resume"}),
+        ),
+    )
+    .await;
+    assert_eq!(status, 201, "{reply}");
+    let answer = reply["message"]["id"].as_i64().unwrap();
+    for _ in 0..5 {
+        dispatcher.pass().unwrap();
+    }
+    let state = c.message(answer).state;
+    let next = c
+        .ledger
+        .borrow()
+        .next_delivery_of(window, answer)
+        .unwrap()
+        .map(|m| m.id);
+    assert!(["read", "delivered", "delivering"].contains(&state.as_str()) || next == Some(answer));
+}
+
+#[test]
+fn t1827_legacy_question_with_failed_answer_can_be_reanswered_after_reopen() {
+    let mut w = from_alpha10("old-unanswered");
+    let question = 2;
+    let previous = w.answer(question, "Earlier words").id;
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET state = 'cancelled' WHERE id = ?",
+            [previous],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE message SET state = 'cancelled', reason = 'T-1 was finished' WHERE id = ?",
+            [question],
+        )
+        .unwrap();
+        db.execute("UPDATE task SET state = 'working' WHERE number = 1", [])
+            .unwrap();
+    });
+    let chief = w.id("chief");
+    let answer = w
+        .ledger
+        .answer(question, chief, Some(&json!("New words")), None)
+        .unwrap();
+    assert_eq!(answer.body, "New words");
+    assert_eq!(w.next("zeus-session-1"), Some(answer.id));
+}
+
+#[test]
+fn t1827_legacy_delivered_question_retains_main_reassign_behavior() {
+    let mut w = from_alpha10("old-unanswered");
+    w.ledger.release_task(w.project, 1, "Reassign").unwrap();
+    assert_eq!(w.message(2).state, "delivered");
+    let closed: Option<String> = w
+        .ledger
+        .sqlite()
+        .query_row(
+            "SELECT door_closed_at FROM message WHERE id = 2",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(closed, None);
+}
+
+#[test]
+fn t1827_legacy_failed_answer_still_makes_its_task_wait() {
+    let mut w = from_alpha10("old-unanswered");
+    let previous = w.answer(2, "Earlier words").id;
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET state = 'cancelled' WHERE id = ?",
+            [previous],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE message SET state = 'cancelled', reason = 'T-1 was finished' WHERE id = 2",
+            [],
+        )
+        .unwrap();
+        db.execute("UPDATE task SET state = 'working' WHERE number = 1", [])
+            .unwrap();
+    });
+    let note = w.note("chief", "zeus-session-1", 1, "A reminder");
+    w.deliver(note.id);
+    assert_eq!(w.state(1), "waiting");
+}
+
+#[test]
+fn t1827_legacy_failed_answer_is_reminded_on_reopen() {
+    let mut w = from_alpha10("old-unanswered");
+    let previous = w.answer(2, "Earlier words").id;
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET state = 'cancelled' WHERE id = ?",
+            [previous],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE message SET state = 'cancelled', reason = 'T-1 was finished' WHERE id = 2",
+            [],
+        )
+        .unwrap();
+        db.execute("UPDATE task SET state = 'done' WHERE number = 1", [])
+            .unwrap();
+    });
+    w.ledger
+        .reopen_task(w.project, 1, "human", "Go on")
+        .unwrap();
+    let notes = w.ledger.inbox(w.id("chief"), 100).unwrap();
+    assert!(
+        notes
+            .iter()
+            .any(|m| m.kind == "note" && m.body.contains("Answer it again: cf answer m-2")),
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn t1827_legacy_paused_answer_follows_main_when_the_member_is_removed() {
+    let mut w = from_alpha10("old-unanswered");
+    let answer = w.answer(2, "Earlier words").id;
+    w.pause(1);
+    w.ledger.remove_member(w.project, "zeus").unwrap();
+    assert_eq!(w.message(answer).state, "cancelled");
+}
+
+#[test]
+fn t1827_legacy_questions_keep_main_cancel_and_accept_behavior() {
+    let mut cancelled = from_alpha10("old-unanswered");
+    cancelled
+        .ledger
+        .cancel_task(cancelled.project, 1, "human")
+        .unwrap();
+    assert_eq!(cancelled.message(2).state, "delivered");
+    let door: Option<String> = cancelled
+        .ledger
+        .sqlite()
+        .query_row(
+            "SELECT door_closed_at FROM message WHERE id = 2",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(door, None);
+
+    let mut accepted = from_alpha10("old-unanswered");
+    accepted.edit(|db| {
+        db.execute("UPDATE task SET state = 'done' WHERE number = 1", [])
+            .unwrap();
+    });
+    accepted
+        .ledger
+        .accept_task(accepted.project, 1, "human")
+        .unwrap();
+    assert_eq!(accepted.message(2).state, "delivered");
+    let door: Option<String> = accepted
+        .ledger
+        .sqlite()
+        .query_row(
+            "SELECT door_closed_at FROM message WHERE id = 2",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(door.is_some());
+}
+
+#[test]
+fn t1827_legacy_question_is_withdrawn_by_finish_as_before() {
+    let mut w = from_alpha10("old-unanswered");
+    w.ledger
+        .record_finished(w.project, 1, "Finished", (0, 0))
+        .unwrap();
+    assert_eq!(w.message(2).state, "cancelled");
+    assert_eq!(w.message(2).reason.as_deref(), Some("T-1 was finished"));
 }

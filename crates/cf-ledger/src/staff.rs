@@ -21,7 +21,7 @@ use crate::projects::NewMember;
 use crate::queue::{drop_queued, send, Sent};
 use crate::roles;
 use crate::store::Store;
-use crate::tasks::{shut_doors, tell_stranded_waiters};
+use crate::tasks::{shut_tracked_doors, tell_stranded_waiters};
 use crate::views::{participant_view, ParticipantRow, TaskRow, PARTICIPANT_SELECT};
 
 pub(crate) use backup::{add_backup, change_backup, remove_backup};
@@ -522,7 +522,7 @@ pub(crate) fn remove_member(
             withdraw_open_questions(store, task, "was cancelled")?;
             store.move_task(task, "cancelled", json!({ "reason": reason }))?;
             if let Some(window) = task.assignee_id {
-                shut_doors(store, task, window)?;
+                shut_tracked_doors(store, task, window)?;
             }
         }
         for id in &windows {

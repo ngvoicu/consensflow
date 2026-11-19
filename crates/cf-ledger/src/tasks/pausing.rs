@@ -493,6 +493,24 @@ pub(crate) fn shut_doors(store: &Store, task: &TaskRow, window: i64) -> Result<(
     Ok(())
 }
 
+/// Close only tracked questions when a holding ends at a newly covered path.
+pub(crate) fn shut_tracked_doors(
+    store: &Store,
+    task: &TaskRow,
+    window: i64,
+) -> Result<(), LedgerError> {
+    store.db.execute(
+        &format!(
+            "UPDATE message SET door_closed_at = (SELECT updated_at FROM task WHERE id = ?1)
+             WHERE {} = ?1 AND sender_id = ?2 AND kind = 'question' AND door_closed_at IS NULL
+               AND id IN (SELECT question_id FROM question_binding)",
+            crate::holding::task_for_question_sql("message")
+        ),
+        params![task.id, window],
+    )?;
+    Ok(())
+}
+
 /// The daemon holds a task with its window while its member is out of
 /// quota: paused, with the time it goes on by itself (`until`, an ISO
 /// time). A hold asks no stop: the refusal ended the window's turn, and a harness
@@ -1131,7 +1149,7 @@ pub(crate) fn resume_task(
                     task.id
                 ],
             )?;
-            shut_doors(store, &task, assignee.id)?;
+            shut_tracked_doors(store, &task, assignee.id)?;
             crate::tasks::end_asides(store, task.id, &at)?;
             store.log(
                 project_id,

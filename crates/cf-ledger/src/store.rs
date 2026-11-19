@@ -259,7 +259,7 @@ impl Store {
         // including failures made by a delivery rather than by a task verb.
         if matches!(to, "accepted" | "cancelled" | "failed") {
             if let Some(window) = task.assignee_id {
-                crate::tasks::shut_doors(self, task, window)?;
+                crate::tasks::shut_tracked_doors(self, task, window)?;
             }
         }
         if !ACTIVE_TASK_STATES.contains(&to) {

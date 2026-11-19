@@ -171,20 +171,6 @@ impl Ledger {
                AND (a.state IN ('queued', 'delivering') OR (a.state = 'cancelled' AND a.reason LIKE 'returned in m-%')) ORDER BY a.id"
         )?.query_map(rusqlite::params![project, reader], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?.collect::<rusqlite::Result<_>>()?;
         let mut hidden = Vec::new();
-        let legacy: Vec<i64> = self
-            .store
-            .db
-            .prepare(
-                "SELECT a.id FROM message a JOIN message q ON q.id = a.reply_to
-             JOIN participant p ON p.id = q.sender_id
-             WHERE a.project_id = ?1 AND a.recipient_id = ?2 AND a.kind = 'answer'
-               AND a.state IN ('queued', 'delivering')
-               AND p.role NOT IN ('chief', 'human')
-               AND NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)",
-            )?
-            .query_map(rusqlite::params![project, reader], |row| row.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        hidden.extend(legacy);
         for (answer, question, state, _) in candidates {
             if state == "cancelled"
                 || crate::holding::question_is_live(&self.store, question)? == Some(false)

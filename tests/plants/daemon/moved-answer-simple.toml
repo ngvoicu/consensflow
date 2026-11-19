@@ -99,7 +99,7 @@ meant = "t1803_finding_06_taskless_plain_answer_is_dispatchable"
 runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1803_finding_06_taskless_plain_answer_is_dispatchable"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = " OR (m.kind = 'answer' AND m.task_id IS NULL) OR m.task_id IN ("
+find = " OR (m.kind = 'answer' AND m.task_id IS NULL\n           AND EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to)) OR m.task_id IN ("
 replace = " OR m.task_id IN ("
 
 [[plant]]
@@ -363,15 +363,6 @@ find = "AND t.deleted_at IS NULL AND project.state = 'open' AND t.state IN ('wor
 replace = "AND t.deleted_at IS NULL AND project.state = 'open' AND t.state = 'failed'"
 
 [[plant]]
-name = "round2 moved answer: old unbound answers become dispatchable"
-meant = "t1823_finding_09_unbound_legacy_taskless_answers_do_not_acquire_a_new_dispatch_route"
-runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_09_unbound_legacy_taskless_answers_do_not_acquire_a_new_dispatch_route"]]
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "         AND (m.kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to)\n           OR NOT EXISTS (SELECT 1 FROM message q JOIN participant p ON p.id = q.sender_id\n             WHERE q.id = m.reply_to AND p.role NOT IN ('chief', 'human')))\n"
-replace = ""
-
-[[plant]]
 name = "round2 moved answer: pi publishes without recording handover"
 meant = "t1813_pi_hands_over_at_inbox_publication_and_settles_its_verdict"
 runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_pi_hands_over_at_inbox_publication_and_settles_its_verdict"]]
@@ -389,38 +380,192 @@ file = "crates/cf-ledger/src/ledger/messages.rs"
 find = "                            if h.active && h.task_id == task && h.first_brief == first\n                                && crate::holding::matches(store, window, Some(task), Some(first))? => Some(h),"
 replace = "                            if h.active => Some(h),"
 
+
 [[plant]]
-name = "round2 moved answer: an already delivered legacy answer disappears"
-meant = "t1823_finding_09_already_delivered_legacy_answer_remains_visible"
-runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1823_finding_09_already_delivered_legacy_answer_remains_visible"]]
+name = "round3 legacy: unbound answer cannot enter the delivery queue"
+meant = "t1827_finding_14_a_new_answer_to_an_old_question_follows_the_legacy_path"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_finding_14_a_new_answer_to_an_old_question_follows_the_legacy_path"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "         AND m.carried_by IS NULL AND m.claimed_at IS NULL\n"
+replace = "         AND m.carried_by IS NULL AND m.claimed_at IS NULL\n         AND (m.kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to))\n"
+
+[[plant]]
+name = "round3 legacy: unbound answers vanish from inbox"
+meant = "t1827_finding_14_a_new_answer_to_an_old_question_follows_the_legacy_path"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_finding_14_a_new_answer_to_an_old_question_follows_the_legacy_path"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/ledger/messages.rs"
-find = "             WHERE a.project_id = ?1 AND a.recipient_id = ?2 AND a.kind = 'answer'\n               AND a.state IN ('queued', 'delivering')"
-replace = "             WHERE a.project_id = ?1 AND a.recipient_id = ?2 AND a.kind = 'answer'"
+find = "        let mut hidden = Vec::new();\n        for (answer, question, state, _) in candidates {"
+replace = "        let mut hidden: Vec<i64> = self.store.db.prepare(\n            \"SELECT a.id FROM message a JOIN message q ON q.id = a.reply_to\n             WHERE a.project_id = ?1 AND a.recipient_id = ?2 AND a.kind = 'answer'\n               AND NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)\"\n        )?.query_map(rusqlite::params![project, reader], |row| row.get(0))?.collect::<rusqlite::Result<_>>()?;\n        for (answer, question, state, _) in candidates {"
 
 [[plant]]
-name = "round2 carrier: old in-flight answer is confirmed"
-meant = "t1823_finding_09_unbound_old_inflight_answer_is_not_newly_confirmed"
-runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1823_finding_09_unbound_old_inflight_answer_is_not_newly_confirmed"]]
+name = "round3 legacy: unbound answer cannot be admitted"
+meant = "t1827_finding_14_a_new_answer_to_an_old_question_follows_the_legacy_path"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_finding_14_a_new_answer_to_an_old_question_follows_the_legacy_path"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "        if message.kind == \"answer\" {\n            if let Some(question) = message.reply_to {\n                if crate::holding::legacy_member_question(store, question)? {\n                    return Ok(message);\n                }\n            }\n        }\n"
-replace = ""
+find = "    let Some(question) = message.reply_to else {\n        return Ok(false);\n    };\n    if crate::holding::awaiting_handover(store, question)? {"
+replace = "    let Some(question) = message.reply_to else {\n        return Ok(false);\n    };\n    if crate::holding::binding_task(store, question)?.is_none() {\n        return Ok(true);\n    }\n    if crate::holding::awaiting_handover(store, question)? {"
 
 [[plant]]
-name = "round2 carrier: unbound old answer is confirmed with its carrier"
-meant = "t1823_finding_09_unbound_old_answer_is_not_confirmed_with_a_carrier"
-runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1823_finding_09_unbound_old_answer_is_not_confirmed_with_a_carrier"]]
+name = "round3 legacy: in-flight unbound answer cannot be confirmed"
+meant = "t1827_finding_15_a_receipted_old_answer_does_not_block_project_resume"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_finding_15_a_receipted_old_answer_does_not_block_project_resume"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "        for id in &rode {\n            store.db.execute(\n                \"UPDATE message SET state = 'delivered', delivered_at = ?, receipt = ?\n                 WHERE id = ? AND state = 'queued'\",\n                params![at, json!({ \"carrier\": message_id }).to_string(), id],\n            )?;\n        }"
-replace = "        store.db.execute(\n            \"UPDATE message SET state = 'delivered', delivered_at = ?, receipt = ? WHERE carried_by = ? AND state = 'queued'\",\n            params![at, json!({ \"carrier\": message_id }).to_string(), message_id],\n        )?;"
+find = "        let message = require_message(store, message_id, \"delivering\")?;\n        let at = store.at();"
+replace = "        let message = require_message(store, message_id, \"delivering\")?;\n        if message.kind == \"answer\" {\n            if let Some(question) = message.reply_to {\n                if crate::holding::binding_task(store, question)?.is_none() {\n                    return Ok(message);\n                }\n            }\n        }\n        let at = store.at();"
 
 [[plant]]
-name = "round2 carrier: cancelled old answer is confirmed with its carrier"
-meant = "t1823_finding_09_unbound_old_cancelled_answer_is_not_confirmed_with_a_carrier"
-runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1823_finding_09_unbound_old_cancelled_answer_is_not_confirmed_with_a_carrier"]]
+name = "round3 legacy: native door closes an unbound question"
+meant = "an_old_answer_can_be_claimed_and_receipted_at_its_native_door"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "an_old_answer_can_be_claimed_and_receipted_at_its_native_door"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "        if shut.is_none() && (crate::holding::awaiting_handover(store, question_id)?"
+replace = "        if crate::holding::binding_task(store, question_id)?.is_none() {\n            return Ok(Claim::Closed);\n        }\n        if shut.is_none() && (crate::holding::awaiting_handover(store, question_id)?"
+
+[[plant]]
+name = "round3 legacy: native door cannot receipt an unbound answer"
+meant = "an_old_answer_can_be_claimed_and_receipted_at_its_native_door"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "an_old_answer_can_be_claimed_and_receipted_at_its_native_door"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "        if let Some(question) = answer.reply_to {\n            if crate::holding::question_is_live(store, question)? == Some(false)"
+replace = "        if let Some(question) = answer.reply_to {\n            if crate::holding::binding_task(store, question)?.is_none() {\n                return Err(LedgerError::refused_with(\"door-closed\", \"legacy answer blocked\", 409));\n            }\n            if crate::holding::question_is_live(store, question)? == Some(false)"
+
+[[plant]]
+name = "round3 legacy: inbox read does not receipt an unbound answer"
+meant = "an_old_answer_read_in_the_inbox_is_receipted_on_the_old_path"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "an_old_answer_read_in_the_inbox_is_receipted_on_the_old_path"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "            let role = says_a_role(store, message.id)?;\n            if via == Read::Inbox && role {"
+replace = "            if message.kind == \"answer\" {\n                if let Some(question) = message.reply_to {\n                    if crate::holding::binding_task(store, question)?.is_none() {\n                        continue;\n                    }\n                }\n            }\n            let role = says_a_role(store, message.id)?;\n            if via == Read::Inbox && role {"
+
+[[plant]]
+name = "round3 legacy: old queued answer is left out of resumed carrier"
+meant = "old_queued_and_unreceipted_read_answers_are_carried_on_resume"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "old_queued_and_unreceipted_read_answers_are_carried_on_resume"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "     AND kind IN ('task', 'answer', 'note') AND state = 'queued'\";"
+replace = "     AND kind IN ('task', 'answer', 'note') AND state = 'queued'\n     AND (kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to))\";"
+
+[[plant]]
+name = "round3 legacy: old carried answer is left out of paste"
+meant = "old_queued_and_unreceipted_read_answers_are_carried_on_resume"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "old_queued_and_unreceipted_read_answers_are_carried_on_resume"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "            \"{MESSAGE_SELECT} WHERE m.carried_by = ? AND m.state = 'queued' ORDER BY m.id\""
+replace = "            \"{MESSAGE_SELECT} WHERE m.carried_by = ? AND m.state = 'queued'\n             AND (m.kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = m.reply_to)) ORDER BY m.id\""
+
+[[plant]]
+name = "round3 legacy: old unreceipted read is left behind on resume"
+meant = "old_queued_and_unreceipted_read_answers_are_carried_on_resume"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "old_queued_and_unreceipted_read_answers_are_carried_on_resume"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "           AND state = 'read' AND receipt IS NULL AND created_at >= ?3 ORDER BY id\","
+replace = "           AND state = 'read' AND receipt IS NULL AND created_at >= ?3\n           AND EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = message.reply_to) ORDER BY id\","
+
+[[plant]]
+name = "round3 legacy: new answer to old question cannot join its waiting carrier"
+meant = "a_new_answer_to_an_old_question_joins_a_waiting_carrier"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_new_answer_to_an_old_question_joins_a_waiting_carrier"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "pub(crate) fn adopt(store: &mut Store, id: i64) -> Result<(), LedgerError> {\n    let adopted:"
+replace = "pub(crate) fn adopt(store: &mut Store, id: i64) -> Result<(), LedgerError> {\n    if let Some(message) = store.message(id)? {\n        if message.kind == \"answer\" {\n            if let Some(question) = message.reply_to {\n                if crate::holding::binding_task(store, question)?.is_none() {\n                    return Ok(());\n                }\n            }\n        }\n    }\n    let adopted:"
+
+[[plant]]
+name = "round3 legacy: old queued answer is not confirmed with its carrier"
+meant = "a_row_left_under_a_carrier_this_daemon_began_to_paste_is_settled_with_it"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "a_row_left_under_a_carrier_this_daemon_began_to_paste_is_settled_with_it"]]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "                   AND (kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = message.reply_to)\n                     OR NOT EXISTS (SELECT 1 FROM message q JOIN participant p ON p.id = q.sender_id\n                       WHERE q.id = message.reply_to AND p.role NOT IN ('chief', 'human')))\n"
-replace = ""
+find = "         WHERE carried_by = ? AND state = 'queued'\","
+replace = "         WHERE carried_by = ? AND state = 'queued'\n           AND (kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = message.reply_to))\","
+
+[[plant]]
+name = "round3 legacy: old handed cancelled answer is not confirmed with its carrier"
+meant = "an_old_cancelled_answer_handed_with_a_carrier_is_settled_with_it"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "an_old_cancelled_answer_handed_with_a_carrier_is_settled_with_it"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "         WHERE carried_by = ?3 AND state = 'cancelled'\n           AND handed_at >= (SELECT handed_at FROM message WHERE id = ?3)\","
+replace = "         WHERE carried_by = ?3 AND state = 'cancelled'\n           AND handed_at >= (SELECT handed_at FROM message WHERE id = ?3)\n           AND (kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = message.reply_to))\","
+
+[[plant]]
+name = "round3 legacy: a finished old question cannot take its replacement answer"
+meant = "t1827_legacy_question_with_failed_answer_can_be_reanswered_after_reopen"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_question_with_failed_answer_can_be_reanswered_after_reopen"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "        let finished_task = if binding.is_some() {\n            crate::holding::task_of_question(store, question_id)?\n        } else {\n            None\n        };"
+replace = "        let finished_task = if binding.is_some() {\n            crate::holding::task_of_question(store, question_id)?\n        } else {\n            message_task(store, question_id)?\n        };"
+
+[[plant]]
+name = "round3 legacy: finish leaves the old question open"
+meant = "t1827_legacy_question_is_withdrawn_by_finish_as_before"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_question_is_withdrawn_by_finish_as_before"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "    if why == \"was finished\" {\n        store.db.execute("
+replace = "    if false && why == \"was finished\" {\n        store.db.execute("
+
+[[plant]]
+name = "round3 legacy: cancellation changes an old delivered question"
+meant = "t1827_legacy_questions_keep_main_cancel_and_accept_behavior"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_questions_keep_main_cancel_and_accept_behavior"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "              WHERE {} = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0\n                AND id IN (SELECT question_id FROM question_binding)\n                AND (state IN"
+replace = "              WHERE {} = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0\n                AND (state IN"
+
+[[plant]]
+name = "round3 legacy: reassign withdraws an old delivered question"
+meant = "t1827_legacy_delivered_question_retains_main_reassign_behavior"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_delivered_question_retains_main_reassign_behavior"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "           AND id NOT IN (SELECT question_id FROM question_binding)\n           AND state IN ('queued', 'gated')\","
+replace = "           AND id NOT IN (SELECT question_id FROM question_binding)\n           AND state IN ('queued', 'gated', 'delivered')\","
+
+[[plant]]
+name = "round3 legacy: reassign closes an old question door"
+meant = "t1827_legacy_delivered_question_retains_main_reassign_behavior"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_delivered_question_retains_main_reassign_behavior"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "             WHERE {} = ?1 AND sender_id = ?2 AND kind = 'question' AND door_closed_at IS NULL\n               AND id IN (SELECT question_id FROM question_binding)\","
+replace = "             WHERE {} = ?1 AND sender_id = ?2 AND kind = 'question' AND door_closed_at IS NULL\","
+
+[[plant]]
+name = "round3 legacy: an old failed answer does not make its task wait"
+meant = "t1827_legacy_failed_answer_still_makes_its_task_wait"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_failed_answer_still_makes_its_task_wait"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = "               AND (NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)\n                 OR (q.reason IS NOT ?3\n                   AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')))"
+replace = "               AND q.reason IS NOT ?3\n               AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')"
+
+[[plant]]
+name = "round3 legacy: reopen forgets to remind about an old failed answer"
+meant = "t1827_legacy_failed_answer_is_reminded_on_reopen"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_failed_answer_is_reminded_on_reopen"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/again.rs"
+find = "               AND (NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)\n                 OR (q.reason IS NOT ?3\n                   AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')))"
+replace = "               AND q.reason IS NOT ?3\n               AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')"
+
+[[plant]]
+name = "round3 legacy: member removal keeps an old paused answer"
+meant = "t1827_legacy_paused_answer_follows_main_when_the_member_is_removed"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_review", "t1827_legacy_paused_answer_follows_main_when_the_member_is_removed"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "(kind = 'answer' AND urgent = 0 AND reply_to IN (SELECT question_id FROM question_binding))"
+replace = "(kind = 'answer' AND urgent = 0)"

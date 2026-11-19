@@ -29,7 +29,7 @@ use rusqlite::{params, OptionalExtension};
 use serde_json::json;
 
 use super::outage;
-use super::pausing::shut_doors;
+use super::pausing::{shut_doors, shut_tracked_doors};
 use super::{
     carrier_body, delivery_body, own_steps, require_on_board, require_task_state, resume_words,
     task_by_id,
@@ -769,7 +769,7 @@ pub(crate) fn call_off(
     say_again(store, &task, "cancelled", warnings)?;
     store.move_task(&task, "cancelled", json!({ "by": by }))?;
     if let Some(window) = task.assignee_id {
-        shut_doors(store, &task, window)?;
+        shut_tracked_doors(store, &task, window)?;
     }
     release_ready(store, project_id)?;
     Ok(CalledOff {
@@ -1141,7 +1141,7 @@ fn fail(
         recover_after_lost_answer(store, &task, None, true)?;
         store.move_task(&task, "failed", json!({ "reason": reason }))?;
         if let Some(window) = task.assignee_id {
-            shut_doors(store, &task, window)?;
+            shut_tracked_doors(store, &task, window)?;
         }
         release_ready(store, project_id)?;
         let requester = store.participant_row(task.requester_id)?;

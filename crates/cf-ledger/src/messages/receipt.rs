@@ -229,8 +229,9 @@ fn outstanding(store: &Store, task: i64, window: i64) -> Result<bool, LedgerErro
         .prepare(&format!(
             "SELECT 1 FROM message q
              WHERE {} = ?1 AND q.kind = 'question' AND q.sender_id = ?2 AND q.urgent = 0
-               AND q.reason IS NOT ?3
-               AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')
+               AND (NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)
+                 OR (q.reason IS NOT ?3
+                   AND q.reason IS NOT ('T-' || (SELECT number FROM task WHERE id = ?1) || ' was finished')))
                AND NOT EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id
                                AND a.kind = 'answer' AND a.state IN ('queued', 'delivering', 'delivered', 'read'))
                AND (q.state != 'cancelled'
@@ -373,9 +374,6 @@ pub(crate) fn claim_answer(
                 403,
             ));
         }
-        if crate::holding::legacy_member_question(store, question_id)? {
-            return Ok(Claim::Closed);
-        }
         if shut.is_none() && (crate::holding::awaiting_handover(store, question_id)?
             || crate::holding::provisional_question(store, question_id)?) {
             return Ok(Claim::Waiting);
@@ -478,8 +476,7 @@ pub(crate) fn settle_claim(
             return Ok(());
         }
         if let Some(question) = answer.reply_to {
-            if crate::holding::legacy_member_question(store, question)?
-                || crate::holding::question_is_live(store, question)? == Some(false)
+            if crate::holding::question_is_live(store, question)? == Some(false)
                 || crate::holding::awaiting_handover(store, question)?
                 || crate::holding::provisional_question(store, question)?
             {
@@ -537,13 +534,6 @@ pub(crate) fn receive_read(
             else {
                 continue;
             };
-            if message.kind == "answer" {
-                if let Some(question) = message.reply_to {
-                    if crate::holding::legacy_member_question(store, question)? {
-                        continue;
-                    }
-                }
-            }
             let role = says_a_role(store, message.id)?;
             if via == Read::Inbox && role {
                 received += read_part(store, &message, 1, 1, cf)?;

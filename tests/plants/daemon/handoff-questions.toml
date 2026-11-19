@@ -133,8 +133,8 @@ runs = ["handoff-open-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages.rs"
-find = "            if FINISHED_TASK_STATES.contains(&task.state.as_str()) {\n                return Err(finished_task_takes_no_answer(store, &task)?);"
-replace = "            if FINISHED_TASK_STATES.contains(&task.state.as_str()) || task.state == \"done\" {\n                return Err(finished_task_takes_no_answer(store, &task)?);"
+find = "            if FINISHED_TASK_STATES.contains(&task.state.as_str()) {\n                return Err(if binding.is_some() {"
+replace = "            if FINISHED_TASK_STATES.contains(&task.state.as_str()) || task.state == \"done\" {\n                return Err(if binding.is_some() {"
 
 [[plant]]
 name = "handoff questions: a failed answer stands, so the list drops a question that waits for another"
@@ -194,8 +194,8 @@ runs = ["handoff-receipt-doors"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
-find = "WHERE {} = ?1 AND sender_id = ?2 AND kind = 'question' AND door_closed_at IS NULL"
-replace = "WHERE kind = 'question' AND door_closed_at IS NULL AND ?1 IS NOT NULL AND ?2 IS NOT NULL AND {} IS NOT NULL"
+find = "WHERE {} = ?1 AND sender_id = ?2 AND kind = 'question' AND door_closed_at IS NULL\","
+replace = "WHERE kind = 'question' AND door_closed_at IS NULL AND ?1 IS NOT NULL AND ?2 IS NOT NULL AND {} IS NOT NULL\","
 
 [[plant]]
 name = "handoff questions: a door the acceptance shut is told its task was stopped and will go on"

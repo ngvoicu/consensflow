@@ -478,18 +478,6 @@ pub(crate) fn binding_task(
         .optional()?)
 }
 
-/// A member question predating prospective holding tracking has no safe route.
-pub(crate) fn legacy_member_question(store: &Store, question: i64) -> Result<bool, LedgerError> {
-    Ok(store
-        .db
-        .prepare(
-            "SELECT 1 FROM message q JOIN participant p ON p.id = q.sender_id
-        WHERE q.id = ? AND p.role NOT IN ('chief', 'human')
-          AND NOT EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = q.id)",
-        )?
-        .exists([question])?)
-}
-
 /// The held task of a tracked question, or the topic for an untracked one.
 /// A tracked idle question has no held task even if it mentions a topic.
 pub(crate) fn task_for_question_sql(question: &str) -> String {

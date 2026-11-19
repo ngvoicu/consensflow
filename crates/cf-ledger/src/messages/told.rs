@@ -462,7 +462,7 @@ pub(crate) fn kept_through_leaving(
     why: &str,
 ) -> Result<Vec<i64>, LedgerError> {
     let paused = format!(
-        "recipient_id = ?1 AND ({told} OR (kind = 'answer' AND urgent = 0)) AND task_id IN (SELECT id FROM task WHERE state = 'paused')",
+        "recipient_id = ?1 AND ({told} OR (kind = 'answer' AND urgent = 0 AND reply_to IN (SELECT question_id FROM question_binding))) AND task_id IN (SELECT id FROM task WHERE state = 'paused')",
         told = told("message")
     );
     let given_back: Vec<(i64, i64, i64)> = store

@@ -348,7 +348,8 @@ pub(crate) fn answer(
             [question_id],
             |row| Ok((row.get("sender_id")?, row.get("task_id")?)),
         )?;
-        let task_id = crate::holding::binding_task(store, question_id)?.unwrap_or(mentioned_task);
+        let binding = crate::holding::binding_task(store, question_id)?;
+        let task_id = binding.unwrap_or(mentioned_task);
         // The one asked, or (a question with options) the asker itself: its
         // window may have answered first, and the board's copy takes that answer.
         let from_window = !question.questions.is_null() && Some(answerer.id) == asker_id;
@@ -374,16 +375,20 @@ pub(crate) fn answer(
             }
             return Err(LedgerError::refused_with("question-window-closed", "the window that asked this question has ended; start a new task with what you meant to answer", 409));
         }
-        let answer_task = match crate::holding::binding_task(store, question_id)? {
+        let answer_task = match binding {
             Some(_) => crate::holding::task_of_question(store, question_id)?,
             None => message_task(store, question_id)?,
         };
         if let Some(task) = answer_task {
-            if question.reason.as_deref() == Some(MOVED_QUESTION) {
+            if binding.is_some() && question.reason.as_deref() == Some(MOVED_QUESTION) {
                 return Err(moved_task_takes_no_answer(store, &task)?);
             }
             if FINISHED_TASK_STATES.contains(&task.state.as_str()) {
-                return Err(finished_task_takes_no_answer(store, &task)?);
+                return Err(if binding.is_some() {
+                    finished_task_takes_no_answer(store, &task)?
+                } else {
+                    legacy_finished_task_takes_no_answer(&task)
+                });
             }
         }
         if answered(store, question_id)? {
@@ -396,9 +401,10 @@ pub(crate) fn answer(
         // A question the ledger withdrew with no answer ever given (its task was finished
         // while it was open) is answered by no one: its words, if the chief took them, are the
         // result. One whose answer failed or was cancelled still obliges, and takes another.
-        let finished_task = match crate::holding::binding_task(store, question_id)? {
-            Some(_) => crate::holding::task_of_question(store, question_id)?,
-            None => message_task(store, question_id)?,
+        let finished_task = if binding.is_some() {
+            crate::holding::task_of_question(store, question_id)?
+        } else {
+            None
         };
         let finished = finished_task.is_some_and(|task| {
             question.reason.as_deref() == Some(&format!("T-{} was finished", task.number))
@@ -576,6 +582,26 @@ fn finished_task_takes_no_answer(
     Ok(LedgerError::refused_with(code, words, 409))
 }
 
+/// A question recorded before holding tracking keeps the earlier refusal.
+fn legacy_finished_task_takes_no_answer(task: &TaskRow) -> LedgerError {
+    let number = task.number;
+    let (code, words) = match task.state.as_str() {
+        "cancelled" => (
+            "task-cancelled",
+            format!("T-{number} is cancelled: nobody waits for this answer"),
+        ),
+        "accepted" => (
+            "task-accepted",
+            format!("T-{number} is accepted, so it is finished and nobody waits for this answer: to give what is still wanted, add a task for the same window with cf task add --after T-{number} \"…\""),
+        ),
+        _ => (
+            "task-failed",
+            format!("T-{number} failed, so nobody waits for this answer: reopen T-{number} to go on with it (cf task reopen T-{number} \"…\")"),
+        ),
+    };
+    LedgerError::refused_with(code, words, 409)
+}
+
 /// The questions a task's window asked, still open, are withdrawn when the task is finished
 /// while it waits for their answers (the chief's Finish):
 /// nobody waits for them now. A question not yet given to the chief is never given, and one
@@ -589,10 +615,24 @@ pub(crate) fn withdraw_open_questions(
     let Some(window) = task.assignee_id else {
         return Ok(());
     };
+    if why == "was finished" {
+        store.db.execute(
+            &format!(
+                "UPDATE message SET state = 'cancelled', reason = ?1
+                 WHERE task_id = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0
+                   AND id NOT IN (SELECT question_id FROM question_binding)
+                   AND state IN ('queued', 'delivering', 'gated', 'delivered', 'read')
+                   AND NOT {}",
+                has_standing_answer("message")
+            ),
+            params![format!("T-{} {why}", task.number), task.id, window],
+        )?;
+    }
     store.db.execute(
         &format!(
             "UPDATE message SET state = 'cancelled', reason = ?1
               WHERE {} = ?2 AND sender_id = ?3 AND kind = 'question' AND urgent = 0
+                AND id IN (SELECT question_id FROM question_binding)
                 AND (state IN ('queued', 'delivering', 'gated', 'delivered', 'read', 'failed')
                      OR (state = 'cancelled' AND reason IS NOT ?4 AND EXISTS (
                          SELECT 1 FROM message a WHERE a.reply_to = message.id AND a.kind = 'answer')))

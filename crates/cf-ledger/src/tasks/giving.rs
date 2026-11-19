@@ -809,7 +809,7 @@ fn release_told(
             ],
         )?;
         if let Some(window) = task.assignee_id {
-            super::pausing::shut_doors(store, &task, window)?;
+            super::pausing::shut_tracked_doors(store, &task, window)?;
         }
         crate::tasks::end_asides(store, task.id, &at)?;
         store.log(
