@@ -231,6 +231,25 @@ jobs:
       # which put the slowest at about 30 and 26 against a limit of 30.
       - name: Muse echo cases
         run: 'echo "not run: this runner has no Muse"'
+      # macOS stand-ins likewise make h-* homes under their inherited TMPDIR.
+      - name: Isolate macOS rig scratch
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          rig_temp="$RUNNER_TEMP/cf-daemons"
+          mkdir -m 700 "$rig_temp"
+          printf 'RIG_MAC_TEMP=%s\nTMPDIR=%s\n' "$rig_temp" "$rig_temp" >> "$GITHUB_ENV"
+      # Windows stand-in processes use PUBLIC, then make their own h-* homes.
+      # Give this job a short, empty parent so its reports can be uploaded
+      # without looking in anyone else's public scratch homes.
+      - name: Isolate Windows rig scratch
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $rigPublic = Join-Path $env:PUBLIC 'cf-daemons'
+          New-Item -ItemType Directory -Path $rigPublic -ErrorAction Stop | Out-Null
+          "RIG_PUBLIC=$rigPublic" >> $env:GITHUB_ENV
+          "PUBLIC=$rigPublic" >> $env:GITHUB_ENV
       - run: npm run test:daemons
         env:
           CF_TEST_SHARD: ${{ matrix.shard }}
@@ -249,14 +268,11 @@ jobs:
           cargo test -p cf-e2e --test rig -- --ignored --exact owner_launchers::a_run_whose_claude_code_left_an_item_in_the_keychain_fails_the_rig_that_ends_and_names_it
           cargo test -p cf-e2e --test rig -- --ignored --exact owner_launchers::a_claude_whose_config_keeps_its_findings_is_not_listed_by_the_guard_and_its_rig_ignores_another_processs_item
 
-      # A rig case that fails keeps a report of what its windows showed beside
-      # its home, in the runner's temp folder (cf-e2e's rig/report.rs, `keep`),
-      # which goes with the runner: so a failure that does not reproduce at home
-      # is read from these (2026-10-21: Windows' folder-trust case). Node names
-      # the folder as the Rust that wrote there does (TMPDIR on the Mac's
-      # runner; on Windows', TMP, which Rust reads first and the runner sets as
-      # it does TEMP, which Node reads); `runner.temp` is another folder. The
-      # reports hold the stand-in agents' output and the daemon's log, from a
+      # A failed rig keeps its report beside its home. Stand-in test processes
+      # put those homes in an h-* folder under the job's own scratch parent;
+      # the platform uploads below find those reports without scanning another
+      # process's homes. Node also names the ordinary temp folder for reports
+      # kept directly there. The reports hold the stand-in agents' output and the daemon's log, from a
       # rig whose environment is its own (cf-e2e's rig/install.rs): no real
       # harness, home or token. The step that names the folder runs only for a
       # failed job, and the upload, for one that wrote none, says nothing. A rig
@@ -276,6 +292,20 @@ jobs:
         with:
           name: rig-reports-${{ matrix.os }}-${{ strategy.job-index }}
           path: ${{ env.RIG_TEMP }}/consensflow-integration-*-left.txt
+          if-no-files-found: ignore
+          retention-days: 7
+      - if: failure() && runner.os == 'Windows' && env.RIG_PUBLIC != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-rig-reports-${{ strategy.job-index }}
+          path: ${{ env.RIG_PUBLIC }}/h-*/consensflow-integration-*-left.txt
+          if-no-files-found: ignore
+          retention-days: 7
+      - if: failure() && runner.os == 'macOS' && env.RIG_MAC_TEMP != ''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-rig-reports-${{ strategy.job-index }}
+          path: ${{ env.RIG_MAC_TEMP }}/h-*/consensflow-integration-*-left.txt
           if-no-files-found: ignore
           retention-days: 7
       - if: failure()

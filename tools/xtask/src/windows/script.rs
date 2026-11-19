@@ -63,10 +63,9 @@ pub const RUNNING: &str = ".windows-run.pid";
 /// lock and needs no looking at. It stays in the folder, empty, between runs.
 pub const LOCK: &str = ".windows-run.lock";
 
-/// The id of the run ([`run_id`]) that holds the lock and the process it is, there, beside
-/// it (two lines: the id, the process, and a third, [`IN_JOB`], once the run has put itself
-/// in its job), so that a run that is ended there ends its own and no other, and that
-/// process and no other.
+/// The run's id and process id; once it is in its job, [`IN_JOB`], its exact process
+/// creation time and the tarball name follow. A stop verifies the time on the process
+/// handle it uses to end the run.
 pub const OWNER: &str = ".windows-run.id";
 
 /// The third line of the owner file ([`OWNER`]): the run is in its job ([`RUN_TEMPLATE`]), so
@@ -221,7 +220,42 @@ pub fn run_id() -> String {
 /// and one lock, and runs from several trees queue for it: a name they shared would
 /// let the run that sent last be the one every script there unpacks.
 pub fn upload_name(dir: &str, id: &str) -> String {
-    format!("{dir}.{id}.tgz")
+    let _ = dir;
+    format!("consensflow-wrun-{id}/tree.tgz")
+}
+
+/// Makes this run's folder exclusively and records its owner before upload.
+pub fn claim_script(dir: &str, id: &str) -> String {
+    format!(
+        r#"# CF_OWNED_CLAIM
+$ErrorActionPreference='Stop'
+$u=$env:USERPROFILE
+if ((Get-Item -LiteralPath $u -Force).Attributes -band 1024) {{ throw 'profile is a link' }}
+$run=Join-Path $u 'consensflow-wrun-{id}'
+New-Item -ItemType Directory -Path $run -ErrorAction Stop | Out-Null
+[IO.File]::WriteAllText((Join-Path $run 'record.txt'), "id={id}`ncopy={dir}`ncreated=$([DateTime]::UtcNow.ToString('o'))`n")
+Write-Output '== claimed {id}'
+"#
+    )
+}
+
+/// Removes only this run's folder, after its own completion receipt exists.
+pub fn cleanup_script(id: &str) -> String {
+    format!(
+        r#"# CF_OWNED_CLEANUP
+$ErrorActionPreference='Stop'
+$u=$env:USERPROFILE
+$run=Join-Path $u 'consensflow-wrun-{id}'
+$receipt=Join-Path $run 'completed.txt'
+foreach($path in @($u,$run,$receipt)) {{
+  $item=Get-Item -LiteralPath $path -Force -ErrorAction Stop
+  if ($item.Attributes -band 1024) {{ throw "link refused: $path" }}
+}}
+if ([IO.File]::ReadAllText($receipt) -ne 'finished {id}') {{ throw 'completion receipt did not match' }}
+Remove-Item -LiteralPath $run -Recurse -Force
+Write-Output '== removed {id}'
+"#
+    )
 }
 
 /// The command as cmd.exe reads a line: an argument with a space or a quote in
@@ -367,11 +401,9 @@ pub struct Script<'a> {
 /// condition); this look is for what comes before it, and is one line because the bootstrap is what goes
 /// on ssh's command line (`the_longest_run_there_is_leaves_the_command_line_a_margin_of_a_thousand_and_more`).
 ///
-/// The run's tarball is removed whichever way the script ends, a refusal by the lock
-/// too: the one thing it takes away is its own, and the lock's records only if they are
-/// its (the `finally`). A tarball a run left there when it never got so far (this program
-/// killed, the connection lost, an upload cut short) is taken away by the sweep of the
-/// next run that holds the lock.
+/// The bootstrap writes its completion receipt when it finishes. After the controller
+/// sees the exit line, it removes the run's own folder only if the receipt matches.
+/// A killed or unknown run keeps its folder for a reviewed manual cleanup.
 ///
 /// The unpack is Windows' own tar (bsdtar), `System32\tar.exe`, named by its path, and a
 /// machine without it ends the run saying so: a bare `tar.exe` is the first on the PATH,
@@ -445,6 +477,7 @@ pub fn run_script(script: &Script) -> String {
             ("job", JOB_SOURCE),
             ("node", script.node),
             ("in_job", IN_JOB),
+            ("tarball", &upload_name(script.dir, script.id)),
             ("command_file", COMMAND_FILE),
             ("test_machine", TEST_MACHINE),
             ("machine", &quoted(script.machine)),
@@ -555,36 +588,11 @@ pub fn sweep_script() -> String {
     )
 }
 
-/// What ends the run `id` that goes on there: its process ended, and with it everything it
-/// started, its record taken away, and its tarball. Sent when the run is stopped here,
-/// which Windows' SSH server does not pass on. Only the run the lock's owner file
-/// ([`OWNER`]) names is ended, and the process it names (not the one in the older file,
-/// which another script may have written over): a run that was stopped before its script
-/// had the lock (or that the lock refused) must not end the one that holds it. The stop
-/// says nothing, and ends with 0 whether or not there was a run, a process or a tarball
-/// left to end: it ended with the status of its last command, so that a stop of a run
-/// whose tarball was gone already (the run had ended) ended with 1, which the Mac took
-/// for a run that may still be going on the machine.
-///
-/// - The process is ended only if it is still the run's: a PowerShell that was started
-///   before the owner file was last written. A process id is given again to the next
-///   program that starts once its program has ended, so one that is not (the record of a
-///   run that had ended, which a stop that landed as it ended leaves) names whatever
-///   program has it now, and ending it ends that.
-/// - Its records are taken away without a word if they cannot be: the run that ends by
-///   itself takes them away too, and one that lands between the stop's reading of the owner
-///   file and its removal made PowerShell say "Cannot find path" (the stop's contract is that
-///   it says nothing).
-/// - A run that is in its job ([`IN_JOB`] in the owner file) is ended by its process alone:
-///   the system ends the job's programs, every one of them, with it. The tree is not read
-///   and walked as `taskkill /T` does (leaves first, about 7 ms a program, so that the
-///   walk of a run that has started hundreds goes on for seconds): a program of the
-///   walk's list that has ended since has its process id given to a program that has
-///   not, and the walk ends that one, whose it is (CI, 2026-10-24: two PowerShells of
-///   other cases of the Windows runner's tests were ended, in their first seconds, by
-///   the stop of a case that had a run starting programs; each ended with 1 and what a
-///   PowerShell has written by then, `#< CLIXML`). A run that is not in its job yet, or
-///   cannot be put in one, is ended with its tree, as before.
+/// Ends a run only when its complete record names a job and an exact process creation
+/// time. A Windows handle is opened and checked again before termination, so a PID reused
+/// between the lookup and termination cannot name another process. If a job or identity
+/// is missing, the stop reports uncertainty and leaves it alone. Records and the tarball
+/// stay for ownership-based cleanup: a later run can replace those paths after termination.
 pub fn stop_script(dir: &str, id: &str) -> String {
     fill(
         STOP,

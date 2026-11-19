@@ -12,11 +12,40 @@ use cf_base::time::{iso, Clock, SystemClock};
 use super::said;
 use crate::process::{self, Captured, Invocation};
 
-// Hosted macOS once started three of these together; one pwsh 7.6.9 then died
-// in SIGSEGV before it said anything. Keep all of this test binary's helper
-// shells, including the diagnostic probe, to one at a time on macOS.
-#[cfg(target_os = "macos")]
-static POWERSHELL_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+#[path = "../../../../../../tests/support/powershell_start_lock.rs"]
+mod powershell_start_lock;
+
+pub(super) fn with_shell_turn<T>(shell: &str, start: impl FnOnce() -> T) -> T {
+    if shell.eq_ignore_ascii_case("pwsh") || shell.eq_ignore_ascii_case("pwsh.exe") {
+        powershell_start_lock::one_at_a_time(start)
+    } else {
+        start()
+    }
+}
+
+pub(super) fn shell_environment(shell: &str, env: Env) -> Env {
+    if shell.eq_ignore_ascii_case("pwsh") || shell.eq_ignore_ascii_case("pwsh.exe") {
+        env.with_var("DOTNET_MultiCoreJitMinNumCpus", "65535")
+            .with_var("COMPlus_MultiCoreJitMinNumCpus", "65535")
+            .with_var("POWERSHELL_TELEMETRY_OPTOUT", "1")
+    } else {
+        env
+    }
+}
+
+#[test]
+fn pwsh_environment_disables_the_shared_startup_profile() {
+    let original = Env::from_process().with_var("DOTNET_MultiCoreJitMinNumCpus", "0");
+    let pwsh = shell_environment("pwsh", original.clone());
+    assert_eq!(pwsh.os("DOTNET_MultiCoreJitMinNumCpus").unwrap(), "65535");
+    assert_eq!(pwsh.os("POWERSHELL_TELEMETRY_OPTOUT").unwrap(), "1");
+    assert_eq!(
+        shell_environment("powershell.exe", original)
+            .os("DOTNET_MultiCoreJitMinNumCpus")
+            .unwrap(),
+        "0"
+    );
+}
 
 /// A PowerShell of this machine: the Mac's (`pwsh`) or Windows' own; none where the
 /// machine has neither on its PATH, and the tests that run it say so. One that is there
@@ -26,9 +55,34 @@ static POWERSHELL_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 pub(super) fn shell() -> Option<&'static str> {
     let path = Env::from_process();
     let folders: Vec<std::path::PathBuf> = std::env::split_paths(path.search_path()?).collect();
-    ["pwsh", "pwsh.exe", "powershell.exe"]
-        .into_iter()
+    shell_in(&folders, cfg!(windows))
+}
+
+fn shell_in(folders: &[PathBuf], windows: bool) -> Option<&'static str> {
+    // PowerShell 7 on Windows resolves its cache through the user's Windows
+    // special folder, not XDG_CACHE_HOME. These Windows scripts run in the
+    // built-in Windows PowerShell that the runner itself uses.
+    let names: &[&str] = if windows {
+        &["powershell.exe"]
+    } else {
+        &["pwsh", "pwsh.exe", "powershell.exe"]
+    };
+    names
+        .iter()
+        .copied()
         .find(|name| folders.iter().any(|folder| folder.join(name).is_file()))
+}
+
+#[test]
+fn windows_script_tests_choose_windows_powershell_not_the_users_pwsh_cache() {
+    let folder = tempfile::tempdir().unwrap();
+    for name in ["pwsh.exe", "powershell.exe"] {
+        fs::write(folder.path().join(name), "").unwrap();
+    }
+    let path = [folder.path().to_path_buf()];
+    assert_eq!(shell_in(&path, true), Some("powershell.exe"));
+    fs::remove_file(folder.path().join("powershell.exe")).unwrap();
+    assert_eq!(shell_in(&path, true), None);
 }
 
 /// What `script` says when `shell` runs it from a file in `folder`, its lines' ends as `\n`.
@@ -164,17 +218,17 @@ pub(super) fn capture(
     invocation: Invocation,
     written: &Written,
 ) -> Report {
+    let env = shell_environment(shell, env);
     // Take the turn before recording the start: the reported interval must not
     // include time spent waiting for another test's PowerShell.
-    #[cfg(target_os = "macos")]
-    let _turn = POWERSHELL_TURN
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    let started = iso(SystemClock.now_ms());
-    trace(&started, "starting", &invocation);
-    let ran = output(&invocation, &env);
-    let ended = iso(SystemClock.now_ms());
-    trace(&ended, "ended", &invocation);
+    let (started, ended, ran) = with_shell_turn(shell, || {
+        let started = iso(SystemClock.now_ms());
+        trace(&started, "starting", &invocation);
+        let ran = output(&invocation, &env);
+        let ended = iso(SystemClock.now_ms());
+        trace(&ended, "ended", &invocation);
+        (started, ended, ran)
+    });
     Report {
         shell: shell.to_owned(),
         folder: folder.to_owned(),
@@ -202,16 +256,10 @@ fn why(report: &Report) -> String {
         "-Command",
         "Write-Output ('PWSH-OK ' + $PSVersionTable.PSVersion.ToString())",
     ]);
-    let alone = {
-        #[cfg(target_os = "macos")]
-        let _turn = POWERSHELL_TURN
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        match output(&probe, &report.env) {
-            Ok(alone) => format!("{}\n{}", probe.display(), said_output(&alone)),
-            Err(failed) => format!("{}\n{failed}", probe.display()),
-        }
-    };
+    let alone = with_shell_turn(&report.shell, || match output(&probe, &report.env) {
+        Ok(alone) => format!("{}\n{}", probe.display(), said_output(&alone)),
+        Err(failed) => format!("{}\n{failed}", probe.display()),
+    });
     format!(
         "{}\n--- the command, in {}\n{}\nwith XDG_CACHE_HOME of its own: {}\nstarted (capture called): {}\nended (capture returned): {}\n--- the file of the run, as it left it\n{}\n--- the script the run was given\n{}\n--- the same shell alone on the folder\n{}",
         match &report.ran {
@@ -234,7 +282,7 @@ fn why(report: &Report) -> String {
 
 /// What `run` has to tell of `script` on `folder`: the output it gives, or all a run that
 /// did not end can still say of why.
-fn told(shell: &str, folder: &Path, script: &str) -> Result<String, String> {
+pub(super) fn told(shell: &str, folder: &Path, script: &str) -> Result<String, String> {
     let file = folder.join("case.ps1");
     let wrapped = WRAPPED.replace("«case»", script);
     fs::write(&file, &wrapped).unwrap();
@@ -328,7 +376,7 @@ fn a_running_powershell_holds_the_shared_turn_until_it_ends() {
     let release = folder.path().join("release");
     let quoted = |path: &Path| path.display().to_string().replace('\'', "''");
     let script = format!(
-        "[IO.File]::WriteAllText('{}', 'ready')\nwhile (-not (Test-Path -LiteralPath '{}')) {{ [Threading.Thread]::Sleep(25) }}\n",
+        "[IO.File]::WriteAllText('{}', 'ready')\n$clock = [Diagnostics.Stopwatch]::StartNew()\nwhile (-not (Test-Path -LiteralPath '{}')) {{ if ($clock.Elapsed.TotalSeconds -gt 45) {{ throw 'release did not arrive' }}; [Threading.Thread]::Sleep(25) }}\n",
         quoted(&ready),
         quoted(&release),
     );
@@ -339,13 +387,21 @@ fn a_running_powershell_holds_the_shared_turn_until_it_ends() {
         std::thread::sleep(Duration::from_millis(10));
     }
     let started = ready.exists();
-    let held = matches!(
-        POWERSHELL_TURN.try_lock(),
-        Err(std::sync::TryLockError::WouldBlock)
-    );
-    // Release and join before asserting, even on a red: no test-owned shell is left behind.
-    fs::write(&release, "go").unwrap();
+    let lock = fs::File::options()
+        .read(true)
+        .write(true)
+        .open(powershell_start_lock::lock_path());
+    let held = lock
+        .as_ref()
+        .is_ok_and(|file| matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)));
+    // Release and join before asserting, even if opening the lock failed.
+    let released = fs::write(&release, "go");
     let ended = run.join().unwrap();
+    assert!(
+        released.is_ok(),
+        "could not release the shell: {released:?}"
+    );
+    assert!(lock.is_ok(), "could not open the shared lock: {lock:?}");
     assert!(
         started,
         "the shell never reached its ready marker: {ended:?}"

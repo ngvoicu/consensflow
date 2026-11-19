@@ -376,6 +376,11 @@ pub(crate) fn edit_member(
         } else {
             Some(edit.tier.clone())
         };
+        if (member.harness.as_deref() != Some(edit.harness.as_str()) || member.model != edit.model)
+            && quota::account_hold_for_edit(store, &member)?
+        {
+            quota::mark_back(store, member.id, "by @human")?;
+        }
         store.db.execute(
             "UPDATE participant SET harness = ?, model = ?, effort = ?, model_name = ?, tier = ?,
                     needs_edit = 0

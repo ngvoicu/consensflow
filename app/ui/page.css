@@ -45,7 +45,9 @@
   --term-magenta: #c084fc;
   --term-cyan: #22d3ee;
   --term-white: #d4d4d8;
-  --term-bright-black: #8a8a93;
+  /* Grey, the page's own quiet words (--muted), 7.5 to 1 on the well: far enough above the
+     dim floor below that a dim grey still reads dimmer than grey. */
+  --term-bright-black: #a1a1aa;
   --term-bright-red: #fca5a5;
   --term-bright-green: #86efac;
   --term-bright-yellow: #fde68a;
@@ -53,6 +55,12 @@
   --term-bright-magenta: #d8b4fe;
   --term-bright-cyan: #67e8f9;
   --term-bright-white: #fafafa;
+  /* A program's dim words (ESC[2m: Claude Code's and Codex's hints and footers): their colour
+     at this share of its opacity, and more where that would read under the contrast below on
+     the well (term.js). The window's own words dim read at 5.9 to 1 (its words, 15.2), every
+     colour dim at 4.5 or more. */
+  --term-dim: .6;
+  --term-dim-contrast: 4.5;
 }
 
 * { box-sizing: border-box; }
@@ -1325,7 +1333,9 @@ button.registry-row:hover:not(:disabled) { border-color: rgba(167, 139, 250, .5)
 /* The history viewer: one stream, laid out to the approved mock (chief-harness CHF-20) in
    providers.dev's colours, dark or light as the system is: the app's own page is dark only,
    so the viewer alone follows the system. Its words are in a monospace the Mac has (SF Mono,
-   Menlo) or Windows has (Cascadia, Consolas). */
+   Menlo) or Windows has (Cascadia, Consolas). Its italic is the face's own, never the upright
+   one slanted: SF Mono's in the Mac's WebKit view, Cascadia Mono's on Windows 11 (in its
+   system CascadiaMono.ttf), Menlo's and Consolas's. */
 dialog.history-viewer {
   --history-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, "Cascadia Mono", "Cascadia Code", Consolas, monospace;
   --history-surface: #18181b;
@@ -1428,6 +1438,8 @@ dialog.history-viewer[open] { grid-template-rows: auto minmax(0, 1fr); }
 .history-item :is(pre, p) { margin: 0; font: inherit; white-space: pre-wrap; }
 .history-item[data-kind="prompt"] .history-text + .history-text { margin-top: 8px; }
 .history-item .history-thinking { font-style: italic; color: var(--history-thinking); }
+/* A face's own italic or none: where the face has no italic, the words stand upright. */
+.history-item :is(.history-thinking, em) { font-synthesis: weight; }
 .history-item[data-kind="notice"] { color: var(--history-quiet); }
 .history-call { font-weight: 700; }
 .history-call .history-path,

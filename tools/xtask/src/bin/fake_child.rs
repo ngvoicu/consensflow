@@ -31,6 +31,8 @@
 use std::io::{self, Write};
 use std::process::ExitCode;
 
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine;
 use cf_base::env::Env;
 
 fn main() -> ExitCode {
@@ -59,6 +61,23 @@ fn main() -> ExitCode {
     if let Some(probe) = env.text("FAKE_CHILD_PROBE") {
         if std::env::args_os().any(|arg| arg == "ServerAliveCountMax=1") {
             let _ = writeln!(io::stdout().lock(), "{probe}");
+            return ExitCode::SUCCESS;
+        }
+    }
+    // The Windows runner now claims a run folder and removes it only after a receipt.
+    // Only the Windows integration fixture opts into these fake SSH answers.
+    if env.text("FAKE_CHILD_OWNED").is_some() {
+        if let Some((operation, marker)) = owned_answer(&args) {
+            if let Some(log) = env.path("FAKE_CHILD_OWNED_LOG") {
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(log)
+                {
+                    let _ = writeln!(file, "{operation} {marker}");
+                }
+            }
+            let _ = writeln!(io::stdout().lock(), "{marker}");
             return ExitCode::SUCCESS;
         }
     }
@@ -108,6 +127,30 @@ fn main() -> ExitCode {
         Some(code) => u8::try_from(code).map_or_else(|_| std::process::exit(code), ExitCode::from),
         None => ExitCode::SUCCESS,
     }
+}
+
+fn owned_answer(args: &[std::ffi::OsString]) -> Option<(&'static str, String)> {
+    let line = args.last()?.to_str()?;
+    let encoded = line.rsplit_once(' ')?.1;
+    let bytes = STANDARD.decode(encoded).ok()?;
+    let (pairs, remainder) = bytes.as_chunks::<2>();
+    if !remainder.is_empty() {
+        return None;
+    }
+    let words: Vec<u16> = pairs.iter().copied().map(u16::from_le_bytes).collect();
+    let script = String::from_utf16(&words).ok()?;
+    let (operation, prefix) = if script.starts_with("# CF_OWNED_CLAIM\n") {
+        ("claim", "== claimed ")
+    } else if script.starts_with("# CF_OWNED_CLEANUP\n") {
+        ("cleanup", "== removed ")
+    } else {
+        return None;
+    };
+    let marker = script.lines().find_map(|line| {
+        let value = line.strip_prefix("Write-Output '")?.strip_suffix('\'')?;
+        value.starts_with(prefix).then(|| value.to_owned())
+    })?;
+    Some((operation, marker))
 }
 
 /// The caller gives this test-only stand-in a folder of the test's own. Do not interpret a binary

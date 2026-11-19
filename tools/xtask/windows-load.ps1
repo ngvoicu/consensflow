@@ -42,22 +42,48 @@ try {
   Write-Output "== load: $Burners burners, $Churners churners, for $MaxMinutes minutes at the most; $Runs runs of cargo test -p $Package $Filter"
   for ($run = 1; $run -le $Runs; $run++) {
     if ((Get-Date) -gt $ends) { Write-Output "== the $MaxMinutes minutes ran out before run $run"; $failed++; break }
-    $log = Join-Path $env:TEMP "windows-load-$PID-$run.log"
     $watch = [Diagnostics.Stopwatch]::StartNew()
-    cmd /c "cargo test --offline --locked -p $Package --lib $Filter -- $TestArgs > `"$log`" 2>&1"
-    $code = $LASTEXITCODE
+    # A bounded in-memory log needs no filename and cannot remove somebody
+    # else's file when a process id or a temporary directory is reused.
+    $writer = [IO.StringWriter]::new()
+    try {
+      $limit = 1048576
+      $used = 0
+      $truncated = $false
+      $rounds = [Collections.Generic.List[string]]::new()
+      $moreRounds = $false
+      $result = $null
+      cmd /c "cargo test --offline --locked -p $Package --lib $Filter -- $TestArgs 2>&1" | ForEach-Object {
+        $line = [string]$_
+        if ($line.StartsWith('test result: ')) { $result = $line }
+        if ($line.StartsWith('round ')) {
+          if ($rounds.Count -lt 1000) { $rounds.Add($line.Substring(0, [Math]::Min(4096, $line.Length))) } else { $moreRounds = $true }
+        }
+        $remaining = $limit - $used
+        if ($remaining -gt 0) {
+          $part = $line + "`n"
+          if ($part.Length -gt $remaining) { $part = $part.Substring(0, $remaining); $truncated = $true }
+          $writer.Write($part)
+          $used += $part.Length
+        } else { $truncated = $true }
+      }
+      $code = $LASTEXITCODE
+      $writer.Flush()
+      $said = $writer.ToString()
+    } finally {
+      $writer.Dispose()
+    }
     $ran++
-    $result = (Select-String -LiteralPath $log -Pattern '^test result: ' | Select-Object -Last 1).Line
     Write-Output "== run ${run}: exit $code in $([int]$watch.Elapsed.TotalSeconds) s: $result"
     # What the cases say of themselves with `--nocapture` (their lines begin with `round `).
-    Select-String -LiteralPath $log -Pattern '^round ' | ForEach-Object { Write-Output "   $($_.Line)" }
+    $rounds | ForEach-Object { Write-Output "   $_" }
+    if ($moreRounds) { Write-Output '   additional round lines omitted' }
     if ($code -ne 0) {
       $failed++
-      $text = Get-Content -LiteralPath $log -Raw
-      $from = $text.IndexOf('failures:')
-      Write-Output $(if ($from -ge 0) { $text.Substring($from) } else { $text })
+      $from = $said.IndexOf('failures:')
+      Write-Output $(if ($from -ge 0) { $said.Substring($from) } else { $said })
+      if ($truncated) { Write-Output '== diagnostic truncated after 1048576 characters' }
     }
-    Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
   }
 } finally {
   foreach ($process in $started) { try { $process.Kill() } catch {} }

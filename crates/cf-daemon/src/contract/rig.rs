@@ -55,14 +55,14 @@ pub struct Pieces {
     /// The home: the daemon's log and trace, until it goes. Last, so that the
     /// folder goes after what has files open in it (Windows will not remove
     /// them from under it).
-    pub home: tempfile::TempDir,
+    pub home: Rc<tempfile::TempDir>,
 }
 
 impl Pieces {
     /// The pieces over `transport`. Called inside the local set the test runs
     /// in.
     pub async fn new(transport: Transport) -> Self {
-        let home = tempfile::tempdir().expect("a home");
+        let home = Rc::new(tempfile::tempdir().expect("a home"));
         let errors = Rc::new(Errors::new(
             Rc::new(Log::new(home.path())),
             Rc::new(Trace::new(home.path())),
@@ -170,6 +170,14 @@ pub struct Rig {
     pub pieces: Pieces,
 }
 
+// Tasks on the local set can outlive this fixture. Release its file before
+// Pieces drops the home, even if one of those tasks still holds the ledger.
+impl Drop for Rig {
+    fn drop(&mut self) {
+        Ledger::finish_test_fixture(&self.ledger);
+    }
+}
+
 /// How much was logged and asked when the project opened.
 #[derive(Default)]
 struct Opened {
@@ -195,7 +203,7 @@ impl Rig {
         );
         let events: Rc<RefCell<Vec<(String, Value)>>> = Rc::default();
         let told = Rc::clone(&events);
-        let ledger = open_ledger(
+        let mut ledger = open_ledger(
             &home.join("consensflow.db"),
             Options {
                 trace: Box::new(move |event| {
@@ -206,6 +214,7 @@ impl Rig {
             },
         )
         .expect("a ledger");
+        ledger.keep_test_file_owner(Rc::clone(&pieces.home));
         let ledger = Rc::new(RefCell::new(ledger));
 
         let recorder = Recorder::default();
@@ -392,5 +401,66 @@ impl Rig {
     /// How many times in all.
     fn asked(&self, method: &str) -> usize {
         self.recorder.calls("adapter:claude-code", &[method]).len()
+    }
+}
+
+#[tokio::test]
+async fn temp_fixture_releases_ledger_for_the_next_owner() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let mut rig = Rig::new().await;
+            let home =
+                std::mem::replace(&mut rig.pieces.home, Rc::new(tempfile::tempdir().unwrap()));
+            let path = home.path().join("consensflow.db");
+            let still_held = Rc::clone(&rig.ledger);
+            drop(rig);
+            let reopened = open_ledger(&path, Options::default()).unwrap_or_else(|error| {
+                panic!("the dropped fixture still owns the ledger: {error}")
+            });
+            drop(reopened);
+            drop(still_held);
+        })
+        .await;
+}
+
+#[test]
+fn borrowed_ledger_keeps_the_fixture_home_until_its_last_holder_drops() {
+    for mutable in [false, true] {
+        let path = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let local = tokio::task::LocalSet::new();
+            runtime.block_on(local.run_until(async {
+                let rig = Rig::new().await;
+                let path = rig.pieces.home.path().to_path_buf();
+                let ledger = Rc::clone(&rig.ledger);
+                if mutable {
+                    let borrowed = ledger.borrow_mut();
+                    drop(rig);
+                    assert!(
+                        path.exists(),
+                        "a borrowed ledger must keep its home: {path:?}"
+                    );
+                    drop(borrowed);
+                } else {
+                    let borrowed = ledger.borrow();
+                    drop(rig);
+                    assert!(
+                        path.exists(),
+                        "a borrowed ledger must keep its home: {path:?}"
+                    );
+                    drop(borrowed);
+                }
+                path
+            }))
+        })
+        .join()
+        .unwrap();
+        assert!(
+            !path.exists(),
+            "the fixture left its home after its thread ended: {path:?}"
+        );
     }
 }

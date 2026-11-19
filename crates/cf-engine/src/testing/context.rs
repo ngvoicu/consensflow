@@ -155,7 +155,7 @@ pub struct Context {
     file: PathBuf,
     // Last, so the ledger's file goes after the ledger.
     _lets_go: LetsGoOfTheFile,
-    _dir: tempfile::TempDir,
+    _dir: Rc<tempfile::TempDir>,
 }
 
 /// Lets the ledger go of its file when the context goes (T-1333), whatever else still holds the
@@ -167,9 +167,7 @@ struct LetsGoOfTheFile(std::rc::Weak<RefCell<Ledger>>);
 impl Drop for LetsGoOfTheFile {
     fn drop(&mut self) {
         if let Some(ledger) = self.0.upgrade() {
-            if let Ok(mut ledger) = ledger.try_borrow_mut() {
-                ledger.let_go_of_its_file();
-            }
+            Ledger::finish_test_fixture(&ledger);
         }
     }
 }
@@ -181,15 +179,18 @@ impl Context {
 
     pub fn made(made: Made) -> Self {
         let paced = paced_mode();
-        let dir = tempfile::Builder::new()
-            .prefix("cf-dispatch-")
-            .tempdir()
-            .expect("a temporary folder");
+        let dir = Rc::new(
+            tempfile::Builder::new()
+                .prefix("cf-dispatch-")
+                .tempdir()
+                .expect("a temporary folder"),
+        );
         let file = dir.path().join("consensflow.db");
         let recorder = Recorder::default();
         let time = Rc::new(ManualTime::new(START_MS));
         let timers = Rc::new(TestTime::new(Rc::clone(&time), recorder.clone()));
-        let ledger = open_ledger(&file, ledger_options(&time, &recorder)).expect("a ledger");
+        let mut ledger = open_ledger(&file, ledger_options(&time, &recorder)).expect("a ledger");
+        ledger.keep_test_file_owner(Rc::clone(&dir));
         let ledger = Rc::new(RefCell::new(ledger));
         let executor = Rc::new(Executor::strict());
         let host = FakeHost::new(recorder.clone());
@@ -467,6 +468,7 @@ impl Context {
         change(&self.file);
         *ledger = open_ledger(&self.file, ledger_options(&self.time, &self.recorder))
             .expect("the ledger opens again");
+        ledger.keep_test_file_owner(Rc::clone(&self._dir));
     }
 
     /// The test is over: nothing may have failed unseen, and the engine and
@@ -500,6 +502,8 @@ impl Context {
         let ledger = Rc::try_unwrap(ledger)
             .unwrap_or_else(|_| panic!("something of the test still holds the ledger"));
         drop(ledger.into_inner());
+        let dir =
+            Rc::try_unwrap(dir).unwrap_or_else(|_| panic!("something still holds the test home"));
         Closed { events, file, dir }
     }
 }
@@ -598,5 +602,22 @@ mod tests {
             "the folder of the context is gone, the ledger held or not: {folder:?}"
         );
         drop(held);
+    }
+
+    #[test]
+    fn a_borrowed_ledger_releases_the_context_home_when_its_test_thread_ends() {
+        let folder = std::thread::spawn(|| {
+            let context = Context::new();
+            let folder = context.file.parent().unwrap().to_path_buf();
+            let ledger = Rc::clone(&context.ledger);
+            let borrowed = ledger.borrow_mut();
+            drop(context);
+            assert!(folder.exists());
+            drop(borrowed);
+            folder
+        })
+        .join()
+        .unwrap();
+        assert!(!folder.exists(), "the context left {folder:?}");
     }
 }

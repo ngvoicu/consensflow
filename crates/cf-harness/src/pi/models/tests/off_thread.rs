@@ -161,7 +161,10 @@ fn a_default_model_lookup_that_overlaps_a_listing_is_told_what_the_folder_holds(
     );
     // The page's listings, both of them, are told what the folder holds.
     for told in [&listing, &again] {
-        assert!(told.contains("no provider is set up"), "{told}");
+        assert!(
+            told.contains("/login") && told.contains("settings"),
+            "{told}"
+        );
         assert!(!told.contains(LATE), "{told}");
     }
     // The chief's note says only that the list could not be read; the page tells why (T-1328).
@@ -172,7 +175,7 @@ fn a_default_model_lookup_that_overlaps_a_listing_is_told_what_the_folder_holds(
 /// Two asks for the same folder that overlap are answered by the one read, whole.
 #[test]
 fn two_asks_for_the_folder_that_overlap_take_the_answer_of_the_one_read() {
-    let pi = StandIn::new(&[("auth.json", r#"{"openai": {"type": "api_key"}}"#)], &[]);
+    let pi = StandIn::new(&[("models.json", r#"{"providers":{"openai": {}}}"#)], &[]);
     held_until_asked(2);
     let (first, second) = eventually(Box::pin(async {
         tokio::join!(
@@ -181,7 +184,7 @@ fn two_asks_for_the_folder_that_overlap_take_the_answer_of_the_one_read() {
         )
     }));
     assert!(!first.late && !second.late, "{first:?} / {second:?}");
-    assert_eq!(first.logins, ["openai"]);
+    assert_eq!(first.custom, ["openai"]);
     assert_eq!(second, first, "the same answer");
     assert_eq!(setup::reads(), 1);
 }
@@ -190,9 +193,13 @@ fn two_asks_for_the_folder_that_overlap_take_the_answer_of_the_one_read() {
 /// end (its thread is the one read there is) and reads its own.
 #[test]
 fn an_ask_for_another_folder_takes_no_answer_that_is_not_its_own() {
-    let pi = StandIn::new(&[("auth.json", r#"{"one": {}}"#)], &[]);
+    let pi = StandIn::new(&[("models.json", r#"{"providers":{"one": {}}}"#)], &[]);
     let other = tempfile::tempdir().unwrap();
-    std::fs::write(other.path().join("auth.json"), r#"{"two": {}}"#).unwrap();
+    std::fs::write(
+        other.path().join("models.json"),
+        r#"{"providers":{"two": {}}}"#,
+    )
+    .unwrap();
     let elsewhere = pi
         .env
         .clone()
@@ -205,8 +212,8 @@ fn an_ask_for_another_folder_takes_no_answer_that_is_not_its_own() {
         )
     }));
     assert!(!first.late && !second.late, "{first:?} / {second:?}");
-    assert_eq!(first.logins, ["one"]);
-    assert_eq!(second.logins, ["two"]);
+    assert_eq!(first.custom, ["one"]);
+    assert_eq!(second.custom, ["two"]);
     assert_eq!(setup::reads(), 2, "each folder was read once");
 }
 
@@ -286,7 +293,7 @@ fn the_folder_is_read_again_once_the_stalled_read_has_ended() {
     }
     let why = settled(&mut pi.begin(false)).unwrap_err();
     assert!(
-        why.contains("no provider is set up"),
+        why.contains("/login") && why.contains("settings"),
         "the folder was read, and holds nothing: {why}"
     );
     assert_eq!(

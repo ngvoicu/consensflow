@@ -135,11 +135,33 @@ fn names_a_built_windows_app(text: &str) -> bool {
 /// The lines of a file that start a program, any way the tests and the tools do, trimmed:
 /// Node's and Rust's starts, PowerShell's (its call operator `&` where a command begins, and
 /// `Invoke-Expression`, `Invoke-Command`, `Start-Process`) and cmd's `start`.
-fn start_lines(text: &str) -> Vec<&str> {
-    text.lines()
-        .map(str::trim)
-        .filter(|line| starts_a_program(line))
+fn start_lines(text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| starts_a_program(line))
+        .map(|(at, line)| {
+            if line.ends_with('(') {
+                let argument = lines[at + 1..]
+                    .iter()
+                    .find(|next| !next.is_empty())
+                    .copied()
+                    .unwrap_or_default();
+                format!("{line} {argument}")
+            } else {
+                (*line).to_owned()
+            }
+        })
         .collect()
+}
+
+#[test]
+fn the_windows_start_inventory_distinguishes_multiline_programs() {
+    assert_ne!(
+        start_lines("spawnSync(\n  shell,\n)"),
+        start_lines("spawnSync(\n  'app.exe',\n)")
+    );
 }
 
 /// Whether a line starts a program.
@@ -245,17 +267,19 @@ const STARTING_NO_BUILT_APP: [(&str, &str, &[&str]); 9] = [
         "a stand-in named ConsensFlow.exe, a copy of ping, and the installer the test builds",
         &[
             r#"return spawnSync(windows ? 'where' : 'which', [program], { encoding: 'utf8' }).status === 0"#,
-            r#"const read = spawnSync("#,
-            r#"const ran = spawnSync("#,
+            r#"spawnSync(shell, ['-NoProfile', '-NonInteractive', '-Command', '[IO.Path]::GetTempPath()'], {"#,
+            r#"spawnSync( shell,"#,
             r#"const made = spawnSync('reg', ['add', key, '/v', name, '/d', value, '/f'], {"#,
             r#"const child = spawn(program, all, {"#,
-            r#"if (windows) spawnSync('reg', ['delete', TEST_KEYS, '/f'])"#,
+            r#"const existing = spawnSync('reg', ['query', installerTestKey(TEST_KEYS, work)], {"#,
+            r#"spawnSync('reg', ['delete', installerTestKey(TEST_KEYS, work), '/f'])"#,
             r#""$run = Start-Process -FilePath $setup -ArgumentList '/S' -Wait -PassThru","#,
             r#"const running = spawn(program(at, 'ConsensFlow.exe'), ['-n', '60', '127.0.0.1'], {"#,
-            r#"`Close-CfOpen $dir; $null = Start-Process -FilePath '${ping}' -ArgumentList '-n', '30', '127.0.0.1' -WindowStyle Hidden; Start-Sleep -Milliseconds 500\n`,"#,
-            r#"spawnSync('powershell', ["#,
+            r#"reopened = spawn(ping, ['-n', '30', '127.0.0.1'], { stdio: 'ignore' })"#,
+            r#"decoy = spawn(ping, ['-n', '30', '127.0.0.1'], { stdio: 'ignore' })"#,
             r#"const child = spawn(process.execPath, ['-e', ''])"#,
-            r#"const child = spawn(program, args, { stdio: 'ignore' })"#,
+            r#"const child = spawn(program, args, {"#,
+            r#"const child = spawn(program, words, {"#,
         ],
     ),
     (
@@ -292,7 +316,7 @@ const STARTING_NO_BUILT_APP: [(&str, &str, &[&str]); 9] = [
             r#"const child = spawn(program, args, {"#,
             r#"spawnSync('hdiutil', ['detach', '-quiet', '-force', mounted])"#,
             r#"const child = spawn('/bin/sh', ['-c', 'exit 0'])"#,
-            r#"spawnSync("#,
+            r#"spawnSync( '/usr/libexec/PlistBuddy',"#,
             r#"const child = spawn('/bin/sh', ['-c', 'exit 0'])"#,
             r#"const child = spawn('/bin/sh', [script], { detached: true, stdio: 'ignore' })"#,
         ],
@@ -303,8 +327,9 @@ const STARTING_NO_BUILT_APP: [(&str, &str, &[&str]); 9] = [
         &[
             r#"const ran = spawnSync(process.platform === 'win32' ? 'where' : 'which', [program], {"#,
             r#"return spawnSync('osascript', ['-l', 'JavaScript', script, JSON.stringify(input)], {"#,
-            r#"return spawnSync("#,
-            r#"const ran = spawnSync("#,
+            r#"return spawnSync(program, args, { encoding: 'utf8', maxBuffer: 1 << 26, env })"#,
+            r#"const child = spawn(program, args, { env })"#,
+            r#"const ran = spawnSync( process.execPath,"#,
         ],
     ),
 ];
@@ -703,11 +728,18 @@ fn unheld_windows_starts(files: &[(String, String)]) -> Vec<String> {
             .find(|(listed, _, _)| listed == path)
         {
             None => unheld.push(path.clone()),
-            Some((_, _, held)) if start_lines(text) != *held => unheld.push(format!(
-                "{path}, whose starts are no longer the ones held to (say why each starts no \
+            Some((_, _, held))
+                if start_lines(text)
+                    .iter()
+                    .map(String::as_str)
+                    .ne(held.iter().copied()) =>
+            {
+                unheld.push(format!(
+                    "{path}, whose starts are no longer the ones held to (say why each starts no \
                  app of the release's, and list it):\n  {}",
-                start_lines(text).join("\n  ")
-            )),
+                    start_lines(text).join("\n  ")
+                ))
+            }
             Some(_) => {}
         }
     }

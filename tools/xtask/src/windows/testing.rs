@@ -29,6 +29,27 @@ const ASKS_STATE: &str = r#"for word; do last=$word; done
 case "$(printf '%s' "${last##* }" | base64 -d 2>/dev/null | iconv -f UTF-16LE -t UTF-8 2>/dev/null)" in *PSDrive*) echo "free 614"; exit 0 ;; esac
 "#;
 
+#[cfg(unix)]
+const OWNED_UPLOAD: &str = r#"for word; do last=$word; done
+script=$(printf '%s' "${last##* }" | base64 -d 2>/dev/null | iconv -f UTF-16LE -t UTF-8 2>/dev/null)
+case "$script" in
+  *CF_OWNED_CLAIM*)
+    [ -z "$CF_OWNED_LOG" ] || echo claim >> "$CF_OWNED_LOG"
+    [ "${CF_CLAIM_FAIL:-0}" = 0 ] || exit 1
+    marker=$(printf '%s\n' "$script" | sed -n "s/^Write-Output '\(== claimed [^']*\)'$/\1/p")
+    [ -z "$CF_HOME" ] || mkdir -p "$CF_HOME/consensflow-wrun-${marker#== claimed }"
+    echo "$marker"
+    exit 0 ;;
+  *CF_OWNED_CLEANUP*)
+    [ -z "$CF_OWNED_LOG" ] || echo cleanup >> "$CF_OWNED_LOG"
+    marker=$(printf '%s\n' "$script" | sed -n "s/^Write-Output '\(== removed [^']*\)'$/\1/p")
+    id=${marker#== removed }
+    [ -z "$CF_HOME" ] || rm -rf "${CF_HOME:?}/consensflow-wrun-${id:?}"
+    echo "$marker"
+    exit 0 ;;
+esac
+"#;
+
 /// The body of the `ssh` stand-in a case writes: `body`, after the answer to the machine's state
 /// unless `body` answers it (it names `PSDrive`).
 #[cfg(unix)]
@@ -59,7 +80,7 @@ if [ -n "$quiet" ]; then set -- -q "$@"; fi
 pub fn stand_in(name: &str, body: &str) -> String {
     match name {
         "ssh" => format!(
-            "{NOTES_THE_CALL_AND_LEAVES_OUT_THE_OPTIONS}{}",
+            "{OWNED_UPLOAD}{NOTES_THE_CALL_AND_LEAVES_OUT_THE_OPTIONS}{}",
             ssh_stand_in(body)
         ),
         "scp" => format!("{NOTES_THE_CALL_AND_LEAVES_OUT_THE_OPTIONS}{body}"),

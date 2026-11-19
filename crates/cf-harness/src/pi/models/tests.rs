@@ -127,7 +127,7 @@ fn pi_with_no_login_lists_no_model_and_says_why() {
     );
     assert!(Setup::default()
         .unlisted()
-        .starts_with("Pi lists no model: no provider is set up ("));
+        .starts_with("Pi lists no model. Log in inside Pi with /login"));
     let refused = parse(&json!({ "success": false, "error": "bad" }), AT);
     // What Pi gives as its reason is Pi's words, after the mark, whole.
     assert_eq!(

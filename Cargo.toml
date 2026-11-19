@@ -8,12 +8,32 @@
 # and no GUI toolchain.
 [workspace]
 resolver = "2"
-members = ["app/src-tauri", "crates/*", "tools/*"]
+members = [
+    "app/src-tauri",
+    "crates/cf",
+    "crates/cf-base",
+    "crates/cf-board",
+    "crates/cf-bridge",
+    "crates/cf-codex-session",
+    "crates/cf-daemon",
+    "crates/cf-e2e",
+    "crates/cf-engine",
+    "crates/cf-harness",
+    "crates/cf-launcher",
+    "crates/cf-ledger",
+    "crates/cf-panes",
+    "crates/cf-portable",
+    "crates/cf-process",
+    "crates/cf-proto",
+    "tools/cf-publish",
+    "tools/cf-release",
+    "tools/xtask",
+]
 # Probes are scripts that read the harnesses, kept to be run again: no crate.
 exclude = ["tools/probes"]
 
 [workspace.package]
-version = "3.0.7-alpha.11"
+version = "3.0.7-alpha.12"
 edition = "2021"
 rust-version = "1.95"
 

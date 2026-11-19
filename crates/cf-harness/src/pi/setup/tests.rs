@@ -24,16 +24,26 @@ fn names(names: &[&str]) -> Vec<String> {
 }
 
 #[test]
-fn a_folder_that_holds_nothing_is_no_provider_set_up() {
+fn long_setup_details_stay_short_without_losing_recovery_advice() {
+    let setup = Setup {
+        packages: vec!["é".repeat(500)],
+        ..Setup::default()
+    };
+    let why = setup.unlisted();
+    assert!(why.chars().count() < 300, "{why}");
+    assert!(why.contains('…') && why.contains("/login") && why.contains("settings"));
+    let loading = setup.loading().unwrap();
+    assert_eq!(loading.chars().count(), DETAIL_CHARS + 1);
+    assert!(loading.ends_with('…'));
+}
+
+#[test]
+fn a_folder_that_holds_nothing_offers_recovery_without_guessing() {
     let nothing = setup_of(&[("settings.json", "{}")], &[]);
     assert!(nothing.is_empty());
     let said = nothing.unlisted();
-    assert!(
-        said.starts_with("Pi lists no model: no provider is set up ("),
-        "{said}"
-    );
-    // How to give Pi one, in the three ways the human has.
-    for way in ["/login", "providers.md", "models.json"] {
+    assert!(said.starts_with("Pi lists no model."), "{said}");
+    for way in ["/login", "settings"] {
         assert!(said.contains(way), "{way} in {said}");
     }
     // A folder that is not there at all is the same.
@@ -74,7 +84,6 @@ fn each_source_of_a_provider_is_named_by_its_names_only() {
     assert_eq!(
         setup,
         Setup {
-            logins: names(&["openai-codex", "openrouter"]),
             custom: names(&["mylocal"]),
             packages: names(&[
                 "npm:@router-for-me/pi-cliproxyapi-provider",
@@ -88,10 +97,17 @@ fn each_source_of_a_provider_is_named_by_its_names_only() {
     );
     let said = setup.unlisted();
     assert!(
-        said.starts_with("Pi lists no model though it has a login for openai-codex, openrouter;"),
+        said.starts_with("Pi lists no model (custom providers mylocal;"),
         "{said}"
     );
-    assert!(!said.contains("no provider is set up"), "{said}");
+    assert!(
+        !said.contains("openai-codex") && !said.contains("openrouter"),
+        "{said}"
+    );
+    assert!(
+        said.contains("/login") && said.contains("settings"),
+        "{said}"
+    );
     assert!(
         said.contains("packages npm:@router-for-me/pi-cliproxyapi-provider, git:github.com/x/y"),
         "{said}"
@@ -120,12 +136,7 @@ fn a_file_that_is_there_and_not_what_pi_s_files_are_is_unread_and_never_nothing(
     );
     assert_eq!(
         setup.unread,
-        names(&[
-            "the file of logins",
-            "models.json",
-            "extensions",
-            "settings.json"
-        ])
+        names(&["models.json", "extensions", "settings.json"])
     );
     assert!(
         !setup.is_empty(),
@@ -133,7 +144,7 @@ fn a_file_that_is_there_and_not_what_pi_s_files_are_is_unread_and_never_nothing(
     );
     let said = setup.unlisted();
     assert!(
-        said.contains("could not read the file of logins, models.json, extensions, settings.json"),
+        said.contains("could not read models.json, extensions, settings.json"),
         "{said}"
     );
     assert!(!said.contains("no provider is set up"), "{said}");
@@ -150,7 +161,7 @@ fn a_provider_key_in_the_environment_alone_is_a_provider_set_up() {
 fn with_no_home_and_no_folder_named_only_the_environment_is_looked_at() {
     let setup = Setup::read(&Env::from_vars([("GROQ_API_KEY", "x")]));
     assert_eq!(setup.keys, names(&["GROQ"]));
-    assert!(setup.logins.is_empty() && setup.packages.is_empty());
+    assert!(setup.custom.is_empty() && setup.packages.is_empty());
 }
 
 #[test]
@@ -224,15 +235,15 @@ fn a_pipe_and_a_file_too_large_are_unread_and_never_opened_whole() {
             .unwrap();
         assert!(made.success());
         let big = format!(r#"{{"x":"{}"}}"#, "y".repeat(FILE_CAP as usize));
-        std::fs::write(folder.path().join("auth.json"), big).unwrap();
+        std::fs::write(folder.path().join("auth.json"), &big).unwrap();
+        std::fs::write(folder.path().join("settings.json"), big).unwrap();
         let env = Env::from_vars([("PI_CODING_AGENT_DIR", folder.path().as_os_str())]);
         let _ = tell.send(Setup::read(&env));
     });
     let setup = told
         .recv_timeout(Duration::from_secs(10))
         .expect("the read ended: it opened no pipe");
-    assert_eq!(setup.unread, names(&["the file of logins", "models.json"]));
-    assert!(setup.logins.is_empty());
+    assert_eq!(setup.unread, names(&["models.json", "settings.json"]));
 }
 
 #[test]
@@ -288,17 +299,11 @@ const WITHHELD_WORDS: [&str; 13] = [
 #[test]
 fn no_word_said_of_a_setup_is_a_word_a_line_is_withheld_for() {
     let many = Setup {
-        logins: names(&["openai", "openrouter"]),
         custom: names(&["mylocal"]),
         packages: names(&["npm:@scope/slow-provider@1.2.3"]),
         extensions: names(&["pack", "./declared.ts"]),
         keys: names(&["OPENAI", "AWS_BEDROCK"]),
-        unread: names(&[
-            "the file of logins",
-            "models.json",
-            "extensions",
-            "settings.json",
-        ]),
+        unread: names(&["models.json", "extensions", "settings.json"]),
         late: false,
     };
     let said = [
@@ -306,7 +311,7 @@ fn no_word_said_of_a_setup_is_a_word_a_line_is_withheld_for() {
         Setup::late().unlisted(),
         many.unlisted(),
         Setup {
-            unread: names(&["the file of logins"]),
+            unread: names(&["models.json"]),
             ..Setup::default()
         }
         .unlisted(),
@@ -331,7 +336,7 @@ fn a_folder_not_read_in_time_is_said_so_and_is_never_called_empty() {
     assert!(!late.is_empty());
     let said = late.unlisted();
     assert!(
-        said.starts_with("Pi lists no model, and Pi's folder could not be read in time"),
+        said.starts_with("Pi lists no model. Pi's folder could not be read in time"),
         "{said}"
     );
     assert!(!said.contains("no provider is set up"), "{said}");

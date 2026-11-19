@@ -1,0 +1,113 @@
+[run]
+hold-rule-small = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "hold_rule::"]
+hold-rule-weekly = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "later_quota_reset::"]
+
+[[plant]]
+name = "hold rule small: selected button keeps its member held"
+meant = "try_again_now_releases_members_on_the_same_login"
+runs = ["hold-rule-small"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        } else {\n            self.seams\n                .ledger\n                .borrow_mut()\n                .mark_back(member.id, \"by @human\")?\n        };\n"
+replace = "        } else {\n            member.clone()\n        };\n"
+
+[[plant]]
+name = "hold rule small: the button leaves peers on its shared login held"
+meant = "try_again_now_releases_members_on_the_same_login"
+runs = ["hold-rule-small"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        self.back_on_its_account(project, &member, &News::Human)?;\n"
+replace = ""
+
+[[plant]]
+name = "hold rule small: an edit does not return a held member"
+meant = "an_edit_returns_its_held_task_like_the_selected_button"
+runs = ["hold-rule-small"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "            quota::mark_back(store, member.id, \"by @human\")?;\n"
+replace = "            let _ = &member;\n"
+
+[[plant]]
+name = "hold rule small: only a harness edit returns a member"
+meant = "editing_the_model_ends_its_quota_hold"
+runs = ["hold-rule-small"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "        if (member.harness.as_deref() != Some(edit.harness.as_str()) || member.model != edit.model)\n"
+replace = "        if member.harness.as_deref() != Some(edit.harness.as_str())\n"
+
+[[plant]]
+name = "hold rule small: only a model edit returns a member"
+meant = "editing_only_the_harness_ends_a_quota_or_account_hold"
+runs = ["hold-rule-small"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "        if (member.harness.as_deref() != Some(edit.harness.as_str()) || member.model != edit.model)\n"
+replace = "        if member.model != edit.model\n"
+
+[[plant]]
+name = "hold rule small: an edit returns typed busy and moved holds"
+meant = "editing_does_not_end_a_typed_busy_or_moved_hold"
+runs = ["hold-rule-small"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = "        Some(HoldKind::Busy) => Ok(false),\n"
+replace = "        Some(HoldKind::Busy) => Ok(true),\n"
+
+[[plant]]
+name = "hold rule small: an edit returns an untyped legacy busy hold"
+meant = "editing_a_model_does_not_end_a_legacy_busy_hold_with_no_stored_kind"
+runs = ["hold-rule-small"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = "            Ok(!busy)\n"
+replace = "            let _ = busy;\n            Ok(true)\n"
+
+[[plant]]
+name = "hold rule small: a moved members other window returns the chief"
+meant = "moved_members_answer_preserves_the_chiefs_login_hold"
+runs = ["hold-rule-small"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        // A turn that got through is its account's news: whoever else is out on it is back.\n        if !out {\n            let news = News::Turn {\n"
+replace = "        // A turn that got through is its account's news: whoever else is out on it is back.\n        if !out || owner.out_until.as_deref().is_some_and(moved_hold) {\n            let news = News::Turn {\n"
+
+[[plant]]
+name = "hold rule small: an edit treats a moved deadline as a quota"
+meant = "editing_does_not_end_a_moved_deadline_even_if_its_kind_is_stale"
+runs = ["hold-rule-small"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = "    if until == \"9999-12-31T23:59:59.999Z\" {\n        return Ok(false);\n    }\n"
+replace = ""
+
+[[plant]]
+name = "hold rule small: an edit ignores the account deadline sentinel"
+meant = "editing_an_account_deadline_returns_it_even_if_its_kind_is_stale"
+runs = ["hold-rule-small"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = "    if until.starts_with(\"9999-\") {\n        return Ok(true);\n    }\n"
+replace = ""
+
+[[plant]]
+name = "hold rule small: a later refusal keeps the earlier quota reset"
+meant = "a_weekly_limit_reported_after_the_five_hour_limit_does_not_resume_work_early"
+runs = ["hold-rule-weekly"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/quota.rs"
+find = "        if out && out_until.is_some_and(|until| until >= reset) {\n"
+replace = "        if out && out_until.is_some_and(|until| until <= reset) {\n"
