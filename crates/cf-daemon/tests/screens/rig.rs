@@ -5,7 +5,7 @@
 //! and empty, so a trace that reached for either would fail, not reach out.
 
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use cf_base::env::Env;
@@ -26,19 +26,19 @@ pub struct Rig {
 // The server's tasks can retain the ledger after the fixture itself is dropped.
 impl Drop for Rig {
     fn drop(&mut self) {
-        if let Ok(mut ledger) = self.ledger.try_borrow_mut() {
-            ledger.let_go_of_its_file();
-        }
+        Ledger::finish_test_fixture(&self.ledger);
     }
 }
 
 /// The front for the UI token `token`, over the environment `env` and a ledger
 /// opened at `ledger_file`.
-pub async fn start(token: &str, env: Env, ledger_file: &Path) -> Rig {
+pub async fn start(token: &str, env: Env, home: &Rc<tempfile::TempDir>) -> Rig {
     let state = tempfile::tempdir().unwrap();
+    let ledger_file = home.path().join("consensflow.db");
     let ledger = Rc::new(RefCell::new(
-        open_ledger(ledger_file, Options::default()).unwrap(),
+        open_ledger(&ledger_file, Options::default()).unwrap(),
     ));
+    ledger.borrow_mut().keep_test_file_owner(Rc::clone(home));
     let front = Front::new(state.path(), Rc::clone(&ledger));
     let screens = screens(token, env);
     let api = serve(Rc::clone(&front.context), screens, Rc::clone(&front.spawn))
@@ -47,7 +47,7 @@ pub async fn start(token: &str, env: Env, ledger_file: &Path) -> Rig {
     Rig {
         api,
         ledger,
-        ledger_file: ledger_file.to_path_buf(),
+        ledger_file,
         front,
         _state: state,
     }
@@ -63,9 +63,9 @@ impl Rig {
 #[test]
 fn temp_fixture_releases_ledger_for_the_next_owner() {
     crate::support::trace::locally(async {
-        let home = tempfile::tempdir().unwrap();
+        let home = Rc::new(tempfile::tempdir().unwrap());
         let path = home.path().join("consensflow.db");
-        let rig = start("token", Env::default(), &path).await;
+        let rig = start("token", Env::default(), &home).await;
         let still_held = Rc::clone(&rig.ledger);
         drop(rig);
         let reopened = open_ledger(&path, Options::default())

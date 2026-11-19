@@ -6,6 +6,7 @@
 //! database is compared.
 
 use serde_json::Value;
+use std::rc::Rc;
 
 use crate::front::{address, send, Reply, Request};
 use crate::rig::{start, Rig};
@@ -49,7 +50,7 @@ pub async fn play(name: &str) -> Tally {
         name,
         token: trace["ui"]["token"].as_str().unwrap().to_owned(),
         world: World::new(),
-        ledgers: tempfile::tempdir().unwrap(),
+        ledgers: Rc::new(tempfile::tempdir().unwrap()),
         rig: None,
         closed: false,
         ledger_closed: false,
@@ -77,7 +78,7 @@ struct Game<'a> {
     ledger_closed: bool,
     /// What has been compared so far.
     tally: Tally,
-    ledgers: tempfile::TempDir,
+    ledgers: Rc<tempfile::TempDir>,
 }
 
 impl Game<'_> {
@@ -97,8 +98,7 @@ impl Game<'_> {
             "{} step {at}: a variable changes after the daemon started",
             self.name
         );
-        let ledger = self.ledgers.path().join("consensflow.db");
-        self.rig = Some(start(&self.token, self.world.env(), &ledger).await);
+        self.rig = Some(start(&self.token, self.world.env(), &self.ledgers).await);
     }
 
     async fn exchange(&mut self, at: usize, step: &Value) {

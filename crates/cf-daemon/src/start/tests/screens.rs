@@ -38,8 +38,8 @@ async fn call(
 async fn the_daemon_serves_the_screens_under_its_token_over_its_own_environment() {
     LocalSet::new()
         .run_until(async {
-            let root = tempfile::tempdir().unwrap();
-            let rig = started(root.path()).await;
+            let root = Rc::new(tempfile::tempdir().unwrap());
+            let rig = started(&root).await;
             let handle = rig.daemon.handle().clone();
 
             let (status, page) =

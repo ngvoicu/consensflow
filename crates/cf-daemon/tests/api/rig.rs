@@ -41,22 +41,24 @@ pub struct Rig {
     pub front: Front,
     pub seen: Rc<RefCell<Vec<Seen>>>,
     pub api: Api,
-    _home: tempfile::TempDir,
+    _home: Rc<tempfile::TempDir>,
 }
 
 // The server can retain the ledger after the trace's rig is dropped.
 impl Drop for Rig {
     fn drop(&mut self) {
-        if let Ok(mut ledger) = self.ledger.ledger.try_borrow_mut() {
-            ledger.let_go_of_its_file();
-        }
+        cf_ledger::Ledger::finish_test_fixture(&self.ledger.ledger);
     }
 }
 
 impl Rig {
     pub async fn start() -> Self {
-        let home = tempfile::tempdir().expect("a home");
+        let home = Rc::new(tempfile::tempdir().expect("a home"));
         let ledger = ledger::Rig::open(&home.path().join("consensflow.db"));
+        ledger
+            .ledger
+            .borrow_mut()
+            .keep_test_file_owner(Rc::clone(&home));
         let front = Front::new(home.path(), Rc::clone(&ledger.ledger));
         // Mounted as the daemon mounts them, over a home that is none of the API's.
         let screens = screens(UI_TOKEN, Env::default());
@@ -94,7 +96,7 @@ impl Rig {
 fn temp_fixture_releases_ledger_for_the_next_owner() {
     crate::support::trace::locally(async {
         let mut rig = Rig::start().await;
-        let home = std::mem::replace(&mut rig._home, tempfile::tempdir().unwrap());
+        let home = std::mem::replace(&mut rig._home, Rc::new(tempfile::tempdir().unwrap()));
         let path = home.path().join("consensflow.db");
         let still_held = Rc::clone(&rig.ledger.ledger);
         drop(rig);

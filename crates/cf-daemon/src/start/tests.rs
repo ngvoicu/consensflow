@@ -42,9 +42,7 @@ struct Rig {
 // The local set may still hold the daemon's ledger when the test's home drops.
 impl Drop for Rig {
     fn drop(&mut self) {
-        if let Ok(mut ledger) = self.daemon.parts.ledger.try_borrow_mut() {
-            ledger.let_go_of_its_file();
-        }
+        cf_ledger::Ledger::finish_test_fixture(&self.daemon.parts.ledger);
     }
 }
 
@@ -124,17 +122,22 @@ fn options(
     (options, app)
 }
 
-async fn started(root: &Path) -> Rig {
+async fn started(root: &Rc<tempfile::TempDir>) -> Rig {
     started_with(root, &[]).await
 }
 
 /// [`started`], on the environment and the variables `more` give it.
-async fn started_with(root: &Path, more: &[(&str, &str)]) -> Rig {
+async fn started_with(root: &Rc<tempfile::TempDir>, more: &[(&str, &str)]) -> Rig {
     let (said, exited, handles) = (Said::default(), Rc::default(), Rc::default());
-    let (options, app) = options(root, &said, &exited, &handles);
-    let daemon = start(environment_with(root, more), options)
+    let (options, app) = options(root.path(), &said, &exited, &handles);
+    let daemon = start(environment_with(root.path(), more), options)
         .await
         .expect("it starts");
+    daemon
+        .parts
+        .ledger
+        .borrow_mut()
+        .keep_test_file_owner(Rc::clone(root));
     let home = daemon.parts.home.clone();
     Rig {
         daemon,
@@ -198,8 +201,8 @@ async fn get(url: &str, path: &str, token: Option<&str>) -> (u16, Value) {
 async fn it_says_its_handle_line_logs_its_start_and_serves_its_api() {
     LocalSet::new()
         .run_until(async {
-            let root = tempfile::tempdir().unwrap();
-            let rig = started(root.path()).await;
+            let root = Rc::new(tempfile::tempdir().unwrap());
+            let rig = started(&root).await;
             let handle = rig.handles.borrow()[0].clone();
             assert_eq!(rig.handles.borrow().len(), 1);
             assert_eq!(&handle, rig.daemon.handle());
@@ -236,9 +239,9 @@ async fn it_says_its_handle_line_logs_its_start_and_serves_its_api() {
 async fn a_wait_the_environment_cut_is_in_the_log_at_the_start_and_one_it_left_is_not() {
     LocalSet::new()
         .run_until(async {
-            let root = tempfile::tempdir().unwrap();
+            let root = Rc::new(tempfile::tempdir().unwrap());
             let cut = started_with(
-                root.path(),
+                &root,
                 &[
                     ("CONSENSFLOW_ARRIVAL_TIMEOUT_MS", "15000"),
                     ("CONSENSFLOW_LAUNCH_TIMEOUT_MS", "8000"),
@@ -252,8 +255,8 @@ async fn a_wait_the_environment_cut_is_in_the_log_at_the_start_and_one_it_left_i
                 "info limits set by the environment: arrival wait 15000 ms, not 60000 (CONSENSFLOW_ARRIVAL_TIMEOUT_MS), launch wait 8000 ms, not 180000 (CONSENSFLOW_LAUNCH_TIMEOUT_MS)"
             );
             // A daemon of a person's, which the variables are not in, says nothing of them.
-            let root = tempfile::tempdir().unwrap();
-            let left = started(root.path()).await;
+            let root = Rc::new(tempfile::tempdir().unwrap());
+            let left = started(&root).await;
             assert_eq!(log_lines(&left.home).len(), 1);
         })
         .await;
@@ -263,8 +266,8 @@ async fn a_wait_the_environment_cut_is_in_the_log_at_the_start_and_one_it_left_i
 async fn a_ping_over_the_bridge_is_answered_and_every_page_operation_is_there() {
     LocalSet::new()
         .run_until(async {
-            let root = tempfile::tempdir().unwrap();
-            let rig = started(root.path()).await;
+            let root = Rc::new(tempfile::tempdir().unwrap());
+            let rig = started(&root).await;
             assert_eq!(
                 ask(&rig.app, "ping", json!({})).await,
                 json!({ "ok": true })
@@ -308,8 +311,8 @@ async fn its_input_ending_stops_it_within_the_apps_two_seconds_and_ends_its_log_
 ) {
     LocalSet::new()
         .run_until(async {
-            let root = tempfile::tempdir().unwrap();
-            let rig = started(root.path()).await;
+            let root = Rc::new(tempfile::tempdir().unwrap());
+            let rig = started(&root).await;
             ask(&rig.app, "ping", json!({})).await;
             // In the clock of the timers the stop waits on, not the machine's (as `stop::tests`
             // counts): the stop's own work goes to the disk and takes what the disk gives, and the
@@ -338,8 +341,8 @@ async fn its_input_ending_stops_it_within_the_apps_two_seconds_and_ends_its_log_
 async fn a_signal_stops_it_for_the_signal_s_name() {
     LocalSet::new()
         .run_until(async {
-            let root = tempfile::tempdir().unwrap();
-            let rig = started(root.path()).await;
+            let root = Rc::new(tempfile::tempdir().unwrap());
+            let rig = started(&root).await;
             // Its start is over (its resume of nothing included) before it is asked to stop:
             // the exit of a test returns, where the process's does not.
             ask(&rig.app, "ping", json!({})).await;
@@ -360,7 +363,7 @@ async fn a_signal_stops_it_for_the_signal_s_name() {
 async fn an_output_nobody_reads_stops_it_as_the_bridge_failing_while_its_input_stays_open() {
     LocalSet::new()
         .run_until(async {
-            let root = tempfile::tempdir().unwrap();
+            let root = Rc::new(tempfile::tempdir().unwrap());
             let (said, exited, handles) = (Said::default(), Rc::default(), Rc::default());
             // The app's end is made by hand: its input is dropped, its output stays.
             let (daemon_input, mut app_output) = duplex(64 * 1024);
@@ -407,8 +410,8 @@ async fn an_output_nobody_reads_stops_it_as_the_bridge_failing_while_its_input_s
 async fn a_second_daemon_on_the_same_home_is_refused_and_touches_no_window_of_the_first() {
     LocalSet::new()
         .run_until(async {
-            let root = tempfile::tempdir().unwrap();
-            let rig = started(root.path()).await;
+            let root = Rc::new(tempfile::tempdir().unwrap());
+            let rig = started(&root).await;
             let launch = LaunchId::new("0b9f2c1e-5d4a-4c3b-9a8f-7e6d5c4b3a21").unwrap();
             let folder = rig
                 .home
@@ -460,7 +463,7 @@ async fn a_second_daemon_on_the_same_home_is_refused_and_touches_no_window_of_th
 async fn a_ledger_that_cannot_be_opened_fails_the_start_and_the_log_ends_with_exit_1() {
     LocalSet::new()
         .run_until(async {
-            let root = tempfile::tempdir().unwrap();
+            let root = Rc::new(tempfile::tempdir().unwrap());
             let home = root.path().join("consensflow");
             std::fs::create_dir_all(&home).unwrap();
             std::fs::write(
@@ -490,13 +493,13 @@ async fn a_ledger_that_cannot_be_opened_fails_the_start_and_the_log_ends_with_ex
 async fn a_settings_file_that_cannot_be_read_stops_no_start_and_is_left_as_it_is() {
     LocalSet::new()
         .run_until(async {
-            let root = tempfile::tempdir().unwrap();
+            let root = Rc::new(tempfile::tempdir().unwrap());
             let file = root.path().join("consensflow").join("agents.json");
             std::fs::create_dir_all(file.parent().unwrap()).unwrap();
             let broken =
                 "{\"schemaVersion\": 1, \"agents\": [{\"id\": \"mine\", \"kind\": \"codex\"},]}\n";
             std::fs::write(&file, broken).unwrap();
-            let rig = started(root.path()).await;
+            let rig = started(&root).await;
             assert_eq!(
                 ask(&rig.app, "ping", json!({})).await,
                 json!({ "ok": true })
@@ -514,8 +517,8 @@ async fn a_settings_file_that_cannot_be_read_stops_no_start_and_is_left_as_it_is
 async fn the_engine_s_work_is_driven_from_the_start_so_what_is_woken_outside_a_drain_runs() {
     LocalSet::new()
         .run_until(async {
-            let root = tempfile::tempdir().unwrap();
-            let rig = started(root.path()).await;
+            let root = Rc::new(tempfile::tempdir().unwrap());
+            let rig = started(&root).await;
             // Its start is over, and the pass its resume woke has run and drained:
             // the next one is a second away, so only the driver is left to run
             // what is woken.
@@ -562,8 +565,8 @@ fn a_system_that_gives_no_randomness_refuses_the_start_in_words_and_never_makes_
 async fn temp_fixture_releases_ledger_for_the_next_owner() {
     LocalSet::new()
         .run_until(async {
-            let root = tempfile::tempdir().unwrap();
-            let rig = started(root.path()).await;
+            let root = Rc::new(tempfile::tempdir().unwrap());
+            let rig = started(&root).await;
             let path = rig.home.join("consensflow.db");
             let still_held = Rc::clone(&rig.daemon.parts.ledger);
             drop(rig);
