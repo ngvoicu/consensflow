@@ -49,16 +49,15 @@ impl Dispatcher {
                 || format!("@{}'s", wait.sender),
                 |number| format!("T-{number}'s"),
             );
-            let Some(chief) = project
+            if !project
                 .participants
                 .iter()
-                .find(|p| p.id == wait.recipient_id)
-            else {
+                .any(|p| p.id == wait.recipient_id)
+            {
                 continue;
-            };
-            let cf = self.seams.roles.cf(chief);
+            }
             let next = if let Some(number) = wait.held_task {
-                format!("If only the person can, ask them at the top of your reply, and don't keep the member waiting: finish the task with `{cf} task finish T-{number}`, and once they answer, give the next step as a new task with their answer.")
+                format!("If only the person can, ask them at the top of your reply, and don't keep the member waiting: finish the task with `cf task finish T-{number}`, and once they answer, give the next step as a new task with their answer.")
             } else {
                 "If only the person can, ask them at the top of your reply, and don't keep the member waiting; once they answer, give the next step as a new task with their answer.".to_owned()
             };

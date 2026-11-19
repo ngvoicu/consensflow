@@ -1123,7 +1123,7 @@ fn answering_one_question_withdraws_only_its_queued_reminder() {
 }
 
 #[test]
-fn the_reminder_uses_the_chiefs_own_cf_path_for_its_shell() {
+fn a_queued_reminders_finish_command_uses_the_chiefs_shell_when_delivered() {
     use cf_ledger::Read;
     use cf_proto::cf_word::Shell;
     let context = Context::new();
@@ -1146,11 +1146,16 @@ fn the_reminder_uses_the_chiefs_own_cf_path_for_its_shell() {
         .into_iter()
         .find(|m| m.kind == "note" && m.body.contains("question m-"))
         .unwrap();
-    assert!(
-        note.body.contains(&format!("`{cf} task finish T-1`")),
-        "{}",
-        note.body
-    );
+    // A switched chief can run a different shell on Windows: the stored note
+    // must be rendered for the recipient at delivery, not its previous shell.
+    let bash = CfWord::new(r"C:\Program Files\ConsensFlow\cf.exe", Shell::Posix);
+    for current in [&cf, &bash] {
+        let delivered = cf_engine::delivery_text::delivery_text(&note, &[], current);
+        assert!(
+            delivered.contains(&format!("`{current} task finish T-1`")),
+            "{delivered}"
+        );
+    }
 }
 
 #[test]

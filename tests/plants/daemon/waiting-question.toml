@@ -7,6 +7,7 @@ answer = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher
 pending = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "finished_questions::a_pending_question_reminder_cannot_stack_even_after_the_ledger_is_reopened", "--", "--test-threads=2"]
 returned = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "finished_questions::answering_or_finishing_withdraws_an_unhanded_reminder_and_a_returned_handed_one", "--", "--test-threads=2"]
 answer-lookup = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "waiting_questions::tests::checking_unanswered_questions_uses_an_index_to_find_each_answer"]
+shell-switch = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "shown_notes::a_queued_reminders_finish_command_uses_the_chiefs_shell_when_delivered", "--", "--test-threads=2"]
 
 [[plant]]
 name = "waiting question: the first reminder is late"
@@ -73,6 +74,15 @@ find = '''    if crate::waiting_questions::stale_reminder(store, message.id)? {
     }
 '''
 replace = ""
+
+[[plant]]
+name = "waiting question: a queued reminder keeps the former chief's shell"
+meant = "shown_notes::a_queued_reminders_finish_command_uses_the_chiefs_shell_when_delivered"
+runs = ["shell-switch"]
+[[plant.edit]]
+file = "crates/cf-engine/src/waiting_questions.rs"
+find = 'finish the task with `cf task finish T-{number}`'
+replace = '''finish the task with `& 'C:\\Program Files\\ConsensFlow\\cf.exe' task finish T-{number}`'''
 
 [[plant]]
 name = "waiting question: finding every answer scans all messages"
