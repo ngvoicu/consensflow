@@ -29,7 +29,7 @@ fn try_again_now_releases_only_the_pressed_member_on_a_shared_login() {
 }
 
 #[test]
-fn try_again_does_not_shorten_a_separate_busy_task_hold() {
+fn try_again_retains_mains_behavior_for_a_separate_busy_task_hold() {
     for duration in [60_000, 30 * 60_000] {
         let c = Context::new();
         let t = Tiers::new(&c, &["zeus"]);
@@ -47,9 +47,10 @@ fn try_again_does_not_shorten_a_separate_busy_task_hold() {
             .mark_out_with_kind(id, &account_end, "account unavailable", HoldKind::Account)
             .unwrap();
         c.back_from_quota(t.project.id, "zeus").unwrap();
+        let returned = now(&c);
         assert_eq!(
             t.task(1).task.held_until.as_deref(),
-            Some(busy_end.as_str())
+            Some(returned.as_str())
         );
     }
 }

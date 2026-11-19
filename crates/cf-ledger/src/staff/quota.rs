@@ -129,7 +129,7 @@ pub(crate) fn mark_out_kind(
 }
 
 /// A participant comes back before its reset when the applicable recovery rule
-/// says so. Its previous refusals are history, and its matching held tasks,
+/// says so. Its previous refusals are history, and the tasks held for it,
 /// its own and its sessions', go on at once.
 pub(crate) fn mark_back(
     store: &mut Store,
@@ -151,25 +151,12 @@ pub(crate) fn mark_back(
             "UPDATE participant SET out_until = NULL, out_since = ?, out_kind = NULL WHERE id = ?",
             params![now, member.id],
         )?;
-        if matches!(HoldKind::read(member.out_kind.as_deref()), Some(HoldKind::Quota | HoldKind::Account) | None) {
-            store.db.execute(
-                "UPDATE task SET held_until = ?1
-                 WHERE state = 'paused' AND held_until = ?2 AND held_until > ?1
-                   AND assignee_id IN (SELECT id FROM participant WHERE id = ?3 OR member_id = ?3)
-                   AND (SELECT json_extract(e.data, '$.because') FROM event e
-                        WHERE e.project_id = task.project_id AND e.kind = 'task.state'
-                          AND json_valid(e.data) AND json_extract(e.data, '$.task') = task.number
-                        ORDER BY e.id DESC LIMIT 1)
-                       IN ('out of quota', 'account unavailable')",
-                params![now, member.out_until, member.id],
-            )?;
-        } else {
-            store.db.execute(
-                "UPDATE task SET held_until = ? WHERE state = 'paused' AND held_until IS NOT NULL AND held_until > ?
-                 AND assignee_id IN (SELECT id FROM participant WHERE id = ? OR member_id = ?)",
-                params![now, now, member.id, member.id],
-            )?;
-        }
+        store.db.execute(
+            "UPDATE task SET held_until = ?
+         WHERE state = 'paused' AND held_until IS NOT NULL AND held_until > ?
+           AND assignee_id IN (SELECT id FROM participant WHERE id = ? OR member_id = ?)",
+            params![now, now, member.id, member.id],
+        )?;
         store.log(
             member.project_id,
             "member.back",
