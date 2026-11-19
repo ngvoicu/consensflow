@@ -36,8 +36,13 @@ import {
   testCopy,
   VERSION_ORDER,
 } from '../install/kit.mjs'
+import { installerTestKey } from './support/installer-test-keys.mjs'
+import { endOwned } from './support/owned-child.mjs'
+import { PowerShellStartLock, pwshEnvironment } from './support/powershell-start-lock.mjs'
 
 const windows = process.platform === 'win32'
+const powershellStarts = new PowerShellStartLock()
+const POWERSHELL_READY = '__CONSENSFLOW_TEST_POWERSHELL_READY__'
 const UNINSTALL_ENTRY =
   "'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ConsensFlow'"
 const MACHINE_ENTRIES =
@@ -62,8 +67,11 @@ const setupName = (version) => `ConsensFlow_${version}_x64-setup.exe`
 const POWERSHELL_OWN_FILE = '__PSScriptPolicyTest_te5t1ngx.tmp.ps1'
 const POWERSHELL_OWN = /^__PSScriptPolicyTest_.*\.ps1$/i
 
-/** What is in `folder` (a case's TEMP), but for the files PowerShell writes there and removes itself. */
-const inTemp = (folder) => readdirSync(folder).filter((name) => !POWERSHELL_OWN.test(name))
+/** What is in a case's TEMP, except PowerShell's own policy probes and Unix .NET's shared-memory folder. */
+const inTemp = (folder) =>
+  readdirSync(folder).filter(
+    (name) => !POWERSHELL_OWN.test(name) && (windows || name !== '.dotnet'),
+  )
 
 /** The folder the run of process `pid` made in `temp`, by what the installer names it, once it has. */
 const folderOfRun = (temp, pid) =>
@@ -77,22 +85,34 @@ const folderOfRun = (temp, pid) =>
  * (GitHub's runner's is `C:\Users\RUNNER~1\…`, and the script said `C:\Users\runneradmin\…`).
  * The cases' paths are made below it, so what they expect is what the script says.
  */
-function asTempOf(shell, dir) {
+async function boundSync(shell, run) {
+  return shell === 'pwsh'
+    ? powershellStarts.start(() => ({ ready: Promise.resolve(), value: run() }))
+    : run()
+}
+
+async function asTempOf(shell, dir) {
   if (!windows) return dir
-  const read = spawnSync(
-    shell,
-    ['-NoProfile', '-NonInteractive', '-Command', '[IO.Path]::GetTempPath()'],
-    {
+  const read = await boundSync(shell, () =>
+    spawnSync(shell, ['-NoProfile', '-NonInteractive', '-Command', '[IO.Path]::GetTempPath()'], {
       encoding: 'utf8',
-      env: { ...process.env, TEMP: dir, TMP: dir },
-    },
+      env: pwshEnvironment({
+        ...process.env,
+        TEMP: dir,
+        TMP: dir,
+        XDG_CACHE_HOME: path.join(dir, 'ps-cache'),
+      }),
+    }),
   )
   assert.equal(read.status, 0, read.stderr)
   return read.stdout.trim().replace(/\\+$/, '')
 }
 
 for (const [label, shell] of shells) {
-  test(`install.ps1 orders versions as SemVer does, in ${label}`, () => {
+  // All PowerShell 7 callers in the run take the same file lock until the
+  // script has begun; Windows' special-folder cache does not follow XDG.
+  const boundStarts = shell === 'pwsh'
+  test(`install.ps1 orders versions as SemVer does, in ${label}`, async () => {
     const lines = readFileSync(INSTALL_PS1, 'utf8').split('\n')
     const from = lines.findIndex((line) => line.trim() === '# version order: begin')
     const to = lines.findIndex((line) => line.trim() === '# version order: end')
@@ -104,12 +124,15 @@ for (const [label, shell] of shells) {
         script,
         `${lines.slice(from + 1, to).join('\n')}\n${VERSION_ORDER.map(([a, b]) => `[bool](Test-CfNewer '${a}' '${b}')`).join('\n')}\n`,
       )
-      const ran = spawnSync(
-        shell,
-        ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script],
-        {
-          encoding: 'utf8',
-        },
+      const ran = await boundSync(shell, () =>
+        spawnSync(
+          shell,
+          ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script],
+          {
+            encoding: 'utf8',
+            env: pwshEnvironment({ ...process.env, XDG_CACHE_HOME: path.join(work, 'ps-cache') }),
+          },
+        ),
       )
       assert.equal(ran.status, 0, ran.stderr)
       const said = ran.stdout.trim().split(/\r?\n/)
@@ -125,6 +148,7 @@ for (const [label, shell] of shells) {
     let work
     let key
     let server
+    let ownsRegistry = false
     const files = {}
     // Bytes that stand for an installer: the cases stop before one would run.
     const setup = Buffer.from('MZ not an installer')
@@ -143,14 +167,17 @@ for (const [label, shell] of shells) {
     function freshCase(replacements = []) {
       const dir = mkdtempSync(path.join(work, 'case-'))
       const name = path.basename(dir)
-      const user = `${TEST_KEYS}\\${name}-user`
-      const machine = `${TEST_KEYS}\\${name}-machine`
+      const user = `${installerTestKey(TEST_KEYS, work)}\\${name}-user`
+      const machine = `${installerTestKey(TEST_KEYS, work)}\\${name}-machine`
       const script = testCopy(INSTALL_PS1, path.join(dir, 'install.ps1'), key.keyLine, [
         [UNINSTALL_ENTRY, `'${user.replace('HKCU', 'HKCU:')}'`],
         [MACHINE_ENTRIES, `$machineEntries = @('${machine.replace('HKCU', 'HKCU:')}')`],
         ['$quitWait = 120', '$quitWait = 3'],
         ...replacements,
       ])
+      if (boundStarts) {
+        writeFileSync(script, `Write-Output '${POWERSHELL_READY}'\n${readFileSync(script, 'utf8')}`)
+      }
       for (const folder of ['tmp', 'local']) mkdirSync(path.join(dir, folder))
       // What PowerShell writes into TEMP itself and removes, here left in it: what a case reads of
       // TEMP is the installer's, and this is none of it (CI run 42055791085, T-1244).
@@ -176,10 +203,12 @@ for (const [label, shell] of shells) {
           encoding: 'utf8',
         })
         assert.equal(made.status, 0, made.stderr)
+        ownsRegistry = true
       }
     }
 
     function install(at, args = [], { env = {}, launcher, onStart } = {}) {
+      const cache = mkdtempSync(path.join(at.dir, 'ps-cache-'))
       const words = [
         '-NoProfile',
         '-NonInteractive',
@@ -190,9 +219,9 @@ for (const [label, shell] of shells) {
         ...args,
       ]
       const [program, all] = launcher ? [launcher, ['/d', '/c', shell, ...words]] : [shell, words]
-      return new Promise((resolve) => {
+      const start = () => {
         const child = spawn(program, all, {
-          env: {
+          env: pwshEnvironment({
             ...process.env,
             TEMP: at.tmp,
             TMP: at.tmp,
@@ -202,18 +231,35 @@ for (const [label, shell] of shells) {
             CONSENSFLOW_CHANNEL: '',
             CONSENSFLOW_VERSION: '',
             ...env,
-          },
+            XDG_CACHE_HOME: cache,
+          }),
         })
         onStart?.(child)
         let out = ''
+        let readyNow
+        const ready = new Promise((resolve) => {
+          readyNow = resolve
+        })
         child.stdout.on('data', (chunk) => {
           out += chunk
+          if (out.includes(POWERSHELL_READY)) readyNow()
         })
         child.stderr.on('data', (chunk) => {
           out += chunk
         })
-        child.on('close', (status) => resolve({ status, out: out.replace(/\s*\r?\n\s*/g, ' ') }))
-      })
+        const result = new Promise((resolve) => {
+          child.on('error', () => readyNow())
+          child.on('close', (status) => {
+            readyNow()
+            resolve({
+              status,
+              out: out.replaceAll(POWERSHELL_READY, '').replace(/\s*\r?\n\s*/g, ' '),
+            })
+          })
+        })
+        return { ready, value: result }
+      }
+      return boundStarts ? powershellStarts.start(start) : start().value
     }
 
     function assertRefused(at, ran, words) {
@@ -224,7 +270,14 @@ for (const [label, shell] of shells) {
     }
 
     before(async () => {
-      work = asTempOf(shell, mkdtempSync(path.join(os.tmpdir(), 'cf-install-ps1-')))
+      work = mkdtempSync(path.join(os.tmpdir(), 'cf-install-ps1-'))
+      work = await asTempOf(shell, work)
+      if (windows) {
+        const existing = spawnSync('reg', ['query', installerTestKey(TEST_KEYS, work)], {
+          encoding: 'utf8',
+        })
+        assert.notEqual(existing.status, 0, 'the suite registry key already exists')
+      }
       key = makeKey()
       Object.assign(
         files,
@@ -237,8 +290,47 @@ for (const [label, shell] of shells) {
 
     after(async () => {
       await server?.close()
-      if (windows) spawnSync('reg', ['delete', TEST_KEYS, '/f'])
+      if (windows && ownsRegistry)
+        spawnSync('reg', ['delete', installerTestKey(TEST_KEYS, work), '/f'])
       if (work) rmSync(work, { recursive: true, force: true })
+    })
+
+    test('each concurrent PowerShell installer has its own Unix cache', {
+      skip: windows && 'Windows PowerShell 7 uses a system special folder, not XDG_CACHE_HOME',
+    }, async () => {
+      const outside = path.join(work, 'outside-cache')
+      mkdirSync(outside)
+      writeFileSync(path.join(outside, 'keep'), 'untouched')
+      const cases = [freshCase(), freshCase()]
+      for (const at of cases) {
+        writeFileSync(
+          at.script,
+          [
+            `Write-Output '${POWERSHELL_READY}'`,
+            '$cache = $env:XDG_CACHE_HOME',
+            '[IO.Directory]::CreateDirectory($cache) | Out-Null',
+            "[IO.File]::WriteAllText((Join-Path $cache 'who'), $env:CF_CACHE_TEST)",
+            "Write-Output ('cache=' + $cache)",
+          ].join('\n'),
+        )
+      }
+      const results = await Promise.all(
+        cases.map((at, i) =>
+          install(at, [], {
+            env: { XDG_CACHE_HOME: outside, CF_CACHE_TEST: String(i) },
+          }),
+        ),
+      )
+      for (const [i, at] of cases.entries()) {
+        assert.equal(results[i].status, 0, results[i].out)
+        assert.match(results[i].out.trim(), /^cache=/)
+        const cache = results[i].out.trim().slice('cache='.length)
+        assert.equal(path.dirname(cache), at.dir)
+        assert.match(path.basename(cache), /^ps-cache-/)
+        assert.equal(readFileSync(path.join(cache, 'who'), 'utf8'), String(i))
+      }
+      assert.deepEqual(readdirSync(outside), ['keep'])
+      assert.equal(readFileSync(path.join(outside, 'keep'), 'utf8'), 'untouched')
     })
 
     test('Linux and macOS are refused in plain words', {
@@ -585,23 +677,61 @@ for (const [label, shell] of shells) {
           const opened = freshCase([
             [
               'Close-CfOpen $dir\n',
-              `Close-CfOpen $dir; $null = Start-Process -FilePath '${ping}' -ArgumentList '-n', '30', '127.0.0.1' -WindowStyle Hidden; Start-Sleep -Milliseconds 500\n`,
+              "Close-CfOpen $dir; [IO.File]::WriteAllText($env:CF_TEST_REOPEN_READY, 'ready'); $watch = [Diagnostics.Stopwatch]::StartNew(); while (-not (Test-Path -LiteralPath $env:CF_TEST_REOPEN_GO)) { if ($watch.Elapsed.TotalSeconds -gt 60) { throw 'test gate timed out' }; Start-Sleep -Milliseconds 50 }\n",
             ],
           ])
           opened.local = at.local
+          const ready = path.join(opened.dir, 'reopen-ready')
+          const go = path.join(opened.dir, 'reopen-go')
+          let installer, reopened, decoy, reopenedClosed, decoyClosed
+          let completed = false
+          const installing = install(opened, ['--version', '3.0.7'], {
+            env: { LOCALAPPDATA: at.local, CF_TEST_REOPEN_READY: ready, CF_TEST_REOPEN_GO: go },
+            onStart: (child) => {
+              installer = child
+            },
+          })
+          // Handle an early start failure while the gate is being awaited.
+          installing.catch(() => {})
           try {
+            for (let i = 0; i < 300 && !existsSync(ready); i++) {
+              await new Promise((resolve) => setTimeout(resolve, 100))
+            }
+            assert.ok(existsSync(ready), 'the installer reached the reopen gate')
+            reopened = spawn(ping, ['-n', '30', '127.0.0.1'], { stdio: 'ignore' })
+            decoy = spawn(ping, ['-n', '30', '127.0.0.1'], { stdio: 'ignore' })
+            reopenedClosed = new Promise((resolve) => reopened.once('close', resolve))
+            decoyClosed = new Promise((resolve) => decoy.once('close', resolve))
+            await Promise.all(
+              [reopened, decoy].map(
+                (child) =>
+                  new Promise((resolve, reject) => {
+                    child.once('spawn', resolve)
+                    child.once('error', reject)
+                  }),
+              ),
+            )
+            await new Promise((resolve) => setTimeout(resolve, 500))
+            assert.equal(reopened.exitCode, null, 'the reopened stand-in runs')
+            writeFileSync(go, 'go')
+            const ran = await installing
+            completed = true
             assertRefused(
               opened,
-              await install(opened, ['--version', '3.0.7'], { env: { LOCALAPPDATA: at.local } }),
+              ran,
               /ConsensFlow in .* was opened again while the install waited/,
             )
+            endOwned(reopened)
+            await reopenedClosed
+            reopened = undefined
+            assert.equal(decoy.exitCode, null, 'another process of the same executable survives')
           } finally {
-            // The stand-in alone, by its path: no other ConsensFlow on the machine is touched.
-            spawnSync('powershell', [
-              '-NoProfile',
-              '-Command',
-              `Get-Process | Where-Object { $_.Path -eq '${ping}' } | Stop-Process -Force`,
-            ])
+            if (!completed) endOwned(installer)
+            endOwned(reopened)
+            endOwned(decoy)
+            await Promise.all(
+              [installing.catch(() => {}), reopenedClosed, decoyClosed].filter(Boolean),
+            )
           }
         })
 
@@ -644,9 +774,36 @@ for (const [label, shell] of shells) {
         }
         /** A process kept running: a PowerShell, or a program that is none. */
         function running(program, args) {
-          const child = spawn(program, args, { stdio: 'ignore' })
+          const cache = mkdtempSync(path.join(work, 'ps-cache-'))
+          const child = spawn(program, args, {
+            stdio: 'ignore',
+            env: { ...process.env, XDG_CACHE_HOME: cache },
+          })
           children.push(child)
           return child.pid
+        }
+        async function runningShell(program, args) {
+          if (!boundStarts) return running(program, args)
+          return powershellStarts.start(() => {
+            const words = [...args]
+            words[words.length - 1] =
+              `Write-Output '${POWERSHELL_READY}'; ${words[words.length - 1]}`
+            const child = spawn(program, words, {
+              stdio: ['ignore', 'pipe', 'ignore'],
+              env: pwshEnvironment(process.env),
+            })
+            children.push(child)
+            const ready = new Promise((resolve) => {
+              let out = ''
+              child.stdout.on('data', (chunk) => {
+                out += chunk
+                if (out.includes(POWERSHELL_READY)) resolve()
+              })
+              child.on('error', resolve)
+              child.on('close', resolve)
+            })
+            return { ready, value: child.pid }
+          })
         }
         const folderIn = (at, name, files = { 'verify.js': 'x' }) => {
           const folder = path.join(at.tmp, name)
@@ -662,7 +819,7 @@ for (const [label, shell] of shells) {
           const at = freshCase()
           const hex = '0123456789ab'
           const dead = await deadPid()
-          const live = running(shell, [
+          const live = await runningShell(shell, [
             '-NoProfile',
             '-NonInteractive',
             '-Command',

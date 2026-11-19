@@ -192,7 +192,6 @@ enum Looks {
 
 /// A row being played: its home, its store, its window.
 struct Scene {
-    home: Home,
     store: Store,
     /// None until it is opened.
     window: Option<Rc<dyn Window>>,
@@ -206,6 +205,8 @@ struct Scene {
     step: std::cell::RefCell<String>,
     /// The looks that read wrong: the step, and what it read.
     wrong: std::cell::RefCell<Vec<String>>,
+    // The store must close before the home's TempDir is removed on Windows.
+    home: Home,
 }
 
 fn status(state: &str) -> Value {
@@ -868,4 +869,14 @@ fn a_turn_of_its_own_that_ended_leaves_the_window_at_rest_on_a_chain_put_back_as
             );
         }
     }
+}
+
+#[test]
+fn the_scene_removes_its_home_after_closing_its_store() {
+    let row = rows().into_iter().next().expect("a table row");
+    let scene = Scene::new(row, Looks::EveryStep);
+    let path = std::path::PathBuf::from(&scene.home.root);
+    assert!(path.exists());
+    drop(scene);
+    assert!(!path.exists(), "the scene left its home: {path:?}");
 }
