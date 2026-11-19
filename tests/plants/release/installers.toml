@@ -1831,7 +1831,7 @@ replace = ''''''
 
 [[plant]]
 name = "installers: install.ps1 makes its folder with no pid in its name"
-meant = "this run's folder carries its pid, and one killed hard leaves it for the next run to take away"
+meant = "install.ps1 in PowerShell 7 › on Windows › what an earlier install left in the user's temporary folder › this run's folder carries its pid, and one killed hard leaves it for the next run to take away"
 runs = [["node", "--test", "--test-name-pattern", "temporary folder", "tests/install-ps1.test.mjs"]]
 platforms = ["windows"]
 
