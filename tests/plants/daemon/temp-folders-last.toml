@@ -39,13 +39,13 @@ runs = ["xtask-temp-folders"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/testing.rs"
-find = "    /// The home, which holds the ledger, the log and the trace until the scene goes.\n    pub _home: tempfile::TempDir,\n}"
+find = "    /// The home, which holds the ledger, the log and the trace until the scene goes.\n    pub _home: Rc<tempfile::TempDir>,\n}"
 replace = "}"
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/testing.rs"
 find = "pub struct Scene {\n"
-replace = "pub struct Scene {\n    pub _home: tempfile::TempDir,\n"
+replace = "pub struct Scene {\n    pub _home: Rc<tempfile::TempDir>,\n"
 
 [[plant]]
 name = "temp folder last: the engine's context keeps its ledger's file open as it goes"
@@ -55,8 +55,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/testing/context.rs"
-find = "                ledger.let_go_of_its_file();"
-replace = "                let _ = &mut ledger;"
+find = "            Ledger::finish_test_fixture(&ledger);"
+replace = "            let _ = &ledger;"
 
 [[plant]]
 name = "temp folder last: the daemon's scene keeps its ledger's file open as it goes"
@@ -66,5 +66,5 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/testing.rs"
-find = "            ledger.let_go_of_its_file();"
-replace = "            let _ = &mut ledger;"
+find = "        cf_ledger::Ledger::finish_test_fixture(&self.context.ledger);"
+replace = "        let _ = &self.context.ledger;"

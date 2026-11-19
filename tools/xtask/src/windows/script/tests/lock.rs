@@ -667,13 +667,21 @@ while ($true) { Start-Sleep -Milliseconds 100 }
             .enable_all()
             .build()
             .unwrap();
+        // Check the same program and arguments that the sealed job will start.
+        let program = process::resolved("powershell".as_ref(), &self.env);
+        let args = [
+            std::ffi::OsString::from("-NoProfile"),
+            std::ffi::OsString::from("-NonInteractive"),
+            std::ffi::OsString::from("-EncodedCommand"),
+            encode_script(guardian).unwrap().into(),
+        ];
+        cf_base::bundle::command_startable_by_a_test(std::path::Path::new(&program), &args)
+            .unwrap();
         // This command is started only through cf-process, which creates the sealed job.
         #[allow(clippy::disallowed_methods)]
-        let mut launch =
-            tokio::process::Command::new(process::resolved("powershell".as_ref(), &self.env));
+        let mut launch = tokio::process::Command::new(program);
         launch
-            .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
-            .arg(encode_script(guardian).unwrap())
+            .args(args)
             .current_dir(self.scratch.path())
             .env_clear()
             .envs(self.env.iter())

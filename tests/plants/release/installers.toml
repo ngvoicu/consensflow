@@ -1997,8 +1997,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "tests/install-ps1.test.mjs"
-find = "const inTemp = (folder) => readdirSync(folder).filter((name) => !POWERSHELL_OWN.test(name))"
-replace = "const inTemp = (folder) => readdirSync(folder)"
+find = "    (name) => !POWERSHELL_OWN.test(name) && (windows || name !== '.dotnet'),"
+replace = "    (name) => (windows || name !== '.dotnet'),"
 
 [[plant]]
 name = "installers: the install.ps1 tests read PowerShell's own file in TEMP as the installer's (macOS)"
@@ -2008,8 +2008,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "tests/install-ps1.test.mjs"
-find = "const inTemp = (folder) => readdirSync(folder).filter((name) => !POWERSHELL_OWN.test(name))"
-replace = "const inTemp = (folder) => readdirSync(folder)"
+find = "    (name) => !POWERSHELL_OWN.test(name) && (windows || name !== '.dotnet'),"
+replace = "    (name) => (windows || name !== '.dotnet'),"
 
 # The test copies of install.sh attach the DMG without hdiutil's checksum pass (T-1161),
 # by a replacement of the script's own attach line: a script whose line is other words

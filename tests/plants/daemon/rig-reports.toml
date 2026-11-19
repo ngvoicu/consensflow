@@ -174,8 +174,8 @@ runs = ["reports-ci"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "consensflow-integration-*-left.txt\n          if-no-files-found: ignore\n          retention-days: 7\n      - if: failure()"
-replace = "consensflow-integration-*-left.txt\n          if-no-files-found: error\n          retention-days: 7\n      - if: failure()"
+find = "path: ${{ env.RIG_TEMP }}/consensflow-integration-*-left.txt\n          if-no-files-found: ignore\n          retention-days: 7\n      - if: failure()"
+replace = "path: ${{ env.RIG_TEMP }}/consensflow-integration-*-left.txt\n          if-no-files-found: error\n          retention-days: 7\n      - if: failure()"
 
 [[plant]]
 name = "rig reports: CI takes the action by a tag that can move, not a commit"
