@@ -176,3 +176,34 @@ pub(crate) fn stale_reminder(store: &Store, reminder: i64) -> Result<bool, Ledge
         ))?
         .exists([reminder])?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::is_open;
+    use rusqlite::Connection;
+
+    #[test]
+    fn checking_unanswered_questions_uses_an_index_to_find_each_answer() {
+        let db = Connection::open_in_memory().unwrap();
+        crate::migrate(&db, &crate::MIGRATIONS).unwrap();
+        let sql = format!(
+            "EXPLAIN QUERY PLAN SELECT q.id FROM message q
+             JOIN participant s ON s.id=q.sender_id
+             JOIN participant r ON r.id=q.recipient_id
+             LEFT JOIN task t ON t.id=q.task_id
+             WHERE q.project_id=1 AND {}",
+            is_open()
+        );
+        let plan: Vec<String> = db
+            .prepare(&sql)
+            .unwrap()
+            .query_map([], |row| row.get(3))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert!(
+            plan.iter().any(|step| step.starts_with("SEARCH a USING")),
+            "each question must find answers by index, not scan all messages: {plan:?}"
+        );
+    }
+}

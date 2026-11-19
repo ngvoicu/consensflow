@@ -8,3 +8,6 @@ CREATE TABLE question_reminder (
 );
 CREATE UNIQUE INDEX question_reminder_by_message ON question_reminder(reminder_id);
 CREATE INDEX message_questions_for_chief ON message(project_id, kind, state);
+-- A dispatcher pass checks for an answer to every received question. Without
+-- this, each check scans the entire message table, including old projects.
+CREATE INDEX message_answers_by_question ON message(reply_to) WHERE kind = 'answer';

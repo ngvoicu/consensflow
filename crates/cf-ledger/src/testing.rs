@@ -105,7 +105,9 @@ pub use staff_rules::undo_migration_0026;
 
 /// Remove the reminder objects when a test reconstructs a ledger from before 0041.
 pub fn undo_migration_0041(db: &rusqlite::Connection) -> rusqlite::Result<()> {
-    db.execute_batch("DROP INDEX message_questions_for_chief; DROP TABLE question_reminder")
+    db.execute_batch(
+        "DROP INDEX message_questions_for_chief; DROP INDEX message_answers_by_question; DROP TABLE question_reminder",
+    )
 }
 
 /// Remove the plan-key table when a test reconstructs a ledger from before 0040.
@@ -281,6 +283,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             && entry["name"] != "question_reminder"
             && entry["name"] != "question_reminder_by_message"
             && entry["name"] != "message_questions_for_chief"
+            && entry["name"] != "message_answers_by_question"
             && entry["name"] != "participant_one_live_backup"
             && entry["name"] != "participant_backup_insert"
             && entry["name"] != "participant_backup_update"
@@ -546,6 +549,7 @@ mod tests {
             "question_reminder",
             "question_reminder_by_message",
             "message_questions_for_chief",
+            "message_answers_by_question",
         ] {
             assert!(
                 !schema.iter().any(|item| item["name"] == name),
