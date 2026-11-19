@@ -44,8 +44,9 @@ pub(crate) fn account_hold_for_edit(
 
 /// A member that ran out of quota takes no work until `until`, kept and logged
 /// as a store keeps a time ([`time::canonical`]); when it was marked is its
-/// `outSince`. A known quota or account hold keeps the earlier reset. Other
-/// kinds and older untyped holds retain their existing precedence.
+/// `outSince`. One already out stays out until the later of the two resets,
+/// and keeps the time it was first marked: what its other windows run into
+/// after that is still news for each of them.
 pub(crate) fn mark_out(
     store: &mut Store,
     participant_id: i64,
@@ -61,7 +62,7 @@ pub(crate) fn mark_out(
         "model moved" => Some(HoldKind::Moved),
         _ => None,
     };
-    mark_out_kind(store, participant_id, until, reason, kind, true)
+    mark_out_kind(store, participant_id, until, reason, kind)
 }
 
 /// Keep the kind with the end which wins; a shorter, later report must not
@@ -72,7 +73,6 @@ pub(crate) fn mark_out_kind(
     until: &str,
     reason: &str,
     kind: Option<HoldKind>,
-    reported_reset: bool,
 ) -> Result<ParticipantView, LedgerError> {
     // Kept as a store keeps a time, however it was written.
     let (Some(reset), Some(until)) = (time::parse(until), time::canonical(until)) else {
@@ -88,29 +88,7 @@ pub(crate) fn mark_out_kind(
         let now = store.at();
         let out_until = member.out_until.as_deref().and_then(time::parse);
         let out = matches!((out_until, time::parse(&now)), (Some(until), Some(now)) if until > now);
-        // Main identifies moved and unavailable holds by their sentinel times
-        // even when the stored kind disagrees. Untyped old holds keep main's path.
-        let prior_kind = HoldKind::read(member.out_kind.as_deref()).map(|kind| {
-            match member.out_until.as_deref() {
-                Some("9999-12-31T23:59:59.999Z") => HoldKind::Moved,
-                Some(until) if until.starts_with("9999-") => HoldKind::Account,
-                _ => kind,
-            }
-        });
-        let account_hold = reported_reset
-            && member.role != "chief"
-            && matches!(prior_kind, Some(HoldKind::Quota | HoldKind::Account))
-            && matches!(kind, Some(HoldKind::Quota | HoldKind::Account))
-            && (prior_kind == kind || kind == Some(HoldKind::Quota));
-        let keep_old = out
-            && out_until.is_some_and(|old| {
-                if account_hold {
-                    old <= reset
-                } else {
-                    old >= reset
-                }
-            });
-        if keep_old {
+        if out && out_until.is_some_and(|until| until >= reset) {
             if out_until == Some(reset) && member.out_kind.is_none() && kind.is_some() {
                 store.db.execute(
                     "UPDATE participant SET out_kind = ? WHERE id = ?",
@@ -119,17 +97,6 @@ pub(crate) fn mark_out_kind(
                 return participant_view(&store.participant_row(member.id)?);
             }
             return participant_view(&member);
-        }
-        if out && account_hold && out_until.is_some_and(|old| reset < old) {
-            store.db.execute(
-                "UPDATE task SET held_until = ?1 WHERE state = 'paused' AND held_until = ?2
-                   AND assignee_id IN (SELECT id FROM participant WHERE id = ?3 OR member_id = ?3)
-                   AND (SELECT json_extract(e.data, '$.because') FROM event e
-                        WHERE e.project_id = task.project_id AND e.kind = 'task.state'
-                          AND json_valid(e.data) AND json_extract(e.data, '$.task') = task.number
-                        ORDER BY e.id DESC LIMIT 1) IN ('out of quota', 'account unavailable')",
-                params![until, member.out_until, member.id],
-            )?;
         }
         let since = if out {
             member.out_since.clone()

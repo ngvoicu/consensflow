@@ -32,12 +32,6 @@ pub(crate) const TASK_SELECT: &str = "
              AND json_extract(s.receipt, '$.shown') IS NOT NULL
              AND json_extract(s.receipt, '$.over') IS NULL
            ORDER BY s.id DESC LIMIT 1) AS aside,
-         (SELECT s.body FROM message s
-           WHERE t.held_until IS NOT NULL AND s.task_id = t.id AND s.state = 'read' AND s.sender_id IS NULL
-             AND s.kind = 'note' AND json_valid(s.receipt)
-             AND json_extract(s.receipt, '$.shown') IS NOT NULL
-             AND json_extract(s.receipt, '$.over') IS NULL
-           ORDER BY s.id DESC LIMIT 1) AS aside_body,
          (SELECT h.body FROM message h JOIN participant hp ON hp.id = h.recipient_id
            WHERE t.held_until IS NOT NULL AND h.task_id = t.id AND h.sender_id IS NULL
              AND h.kind = 'note' AND hp.role = 'chief'
@@ -299,19 +293,10 @@ pub(crate) fn task_view(row: &Row<'_>) -> rusqlite::Result<TaskView> {
         // the same while the task is held, unless a newer note is shown (RS-25).
         aside: match row.get::<_, Option<String>>("member_left")? {
             Some(member) => Some(format!("its member @{member} has left the staff")),
-            None => {
-                let until: Option<String> = row.get("held_until")?;
-                let number = row.get("number")?;
-                let typed: Option<String> = row.get("hold_typed")?;
-                let shown: Option<String> = row.get("aside_body")?;
-                let hold = until.as_deref().and_then(|until| {
-                    typed
-                        .as_deref()
-                        .or(shown.as_deref())
-                        .and_then(|body| crate::messages::hold_said_until(number, body, until))
-                });
-                hold.map_or_else(|| row.get("aside"), |said| Ok(Some(said)))?
-            }
+            None => row
+                .get::<_, Option<String>>("hold_typed")?
+                .and_then(|body| crate::messages::hold_said(row.get("number").ok()?, &body))
+                .map_or_else(|| row.get("aside"), |said| Ok(Some(said)))?,
         },
     })
 }

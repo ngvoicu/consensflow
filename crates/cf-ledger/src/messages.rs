@@ -62,8 +62,8 @@ pub use delivery::{HandOver, WITHDRAWN_AFTER_HANDED};
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub use holds::is_busy_note;
 pub(crate) use holds::{
-    note_hold, note_hold_busy, note_hold_moved, note_hold_unavailable,
-    said_until as hold_said_until, tell_goes_on,
+    note_hold, note_hold_busy, note_hold_moved, note_hold_unavailable, said as hold_said,
+    tell_goes_on,
 };
 pub(crate) use paused_answers::{
     answer_to_current_pause, given as paused_answer_given, note as note_paused_answer,

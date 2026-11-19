@@ -160,7 +160,7 @@ fn editing_only_the_harness_ends_a_quota_or_account_hold() {
 }
 
 #[test]
-fn later_refusal_with_an_earlier_reset_shortens_the_quota_hold() {
+fn an_earlier_report_keeps_the_later_quota_reset() {
     let c = Context::new();
     let t = Tiers::new(&c, &["zeus"]);
     let id = t.id("zeus");
@@ -175,7 +175,7 @@ fn later_refusal_with_an_earlier_reset_shortens_the_quota_hold() {
         .borrow_mut()
         .mark_out_with_kind(id, &earlier, "out of quota", HoldKind::Quota)
         .unwrap();
-    assert_eq!(t.out_until("zeus").as_deref(), Some(earlier.as_str()));
+    assert_eq!(t.out_until("zeus").as_deref(), Some(later.as_str()));
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn long_reset_is_not_capped_at_thirty_minutes() {
 }
 
 #[test]
-fn an_earlier_report_also_shortens_the_original_tasks_wait() {
+fn an_earlier_report_leaves_the_original_task_waiting() {
     let c = Context::new();
     let t = Tiers::new(&c, &["zeus"]);
     t.open();
@@ -230,20 +230,20 @@ fn an_earlier_report_also_shortens_the_original_tasks_wait() {
         },
     );
     passes(&c, 4);
-    assert_eq!(t.out_until("zeus").as_deref(), Some(earlier.as_str()));
-    assert_eq!(t.task(1).task.held_until.as_deref(), Some(earlier.as_str()));
+    assert_eq!(t.out_until("zeus").as_deref(), Some(later.as_str()));
+    assert_eq!(t.task(1).task.held_until.as_deref(), Some(later.as_str()));
     let aside = t.task(1).task.aside.unwrap_or_default();
     assert!(
-        aside.contains(&earlier),
+        aside.contains(&later),
         "the task line names its current reset: {aside}"
     );
     c.advance(12 * 60 * 60_000 + 1);
     passes(&c, 6);
-    assert_eq!(t.task(1).task.state, "working");
+    assert_eq!(t.task(1).task.state, "paused");
 }
 
 #[test]
-fn a_later_reset_does_not_extend_an_existing_quota_hold() {
+fn a_later_report_extends_an_existing_quota_hold() {
     let c = Context::new();
     let t = Tiers::new(&c, &["zeus"]);
     let id = t.id("zeus");
@@ -258,7 +258,7 @@ fn a_later_reset_does_not_extend_an_existing_quota_hold() {
         .borrow_mut()
         .mark_out_with_kind(id, &later, "out of quota", HoldKind::Quota)
         .unwrap();
-    assert_eq!(t.out_until("zeus").as_deref(), Some(first.as_str()));
+    assert_eq!(t.out_until("zeus").as_deref(), Some(later.as_str()));
 }
 
 const INTERVAL: i64 = 30 * 60_000;
@@ -610,7 +610,7 @@ fn moved_members_answer_preserves_the_chiefs_login_hold() {
 }
 
 #[test]
-fn a_new_quota_refusal_can_shorten_an_account_hold_at_its_reported_reset() {
+fn a_new_quota_refusal_does_not_shorten_an_account_hold() {
     let c = Context::new();
     let t = Tiers::new(&c, &["zeus"]);
     t.open();
@@ -638,7 +638,7 @@ fn a_new_quota_refusal_can_shorten_an_account_hold_at_its_reported_reset() {
         },
     );
     passes(&c, 5);
-    assert_eq!(t.out_until("zeus").as_deref(), Some(earlier.as_str()));
+    assert_eq!(t.out_until("zeus").as_deref(), Some(NEVER));
 }
 
 #[test]
@@ -713,7 +713,7 @@ fn a_new_quota_refusal_does_not_shorten_a_moved_deadline_with_a_stale_kind() {
 }
 
 #[test]
-fn a_new_quota_refusal_shortens_an_account_deadline_with_a_stale_kind() {
+fn a_new_quota_refusal_keeps_an_account_deadline_with_a_stale_kind() {
     let c = Context::new();
     let t = Tiers::new(&c, &["zeus"]);
     let id = t.id("zeus");
@@ -726,5 +726,5 @@ fn a_new_quota_refusal_shortens_an_account_deadline_with_a_stale_kind() {
         .borrow_mut()
         .mark_out_with_kind(id, &earlier, "out of quota", HoldKind::Quota)
         .unwrap();
-    assert_eq!(t.out_until("zeus").as_deref(), Some(earlier.as_str()));
+    assert_eq!(t.out_until("zeus").as_deref(), Some(NEVER));
 }

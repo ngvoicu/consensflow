@@ -2021,24 +2021,12 @@ impl Dispatcher {
             Some(Unwell::Busy(_)) => HoldKind::Busy,
             None => HoldKind::Quota,
         };
-        let reported_reset = matches!(
-            reported.as_deref(),
-            Some(cf_harness::records::Quota::Exhausted {
-                resets_at: Some(_),
-                ..
-            })
-        );
-        let marked = self
-            .seams
-            .ledger
-            .borrow_mut()
-            .mark_out_with_kind_and_reported_reset(
-                owner.id,
-                &reset,
-                unwell.map_or("out of quota", Unwell::hold),
-                kind,
-                reported_reset,
-            )?;
+        let marked = self.seams.ledger.borrow_mut().mark_out_with_kind(
+            owner.id,
+            &reset,
+            unwell.map_or("out of quota", Unwell::hold),
+            kind,
+        )?;
         let until = marked.out_until.clone().unwrap_or_default();
         self.set_activity(
             record,

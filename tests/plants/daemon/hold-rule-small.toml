@@ -1,6 +1,6 @@
 [run]
 hold-rule-small = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "hold_rule::"]
-hold-rule-allowance = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unavailable_accounts::an_allowance"]
+hold-rule-weekly = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "later_quota_reset::"]
 
 [[plant]]
 name = "hold rule small: selected button keeps its member held"
@@ -73,36 +73,6 @@ find = "            Ok(!busy)\n"
 replace = "            let _ = busy;\n            Ok(true)\n"
 
 [[plant]]
-name = "hold rule small: an earlier quota reset is ignored"
-meant = "later_refusal_with_an_earlier_reset_shortens_the_quota_hold"
-runs = ["hold-rule-small"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/staff/quota.rs"
-find = "                    old <= reset\n"
-replace = "                    old >= reset\n"
-
-[[plant]]
-name = "hold rule small: an earlier reset leaves the original task waiting"
-meant = "an_earlier_report_also_shortens_the_original_tasks_wait"
-runs = ["hold-rule-small"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/staff/quota.rs"
-find = "        if out && account_hold && out_until.is_some_and(|old| reset < old) {\n            store.db.execute(\n                \"UPDATE task SET held_until = ?1 WHERE state = 'paused' AND held_until = ?2\n                   AND assignee_id IN (SELECT id FROM participant WHERE id = ?3 OR member_id = ?3)\n                   AND (SELECT json_extract(e.data, '$.because') FROM event e\n                        WHERE e.project_id = task.project_id AND e.kind = 'task.state'\n                          AND json_valid(e.data) AND json_extract(e.data, '$.task') = task.number\n                        ORDER BY e.id DESC LIMIT 1) IN ('out of quota', 'account unavailable')\",\n                params![until, member.out_until, member.id],\n            )?;\n        }\n"
-replace = ""
-
-[[plant]]
-name = "hold rule small: an untyped old hold is treated as a typed quota"
-meant = "new_typed_refusal_on_a_previously_untyped_hold_reaches_backup"
-runs = ["hold-rule-small"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/staff/quota.rs"
-find = "                if account_hold {\n"
-replace = "                if account_hold || prior_kind.is_none() {\n"
-
-[[plant]]
 name = "hold rule small: a moved members other window returns the chief"
 meant = "moved_members_answer_preserves_the_chiefs_login_hold"
 runs = ["hold-rule-small"]
@@ -111,36 +81,6 @@ runs = ["hold-rule-small"]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = "        // A turn that got through is its account's news: whoever else is out on it is back.\n        if !out {\n            let news = News::Turn {\n"
 replace = "        // A turn that got through is its account's news: whoever else is out on it is back.\n        if !out || owner.out_until.as_deref().is_some_and(moved_hold) {\n            let news = News::Turn {\n"
-
-[[plant]]
-name = "hold rule small: the task card shows the obsolete reset"
-meant = "an_earlier_report_also_shortens_the_original_tasks_wait"
-runs = ["hold-rule-small"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/holds.rs"
-find = "        Some(format!(\"{prefix} until {until}\"))\n"
-replace = "        let _ = prefix;\n        Some(words)\n"
-
-[[plant]]
-name = "hold rule small: an account hold ignores a real earlier quota reset"
-meant = "a_new_quota_refusal_can_shorten_an_account_hold_at_its_reported_reset"
-runs = ["hold-rule-small"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/staff/quota.rs"
-find = "            && (prior_kind == kind || kind == Some(HoldKind::Quota));\n"
-replace = "            && prior_kind == kind;\n"
-
-[[plant]]
-name = "hold rule small: a usage count is treated as a reported reset"
-meant = "an_allowance_the_harness_shows_again_brings_an_unavailable_member_back_a_still_full_one_does_not"
-runs = ["hold-rule-allowance"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/dispatcher.rs"
-find = "        let reported_reset = matches!(\n            reported.as_deref(),\n            Some(cf_harness::records::Quota::Exhausted {\n                resets_at: Some(_),\n                ..\n            })\n        );\n"
-replace = "        let reported_reset = true;\n"
 
 [[plant]]
 name = "hold rule small: an edit treats a moved deadline as a quota"
@@ -163,21 +103,11 @@ find = "    if until.starts_with(\"9999-\") {\n        return Ok(true);\n    }\n
 replace = ""
 
 [[plant]]
-name = "hold rule small: a moved deadline is treated as its stale kind"
-meant = "a_new_quota_refusal_does_not_shorten_a_moved_deadline_with_a_stale_kind"
-runs = ["hold-rule-small"]
+name = "hold rule small: a later refusal keeps the earlier quota reset"
+meant = "a_weekly_limit_reported_after_the_five_hour_limit_does_not_resume_work_early"
+runs = ["hold-rule-weekly"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/quota.rs"
-find = "                Some(\"9999-12-31T23:59:59.999Z\") => HoldKind::Moved,\n"
-replace = "                Some(\"9999-12-31T23:59:59.999Z\") => kind,\n"
-
-[[plant]]
-name = "hold rule small: an account deadline is treated as its stale kind"
-meant = "a_new_quota_refusal_shortens_an_account_deadline_with_a_stale_kind"
-runs = ["hold-rule-small"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/staff/quota.rs"
-find = "                Some(until) if until.starts_with(\"9999-\") => HoldKind::Account,\n"
-replace = "                Some(until) if until.starts_with(\"9999-\") => kind,\n"
+find = "        if out && out_until.is_some_and(|until| until >= reset) {\n"
+replace = "        if out && out_until.is_some_and(|until| until <= reset) {\n"
