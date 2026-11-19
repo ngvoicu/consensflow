@@ -3,11 +3,11 @@
 //! session, text, expiresAt}`, with a unique `m-<hex>` id, the launch's
 //! immutable id, the target's conversation and one absolute expiry. Native
 //! admission is gated by the pane's claim and the pane host's word that it still
-//! admits the message, immediately before the inbox rename, the hand-over: a
-//! failed claim, or any failure before the rename, is known to
-//! have written nothing ([`before`]). From the rename on, Pi may have taken the
-//! message, so a missing acknowledgement or any failure is uncertain and Pi's
-//! own record decides ([`after`]); the message is never retried automatically.
+//! admits the message, immediately before publishing it to the inbox. That
+//! publication queues it; the extension's later rename takes it out of the
+//! inbox and starts its question holding. A failed claim, or any failure before
+//! publication, is known to have written nothing ([`before`]). Once published,
+//! a missing acknowledgement or failure may be uncertain ([`after`]).
 
 use std::path::Path;
 use std::time::Duration;
@@ -206,10 +206,11 @@ pub async fn send(
 ) -> Result<Answer, String> {
     match before(time, entropy, target, text).await {
         Ok(handover) => {
-            let answer = after(time, handover).await;
+            let answer = after(time, target, handover).await;
             if answer.ok && answer.admitted == Some(true) {
                 target.host.delivery_reported(target.pane);
             }
+            target.host.pi_inbox_finished(target.pane);
             Ok(answer)
         }
         Err(Failed::Answered(answer)) => Ok(answer),
@@ -313,7 +314,7 @@ fn pane_named(pane: &Pane) -> Result<(), String> {
 /// an error, and what is not Pi's own word is uncertain. A message nobody
 /// acknowledged is taken out of the inbox; one that failed stays there, as
 /// the extension refuses it once it expires.
-async fn after(time: &dyn Time, handover: Handover) -> Answer {
+async fn after(time: &dyn Time, target: &Target<'_>, handover: Handover) -> Answer {
     let Handover {
         id,
         expires_at,
@@ -321,6 +322,16 @@ async fn after(time: &dyn Time, handover: Handover) -> Answer {
         ack_file,
         temporary,
     } = handover;
+    let taken = format!("{inbox_file}.taken");
+    if !target.host.pi_inbox_pending(
+        target.pane,
+        Path::new(&inbox_file),
+        Path::new(&taken),
+        Path::new(&ack_file),
+    ) {
+        let _ = rm_force(Path::new(&temporary));
+        return Answer::zero_bytes("failed-with-zero-bytes", Some(NOT_ADMITTED.to_owned()));
+    }
     let acknowledged = async {
         rename(Path::new(&temporary), Path::new(&inbox_file))?;
         let ack = ack_for(time, &ack_file, &id, expires_at).await?;

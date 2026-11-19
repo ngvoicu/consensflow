@@ -415,11 +415,32 @@ impl<'a> Admitting<'a> {
 }
 
 impl PaneHost for Admitting<'_> {
-    fn request<'b>(&'b self, op: &'b str, mut body: Value) -> Work<'b, Result<Value, HostError>> {
+    fn request<'b>(&'b self, op: &'b str, body: Value) -> Work<'b, Result<Value, HostError>> {
+        let mut brief = false;
         if op == "pane.write_paste" && !self.again {
             let message = self.dispatcher.seams.ledger.borrow().message(self.message);
             match message {
-                Ok(Some(message)) if message.kind == "task" => body["brief"] = json!(self.message),
+                Ok(Some(message)) if message.kind == "task" => {
+                    let started = self
+                        .dispatcher
+                        .seams
+                        .ledger
+                        .borrow_mut()
+                        .question_brief_handed_over(self.message);
+                    if let Err(error) = started {
+                        let cause = EngineError::from(error);
+                        let message = cause.to_string();
+                        *self.failed.borrow_mut() = Some(cause);
+                        self.refused.set(true);
+                        return Box::pin(async move {
+                            Err(HostError {
+                                error: None,
+                                message,
+                            })
+                        });
+                    }
+                    brief = true;
+                }
                 Ok(_) => {}
                 Err(error) => {
                     let cause = EngineError::from(error);
@@ -435,7 +456,38 @@ impl PaneHost for Admitting<'_> {
                 }
             }
         }
-        self.dispatcher.seams.host.request(op, body)
+        let sent = self.dispatcher.seams.host.request(op, body);
+        Box::pin(async move {
+            let answer = sent.await;
+            if brief {
+                let mut ledger = self.dispatcher.seams.ledger.borrow_mut();
+                let settled = match &answer {
+                    Ok(reply) if reply.get("ok") == Some(&Value::Bool(true)) => {
+                        Some(ledger.question_brief_confirmed(self.message))
+                    }
+                    Ok(reply)
+                        if reply.get("admitted") == Some(&Value::Bool(false))
+                            || reply.get("bytesWritten").and_then(Value::as_u64) == Some(0) =>
+                    {
+                        Some(ledger.question_brief_refused(self.message))
+                    }
+                    // The pane may have received a write even if its answer was
+                    // lost. Let the existing delivery settlement decide it.
+                    _ => None,
+                };
+                if let Some(Err(error)) = settled {
+                    let cause = EngineError::from(error);
+                    let message = cause.to_string();
+                    *self.failed.borrow_mut() = Some(cause);
+                    self.refused.set(true);
+                    return Err(HostError {
+                        error: None,
+                        message,
+                    });
+                }
+            }
+            answer
+        })
     }
 
     fn cleared(&self) -> bool {
@@ -450,6 +502,81 @@ impl PaneHost for Admitting<'_> {
         }
         self.refused.set(true);
         false
+    }
+
+    fn hand_over_to_broker(&self) -> bool {
+        if !self.admits() {
+            return false;
+        }
+        if let Err(error) = self
+            .dispatcher
+            .seams
+            .ledger
+            .borrow_mut()
+            .question_brief_handed_over(self.message)
+        {
+            *self.failed.borrow_mut() = Some(EngineError::from(error));
+            self.refused.set(true);
+            return false;
+        }
+        true
+    }
+
+    fn broker_send_failed(&self) {
+        if let Err(error) = self
+            .dispatcher
+            .seams
+            .ledger
+            .borrow_mut()
+            .question_brief_refused(self.message)
+        {
+            *self.failed.borrow_mut() = Some(EngineError::from(error));
+            self.refused.set(true);
+        }
+    }
+
+    fn pi_inbox_pending(
+        &self,
+        pane: &Pane,
+        inbox: &std::path::Path,
+        taken: &std::path::Path,
+        ack: &std::path::Path,
+    ) -> bool {
+        let Some(record) = self.dispatcher.record_of_pane(pane) else {
+            return false;
+        };
+        let mut ledger = self.dispatcher.seams.ledger.borrow_mut();
+        let result = ledger.message(self.message).and_then(|message| {
+            if message
+                .as_ref()
+                .is_some_and(|message| message.recipient_id == record.id)
+            {
+                ledger.watch_pi_brief(self.message, inbox, taken, ack)
+            } else {
+                Err(cf_ledger::LedgerError::refused(
+                    "question-window-closed",
+                    "the delivery's window is no longer current",
+                ))
+            }
+        });
+        if let Err(error) = result {
+            *self.failed.borrow_mut() = Some(EngineError::from(error));
+            self.refused.set(true);
+            return false;
+        }
+        true
+    }
+
+    fn pi_inbox_finished(&self, _pane: &Pane) {
+        if let Err(error) = self
+            .dispatcher
+            .seams
+            .ledger
+            .borrow_mut()
+            .finish_pi_brief(self.message)
+        {
+            *self.report_failed.borrow_mut() = Some(EngineError::from(error));
+        }
     }
 
     fn delivery_reported(&self, pane: &Pane) {

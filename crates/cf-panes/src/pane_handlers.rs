@@ -96,9 +96,6 @@ struct PasteRequest {
     /// window's adapter read its input box empty on the screen.
     #[serde(default, rename = "readEmpty")]
     read_empty: Option<u64>,
-    /// The task brief whose body is to be reported when written.
-    #[serde(default)]
-    brief: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -250,22 +247,9 @@ fn register(
     // Every way a paste fails is an answer that says whether anything of it
     // reached the window, a request it could not read included.
     let paste_queue = Arc::clone(&inputs);
-    builder.on("pane.write_paste", move |bridge, body| {
-        let pasted = paste_request(body).and_then(|(key, body, read_empty, brief)| {
-            let pending = if let Some(brief) = brief {
-                let pane = key.clone();
-                let written = Box::new(move || {
-                    let _ = bridge.event(
-                        "pane.brief_written",
-                        json!({
-                            "id": pane.id, "generation": pane.generation, "brief": brief
-                        }),
-                    );
-                });
-                paste_queue.paste_notifying(key, body.into_bytes(), read_empty, written)?
-            } else {
-                paste_queue.paste(key, body.into_bytes(), read_empty)?
-            };
+    builder.on("pane.write_paste", move |_bridge, body| {
+        let pasted = paste_request(body).and_then(|(key, body, read_empty)| {
+            let pending = paste_queue.paste(key, body.into_bytes(), read_empty)?;
             wait_for_input_blocking(pending)
         });
         Ok(match pasted {
@@ -652,14 +636,11 @@ fn parse_body<T: DeserializeOwned>(body: Value) -> Result<T, String> {
 
 /// A paste's pane and body. A request that does not name them was refused
 /// before anything was written.
-fn paste_request(body: Value) -> Result<(PaneKey, String, Option<u64>, Option<i64>), InputError> {
+fn paste_request(body: Value) -> Result<(PaneKey, String, Option<u64>), InputError> {
     let refused = |cause| InputError::refused(INVALID_BODY, cause);
     let request: PasteRequest = parse_body(body).map_err(refused)?;
     let key = pane_key(&request.id, request.generation).map_err(refused)?;
-    if request.brief.is_some_and(|brief| brief <= 0) {
-        return Err(refused("invalid task brief".to_owned()));
-    }
-    Ok((key, request.body, request.read_empty, request.brief))
+    Ok((key, request.body, request.read_empty))
 }
 
 /// Everything a `pane.open` asks for, checked before anything is spawned; the
@@ -918,107 +899,6 @@ mod tests {
             "{answer}"
         );
         drop(connected);
-    }
-
-    /// The report of a task brief is emitted after its bytes, before its delayed Enter
-    /// and the paste's ordinary reply. A refused write emits no report.
-    #[cfg(unix)]
-    #[test]
-    fn t1813_a_briefs_write_report_precedes_the_pastes_reply() {
-        use std::io::{BufRead, BufReader, Write};
-        use std::os::unix::net::UnixStream;
-
-        let _pty_guard = crate::pty::serial_pty_test();
-        let panes = Arc::new(PaneTable::new());
-        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(1_000)));
-        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), Arc::clone(&arbiter)));
-        let mut builder = BridgeBuilder::new(Role::Host, 1024 * 1024);
-        register_pane_handlers(
-            &mut builder,
-            Arc::clone(&panes),
-            arbiter,
-            Arc::new(OutputHub::new()),
-            Arc::clone(&inputs),
-        );
-        let (rust_stream, mut node_stream) = UnixStream::pair().expect("bridge socket pair");
-        node_stream
-            .write_all(b"{\"url\":\"http://localhost:1/\",\"token\":\"test\"}\n")
-            .expect("bridge handle");
-        let connected = builder
-            .connect(rust_stream.try_clone().unwrap(), rust_stream)
-            .unwrap();
-        node_stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-            .unwrap();
-        let mut reader = BufReader::new(node_stream.try_clone().unwrap());
-        let mut send = |id: &str, op: &str, body: Value| {
-            let mut bytes =
-                serde_json::to_vec(&json!({"v":1,"id":id,"kind":"req","op":op,"body":body}))
-                    .unwrap();
-            bytes.push(b'\n');
-            node_stream.write_all(&bytes).unwrap();
-        };
-        let next = |reader: &mut BufReader<UnixStream>, id: &str| -> Value {
-            loop {
-                let mut line = String::new();
-                reader.read_line(&mut line).expect("host frame");
-                let frame: Value = serde_json::from_str(&line).unwrap();
-                if (frame["kind"] == "res" && frame["id"] == id)
-                    || (frame["kind"] == "evt" && frame["op"] == "pane.brief_written")
-                {
-                    return frame;
-                }
-            }
-        };
-        send(
-            "n-open",
-            "pane.open",
-            json!({"id":"brief-pane","generation":1,
-            "cwd":"/tmp","argv":["/bin/sh","-c","sleep 30"],"env":{},
-            "size":{"rows":24,"cols":80},"backlogBytes":1024}),
-        );
-        assert_eq!(next(&mut reader, "n-open")["body"]["ok"], true);
-        send(
-            "n-stale",
-            "pane.write_paste",
-            json!({"id":"brief-pane","generation":2,
-            "body":"brief","brief":42}),
-        );
-        let refused = next(&mut reader, "n-stale");
-        send(
-            "n-paste",
-            "pane.write_paste",
-            json!({"id":"brief-pane","generation":1,
-            "body":"brief","brief":42}),
-        );
-        let first = next(&mut reader, "n-paste");
-        let reply = if first["kind"] == "evt" {
-            next(&mut reader, "n-paste")
-        } else {
-            first.clone()
-        };
-        panes
-            .kill(&PaneKey::new("brief-pane", 1))
-            .expect("kill own pane");
-        inputs.close_and_drain();
-        drop(reader);
-        drop(node_stream);
-        connected.bridge.wait_closed().expect("bridge closes");
-
-        assert_eq!(
-            refused["kind"], "res",
-            "a refused write emitted a report: {refused}"
-        );
-        assert_eq!(refused["body"]["admitted"], false, "{refused}");
-        assert_eq!(
-            first["kind"], "evt",
-            "the write report must precede Enter and reply: {first}"
-        );
-        assert_eq!(
-            first["body"],
-            json!({"id":"brief-pane","generation":1,"brief":42})
-        );
-        assert_eq!(reply["body"]["ok"], true, "{reply}");
     }
 
     /// Over the bridge as the daemon speaks it: its own keys are not the

@@ -392,6 +392,7 @@ pub(super) fn close_session(
     reason: &str,
     keep_conversation: bool,
 ) -> Result<(), LedgerError> {
+    crate::holding::close_previous_for_window(store, session.id, None, None)?;
     if let Some(holding) = crate::holding::of(store, session.id)? {
         if holding.active {
             crate::holding::close(

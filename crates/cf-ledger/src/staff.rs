@@ -526,6 +526,7 @@ pub(crate) fn remove_member(
             }
         }
         for id in &windows {
+            crate::holding::close_previous_for_window(store, *id, None, None)?;
             if let Some(holding) = crate::holding::of(store, *id)? {
                 if holding.active {
                     crate::holding::close(store, *id, Some(holding.task_id), Some(&format!("T-{} remains on the board; @{handle} left the staff.", holding.task_number)))?;

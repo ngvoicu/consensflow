@@ -53,6 +53,7 @@ pub fn caller_of(context: &Context, request: &Request) -> Result<Caller, Failure
                 && participant.role != "chief"
             {
                 let mut ledger = context.ledger.borrow_mut();
+                ledger.refresh_pi_holding(participant.id)?;
                 if let Some(start) = identity.question_start {
                     if let Some(brief) = start.launch_brief {
                         if let Some(message) = ledger.message(brief)? {

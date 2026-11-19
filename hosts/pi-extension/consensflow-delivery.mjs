@@ -417,8 +417,26 @@ export function createDeliveryExtension(
             await refuseBeforeSend(path, file, id, tui.reason)
             continue
           }
+          // The existing inbox record itself moves at the take. The daemon
+          // can distinguish a waiting brief from one Pi is about to send
+          // without a separate notification or a second marker file.
+          const takenPath = `${path}.taken`
+          try {
+            await rename(path, takenPath)
+          } catch (cause) {
+            if (cause?.code !== 'ENOENT') {
+              logError(`could not take delivery ${id}: ${cause?.message ?? String(cause)}`)
+              await refuseBeforeSend(path, file, id, 'take-failed')
+            }
+            continue
+          }
+          const stillReady = nativeTuiState(context, record.session)
+          if (compactingNow() || stillReady.ready !== true) {
+            await refuseBeforeSend(takenPath, file, id, stillReady.reason ?? 'chief busy')
+            continue
+          }
           const message = record.text
-          const messageEntry = { path, file, text: message, timer: null, done: false }
+          const messageEntry = { path: takenPath, file, text: message, timer: null, done: false }
           pending.set(id, messageEntry)
           messageEntry.timer = setTimeout(
             () => void acknowledge(id, null, 'admission-unknown'),

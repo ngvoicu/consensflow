@@ -892,6 +892,28 @@ pub trait PaneHost {
         true
     }
 
+    /// The Codex broker is being handed the request on its open connection.
+    fn hand_over_to_broker(&self) -> bool {
+        self.admits()
+    }
+
+    /// A broker send failed after hand-over began.
+    fn broker_send_failed(&self) {}
+
+    /// Remember the existing Pi inbox record before it is published.
+    fn pi_inbox_pending(
+        &self,
+        _pane: &Pane,
+        _inbox: &std::path::Path,
+        _taken: &std::path::Path,
+        _ack: &std::path::Path,
+    ) -> bool {
+        true
+    }
+
+    /// The Pi send has settled; its final file state can be forgotten.
+    fn pi_inbox_finished(&self, _pane: &Pane) {}
+
     /// A native transport reported that this window took its message.
     /// A queue admission without that report must not call this.
     fn delivery_reported(&self, _pane: &Pane) {}

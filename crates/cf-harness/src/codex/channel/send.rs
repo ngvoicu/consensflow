@@ -179,6 +179,8 @@ pub async fn send(
     let answer = hand_over(time, loopback, target, thread, text, deadline).await;
     if answer.ok && answer.admitted == Some(true) {
         target.host.delivery_reported(target.pane);
+    } else if answer.admitted == Some(false) {
+        target.host.broker_send_failed();
     }
     Ok(answer)
 }

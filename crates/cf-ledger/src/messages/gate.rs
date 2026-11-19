@@ -66,6 +66,9 @@ pub(crate) fn approve_message(
         )?;
         if message.kind == "answer" {
             if let Some(question) = message.reply_to {
+                if crate::holding::awaiting_handover(store, question)? {
+                    return known_message(store, message_id);
+                }
                 if crate::holding::question_is_live(store, question)? == Some(false) {
                     let place = crate::holding::answer_place(store, message_id)?;
                     crate::holding::close_question(store, question, &place)?;

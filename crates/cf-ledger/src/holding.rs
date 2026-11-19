@@ -4,6 +4,7 @@
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     OnceLock,
@@ -15,6 +16,125 @@ use serde_json::json;
 use crate::model::LedgerError;
 use crate::queue::{queue, Queued};
 use crate::store::Store;
+
+/// A Pi brief still owned by its launch's inbox protocol. This is process
+/// memory, not a reconstruction of old ledger history.
+#[derive(Clone)]
+pub(crate) struct PendingPi {
+    pub(crate) message: i64,
+    pub(crate) inbox: PathBuf,
+    pub(crate) taken: PathBuf,
+    pub(crate) ack: PathBuf,
+}
+
+/// The channel can finish uncertain while the extension still has the file.
+/// Keep watching until it either gives a verdict or cannot still take it.
+pub(crate) fn pi_may_still_move(pending: &PendingPi) -> Result<bool, LedgerError> {
+    let unreadable = || {
+        LedgerError::refused_with(
+            "pi-inbox-unreadable",
+            "the window's pending Pi delivery cannot be checked",
+            409,
+        )
+    };
+    if pending.inbox.try_exists().map_err(|_| unreadable())? {
+        return Ok(true);
+    }
+    Ok(pending.taken.try_exists().map_err(|_| unreadable())?
+        && !pending.ack.try_exists().map_err(|_| unreadable())?)
+}
+
+/// Re-read each in-flight Pi inbox before a ledger write. No historical rows
+/// are inspected: these paths exist only for this engine's live sends.
+pub(crate) fn sync_pending_pi(store: &mut Store) -> Result<(), LedgerError> {
+    let pending: Vec<_> = store
+        .pending_pi
+        .iter()
+        .map(|(&window, pending)| (window, pending.clone()))
+        .collect();
+    for (window, pending) in pending {
+        sync_pi(store, window, &pending)?;
+    }
+    Ok(())
+}
+
+fn sync_pi(store: &mut Store, window: i64, pending: &PendingPi) -> Result<(), LedgerError> {
+    let unreadable = || {
+        LedgerError::refused_with(
+            "pi-inbox-unreadable",
+            "the window's pending Pi delivery cannot be checked",
+            409,
+        )
+    };
+    // Observe the inbox first: if it is still there, this question arrived
+    // before the extension took it, even if the rename races the checks below.
+    if pending.inbox.try_exists().map_err(|_| unreadable())? {
+        return Ok(());
+    }
+    // The extension writes its ack before removing the taken file. Read in
+    // this order so a concurrent ack-and-remove cannot fall between checks.
+    let taken = pending.taken.try_exists().map_err(|_| unreadable())?;
+    let ack = match std::fs::read(&pending.ack) {
+        Ok(bytes) if bytes.len() <= 16 * 1024 => {
+            Some(serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|_| unreadable())?)
+        }
+        Ok(_) => return Err(unreadable()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => return Err(unreadable()),
+    };
+    if let Some(ack) = &ack {
+        let id = pending
+            .inbox
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(".json"));
+        if ack.get("id").and_then(serde_json::Value::as_str) != id {
+            return Err(unreadable());
+        }
+        if ack.get("admitted") == Some(&serde_json::Value::Bool(false))
+            || ack.get("reason").and_then(serde_json::Value::as_str)
+                == Some("send-user-message-threw")
+        {
+            retract_brief(store, pending.message)?;
+            return Ok(());
+        }
+    }
+    let acknowledged = ack.as_ref().is_some_and(|ack| {
+        matches!(
+            ack.get("admitted"),
+            Some(serde_json::Value::Bool(true) | serde_json::Value::Null)
+        )
+    });
+    if !taken && !acknowledged {
+        return Ok(());
+    }
+    if of(store, window)?.is_some_and(|holding| holding.last_brief == pending.message) {
+        if acknowledged {
+            confirm_brief(store, pending.message)?;
+        }
+        return Ok(());
+    }
+    // The task may have moved or ended after the take. Record that ended
+    // holding too, so a later question cannot be mistaken for an idle one.
+    let active = store
+        .db
+        .prepare(
+            "SELECT 1 FROM message m JOIN task t ON t.id = m.task_id
+        JOIN participant p ON p.id = m.recipient_id WHERE m.id = ? AND m.kind = 'task'
+        AND t.assignee_id = p.id AND p.left_at IS NULL AND t.deleted_at IS NULL
+        AND t.state NOT IN ('accepted', 'cancelled', 'failed')",
+        )?
+        .exists([pending.message])?;
+    if active {
+        hand_brief(store, pending.message)?;
+        if acknowledged {
+            confirm_brief(store, pending.message)?;
+        }
+        Ok(())
+    } else {
+        reported_brief(store, pending.message)
+    }
+}
 
 // A process lifetime is memory only: opening a ledger never rewrites rows.
 // A new dispatcher gets a distinct suffix, including in restart fixtures.
@@ -130,8 +250,7 @@ pub(crate) fn matches(
         .exists(params![task, window])?)
 }
 
-/// A successful handover, or proof of delivery, is the point a brief becomes
-/// the one in the window. Same-task handovers continue the same holding.
+/// Record the start of a handover. Same-task handovers continue the same holding.
 pub(crate) fn hand_brief(store: &mut Store, message: i64) -> Result<(), LedgerError> {
     let brief: Option<(i64, i64)> = store
         .db
@@ -149,19 +268,6 @@ pub(crate) fn hand_brief(store: &mut Store, message: i64) -> Result<(), LedgerEr
     let Some((window, task)) = brief else {
         return Ok(());
     };
-    if let Some(previous) = of(store, window)? {
-        if previous.active && previous.task_id != task {
-            let number: i64 =
-                store
-                    .db
-                    .query_row("SELECT number FROM task WHERE id = ?", [task], |r| r.get(0))?;
-            let place = format!(
-                "{} This window was given T-{number}.",
-                task_place(store, Some(previous.task_id))?
-            );
-            close(store, window, Some(previous.task_id), Some(&place))?;
-        }
-    }
     // Save the prior holding before admitting a new brief. A refusal can put
     // this exact state back without reading or reconstructing event history.
     store.db.execute(
@@ -175,6 +281,8 @@ pub(crate) fn hand_brief(store: &mut Store, message: i64) -> Result<(), LedgerEr
            previous_run_id=excluded.previous_run_id WHERE question_handover.run_id != excluded.run_id",
         params![message, window, store.question_run],
     )?;
+    // Until the send has a result the preceding questions cannot be given to
+    // this window, but must remain recoverable if the send is refused.
     store.db.execute(
         "INSERT INTO question_holding (participant_id, task_id, first_brief_id, last_brief_id, closed, run_id)
          VALUES (?1, ?2, ?3, ?3, 0, ?4)
@@ -209,7 +317,7 @@ pub(crate) fn reported_brief(store: &mut Store, message: i64) -> Result<(), Ledg
     };
     if active {
         hand_brief(store, message)?;
-        // A report of the actual write is final even if its later Enter fails.
+        // This transport has confirmed that the started send succeeded.
         confirm_brief(store, message)?;
         return Ok(());
     }
@@ -228,16 +336,102 @@ pub(crate) fn reported_brief(store: &mut Store, message: i64) -> Result<(), Ledg
     Ok(())
 }
 
-/// A confirmed brief needs no rollback checkpoint.
-pub(crate) fn confirm_brief(store: &Store, brief: i64) -> Result<(), LedgerError> {
+/// Close the previous holding's questions once this handover is final, or the
+/// previous task or physical window ends while the handover is in flight.
+fn close_previous(
+    store: &mut Store,
+    brief: i64,
+    where_now: Option<&str>,
+) -> Result<(), LedgerError> {
+    let previous: Option<(i64, i64, i64, i64)> = store
+        .db
+        .query_row(
+            "SELECT h.participant_id, h.previous_task_id, h.previous_first_brief_id, t.number
+         FROM question_handover h JOIN message m ON m.id = h.brief_id JOIN task t ON t.id = m.task_id
+         WHERE h.brief_id = ?1 AND h.run_id = ?2 AND h.previous_run_id = ?2
+           AND h.previous_closed = 0 AND h.previous_task_id IS NOT m.task_id",
+            params![brief, store.question_run],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()?;
+    let Some((window, task, first, next_number)) = previous else {
+        return Ok(());
+    };
+    let questions: Vec<i64> = store
+        .db
+        .prepare(
+            "SELECT question_id FROM question_binding WHERE participant_id = ?1 AND task_id = ?2
+         AND first_brief_id = ?3 AND run_id = ?4 AND closed = 0 ORDER BY question_id",
+        )?
+        .query_map(params![window, task, first, store.question_run], |r| {
+            r.get(0)
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    let location = match where_now {
+        Some(location) => location.to_owned(),
+        None => format!(
+            "{} This window was given T-{next_number}.",
+            task_place(store, Some(task))?
+        ),
+    };
+    for question in questions {
+        close_question(store, question, &location)?;
+    }
+    store.db.execute(
+        "UPDATE question_handover SET previous_closed = 1 WHERE brief_id = ?",
+        [brief],
+    )?;
+    Ok(())
+}
+
+/// A question of the earlier holding waits for a provisional send's result;
+/// neither its door nor its answer can be delivered into the new holding.
+pub(crate) fn awaiting_handover(store: &Store, question: i64) -> Result<bool, LedgerError> {
+    Ok(store.db.prepare(
+        "SELECT 1 FROM question_binding b JOIN question_handover x
+           ON x.participant_id = b.participant_id AND x.previous_task_id = b.task_id
+          AND x.previous_first_brief_id = b.first_brief_id AND x.previous_run_id = b.run_id
+         JOIN question_holding h ON h.participant_id = b.participant_id AND h.last_brief_id = x.brief_id
+         WHERE b.question_id = ?1 AND b.closed = 0 AND x.run_id = ?2 AND x.previous_closed = 0
+           AND h.task_id IS NOT b.task_id",
+    )?.exists(params![question, store.question_run])?)
+}
+
+pub(crate) fn close_previous_for_window(
+    store: &mut Store,
+    window: i64,
+    task: Option<i64>,
+    where_now: Option<&str>,
+) -> Result<(), LedgerError> {
+    let briefs: Vec<i64> = store
+        .db
+        .prepare(
+            "SELECT brief_id FROM question_handover WHERE participant_id = ?1 AND run_id = ?2
+           AND (?3 IS NULL OR previous_task_id = ?3)",
+        )?
+        .query_map(params![window, store.question_run, task], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    for brief in briefs {
+        close_previous(store, brief, where_now)?;
+    }
+    Ok(())
+}
+
+/// A confirmed brief closes its preceding holding and needs no checkpoint.
+pub(crate) fn confirm_brief(store: &mut Store, brief: i64) -> Result<(), LedgerError> {
+    close_previous(store, brief, None)?;
+    forget_handover(store, brief)
+}
+
+fn forget_handover(store: &Store, brief: i64) -> Result<(), LedgerError> {
     store
         .db
         .execute("DELETE FROM question_handover WHERE brief_id = ?", [brief])?;
     Ok(())
 }
 
-/// A handover that proved refused was not a delivered brief. Restore the
-/// exact earlier holding; questions of the rejected new holding close first.
+/// A refused handover restores the earlier holding. Questions made during the
+/// attempt follow it if it still exists, and otherwise close with their answers.
 pub(crate) fn retract_brief(store: &mut Store, brief: i64) -> Result<(), LedgerError> {
     type Previous = (
         i64,
@@ -258,18 +452,53 @@ pub(crate) fn retract_brief(store: &mut Store, brief: i64) -> Result<(), LedgerE
     };
     let current = of(store, window)?;
     if let Some(current) =
-        current.filter(|h| run == store.question_run && h.last_brief == brief && h.active)
+        current.filter(|h| run == store.question_run && h.last_brief == brief && !h.resumable)
     {
         let same = task == Some(current.task_id)
             && first == Some(current.first_brief)
             && closed == Some(0)
             && previous_run.as_deref() == Some(run.as_str());
-        if !same {
-            close(store, window, Some(current.task_id), None)?;
+        let previous_live = match (task, first, closed, previous_run.as_deref()) {
+            (Some(task), Some(_), Some(0), Some(previous_run)) if previous_run == run => store.db
+                .prepare("SELECT 1 FROM task t JOIN participant p ON p.id = ?2
+                    WHERE t.id = ?1 AND t.assignee_id = p.id AND p.left_at IS NULL
+                      AND t.deleted_at IS NULL AND t.state NOT IN ('accepted','cancelled','failed')")?
+                .exists(params![task, window])?,
+            (None, None, None, None) => store.db.prepare("SELECT 1 FROM participant WHERE id = ? AND left_at IS NULL")?.exists([window])?,
+            _ => false,
+        };
+        if !same && previous_live {
+            let questions: Vec<i64> = store.db.prepare(
+                "SELECT question_id FROM question_binding WHERE participant_id = ?1 AND task_id = ?2
+                 AND first_brief_id = ?3 AND closed = 0 AND run_id = ?4"
+            )?.query_map(params![window, current.task_id, current.first_brief, run], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            for question in questions {
+                store.db.execute(
+                    "UPDATE question_binding SET task_id = ?2, first_brief_id = ?3 WHERE question_id = ?1",
+                    params![question, task, first],
+                )?;
+                store.db.execute(
+                    "UPDATE message SET task_id = ?2 WHERE id = ?1 AND task_id = ?3",
+                    params![question, task, current.task_id],
+                )?;
+                store.db.execute(
+                    "UPDATE message SET task_id = ?2 WHERE reply_to = ?1 AND kind = 'answer' AND task_id = ?3",
+                    params![question, task, current.task_id],
+                )?;
+            }
+            crate::messages::reconcile(store, current.task_id)?;
+            if let Some(task) = task {
+                crate::messages::reconcile(store, task)?;
+            }
+        } else if !same {
+            let place = task_place(store, task)?;
+            close(store, window, Some(current.task_id), Some(&place))?;
         }
         if let (Some(task), Some(first), Some(last), Some(closed), Some(previous_run)) =
             (task, first, last, closed, previous_run)
         {
+            let closed = if previous_live { closed } else { 1 };
             store.db.execute("UPDATE question_holding SET task_id = ?1, first_brief_id = ?2, last_brief_id = ?3, closed = ?4, run_id = ?5 WHERE participant_id = ?6",
                 params![task, first, last, closed, previous_run, window])?;
         } else {
@@ -279,7 +508,7 @@ pub(crate) fn retract_brief(store: &mut Store, brief: i64) -> Result<(), LedgerE
             )?;
         }
     }
-    confirm_brief(store, brief)
+    forget_handover(store, brief)
 }
 
 /// Bind every new ordinary member question to its window's actual holding.
@@ -594,6 +823,7 @@ pub(crate) fn close_task(
     where_now: Option<&str>,
 ) -> Result<(), LedgerError> {
     if let Some(window) = task.assignee_id {
+        close_previous_for_window(store, window, Some(task.id), where_now)?;
         close(store, window, Some(task.id), where_now)?;
         // A move after a window ended also ends the right to resume that
         // window's former holding, even if this session is later used again.

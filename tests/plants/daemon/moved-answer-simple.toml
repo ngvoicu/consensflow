@@ -174,20 +174,6 @@ find = "                state.pasted = Some(self.clock.now());"
 replace = "                state.pasted = Some(self.clock.now() - std::time::Duration::from_millis(25));"
 
 [[plant]]
-name = "moved answer simple: a written brief sends no pane report"
-meant = "t1813_a_briefs_write_report_precedes_the_pastes_reply"
-runs = [["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "t1813_a_briefs_write_report_precedes_the_pastes_reply"]]
-[[plant.edit]]
-file = "crates/cf-panes/src/pane_handlers.rs"
-find = '''                    let _ = bridge.event(
-                        "pane.brief_written",
-                        json!({
-                            "id": pane.id, "generation": pane.generation, "brief": brief
-                        }),
-                    );'''
-replace = '''                    let _ = (bridge, pane, brief);'''
-
-[[plant]]
 name = "moved answer simple: Pi's take is not reported"
 meant = "t1813_pi_reports_the_extensions_take_not_the_inbox_rename"
 runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_pi_reports_the_extensions_take_not_the_inbox_rename"]]
@@ -197,31 +183,13 @@ find = "                target.host.delivery_reported(target.pane);"
 replace = "                let _ = target;"
 
 [[plant]]
-name = "moved answer simple: Codex acceptance is not reported"
-meant = "t1813_codex_reports_app_server_acceptance_not_a_refusal"
-runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_codex_reports_app_server_acceptance_not_a_refusal"]]
+name = "moved answer simple: Codex confirmation is not reported"
+meant = "t1813_codex_confirms_or_retracts_after_its_broker_handover"
+runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_codex_confirms_or_retracts_after_its_broker_handover"]]
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/channel/send.rs"
 find = "        target.host.delivery_reported(target.pane);"
 replace = "        let _ = target;"
-
-[[plant]]
-name = "moved answer simple: a brief paste is not marked for a report"
-meant = "t1813_only_a_brief_paste_asks_the_host_for_a_write_report"
-runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "t1813_only_a_brief_paste_asks_the_host_for_a_write_report"]]
-[[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = '''Ok(Some(message)) if message.kind == "task" => body["brief"] = json!(self.message),'''
-replace = '''Ok(Some(message)) if message.kind == "task" => { let _ = self.message; },'''
-
-[[plant]]
-name = "moved answer simple: the daemon ignores a brief report"
-meant = "t1813_a_brief_write_report_is_handled_before_the_next_bridge_frame"
-runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "t1813_a_brief_write_report_is_handled_before_the_next_bridge_frame"]]
-[[plant.edit]]
-file = "crates/cf-daemon/src/host.rs"
-find = "        match contain_now(|| written(&pane, brief)) {"
-replace = "        match contain_now(|| { let _ = (&written, &pane, brief); Ok::<(), cf_engine::seams::EngineError>(()) }) {"
 
 [[plant]]
 name = "moved answer simple: a reported brief does not change the holding"
@@ -250,3 +218,121 @@ file = "crates/cf-ledger/src/ledger/messages.rs"
 find = '''        self.store
             .write(|store| crate::holding::reported_brief(store, message_id))'''
 replace = "        self.question_brief_handed_over(message_id)"
+
+[[plant]]
+name = "moved answer simple: a pane send starts without recording its holding"
+meant = "t1813_the_pane_holding_changes_when_the_daemon_issues_the_brief_write"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "t1813_the_pane_holding_changes_when_the_daemon_issues_the_brief_write"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                    let started = self
+                        .dispatcher
+                        .seams
+                        .ledger
+                        .borrow_mut()
+                        .question_brief_handed_over(self.message);'''
+replace = '''                    let started = Ok::<(), cf_ledger::LedgerError>(());'''
+
+[[plant]]
+name = "moved answer simple: a refused pane send leaves the question on the new task"
+meant = "t1813_a_pane_refusal_rebinds_the_question_asked_during_the_write"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "t1813_a_pane_refusal_rebinds_the_question_asked_during_the_write"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                        Some(ledger.question_brief_refused(self.message))"
+replace = "                        Some(Ok(()))"
+
+[[plant]]
+name = "moved answer simple: a real broker send does not record its handover"
+meant = "t1813_system_codex_broker_handover_precedes_the_request_and_reply"
+runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_system_codex_broker_handover_precedes_the_request_and_reply"]]
+[[plant.edit]]
+file = "crates/cf-harness/src/seams/loopback.rs"
+find = "            let reply = net::send(request, &|| host.hand_over_to_broker()).await?;"
+replace = "            let reply = net::send(request, &|| host.admits()).await?;"
+
+[[plant]]
+name = "moved answer simple: a broker refusal does not retract the handover"
+meant = "t1813_codex_confirms_or_retracts_after_its_broker_handover"
+runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_codex_confirms_or_retracts_after_its_broker_handover"]]
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/channel/send.rs"
+find = "        target.host.broker_send_failed();"
+replace = "        let _ = target;"
+
+[[plant]]
+name = "moved answer simple: Pi sends before taking its inbox file"
+meant = "moves a brief out of the inbox at the take before sending it"
+runs = [["node", "--test", "--test-name-pattern=moves a brief out of the inbox", "tests/pi-extension.test.mjs"]]
+[[plant.edit]]
+file = "hosts/pi-extension/consensflow-delivery.mjs"
+find = "            await rename(path, takenPath)"
+replace = "            await Promise.resolve()"
+
+[[plant]]
+name = "moved answer simple: the daemon asks before checking Pi's inbox"
+meant = "t1813_pi_question_binds_on_inbox_take_before_the_acknowledgement"
+runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "t1813_pi_question_binds_on_inbox_take_before_the_acknowledgement"]]
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/callers.rs"
+find = "                ledger.refresh_pi_holding(participant.id)?;"
+replace = "                let _ = participant.id;"
+
+[[plant]]
+name = "moved answer simple: Pi's refusal leaves its new holding in place"
+meant = "t1813_pi_refusal_after_take_rebinds_the_answer_to_the_old_holding"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1813_pi_refusal_after_take_rebinds_the_answer_to_the_old_holding"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "            retract_brief(store, pending.message)?;"
+replace = "            let _ = pending.message;"
+
+[[plant]]
+name = "moved answer simple: Pi's uncertain send stops watching its file"
+meant = "t1813_pi_take_or_refusal_after_an_uncertain_channel_result_is_still_observed"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1813_pi_take_or_refusal_after_an_uncertain_channel_result_is_still_observed"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger/messages.rs"
+find = "            if pending.message == message && !crate::holding::pi_may_still_move(pending)? {"
+replace = "            if pending.message == message {"
+
+[[plant]]
+name = "moved answer simple: approval closes a question while the brief may be refused"
+meant = "t1813_approval_during_a_brief_send_waits_for_its_result"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1813_approval_during_a_brief_send_waits_for_its_result"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/gate.rs"
+find = '''                if crate::holding::awaiting_handover(store, question)? {
+                    return known_message(store, message_id);
+                }
+'''
+replace = ""
+
+[[plant]]
+name = "moved answer simple: a successful new brief leaves the previous answer open"
+meant = "t1813_a_successful_brief_closes_the_previous_holdings_questions_once"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1813_a_successful_brief_closes_the_previous_holdings_questions_once"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/holding.rs"
+find = "    close_previous(store, brief, None)?;"
+replace = "    let _ = brief;"
+
+[[plant]]
+name = "moved answer simple: an uncertain pane reply retracts a possibly received brief"
+meant = "t1813_an_uncertain_pane_reply_keeps_the_started_handover_until_settled"
+runs = [["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "t1813_an_uncertain_pane_reply_keeps_the_started_handover_until_settled"]]
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                    // lost. Let the existing delivery settlement decide it.
+                    _ => None,'''
+replace = '''                    // lost. Let the existing delivery settlement decide it.
+                    _ => Some(ledger.question_brief_refused(self.message)),'''
+
+[[plant]]
+name = "moved answer simple: an uncertain broker reply retracts a possibly received brief"
+meant = "t1813_codex_confirms_or_retracts_after_its_broker_handover"
+runs = [["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "t1813_codex_confirms_or_retracts_after_its_broker_handover"]]
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/channel/send.rs"
+find = "    } else if answer.admitted == Some(false) {"
+replace = "    } else {"

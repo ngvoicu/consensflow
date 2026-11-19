@@ -373,6 +373,9 @@ pub(crate) fn claim_answer(
                 403,
             ));
         }
+        if shut.is_none() && crate::holding::awaiting_handover(store, question_id)? {
+            return Ok(Claim::Waiting);
+        }
         if shut.is_some() || crate::holding::question_is_live(store, question_id)? == Some(false) {
             return Ok(Claim::Closed);
         }

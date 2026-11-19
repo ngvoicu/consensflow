@@ -13,6 +13,7 @@ impl Ledger {
     /// Start a new in-memory engine lifetime without changing stored messages.
     pub fn begin_question_engine(&mut self) {
         self.store.question_run = crate::holding::new_run();
+        self.store.pending_pi.clear();
     }
 
     /// End the prospectively recorded holdings whose physical windows were
@@ -74,6 +75,65 @@ impl Ledger {
         crate::holding::of(&self.store, window)
     }
 
+    /// Watch the existing inbox file of a new Pi brief while it is in flight.
+    pub fn watch_pi_brief(
+        &mut self,
+        message: i64,
+        inbox: &std::path::Path,
+        taken: &std::path::Path,
+        ack: &std::path::Path,
+    ) -> Result<(), LedgerError> {
+        if let Some(row) = self
+            .store
+            .message(message)?
+            .filter(|row| row.kind == "task")
+        {
+            if let Some(previous) = self.store.pending_pi.get(&row.recipient_id).cloned() {
+                self.store.write(|_| Ok(()))?;
+                if previous.inbox != inbox && crate::holding::pi_may_still_move(&previous)? {
+                    return Err(LedgerError::refused_with(
+                        "pi-delivery-pending",
+                        "the window's earlier Pi delivery is still awaiting its verdict",
+                        409,
+                    ));
+                }
+            }
+            self.store.pending_pi.insert(
+                row.recipient_id,
+                crate::holding::PendingPi {
+                    message,
+                    inbox: inbox.to_owned(),
+                    taken: taken.to_owned(),
+                    ack: ack.to_owned(),
+                },
+            );
+        }
+        Ok(())
+    }
+
+    /// Check Pi's inbox before placing a question from this window.
+    pub fn refresh_pi_holding(&mut self, window: i64) -> Result<(), LedgerError> {
+        if self.store.pending_pi.contains_key(&window) {
+            self.store.write(|_| Ok(()))?;
+        }
+        Ok(())
+    }
+
+    /// Forget a completed Pi send only after observing its last inbox state.
+    pub fn finish_pi_brief(&mut self, message: i64) -> Result<(), LedgerError> {
+        self.store.write(|_| Ok(()))?;
+        let mut finished = Vec::new();
+        for (&window, pending) in &self.store.pending_pi {
+            if pending.message == message && !crate::holding::pi_may_still_move(pending)? {
+                finished.push(window);
+            }
+        }
+        for window in finished {
+            self.store.pending_pi.remove(&window);
+        }
+        Ok(())
+    }
+
     /// Whether this exact window and holding still match.
     pub fn question_holding_matches(
         &self,
@@ -90,8 +150,9 @@ impl Ledger {
         window: i64,
         in_flight: Option<i64>,
     ) -> Result<Vec<i64>, LedgerError> {
-        self.store.write(|store| {
+        let deferred = self.store.write(|store| {
             let mut deferred = Vec::new();
+            crate::holding::close_previous_for_window(store, window, None, None)?;
             if let Some(h) = crate::holding::of(store, window)? {
                 if h.active {
                     deferred.extend(crate::holding::close_deferring(
@@ -111,7 +172,9 @@ impl Ledger {
                 store, window, None, None, in_flight,
             )?);
             Ok(deferred)
-        })
+        })?;
+        self.store.pending_pi.remove(&window);
+        Ok(deferred)
     }
 
     /// Finish a closed window's in-flight answers after the old paste's receipt
@@ -719,8 +782,7 @@ impl Ledger {
         messages::admit(&mut self.store, message_id, carried, false)
     }
 
-    /// Record a task brief after its window has accepted the handover. A mere
-    /// admission check happens before the host writes and must not advance it.
+    /// Record that the daemon has started handing a task brief to its harness.
     pub fn question_brief_handed_over(&mut self, message_id: i64) -> Result<(), LedgerError> {
         self.store.write(|store| {
             let delivering = store
@@ -734,6 +796,19 @@ impl Ledger {
             }
             Ok(())
         })
+    }
+
+    /// A transport refused a brief after its send began. Restore the earlier
+    /// holding and rebind, or close, questions asked during the attempt.
+    pub fn question_brief_refused(&mut self, message_id: i64) -> Result<(), LedgerError> {
+        self.store
+            .write(|store| crate::holding::retract_brief(store, message_id))
+    }
+
+    /// Finalize the earlier holding after the started send succeeds.
+    pub fn question_brief_confirmed(&mut self, message_id: i64) -> Result<(), LedgerError> {
+        self.store
+            .write(|store| crate::holding::confirm_brief(store, message_id))
     }
 
     /// Record an authenticated transport report, even if the task ended

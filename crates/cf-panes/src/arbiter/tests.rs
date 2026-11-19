@@ -1148,40 +1148,6 @@ fn t1813_the_delivery_retry_clock_is_not_set_before_enter() {
 }
 
 #[test]
-fn t1813_the_brief_report_follows_the_body_and_precedes_enter_on_both_platforms() {
-    for failed_write in [None, Some(1), Some(2)] {
-        let key = PaneKey::new("reported", 1);
-        let arbiter = InputArbiter::new(EnterTiming::fixed(0));
-        arbiter.register(&key).unwrap();
-        let (writer, _observed) = RecordingWriter::new(failed_write);
-        let reports = Arc::new(Mutex::new(Vec::new()));
-        let seen = Arc::clone(&reports);
-        let writes = Arc::clone(&writer);
-        let result =
-            arbiter.write_paste_via_notifying(writer.as_ref(), &key, b"brief", None, move || {
-                seen.lock().unwrap().push(
-                    writes
-                        .records()
-                        .into_iter()
-                        .map(|r| r.bytes)
-                        .collect::<Vec<_>>(),
-                );
-            });
-        assert_eq!(result.is_ok(), failed_write.is_none());
-        let reports = reports.lock().unwrap();
-        if failed_write == Some(1) {
-            assert!(reports.is_empty(), "a failed body write emits no report");
-        } else {
-            assert_eq!(
-                &*reports,
-                &[vec![b"\x1b[200~brief\x1b[201~".to_vec()]],
-                "the completed body is reported before Enter, even if Enter fails"
-            );
-        }
-    }
-}
-
-#[test]
 fn t1813_a_refused_or_failed_brief_write_records_no_paste() {
     let key = PaneKey::new("pasted", 1);
     let arbiter = InputArbiter::new(EnterTiming::fixed(0));

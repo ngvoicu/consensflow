@@ -541,6 +541,9 @@ fn closed_answer(store: &mut Store, message: &MessageView) -> Result<bool, Ledge
     let Some(question) = message.reply_to else {
         return Ok(false);
     };
+    if crate::holding::awaiting_handover(store, question)? {
+        return Ok(true);
+    }
     if crate::holding::question_is_live(store, question)? == Some(false) {
         let place = crate::holding::answer_place(store, message.id)?;
         crate::holding::close_question(store, question, &place)?;

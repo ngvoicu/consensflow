@@ -23,6 +23,356 @@ fn word_notices(w: &World, words: &str) -> usize {
 }
 
 #[test]
+fn t1813_pi_inbox_take_changes_the_holding_when_the_question_arrives() {
+    let mut w = world();
+    let (previous, session, first) = assigned(&mut w, false);
+    w.deliver(first);
+    w.ledger.record_result(w.project, previous, "Done").unwrap();
+    let next = w.give_to(&session, &[], "Next Pi task").unwrap();
+    let brief = next.message.unwrap().id;
+    w.begin(brief);
+    let dir = tempfile::tempdir().unwrap();
+    let inbox = dir.path().join("m-1.json");
+    let taken = dir.path().join("m-1.json.taken");
+    let ack = dir.path().join("ack.json");
+    std::fs::write(&inbox, b"brief").unwrap();
+    w.ledger
+        .watch_pi_brief(brief, &inbox, &taken, &ack)
+        .unwrap();
+    let window = w.id(&session);
+    w.ledger.refresh_pi_holding(window).unwrap();
+    assert_eq!(
+        w.ledger
+            .question_holding(window)
+            .unwrap()
+            .unwrap()
+            .task_number,
+        previous,
+        "a brief still in the inbox leaves the previous holding"
+    );
+    std::fs::rename(&inbox, &taken).unwrap();
+    w.ledger.refresh_pi_holding(window).unwrap();
+    assert_eq!(
+        w.ledger
+            .question_holding(window)
+            .unwrap()
+            .unwrap()
+            .task_number,
+        next.task.number,
+        "the extension's take binds the new task before its acknowledgement"
+    );
+    let question = w.ask(&session, next.task.number, "Pi asks after taking").id;
+    let answer = w.answer(question, "Pi's full answer").id;
+    w.ledger
+        .cancel_task(w.project, next.task.number, "human")
+        .unwrap();
+    assert_eq!(w.message(question).state, "cancelled");
+    assert_eq!(w.message(answer).state, "cancelled");
+    assert_eq!(word_notices(&w, "Pi's full answer"), 1);
+}
+
+#[test]
+fn t1813_pi_take_or_refusal_after_an_uncertain_channel_result_is_still_observed() {
+    for taken_before_result in [false, true] {
+        let mut w = world();
+        let (previous, session, first) = assigned(&mut w, false);
+        w.deliver(first);
+        w.ledger.record_result(w.project, previous, "Done").unwrap();
+        let next = w.give_to(&session, &[], "Next Pi task").unwrap();
+        let brief = next.message.unwrap().id;
+        w.begin(brief);
+        let dir = tempfile::tempdir().unwrap();
+        let inbox = dir.path().join("m-1.json");
+        let taken = dir.path().join("m-1.json.taken");
+        let ack = dir.path().join("ack.json");
+        std::fs::write(&inbox, b"brief").unwrap();
+        w.ledger
+            .watch_pi_brief(brief, &inbox, &taken, &ack)
+            .unwrap();
+        if taken_before_result {
+            std::fs::rename(&inbox, &taken).unwrap();
+        }
+        w.ledger.finish_pi_brief(brief).unwrap();
+        assert!(
+            w.ledger
+                .watch_pi_brief(
+                    brief,
+                    &dir.path().join("m-2.json"),
+                    &dir.path().join("m-2.json.taken"),
+                    &dir.path().join("ack-2.json")
+                )
+                .is_err(),
+            "a later send cannot replace the unresolved file watch"
+        );
+        if !taken_before_result {
+            std::fs::rename(&inbox, &taken).unwrap();
+        }
+        w.ledger.refresh_pi_holding(w.id(&session)).unwrap();
+        assert_eq!(
+            w.ledger
+                .question_holding(w.id(&session))
+                .unwrap()
+                .unwrap()
+                .task_number,
+            next.task.number
+        );
+        let question = w
+            .ask(&session, next.task.number, "Pi asks after the take")
+            .id;
+        let answer = w.answer(question, "Late Pi refusal words").id;
+        std::fs::write(&ack, r#"{"id":"m-1","admitted":false}"#).unwrap();
+        w.ledger.refresh_pi_holding(w.id(&session)).unwrap();
+        assert_eq!(
+            w.ledger
+                .question_holding(w.id(&session))
+                .unwrap()
+                .unwrap()
+                .task_number,
+            previous
+        );
+        assert_eq!(w.message(answer).task_number, Some(previous));
+        assert_eq!(word_notices(&w, "Late Pi refusal words"), 0);
+        w.ledger
+            .watch_pi_brief(
+                brief,
+                &dir.path().join("m-2.json"),
+                &dir.path().join("m-2.json.taken"),
+                &dir.path().join("ack-2.json"),
+            )
+            .unwrap();
+    }
+}
+
+#[test]
+fn t1813_pi_refusal_after_take_rebinds_the_answer_to_the_old_holding() {
+    let mut w = world();
+    let (previous, session, first) = assigned(&mut w, false);
+    w.deliver(first);
+    w.ledger.record_result(w.project, previous, "Done").unwrap();
+    let next = w.give_to(&session, &[], "Next Pi task").unwrap();
+    let brief = next.message.unwrap().id;
+    w.begin(brief);
+    let dir = tempfile::tempdir().unwrap();
+    let inbox = dir.path().join("m-1.json");
+    let taken = dir.path().join("m-1.json.taken");
+    let ack = dir.path().join("ack.json");
+    std::fs::write(&inbox, b"brief").unwrap();
+    w.ledger
+        .watch_pi_brief(brief, &inbox, &taken, &ack)
+        .unwrap();
+    std::fs::rename(&inbox, &taken).unwrap();
+    w.ledger.refresh_pi_holding(w.id(&session)).unwrap();
+    let question = w.ask(&session, next.task.number, "Pi asks while taking").id;
+    let answer = w.answer(question, "Words after the take").id;
+    std::fs::write(&ack, r#"{"id":"m-1","admitted":false}"#).unwrap();
+    w.ledger.refresh_pi_holding(w.id(&session)).unwrap();
+    assert_eq!(
+        w.ledger
+            .question_holding(w.id(&session))
+            .unwrap()
+            .unwrap()
+            .task_number,
+        previous
+    );
+    assert_eq!(w.message(answer).task_number, Some(previous));
+    assert_ne!(w.message(answer).state, "cancelled");
+    assert_eq!(word_notices(&w, "Words after the take"), 0);
+}
+
+#[test]
+fn t1813_approval_during_a_brief_send_waits_for_its_result() {
+    for succeeds in [false, true] {
+        let mut w = gated_world();
+        let (previous, session, first) = assigned(&mut w, true);
+        w.deliver(first);
+        let question = w.ask(&session, previous, "Question before the send").id;
+        w.ledger.approve_message(question, "human").unwrap();
+        w.deliver(question);
+        let answer = w.answer(question, "A gated full answer").id;
+        w.ledger.record_result(w.project, previous, "Done").unwrap();
+        let next = w.give_to(&session, &[], "Next task").unwrap();
+        let brief = next.message.unwrap().id;
+        w.ledger.approve_message(brief, "human").unwrap();
+        w.begin(brief);
+        w.ledger.question_brief_handed_over(brief).unwrap();
+        w.ledger.approve_message(answer, "human").unwrap();
+        assert_eq!(w.message(answer).state, "queued");
+        assert_eq!(word_notices(&w, "A gated full answer"), 0);
+        if succeeds {
+            w.ledger.question_brief_reported(brief).unwrap();
+            assert_eq!(w.message(answer).state, "cancelled");
+            assert_eq!(word_notices(&w, "A gated full answer"), 1);
+        } else {
+            w.ledger.retry_delivery(brief, "refused", true).unwrap();
+            assert_ne!(w.message(answer).state, "cancelled");
+            assert_eq!(word_notices(&w, "A gated full answer"), 0);
+        }
+    }
+}
+
+#[test]
+fn t1813_previous_task_ending_during_a_send_returns_its_answer_once() {
+    let mut w = world();
+    let (previous, session, first) = assigned(&mut w, false);
+    w.deliver(first);
+    let question = w.ask(&session, previous, "Question before the send").id;
+    let answer = w.answer(question, "Answer of the previous task").id;
+    w.ledger.record_result(w.project, previous, "Done").unwrap();
+    let next = w.give_to(&session, &[], "Next task").unwrap();
+    let brief = next.message.unwrap().id;
+    w.begin(brief);
+    w.ledger.question_brief_handed_over(brief).unwrap();
+    w.ledger.accept_task(w.project, previous, "human").unwrap();
+    assert_eq!(w.message(question).state, "cancelled");
+    assert_eq!(w.message(answer).state, "cancelled");
+    assert_eq!(word_notices(&w, "Answer of the previous task"), 1);
+    w.ledger.retry_delivery(brief, "refused", true).unwrap();
+    assert_eq!(word_notices(&w, "Answer of the previous task"), 1);
+}
+
+#[test]
+fn t1813_a_refused_brief_keeps_existing_questions_of_the_previous_holding() {
+    let mut w = world();
+    let (previous, session, first) = assigned(&mut w, false);
+    w.deliver(first);
+    let question = w.ask(&session, previous, "Question before the send").id;
+    let answer = w.answer(question, "Previous holding's answer").id;
+    w.ledger.record_result(w.project, previous, "Done").unwrap();
+    let next = w.give_to(&session, &[], "Next task").unwrap();
+    let brief = next.message.unwrap().id;
+    w.begin(brief);
+    w.ledger.question_brief_handed_over(brief).unwrap();
+    assert!(matches!(
+        w.ledger.claim_answer(question, w.id(&session)).unwrap(),
+        cf_ledger::Claim::Waiting
+    ));
+    w.ledger.retry_delivery(brief, "refused", true).unwrap();
+    assert_eq!(
+        w.ledger
+            .question_holding(w.id(&session))
+            .unwrap()
+            .unwrap()
+            .task_number,
+        previous
+    );
+    assert_ne!(w.message(question).state, "cancelled");
+    assert_ne!(w.message(answer).state, "cancelled");
+    assert_eq!(word_notices(&w, "Previous holding's answer"), 0);
+    assert_eq!(
+        w.ledger
+            .next_delivery_of(w.id(&session), answer)
+            .unwrap()
+            .map(|m| m.id),
+        Some(answer)
+    );
+}
+
+#[test]
+fn t1813_a_successful_brief_closes_the_previous_holdings_questions_once() {
+    let mut w = world();
+    let (previous, session, first) = assigned(&mut w, false);
+    w.deliver(first);
+    let question = w.ask(&session, previous, "Question before the send").id;
+    let answer = w.answer(question, "Previous holding's answer").id;
+    w.ledger.record_result(w.project, previous, "Done").unwrap();
+    let next = w.give_to(&session, &[], "Next task").unwrap();
+    let brief = next.message.unwrap().id;
+    w.begin(brief);
+    w.ledger.question_brief_handed_over(brief).unwrap();
+    assert_eq!(word_notices(&w, "Previous holding's answer"), 0);
+    w.ledger.question_brief_reported(brief).unwrap();
+    assert_eq!(w.message(question).state, "cancelled");
+    assert_eq!(w.message(answer).state, "cancelled");
+    assert_eq!(word_notices(&w, "Previous holding's answer"), 1);
+    w.ledger.question_brief_reported(brief).unwrap();
+    assert_eq!(word_notices(&w, "Previous holding's answer"), 1);
+}
+
+#[test]
+fn t1813_a_refused_brief_rebinds_its_questions_and_answers_to_the_previous_holding() {
+    let mut w = world();
+    let (previous, session, first) = assigned(&mut w, false);
+    w.deliver(first);
+    w.ledger.record_result(w.project, previous, "Done").unwrap();
+    let next = w.give_to(&session, &[], "Next task").unwrap();
+    let brief = next.message.unwrap().id;
+    w.begin(brief);
+    w.ledger.question_brief_handed_over(brief).unwrap();
+    let question = w
+        .ask(&session, next.task.number, "Question during the send")
+        .id;
+    let answer = w.answer(question, "Words to keep").id;
+    w.ledger
+        .retry_delivery(brief, "the pane refused the write", true)
+        .unwrap();
+    let holding = w.ledger.question_holding(w.id(&session)).unwrap().unwrap();
+    assert_eq!((holding.task_number, holding.active), (previous, true));
+    assert_ne!(w.message(question).state, "cancelled");
+    assert_ne!(w.message(answer).state, "cancelled");
+    assert_eq!(w.message(answer).task_number, Some(previous));
+    assert_eq!(word_notices(&w, "Words to keep"), 0);
+    w.ledger.accept_task(w.project, previous, "human").unwrap();
+    assert_eq!(w.message(question).state, "cancelled");
+    assert_eq!(w.message(answer).state, "cancelled");
+    assert_eq!(word_notices(&w, "Words to keep"), 1);
+}
+
+#[test]
+fn t1813_a_refused_brief_returns_its_answer_if_the_previous_holding_ended() {
+    let mut w = world();
+    let (previous, session, first) = assigned(&mut w, false);
+    w.deliver(first);
+    w.ledger.record_result(w.project, previous, "Done").unwrap();
+    let next = w
+        .ledger
+        .create_task(
+            w.project,
+            &cf_ledger::NewTask {
+                from: "chief".into(),
+                after: Some(previous),
+                body: "Follow-up".into(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    w.ledger.accept_task(w.project, previous, "human").unwrap();
+    let brief = w
+        .ledger
+        .task(w.project, next.task.number)
+        .unwrap()
+        .unwrap()
+        .messages
+        .into_iter()
+        .find(|m| m.kind == "task")
+        .unwrap()
+        .id;
+    w.begin(brief);
+    w.ledger.question_brief_handed_over(brief).unwrap();
+    let question = w
+        .ask(&session, next.task.number, "Question during the send")
+        .id;
+    let answer = w.answer(question, "Words for the chief").id;
+    w.ledger
+        .retry_delivery(brief, "the pane refused the write", true)
+        .unwrap();
+    assert_eq!(w.message(question).state, "cancelled");
+    assert_eq!(w.message(answer).state, "cancelled");
+    assert_eq!(word_notices(&w, "Words for the chief"), 1);
+    let notice = w
+        .ledger
+        .inbox(w.id("chief"), 100)
+        .unwrap()
+        .into_iter()
+        .find(|m| m.kind == "note" && m.body.contains("Words for the chief"))
+        .unwrap();
+    assert!(
+        notice.body.contains(&format!("T-{previous}")),
+        "{}",
+        notice.body
+    );
+}
+
+#[test]
 fn t1803_finding_05_own_done_keeps_a_gated_question_gated() {
     let mut w = gated_world();
     let (task, session, brief) = assigned(&mut w, true);

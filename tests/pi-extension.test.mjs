@@ -233,6 +233,23 @@ const envelopeRecord = {
 const envelope = envelopeRecord.text
 
 describe('consensflow Pi extension', () => {
+  it('moves a brief out of the inbox at the take before sending it', async () => {
+    const s = await setup(envelopeRecord, { idle: false })
+    try {
+      const file = join(s.inbox, `${envelopeRecord.id}.json`)
+      assert.equal(existsSync(file), true, 'a brief waiting for Pi stays in the inbox')
+      let atSend
+      s.pi.sendUserMessage = (text) => {
+        atSend = { waiting: existsSync(file), taken: existsSync(`${file}.taken`), text }
+      }
+      s.setIdle(true)
+      await s.extension.consume()
+      assert.deepEqual(atSend, { waiting: false, taken: true, text: envelope })
+    } finally {
+      await s.close()
+    }
+  })
+
   // Text the human left in the editor holds nothing and stays there (the
   // owner's choice, 2026-10-01): Pi's own send never touches the editor.
   for (const [name, editor] of [

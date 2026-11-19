@@ -184,6 +184,90 @@ async fn t1813_a_launch_token_follows_a_later_delivered_brief() {
 }
 
 #[tokio::test]
+async fn t1813_pi_question_binds_on_inbox_take_before_the_acknowledgement() {
+    let scene = scene();
+    let (number, _, session, first) = first_brief_opening(&scene);
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .question_brief_handed_over(first)
+        .unwrap();
+    let token = issue_on_open(&scene, session);
+    let (next, brief) = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        ledger
+            .confirm_delivery(first, Some(&json!({"item":"first"})))
+            .unwrap();
+        ledger
+            .record_result(scene.project.id, number, "Done")
+            .unwrap();
+        let next = ledger
+            .create_task(
+                scene.project.id,
+                &cf_ledger::NewTask {
+                    from: "chief".into(),
+                    after: Some(number),
+                    body: "Follow-up".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .task
+            .number;
+        ledger
+            .accept_task(scene.project.id, number, "chief")
+            .unwrap();
+        let brief = ledger
+            .task(scene.project.id, next)
+            .unwrap()
+            .unwrap()
+            .messages
+            .into_iter()
+            .find(|m| m.kind == "task")
+            .unwrap()
+            .id;
+        ledger.begin_delivery(brief).unwrap();
+        (next, brief)
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let inbox = dir.path().join("m-1.json");
+    let taken = dir.path().join("m-1.json.taken");
+    let ack = dir.path().join("ack.json");
+    std::fs::write(&inbox, b"brief").unwrap();
+    scene
+        .context
+        .ledger
+        .borrow_mut()
+        .watch_pi_brief(brief, &inbox, &taken, &ack)
+        .unwrap();
+    let before = ask(&scene, &token, r#"{"body":"Before the take"}"#).await;
+    assert_eq!(before.0, 409, "{before:?}");
+    std::fs::rename(&inbox, &taken).unwrap();
+    let after = ask(&scene, &token, r#"{"body":"After the take"}"#).await;
+    assert_eq!(after.0, 201, "{after:?}");
+    assert_eq!(after.1["message"]["task"], next);
+    let question = after.1["message"]["id"].as_i64().unwrap();
+    let chief = scene.id("chief");
+    let mut ledger = scene.context.ledger.borrow_mut();
+    let answer = ledger
+        .answer(question, chief, Some(&json!("The whole Pi answer")), None)
+        .unwrap()
+        .id;
+    ledger.cancel_task(scene.project.id, next, "chief").unwrap();
+    assert_eq!(ledger.message(answer).unwrap().unwrap().state, "cancelled");
+    assert_eq!(
+        ledger
+            .inbox(chief, 100)
+            .unwrap()
+            .iter()
+            .filter(|m| m.kind == "note" && m.body.contains("The whole Pi answer"))
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
 async fn t1813_a_reported_different_brief_binds_the_http_question_before_delivery_reply() {
     let scene = scene();
     let (number, _, session, first) = first_brief_opening(&scene);

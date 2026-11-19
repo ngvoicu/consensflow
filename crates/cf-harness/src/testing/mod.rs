@@ -468,6 +468,8 @@ pub struct ScriptedHost {
     held: RefCell<VecDeque<HeldRequest>>,
     refusing: Cell<bool>,
     admissions: Cell<usize>,
+    broker_handovers: Cell<usize>,
+    broker_failures: Cell<usize>,
     pub reports: Cell<usize>,
 }
 
@@ -488,6 +490,14 @@ impl ScriptedHost {
     /// How often the host was asked whether it admits a hand-over.
     pub fn admissions(&self) -> usize {
         self.admissions.get()
+    }
+
+    pub fn broker_handovers(&self) -> usize {
+        self.broker_handovers.get()
+    }
+
+    pub fn broker_failures(&self) -> usize {
+        self.broker_failures.get()
     }
 
     /// Scripts the next answers to `op`, after those scripted already.
@@ -587,6 +597,15 @@ impl PaneHost for ScriptedHost {
     fn admits(&self) -> bool {
         self.admissions.set(self.admissions.get() + 1);
         !self.refusing.get()
+    }
+
+    fn hand_over_to_broker(&self) -> bool {
+        self.broker_handovers.set(self.broker_handovers.get() + 1);
+        self.admits()
+    }
+
+    fn broker_send_failed(&self) {
+        self.broker_failures.set(self.broker_failures.get() + 1);
     }
 
     fn delivery_reported(&self, _pane: &Pane) {
