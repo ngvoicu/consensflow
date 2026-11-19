@@ -397,3 +397,30 @@ runs = [["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "t1813_revie
 file = "crates/cf-ledger/src/ledger/messages.rs"
 find = "             WHERE a.project_id = ?1 AND a.recipient_id = ?2 AND a.kind = 'answer'\n               AND a.state IN ('queued', 'delivering')"
 replace = "             WHERE a.project_id = ?1 AND a.recipient_id = ?2 AND a.kind = 'answer'"
+
+[[plant]]
+name = "round2 carrier: old in-flight answer is confirmed"
+meant = "t1823_finding_09_unbound_old_inflight_answer_is_not_newly_confirmed"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1823_finding_09_unbound_old_inflight_answer_is_not_newly_confirmed"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        if message.kind == \"answer\" {\n            if let Some(question) = message.reply_to {\n                if crate::holding::legacy_member_question(store, question)? {\n                    return Ok(message);\n                }\n            }\n        }\n"
+replace = ""
+
+[[plant]]
+name = "round2 carrier: unbound old answer is confirmed with its carrier"
+meant = "t1823_finding_09_unbound_old_answer_is_not_confirmed_with_a_carrier"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1823_finding_09_unbound_old_answer_is_not_confirmed_with_a_carrier"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        for id in &rode {\n            store.db.execute(\n                \"UPDATE message SET state = 'delivered', delivered_at = ?, receipt = ?\n                 WHERE id = ? AND state = 'queued'\",\n                params![at, json!({ \"carrier\": message_id }).to_string(), id],\n            )?;\n        }"
+replace = "        store.db.execute(\n            \"UPDATE message SET state = 'delivered', delivered_at = ?, receipt = ? WHERE carried_by = ? AND state = 'queued'\",\n            params![at, json!({ \"carrier\": message_id }).to_string(), message_id],\n        )?;"
+
+[[plant]]
+name = "round2 carrier: cancelled old answer is confirmed with its carrier"
+meant = "t1823_finding_09_unbound_old_cancelled_answer_is_not_confirmed_with_a_carrier"
+runs = [["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "t1823_finding_09_unbound_old_cancelled_answer_is_not_confirmed_with_a_carrier"]]
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "                   AND (kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = message.reply_to)\n                     OR NOT EXISTS (SELECT 1 FROM message q JOIN participant p ON p.id = q.sender_id\n                       WHERE q.id = message.reply_to AND p.role NOT IN ('chief', 'human')))\n"
+replace = ""

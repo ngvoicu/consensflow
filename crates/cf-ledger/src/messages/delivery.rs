@@ -696,6 +696,13 @@ pub(crate) fn confirm_delivery(
 ) -> Result<MessageView, LedgerError> {
     store.write(|store| {
         let message = require_message(store, message_id, "delivering")?;
+        if message.kind == "answer" {
+            if let Some(question) = message.reply_to {
+                if crate::holding::legacy_member_question(store, question)? {
+                    return Ok(message);
+                }
+            }
+        }
         let at = store.at();
         let early = kept_read(&message);
         let receipt = js_order(with_kept_read(
@@ -715,11 +722,13 @@ pub(crate) fn confirm_delivery(
             .into_iter()
             .map(|row| row.id)
             .collect();
-        store.db.execute(
-            "UPDATE message SET state = 'delivered', delivered_at = ?, receipt = ?
-         WHERE carried_by = ? AND state = 'queued'",
-            params![at, json!({ "carrier": message_id }).to_string(), message_id],
-        )?;
+        for id in &rode {
+            store.db.execute(
+                "UPDATE message SET state = 'delivered', delivered_at = ?, receipt = ?
+                 WHERE id = ? AND state = 'queued'",
+                params![at, json!({ "carrier": message_id }).to_string(), id],
+            )?;
+        }
         crate::tasks::background_exchange(store, message_id, true)?;
         for id in &rode {
             crate::tasks::background_exchange(store, *id, true)?;
@@ -739,20 +748,20 @@ pub(crate) fn confirm_delivery(
                 "SELECT id FROM message
                  WHERE carried_by = ?1 AND state = 'cancelled'
                    AND handed_at >= (SELECT handed_at FROM message WHERE id = ?1)
+                   AND (kind != 'answer' OR EXISTS (SELECT 1 FROM question_binding b WHERE b.question_id = message.reply_to)
+                     OR NOT EXISTS (SELECT 1 FROM message q JOIN participant p ON p.id = q.sender_id
+                       WHERE q.id = message.reply_to AND p.role NOT IN ('chief', 'human')))
                  ORDER BY id",
             )?
             .query_map([message_id], |row| row.get(0))?
             .collect::<rusqlite::Result<_>>()?;
-        store.db.execute(
-            "UPDATE message SET state = 'delivered', delivered_at = ?1, receipt = ?2
-         WHERE carried_by = ?3 AND state = 'cancelled'
-           AND handed_at >= (SELECT handed_at FROM message WHERE id = ?3)",
-            params![
-                at,
-                json!({ "carrier": message_id, "cancelled": WITHDRAWN_AFTER_HANDED }).to_string(),
-                message_id
-            ],
-        )?;
+        for id in &late {
+            store.db.execute(
+                "UPDATE message SET state = 'delivered', delivered_at = ?1, receipt = ?2
+                 WHERE id = ?3 AND state = 'cancelled'",
+                params![at, json!({ "carrier": message_id, "cancelled": WITHDRAWN_AFTER_HANDED }).to_string(), id],
+            )?;
+        }
         let mut data = json!({ "message": message_id });
         if !rode.is_empty() {
             data["carried"] = json!(rode);

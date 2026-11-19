@@ -575,17 +575,57 @@ fn a_row_in_a_carrier_no_paste_of_which_began_rides_in_its_first_paste_through_0
     assert_eq!(w.next("zeus"), None, "nothing is left to paste");
 }
 
-/// A carrier this build began froze its set at its first paste: its rows were in
-/// every paste of it, and the start settles them with it (a review of 2026-10-16:
-/// let go of, they were pasted again on their own).
+/// Limit 16: an unbound old answer cannot gain a receipt from a carrier whose
+/// record does not establish a tracked window holding for that answer.
 #[test]
-fn a_row_left_under_a_carrier_this_daemon_began_to_paste_is_settled_with_it() {
+fn t1823_finding_09_unbound_old_answer_is_not_confirmed_with_a_carrier() {
     let (mut w, carrier, answer) = a_carrier_on_its_way_as_a_build_left_it(MIGRATIONS.len());
     assert!(let_go(&w).is_empty(), "the start lets go of nothing");
     assert_eq!(ids(&w.ledger.in_flight().unwrap()), [carrier]);
     w.confirm(carrier);
-    assert_eq!(w.states(&[carrier, answer]), ["delivered", "delivered"]);
+    assert_eq!(w.states(&[carrier, answer]), ["delivered", "queued"]);
     assert_eq!(w.next("zeus"), None);
+}
+
+#[test]
+fn t1823_finding_09_unbound_old_cancelled_answer_is_not_confirmed_with_a_carrier() {
+    let (mut w, carrier, answer) = a_carrier_on_its_way_as_a_build_left_it(MIGRATIONS.len());
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET handed_at = '2026-10-08T12:00:00.000Z' WHERE id IN (?1, ?2)",
+            (carrier, answer),
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE message SET state = 'cancelled' WHERE id = ?",
+            [answer],
+        )
+        .unwrap();
+    });
+    w.confirm(carrier);
+    assert_eq!(w.states(&[carrier, answer]), ["delivered", "cancelled"]);
+}
+
+#[test]
+fn t1823_finding_09_unbound_old_inflight_answer_is_not_newly_confirmed() {
+    let (mut w, carrier, answer) = a_carrier_on_its_way_as_a_build_left_it(MIGRATIONS.len());
+    w.edit(|db| {
+        db.execute(
+            "UPDATE message SET state = 'delivered' WHERE id = ?",
+            [carrier],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE message SET state = 'delivering', carried_by = NULL WHERE id = ?",
+            [answer],
+        )
+        .unwrap();
+    });
+    let before = w.message(answer);
+    w.confirm(answer);
+    let after = w.message(answer);
+    assert_eq!(after.state, "delivering");
+    assert_eq!(after.receipt, before.receipt);
 }
 
 #[test]
