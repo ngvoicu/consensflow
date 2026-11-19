@@ -247,8 +247,11 @@ for (const [label, shell] of shells) {
         child.stderr.on('data', (chunk) => {
           out += chunk
         })
-        const result = new Promise((resolve) => {
-          child.on('error', () => readyNow())
+        const result = new Promise((resolve, reject) => {
+          child.on('error', (error) => {
+            readyNow()
+            reject(error)
+          })
           child.on('close', (status) => {
             readyNow()
             resolve({
@@ -257,6 +260,9 @@ for (const [label, shell] of shells) {
             })
           })
         })
+        // The lock waits for readiness before it returns this promise; a failed spawn can
+        // reject first. Keep it observed here and still propagate it to the caller.
+        result.catch(() => {})
         return { ready, value: result }
       }
       return boundStarts ? powershellStarts.start(start) : start().value
@@ -352,6 +358,16 @@ for (const [label, shell] of shells) {
       function downloaded(from) {
         return server.asked.slice(from).filter((asked) => !asked.includes('/feed-'))
       }
+
+      test('an installer that cannot start reports the spawn error', async () => {
+        const at = freshCase()
+        await assert.rejects(
+          install(at, [], { launcher: path.join(at.dir, 'missing-launcher.exe') }),
+          {
+            code: 'ENOENT',
+          },
+        )
+      })
 
       test('--help says how to install and uninstall', async () => {
         const ran = await install(freshCase(), ['--help'])
@@ -1047,14 +1063,40 @@ for (const [label, shell] of shells) {
           })
           await new Promise((resolve) => hung.listen(0, '127.0.0.1', resolve))
           let child
+          let tellStarted
+          const started = new Promise((resolve) => {
+            tellStarted = resolve
+          })
           const first = install(at, ['--version', '3.0.7'], {
             env: { CONSENSFLOW_RELEASES_URL: `http://127.0.0.1:${hung.address().port}/releases` },
-            onStart: (started) => {
-              child = started
+            onStart: (running) => {
+              child = running
+              tellStarted()
             },
           })
+          let outcome
+          first.then(
+            (result) => {
+              outcome = { result }
+            },
+            (error) => {
+              outcome = { error }
+            },
+          )
           try {
-            await waitFor(() => folderOfRun(at.tmp, child.pid), 'the run making its folder')
+            // PowerShell 7 takes its start lock asynchronously, so onStart can come later.
+            // If it cannot start, preserve the real lock or spawn error.
+            await Promise.race([started, first])
+            assert.ok(child, 'the installer must start before its folder is observed')
+            await waitFor(() => {
+              if (outcome?.error) throw outcome.error
+              if (outcome) {
+                throw new Error(
+                  `the installer ended before making its folder: ${outcome.result.out}`,
+                )
+              }
+              return folderOfRun(at.tmp, child.pid)
+            }, 'the run making its folder')
             const folder = folderOfRun(at.tmp, child.pid)
             child.kill()
             await first
@@ -1063,8 +1105,10 @@ for (const [label, shell] of shells) {
             assert.match(ran.out, new RegExp(`removed ${exact(path.join(at.tmp, folder))}`))
             assert.deepEqual(inTemp(at.tmp), [], 'the next run took it away, and its own')
           } finally {
-            child?.kill()
+            await Promise.race([started, first.catch(() => {})])
+            if (child && child.exitCode === null && child.signalCode === null) child.kill()
             for (const socket of sockets) socket.destroy()
+            await first.catch(() => {})
             await new Promise((resolve) => hung.close(resolve))
           }
         })
