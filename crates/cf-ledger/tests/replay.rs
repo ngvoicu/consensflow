@@ -230,7 +230,11 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-schema-024", 13, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
     ("ledger-schema-025", 13, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
     ("ledger-schema-027", 12, ANSWER_ON_ITS_WAY), // Later departure: KEPT_IN_BRIEF
-    ("ledger-staff-008", 13, KEPT_BY_PAUSE),
+    (
+        "ledger-staff-008",
+        6,
+        "a later quota refusal with an earlier reset shortens the hold; Node kept the later reset",
+    ),
     ("ledger-staff-015", 8, FOLLOW_UP_BEHIND_WORK),
     ("ledger-staff-016", 17, RESULT_ACCEPTED),
     ("ledger-staff-017", 20, RESULT_ACCEPTED),

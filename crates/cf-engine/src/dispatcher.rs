@@ -460,11 +460,8 @@ impl Dispatcher {
         self.project_now(project)
     }
 
-    /// The human says a member, or the chief, out of quota is back before its reset: the
-    /// login works again, for every member on it in every project. A member whose model is
-    /// busy for a moment is none of that (T-1357): it is left to its back-off, and the
-    /// answer says so, so a stale row's button, or a call of the API, spends no try of its
-    /// task for nothing; the others on its login are cleared all the same.
+    /// The human brings this member or chief back before its reset. A busy model
+    /// keeps its backoff, and the answer says when it will be tried again.
     pub fn back_from_quota(
         &self,
         project: i64,
@@ -491,20 +488,6 @@ impl Dispatcher {
                 .borrow_mut()
                 .mark_back(member.id, "by @human")?
         };
-        // The quota the human renewed is the account's: every project's members on the
-        // harness's one login are back (T-1357), this project's first.
-        let projects: Vec<i64> = self
-            .seams
-            .ledger
-            .borrow()
-            .projects()?
-            .into_iter()
-            .map(|other| other.id)
-            .collect();
-        self.back_on_its_account(project, &member, &News::Human)?;
-        for other in projects.into_iter().filter(|other| *other != project) {
-            self.back_on_its_account(other, &member, &News::Human)?;
-        }
         self.changed();
         match busy {
             Some(until) => Err(EngineError::said(
@@ -2021,12 +2004,24 @@ impl Dispatcher {
             Some(Unwell::Busy(_)) => HoldKind::Busy,
             None => HoldKind::Quota,
         };
-        let marked = self.seams.ledger.borrow_mut().mark_out_with_kind(
-            owner.id,
-            &reset,
-            unwell.map_or("out of quota", Unwell::hold),
-            kind,
-        )?;
+        let reported_reset = matches!(
+            reported.as_deref(),
+            Some(cf_harness::records::Quota::Exhausted {
+                resets_at: Some(_),
+                ..
+            })
+        );
+        let marked = self
+            .seams
+            .ledger
+            .borrow_mut()
+            .mark_out_with_kind_and_reported_reset(
+                owner.id,
+                &reset,
+                unwell.map_or("out of quota", Unwell::hold),
+                kind,
+                reported_reset,
+            )?;
         let until = marked.out_until.clone().unwrap_or_default();
         self.set_activity(
             record,

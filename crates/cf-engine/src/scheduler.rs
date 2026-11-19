@@ -168,18 +168,14 @@ pub(crate) struct QuotaPart {
     pub(crate) drifts_told: HashSet<String>,
 }
 
-/// News that an account has quota again.
+/// A turn of a window on an account that got through.
 pub(crate) enum News<'a> {
-    /// A turn of the window `record` got through (`observed`, its look).
-    /// `returned` is the reset its member was out until, where that turn brought
-    /// it back: none where the member was not out.
     Turn {
         record: &'a Record,
         observed: &'a Observed,
+        /// The reset its member was out until, if this turn brought it back.
         returned: Option<String>,
     },
-    /// The human's Try again now.
-    Human,
 }
 
 /// What the scheduler keeps across records: the open tasks whose requester
@@ -1238,9 +1234,7 @@ impl Dispatcher {
     /// until its reset, with everything sent to it queued (the field report of
     /// 2026-10-22, T-254).
     ///
-    /// The human's word brings back all of them, in every project (`back_from_quota`):
-    /// the quota they renewed by hand is the account's. A window's turn that got through
-    /// is news for those marked out before it, read from the ledger as it is now
+    /// A window's turn that got through is news for those marked out before it, read from the ledger as it is now
     /// (one marked out earlier in this pass too), once for each answer. One
     /// account is not one quota: a plan may limit one model by the week, so a
     /// member back from a reset brings back none out until a later one, and the
@@ -1253,30 +1247,28 @@ impl Dispatcher {
         owner: &ParticipantView,
         news: &News<'_>,
     ) -> Result<(), EngineError> {
+        let News::Turn {
+            record,
+            observed,
+            returned,
+        } = news;
         let Some(harness) = owner.harness.as_deref() else {
             return Ok(());
         };
         // A window's turn is news for the others only where nobody has to look to know they
-        // share the account (`one_account`); the human's word is for the harness's one login on
-        // the machine (`one_login`): the quota they renewed is the account's.
+        // share the account (`one_account`).
         let shared = self
             .seams
             .adapters
             .adapter(harness)
-            .is_some_and(|adapter| match news {
-                News::Human => adapter.one_login(),
-                News::Turn { .. } => adapter.one_account(),
-            });
+            .is_some_and(|adapter| adapter.one_account());
         if !shared {
             return Ok(());
         }
-        if let News::Turn {
-            record, observed, ..
-        } = news
+        let Some(at) = last_answer(observed) else {
+            return Ok(());
+        };
         {
-            let Some(at) = last_answer(observed) else {
-                return Ok(());
-            };
             let mut quota = record.quota.borrow_mut();
             if quota.answered.as_deref() == Some(at.as_str()) {
                 return Ok(());
@@ -1304,20 +1296,8 @@ impl Dispatcher {
             if moved_hold(&until) {
                 continue;
             }
-            // The human's word is that the login works again (a quota renewed, a login
-            // done again, a credit bought). A model busy for a moment is none of those:
-            // its back-off is its own, and a press that shortened it would send its task
-            // back into a model still at capacity and spend one of its tries (T-1357).
-            if matches!(news, News::Human) && self.kind_of_hold(other.id, &until) == Held::Busy {
-                continue;
-            }
-            let back = match news {
-                News::Human => true,
-                News::Turn {
-                    observed,
-                    returned: Some(returned),
-                    ..
-                } => {
+            let back = match returned.as_deref() {
+                Some(returned) => {
                     // A later reset is a limit of its own; an account unavailable has none (MUS-23),
                     // and a turn that got through says its refusal is over.
                     if later_limit(&until, returned) && !never(&until) {
@@ -1331,11 +1311,7 @@ impl Dispatcher {
                         self.answered_since(&other, observed) && self.tried_anew(other.id, &until)
                     }
                 }
-                News::Turn {
-                    observed,
-                    returned: None,
-                    ..
-                } => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),
+                None => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),
             };
             if back {
                 self.seams

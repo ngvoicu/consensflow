@@ -131,6 +131,17 @@ pub(crate) fn said(number: i64, body: &str) -> Option<String> {
         .map(|moved| format!("{moved}, until the human says it may go on"))
 }
 
+/// Show the current quota deadline when a later refusal shortened it.
+pub(crate) fn said_until(number: i64, body: &str, until: &str) -> Option<String> {
+    let words = said(number, body)?;
+    if body.ends_with(TAIL) || body.ends_with(OLD_TAIL) {
+        let (prefix, _) = words.rsplit_once(" until ")?;
+        Some(format!("{prefix} until {until}"))
+    } else {
+        Some(words)
+    }
+}
+
 /// Which hold a note of T-`number` says, `body`: the window that holds it and the hold's kind.
 /// A hold is the same hold while its window and its kind are, and a quota's end; the words the
 /// harness gave may differ. A hold is its window's: a task that left its window (taken back,

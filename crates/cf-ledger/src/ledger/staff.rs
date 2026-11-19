@@ -90,7 +90,26 @@ impl Ledger {
         reason: &str,
         kind: HoldKind,
     ) -> Result<ParticipantView, LedgerError> {
-        staff::mark_out_kind(&mut self.store, participant, until, reason, Some(kind))
+        self.mark_out_with_kind_and_reported_reset(participant, until, reason, kind, true)
+    }
+
+    /// Mark a refusal, distinguishing a reported reset from a fallback or usage count.
+    pub fn mark_out_with_kind_and_reported_reset(
+        &mut self,
+        participant: i64,
+        until: &str,
+        reason: &str,
+        kind: HoldKind,
+        reported_reset: bool,
+    ) -> Result<ParticipantView, LedgerError> {
+        staff::mark_out_kind(
+            &mut self.store,
+            participant,
+            until,
+            reason,
+            Some(kind),
+            reported_reset,
+        )
     }
 
     /// A member joins the staff, named by its model, or one that left on the same
