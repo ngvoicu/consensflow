@@ -257,3 +257,29 @@ fn a_pending_question_reminder_cannot_stack_even_after_the_ledger_is_reopened() 
         "a still queued reminder cannot be followed by another"
     );
 }
+
+#[test]
+fn migration_keeps_an_old_ledgers_delivered_question_and_its_receipt_time() {
+    let mut w = world();
+    let (task, question) = asked(&mut w);
+    w.deliver(question);
+    let before = w.message(question);
+    let receipt = before
+        .delivered_at
+        .clone()
+        .expect("the question was received");
+    w.edit(|db| {
+        cf_ledger::testing::undo_migration_0041(db).unwrap();
+        db.execute_batch("PRAGMA user_version = 40").unwrap();
+    });
+    let after = w.message(question);
+    assert_eq!(after.id, before.id);
+    assert_eq!(after.state, before.state);
+    assert_eq!(after.delivered_at, before.delivered_at);
+    let open = w.ledger.waiting_questions(w.project).unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0].id, question);
+    assert_eq!(open[0].task, Some(task));
+    assert_eq!(open[0].received_at, receipt);
+    assert!(open[0].reminder.is_none());
+}

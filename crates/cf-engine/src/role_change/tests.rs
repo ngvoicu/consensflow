@@ -363,8 +363,8 @@ fn the_staff_a_replacement_holds_whole_and_read_in_one_piece_is_as_large_as_the_
     let whole = |note: &MessageView, cf: &CfWord| goes_whole(note, &[], cf);
     let one = |note: &MessageView, cf: &CfWord| read_in_one(note, cf);
     for (cf, pins) in [
-        (a_mac(), [Some(138), Some(163), None, Some(27)]),
-        (a_windows(), [Some(135), Some(159), None, Some(23)]),
+        (a_mac(), [Some(135), Some(159), None, Some(23)]),
+        (a_windows(), [Some(131), Some(156), None, Some(20)]),
     ] {
         assert_eq!(
             one(
@@ -1175,17 +1175,27 @@ fn the_largest_roles_are_given_to_a_muse_window_in_the_parts_its_hooks_say_and_e
             &chief(0, false, None),
             2,
         );
+        let longest_in_bytes = if !PATH_ONCE && shape == "Windows" {
+            3
+        } else {
+            2
+        };
+        let longest_in_hook = if !PATH_ONCE && shape == "Windows" {
+            4
+        } else {
+            3
+        };
         on(
             &format!("the largest chief in bytes (25 staff, specs, the most rules) on {shape}"),
             &chief(25, true, Some(&utf8)),
-            2,
+            longest_in_bytes,
         );
         on(
             &format!(
                 "the largest chief in a hook (25 staff, specs, the most escaped rules) on {shape}"
             ),
             &chief(25, true, Some(&escaped)),
-            3,
+            longest_in_hook,
         );
         for role in cf_ledger::roles::ids() {
             on(
@@ -1242,10 +1252,10 @@ fn the_parts_of_a_muse_chiefs_role_begin_at_a_paragraph_or_a_heading_and_never_i
     type Case<'a> = (&'a str, CfWord, usize, bool, Option<&'a str>, &'a [&'a str]);
     // These first lines are measured for the active path mode and each shell.
     const REVIEW: &str = "A finding blocks the work only when it would make it fail (a";
-    const INTEGRATOR: &str = "Where the staff has an integrator, it lands accepted work; a";
-    const DESIGN: &str = "Work big enough to need a design (a new module, a new API, a";
-    let mac = if PATH_ONCE { REVIEW } else { INTEGRATOR };
-    let windows = if PATH_ONCE { REVIEW } else { DESIGN };
+    const FRONTEND: &str = "How a screen looks, feels and moves is the frontend designer";
+    const CHOOSE: &str = "## Choose the role, not the member";
+    let mac = if PATH_ONCE { REVIEW } else { FRONTEND };
+    let windows = if PATH_ONCE { REVIEW } else { CHOOSE };
     let cases: [Case; 4] = [
         ("a Mac, no staff", a_mac(), 0, false, None, &[mac]),
         (
