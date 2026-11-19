@@ -17913,15 +17913,19 @@ test('BKG a staff row that fills the member form brings the form into sight', as
   await page.getByRole('button', { name: 'Project settings' }).click()
   const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const harness = dialog.locator('.staff-add [name="memberHarness"]')
+  // Back at the dialog's top, the form is out of sight under the long staff.
+  const top = () =>
+    dialog.getByRole('heading', { name: 'Project settings' }).scrollIntoViewIfNeeded()
+  await top()
   await expect(harness).not.toBeInViewport()
   await dialog.getByRole('button', { name: 'Add backup for @diana' }).click()
   await expect(dialog.getByRole('group', { name: 'Add backup for @diana' })).toBeInViewport()
   await expect(harness).toBeFocused()
   await dialog.locator('.staff-add [name="memberCancel"]').click()
-  await dialog.getByRole('button', { name: 'Add backup for @diana' }).scrollIntoViewIfNeeded()
+  await top()
   await expect(harness).not.toBeInViewport()
-  await dialog.getByRole('button', { name: 'Change backup for @kronos' }).click()
-  await expect(dialog.getByRole('group', { name: 'Change backup for @kronos' })).toBeInViewport()
+  await dialog.getByRole('button', { name: 'Change backup for @zeus' }).click()
+  await expect(dialog.getByRole('group', { name: 'Change backup for @zeus' })).toBeInViewport()
   await expect(harness).toBeFocused()
 })
 
