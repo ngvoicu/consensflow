@@ -4,8 +4,7 @@
 //! and the copy it keeps, and fetches nothing: a fresh catalog is the human's Refresh,
 //! which runs `pi update --models` first ([`UPDATE`]) and then reads the list once, as any
 //! read does. A package that fills its catalog a few seconds after Pi starts shows its new
-//! models at the next Refresh: holding Pi's session for it took a Refresh past the app's 30 s
-//! bridge deadline (the review T-1270, second reading, F6 and F8).
+//! models at the next Refresh (the review T-1270, second reading, F6 and F8).
 //!
 //! Pi lists the models of the providers it has set up, whatever sets them up: a login or a
 //! provider key, a custom provider in `models.json`, and the providers that its installed
@@ -51,7 +50,7 @@ pub(crate) const UPDATE: [&str; 2] = ["update", "--models"];
 
 /// How long the catalogs' fetch may take, and how much it may say.
 pub(crate) const UPDATE_LIMITS: Limits = Limits {
-    timeout: Duration::from_secs(60),
+    timeout: Duration::from_millis(cf_proto::models::PI_UPDATE_TIMEOUT_MS),
     max_buffer: 1 << 20,
 };
 

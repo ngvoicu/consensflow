@@ -78,7 +78,7 @@ use crate::seams::{arm, Time};
 
 /// How long the answer of a read of the folder is waited for. Its files are some kilobytes of
 /// a local disk: past this a file is not opening, and the words say so.
-pub(crate) const WAIT_MS: u64 = 2_000;
+pub(crate) const WAIT_MS: u64 = cf_proto::models::PI_SETUP_TIMEOUT_MS;
 
 /// The largest file of Pi's folder that is read: a setup's files are some kilobytes.
 const FILE_CAP: u64 = 1 << 20;

@@ -16,7 +16,7 @@ use crate::shared::child::stop;
 
 /// How long a conversation has to answer: each harness answers its list in a few seconds
 /// (Codex with no network in 3.5 s, research-02 §8), and past this it is given up on.
-pub(crate) const BOUND_MS: u64 = 30_000;
+pub(crate) const BOUND_MS: u64 = cf_proto::models::LISTING_TIMEOUT_MS;
 
 /// The longest line an answer may be: Pi lists 469 models in about 300 KB on one line.
 const LINE_LIMIT: usize = 16 << 20;

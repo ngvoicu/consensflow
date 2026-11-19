@@ -7,6 +7,18 @@
 
 use serde::{Deserialize, Serialize};
 
+/// The app-to-daemon deadline for operations that may read model lists.
+/// A `models.get` read can wait behind another read, and a Pi Refresh first
+/// runs its own update. Model validation during a submission may read too.
+/// Other operations keep the bridge's ordinary deadline.
+pub fn request_deadline_ms(operation: &str) -> Option<u64> {
+    match operation {
+        "models.get" | "project.open" | "chief.switch" | "member.add" | "member.edit"
+        | "backup.add" | "backup.change" => Some(crate::models::PAGE_MODEL_REQUEST_TIMEOUT_MS),
+        _ => None,
+    }
+}
+
 /// One of the page's operations, in the order Node's page listed them, and
 /// after them the ones this build added. `ping`, which the daemon also answers,
 /// is no operation of the page's: the app's check that the bridge is up.
@@ -297,6 +309,28 @@ pub struct HandleLine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_reads_and_submissions_have_time_for_a_preceding_refresh() {
+        use crate::models::{LISTING_CLEANUP_MS, LISTING_TIMEOUT_MS, PI_UPDATE_TIMEOUT_MS};
+
+        let two_refreshes = 2 * (PI_UPDATE_TIMEOUT_MS + LISTING_TIMEOUT_MS + LISTING_CLEANUP_MS);
+        for operation in [
+            "models.get",
+            "project.open",
+            "chief.switch",
+            "member.add",
+            "member.edit",
+            "backup.add",
+            "backup.change",
+        ] {
+            assert!(
+                request_deadline_ms(operation).is_some_and(|ms| ms >= two_refreshes + 15_000),
+                "{operation}"
+            );
+        }
+        assert_eq!(request_deadline_ms("board.get"), None);
+    }
 
     #[test]
     fn the_operations_are_the_ones_the_app_forwards() {
